@@ -1,0 +1,2721 @@
+#include <json/json.h>
+#include <ips4o.hpp>
+
+#include "unix_tools.hpp"
+#include "config.hpp"
+#include "sequence_io.hpp"
+#include "boss_construct.hpp"
+#include "boss_chunk.hpp"
+#include "boss_merge.hpp"
+#include "annotated_dbg.hpp"
+#include "annotate_row_compressed.hpp"
+#include "annotate_column_compressed.hpp"
+#include "serialization.hpp"
+#include "utils.hpp"
+#include "threading.hpp"
+#include "reverse_complement.hpp"
+#include "static_annotators_def.hpp"
+#include "annotation_converters.hpp"
+#include "kmc_parser.hpp"
+#include "dbg_hash_ordered.hpp"
+#include "dbg_hash_string.hpp"
+#include "dbg_bitmap.hpp"
+#include "dbg_bitmap_construct.hpp"
+#include "dbg_succinct.hpp"
+#include "graph_cleaning.hpp"
+#include "server.hpp"
+#include "weighted_graph.hpp"
+#include "masked_graph.hpp"
+#include "annotated_graph_algorithm.hpp"
+#include "taxid_mapper.hpp"
+#include <typeinfo>
+
+typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+
+const size_t kNumCachedColumns = 10;
+const size_t kBitsPerCount = 8;
+
+
+Config::GraphType parse_graph_extension(const std::string &filename) {
+    if (utils::ends_with(filename, ".dbg")) {
+        return Config::GraphType::SUCCINCT;
+
+    } else if (utils::ends_with(filename, ".orhashdbg")) {
+        return Config::GraphType::HASH;
+
+    } else if (utils::ends_with(filename, ".hashstrdbg")) {
+        return Config::GraphType::HASH_STR;
+
+    } else if (utils::ends_with(filename, ".bitmapdbg")) {
+        return Config::GraphType::BITMAP;
+
+    } else {
+        return Config::GraphType::INVALID;
+    }
+}
+
+Config::AnnotationType parse_annotation_type(const std::string &filename) {
+    if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
+        return Config::AnnotationType::ColumnCompressed;
+
+    } else if (utils::ends_with(filename, annotate::kRowAnnotatorExtension)) {
+        return Config::AnnotationType::RowCompressed;
+
+    } else if (utils::ends_with(filename, annotate::kBRWTExtension)) {
+        return Config::AnnotationType::BRWT;
+
+    } else if (utils::ends_with(filename, annotate::kBinRelWT_sdslExtension)) {
+        return Config::AnnotationType::BinRelWT_sdsl;
+
+    } else if (utils::ends_with(filename, annotate::kBinRelWTExtension)) {
+        return Config::AnnotationType::BinRelWT;
+
+    } else if (utils::ends_with(filename, annotate::kRowPackedExtension)) {
+        return Config::AnnotationType::RowFlat;
+
+    } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
+        return Config::AnnotationType::RBFish;
+
+    } else {
+        std::cerr << "Error: unknown annotation format in "
+                  << filename << std::endl;
+        exit(1);
+    }
+}
+
+bool graph_has_weights_file(const std::string &filename) {
+    std::ifstream f(filename + ".weights");
+    return f.good();
+}
+
+std::string remove_graph_extension(const std::string &filename) {
+    return utils::remove_suffix(filename, ".dbg", ".orhashdbg", ".bitmapdbg");
+}
+
+template <class Graph = BOSS>
+std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
+    Graph *graph;
+
+    if constexpr(std::is_same<BOSS, Graph>::value) {
+        graph = new Graph(2);
+
+    } else if constexpr(!std::is_base_of<DeBruijnGraph, Graph>::value) {
+        // TODO What if there were many graph mixins and any number of them could be present?
+        //   Consider an Entity Component System or boost.mixin (options for runtime/dynamic mixin)
+        static_assert(std::is_base_of<IWeighted<DeBruijnGraph::node_index>, Graph>::value);
+        graph = new Graph(2);
+
+    } else {
+        if (graph_has_weights_file(filename)) {
+            graph = new WeightedDBG<Graph>(2);
+        } else {
+            graph = new Graph(2);
+        }
+    }
+    if (!graph->load(filename)) {
+        std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
+        delete graph;
+        exit(1);
+    }
+    return std::shared_ptr<Graph> { graph };
+}
+
+template <class DefaultGraphType = DBGSuccinct>
+std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
+    auto graph_type = parse_graph_extension(filename);
+    switch (graph_type) {
+        case Config::GraphType::SUCCINCT:
+            return load_critical_graph_from_file<DBGSuccinct>(filename);
+
+        case Config::GraphType::HASH:
+            return load_critical_graph_from_file<DBGHashOrdered>(filename);
+
+        case Config::GraphType::HASH_STR:
+            return load_critical_graph_from_file<DBGHashString>(filename);
+
+        case Config::GraphType::BITMAP:
+            return load_critical_graph_from_file<DBGBitmap>(filename);
+
+        case Config::GraphType::INVALID:
+            std::cerr << "ERROR: can't load graph from file '"
+                      << filename
+                      << "', needs valid file extension" << std::endl;
+            exit(1);
+    }
+    assert(false);
+    exit(1);
+}
+
+void annotate_data(const std::vector<std::string> &files,
+                   const std::string &ref_sequence_path,
+                   AnnotatedDBG *anno_graph,
+                   bool reverse,
+                   size_t min_count,
+                   size_t max_count,
+                   bool filename_anno,
+                   bool fasta_anno,
+                   const std::string &fasta_anno_comment_delim,
+                   const std::string &fasta_header_delimiter,
+                   const std::vector<std::string> &anno_labels,
+                   bool verbose) {
+    size_t total_seqs = 0;
+
+    Timer timer;
+
+    // iterate over input files
+    for (const auto &file : files) {
+        Timer data_reading_timer;
+
+        if (verbose) {
+            std::cout << std::endl << "Parsing " << file << std::endl;
+        }
+        // read files
+        if (utils::get_filetype(file) == "VCF") {
+            read_vcf_file_with_annotations_critical(
+                file,
+                ref_sequence_path,
+                dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k(),
+                [&](auto&& seq, const auto &variant_labels) {
+                    std::vector<std::string> labels(variant_labels.begin(),
+                                                    variant_labels.end());
+
+                    if (filename_anno)
+                        labels.push_back(file);
+
+                    for (const auto &label : anno_labels) {
+                        labels.push_back(label);
+                    }
+
+                    anno_graph->annotate_sequence(seq, labels);
+                },
+                reverse
+            );
+        } else if (utils::get_filetype(file) == "KMC") {
+            std::vector<std::string> labels;
+
+            if (filename_anno) {
+                labels.push_back(file);
+            }
+
+            for (const auto &label : anno_labels) {
+                labels.push_back(label);
+            }
+
+            kmc::read_kmers(
+                file,
+                [&](std::string&& sequence) {
+                    anno_graph->annotate_sequence(std::move(sequence), labels);
+
+                    total_seqs += 1;
+                    if (verbose && total_seqs % 10000 == 0) {
+                        std::cout << "processed " << total_seqs << " sequences"
+                                  << ", trying to annotate as ";
+                        for (const auto &label : labels) {
+                            std::cout << "<" << label << ">";
+                        }
+                        std::cout << ", " << timer.elapsed() << "sec" << std::endl;
+                    }
+                },
+                min_count,
+                max_count
+            );
+        } else if (utils::get_filetype(file) == "FASTA"
+                    || utils::get_filetype(file) == "FASTQ") {
+            read_fasta_file_critical(file,
+                [&](kseq_t *read_stream) {
+                    std::vector<std::string> labels;
+
+                    if (fasta_anno) {
+                        labels = utils::split_string(
+                            fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                                && read_stream->comment.l
+                                    ? utils::join_strings(
+                                        { read_stream->name.s, read_stream->comment.s },
+                                        fasta_anno_comment_delim,
+                                        true)
+                                    : read_stream->name.s,
+                            fasta_header_delimiter
+                        );
+                    }
+                    if (filename_anno) {
+                        labels.push_back(file);
+                    }
+
+                    for (const auto &label : anno_labels) {
+                        labels.push_back(label);
+                    }
+
+                    anno_graph->annotate_sequence(read_stream->seq.s, labels);
+
+                    total_seqs += 1;
+                    if (verbose && total_seqs % 10000 == 0) {
+                        std::cout << "processed " << total_seqs << " sequences"
+                                  << ", last was " << read_stream->name.s
+                                  << ", trying to annotate as ";
+                        for (const auto &label : labels) {
+                            std::cout << "<" << label << ">";
+                        }
+                        std::cout << ", " << timer.elapsed() << "sec" << std::endl;
+                    }
+                },
+                reverse
+            );
+        } else {
+            std::cerr << "ERROR: Filetype unknown for file "
+                      << file << std::endl;
+            exit(1);
+        }
+
+        if (verbose) {
+            std::cout << "File processed in "
+                      << data_reading_timer.elapsed()
+                      << "sec, current mem usage: "
+                      << (get_curr_RSS() >> 20) << " MiB"
+                      << ", total time: " << timer.elapsed()
+                      << "sec" << std::endl;
+        }
+    }
+
+    // join threads if any were initialized
+    anno_graph->join();
+}
+
+
+void annotate_coordinates(const std::vector<std::string> &files,
+                          AnnotatedDBG *anno_graph,
+                          bool reverse,
+                          size_t genome_bin_size,
+                          bool verbose) {
+    size_t total_seqs = 0;
+
+    Timer timer;
+
+    const size_t k = dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k();
+
+    // iterate over input files
+    for (const auto &file : files) {
+        Timer data_reading_timer;
+
+        if (verbose)
+            std::cout << std::endl << "Parsing " << file << std::endl;
+
+        // open stream
+        if (utils::get_filetype(file) == "FASTA"
+                    || utils::get_filetype(file) == "FASTQ") {
+
+            bool forward_strand = true;
+
+            read_fasta_file_critical(file,
+                [&](kseq_t *read_stream) {
+                    std::vector<std::string> labels {
+                        file,
+                        read_stream->name.s,
+                        std::to_string(reverse && (total_seqs % 2)), // whether the read is reverse
+                        "",
+                    };
+
+                    const std::string sequence(read_stream->seq.s);
+                    for (size_t i = 0; i < sequence.size(); i += genome_bin_size) {
+                        labels.back() = std::to_string(i);
+
+                        // forward: |0 =>  |6 =>  |12=>  |18=>  |24=>  |30=>|
+                        // reverse: |<=30|  <=24|  <=18|  <=12|  <= 6|  <= 0|
+                        const size_t bin_size = std::min(
+                            static_cast<size_t>(sequence.size() - i),
+                            static_cast<size_t>(genome_bin_size + k - 1)
+                        );
+                        anno_graph->annotate_sequence(
+                            forward_strand
+                                ? sequence.substr(i, bin_size)
+                                : sequence.substr(sequence.size() - i - bin_size, bin_size),
+                            { utils::join_strings(labels, "\1"), }
+                        );
+                    }
+
+                    total_seqs += 1;
+                    if (verbose && total_seqs % 10000 == 0) {
+                        std::cout << "processed " << total_seqs << " sequences"
+                                  << ", last was " << read_stream->name.s
+                                  << ", trying to annotate as ";
+                        for (const auto &label : labels) {
+                            std::cout << "<" << label << ">";
+                        }
+                        std::cout << ", " << timer.elapsed() << "sec" << std::endl;
+                    }
+
+                    // If we read both strands, the next sequence is
+                    // either reverse (if the current one is forward)
+                    // or new (if the current one is reverse), and therefore forward
+                    if (reverse)
+                        forward_strand = !forward_strand;
+                },
+                reverse
+            );
+        } else {
+            std::cerr << "ERROR: the type of file "
+                      << file << " is not supported" << std::endl;
+            exit(1);
+        }
+
+        if (verbose) {
+            std::cout << "File processed in "
+                      << data_reading_timer.elapsed()
+                      << "sec, current mem usage: "
+                      << (get_curr_RSS() >> 20) << " MiB"
+                      << ", total time: " << timer.elapsed()
+                      << "sec" << std::endl;
+        }
+    }
+
+    // join threads if any were initialized
+    anno_graph->join();
+}
+
+
+void execute_query(std::string seq_name,
+                   std::string sequence,
+                   bool count_labels,
+                   bool suppress_unlabeled,
+                   size_t num_top_labels,
+                   double discovery_fraction,
+                   std::string anno_labels_delimiter,
+                   const AnnotatedDBG &anno_graph,
+                   std::ostream &output_stream) {
+    std::ostringstream oss;
+
+    if (count_labels) {
+        auto top_labels = anno_graph.get_top_labels(sequence,
+                                                    num_top_labels,
+                                                    discovery_fraction);
+
+        if (!top_labels.size() && suppress_unlabeled)
+            return;
+
+        oss << seq_name << "\t";
+
+        if (top_labels.size()) {
+            oss << "<" << top_labels[0].first << ">:" << top_labels[0].second;
+        }
+        for (size_t i = 1; i < top_labels.size(); ++i) {
+            oss << "\t<" << top_labels[i].first << ">:" << top_labels[i].second;
+        }
+        oss << "\n";
+    } else {
+        auto labels_discovered
+                = anno_graph.get_labels(sequence, discovery_fraction);
+
+        if (!labels_discovered.size() && suppress_unlabeled)
+            return;
+
+        oss << seq_name << "\t"
+            << utils::join_strings(labels_discovered,
+                                   anno_labels_delimiter) << "\n";
+    }
+
+    output_stream << oss.str();
+}
+
+std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_type,
+                                                 const Config &config,
+                                                 uint64_t num_rows) {
+    std::unique_ptr<Annotator> annotation;
+
+    switch (anno_type) {
+        case Config::ColumnCompressed: {
+            annotation.reset(
+                new annotate::ColumnCompressed<>(
+                    num_rows, kNumCachedColumns, config.verbose
+                )
+            );
+            break;
+        }
+        case Config::RowCompressed: {
+            annotation.reset(new annotate::RowCompressed<>(num_rows, config.sparse));
+            break;
+        }
+        case Config::BRWT: {
+            annotation.reset(new annotate::BRWTCompressed<>(config.row_cache_size));
+            break;
+        }
+        case Config::BinRelWT_sdsl: {
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator(config.row_cache_size));
+            break;
+        }
+        case Config::BinRelWT: {
+            annotation.reset(new annotate::BinRelWTAnnotator(config.row_cache_size));
+            break;
+        }
+        case Config::RowFlat: {
+            annotation.reset(new annotate::RowFlatAnnotator(config.row_cache_size));
+            break;
+        }
+        case Config::RBFish: {
+            annotation.reset(new annotate::RainbowfishAnnotator(config.row_cache_size));
+            break;
+        }
+    }
+
+    return annotation;
+}
+
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
+                                                 const Config &config) {
+    return initialize_annotation(parse_annotation_type(filename), config, 0);
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       const Config &config) {
+    auto annotation_temp = config.infbase_annotators.size()
+            ? initialize_annotation(parse_annotation_type(config.infbase_annotators.at(0)), config, 0)
+            : initialize_annotation(config.anno_type, config, graph->num_nodes());
+
+    if (config.infbase_annotators.size()
+            && !annotation_temp->load(config.infbase_annotators.at(0))) {
+        std::cerr << "ERROR: can't load annotations for graph "
+                  << config.infbase
+                  << ", file corrupted" << std::endl;
+        exit(1);
+    }
+
+    // load graph
+    auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph),
+                                                     std::move(annotation_temp),
+                                                     config.parallel);
+
+    if (!anno_graph->check_compatibility()) {
+        std::cerr << "Error: graph and annotation are not compatible."
+                  << std::endl;
+        exit(1);
+    }
+
+    return anno_graph;
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
+    return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
+}
+
+std::unique_ptr<MaskedDeBruijnGraph>
+mask_graph(const AnnotatedDBG &anno_graph,
+           const Config &config) {
+    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
+
+    if (!graph.get())
+        throw std::runtime_error("Masking only supported for DeBruijnGraph");
+
+    std::vector<std::string> mask_in, mask_out;
+
+    // Remove non-present labels
+    std::copy_if(config.label_mask_in.begin(),
+                 config.label_mask_in.end(),
+                 std::back_inserter(mask_in),
+                 [&](const auto &label) {
+                     bool exists = anno_graph.label_exists(label);
+                     if (!exists && config.verbose)
+                         std::cout << "Removing mask-in label " << label << std::endl;
+
+                     return exists;
+                 });
+
+    std::copy_if(config.label_mask_out.begin(),
+                 config.label_mask_out.end(),
+                 std::back_inserter(mask_out),
+                 [&](const auto &label) {
+                     bool exists = anno_graph.label_exists(label);
+                     if (!exists && config.verbose)
+                         std::cout << "Removing mask-out label " << label << std::endl;
+
+                     return exists;
+                 });
+
+    if (config.verbose) {
+        std::cout << "Masked in:";
+        for (const auto &in : mask_in) {
+            std::cout << " " << in;
+        }
+        std::cout << std::endl;
+        std::cout << "Masked out:";
+        for (const auto &out : mask_out) {
+            std::cout << " " << out;
+        }
+        std::cout << std::endl;
+    }
+
+    return std::make_unique<MaskedDeBruijnGraph>(
+        std::move(graph),
+        annotated_graph_algorithm::mask_nodes_by_label(
+            anno_graph,
+            mask_in, mask_out,
+            [&](UInt64Callback counter_in, UInt64Callback counter_out) {
+                auto count_in = counter_in();
+                if (count_in != mask_in.size())
+                    return false;
+
+                auto count_out = counter_out();
+                return count_out <= config.label_mask_out_fraction * (count_in + count_out);
+            }
+        ).release()
+    );
+}
+
+
+template <class AnnotatorTo, class AnnotatorFrom>
+void convert(std::unique_ptr<AnnotatorFrom> annotator,
+             const Config &config,
+             const Timer &timer) {
+    if (config.verbose)
+        std::cout << "Converting to " << Config::annotype_to_string(config.anno_type)
+                  << " annotator...\t" << std::flush;
+
+    auto target_annotator = annotate::convert<AnnotatorTo>(std::move(*annotator));
+    annotator.reset();
+    if (config.verbose)
+        std::cout << timer.elapsed() << "sec" << std::endl;
+
+    if (config.verbose)
+        std::cout << "Serializing to " << config.outfbase
+                  << "...\t" << std::flush;
+    target_annotator->serialize(config.outfbase);
+    if (config.verbose)
+        std::cout << timer.elapsed() << "sec" << std::endl;
+}
+
+
+void print_boss_stats(const BOSS &boss_graph,
+                      bool count_dummy = false,
+                      size_t num_threads = 0,
+                      bool verbose = false) {
+    std::cout << "====================== BOSS STATS ======================" << std::endl;
+    std::cout << "k: " << boss_graph.get_k() + 1 << std::endl;
+    std::cout << "nodes (k-1): " << boss_graph.num_nodes() << std::endl;
+    std::cout << "edges ( k ): " << boss_graph.num_edges() << std::endl;
+    std::cout << "state: " << Config::state_to_string(boss_graph.get_state()) << std::endl;
+
+    assert(boss_graph.rank_W(boss_graph.num_edges(), boss_graph.alph_size) == 0);
+    std::cout << "W stats: {'" << boss_graph.decode(0) << "': "
+              << boss_graph.rank_W(boss_graph.num_edges(), 0);
+    for (int i = 1; i < boss_graph.alph_size; ++i) {
+        std::cout << ", '" << boss_graph.decode(i) << "': "
+                  << boss_graph.rank_W(boss_graph.num_edges(), i)
+                        + boss_graph.rank_W(boss_graph.num_edges(), i + boss_graph.alph_size);
+    }
+    std::cout << "}" << std::endl;
+
+    assert(boss_graph.get_F(0) == 0);
+    std::cout << "F stats: {'";
+    for (int i = 1; i < boss_graph.alph_size; ++i) {
+        std::cout << boss_graph.decode(i - 1) << "': "
+                  << boss_graph.get_F(i) - boss_graph.get_F(i - 1)
+                  << ", '";
+    }
+    std::cout << boss_graph.decode(boss_graph.alph_size - 1) << "': "
+              << boss_graph.num_edges() - boss_graph.get_F(boss_graph.alph_size - 1)
+              << "}" << std::endl;
+
+    if (count_dummy) {
+        std::cout << "dummy source edges: "
+                  << boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose)
+                  << std::endl;
+        std::cout << "dummy sink edges: "
+                  << boss_graph.mark_sink_dummy_edges()
+                  << std::endl;
+    }
+    std::cout << "========================================================" << std::endl;
+}
+
+void print_stats(const DeBruijnGraph &graph) {
+    std::cout << "====================== GRAPH STATS =====================" << std::endl;
+    std::cout << "k: " << graph.get_k() << std::endl;
+    std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
+    std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
+
+    if (dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(&graph)) {
+        const auto &weighted = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>&>(graph);
+        double sum_weights = 0;
+        for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
+            sum_weights += weighted.get_weight(i);
+        }
+        std::cout << "sum weights: " << sum_weights << std::endl;
+
+        if (utils::get_verbose()) {
+            for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
+                std::cout << weighted.get_weight(i) << " ";
+            }
+            std::cout << std::endl;
+        }
+    }
+
+    std::cout << "========================================================" << std::endl;
+}
+
+void print_stats(const Annotator &annotation) {
+    std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
+    std::cout << "labels:  " << annotation.num_labels() << std::endl;
+    std::cout << "objects: " << annotation.num_objects() << std::endl;
+    std::cout << "density: " << std::scientific
+                              << static_cast<double>(annotation.num_relations())
+                                    / annotation.num_objects()
+                                    / annotation.num_labels() << std::endl;
+    std::cout << "representation: ";
+
+    if (dynamic_cast<const annotate::ColumnCompressed<std::string> *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::ColumnCompressed) << std::endl;
+
+    } else if (dynamic_cast<const annotate::RowCompressed<std::string> *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RowCompressed) << std::endl;
+
+    } else if (dynamic_cast<const annotate::BRWTCompressed<std::string> *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
+
+    } else if (dynamic_cast<const annotate::BinRelWT_sdslAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BinRelWT_sdsl) << std::endl;
+
+    } else if (dynamic_cast<const annotate::BinRelWTAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BinRelWT) << std::endl;
+
+    } else if (dynamic_cast<const annotate::RowFlatAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RowFlat) << std::endl;
+
+    } else if (dynamic_cast<const annotate::RainbowfishAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RBFish) << std::endl;
+
+    } else {
+        assert(false);
+        throw std::runtime_error("Unknown annotator");
+    }
+    std::cout << "========================================================" << std::endl;
+}
+
+template <class Callback, class CountedKmer, class Loop>
+void parse_sequences(const std::vector<std::string> &files,
+                     const Config &config,
+                     const Timer &timer,
+                     Callback call_read,
+                     CountedKmer call_kmer,
+                     Loop call_reads) {
+    // iterate over input files
+    for (const auto &file : files) {
+        if (config.verbose) {
+            std::cout << std::endl << "Parsing " << file << std::endl;
+        }
+
+        Timer data_reading_timer;
+
+        if (utils::get_filetype(file) == "VCF") {
+            read_vcf_file_critical(file,
+                                   config.refpath,
+                                   config.k,
+                                   [&](std::string&& sequence) {
+                                       call_read(std::move(sequence));
+                                   },
+                                   config.reverse);
+        } else if (utils::get_filetype(file) == "KMC") {
+            bool warning_different_k = false;
+
+            auto min_count = config.min_count;
+            auto max_count = config.max_count;
+
+            if (config.min_count_quantile > 0 || config.max_count_quantile < 1) {
+                std::unordered_map<uint64_t, uint64_t> count_hist;
+                kmc::read_kmers(
+                    file,
+                    [&](std::string&&, uint32_t count) {
+                        count_hist[count]++;
+                    }
+                );
+
+                if (count_hist.size()) {
+                    std::vector<std::pair<uint64_t, uint64_t>> count_hist_v(count_hist.begin(),
+                                                                            count_hist.end());
+
+                    ips4o::parallel::sort(count_hist_v.begin(), count_hist_v.end(),
+                        [](const auto &first, const auto &second) {
+                            return first.first < second.first;
+                        },
+                        config.parallel
+                    );
+
+                    if (config.min_count_quantile > 0)
+                        min_count = utils::get_quantile(count_hist_v, config.min_count_quantile);
+                    if (config.max_count_quantile < 1)
+                        max_count = utils::get_quantile(count_hist_v, config.max_count_quantile);
+
+                    std::cout << "Used k-mer count thresholds:\n"
+                              << "min (including): " << min_count << "\n"
+                              << "max (excluding): " << max_count << std::endl;
+                }
+            }
+
+            kmc::read_kmers(
+                file,
+                [&](std::string&& sequence, uint32_t count) {
+                    if (!warning_different_k && sequence.size() != config.k) {
+                        std::cerr << "Warning: k-mers parsed from KMC database "
+                                  << file << " have length " << sequence.size()
+                                  << " but graph is constructed for k=" << config.k
+                                  << std::endl;
+                        warning_different_k = true;
+                    }
+                    call_kmer(std::move(sequence), count);
+                },
+                min_count,
+                max_count
+            );
+        } else if (utils::get_filetype(file) == "FASTA"
+                    || utils::get_filetype(file) == "FASTQ") {
+            if (files.size() >= config.parallel) {
+                auto reverse = config.reverse;
+                auto file_copy = file;
+
+                // capture all required values by copying to be able
+                // to run task from other threads
+                call_reads([=](auto callback) {
+                    read_fasta_file_critical(file_copy, [=](kseq_t *read_stream) {
+                        // add read to the graph constructor as a callback
+                        callback(read_stream->seq.s);
+                    }, reverse);
+                });
+            } else {
+                read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+                    // add read to the graph constructor as a callback
+                    call_read(read_stream->seq.s);
+                }, config.reverse);
+            }
+        } else {
+            std::cerr << "ERROR: Filetype unknown for file "
+                      << file << std::endl;
+            exit(1);
+        }
+
+        if (config.verbose) {
+            std::cout << "Finished extracting sequences from file " << file
+                      << " in " << timer.elapsed() << "sec" << std::endl;
+        }
+        if (config.verbose) {
+            std::cout << "File processed in "
+                      << data_reading_timer.elapsed()
+                      << "sec, current mem usage: "
+                      << (get_curr_RSS() >> 20) << " MiB"
+                      << ", total time: " << timer.elapsed()
+                      << "sec" << std::endl;
+        }
+    }
+
+    if (config.verbose) {
+        std::cout << std::endl;
+    }
+}
+
+std::string form_client_reply(const std::string &received_message,
+                              const AnnotatedDBG &anno_graph,
+                              const Config &config) {
+    try {
+        Json::Value json;
+
+        {
+            Json::CharReaderBuilder rbuilder;
+            std::unique_ptr<Json::CharReader> reader { rbuilder.newCharReader() };
+            std::string errors;
+
+            if (!reader->parse(received_message.data(),
+                               received_message.data() + received_message.size(),
+                               &json,
+                               &errors)) {
+                std::cerr << "Error: bad json file:\n" << errors << std::endl;
+                //TODO: send error message back in a json file
+                throw std::domain_error("bad json received");
+            }
+        }
+
+        const auto &fasta = json["FASTA"];
+        const auto &seq = json["SEQ"];
+
+        // discovery_fraction a proxy of 1 - %similarity
+        auto discovery_fraction = json.get("discovery_fraction",
+                                           config.discovery_fraction).asDouble();
+        auto count_labels = json.get("count_labels", config.count_labels).asBool();
+        auto num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
+
+        std::ostringstream oss;
+
+        // query callback shared by FASTA and sequence modes
+        auto execute_server_query = [&](const std::string &name,
+                                        const std::string &sequence) {
+            execute_query(name,
+                          sequence,
+                          count_labels,
+                          config.suppress_unlabeled,
+                          num_top_labels,
+                          discovery_fraction,
+                          config.anno_labels_delimiter,
+                          anno_graph,
+                          oss);
+        };
+
+        if (!seq.isNull()) {
+            // input is plain sequence
+            execute_server_query(seq.asString(), seq.asString());
+        } else if (!fasta.isNull()) {
+            // input is a FASTA sequence
+            read_fasta_from_string(
+                fasta.asString(),
+                [&](kseq_t *read_stream) {
+                    execute_server_query(read_stream->name.s,
+                                         read_stream->seq.s);
+                }
+            );
+        } else {
+            std::cerr << "Error: no input sequences received from client" << std::endl;
+            // TODO: no input sequences -> form an error message for the client
+            throw std::domain_error("No input sequences");
+        }
+
+        return oss.str();
+
+    } catch (const Json::LogicError &e) {
+        std::cerr << "Error: bad json file: " << e.what() << std::endl;
+        //TODO: send errors in a json file
+        throw;
+    } catch (const std::exception &e) {
+        std::cerr << "Error: processing request error: " << e.what() << std::endl;
+        //TODO: send errors in a json file
+        throw;
+    } catch (...) {
+        std::cerr << "Error: processing request error" << std::endl;
+        //TODO: send errors in a json file
+        throw;
+    }
+}
+
+
+int main(int argc, const char *argv[]) {
+    auto config = std::make_unique<Config>(argc, argv);
+
+    if (config->verbose) {
+        std::cout << "#############################\n"
+                  << "### Welcome to MetaGraph! ###\n"
+                  << "#############################\n" << std::endl;
+    }
+
+    const auto &files = config->fname;
+
+    switch (config->identity) {
+        case Config::EXPERIMENT: {
+            break;
+        }
+        case Config::BUILD: {
+            std::unique_ptr<DeBruijnGraph> graph;
+
+            if (config->verbose)
+                std::cout << "Build De Bruijn Graph with k-mer size k="
+                          << config->k << std::endl;
+
+            Timer timer;
+
+            if (config->complete) {
+                if (config->graph_type != Config::GraphType::BITMAP) {
+                    std::cerr << "Error: Only bitmap-graph can be built"
+                              << " in complete mode" << std::endl;
+                    exit(1);
+                }
+
+                graph.reset(new DBGBitmap(config->k, config->canonical));
+
+            } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
+                auto boss_graph = std::make_unique<BOSS>(config->k - 1);
+
+                if (config->verbose) {
+                    std::cout << "Start reading data and extracting k-mers" << std::endl;
+                }
+                //enumerate all suffixes
+                assert(boss_graph->alph_size > 1);
+                std::vector<std::string> suffixes;
+                if (config->suffix.size()) {
+                    suffixes = { config->suffix };
+                } else {
+                    suffixes = KmerExtractor::generate_suffixes(config->suffix_len);
+                }
+
+                BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), boss_graph->get_k());
+
+                //one pass per suffix
+                for (const std::string &suffix : suffixes) {
+                    timer.reset();
+
+                    if (suffix.size() > 0 || suffixes.size() > 1) {
+                        std::cout << "\nSuffix: " << suffix << std::endl;
+                    }
+
+                    auto constructor = IBOSSChunkConstructor::initialize(
+                        boss_graph->get_k(),
+                        config->canonical,
+                        config->count_kmers,
+                        suffix,
+                        config->parallel,
+                        static_cast<uint64_t>(config->memory_available) << 30,
+                        config->verbose
+                    );
+
+                    parse_sequences(files, *config, timer,
+                        [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
+                        [&](std::string&& kmer, uint32_t count) { constructor->add_sequence(std::move(kmer), count); },
+                        [&](const auto &loop) { constructor->add_sequences(loop); }
+                    );
+
+                    auto next_block = constructor->build_chunk();
+                    std::cout << "Graph chunk with " << next_block->size()
+                              << " k-mers was built in "
+                              << timer.elapsed() << "sec" << std::endl;
+
+                    if (config->outfbase.size() && config->suffix.size()) {
+                        std::cout << "Serialize the graph chunk for suffix '"
+                                  << suffix << "'...\t" << std::flush;
+                        timer.reset();
+                        next_block->serialize(config->outfbase + "." + suffix);
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    }
+
+                    if (config->suffix.size())
+                        return 0;
+
+                    graph_data.extend(*next_block);
+                    delete next_block;
+                }
+
+                if (config->count_kmers) {
+                    sdsl::int_vector<> kmer_counts;
+                    graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
+                    auto weighted_graph = std::make_unique<WeightedDBGSuccinct>(
+                        boss_graph.release(),
+                        config->canonical
+                    );
+                    weighted_graph->set_weights(std::move(kmer_counts));
+                    graph.reset(weighted_graph.release());
+                } else {
+                    graph_data.initialize_boss(boss_graph.get());
+                    graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
+                }
+
+            } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
+
+                if (!config->outfbase.size()) {
+                    std::cerr << "Error: No output file provided" << std::endl;
+                    exit(1);
+                }
+
+                auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
+
+                if (config->verbose) {
+                    std::cout << "Start reading data and extracting k-mers" << std::endl;
+                }
+                //enumerate all suffixes
+                assert(bitmap_graph->alphabet().size() > 1);
+                std::vector<std::string> suffixes;
+                if (config->suffix.size()) {
+                    suffixes = { config->suffix };
+                } else {
+                    suffixes = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+                }
+
+                std::unique_ptr<DBGBitmapConstructor> constructor;
+                std::vector<std::string> chunk_filenames;
+
+                //one pass per suffix
+                for (const std::string &suffix : suffixes) {
+                    timer.reset();
+
+                    if (config->verbose && (suffix.size() > 0 || suffixes.size() > 1)) {
+                        std::cout << "\nSuffix: " << suffix << std::endl;
+                    }
+
+                    constructor.reset(
+                        new DBGBitmapConstructor(
+                            bitmap_graph->get_k(),
+                            config->canonical,
+                            config->count_kmers,
+                            suffix,
+                            config->parallel,
+                            static_cast<uint64_t>(config->memory_available) << 30,
+                            config->verbose
+                        )
+                    );
+
+                    parse_sequences(files, *config, timer,
+                        [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
+                        [&](std::string&& kmer, uint32_t count) { constructor->add_sequence(std::move(kmer), count); },
+                        [&](const auto &loop) { constructor->add_sequences(loop); }
+                    );
+
+                    if (!suffix.size()) {
+                        assert(suffixes.size() == 1);
+
+                        if (config->count_kmers) {
+                            auto weighted_bitmap_graph = std::make_unique<WeightedDBGBitmap>(config->k);
+                            constructor->build_graph(weighted_bitmap_graph.get());
+                            weighted_bitmap_graph->set_weights(constructor->get_weights(kBitsPerCount));
+                            graph.reset(weighted_bitmap_graph.release());
+                        } else {
+                            auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
+                            constructor->build_graph(bitmap_graph.get());
+                            graph.reset(bitmap_graph.release());
+                        }
+
+                    } else {
+                        std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
+                        if (config->verbose) {
+                            std::cout << "Graph chunk with " << chunk->num_set_bits()
+                                      << " k-mers was built in "
+                                      << timer.elapsed() << "sec" << std::endl;
+
+                            std::cout << "Serialize the graph chunk for suffix '"
+                                      << suffix << "'...\t" << std::flush;
+                        }
+
+                        chunk_filenames.push_back(
+                            utils::join_strings({ config->outfbase, suffix }, ".")
+                                + DBGBitmap::kChunkFileExtension
+                        );
+                        std::ofstream out(chunk_filenames.back(), std::ios::binary);
+                        chunk->serialize(out);
+                        if (config->verbose)
+                            std::cout << timer.elapsed() << "sec" << std::endl;
+                    }
+
+                    // only one chunk had to be constructed
+                    if (config->suffix.size())
+                        return 0;
+                }
+
+                if (suffixes.size() > 1) {
+                    assert(chunk_filenames.size());
+                    timer.reset();
+                    graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
+                                                                     config->canonical,
+                                                                     config->verbose));
+                }
+
+            } else {
+                //slower method
+                switch (config->graph_type) {
+
+                    case Config::GraphType::SUCCINCT:
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGSuccinct(config->k, config->canonical));
+                        } else {
+                            graph.reset(new DBGSuccinct(config->k, config->canonical));
+                        }
+                        break;
+
+                    case Config::GraphType::HASH:
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGHashOrdered(config->k, config->canonical));
+                        } else {
+                            graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        }
+                        break;
+
+                    case Config::GraphType::HASH_STR:
+                        if (config->canonical) {
+                            std::cerr << "Warning: string hash-based de Bruijn graph"
+                                      << " does not support canonical mode."
+                                      << " Normal mode will be used instead." << std::endl;
+                        }
+                        // TODO: implement canonical mode
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGHashString(config->k/*, config->canonical*/));
+                        } else {
+                            graph.reset(new DBGHashString(config->k/*, config->canonical*/));
+                        }
+                        break;
+
+                    case Config::GraphType::BITMAP:
+                        std::cerr << "Error: Bitmap-graph construction"
+                                  << " in dynamic regime is not supported" << std::endl;
+                        exit(1);
+                    case Config::GraphType::INVALID:
+                        assert(false);
+                }
+                assert(graph.get());
+
+                parse_sequences(files, *config, timer,
+                    [&graph](std::string&& seq) { graph->add_sequence(seq); },
+                    [&graph](std::string&& kmer, uint32_t /*count*/) { graph->add_sequence(kmer); },
+                    [&graph](const auto &loop) {
+                        loop([&graph](const auto &seq) { graph->add_sequence(seq); });
+                    }
+                );
+
+                sdsl::int_vector<> kmer_counts(graph->num_nodes() + 1, 0, kBitsPerCount);
+
+                parse_sequences(files, *config, timer,
+                    [&graph,&kmer_counts](std::string&& seq) {
+                        graph->map_to_nodes(seq, [&](uint64_t i) {
+                            if (i > 0) {
+                                assert(i <= graph->num_nodes());
+                                kmer_counts[i]++;
+                            }
+                        });
+                    },
+                    [&graph,&kmer_counts](std::string&& kmer, uint32_t count) {
+                        graph->map_to_nodes(kmer, [&](uint64_t i) {
+                            if (i > 0) {
+                                assert(i <= graph->num_nodes());
+                                kmer_counts[i] += count;
+                            }
+                        });
+                    },
+                    [&graph,&kmer_counts](const auto &loop) {
+                        loop([&graph,&kmer_counts](const auto &seq) {
+                            graph->map_to_nodes(seq, [&](uint64_t i) {
+                                if (i > 0) {
+                                    assert(i <= graph->num_nodes());
+                                    kmer_counts[i]++;
+                                }
+                            });
+                        });
+                    }
+                );
+
+                dynamic_cast<IWeighted<uint64_t, sdsl::int_vector<>>&>(*graph).set_weights(std::move(kmer_counts));
+            }
+
+            if (config->verbose)
+                std::cout << "Graph construction finished in "
+                          << timer.elapsed() << "sec" << std::endl;
+
+            if (!config->outfbase.empty()) {
+                if (dynamic_cast<DBGSuccinct*>(graph.get()) && config->mark_dummy_kmers) {
+                    if (config->verbose)
+                        std::cout << "Detecting all dummy k-mers..." << std::flush;
+
+                    timer.reset();
+                    dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(config->parallel, false);
+
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+
+                graph->serialize(config->outfbase);
+            }
+
+            return 0;
+        }
+        case Config::EXTEND: {
+            assert(config->infbase_annotators.size() <= 1);
+
+            Timer timer;
+
+            // load graph
+            auto graph = load_critical_dbg(config->infbase);
+
+            if (config->verbose) {
+                std::cout << "De Bruijn graph with k-mer size k="
+                          << graph->get_k() << " has been loaded in "
+                          << timer.elapsed() << "sec" << std::endl;
+            }
+            timer.reset();
+
+            if (dynamic_cast<DBGSuccinct*>(graph.get())) {
+                auto &succinct_graph = dynamic_cast<DBGSuccinct&>(*graph);
+
+                if (succinct_graph.get_state() != Config::DYN) {
+                    if (config->verbose)
+                        std::cout << "Switching state of succinct graph to dynamic..." << std::flush;
+
+                    succinct_graph.switch_state(Config::DYN);
+
+                    if (config->verbose)
+                        std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+                }
+            }
+
+            std::unique_ptr<bit_vector_dyn> inserted_edges;
+            if (config->infbase_annotators.size())
+                inserted_edges.reset(new bit_vector_dyn(graph->num_nodes() + 1, 0));
+
+            timer.reset();
+
+            if (config->verbose)
+                std::cout << "Start graph extension" << std::endl;
+
+            parse_sequences(files, *config, timer,
+                [&graph,&inserted_edges](std::string&& seq) {
+                    graph->add_sequence(seq, inserted_edges.get());
+                },
+                [&graph,&inserted_edges](std::string&& kmer, uint32_t /*count*/) {
+                    graph->add_sequence(kmer, inserted_edges.get());
+                },
+                [&graph,&inserted_edges](const auto &loop) {
+                    loop([&graph,&inserted_edges](const auto &seq) {
+                        graph->add_sequence(seq, inserted_edges.get());
+                    });
+                }
+            );
+            // if (config->verbose) {
+            //     std::cout << "Number of k-mers in graph: " << graph->num_nodes() << std::endl;
+            // }
+
+            if (config->verbose)
+                std::cout << "Graph extension finished in "
+                          << timer.elapsed() << "sec" << std::endl;
+
+            assert(config->outfbase.size());
+
+            // serialize graph
+            timer.reset();
+
+            graph->serialize(config->outfbase);
+            graph.reset();
+
+            if (config->verbose)
+                std::cout << "Serialized in " << timer.elapsed() << "sec" << std::endl;
+
+            timer.reset();
+
+            if (!config->infbase_annotators.size())
+                return 0;
+
+            auto annotation = initialize_annotation(config->infbase_annotators.at(0), *config);
+
+            if (!annotation->load(config->infbase_annotators.at(0))) {
+                std::cerr << "ERROR: can't load annotations" << std::endl;
+                exit(1);
+            } else if (config->verbose) {
+                std::cout << "Annotation was loaded in "
+                          << timer.elapsed() << "sec" << std::endl;
+            }
+
+            timer.reset();
+
+            assert(inserted_edges.get());
+
+            if (annotation->num_objects() + 1 != inserted_edges->size()
+                                                - inserted_edges->num_set_bits()) {
+                std::cerr << "ERROR: incompatible graph and annotation." << std::endl;
+                exit(1);
+            }
+
+            if (config->verbose)
+                std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
+
+            AnnotatedDBG::insert_zero_rows(annotation.get(), *inserted_edges);
+
+            if (config->verbose)
+                std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+
+            annotation->serialize(config->outfbase);
+
+            return 0;
+        }
+        case Config::ANNOTATE: {
+            assert(config->infbase_annotators.size() <= 1);
+
+            if (!config->separately) {
+                auto anno_graph = initialize_annotated_dbg(*config);
+
+                annotate_data(files,
+                              config->refpath,
+                              anno_graph.get(),
+                              config->reverse,
+                              config->min_count,
+                              config->max_count,
+                              config->filename_anno,
+                              config->fasta_anno,
+                              config->fasta_anno_comment_delim,
+                              config->fasta_header_delimiter,
+                              config->anno_labels,
+                              config->verbose);
+
+                anno_graph->get_annotation().serialize(config->outfbase);
+
+            } else {
+                const auto graph = load_critical_dbg(config->infbase);
+
+                ThreadPool thread_pool(config->parallel);
+
+                // annotate multiple columns in parallel, each in a single thread
+                config->parallel = 1;
+
+                for (const auto &file : files) {
+                    thread_pool.enqueue([](auto graph, auto filename, auto outfilename, const Config *config) {
+                            auto anno_graph = initialize_annotated_dbg(graph, *config);
+
+                            annotate_data({ filename },
+                                          config->refpath,
+                                          anno_graph.get(),
+                                          config->reverse,
+                                          config->min_count,
+                                          config->max_count,
+                                          config->filename_anno,
+                                          config->fasta_anno,
+                                          config->fasta_anno_comment_delim,
+                                          config->fasta_header_delimiter,
+                                          config->anno_labels,
+                                          config->verbose);
+                            anno_graph->get_annotation().serialize(outfilename);
+                        },
+                        graph,
+                        file,
+                        config->outfbase.size()
+                            ? config->outfbase + "/" + utils::split_string(file, "/").back()
+                            : file,
+                        config.get()
+                    );
+                }
+            }
+
+            return 0;
+        }
+        case Config::ANNOTATE_COORDINATES: {
+            assert(config->infbase_annotators.size() <= 1);
+
+            auto graph_temp = load_critical_dbg(config->infbase);
+
+            auto annotation_temp
+                = std::make_unique<annotate::RowCompressed<>>(graph_temp->num_nodes());
+
+            if (config->infbase_annotators.size()
+                    && !annotation_temp->load(config->infbase_annotators.at(0))) {
+                std::cerr << "ERROR: can't load annotations" << std::endl;
+                exit(1);
+            }
+
+            // load graph
+            AnnotatedDBG anno_graph(graph_temp,
+                                    std::move(annotation_temp),
+                                    config->parallel,
+                                    config->fast);
+
+            if (!anno_graph.check_compatibility()) {
+                std::cerr << "Error: graph and annotation are not compatible."
+                          << std::endl;
+                exit(1);
+            }
+
+            annotate_coordinates(files,
+                                 &anno_graph,
+                                 config->reverse,
+                                 config->genome_binsize_anno,
+                                 config->verbose);
+
+            anno_graph.get_annotation().serialize(config->outfbase);
+
+            return 0;
+        }
+        case Config::MERGE_ANNOTATIONS: {
+            if (config->anno_type == Config::ColumnCompressed) {
+                annotate::ColumnCompressed<> annotation(0, kNumCachedColumns, config->verbose);
+                if (!annotation.merge_load(files)) {
+                    std::cerr << "ERROR: can't load annotations" << std::endl;
+                    exit(1);
+                }
+                annotation.serialize(config->outfbase);
+                return 0;
+            }
+
+            std::vector<std::unique_ptr<Annotator>> annotators;
+            std::vector<std::string> stream_files;
+
+            for (const auto &filename : files) {
+                auto anno_file_type = parse_annotation_type(filename);
+                if (anno_file_type == Config::AnnotationType::RowCompressed) {
+                    stream_files.push_back(filename);
+                } else {
+                    auto annotator = initialize_annotation(filename, *config);
+                    if (!annotator->load(filename)) {
+                        std::cerr << "ERROR: can't load annotation from file "
+                                  << filename << std::endl;
+                        exit(1);
+                    }
+                    annotators.push_back(std::move(annotator));
+                }
+            }
+
+            if (config->anno_type == Config::RowCompressed) {
+                annotate::merge<annotate::RowCompressed<>>(annotators, stream_files, config->outfbase);
+            } else if (config->anno_type == Config::RowFlat) {
+                annotate::merge<annotate::RowFlatAnnotator>(annotators, stream_files, config->outfbase);
+            } else if (config->anno_type == Config::RBFish) {
+                annotate::merge<annotate::RainbowfishAnnotator>(annotators, stream_files, config->outfbase);
+            } else if (config->anno_type == Config::BinRelWT_sdsl) {
+                annotate::merge<annotate::BinRelWT_sdslAnnotator>(annotators, stream_files, config->outfbase);
+            } else if (config->anno_type == Config::BinRelWT) {
+                annotate::merge<annotate::BinRelWTAnnotator>(annotators, stream_files, config->outfbase);
+            } else {
+                std::cerr << "ERROR: Merging of annotations to '"
+                          << config->annotype_to_string(config->anno_type)
+                          << "' is not implemented." << std::endl;
+                exit(1);
+            }
+
+            return 0;
+        }
+        case Config::QUERY: {
+            assert(config->infbase_annotators.size() == 1);
+
+            auto anno_graph = initialize_annotated_dbg(*config);
+
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+
+            Timer timer;
+
+            // iterate over input files
+            for (const auto &file : files) {
+                if (config->verbose) {
+                    std::cout << std::endl << "Parsing " << file << std::endl;
+                }
+
+                Timer data_reading_timer;
+
+                size_t seq_count = 0;
+
+                read_fasta_file_critical(file,
+                    [&](kseq_t *read_stream) {
+                        thread_pool.enqueue(execute_query,
+                            std::to_string(seq_count++) + "\t"
+                                + read_stream->name.s,
+                            std::string(read_stream->seq.s),
+                            config->count_labels,
+                            config->suppress_unlabeled,
+                            config->num_top_labels,
+                            config->discovery_fraction,
+                            config->anno_labels_delimiter,
+                            std::ref(*anno_graph),
+                            std::ref(std::cout)
+                        );
+                    },
+                    config->reverse
+                );
+                if (config->verbose) {
+                    std::cout << "Finished extracting sequences from file " << file
+                              << " in " << timer.elapsed() << "sec" << std::endl;
+                }
+                if (config->verbose) {
+                    std::cout << "File processed in "
+                              << data_reading_timer.elapsed()
+                              << "sec, current mem usage: "
+                              << (get_curr_RSS() >> 20) << " MiB"
+                              << ", total time: " << timer.elapsed()
+                              << "sec" << std::endl;
+                }
+
+                // wait while all threads finish processing the current file
+                thread_pool.join();
+            }
+
+            return 0;
+        }
+        case Config::SERVER_QUERY: {
+            assert(config->infbase_annotators.size() == 1);
+
+            Timer timer;
+
+            std::cout << "Loading graph..." << std::endl;
+
+            auto anno_graph = initialize_annotated_dbg(*config);
+
+            std::cout << "Graph loaded in "
+                      << timer.elapsed() << "sec, current mem usage: "
+                      << (get_curr_RSS() >> 20) << " MiB" << std::endl;
+
+            const size_t num_threads = std::max(1u, config->parallel);
+
+            std::cout << "Initializing tcp service with "
+                      << num_threads << " threads, listening port "
+                      << config->port << std::endl;
+
+            try {
+                asio::io_context io_context;
+
+                asio::signal_set signals(io_context, SIGINT, SIGTERM);
+                signals.async_wait([&](auto, auto) { io_context.stop(); });
+
+                Server server(io_context, config->port,
+                    [&](const std::string &received_message) {
+                        return form_client_reply(
+                            received_message,
+                            *anno_graph,
+                            *config
+                        );
+                    }
+                );
+
+                std::vector<std::thread> workers;
+                for (size_t i = 0; i < std::max(1u, config->parallel); ++i) {
+                    workers.emplace_back([&io_context]() { io_context.run(); });
+                }
+                for (auto &thread : workers) {
+                    thread.join();
+                }
+            } catch (const std::exception &e) {
+                std::cerr << "Exception: " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "Error: Unknown exception" << std::endl;
+            }
+
+            return 0;
+        }
+        case Config::COMPARE: {
+            assert(files.size());
+
+            std::cout << "Opening file                " << files.at(0) << std::endl;
+            auto graph = load_critical_graph_from_file(files.at(0));
+
+            for (size_t f = 1; f < files.size(); ++f) {
+                std::cout << "Opening file for comparison " << files[f] << std::endl;
+                auto second = load_critical_graph_from_file(files[f]);
+                if (config->internal
+                        ? graph->equals_internally(*second, config->verbose)
+                        : *graph == *second) {
+                    std::cout << "Graphs are identical" << std::endl;
+                } else {
+                    std::cout << "Graphs are not identical" << std::endl;
+                }
+            }
+
+            return 0;
+        }
+        case Config::CONCATENATE: {
+            assert(config->outfbase.size());
+
+            auto chunk_files = files;
+
+            if (!files.size()) {
+                assert(config->infbase.size());
+
+                const auto sorted_suffixes = config->graph_type == Config::GraphType::SUCCINCT
+                        ? KmerExtractor().generate_suffixes(config->suffix_len)
+                        : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+
+                for (const std::string &suffix : sorted_suffixes) {
+                    assert(suffix.size() == config->suffix_len);
+                    chunk_files.push_back(config->infbase + "." + suffix);
+                }
+            }
+
+            for (auto &filename : chunk_files) {
+                filename = utils::remove_suffix(filename,
+                                                    BOSS::Chunk::kFileExtension,
+                                                    DBGBitmap::kChunkFileExtension);
+            }
+
+            // collect results on an external merge or construction
+            std::unique_ptr<DeBruijnGraph> graph;
+            if (config->graph_type == Config::GraphType::SUCCINCT) {
+                graph.reset(
+                    new DBGSuccinct(BOSS::Chunk::build_boss_from_chunks(
+                        chunk_files, config->verbose
+                    ), config->canonical)
+                );
+            } else if (config->graph_type == Config::GraphType::BITMAP) {
+                graph.reset(
+                    DBGBitmapConstructor::build_graph_from_chunks(
+                        chunk_files, config->canonical, config->verbose
+                    )
+                );
+            }
+            assert(graph.get());
+
+            if (config->verbose) {
+                std::cout << "Graph has been assembled" << std::endl;
+                print_stats(*graph);
+                if (config->graph_type == Config::GraphType::SUCCINCT) {
+                    print_boss_stats(
+                        dynamic_cast<DBGSuccinct*>(graph.get())->get_boss()
+                    );
+                }
+            }
+
+            // graph output
+            graph->serialize(config->outfbase);
+
+            return 0;
+        }
+        case Config::MERGE: {
+            BOSS *graph = NULL;
+
+            Timer timer;
+
+            std::vector<std::shared_ptr<DBGSuccinct>> dbg_graphs;
+            std::vector<const BOSS*> graphs;
+
+            config->canonical = true;
+
+            for (const auto &file : files) {
+                std::cout << "Opening file " << file << std::endl;
+
+                dbg_graphs.emplace_back(load_critical_graph_from_file<DBGSuccinct>(file));
+
+                graphs.push_back(&dbg_graphs.back()->get_boss());
+
+                if (config->verbose)
+                    print_boss_stats(*graphs.back());
+
+                config->canonical &= dbg_graphs.back()->is_canonical_mode();
+            }
+
+            std::cout << "Graphs are loaded in " << timer.elapsed()
+                                                 << "sec" << std::endl;
+
+            if (config->dynamic) {
+                std::cout << "Start merging traversal" << std::endl;
+                timer.reset();
+
+                graph = dbg_graphs.at(0)->release_boss();
+
+                if (graph->get_state() != Config::DYN) {
+                    if (config->verbose)
+                        std::cout << "Switching state of succinct graph to dynamic..." << std::flush;
+
+                    graph->switch_state(Config::DYN);
+
+                    if (config->verbose)
+                        std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+                }
+
+                for (size_t i = 1; i < graphs.size(); ++i) {
+                    graph->merge(dbg_graphs.at(i)->get_boss());
+
+                    std::cout << "traversal " << files[i] << " done\t"
+                              << timer.elapsed() << "sec" << std::endl;
+
+                    dbg_graphs.at(i).reset();
+                }
+            } else if (config->parallel > 1 || config->parts_total > 1) {
+                std::cout << "Start merging blocks" << std::endl;
+                timer.reset();
+
+                auto *chunk = merge::merge_blocks_to_chunk(
+                    graphs,
+                    config->part_idx,
+                    config->parts_total,
+                    config->parallel,
+                    config->num_bins_per_thread,
+                    config->verbose
+                );
+                if (!chunk) {
+                    std::cerr << "ERROR when building chunk "
+                              << config->part_idx << std::endl;
+                    exit(1);
+                }
+                std::cout << "Blocks merged\t" << timer.elapsed()
+                          << "sec" << std::endl;
+
+                if (config->parts_total > 1) {
+                    chunk->serialize(config->outfbase
+                                      + "." + std::to_string(config->part_idx)
+                                      + "_" + std::to_string(config->parts_total));
+                } else {
+                    graph = new BOSS(graphs[0]->get_k());
+                    chunk->initialize_boss(graph);
+                }
+                delete chunk;
+            } else {
+                std::cout << "Start merging graphs" << std::endl;
+                timer.reset();
+
+                graph = merge::merge(graphs, config->verbose);
+            }
+            dbg_graphs.clear();
+
+            assert(graph);
+
+            std::cout << "Graphs merged in " << timer.elapsed() << "sec" << std::endl;
+
+            // graph output
+            DBGSuccinct(graph, config->canonical).serialize(config->outfbase);
+
+            return 0;
+        }
+        case Config::CLEAN: {
+            assert(files.size() == 1);
+            assert(config->outfbase.size());
+
+            Timer timer;
+            if (config->verbose)
+                std::cout << "Graph loading...\t" << std::flush;
+
+            auto graph = load_critical_dbg(files.at(0));
+
+            auto node_weights = std::dynamic_pointer_cast<const IWeighted<DeBruijnGraph::node_index>>(graph);
+            std::unique_ptr<MaskedDeBruijnGraph> subgraph;
+
+            // TODO: fix unitig extraction from subgraph in order for this
+            // to work properly when k-mers are filtered
+            const DeBruijnGraph *graph_with_unitigs = graph.get();
+
+            if (config->min_count > 1
+                    || config->max_count < std::numeric_limits<unsigned int>::max()
+                    || config->min_unitig_median_kmer_abundance != 1) {
+
+                if (!node_weights.get()) {
+                    std::cerr << "ERROR: Cannot load weighted graph from "
+                              << files.at(0) << std::endl;
+                    exit(1);
+                }
+
+                subgraph.reset(new MaskedDeBruijnGraph(graph,
+                    [&](auto i) { return node_weights->get_weight(i) >= config->min_count
+                                        && node_weights->get_weight(i) <= config->max_count; }
+                ));
+
+                graph_with_unitigs = subgraph.get();
+            }
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->verbose)
+                std::cout << "Extracting sequences from subgraph..." << std::endl;
+
+            timer.reset();
+
+            auto out_filename
+                = utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz";
+
+            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+
+            if (out_fasta_gz == Z_NULL) {
+                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                exit(1);
+            }
+
+            uint64_t counter = 0;
+            const auto &dump_sequence = [&](const auto &sequence) {
+                if (!write_fasta(out_fasta_gz,
+                                 utils::join_strings({ config->header,
+                                                        std::to_string(counter) },
+                                                     ".",
+                                                     true),
+                                 sequence)) {
+                    std::cerr << "ERROR: Can't write extracted sequences to "
+                              << out_filename << std::endl;
+                    exit(1);
+                }
+                counter++;
+            };
+
+            // TODO: if DBGSuccinct is used, make sure it doesn't contain
+            // any redundant dummy k-mers. Otherwise, it will split
+            // the unitigs and the result will be incorrect.
+            // TODO: Alternatively, double check implementation of call_unitigs in BOSS
+            // and make it call proper unitigs even if it contains redundant dummy k-mers.
+
+            if (config->min_unitig_median_kmer_abundance != 1) {
+
+                assert(node_weights.get());
+
+                if (config->min_unitig_median_kmer_abundance == 0) {
+                    config->min_unitig_median_kmer_abundance
+                        = estimate_min_kmer_abundance(subgraph->get_mask(), *node_weights,
+                                                      config->fallback_abundance_cutoff);
+                }
+
+                assert(subgraph->num_nodes() == graph->num_nodes());
+
+                if (config->verbose)
+                    std::cout << "Threshold for median k-mer abundance in unitigs: "
+                              << config->min_unitig_median_kmer_abundance << std::endl;
+
+                // subgraph->call_unitigs(
+                graph_with_unitigs->call_unitigs(
+                    [&](const auto &sequence) {
+                        if (!is_unreliable_unitig(sequence, *graph, *node_weights,
+                                                  config->min_unitig_median_kmer_abundance))
+                            dump_sequence(sequence);
+                    },
+                    config->min_tip_size
+                );
+
+            } else if (config->unitigs) {
+                // subgraph->call_unitigs(dump_sequence);
+                graph_with_unitigs->call_unitigs(dump_sequence, config->min_tip_size);
+
+            } else {
+                // subgraph->call_sequences(dump_sequence);
+                graph_with_unitigs->call_sequences(dump_sequence);
+            }
+
+            gzclose(out_fasta_gz);
+
+            if (config->verbose)
+                std::cout << "Graph cleaning finished in "
+                          << timer.elapsed() << "sec" << std::endl;
+
+            return 0;
+        }
+        case Config::STATS: {
+            for (const auto &file : files) {
+                std::shared_ptr<DeBruijnGraph> graph;
+
+                graph = load_critical_dbg(file);
+
+                std::cout << "Statistics for graph " << file << std::endl;
+
+                print_stats(*graph);
+
+                if (dynamic_cast<DBGSuccinct*>(graph.get())) {
+                    const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+
+                    print_boss_stats(boss_graph,
+                                     config->count_dummy,
+                                     config->parallel,
+                                     config->verbose);
+
+                    if (config->print_graph_internal_repr)
+                        boss_graph.print_internal_representation(std::cout);
+                }
+
+                if (config->print_graph)
+                    std::cout << *graph;
+            }
+
+            for (const auto &file : config->infbase_annotators) {
+                auto annotation = initialize_annotation(file, *config);
+
+                if (config->print_column_names) {
+                    annotate::LabelEncoder<std::string> label_encoder;
+
+                    std::cout << "INFO: Scanning annotation " << file << std::endl;
+
+                    try {
+                        std::ifstream instream(file, std::ios::binary);
+
+                        // TODO: make this more reliable
+                        if (dynamic_cast<const annotate::ColumnCompressed<> *>(annotation.get())) {
+                            // Column compressed dumps the number of rows first
+                            // skipping it...
+                            load_number(instream);
+                        }
+
+                        if (!label_encoder.load(instream))
+                            throw std::ios_base::failure("");
+
+                    } catch (...) {
+                        std::cerr << "Error: Can't read label encoder from file "
+                                  << file << std::endl;
+                        exit(1);
+                    }
+
+                    std::cout << "INFO: Number of columns: " << label_encoder.size() << std::endl;
+                    for (size_t c = 0; c < label_encoder.size(); ++c) {
+                        std::cout << label_encoder.decode(c) << std::endl;
+                    }
+
+                    continue;
+                }
+
+                if (!annotation->load(file)) {
+                    std::cerr << "ERROR: can't load annotation from file "
+                              << file << std::endl;
+                    exit(1);
+                }
+
+                std::cout << "Statistics for annotation " << file << std::endl;
+                print_stats(*annotation);
+            }
+
+            return 0;
+        }
+        case Config::TRANSFORM_ANNOTATION: {
+            assert(files.size() == 1);
+
+            Timer timer;
+
+            /********************************************************/
+            /***************** dump labels to text ******************/
+            /********************************************************/
+
+            if (config->dump_raw_anno || config->dump_text_anno) {
+                const Config::AnnotationType input_anno_type
+                    = parse_annotation_type(files.at(0));
+
+                auto annotation = initialize_annotation(files.at(0), *config);
+
+                if (config->verbose)
+                    std::cout << "Loading annotation..." << std::endl;
+
+                if (config->anno_type == Config::ColumnCompressed) {
+                    if (!annotation->merge_load(files)) {
+                        std::cerr << "ERROR: can't load annotations" << std::endl;
+                        exit(1);
+                    }
+                } else {
+                    // Load annotation from disk
+                    if (!annotation->load(files.at(0))) {
+                        std::cerr << "ERROR: can't load annotation from file "
+                                  << files.at(0) << std::endl;
+                        exit(1);
+                    }
+                }
+
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+
+                    std::cout << "Dumping annotators...\t" << std::flush;
+                }
+
+                if (input_anno_type == Config::ColumnCompressed) {
+                    assert(dynamic_cast<annotate::ColumnCompressed<>*>(annotation.get()));
+                    if (config->dump_raw_anno) {
+                        dynamic_cast<annotate::ColumnCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, true, get_num_threads());
+                    }
+
+                    if (config->dump_text_anno) {
+                        dynamic_cast<annotate::ColumnCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, false, get_num_threads());
+                    }
+                } else if (input_anno_type == Config::BRWT) {
+                    assert(dynamic_cast<annotate::BRWTCompressed<>*>(annotation.get()));
+                    if (config->dump_raw_anno) {
+                        dynamic_cast<annotate::BRWTCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, true, get_num_threads());
+                    }
+
+                    if (config->dump_text_anno) {
+                        dynamic_cast<annotate::BRWTCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, false, get_num_threads());
+                    }
+                } else {
+                    throw std::runtime_error("Dumping columns for this type not implemented");
+                }
+
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
+            }
+
+            /********************************************************/
+            /***************** rename column labels *****************/
+            /********************************************************/
+
+            if (config->rename_instructions_file.size()) {
+                auto annotation = initialize_annotation(files.at(0), *config);
+
+                if (config->verbose)
+                    std::cout << "Loading annotation..." << std::endl;
+
+                if (config->anno_type == Config::ColumnCompressed) {
+                    if (!annotation->merge_load(files)) {
+                        std::cerr << "ERROR: can't load annotations" << std::endl;
+                        exit(1);
+                    } else {
+                        std::cout << annotation->num_objects() << " " << annotation->num_labels() << "\n";
+                    }
+                } else {
+                    // Load annotation from disk
+                    if (!annotation->load(files.at(0))) {
+                        std::cerr << "ERROR: can't load annotation from file "
+                              << files.at(0) << std::endl;
+                        exit(1);
+                    }
+                }
+
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
+                if (config->verbose)
+                    std::cout << "Renaming...\t" << std::flush;
+
+                std::unordered_map<std::string, std::string> dict;
+                std::ifstream instream(config->rename_instructions_file);
+                if (!instream.is_open()) {
+                    std::cerr << "ERROR: Can't open file "
+                              << config->rename_instructions_file << std::endl;
+                    exit(1);
+                }
+                std::string old_name;
+                std::string new_name;
+                while (instream.good() && !(instream >> old_name).eof()) {
+                    instream >> new_name;
+                    if (instream.fail() || instream.eof()) {
+                        std::cerr << "ERROR: wrong format of the rules for"
+                                  << " renaming annotation columns passed in file "
+                                  << config->rename_instructions_file << std::endl;
+                        exit(1);
+                    }
+                    dict[old_name] = new_name;
+                }
+                //TODO: could be made to work with streaming
+                annotation->rename_labels(dict);
+
+                annotation->serialize(config->outfbase);
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
+            }
+
+            /********************************************************/
+            /****************** convert annotation ******************/
+            /********************************************************/
+
+            const Config::AnnotationType input_anno_type
+                = parse_annotation_type(files.at(0));
+
+            if (config->anno_type == input_anno_type) {
+                std::cerr << "Skipping conversion: same input and target type: "
+                          << Config::annotype_to_string(Config::RowCompressed)
+                          << std::endl;
+                exit(1);
+            }
+
+            if (input_anno_type == Config::ColumnCompressed && files.size() > 1) {
+                std::cerr << "ERROR: conversion of multiple annotators only supported for ColumnCompressed" << std::endl;
+                exit(1);
+            }
+
+            if (config->verbose) {
+                std::cout << "Converting to " << Config::annotype_to_string(config->anno_type)
+                          << " annotator..." << std::endl;
+            }
+
+            if (input_anno_type == Config::RowCompressed) {
+
+                std::unique_ptr<const Annotator> target_annotator;
+
+                switch (config->anno_type) {
+                    case Config::RowFlat: {
+                        auto annotator = annotate::convert<annotate::RowFlatAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::RBFish: {
+                        auto annotator = annotate::convert<annotate::RainbowfishAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::BinRelWT_sdsl: {
+                        auto annotator = annotate::convert<annotate::BinRelWT_sdslAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::BinRelWT: {
+                        auto annotator = annotate::convert<annotate::BinRelWTAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    default:
+                        std::cerr << "Error: Streaming conversion from RowCompressed annotation"
+                                  << " is not implemented for the requested target type: "
+                                  << Config::annotype_to_string(config->anno_type)
+                                  << std::endl;
+                        exit(1);
+                }
+
+                if (config->verbose) {
+                    std::cout << "Annotation converted in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
+                if (config->verbose) {
+                    std::cout << "Serializing to " << config->outfbase
+                              << "...\t" << std::flush;
+                }
+
+                target_annotator->serialize(config->outfbase);
+
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+
+            } else if (input_anno_type == Config::ColumnCompressed) {
+                auto annotation = initialize_annotation(files.at(0), *config);
+
+                if (config->verbose)
+                    std::cout << "Loading annotation..." << std::endl;
+
+                // Load annotation from disk
+                if (!annotation->merge_load(files)) {
+                    std::cerr << "ERROR: can't load annotations" << std::endl;
+                    exit(1);
+                }
+
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
+                std::unique_ptr<annotate::ColumnCompressed<>> annotator {
+                    dynamic_cast<annotate::ColumnCompressed<> *>(annotation.release())
+                };
+                assert(annotator.get());
+
+                switch (config->anno_type) {
+                    case Config::ColumnCompressed: {
+                        assert(false);
+                        break;
+                    }
+                    case Config::RowCompressed: {
+                        if (config->fast) {
+                            annotate::RowCompressed<> row_annotator(0);
+                            annotator->convert_to_row_annotator(&row_annotator,
+                                                                config->parallel);
+                            annotator.reset();
+
+                            if (config->verbose) {
+                                std::cout << "Annotation converted in "
+                                          << timer.elapsed() << "sec" << std::endl;
+                            }
+
+                            if (config->verbose) {
+                                std::cout << "Serializing to " << config->outfbase
+                                          << "...\t" << std::flush;
+                            }
+
+                            row_annotator.serialize(config->outfbase);
+
+                            if (config->verbose) {
+                                std::cout << timer.elapsed() << "sec" << std::endl;
+                            }
+
+                        } else {
+                            annotator->convert_to_row_annotator(config->outfbase);
+                            if (config->verbose) {
+                                std::cout << "Annotation converted and serialized in "
+                                          << timer.elapsed() << "sec" << std::endl;
+                            }
+                        }
+                        break;
+                    }
+                    case Config::BRWT: {
+                        auto brwt_annotator = config->greedy_brwt
+                            ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+                                std::move(*annotator),
+                                config->parallel)
+                            : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
+                                std::move(*annotator),
+                                config->arity_brwt,
+                                config->parallel);
+
+                        annotator.reset();
+
+                        if (config->verbose) {
+                            std::cout << "Annotation converted in "
+                                      << timer.elapsed() << "sec" << std::endl;
+                        }
+
+                        if (config->verbose) {
+                            std::cout << "Serializing to " << config->outfbase
+                                      << "...\t" << std::flush;
+                        }
+
+                        brwt_annotator->serialize(config->outfbase);
+
+                        if (config->verbose) {
+                            std::cout << timer.elapsed() << "sec" << std::endl;
+                        }
+                        break;
+                    }
+                    case Config::BinRelWT_sdsl: {
+                        convert<annotate::BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::BinRelWT: {
+                        convert<annotate::BinRelWTAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RowFlat: {
+                        convert<annotate::RowFlatAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RBFish: {
+                        convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                }
+
+            } else {
+                std::cerr << "Error: Conversion to other representations"
+                          << " is not implemented for "
+                          << Config::annotype_to_string(input_anno_type)
+                          << " annotator." << std::endl;
+                exit(1);
+            }
+
+            return 0;
+        }
+        case Config::TRANSFORM: {
+            assert(files.size() == 1);
+            assert(config->outfbase.size());
+
+            Timer timer;
+            if (config->verbose)
+                std::cout << "Graph loading...\t" << std::flush;
+
+            auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(
+                load_critical_dbg(files.at(0))
+            );
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (!dbg_succ.get())
+                throw std::runtime_error("Only implemented for DBGSuccinct");
+
+            if (config->clear_dummy) {
+                if (config->verbose) {
+                    std::cout << "Traverse source dummy edges and remove redundant ones..." << std::endl;
+                }
+                timer.reset();
+
+                // remove redundant dummy edges and mark all other dummy edges
+                dbg_succ->mask_dummy_kmers(config->parallel, true);
+
+                if (config->verbose)
+                    std::cout << "Done in " << timer.elapsed() << "sec" << std::endl;
+
+                timer.reset();
+            }
+
+            if (config->to_adj_list) {
+                if (config->verbose)
+                    std::cout << "Converting graph to adjacency list...\t" << std::flush;
+
+                auto *boss = &dbg_succ->get_boss();
+                timer.reset();
+
+                std::ofstream outstream(config->outfbase + ".adjlist");
+                boss->print_adj_list(outstream);
+
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
+            }
+
+            if (config->verbose) {
+                std::cout << "Converting graph to state "
+                          << Config::state_to_string(config->state)
+                          << "...\t" << std::flush;
+                timer.reset();
+            }
+
+            dbg_succ->switch_state(config->state);
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->verbose) {
+                std::cout << "Serializing transformed graph...\t" << std::flush;
+                timer.reset();
+            }
+            dbg_succ->serialize(config->outfbase);
+            if (config->verbose) {
+                std::cout << timer.elapsed() << "sec" << std::endl;
+            }
+
+            return 0;
+        }
+        case Config::ASSEMBLE: {
+            assert(files.size() == 1);
+            assert(config->outfbase.size());
+
+            Timer timer;
+            if (config->verbose)
+                std::cout << "Graph loading...\t" << std::flush;
+
+            auto graph = load_critical_dbg(files.at(0));
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->infbase_annotators.size()) {
+                auto anno_graph = initialize_annotated_dbg(graph, *config);
+
+                if (config->verbose) {
+                    std::cout << "Masking graph...\t" << std::flush;
+                }
+
+                graph = mask_graph(*anno_graph, *config);
+
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+            }
+
+            if (config->verbose)
+                std::cout << "Extracting sequences from graph...\t" << std::flush;
+
+            timer.reset();
+
+            auto out_filename
+                = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
+                    + ".fasta.gz";
+
+            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+
+            if (out_fasta_gz == Z_NULL) {
+                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                exit(1);
+            }
+
+            uint64_t counter = 0;
+            const auto &dump_sequence = [&](const auto &sequence) {
+                if (!write_fasta(out_fasta_gz,
+                                 utils::join_strings({ config->header,
+                                                        std::to_string(counter) },
+                                                     ".",
+                                                     true),
+                                 sequence)) {
+                    std::cerr << "ERROR: Can't write extracted sequences to "
+                              << out_filename << std::endl;
+                    exit(1);
+                }
+                counter++;
+            };
+
+            if (config->unitigs || config->min_tip_size > 1) {
+                graph->call_unitigs(dump_sequence, config->min_tip_size);
+            } else {
+                graph->call_sequences(dump_sequence);
+            }
+
+            gzclose(out_fasta_gz);
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            return 0;
+        }
+        case Config::RELAX_BRWT: {
+            assert(files.size() == 1);
+            assert(config->outfbase.size());
+
+            Timer timer;
+
+            auto annotator = std::make_unique<annotate::BRWTCompressed<>>();
+
+            if (config->verbose)
+                std::cout << "Loading annotator...\t" << std::flush;
+
+            if (!annotator->load(files.at(0))) {
+                std::cerr << "ERROR: can't load annotations from file "
+                          << files.at(0) << std::endl;
+                exit(1);
+            }
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->verbose)
+                std::cout << "Relaxing BRWT tree...\t" << std::flush;
+
+            annotate::relax_BRWT<annotate::BRWTCompressed<>>(annotator.get(),
+                                                             config->relax_arity_brwt,
+                                                             config->parallel);
+
+            annotator->serialize(config->outfbase);
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            return 0;
+        }
+        case Config::ALIGN: {
+            assert(config->infbase.size());
+
+            // load graph
+            auto graph = load_critical_graph_from_file(config->infbase);
+
+            if (!config->alignment_length) {
+                if (config->distance > 0) {
+                    config->alignment_length = graph->get_k();
+                } else {
+                    config->alignment_length = graph->get_k() + 1;
+                }
+            }
+
+            if (config->alignment_length > graph->get_k() + 1) {
+                // std::cerr << "ERROR: Alignment patterns longer than"
+                //           << " the graph edge size are not supported."
+                //           << " Decrease the alignment length." << std::endl;
+                // exit(1);
+                std::cerr << "Warning: Aligning to k-mers"
+                          << " longer than k+1 is not supported." << std::endl;
+                config->alignment_length = graph->get_k() + 1;
+            }
+            if (config->distance > 0
+                    && config->alignment_length != graph->get_k()) {
+                std::cerr << "Warning: Aligning to k-mers longer or shorter than k"
+                          << " is not supported for fuzzy alignment." << std::endl;
+                config->alignment_length = graph->get_k();
+            }
+
+            Timer timer;
+
+            std::cout << "Align sequences against the de Bruijn graph with ";
+            std::cout << "k=" << graph->get_k() << "\n"
+                      << "Length of aligning k-mers: "
+                      << config->alignment_length << std::endl;
+
+            for (const auto &file : files) {
+                std::cout << "Align sequences from file " << file << std::endl;
+
+                Timer data_reading_timer;
+
+                read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+                    if (config->distance > 0) {
+                        uint64_t aln_len = read_stream->seq.l;
+
+                        // since we set aln_len = read_stream->seq.l, we only get a single hit vector
+                        auto graphindices = graph->align_fuzzy(
+                            read_stream->seq.s,
+                            aln_len,
+                            config->distance
+                        );
+                        //for (size_t i = 0; i < graphindices.size(); ++i) {
+                        size_t i = 0;
+
+                        int print_len = i + aln_len < read_stream->seq.l
+                                        ? aln_len
+                                        : (read_stream->seq.l - i);
+
+                        printf("%.*s: ", print_len, read_stream->seq.s + i);
+
+                        for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
+                            HitInfo curr_hit(graphindices.at(i).at(l));
+                            for (size_t m = 0; m < curr_hit.path.size(); ++m) {
+                                std::cout << curr_hit.path.at(m) << ':';
+                            }
+                            for (size_t m = curr_hit.rl; m <= curr_hit.ru; ++m) {
+                                std::cout << m << " ";
+                            }
+                            std::cout << "[" << curr_hit.cigar << "] ";
+                        }
+                        //}
+                        std::cout << std::endl;
+
+                        return;
+                    }
+
+                    // Non-fuzzy mode
+
+                    if (config->verbose) {
+                        std::cout << "Sequence: " << read_stream->seq.s << "\n";
+                    }
+
+                    if (config->query_presence
+                            && config->alignment_length == graph->get_k() + 1) {
+                        if (config->filter_present) {
+                            if (graph->find(read_stream->seq.s,
+                                            config->discovery_fraction,
+                                            config->kmer_mapping_mode))
+                                std::cout << ">" << read_stream->name.s << "\n"
+                                                 << read_stream->seq.s << "\n";
+                        } else {
+                            std::cout << graph->find(read_stream->seq.s,
+                                                     config->discovery_fraction,
+                                                     config->kmer_mapping_mode) << "\n";
+                        }
+                        return;
+                    }
+
+                    assert(config->alignment_length <= graph->get_k() + 1);
+
+                    std::vector<uint64_t> graphindices;
+
+                    if (config->alignment_length == graph->get_k() + 1) {
+                        graphindices = graph->map_to_edges(read_stream->seq.s);
+                    } else {
+                        graphindices = graph->map_to_nodes(read_stream->seq.s,
+                                                           config->alignment_length);
+                    }
+
+                    size_t num_discovered = std::count_if(
+                        graphindices.begin(), graphindices.end(),
+                        [](const auto &x) { return x > 0; }
+                    );
+
+                    const size_t num_kmers = graphindices.size();
+
+                    if (config->query_presence) {
+                        const size_t min_kmers_discovered =
+                            num_kmers - num_kmers * (1 - config->discovery_fraction);
+                        if (config->filter_present) {
+                            if (num_discovered >= min_kmers_discovered)
+                                std::cout << ">" << read_stream->name.s << "\n"
+                                                 << read_stream->seq.s << "\n";
+                        } else {
+                            std::cout << (num_discovered >= min_kmers_discovered) << "\n";
+                        }
+                        return;
+                    }
+
+                    if (config->count_kmers) {
+                        std::cout << "Kmers matched (discovered/total): " << num_discovered << "/" << num_kmers << "\n";
+                        return;
+                    }
+
+                    for (size_t i = 0; i < graphindices.size(); ++i) {
+                        assert(i + config->alignment_length <= read_stream->seq.l);
+                        std::cout << std::string(read_stream->seq.s + i, config->alignment_length);
+                        std::cout << ": " << graphindices[i] << "\n";
+                    }
+                }, config->reverse);
+
+                if (config->verbose) {
+                    std::cout << "File processed in "
+                              << data_reading_timer.elapsed()
+                              << "sec, current mem usage: "
+                              << (get_curr_RSS() >> 20) << " MiB"
+                              << ", total time: " << timer.elapsed()
+                              << "sec" << std::endl;
+                }
+            }
+
+            return 0;
+        }
+        case Config::CALL_VARIANTS: {
+            assert(config->infbase_annotators.size() == 1);
+
+            std::unique_ptr<TaxIDMapper> taxid_mapper;
+            if (config->taxonomy_map.length()) {
+                taxid_mapper.reset(new TaxIDMapper());
+                std::ifstream taxid_mapper_in(config->taxonomy_map, std::ios::binary);
+                if (!taxid_mapper->load(taxid_mapper_in)) {
+                    std::cerr << "ERROR: failed to read accession2taxid map" << std::endl;
+                    exit(1);
+                }
+            }
+
+            auto anno_graph = initialize_annotated_dbg(*config);
+            auto masked_graph = mask_graph(*anno_graph, *config);
+
+            if (config->verbose) {
+                std::cout << "Filter out:";
+                for (const auto &out : config->label_filter) {
+                    std::cout << " " << out;
+                }
+                std::cout << std::endl;
+            }
+
+            std::sort(config->label_filter.begin(), config->label_filter.end());
+
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            std::mutex print_label_mutex;
+            std::atomic_uint64_t num_calls = 0;
+
+            auto print_index_ref_var_label =
+                [&](const auto &first, const auto &ref, const auto &var, auto&& labels) {
+                    std::lock_guard<std::mutex> lock(print_label_mutex);
+
+                    std::sort(labels.begin(), labels.end());
+
+                    auto it = config->label_filter.begin();
+                    for (const auto &label : labels) {
+                        while (it != config->label_filter.end() && *it < label)
+                            ++it;
+
+                        if (it == config->label_filter.end())
+                            break;
+
+                        if (*it == label)
+                            return;
+                    }
+
+                    num_calls += labels.size();
+
+                    std::cout << first
+                              << "\t" << ref
+                              << "\t" << var
+                              << "\t" << utils::join_strings(labels, ",");
+
+                    if (taxid_mapper.get()) {
+                        std::transform(
+                            labels.begin(), labels.end(),
+                            labels.begin(),
+                            [&](const auto &label) {
+                                return std::to_string(taxid_mapper->gb_to_taxid(label));
+                            }
+                        );
+
+                        std::cout << "\t" << utils::join_strings(labels, ",");
+                    }
+
+                    std::cout << std::endl;
+                };
+
+            if (config->call_bubbles) {
+                std::cout << "Index"
+                          << "\t" << "Ref"
+                          << "\t" << "Var"
+                          << "\t" << "Label";
+
+                if (taxid_mapper.get())
+                    std::cout << "\t" << "TaxID";
+
+                std::cout << std::endl;
+
+                annotated_graph_algorithm::call_bubbles(*masked_graph,
+                                                        *anno_graph,
+                                                        print_index_ref_var_label,
+                                                        &thread_pool);
+                thread_pool.join();
+
+                if (config->verbose) {
+                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
+                              << std::endl
+                              << "# bubbles called: " << num_calls
+                              << std::endl;
+                }
+            } else {
+                std::cout << "Index"
+                          << "\t" << "Node"
+                          << "\t" << "Edge"
+                          << "\t" << "Label";
+
+                if (taxid_mapper.get())
+                    std::cout << "\t" << "TaxID";
+
+                std::cout << std::endl;
+
+                annotated_graph_algorithm::call_breakpoints(*masked_graph,
+                                                            *anno_graph,
+                                                            print_index_ref_var_label,
+                                                            &thread_pool);
+                thread_pool.join();
+
+                if (config->verbose) {
+                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
+                              << std::endl
+                              << "# breakpoints called: " << num_calls
+                              << std::endl;
+                }
+            }
+
+            return 0;
+        }
+        case Config::PARSE_TAXONOMY: {
+            TaxIDMapper taxid_mapper;
+            if (config->accession2taxid.length()
+                && !taxid_mapper.parse_accession2taxid(config->accession2taxid)) {
+                std::cerr << "ERROR: failed to read accession2taxid file" << std::endl;
+                exit(1);
+            }
+
+            if (config->taxonomy_nodes.length()
+                && !taxid_mapper.parse_nodes(config->taxonomy_nodes)) {
+                std::cerr << "ERROR: failed to read nodes.dmp file" << std::endl;
+                exit(1);
+            }
+
+            std::ofstream out(config->outfbase + ".taxonomy.map", std::ios::binary);
+            taxid_mapper.serialize(out);
+            return 0;
+        }
+        case Config::NO_IDENTITY: {
+            assert(false);
+            break;
+        }
+    }
+
+    return 0;
+}

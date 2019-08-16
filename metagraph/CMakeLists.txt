@@ -1,13 +1,23 @@
 cmake_minimum_required (VERSION 3.6.1)
-project(MetaGenGraph)
+project(Metagraph)
+include(CheckFunctionExists)
+include(CheckLibraryExists)
 
 enable_testing()
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "DEBUG")
+  set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
+
+set(JSONCPP_WITH_TESTS FALSE)
+add_subdirectory(
+  external-libraries/jsoncpp
+)
 
 if(NOT CMAKE_DBG_ALPHABET)
   set(CMAKE_DBG_ALPHABET "DNA")
@@ -15,6 +25,8 @@ endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
   string(APPEND CMAKE_CXX_FLAGS " -D_DNA_GRAPH")
+elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA5")
+  string(APPEND CMAKE_CXX_FLAGS " -D_DNA5_GRAPH")
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA_CASE_SENSITIVE")
   string(APPEND CMAKE_CXX_FLAGS " -D_DNA_CASE_SENSITIVE_GRAPH")
 else()
@@ -23,27 +35,37 @@ endif()
 
 
 string(APPEND CMAKE_CXX_FLAGS " \
-  -std=c++14 -Wall -Wextra -Werror \
-  -msse4.2 -mavx -mavx2 -mfma -mbmi -mbmi2 \
-  -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG -Wconversion -Wsign-conversion
+  -Wall -Wextra -Werror \
+  -msse4.2 \
+  -D_THREAD_SAFE -pthread \
+") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  string(APPEND CMAKE_CXX_FLAGS " \
+    -Wno-exit-time-destructors \
+    -Wno-unused-function \
+    -Wno-old-style-cast \
+    -Wno-atomic-alignment \
+    -Wno-extra-semi-stmt \
+  ")
+endif()
 
-# Profile build type
-set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2 -g")
-set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
-set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
+find_package(OpenMP REQUIRED)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
-# Debug build type
-set(CMAKE_CXX_FLAGS_DEBUG "-O3 -g")
+if(NOT DEFINED WITH_AVX)
+set(WITH_AVX TRUE)
+endif()
+if(WITH_AVX)
+string(APPEND CMAKE_CXX_FLAGS " -mavx -mavx2 -mfma -mbmi -mbmi2")
+endif()
 
-# Thread sanitizer build type
-set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
-set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
-set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
-
-set(CMAKE_VERBOSE_MAKEFILE 1)
-cmake_policy(SET CMP0015 NEW)
-
+if(WITH_MMAP)
+message(STATUS "Enabling boost iostreams for mmapped reader")
+string(APPEND CMAKE_CXX_FLAGS " -D_USE_MMAP")
+set(METALIBS ${METALIBS} -lboost_iostreams)
+endif()
 
 #-------------------
 # KMC k-mer counter
@@ -69,26 +91,102 @@ if(result)
 endif()
 
 
+# Profile with gprof
+set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O1 -g")
+set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
+set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
+
+# Profile with gperftools
+set(CMAKE_CXX_FLAGS_GPROFILE "-fno-omit-frame-pointer -DNDEBUG -O2 -g")
+set(CMAKE_EXE_LINKER_FLAGS_GPROFILE "-g")
+set(CMAKE_SHARED_LINKER_FLAGS_GPROFILE "-g")
+
+set(PROFILER_LIBRARIES PROFILER_LIBRARIES-NOTFOUND)
+find_library(PROFILER_LIBRARIES
+  NAMES profiler
+  HINTS
+  ENV LD_LIBRARY_PATH
+  PATHS
+    ~/.linuxbrew/lib
+)
+if(${CMAKE_BUILD_TYPE} MATCHES GPROFILE)
+  if(PROFILER_LIBRARIES)
+    set(METALIBS ${METALIBS} -lprofiler)
+  else()
+    message(FATAL_ERROR "Could not find -lprofiler installed")
+  endif()
+endif()
+
+# Debug build type
+set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
+
+# Link time optimization
+if(LINK_OPT)
+  string(APPEND CMAKE_CXX_FLAGS " -flto")
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -flto")
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    set(CMAKE_AR  "gcc-ar")
+    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_FINISH   true)
+  endif()
+endif()
+
+# Thread sanitizer build type
+set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
+set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
+set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
+
+
+set(CMAKE_VERBOSE_MAKEFILE 1)
+cmake_policy(SET CMP0015 NEW)
+
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
+  ${CMAKE_BINARY_DIR}/lib
+  ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
 )
 
+MACRO(SUBDIRLIST result curdir)
+  FILE(GLOB children RELATIVE ${curdir} ${curdir}/* ${curdir}/*/*)
+  SET(dirlist "${curdir}")
+  FOREACH(child ${children})
+    IF(IS_DIRECTORY ${curdir}/${child})
+      LIST(APPEND dirlist ${curdir}/${child})
+    ENDIF()
+  ENDFOREACH()
+  SET(${result} ${dirlist})
+ENDMACRO()
+
+SUBDIRLIST(INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
+
 include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
+  external-libraries/DYNAMIC/include
   external-libraries/sdsl-lite/include
-  external-libraries/hopscotch-map/src
   external-libraries/rollinghashcpp
   external-libraries/ips4o
   external-libraries/eigen
   external-libraries/caches/include
-  external-libraries/graph_annotation/bloom_annotator
+  external-libraries/sparsepp
+  external-libraries/hopscotch-map/include
+  external-libraries/ordered-map/include
+  external-libraries/binrel_wt/include
+  external-libraries/jsoncpp/include
+  external-libraries/asio/asio/include
+  external-libraries/cpp_progress_bar
+  ${INCLUDE_DIRS}
 )
 
+add_library(progress_bar STATIC
+  external-libraries/cpp_progress_bar/progress_bar.cpp
+)
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules")
 add_subdirectory(
-  external-libraries/graph_annotation/bloom_annotator
+  external-libraries/binrel_wt
 )
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
@@ -97,57 +195,166 @@ find_library(FOLLY_LIBRARIES
   HINTS
   ENV LD_LIBRARY_PATH
   PATHS
-  ~/.linuxbrew/lib/
+    ~/.linuxbrew/lib
 )
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-  set(METALIBS -lfolly)
+  set(METALIBS ${METALIBS}
+    ${FOLLY_LIBRARIES}
+    -ldouble-conversion
+    -ldl
+    -lboost_regex
+    -lboost_filesystem
+    -lboost_program_options
+    -lcrypto
+  )
+  if(NOT BUILD_STATIC)
+    set(METALIBS ${METALIBS}
+      -lglog
+      -lgflags
+    )
+  endif()
+  find_library(LIBERTY
+    NAMES iberty
+    HINTS
+    ENV LD_LIBRARY_PATH
+    PATHS
+      ~/.linuxbrew/lib
+  )
+  if(LIBERTY)
+    set(METALIBS ${METALIBS} ${LIBERTY})
+  endif()
 else()
-  message("Folly was not found. Install folly to get most out of the row-based annotator.")
+  message(WARNING "Folly was not found.\n"
+  "Install folly to reduce RAM required by the row-compressed annotator.")
 endif()
 
-file(GLOB src_files "*.cpp" "*.h" "*.hpp")
+file(GLOB src_files
+  "src/*.cpp"
+  "src/*/*.cpp"
+  "src/*/*/*.cpp"
+)
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
-list(FILTER src_files EXCLUDE REGEX ".*main.cpp|.*sequence_io.cpp")
+list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
 add_library(metagraph STATIC ${src_files})
-add_executable(metagengraph "main.cpp" "sequence_io.cpp")
-set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_DBG_ALPHABET}")
+add_executable(metagraph-bin "src/main.cpp")
+set_target_properties(metagraph-bin PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
   -lKMC
   -lhts -lz -lbz2
-  -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
-  -lsdsl -ldivsufsort -ldivsufsort64
-  -lssl -lcrypto -llzma
-  -latomic
+  -lmaus2
+  -lsdsl
+  -lbrwt
+  -ljsoncpp
+  progress_bar
 )
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  set(METALIBS ${METALIBS} -latomic)
+endif()
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
-  set(METALIBS ${METALIBS} -lcurl -lssl)
+  set(METALIBS ${METALIBS} -lssl -lbz2 -llzma -lcurl -lcrypto)
+endif()
+
+# check for std::filesystem::temp_directory_path
+include(CheckCXXSourceRuns)
+set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+set(CMAKE_REQUIRED_LIBRARIES "c++fs")
+check_cxx_source_runs("
+    #include <iostream>
+    #include <filesystem>
+    int main() {
+        std::cout << std::filesystem::temp_directory_path();
+        return 0;
+    }
+" CPPFS)
+unset(CMAKE_REQUIRED_FLAGS)
+unset(CMAKE_REQUIRED_LIBRARIES)
+if(CPPFS)
+  set(METALIBS ${METALIBS} -lc++fs)
+else()
+  set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+  set(CMAKE_REQUIRED_LIBRARIES "stdc++fs")
+  check_cxx_source_runs("
+      #include <iostream>
+      #include <filesystem>
+      int main() {
+          std::cout << std::filesystem::temp_directory_path();
+          return 0;
+      }
+  " STDCPPFS)
+  unset(CMAKE_REQUIRED_FLAGS)
+  unset(CMAKE_REQUIRED_LIBRARIES)
+  if(STDCPPFS)
+    set(METALIBS ${METALIBS} -lstdc++fs)
+  else()
+    message(FATAL_ERROR "std::filesystem not found")
+  endif()
 endif()
 
 target_link_libraries(
-  metagraph bloom_annotator ${METALIBS}
+  metagraph ${METALIBS}
 )
 
 target_link_libraries(
-  metagengraph metagraph ${METALIBS}
+  metagraph-bin metagraph ${METALIBS}
 )
 
 add_custom_target(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E
   create_symlink
-    "metagengraph_${CMAKE_DBG_ALPHABET}"
-    "metagengraph"
+    "metagraph_${CMAKE_DBG_ALPHABET}"
+    "metagraph"
 )
 
 
 #-------------------
+# Experiments
+#-------------------
+file(GLOB experiment_files
+  "experiments/*.cpp"
+)
+list(FILTER experiment_files EXCLUDE REGEX ".*\\._.*")
+
+include_directories(
+  .
+  ${INCLUDE_DIRS}
+  experiments
+  external-libraries/tclap/include
+)
+
+link_directories(
+  external-libraries/libmaus2/lib
+  external-libraries/sdsl-lite/lib
+  external-libraries/binrel_wt/lib
+)
+add_executable(run_experiments ${experiment_files})
+
+target_link_libraries(
+  run_experiments metagraph ${METALIBS}
+)
+
+#-------------------
+# install library
+#-------------------
+
+file(GLOB header_files
+  "src/*.hpp"
+  "src/*/*.hpp"
+  "src/*/*/*.hpp"
+)
+
+install(TARGETS metagraph DESTINATION lib)
+install(FILES ${header_files} DESTINATION include/metagraph)
+
+#-------------------
 # Unit Tests
 #-------------------
+if(FALSE) # there is one gtest version attached with sdsl
 # Download and unpack googletest at configure time
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/googletest-download)
   configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
@@ -173,8 +380,23 @@ add_subdirectory(
   ${CMAKE_BINARY_DIR}/googletest-build
   EXCLUDE_FROM_ALL
 )
+endif()
 
-file(GLOB unit_tests_files "tests/*.cpp")
+if(NOT DEFINED DEATH_TEST)
+  set(DEATH_TEST TRUE)
+endif()
+if(DEATH_TEST AND ${CMAKE_BUILD_TYPE} MATCHES DEBUG)
+  set(DEATH_TEST_FLAG "")
+else()
+  message(STATUS "Disabling death tests in gtest")
+  set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
+endif()
+
+file(GLOB unit_tests_files
+  "tests/*.cpp"
+  "tests/*/*.cpp"
+  "tests/*/*/*.cpp"
+)
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
 if (CMAKE_VERSION VERSION_LESS 2.8.11)
@@ -182,7 +404,7 @@ if (CMAKE_VERSION VERSION_LESS 2.8.11)
 endif()
 
 include_directories(
-  .
+  ${INCLUDE_DIRS}
 )
 
 link_directories(
@@ -191,10 +413,24 @@ link_directories(
 
 add_executable(unit_tests ${unit_tests_files})
 
-target_link_libraries(unit_tests -lgtest_main -lgtest metagraph ${METALIBS})
+target_link_libraries(unit_tests gtest_main gtest
+  metagraph
+  ${METALIBS}
+)
+
+target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
 add_test(NAME unit_tests COMMAND unit_tests)
 
+# A trick to compile everything in parallel even before linking
+if(${CMAKE_BUILD_TYPE} MATCHES DEBUG)
+  add_library(everything
+    ${src_files}
+    "src/main.cpp"
+    ${unit_tests_files}
+    ${experiment_files}
+  )
+endif()
 
 #-------------------
 # Python interfaces

@@ -1,21 +1,18 @@
 [submodule "metagraph/external-libraries/libmaus2"]
 	path = metagraph/external-libraries/libmaus2
 	url = https://github.com/akahles/libmaus2.git
-  ignore = untracked
+	ignore = untracked
+	branch = shrunk
 [submodule "metagraph/external-libraries/sdsl-lite"]
 	path = metagraph/external-libraries/sdsl-lite
 	url = https://github.com/hmusta/sdsl-lite.git
-  ignore = untracked
+	ignore = untracked
 [submodule "metagraph/external-libraries/hopscotch-map"]
 	path = metagraph/external-libraries/hopscotch-map
 	url = https://github.com/Tessil/hopscotch-map.git
 [submodule "metagraph/external-libraries/ips4o"]
 	path = metagraph/external-libraries/ips4o
 	url = https://github.com/SaschaWitt/ips4o.git
-[submodule "metagraph/external-libraries/graph_annotation"]
-	path = metagraph/external-libraries/graph_annotation
-	url = https://github.com/ratschlab/graph_annotation.git
-  ignore = untracked
 [submodule "metagraph/external-libraries/caches"]
 	path = metagraph/external-libraries/caches
 	url = https://github.com/karasikov/caches.git
@@ -25,3 +22,27 @@
 [submodule "metagraph/external-libraries/KMC"]
 	path = metagraph/external-libraries/KMC
 	url = https://github.com/karasikov/KMC.git
+[submodule "metagraph/external-libraries/binrel_wt"]
+	path = metagraph/external-libraries/binrel_wt
+	url = https://github.com/sara-jvz/binrel_wt.git
+[submodule "metagraph/external-libraries/ordered-map"]
+	path = metagraph/external-libraries/ordered-map
+	url = https://github.com/Tessil/ordered-map.git
+[submodule "metagraph/external-libraries/sparsepp"]
+	path = metagraph/external-libraries/sparsepp
+	url = https://github.com/greg7mdp/sparsepp.git
+[submodule "metagraph/external-libraries/tclap"]
+	path = metagraph/external-libraries/tclap
+	url = https://github.com/eile/tclap.git
+[submodule "metagraph/external-libraries/asio"]
+	path = metagraph/external-libraries/asio
+	url = https://github.com/chriskohlhoff/asio.git
+[submodule "metagraph/external-libraries/jsoncpp"]
+	path = metagraph/external-libraries/jsoncpp
+	url = https://github.com/open-source-parsers/jsoncpp.git
+[submodule "metagraph/external-libraries/cpp_progress_bar"]
+	path = metagraph/external-libraries/cpp_progress_bar
+	url = https://github.com/karasikov/cpp_progress_bar
+[submodule "metagraph/external-libraries/DYNAMIC"]
+	path = metagraph/external-libraries/DYNAMIC
+	url = https://github.com/karasikov/DYNAMIC.git

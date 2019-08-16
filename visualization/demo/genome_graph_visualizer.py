@@ -129,7 +129,7 @@ def to_html(state_repr):
 
 
 if __name__ == '__main__':
-    executable = '../../metagraph/build/metagengraph'
+    executable = '../../metagraph/build/metagraph'
 
     k = 3
     sequences = [
