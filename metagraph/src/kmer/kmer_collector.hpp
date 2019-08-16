@@ -30,8 +30,7 @@ class KmerStorage {
                 Sequence&& filter_suffix_encoded = {},
                 size_t num_threads = 1,
                 double memory_preallocated = 0,
-                bool verbose = false,
-                std::function<void(Data*)> cleanup = [](Data*) {});
+                bool verbose = false);
 
     inline size_t get_k() const { return k_; }
 
@@ -74,11 +73,22 @@ class KmerStorage {
 };
 
 
-template <typename KMER, class KmerExtractor>
-using KmerCollector = KmerStorage<KMER, KmerExtractor, SortedSet<KMER>>;
+template <typename KMER,
+          class KmerExtractor,
+          class Container = Vector<KMER>,
+          class Cleaner = utils::NoCleanup>
+using KmerCollector = KmerStorage<KMER,
+                                  KmerExtractor,
+                                  SortedSet<KMER, Container, Cleaner>>;
 
-template <typename KMER, class KmerExtractor, typename KmerCount = uint8_t>
-using KmerCounter = KmerStorage<KMER, KmerExtractor, SortedMultiset<KMER, KmerCount>>;
+template <typename KMER,
+          class KmerExtractor,
+          typename KmerCount = uint8_t,
+          class Container = Vector<std::pair<KMER, KmerCount>>,
+          class Cleaner = utils::NoCleanup>
+using KmerCounter = KmerStorage<KMER,
+                                KmerExtractor,
+                                SortedMultiset<KMER, KmerCount, Container, Cleaner>>;
 
 
 #endif // __KMER_COLLECTOR_HPP__

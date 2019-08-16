@@ -48,25 +48,34 @@ namespace utils {
     static_assert(!is_pair<std::tuple<int,size_t>>::value);
     static_assert(!is_pair<int>::value);
 
+    template <typename T, typename U>
+    const T& get_first(const std::pair<T, U> &pair) {
+        return pair.first;
+    }
+    template <typename T>
+    const T& get_first(const T &value) {
+        return value;
+    }
+    template <typename T, typename U>
+    T& get_first(std::pair<T, U> &pair) {
+        return pair.first;
+    }
+    template <typename T>
+    T& get_first(T &value) {
+        return value;
+    }
+
     template <typename T>
     struct LessFirst {
         bool operator()(const T &p1, const T &p2) const {
-            if constexpr(is_pair<T>::value) {
-                return p1.first < p2.first;
-            } else {
-                return p1 < p2;
-            }
+            return get_first(p1) < get_first(p2);
         }
     };
 
     template <typename T>
     struct EqualFirst {
         bool operator()(const T &p1, const T &p2) const {
-            if constexpr(is_pair<T>::value) {
-                return p1.first == p2.first;
-            } else {
-                return p1 == p2;
-            }
+            return get_first(p1) == get_first(p2);
         }
     };
 
@@ -457,6 +466,204 @@ namespace utils {
         assert(false);
         return count_hist.back().first;
     }
+
+    template <typename T>
+    class DequeStorage {
+      public:
+        typedef T value_type;
+        using iterator = typename std::deque<T>::iterator;
+        using const_iterator = typename std::deque<T>::const_iterator;
+
+        template <class... Args>
+        DequeStorage(Args&&... args) : deque_(std::forward<Args>(args)...),
+                                       size_(deque_.size()) {}
+        ~DequeStorage() {}
+
+        DequeStorage& operator=(const DequeStorage &other) = default;
+        DequeStorage& operator=(DequeStorage&& other) = default;
+
+        inline void push_back(T&& value) {
+            if (size_ == deque_.size())
+                try_reserve(size_ * growth_factor, size_ + 1);
+
+            deque_[size_++] = std::move(value);
+        }
+
+        inline void push_back(const T &value) {
+            if (size_ == deque_.size())
+                try_reserve(size_ * growth_factor, size_ + 1);
+
+            deque_[size_++] = value;
+        }
+
+        template <class... Args>
+        inline void emplace_back(Args&&... args) {
+            if (size_ == deque_.size())
+                try_reserve(size_ * growth_factor, size_ + 1);
+
+            deque_[size_++] = T(std::forward<Args>(args)...);
+        }
+
+        inline iterator erase(iterator first, iterator last) {
+            return __erase(first, last);
+        }
+
+        inline const_iterator erase(const_iterator first, const_iterator last) {
+            return __erase(first, last);
+        }
+
+        inline void clear() {
+            size_ = 0;
+            deque_.clear();
+        }
+
+        inline void resize(size_t size) {
+            reserve(size);
+            size_ = size;
+        }
+
+        inline void reserve(size_t size) {
+            if (size > deque_.size())
+                deque_.resize(size);
+        }
+
+        inline void try_reserve(size_t size, size_t min_size = 0) {
+            size = std::max(size, min_size);
+
+            while (size > min_size) {
+                try {
+                    reserve(size);
+                    return;
+                } catch (const std::bad_alloc &exception) {
+                    size = min_size + (size - min_size) * 2 / 3;
+                }
+            }
+            reserve(min_size);
+        }
+
+        inline size_t size() const { return size_; }
+
+        inline size_t capacity() const { return deque_.size(); }
+
+        inline T& operator[](size_t pos) { return deque_[pos]; }
+        inline const T& operator[](size_t pos) const { return deque_[pos]; }
+
+        inline T& at(size_t pos) {
+            if (pos > size_)
+                throw std::out_of_range("Out of range error");
+            return deque_[pos];
+        }
+
+        inline const T& at(size_t pos) const {
+            if (pos > size_)
+                throw std::out_of_range("Out of range error");
+            return deque_[pos];
+        }
+
+        inline T& front() { return deque_.front(); }
+        inline const T& front() const { return deque_.front(); }
+
+        inline T& back() { return deque_[size_ - 1]; }
+        inline const T& back() const { return deque_[size_ - 1]; }
+
+        inline void shrink_to_fit() {
+            deque_.resize(size_);
+            deque_.shrink_to_fit();
+        }
+
+        inline auto begin() { return deque_.begin(); }
+        inline auto end() { return deque_.begin() + size_; }
+
+        inline auto begin() const { return deque_.begin(); }
+        inline auto end() const { return deque_.begin() + size_; }
+
+      private:
+        template <typename Iterator>
+        inline Iterator __erase(Iterator first, Iterator last) {
+            assert(first <= last);
+
+            if (last == end()) {
+                size_ -= (last - first);
+                return end();
+            }
+
+            size_t old_size = deque_.size();
+            auto it = deque_.erase(first, last);
+            size_ -= old_size - deque_.size();
+            return it;
+        }
+
+        static constexpr double growth_factor = 3. / 2;
+        std::deque<T> deque_;
+        size_t size_;
+    };
+
+    class NoCleanup {
+      public:
+        template <class Array>
+        static void cleanup(Array*) {}
+    };
+
+    class DummyKmersCleaner {
+      public:
+        template <class Array>
+        static void cleanup(Array *kmers) {
+            using T = typename Array::value_type;
+            using KMER = std::remove_reference_t<decltype(get_first(kmers->at(0)))>;
+
+            assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst<T>()));
+            assert(std::unique(kmers->begin(), kmers->end(), utils::EqualFirst<T>()) == kmers->end());
+
+            if (kmers->size() < 2)
+                return;
+
+            // last k-mer is never redundant. Start with the next one.
+            uint64_t last = kmers->size() - 1;
+
+            typename KMER::CharType edge_label, node_last_char;
+
+            std::vector<uint64_t> last_kmer(1llu << KMER::kBitsPerChar, kmers->size());
+
+            last_kmer[get_first(kmers->at(last))[0]] = last;
+
+            for (int64_t i = last - 1; i >= 0; --i) {
+                const KMER &kmer = get_first(kmers->at(i));
+                node_last_char = kmer[1];
+                edge_label = kmer[0];
+
+                // assert((edge_label || node_last_char)
+                //             && "dummy k-mer cannot be both source and sink dummy");
+
+                if (!edge_label) {
+                    // sink dummy k-mer
+
+                    // skip if redundant
+                    if (node_last_char && KMER::compare_suffix(kmer, get_first(kmers->at(last)), 0))
+                        continue;
+
+                } else if (!node_last_char) {
+                    // source dummy k-mer
+
+                    // skip if redundant
+                    if (last_kmer[edge_label] < kmers->size()
+                            && KMER::compare_suffix(kmer, get_first(kmers->at(last_kmer[edge_label])), 1))
+                        continue;
+                }
+
+                // the k-mer is either not dummy, or not redundant -> keep the k-mer
+                kmers->at(--last) = kmers->at(i);
+                last_kmer[edge_label] = last;
+            }
+
+            kmers->erase(kmers->begin(), kmers->begin() + last);
+        }
+    };
+
+    template <typename, template <typename, typename...> class>
+    struct is_instance : public std::false_type {};
+
+    template <typename... Ts, template <typename, typename...> class U>
+    struct is_instance<U<Ts...>, U> : public std::true_type {};
 
 } // namespace utils
 

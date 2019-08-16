@@ -22,8 +22,17 @@ class BOSS::Chunk {
           const Vector<std::pair<KMER, COUNT>> &kmers,
           uint8_t bits_per_count = 8);
 
+    template <typename KMER, typename COUNT>
+    Chunk(uint64_t alph_size,
+          size_t k,
+          const utils::DequeStorage<std::pair<KMER, COUNT>> &kmers,
+          uint8_t bits_per_count = 8);
+
     template <typename KMER>
     Chunk(uint64_t alph_size, size_t k, const Vector<KMER> &kmers);
+
+    template <typename KMER>
+    Chunk(uint64_t alph_size, size_t k, const utils::DequeStorage<KMER> &kmers);
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
 
