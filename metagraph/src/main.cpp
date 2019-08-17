@@ -641,8 +641,7 @@ void map_sequences_in_file(const std::string &file,
         };
     } else {
         map_kmers = [&](std::string sequence) {
-            return graph.find(sequence,
-                              config.discovery_fraction);
+            return graph.find(sequence, config.discovery_fraction);
         };
     }
 
@@ -664,20 +663,30 @@ void map_sequences_in_file(const std::string &file,
 
         assert(config.alignment_length <= graph.get_k());
 
-        std::vector<uint64_t> graphindices;
+        std::vector<DeBruijnGraph::node_index> graphindices;
         if (config.alignment_length == graph.get_k()) {
-            graph.map_to_nodes(
-                read_stream->seq.s,
-                [&](const auto &node) { graphindices.emplace_back(node); }
-            );
-        } else {
-            graphindices = dbg->get_boss().map_to_nodes(read_stream->seq.s);
+            graph.map_to_nodes(read_stream->seq.s,
+                               [&](const auto &node) {
+                                   graphindices.emplace_back(node);
+                               });
+        } else if (config.query_presence || config.count_kmers) {
+            // TODO: make more efficient
+            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
+                dbg->call_nodes_with_suffix(
+                    read_stream->seq.s + i,
+                    read_stream->seq.s + i + config.alignment_length,
+                    [&](auto node, auto) {
+                        if (graphindices.empty())
+                            graphindices.emplace_back(node);
+                    },
+                    config.alignment_length
+                );
+            }
         }
 
-        size_t num_discovered = std::count_if(
-            graphindices.begin(), graphindices.end(),
-            [](const auto &x) { return x > 0; }
-        );
+        size_t num_discovered = std::count_if(graphindices.begin(),
+                                              graphindices.end(),
+                                              [](const auto &x) { return x > 0; });
 
         const size_t num_kmers = graphindices.size();
 
@@ -701,12 +710,30 @@ void map_sequences_in_file(const std::string &file,
             return;
         }
 
-        for (size_t i = 0; i < graphindices.size(); ++i) {
-            assert(i + config.alignment_length <= read_stream->seq.l);
-            std::cout << std::string(read_stream->seq.s + i,
-                                     config.alignment_length);
-            std::cout << ": " << graphindices[i] << "\n";
+        if (config.alignment_length == graph.get_k()) {
+            for (size_t i = 0; i < graphindices.size(); ++i) {
+                assert(i + config.alignment_length <= read_stream->seq.l);
+                std::cout << std::string(read_stream->seq.s + i, config.alignment_length)
+                          << ": " << graphindices[i] << "\n";
+            }
+        } else {
+            // map input subsequences to multiple nodes
+            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
+                // TODO: make more efficient
+                std::string subseq(read_stream->seq.s + i,
+                                   read_stream->seq.s + i + config.alignment_length);
+
+                dbg->call_nodes_with_suffix(subseq.begin(),
+                                            subseq.end(),
+                                            [&](auto node, auto) {
+                                                std::cout << subseq << ": "
+                                                          << node
+                                                          << "\n";
+                                            },
+                                            config.alignment_length);
+            }
         }
+
     }, config.reverse);
 
     if (config.verbose) {
