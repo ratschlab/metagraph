@@ -608,11 +608,12 @@ namespace utils {
       public:
         template <class Array>
         static void cleanup(Array *kmers) {
-            using T = typename Array::value_type;
             using KMER = std::remove_reference_t<decltype(get_first(kmers->at(0)))>;
 
-            assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst<T>()));
-            assert(std::unique(kmers->begin(), kmers->end(), utils::EqualFirst<T>()) == kmers->end());
+            assert(std::is_sorted(kmers->begin(), kmers->end(),
+                                  utils::LessFirst<typename Array::value_type>()));
+            assert(std::unique(kmers->begin(), kmers->end(),
+                               utils::EqualFirst<typename Array::value_type>()) == kmers->end());
 
             if (kmers->size() < 2)
                 return;
