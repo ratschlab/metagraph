@@ -778,41 +778,9 @@ void BOSS::map_to_nodes(const std::string &sequence,
     }
 }
 
-std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence,
-                                           size_t kmer_size) const {
-    if (kmer_size == 0 || kmer_size > k_)
-        kmer_size = k_;
-
-    if (sequence.size() < kmer_size)
-        return {};
-
-    auto seq_encoded = encode(sequence);
-
+std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence) const {
     std::vector<node_index> indices;
-
-    for (size_t i = 0; i + kmer_size <= seq_encoded.size(); ++i) {
-        edge_index edge = index(seq_encoded.data() + i,
-                                seq_encoded.data() + i + kmer_size);
-        node_index node = edge ? get_source_node(edge) : npos;
-        indices.push_back(node);
-
-        if (!edge || kmer_size != k_ || !indices.back())
-            continue;
-
-        // This boost is valid only if alignment length equals k since
-        // otherwise, when alignment length is less than k,
-        // the existence of an edge between node ending with preceeding
-        // aligned substring and node ending with the next aligned substring
-        // is not guaranteed. It may be a suffix of some other k-mer.
-        while (i + kmer_size < seq_encoded.size()) {
-            node = outgoing(node, seq_encoded[i + kmer_size]);
-            if (!node)
-                break;
-
-            indices.push_back(node);
-            i++;
-        }
-    }
+    map_to_nodes(sequence, [&](node_index node) { indices.emplace_back(node); });
 
     return indices;
 }

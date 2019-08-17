@@ -671,10 +671,7 @@ void map_sequences_in_file(const std::string &file,
                 [&](const auto &node) { graphindices.emplace_back(node); }
             );
         } else {
-            graphindices = dbg->get_boss().map_to_nodes(
-                read_stream->seq.s,
-                config.alignment_length
-            );
+            graphindices = dbg->get_boss().map_to_nodes(read_stream->seq.s);
         }
 
         size_t num_discovered = std::count_if(

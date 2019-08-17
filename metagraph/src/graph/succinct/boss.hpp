@@ -72,10 +72,8 @@ class BOSS {
     /**
      * Breaks the sequence into k-mers and searches for the index of each
      * k-mer in the graph. Returns these indices.
-     * Default: kmer_size = k
      */
-    std::vector<node_index> map_to_nodes(const std::string &sequence,
-                                         size_t kmer_size = 0) const;
+    std::vector<node_index> map_to_nodes(const std::string &sequence) const;
 
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
