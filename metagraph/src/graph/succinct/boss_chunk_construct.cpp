@@ -42,48 +42,15 @@ void shrink_kmers(Array *kmers,
     }
 }
 
-template <typename KMER, typename COUNT>
-inline KMER& push_back(Vector<std::pair<KMER, COUNT>> &kmers, const KMER &kmer) {
-    kmers.emplace_back(kmer, 0);
-    return kmers.back().first;
-}
-
-template <typename KMER, typename COUNT>
-inline KMER& push_back(utils::DequeStorage<std::pair<KMER, COUNT>> &kmers, const KMER &kmer) {
-    kmers.emplace_back(kmer, 0);
-    return kmers.back().first;
-}
-
-template <typename KMER>
-inline KMER& push_back(Vector<KMER> &kmers, const KMER &kmer) {
-    kmers.push_back(kmer);
-    return kmers.back();
-}
-
-template <typename KMER>
-inline KMER& push_back(utils::DequeStorage<KMER> &kmers, const KMER &kmer) {
-    kmers.push_back(kmer);
-    return kmers.back();
-}
-
-template <typename KMER, typename COUNT>
-inline KMER& get_kmer(Vector<std::pair<KMER, COUNT>> &kmers, uint64_t i) {
-    return kmers[i].first;
-}
-
-template <typename KMER, typename COUNT>
-inline KMER& get_kmer(utils::DequeStorage<std::pair<KMER, COUNT>> &kmers, uint64_t i) {
-    return kmers[i].first;
-}
-
-template <typename KMER>
-inline KMER& get_kmer(Vector<KMER> &kmers, uint64_t i) {
-    return kmers[i];
-}
-
-template <typename KMER>
-inline KMER& get_kmer(utils::DequeStorage<KMER> &kmers, uint64_t i) {
-    return kmers[i];
+template <class Container, typename KMER>
+inline KMER& push_back(Container &kmers, const KMER &kmer) {
+    if constexpr(utils::is_pair<typename Container::value_type>::value) {
+        kmers.emplace_back(kmer, 0);
+        return kmers.back().first;
+    } else {
+        kmers.push_back(kmer);
+        return kmers.back();
+    }
 }
 
 // Although this function could be parallelized better,
@@ -94,13 +61,13 @@ void recover_source_dummy_nodes(size_t k,
                                 Array *kmers,
                                 size_t num_threads,
                                 bool verbose) {
-    using KMER = std::remove_reference_t<decltype(get_kmer(*kmers, 0))>;
+    using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
 
     for (size_t i = 0; i < dummy_begin; ++i) {
-        const KMER &kmer = get_kmer(*kmers, i);
+        const KMER &kmer = utils::get_first((*kmers)[i]);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 
@@ -136,7 +103,7 @@ void recover_source_dummy_nodes(size_t k,
             if (kmers->size() + 1 > kmers->capacity())
                 shrink_kmers(kmers, num_threads, verbose, dummy_begin);
 
-            push_back(*kmers, get_kmer(*kmers, i)).to_prev(k + 1, BOSS::kSentinelCode);
+            push_back(*kmers, utils::get_first((*kmers)[i])).to_prev(k + 1, BOSS::kSentinelCode);
         }
         sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
