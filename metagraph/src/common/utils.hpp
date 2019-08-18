@@ -48,22 +48,20 @@ namespace utils {
     static_assert(!is_pair<std::tuple<int,size_t>>::value);
     static_assert(!is_pair<int>::value);
 
+    template <typename T, typename... Us>
+    const T& get_first(const std::tuple<T, Us...> &tuple) { return std::get<0>(tuple); }
+
+    template <typename T, typename... Us>
+    T& get_first(std::tuple<T, Us...> &tuple) { return std::get<0>(tuple); }
+
     template <typename T, typename U>
-    const T& get_first(const std::pair<T, U> &pair) {
-        return pair.first;
-    }
-    template <typename T>
-    const T& get_first(const T &value) {
-        return value;
-    }
+    const T& get_first(const std::pair<T, U> &pair) { return pair.first; }
+
     template <typename T, typename U>
-    T& get_first(std::pair<T, U> &pair) {
-        return pair.first;
-    }
+    T& get_first(std::pair<T, U> &pair) { return pair.first; }
+
     template <typename T>
-    T& get_first(T &value) {
-        return value;
-    }
+    T& get_first(T &value) { return value; }
 
     template <typename T>
     struct LessFirst {
