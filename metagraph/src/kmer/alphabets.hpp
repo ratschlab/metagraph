@@ -141,8 +141,8 @@ static_assert(kSigmaDNA <= 1llu << kBitsPerCharDNA);
 static_assert(kSigmaDNA > 1llu << (kBitsPerCharDNA - 1));
 
 constexpr char kAlphabetDNA5[] = "ACGTN";
-constexpr uint8_t kSigmaDNA5 = sizeof(kAlphabetDNA) - 1;
-constexpr uint8_t kBitsPerCharDNA5 = log2<kSigmaDNA - 1>::value + 1;
+constexpr uint8_t kSigmaDNA5 = sizeof(kAlphabetDNA5) - 1;
+constexpr uint8_t kBitsPerCharDNA5 = log2<kSigmaDNA5 - 1>::value + 1;
 static_assert(kSigmaDNA5 <= 1llu << kBitsPerCharDNA5);
 static_assert(kSigmaDNA5 > 1llu << (kBitsPerCharDNA5 - 1));
 
