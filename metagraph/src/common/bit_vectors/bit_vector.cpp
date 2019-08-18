@@ -123,22 +123,20 @@ typename t_int_vec::size_type
 next_bit(const t_int_vec &v,
          uint64_t idx,
          uint64_t max_steps = std::numeric_limits<uint64_t>::max()) {
+    assert(idx < v.bit_size());
+
     uint64_t pos  = idx >> 6;
     uint64_t node = v.data()[pos];
     node >>= (idx & 0x3F);
-    if (node) {
-        return idx + std::min(max_steps, static_cast<uint64_t>(sdsl::bits::lo(node)));
-    } else {
-        ++pos;
-        uint64_t end = idx + std::min(max_steps, v.bit_size() - idx);
-        while ((pos << 6) < end) {
-            if (v.data()[pos]) {
-                return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), end);
-            }
-            ++pos;
-        }
-        return end;
+    if (node)
+        return std::min(idx + sdsl::bits::lo(node), v.bit_size());
+
+    uint64_t end = idx + std::min(max_steps, v.bit_size() - idx);
+    for (++pos; (pos << 6) < end; ++pos) {
+        if (v.data()[pos])
+            return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), v.bit_size());
     }
+    return v.bit_size();
 }
 
 // taken from https://github.com/xxsds/sdsl-lite/blob/master/include/sdsl/util.hpp
@@ -148,26 +146,22 @@ typename t_int_vec::size_type
 prev_bit(const t_int_vec &v,
          uint64_t idx,
          uint64_t max_steps = std::numeric_limits<uint64_t>::max()) {
-    uint64_t pos  = idx >> 6;
+    assert(idx < v.bit_size());
+
+    int64_t pos  = idx >> 6;
     uint64_t node = v.data()[pos];
     node <<= 63 - (idx & 0x3F);
-    if (node) {
-        return std::min(idx - std::min(idx, max_steps),
-                        sdsl::bits::hi(node) + (pos << 6) - (63 - (idx & 0x3F)));
-    } else {
-        --pos;
-        uint64_t end = max_steps > idx
-            ? v.bit_size()
-            : idx - max_steps;
+    if (node)
+        return idx - (63 - sdsl::bits::hi(node));
 
-        while ((pos << 6) < end) {
-            if (v.data()[pos]) {
-                return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
-            }
-            --pos;
-        }
-        return end;
+    // last position to visit: 0 or (idx + 1 - max_steps)
+    int64_t r_end_word = ((idx + 1 - std::min(idx + 1, max_steps)) >> 6) - 1;
+    assert(r_end_word >= -1);
+    for (--pos; pos > r_end_word; --pos) {
+        if (v.data()[pos])
+            return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
     }
+    return v.bit_size();
 }
 
 template <typename BitVector>
@@ -429,8 +423,11 @@ uint64_t bit_vector_stat::next1(uint64_t pos) const {
     assert(pos < size());
 
     auto next = next_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
-    if (next - pos < MAX_ITER_BIT_VECTOR_STAT)
+    if (next < vector_.size())
         return next;
+
+    if (vector_.size() - pos <= MAX_ITER_BIT_VECTOR_STAT)
+        return size();
 
     uint64_t rk = rank1(pos) + 1;
     return rk <= num_set_bits() ? select1(rk) : size();
@@ -440,8 +437,11 @@ uint64_t bit_vector_stat::prev1(uint64_t pos) const {
     assert(pos < size());
 
     auto prev = prev_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
-    if (prev < vector_.size() && prev > pos - MAX_ITER_BIT_VECTOR_STAT)
+    if (prev <= pos)
         return prev;
+
+    if (pos < MAX_ITER_BIT_VECTOR_STAT)
+        return size();
 
     uint64_t rk = rank1(pos);
     return rk ? select1(rk) : size();

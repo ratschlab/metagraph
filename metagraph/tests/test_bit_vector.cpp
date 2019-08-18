@@ -37,6 +37,11 @@ void test_next(const bit_vector &vector) {
     ASSERT_DEATH(vector.next1(vector.size() * 2), "");
 
     test_next_subvector(vector, 0);
+    test_next_subvector(vector, 0);
+    if (vector.size() >= 64)
+        test_next_subvector(vector, 63);
+    if (vector.size() >= 128)
+        test_next_subvector(vector, 127);
     test_next_subvector(vector, vector.size() / 5);
     test_next_subvector(vector, vector.size() / 2);
     test_next_subvector(vector, vector.size() * 2 / 3);
@@ -74,6 +79,10 @@ void test_prev(const bit_vector &vector) {
     ASSERT_DEATH(vector.prev1(vector.size() * 2), "");
 
     test_prev_subvector(vector, 0);
+    if (vector.size() >= 64)
+        test_prev_subvector(vector, 63);
+    if (vector.size() >= 128)
+        test_prev_subvector(vector, 127);
     test_prev_subvector(vector, vector.size() / 5);
     test_prev_subvector(vector, vector.size() / 2);
     test_prev_subvector(vector, vector.size() * 2 / 3);
