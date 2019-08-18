@@ -490,29 +490,27 @@ Config::StateType DBGSuccinct::get_state() const {
 void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     valid_edges_.reset();
 
-    //TODO: use sdsl::bit_vector as mask
     auto vector_mask = with_pruning
         ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
         : boss_graph_->mark_all_dummy_edges(num_threads);
 
-    auto vector = to_sdsl(std::move(vector_mask));
-    vector.flip();
+    vector_mask.flip();
 
     switch (get_state()) {
         case Config::STAT: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
             break;
         }
         case Config::FAST: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
             break;
         }
         case Config::DYN: {
-            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector_mask));
             break;
         }
         case Config::SMALL: {
-            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
             break;
         }
     }

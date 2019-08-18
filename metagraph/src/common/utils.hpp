@@ -264,9 +264,18 @@ namespace utils {
     template <typename Index, class Vector>
     void insert_default_values(const std::vector<Index> &indexes, Vector *vector);
 
-    template <typename T>
-    void erase(std::vector<T> *vector, const std::vector<bool> &erase_mask);
+    template <class Array, class Mask>
+    void erase(Array *vector, const Mask &erase_mask) {
+        assert(vector);
+        assert(vector->size() == erase_mask.size());
 
+        size_t j = 0;
+        for (size_t i = 0; i < erase_mask.size(); ++i) {
+            if (!erase_mask[i])
+                (*vector)[j++] = (*vector)[i];
+        }
+        vector->resize(j);
+    }
 
     // Read indices of set bits from a vector of VectorStreams
     class RowsFromColumnsTransformer {
