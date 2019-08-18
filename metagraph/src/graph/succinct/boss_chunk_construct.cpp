@@ -6,6 +6,8 @@
 #include "boss_chunk.hpp"
 #include "kmer_collector.hpp"
 
+const static bool kUseDeque = false;
+
 
 template <class Array>
 void sort_and_remove_duplicates(Array *array,
@@ -309,13 +311,13 @@ IBOSSChunkConstructor
 
         if (filter_suffix.size()) {
 
-            if (memory_preallocated > 0) {
+            if (!kUseDeque || memory_preallocated > 0) {
                 return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
             } else {
                 return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
             }
         } else {
-            if (memory_preallocated > 0) {
+            if (!kUseDeque || memory_preallocated > 0) {
                 return initialize_boss_chunk_constructor<KmerCounterVectorClean>(OTHER_ARGS);
             } else {
                 return initialize_boss_chunk_constructor<KmerCounterDequeClean>(OTHER_ARGS);
@@ -325,13 +327,13 @@ IBOSSChunkConstructor
 
         if (filter_suffix.size()) {
 
-            if (memory_preallocated > 0) {
+            if (!kUseDeque || memory_preallocated > 0) {
                 return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
             } else {
                 return initialize_boss_chunk_constructor<KmerCollectorDeque>(OTHER_ARGS);
             }
         } else {
-            if (memory_preallocated > 0) {
+            if (!kUseDeque || memory_preallocated > 0) {
                 return initialize_boss_chunk_constructor<KmerCollectorVectorClean>(OTHER_ARGS);
             } else {
                 return initialize_boss_chunk_constructor<KmerCollectorDequeClean>(OTHER_ARGS);
