@@ -257,7 +257,7 @@ endif()
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
-  set(METALIBS ${METALIBS} -lssl -lbz2 -llzma -lcurl -lcrypto)
+  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl -lssl -lcrypto)
 endif()
 
 # check for std::filesystem::temp_directory_path
