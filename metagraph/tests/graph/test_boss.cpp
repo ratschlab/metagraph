@@ -283,9 +283,9 @@ TEST(BOSS, MarkDummySinkEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + 'G');
-        std::vector<bool> sink_nodes(graph.num_edges() + 1);
-        sink_nodes.back() = true;
-        std::vector<bool> sink_nodes_result(graph.num_edges() + 1, false);
+        sdsl::bit_vector sink_nodes(graph.num_edges() + 1);
+        sink_nodes[sink_nodes.size() - 1] = true;
+        sdsl::bit_vector sink_nodes_result(graph.num_edges() + 1, false);
         ASSERT_EQ(1u, graph.mark_sink_dummy_edges(&sink_nodes_result));
         EXPECT_EQ(sink_nodes, sink_nodes_result) << graph;
     }
@@ -296,10 +296,10 @@ TEST(BOSS, MarkDummySinkEdgesTwoPaths) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + 'T');
         graph.add_sequence(std::string(100, 'A') + 'G');
-        std::vector<bool> sink_nodes(graph.num_edges() + 1);
+        sdsl::bit_vector sink_nodes(graph.num_edges() + 1);
         sink_nodes[sink_nodes.size() - 2] = true;
         sink_nodes[sink_nodes.size() - 1] = true;
-        std::vector<bool> sink_nodes_result(graph.num_edges() + 1, false);
+        sdsl::bit_vector sink_nodes_result(graph.num_edges() + 1, false);
         ASSERT_EQ(2u, graph.mark_sink_dummy_edges(&sink_nodes_result));
         EXPECT_EQ(sink_nodes, sink_nodes_result) << graph;
     }
@@ -309,10 +309,10 @@ TEST(BOSS, MarkDummySourceEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
-        std::vector<bool> source_nodes(graph.num_edges() + 1, true);
-        source_nodes.front() = false;
-        source_nodes.back() = false;
-        std::vector<bool> source_nodes_result(graph.num_edges() + 1, false);
+        sdsl::bit_vector source_nodes(graph.num_edges() + 1, true);
+        source_nodes[0] = false;
+        source_nodes[source_nodes.size() - 1] = false;
+        sdsl::bit_vector source_nodes_result(graph.num_edges() + 1, false);
         ASSERT_EQ(int(k + 1), int(std::count(source_nodes.begin(),
                                              source_nodes.end(), true)));
         ASSERT_EQ(k + 1, graph.mark_source_dummy_edges(&source_nodes_result));
@@ -325,11 +325,11 @@ TEST(BOSS, MarkDummySourceEdgesTwoPaths) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
         graph.add_sequence(std::string(100, 'C'));
-        std::vector<bool> source_nodes(graph.num_edges() + 1, true);
-        source_nodes.front() = false;
+        sdsl::bit_vector source_nodes(graph.num_edges() + 1, true);
+        source_nodes[0] = false;
         source_nodes[1 + 2 + k] = false;
         source_nodes[1 + 2 + 2 * k] = false;
-        std::vector<bool> source_nodes_result(graph.num_edges() + 1, false);
+        sdsl::bit_vector source_nodes_result(graph.num_edges() + 1, false);
         ASSERT_EQ(int(2 * k + 1), int(std::count(source_nodes.begin(),
                                                  source_nodes.end(), true)));
         ASSERT_EQ(2 * k + 1, graph.mark_source_dummy_edges(&source_nodes_result));
@@ -341,10 +341,10 @@ TEST(BOSS, MarkDummySourceEdgesSimplePathParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
-        std::vector<bool> source_nodes(graph.num_edges() + 1, true);
-        source_nodes.front() = false;
-        source_nodes.back() = false;
-        std::vector<bool> source_nodes_result(graph.num_edges() + 1, false);
+        sdsl::bit_vector source_nodes(graph.num_edges() + 1, true);
+        source_nodes[0] = false;
+        source_nodes[source_nodes.size() - 1] = false;
+        sdsl::bit_vector source_nodes_result(graph.num_edges() + 1, false);
         ASSERT_EQ(int(k + 1), int(std::count(source_nodes.begin(),
                                              source_nodes.end(), true)));
         ASSERT_EQ(k + 1, graph.mark_source_dummy_edges(&source_nodes_result, 10));
@@ -357,11 +357,11 @@ TEST(BOSS, MarkDummySourceEdgesTwoPathsParallel) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
         graph.add_sequence(std::string(100, 'C'));
-        std::vector<bool> source_nodes(graph.num_edges() + 1, true);
-        source_nodes.front() = false;
+        sdsl::bit_vector source_nodes(graph.num_edges() + 1, true);
+        source_nodes[0] = false;
         source_nodes[1 + 2 + k] = false;
         source_nodes[1 + 2 + 2 * k] = false;
-        std::vector<bool> source_nodes_result(graph.num_edges() + 1, false);
+        sdsl::bit_vector source_nodes_result(graph.num_edges() + 1, false);
         ASSERT_EQ(int(2 * k + 1), int(std::count(source_nodes.begin(),
                                                  source_nodes.end(), true)));
         ASSERT_EQ(2 * k + 1, graph.mark_source_dummy_edges(&source_nodes_result, 10));
@@ -399,10 +399,10 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
 
         ASSERT_TRUE(first.equals_internally(second)) << first;
 
-        std::vector<bool> source_dummy_edges(second.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(second.num_edges() + 1, false);
         auto to_remove = second.erase_redundant_dummy_edges(&source_dummy_edges);
 
-        std::vector<bool> source_dummy_edges_result(second.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(second.num_edges() + 1, false);
         second.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
@@ -423,17 +423,17 @@ TEST(BOSS, RemoveDummyEdgesLinear) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -454,17 +454,17 @@ TEST(BOSS, RemoveDummyEdgesThreePaths) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -487,17 +487,17 @@ TEST(BOSS, RemoveDummyEdgesFourPaths) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -522,17 +522,17 @@ TEST(BOSS, RemoveDummyEdgesFivePaths) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -557,17 +557,17 @@ TEST(BOSS, RemoveDummyEdges) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -602,10 +602,10 @@ TEST(BOSS, RemoveDummyEdgesForClearGraphParallel) {
 
         ASSERT_TRUE(first.equals_internally(second)) << first;
 
-        std::vector<bool> source_dummy_edges(second.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(second.num_edges() + 1, false);
         auto to_remove = second.erase_redundant_dummy_edges(&source_dummy_edges, 10);
 
-        std::vector<bool> source_dummy_edges_result(second.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(second.num_edges() + 1, false);
         second.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
@@ -626,17 +626,17 @@ TEST(BOSS, RemoveDummyEdgesLinearParallel) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -657,17 +657,17 @@ TEST(BOSS, RemoveDummyEdgesThreePathsParallel) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -690,17 +690,17 @@ TEST(BOSS, RemoveDummyEdgesFourPathsParallel) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -725,17 +725,17 @@ TEST(BOSS, RemoveDummyEdgesFivePathsParallel) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -760,17 +760,17 @@ TEST(BOSS, RemoveDummyEdgesParallel) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges(dynamic_graph.num_edges() + 1, false);
         auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
 
-        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        sdsl::bit_vector source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
         dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << to_sdsl(redundant_edges);
+            << "Removed edges\n" << redundant_edges;
         EXPECT_EQ(graph, dynamic_graph);
     }
 }

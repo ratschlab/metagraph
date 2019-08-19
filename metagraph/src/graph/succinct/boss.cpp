@@ -1469,7 +1469,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
  * may invalidate the BOSS table (if leaves nodes with no incoming edges).
  * Returns the number of edges erased.
  */
-uint64_t BOSS::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
+uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
     size_t num_edges_to_remove = std::count(edges_to_remove_mask.begin(),
                                             edges_to_remove_mask.end(), true);
     if (!num_edges_to_remove)
@@ -1491,7 +1491,7 @@ uint64_t BOSS::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
 
     // update W
     sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, bits_per_char_W_);
-    std::vector<bool> first_removed(alph_size, false);
+    sdsl::bit_vector first_removed(alph_size, false);
 
     for (size_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
         TAlphabet c = get_W(i);
@@ -1572,12 +1572,12 @@ void BOSS::edge_DFT(edge_index start,
  * Traverse the entire dummy subtree
  * and find all redundant dummy edges.
  */
-template <typename T, typename U>
+template <typename Array, typename U>
 void traverse_dummy_edges(const BOSS &graph,
                           edge_index subtree_root,
                           size_t check_depth,
-                          std::vector<T> *redundant_mask,
-                          std::vector<T> *traversed_mask,
+                          Array *redundant_mask,
+                          Array *traversed_mask,
                           U *num_dummy_traversed,
                           bool verbose) {
     assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
@@ -1599,17 +1599,17 @@ void traverse_dummy_edges(const BOSS &graph,
             assert(graph.get_W(edge) < graph.alph_size);
 
             if (traversed_mask)
-                traversed_mask->at(edge) = 1;
+                (*traversed_mask)[edge] = 1;
 
             if (redundant_path.back())
-                redundant_mask->at(edge) = 2;
+                (*redundant_mask)[edge] = 2;
 
             redundant_path.pop_back();
         },
         [&](edge_index edge) {
             if (redundant_path.size() == check_depth) {
                 if (!redundant_mask
-                        || (!redundant_mask->at(edge)
+                        || (!(*redundant_mask)[edge]
                                 && graph.is_single_incoming(edge))) {
                     // the last dummy edge is not redundant and hence the
                     // entire path has to remain in the graph
@@ -1635,15 +1635,15 @@ void traverse_dummy_edges(const BOSS &graph,
  * dummy source edges and return number of these edges.
  */
 uint64_t traverse_dummy_edges(const BOSS &graph,
-                              std::vector<bool> *redundant_mask,
-                              std::vector<bool> *traversed_mask,
+                              sdsl::bit_vector *redundant_mask,
+                              sdsl::bit_vector *traversed_mask,
                               size_t num_threads,
                               bool verbose) {
     assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
     assert(!traversed_mask || traversed_mask->size() == graph.get_W().size());
 
     if (traversed_mask)
-        traversed_mask->at(1) = true;
+        (*traversed_mask)[1] = true;
 
     if (graph.get_last(1))
         return 1;
@@ -1710,9 +1710,9 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
     if (edges_threadsafe.get()) {
         for (size_t i = 0; i < edges_threadsafe->size(); ++i) {
             if ((*edges_threadsafe)[i] && traversed_mask)
-                traversed_mask->at(i) = true;
+                (*traversed_mask)[i] = true;
             if ((*edges_threadsafe)[i] == 2 && redundant_mask)
-                redundant_mask->at(i) = true;
+                (*redundant_mask)[i] = true;
         }
         edges_threadsafe.reset();
     }
@@ -1737,15 +1737,16 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
  * of non-redundant dummy source edges.
  * Return value: edges removed from the BOSS graph.
  */
-std::vector<bool>
-BOSS::erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges,
+sdsl::bit_vector
+BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
                                   size_t num_threads,
                                   bool verbose) {
-    std::vector<bool> redundant_dummy_edges_mask(W_->size(), false);
+    sdsl::bit_vector redundant_dummy_edges_mask(W_->size(), false);
 
     if (source_dummy_edges) {
-        source_dummy_edges->assign(W_->size(), false);
-        source_dummy_edges->at(1) = true;
+        (*source_dummy_edges) = sdsl::bit_vector();
+        (*source_dummy_edges) = sdsl::bit_vector(W_->size(), false);
+        (*source_dummy_edges)[1] = true;
     }
 
     if (get_last(1))
@@ -1774,7 +1775,7 @@ BOSS::erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges,
     return redundant_dummy_edges_mask;
 }
 
-uint64_t BOSS::mark_source_dummy_edges(std::vector<bool> *mask,
+uint64_t BOSS::mark_source_dummy_edges(sdsl::bit_vector *mask,
                                        size_t num_threads,
                                        bool verbose) const {
     assert(!mask || mask->size() == W_->size());
@@ -1782,7 +1783,7 @@ uint64_t BOSS::mark_source_dummy_edges(std::vector<bool> *mask,
     return traverse_dummy_edges(*this, NULL, mask, num_threads, verbose);
 }
 
-uint64_t BOSS::mark_sink_dummy_edges(std::vector<bool> *mask) const {
+uint64_t BOSS::mark_sink_dummy_edges(sdsl::bit_vector *mask) const {
     if (!mask)
         return rank_W(num_edges(), 0) - 1;
 
@@ -1794,7 +1795,7 @@ uint64_t BOSS::mark_sink_dummy_edges(std::vector<bool> *mask) const {
     for (uint64_t i = 2; i < W_->size(); ++i) {
         assert(get_W(i) != alph_size);
         if (!get_W(i)) {
-            mask->at(i) = true;
+            (*mask)[i] = true;
             num_dummy_sink_edges++;
         }
     }
@@ -1804,8 +1805,8 @@ uint64_t BOSS::mark_sink_dummy_edges(std::vector<bool> *mask) const {
     return num_dummy_sink_edges;
 }
 
-std::vector<bool> BOSS::mark_all_dummy_edges(size_t num_threads) const {
-    std::vector<bool> edge_mask(num_edges() + 1, 0);
+sdsl::bit_vector BOSS::mark_all_dummy_edges(size_t num_threads) const {
+    sdsl::bit_vector edge_mask(num_edges() + 1, 0);
 
     mark_source_dummy_edges(&edge_mask, num_threads);
     mark_sink_dummy_edges(&edge_mask);
@@ -1816,8 +1817,8 @@ std::vector<bool> BOSS::mark_all_dummy_edges(size_t num_threads) const {
     return edge_mask;
 }
 
-std::vector<bool> BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
-    std::vector<bool> edge_mask(num_edges() + 1, 0);
+sdsl::bit_vector BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
+    sdsl::bit_vector edge_mask(num_edges() + 1, 0);
 
     erase_redundant_dummy_edges(&edge_mask, num_threads);
     mark_sink_dummy_edges(&edge_mask);

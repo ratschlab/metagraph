@@ -257,7 +257,7 @@ endif()
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
-  set(METALIBS ${METALIBS} -lssl -lbz2 -llzma -lcurl -lcrypto)
+  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl -lssl -lcrypto)
 endif()
 
 # check for std::filesystem::temp_directory_path
@@ -425,10 +425,10 @@ add_test(NAME unit_tests COMMAND unit_tests)
 # A trick to compile everything in parallel even before linking
 if(${CMAKE_BUILD_TYPE} MATCHES DEBUG)
   add_library(everything
-    ${src_files}
+    metagraph
     "src/main.cpp"
-    ${unit_tests_files}
-    ${experiment_files}
+    unit_tests
+    run_experiments
   )
 endif()
 

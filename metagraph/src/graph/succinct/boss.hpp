@@ -150,27 +150,25 @@ class BOSS {
      * of non-redundant dummy source edges.
      * Return value: edges removed from the initial graph.
      */
-    std::vector<bool>
-    erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges = NULL,
+    sdsl::bit_vector
+    erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges = NULL,
                                 size_t num_threads = 0,
                                 bool verbose = false);
 
-    uint64_t mark_source_dummy_edges(std::vector<bool> *mask = NULL,
+    uint64_t mark_source_dummy_edges(sdsl::bit_vector *mask = NULL,
                                      size_t num_threads = 0,
                                      bool verbose = false) const;
 
     // Do not include the main dummy edge (with edge_index = 1)
-    uint64_t mark_sink_dummy_edges(std::vector<bool> *mask = NULL) const;
+    uint64_t mark_sink_dummy_edges(sdsl::bit_vector *mask = NULL) const;
 
     // Mark npos, i.e. 0, as well as all the source
     // and all the sink dummy edges in graph.
-    std::vector<bool>
-    mark_all_dummy_edges(size_t num_threads) const;
+    sdsl::bit_vector mark_all_dummy_edges(size_t num_threads) const;
 
     // Prune redundant dummy edges in graph
     // and mark all dummy edges that cannot be removed.
-    std::vector<bool>
-    prune_and_mark_all_dummy_edges(size_t num_threads);
+    sdsl::bit_vector prune_and_mark_all_dummy_edges(size_t num_threads);
 
     /**
      * Depth first edge traversal.
@@ -427,7 +425,7 @@ class BOSS {
      * may invalidate the graph (if leaves nodes with no incoming edges).
      * Returns the number of edges erased.
      */
-    uint64_t erase_edges(const std::vector<bool> &edges_to_remove_mask);
+    uint64_t erase_edges(const sdsl::bit_vector &edges_to_remove_mask);
 
     // traverse graph from the specified (k+1)-mer/edge and call
     // all paths reachable from it
