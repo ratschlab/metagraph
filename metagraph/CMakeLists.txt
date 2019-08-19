@@ -425,10 +425,10 @@ add_test(NAME unit_tests COMMAND unit_tests)
 # A trick to compile everything in parallel even before linking
 if(${CMAKE_BUILD_TYPE} MATCHES DEBUG)
   add_library(everything
-    ${src_files}
+    metagraph
     "src/main.cpp"
-    ${unit_tests_files}
-    ${experiment_files}
+    unit_tests
+    run_experiments
   )
 endif()
 
