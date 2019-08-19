@@ -75,7 +75,7 @@ BOSS::~BOSS() {
  */
 bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     // compare size
-    if (W_->size() != other.W_->size()) {
+    if (num_edges() != other.num_edges()) {
         if (verbose)
             std::cout << "sizes of graphs differ"
                       << "\n1: " << W_->size()
@@ -85,6 +85,13 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     }
 
     assert(F_.size() == other.F_.size());
+
+    bool all_equal = (*W_ == *other.W_
+                        && *last_ == *other.last_
+                        && F_ == other.F_);
+
+    if (all_equal || !verbose)
+        return all_equal;
 
     // compare last
     for (size_t i = 0; i < W_->size(); ++i) {
@@ -122,6 +129,7 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
         }
     }
 
+    assert(all_equal);
     return true;
 }
 
