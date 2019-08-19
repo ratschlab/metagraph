@@ -10,17 +10,20 @@
 
 
 // Thread safe data storage to extract distinct elements
-template <typename T>
+template <typename T,
+          class Container = Vector<T>,
+          class Cleaner = utils::NoCleanup>
 class SortedSet {
   public:
+    static_assert(std::is_same_v<T, typename Container::value_type>);
+
     typedef T key_type;
     typedef T value_type;
-    typedef Vector<T> storage_type;
+    typedef Container storage_type;
 
     SortedSet(size_t num_threads = 1,
-              bool verbose = false,
-              std::function<void(storage_type*)> cleanup = [](storage_type*) {})
-      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
+              bool verbose = false)
+      : num_threads_(num_threads), verbose_(verbose) {}
 
     ~SortedSet() {}
 
@@ -84,16 +87,18 @@ class SortedSet {
         sorted_end_ = 0;
     }
 
-    void sort_and_remove_duplicates(storage_type *vector, size_t num_threads) const {
+    template <class Array>
+    void sort_and_remove_duplicates(Array *vector, size_t num_threads) const {
         assert(vector);
 
-        ips4o::parallel::sort(vector->begin(), vector->end(), std::less<T>(), num_threads);
-
+        ips4o::parallel::sort(vector->begin(), vector->end(),
+                              std::less<typename Array::value_type>(),
+                              num_threads);
         // remove duplicates
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
 
-        cleanup_(vector);
+        Cleaner::cleanup(vector);
     }
 
   private:
@@ -116,23 +121,27 @@ class SortedSet {
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
-        size = std::max(size, min_size);
+        if constexpr(std::is_same_v<utils::DequeStorage<T>, storage_type>) {
+            data_.try_reserve(size, min_size);
 
-        while (size > min_size) {
-            try {
-                data_.reserve(size);
-                return;
-            } catch (const std::bad_alloc &exception) {
-                size = min_size + (size - min_size) * 2 / 3;
+        } else {
+            size = std::max(size, min_size);
+
+            while (size > min_size) {
+                try {
+                    data_.reserve(size);
+                    return;
+                } catch (const std::bad_alloc &exception) {
+                    size = min_size + (size - min_size) * 2 / 3;
+                }
             }
+            data_.reserve(min_size);
         }
-        data_.reserve(min_size);
     }
 
     storage_type data_;
     size_t num_threads_;
     bool verbose_;
-    std::function<void(storage_type*)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values
     uint64_t sorted_end_ = 0;

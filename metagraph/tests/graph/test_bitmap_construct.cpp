@@ -194,11 +194,11 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
 
 typedef std::function<void(const std::string&)> CallbackString;
 
-template <typename KMER, class KmerExtractor>
-void extract_kmers(std::function<void(CallbackString)> generate_reads,
+template <typename KMER, class KmerExtractor, class Container>
+void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
-                   bool canonical_mode,
-                   SortedSet<KMER> *kmers,
+                   bool both_strands_mode,
+                   Container *kmers,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true);
 
@@ -210,7 +210,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    extract_kmers<KMER, KmerExtractor2Bit>(
+    extract_kmers<KMER, KmerExtractor2Bit, SortedSet<KMER>>(
         [reads](CallbackString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },

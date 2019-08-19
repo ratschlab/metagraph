@@ -10,18 +10,22 @@
 
 
 // Thread safe data storage for counting
-template <typename T, typename C = uint8_t>
+template <typename T,
+          typename C = uint8_t,
+          class Container = Vector<std::pair<T, C>>,
+          class Cleaner = utils::NoCleanup>
 class SortedMultiset {
   public:
+    static_assert(std::is_same_v<std::pair<T, C>, typename Container::value_type>);
+
     typedef T key_type;
     typedef C count_type;
     typedef std::pair<T, C> value_type;
-    typedef Vector<std::pair<T, C>> storage_type;
+    typedef Container storage_type;
 
     SortedMultiset(size_t num_threads = 1,
-                   bool verbose = false,
-                   std::function<void(storage_type*)> cleanup = [](storage_type*) {})
-      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
+                   bool verbose = false)
+      : num_threads_(num_threads), verbose_(verbose) {}
 
     ~SortedMultiset() {}
 
@@ -146,7 +150,7 @@ class SortedMultiset {
 
         data_.erase(++dest, data_.end());
 
-        cleanup_(&data_);
+        Cleaner::cleanup(&data_);
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
@@ -166,7 +170,6 @@ class SortedMultiset {
     storage_type data_;
     size_t num_threads_;
     bool verbose_;
-    std::function<void(storage_type*)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values
     uint64_t sorted_end_ = 0;
