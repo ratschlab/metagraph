@@ -35,6 +35,9 @@ class bitmap {
   public:
     virtual ~bitmap() {}
 
+    virtual bool operator==(const bitmap &other) const final;
+    virtual bool operator!=(const bitmap &other) const final { return !(*this == other); }
+
     virtual void set(uint64_t id, bool val) = 0;
 
     virtual bool operator[](uint64_t id) const = 0;

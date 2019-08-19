@@ -561,3 +561,55 @@ TEST(wavelet_tree_stat, ConcurrentReadingAfterWriting) {
     }
     thread_pool.join();
 }
+
+TYPED_TEST(WaveletTreeTest, operator_eq) {
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 10000 }) {
+        for (int value : { 0, 1, 2, 5 }) {
+            const auto vector = sdsl::int_vector<>(size, value);
+            const TypeParam wt(3, vector);
+
+            EXPECT_EQ(wt, wavelet_tree_stat(3, vector));
+            EXPECT_EQ(wt, wavelet_tree_fast(3, vector));
+            EXPECT_EQ(wt, wavelet_tree_dyn(3, vector));
+            EXPECT_EQ(wt, wavelet_tree_small(3, vector));
+        }
+    }
+}
+
+TYPED_TEST(WaveletTreeTest, operator_neq) {
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 10000 }) {
+        for (int value : { 0, 1, 2, 5 }) {
+            const auto vector = sdsl::int_vector<>(size, value);
+            const TypeParam wt(3, sdsl::int_vector<>(size + 1, value));
+
+            EXPECT_NE(wt, wavelet_tree_stat(3, vector));
+            EXPECT_NE(wt, wavelet_tree_fast(3, vector));
+            EXPECT_NE(wt, wavelet_tree_dyn(3, vector));
+            EXPECT_NE(wt, wavelet_tree_small(3, vector));
+        }
+    }
+
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 10000 }) {
+        for (int value : { 0, 1, 2, 5 }) {
+            const auto vector = sdsl::int_vector<>(size, value);
+            const TypeParam wt(3, sdsl::int_vector<>(size + 1, value + 1));
+
+            EXPECT_NE(wt, wavelet_tree_stat(3, vector));
+            EXPECT_NE(wt, wavelet_tree_fast(3, vector));
+            EXPECT_NE(wt, wavelet_tree_dyn(3, vector));
+            EXPECT_NE(wt, wavelet_tree_small(3, vector));
+        }
+    }
+
+    for (uint64_t size : { 10, 64, 120, 128, 1000, 10000, 10000 }) {
+        for (int value : { 0, 1, 2, 5 }) {
+            const auto vector = sdsl::int_vector<>(size, value);
+            const TypeParam wt(3, sdsl::int_vector<>(size, value + 1));
+
+            EXPECT_NE(wt, wavelet_tree_stat(3, vector));
+            EXPECT_NE(wt, wavelet_tree_fast(3, vector));
+            EXPECT_NE(wt, wavelet_tree_dyn(3, vector));
+            EXPECT_NE(wt, wavelet_tree_small(3, vector));
+        }
+    }
+}

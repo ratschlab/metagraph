@@ -1039,3 +1039,75 @@ TEST(bit_vector, inner_prod_disjoint) {
         EXPECT_EQ(0u, inner_prod(first, second));
     }
 }
+
+TYPED_TEST(BitVectorTest, operator_eq) {
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 100000 }) {
+        for (bool value : { false, true }) {
+            const TypeParam bit_vector(size, value);
+
+            EXPECT_EQ(bit_vector, bitmap_vector(size, value));
+            EXPECT_EQ(bit_vector, bitmap_set(size, value));
+            EXPECT_EQ(bit_vector, bitmap_adaptive(size, value));
+            EXPECT_EQ(bit_vector, bitmap_lazy([value](uint64_t) { return value; }, size, size * value));
+            EXPECT_EQ(bit_vector, bit_vector_stat(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_dyn(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_sd(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_rrr<>(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_small(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_smart(size, value));
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, operator_neq) {
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 100000 }) {
+        bool value = false;
+
+        const TypeParam bit_vector(size + 1, false);
+
+        EXPECT_NE(bit_vector, bitmap_vector(size, value));
+        EXPECT_NE(bit_vector, bitmap_set(size, value));
+        EXPECT_NE(bit_vector, bitmap_adaptive(size, value));
+        EXPECT_NE(bit_vector, bitmap_lazy([value](uint64_t) { return value; }, size, size * value));
+        EXPECT_NE(bit_vector, bit_vector_stat(size, value));
+        EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
+        EXPECT_NE(bit_vector, bit_vector_sd(size, value));
+        EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+        EXPECT_NE(bit_vector, bit_vector_small(size, value));
+        EXPECT_NE(bit_vector, bit_vector_smart(size, value));
+    }
+
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 100000 }) {
+        bool value = false;
+
+        const TypeParam bit_vector(size + 1, true);
+
+        EXPECT_NE(bit_vector, bitmap_vector(size, value));
+        EXPECT_NE(bit_vector, bitmap_set(size, value));
+        EXPECT_NE(bit_vector, bitmap_adaptive(size, value));
+        EXPECT_NE(bit_vector, bitmap_lazy([value](uint64_t) { return value; }, size, size * value));
+        EXPECT_NE(bit_vector, bit_vector_stat(size, value));
+        EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
+        EXPECT_NE(bit_vector, bit_vector_sd(size, value));
+        EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+        EXPECT_NE(bit_vector, bit_vector_small(size, value));
+        EXPECT_NE(bit_vector, bit_vector_smart(size, value));
+    }
+
+    for (uint64_t size : { 10, 64, 120, 128, 1000, 10000, 100000 }) {
+        for (bool value : { false, true }) {
+            const TypeParam bit_vector(size, !value);
+
+            EXPECT_NE(bit_vector, bitmap_vector(size, value));
+            EXPECT_NE(bit_vector, bitmap_set(size, value));
+            EXPECT_NE(bit_vector, bitmap_adaptive(size, value));
+            EXPECT_NE(bit_vector, bitmap_lazy([value](uint64_t) { return value; }, size, size * value));
+            EXPECT_NE(bit_vector, bit_vector_stat(size, value));
+            EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
+            EXPECT_NE(bit_vector, bit_vector_sd(size, value));
+            EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+            EXPECT_NE(bit_vector, bit_vector_small(size, value));
+            EXPECT_NE(bit_vector, bit_vector_smart(size, value));
+        }
+    }
+}
