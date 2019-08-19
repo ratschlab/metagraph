@@ -236,6 +236,9 @@ file(GLOB src_files
   "src/*/*/*.cpp"
 )
 
+# for compiling faster
+list(REVERSE src_files)
+
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
