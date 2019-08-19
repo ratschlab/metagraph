@@ -357,7 +357,7 @@ class bit_vector_adaptive_stat : public bit_vector_adaptive {
     bit_vector_adaptive_stat(std::initializer_list<bool> init)
       : bit_vector_adaptive_stat(sdsl::bit_vector(init)) {}
 
-    virtual std::unique_ptr<bit_vector> copy() const override final;
+    std::unique_ptr<bit_vector> copy() const override final;
 
   private:
     explicit bit_vector_adaptive_stat(const bit_vector &vector);

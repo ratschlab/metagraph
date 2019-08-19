@@ -268,10 +268,9 @@ bool bit_vector_dyn::operator[](uint64_t id) const {
 uint64_t bit_vector_dyn::get_int(uint64_t id, uint32_t width) const {
     assert(id + width <= size());
     assert(width);
-    int64_t pos = id + width - 1;
     uint64_t word = 0;
-    while (pos >= static_cast<int64_t>(id)) {
-        word = (word << 1) + vector_.at(pos--);
+    for (int64_t pos = id + width - 1; pos >= static_cast<int64_t>(id); --pos) {
+        word = (word << 1) + vector_.at(pos);
     }
     return word;
 }

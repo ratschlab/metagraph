@@ -220,7 +220,6 @@ void wavelet_tree_stat::set(uint64_t id, uint64_t val) {
         return;
 
     if (!requires_update_) {
-        std::unique_lock<std::mutex> lock(mu_);
         wwt_ = decltype(wwt_)();
         requires_update_ = true;
     }
