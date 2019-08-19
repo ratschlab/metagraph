@@ -2648,6 +2648,28 @@ int main(int argc, const char *argv[]) {
                     && !config->alignment_seed_unimems)
                 config->alignment_max_seed_length = graph->get_k();
 
+            if (config->verbose) {
+                std::cout << "Alignment settings:" << "\n"
+                          << "\t Seeding: " << (config->alignment_seed_unimems ? "unimems" : "nodes") << "\n"
+                          << "\t Alignments to report: " << config->alignment_num_alternative_paths << "\n"
+                          << "\t Priority queue size: " << config->alignment_queue_size << "\n"
+                          << "\t Min seed length: " << config->alignment_min_seed_length << "\n"
+                          << "\t Max seed length: " << config->alignment_max_seed_length << "\n"
+                          << "\t Max num seeds per locus: " << config->alignment_max_num_seeds_per_locus << "\n"
+                          << "\t Scoring matrix: " << (config->alignment_edit_distance ? "unit costs" : "matrix") << "\n"
+                          << "\t Gap opening penalty: " << int64_t(config->alignment_gap_opening_penalty) << "\n"
+                          << "\t Gap extension penalty: " << int64_t(config->alignment_gap_extension_penalty) << "\n"
+                          << "\t Min DP table cell score: " << int64_t(config->alignment_min_cell_score) << "\n"
+                          << "\t Min alignment score: " << config->alignment_min_path_score << std::endl;
+
+                if (!config->alignment_edit_distance)
+                    std::cout << "\t Match score: " << int64_t(config->alignment_match_score) << "\n"
+                              << "\t (DNA) Transition score: " << int64_t(config->alignment_mm_transition) << "\n"
+                              << "\t (DNA) Transversion score: " << int64_t(config->alignment_mm_transversion) << "\n";
+
+                std::cout << std::endl;
+            }
+
             Cigar::initialize_opt_table(graph->alphabet());
 
             for (const auto &file : files) {
