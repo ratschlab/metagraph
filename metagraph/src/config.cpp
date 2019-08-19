@@ -163,6 +163,8 @@ Config::Config(int argc, const char *argv[]) {
             map_sequences = true;
         } else if (!strcmp(argv[i], "--align-seed-unimems")) {
             alignment_seed_unimems = true;
+        } else if (!strcmp(argv[i], "--align-edit-distance")) {
+            alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-queue-size")) {
@@ -667,10 +669,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximum exact matches in unitigs as seeds [off]\n");
+            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
-            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive mismatch transition penalty [1]\n");
-            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive mismatch transversion penalty [2]\n");
+            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [1]\n");
+            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [2]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [3]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [1]\n");
             fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [50]\n");

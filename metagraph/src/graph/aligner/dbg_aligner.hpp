@@ -16,7 +16,7 @@ class DBGAligner {
     typedef typename DBGAlignment::score_t score_t;
 
     explicit DBGAligner(const DeBruijnGraph &graph,
-                        const DBGAlignerConfig &config = DBGAlignerConfig(),
+                        const DBGAlignerConfig &config,
                         const Seeder &seed = default_seeder,
                         const Extender &extend = default_extender,
                         const PriorityFunction &priority_function = std::less<DBGAlignment>());
@@ -65,7 +65,7 @@ std::vector<DBGAligner::DBGAlignment>
 extend_mapping_forward_and_reverse_complement(const std::string &query,
                                               const std::string &reverse_complement_query,
                                               const DeBruijnGraph &graph,
-                                              const DBGAlignerConfig &config = DBGAlignerConfig(),
+                                              const DBGAlignerConfig &config,
                                               DBGAligner::score_t min_path_score
                                                   = std::numeric_limits<DBGAligner::score_t>::min(),
                                               const Extender &extend = default_extender,

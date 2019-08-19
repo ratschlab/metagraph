@@ -10,17 +10,77 @@
 #include "dbg_hash_ordered.hpp"
 #include "annotate_column_compressed.hpp"
 #include "reverse_complement.hpp"
+#include "alphabets.hpp"
 #include "../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 
 
 typedef DBGAligner::score_t score_t;
 
-const DBGAlignerConfig config;
-
 int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b) {
     return config.get_row(a)[b];
 }
+
+void check_score_matrix(const DBGAlignerConfig &config,
+                        const char* alphabet,
+                        size_t alph_size) {
+    ASSERT_EQ(strlen(alphabet), alph_size);
+
+    for (size_t i = 0; i < alph_size; ++i) {
+        if (i + 1 != alph_size) {
+            EXPECT_LT(int8_t(0), single_char_score(config, alphabet[i], alphabet[i]));
+        }
+
+        for (size_t j = 0; j < alph_size; ++j) {
+            //check if the match score is the greatest
+            if (i + 1 != alph_size) {
+                EXPECT_GE(single_char_score(config, alphabet[i], alphabet[i]),
+                          single_char_score(config, alphabet[i], alphabet[j]));
+            }
+
+            // checking symmetry
+            EXPECT_EQ(single_char_score(config, alphabet[i], alphabet[j]),
+                      single_char_score(config, alphabet[j], alphabet[i]));
+        }
+    }
+}
+
+TEST(DBGAlignerTest, check_score_matrix_dna) {
+    check_score_matrix(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2),
+                       alphabets::kAlphabetDNA5,
+                       alphabets::kSigmaDNA5);
+}
+
+TEST(DBGAlignerTest, check_score_matrix_protein) {
+    check_score_matrix(DBGAlignerConfig::score_matrix_blosum62,
+                       alphabets::kAlphabetProtein,
+                       alphabets::kSigmaProtein);
+}
+
+TEST(DBGAlignerTest, check_score_matrix_dna_unit) {
+    check_score_matrix(
+        DBGAlignerConfig::unit_scoring_matrix(1, alphabets::kAlphabetDNA),
+        alphabets::kAlphabetDNA5,
+        alphabets::kSigmaDNA5
+    );
+
+    check_score_matrix(
+        DBGAlignerConfig::unit_scoring_matrix(1, alphabets::kAlphabetDNA5),
+        alphabets::kAlphabetDNA5,
+        alphabets::kSigmaDNA5
+    );
+}
+
+TEST(DBGAlignerTest, check_score_matrix_protein_unit) {
+    check_score_matrix(
+        DBGAlignerConfig::unit_scoring_matrix(1, alphabets::kAlphabetProtein),
+        alphabets::kAlphabetProtein,
+        alphabets::kSigmaProtein
+    );
+}
+
+const DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+
 
 bool check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                   const DBGAlignerConfig &config,
@@ -28,6 +88,8 @@ bool check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                   const std::string &query,
                   score_t min_path_score = std::numeric_limits<score_t>::min()) {
     assert(graph.get());
+
+    Cigar::initialize_opt_table(graph->alphabet());
 
     std::vector<DeBruijnGraph::node_index> nodes;
     graph->map_to_nodes_sequentially(query.begin(),
@@ -57,7 +119,8 @@ TYPED_TEST(DBGAlignerTest, align_sequence_too_short) {
     std::string query =     "CAT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto alt_paths = aligner.align(query);
 
     EXPECT_EQ(0ull, alt_paths.size());
@@ -69,7 +132,8 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     std::string query =     "CAT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -93,7 +157,8 @@ TYPED_TEST(DBGAlignerTest, align_iterators_straight) {
     std::string query = reference;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     std::vector<DBGAligner::DBGAlignment> alt_paths;
     aligner.align(query.begin(), query.end(),
                   [&](auto&& alignment) { alt_paths.emplace_back(std::move(alignment)); });
@@ -119,7 +184,8 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     std::string query = reference;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -144,8 +210,9 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     reverse_complement(query.begin(), query.end());
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
+    Cigar::initialize_opt_table(graph->alphabet());
 
-    DBGAligner aligner(*graph);
+    DBGAligner aligner(*graph, config);
     auto paths = aligner.align_forward_and_reverse_complement(query, reference);
     ASSERT_FALSE(paths.empty());
 
@@ -160,7 +227,12 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     EXPECT_EQ(14u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
 
-    auto ext_paths = extend_mapping_forward_and_reverse_complement(query, reference, *graph);
+    auto ext_paths = extend_mapping_forward_and_reverse_complement(
+        query,
+        reference,
+        *graph,
+        config
+    );
 
     EXPECT_TRUE(std::equal(paths.begin(), paths.end(),
                            ext_paths.begin(), ext_paths.end()));
@@ -174,7 +246,8 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -199,7 +272,8 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -223,7 +297,8 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
     std::string query =     "AGGGGG";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -247,7 +322,8 @@ TYPED_TEST(DBGAlignerTest, variation) {
     std::string query =     "AGCAA" "T" "TCGAAA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -273,13 +349,9 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     std::string query =       "TTAAGCAA" "TGG" "GAAA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
+    Cigar::initialize_opt_table(graph->alphabet());
 
-    DBGAlignerConfig config;
-    config.gap_opening_penalty = -3;
-    config.gap_extension_penalty = -1;
-    config.set_mismatch_transition_score(-1);
-    config.set_mismatch_transversion_score(-2);
-    config.set_match_score(2);
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
     DBGAligner aligner(*graph, config);
 
     auto alt_paths = aligner.align(query);
@@ -308,7 +380,8 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     std::string query =     "ACGCAA" "T" "TCTCTG" "T" "A" "T" "TTGT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -334,14 +407,10 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     std::string query =       "AAAA" "TTTTTTT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
+    Cigar::initialize_opt_table(graph->alphabet());
 
-    DBGAlignerConfig config;
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
     config.num_alternative_paths = 2;
-    config.gap_opening_penalty = -3;
-    config.gap_extension_penalty = -1;
-    config.set_mismatch_transition_score(-1);
-    config.set_mismatch_transversion_score(-2);
-    config.set_match_score(2);
     DBGAligner aligner(*graph, config);
 
     auto alt_paths = aligner.align(query);
@@ -372,15 +441,11 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     std::string query =                    "ACAA" "CTTT" "TCTT";
 
     auto graph = build_graph_batch<TypeParam>(k, references);
+    Cigar::initialize_opt_table(graph->alphabet());
 
-    DBGAlignerConfig config;
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
     config.num_alternative_paths = 2;
     config.queue_size = 100;
-    config.gap_opening_penalty = -3;
-    config.gap_extension_penalty = -1;
-    config.set_mismatch_transition_score(-1);
-    config.set_mismatch_transversion_score(-2);
-    config.set_match_score(2);
     DBGAligner aligner(*graph, config);
 
     auto alt_paths = aligner.align(query);
@@ -403,7 +468,8 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     std::string query =     "AAAG" "G" "GGACCCTTT" "T" "CGTTAT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -428,7 +494,8 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     std::string query =     "TTTCC" "A" "TTGTT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -454,7 +521,8 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
     // alt query            "TTCGA" "T"  "GGCCT"
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -495,7 +563,8 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
     std::string query =     "TTTCTGTATA"        "GGCGCTCTC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner(*graph);
+    Cigar::initialize_opt_table(graph->alphabet());
+    DBGAligner aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -521,8 +590,9 @@ TEST(DBGAlignerTest, align_inexact_seeding1) {
     std::string query =     "ACCC" "TGTTTG";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
+    Cigar::initialize_opt_table(graph->alphabet());
     graph->add_sequence(reference);
-    DBGAligner aligner(*graph);
+    DBGAligner aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -547,8 +617,9 @@ TEST(DBGAlignerTest, align_inexact_seeding2) {
     std::string query =      "TT" "AGCTTCGAGGCCAA";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
+    Cigar::initialize_opt_table(graph->alphabet());
     graph->add_sequence(reference);
-    DBGAligner aligner(*graph);
+    DBGAligner aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -572,10 +643,11 @@ TEST(DBGAlignerTest, align_inexact_seed_snp) {
     std::string query =        "AC" "CTTTCGAGGCCAA";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
+    Cigar::initialize_opt_table(graph->alphabet());
     graph->add_sequence(reference);
 
     {
-        DBGAlignerConfig config;
+        DBGAlignerConfig config = ::config;
         config.min_cell_score = 0;
         DBGAligner aligner(*graph, config);
 
@@ -594,7 +666,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp) {
         EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
     }
     {
-        DBGAlignerConfig config;
+        DBGAlignerConfig config = ::config;
         config.min_seed_length = 2;
         config.min_cell_score = std::numeric_limits<score_t>::min();
         DBGAligner aligner(*graph, config);
@@ -613,7 +685,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp) {
         EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
     }
     {
-        DBGAlignerConfig config;
+        DBGAlignerConfig config = ::config;
         config.min_cell_score = std::numeric_limits<score_t>::min();
         DBGAligner aligner(*graph, config);
         auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
@@ -631,7 +703,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp) {
         EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
     }
     {
-        DBGAlignerConfig config;
+        DBGAlignerConfig config = ::config;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min();
         DBGAligner aligner(*graph, config);

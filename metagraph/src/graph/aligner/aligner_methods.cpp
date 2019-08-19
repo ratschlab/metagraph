@@ -399,6 +399,7 @@ const Extender default_extender = [](const DeBruijnGraph &graph,
 
     auto best_pos = std::get<3>(start_node->second);
     auto best_score = std::get<0>(start_node->second).at(best_pos);
+    assert(best_score > config.min_cell_score);
 
     //no good path found
     if (UNLIKELY(start_node->first == DeBruijnGraph::npos
@@ -434,7 +435,7 @@ const Extender default_extender = [](const DeBruijnGraph &graph,
         if (next_paths->back().empty() && !next_paths->back().get_query_begin()) {
             next_paths->pop_back();
         } else {
-            assert(next_paths->back().get_score() > config.min_cell_score);
+            assert(next_paths->back().get_score() + path.get_score() == best_score);
         }
 
         return;

@@ -594,11 +594,11 @@ align_sequences(const DeBruijnGraph &graph,
                   query,
                   reverse_complement_query,
                   graph,
-                  DBGAlignerConfig(config),
+                  DBGAlignerConfig(config, graph),
                   config.alignment_min_path_score
               )
             : DBGAligner(graph,
-                         DBGAlignerConfig(config)).align_forward_and_reverse_complement(
+                         DBGAlignerConfig(config, graph)).align_forward_and_reverse_complement(
                   query, reverse_complement_query, config.alignment_min_path_score
               );
     }
@@ -615,7 +615,7 @@ align_sequences(const DeBruijnGraph &graph,
         seeder = make_unimem_seeder(nodes);
     }
 
-    return DBGAligner(graph, DBGAlignerConfig(config), seeder).align(
+    return DBGAligner(graph, DBGAlignerConfig(config, graph), seeder).align(
         query, false, config.alignment_min_path_score
     );
 }
@@ -2590,6 +2590,8 @@ int main(int argc, const char *argv[]) {
             if (config->alignment_max_seed_length == std::numeric_limits<size_t>::max()
                     && !config->alignment_seed_unimems)
                 config->alignment_max_seed_length = graph->get_k();
+
+            Cigar::initialize_opt_table(graph->alphabet());
 
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;

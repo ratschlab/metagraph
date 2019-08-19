@@ -68,6 +68,7 @@ class Config {
 
     // Alignment options
     bool alignment_seed_unimems = false;
+    bool alignment_edit_distance = false;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition = 1;

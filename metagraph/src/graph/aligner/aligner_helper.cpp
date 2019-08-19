@@ -1,74 +1,65 @@
 #include "aligner_helper.hpp"
 
 #include "utils.hpp"
+#include "alphabets.hpp"
 
 
-std::array<std::array<Cigar::Operator, 128>, 128> Cigar::initialize_opt_table() {
-    std::array<std::array<Cigar::Operator, 128>, 128> char_to_op;
+std::pair<const char*, const char*>
+get_alphabet_boundaries(const std::string &alphabet) {
+    auto range = std::make_pair(&*alphabet.begin(), &*alphabet.end());
 
-    for (auto& row : char_to_op) {
-        row.fill(Operator::MISMATCH_TRANSVERSION);
-    }
+    // TODO: fix graph alphabets and these hacks
+    if (*range.first == '$')
+        ++range.first;
 
-    char_to_op['a']['a'] = char_to_op['A']['a'] = char_to_op['a']['A'] = char_to_op['A']['A'] = Operator::MATCH;
-    char_to_op['c']['c'] = char_to_op['C']['c'] = char_to_op['c']['C'] = char_to_op['C']['C'] = Operator::MATCH;
-    char_to_op['g']['g'] = char_to_op['G']['g'] = char_to_op['g']['G'] = char_to_op['G']['G'] = Operator::MATCH;
-    char_to_op['t']['t'] = char_to_op['T']['t'] = char_to_op['t']['T'] = char_to_op['T']['T'] = Operator::MATCH;
-    char_to_op['a']['g'] = char_to_op['A']['g'] = char_to_op['a']['G'] = char_to_op['A']['G'] = Operator::MISMATCH_TRANSITION;
-    char_to_op['g']['a'] = char_to_op['G']['a'] = char_to_op['g']['A'] = char_to_op['G']['A'] = Operator::MISMATCH_TRANSITION;
-    char_to_op['c']['t'] = char_to_op['C']['t'] = char_to_op['c']['T'] = char_to_op['C']['T'] = Operator::MISMATCH_TRANSITION;
-    char_to_op['t']['c'] = char_to_op['T']['c'] = char_to_op['t']['C'] = char_to_op['T']['C'] = Operator::MISMATCH_TRANSITION;
-    char_to_op['a']['c'] = char_to_op['A']['c'] = char_to_op['a']['C'] = char_to_op['A']['C'] = Operator::MISMATCH_TRANSVERSION;
-    char_to_op['a']['t'] = char_to_op['A']['t'] = char_to_op['a']['T'] = char_to_op['A']['T'] = Operator::MISMATCH_TRANSVERSION;
-    char_to_op['g']['c'] = char_to_op['G']['c'] = char_to_op['g']['C'] = char_to_op['G']['C'] = Operator::MISMATCH_TRANSVERSION;
-    char_to_op['g']['t'] = char_to_op['G']['t'] = char_to_op['g']['T'] = char_to_op['G']['T'] = Operator::MISMATCH_TRANSVERSION;
-    char_to_op['c']['a'] = char_to_op['C']['a'] = char_to_op['c']['A'] = char_to_op['C']['A'] = Operator::MISMATCH_TRANSVERSION;
-    char_to_op['c']['g'] = char_to_op['C']['g'] = char_to_op['c']['G'] = char_to_op['C']['G'] = Operator::MISMATCH_TRANSVERSION;
-    char_to_op['t']['a'] = char_to_op['T']['a'] = char_to_op['t']['A'] = char_to_op['T']['A'] = Operator::MISMATCH_TRANSVERSION;
-    char_to_op['t']['g'] = char_to_op['T']['g'] = char_to_op['t']['G'] = char_to_op['T']['G'] = Operator::MISMATCH_TRANSVERSION;
+    // TODO: find a better solution for this hack
+    // The last character in these alphabets is a wildcard ('N' or 'X')
+    // make sure that wildcard-wildcard matches are counted as mismatches
+    if (!strcmp(range.first, alphabets::kAlphabetProtein)
+            || !strcmp(range.first, alphabets::kAlphabetDNA5))
+        --range.second;
 
-    return char_to_op;
+    return range;
 }
 
-const std::array<std::array<Cigar::Operator, 128>, 128> Cigar::char_to_op
-    = Cigar::initialize_opt_table();
+Cigar::OperatorTable Cigar::char_to_op;
+
+void Cigar::initialize_opt_table(const std::string &alphabet) {
+    for (auto& row : char_to_op) {
+        row.fill(Cigar::Operator::MISMATCH);
+    }
+
+    auto range = get_alphabet_boundaries(alphabet);
+
+    for (const char *it = range.first; it != range.second; ++it) {
+        char upper = toupper(*it);
+        char lower = tolower(*it);
+
+        char_to_op[upper][upper]
+            = char_to_op[upper][lower]
+            = char_to_op[lower][upper]
+            = char_to_op[lower][lower] = Cigar::Operator::MATCH;
+    }
+}
 
 char opt_to_char(Cigar::Operator op) {
     switch (op) {
         case Cigar::Operator::MATCH: return '=';
-        case Cigar::Operator::MISMATCH_TRANSITION: return 'X';
-        case Cigar::Operator::MISMATCH_TRANSVERSION: return 'X';
+        case Cigar::Operator::MISMATCH: return 'X';
         case Cigar::Operator::INSERTION: return 'I';
         case Cigar::Operator::DELETION: return 'D';
         case Cigar::Operator::CLIPPED: return 'S';
-        default:
-            assert(false);
-            return '\0';
     }
+
+    assert(false);
+    return '\0';
 }
 
 std::string Cigar::to_string() const {
-    if (cigar_.empty())
-        return "";
-
-    // fold down to CIGAR operations
-    std::vector<std::pair<char, uint64_t>> converted;
-    converted.reserve(cigar_.size());
-    converted.emplace_back(opt_to_char(cigar_.front().first), cigar_.front().second);
-
-    for (auto it = std::next(cigar_.begin()); it != cigar_.end(); ++it) {
-        auto op_char = opt_to_char(it->first);
-        if (converted.back().first != op_char) {
-            converted.emplace_back(op_char, it->second);
-        } else {
-            converted.back().second += it->second;
-        }
-    }
-
-    // generate string
     std::string cigar_string;
-    for (const auto &pair : converted) {
-        cigar_string += std::to_string(pair.second) + pair.first;
+
+    for (const auto &pair : cigar_) {
+        cigar_string += std::to_string(pair.second) + opt_to_char(pair.first);
     }
 
     return cigar_string;
@@ -94,50 +85,149 @@ void Cigar::append(Cigar&& other) {
 }
 
 
-void DBGAlignerConfig::set_match_score(int8_t match_score) {
-    match_score_ = match_score;
-    score_matrix_['a']['a'] = score_matrix_['A']['a'] = score_matrix_['a']['A'] = score_matrix_['A']['A'] = match_score;
-    score_matrix_['c']['c'] = score_matrix_['C']['c'] = score_matrix_['c']['C'] = score_matrix_['C']['C'] = match_score;
-    score_matrix_['g']['g'] = score_matrix_['G']['g'] = score_matrix_['g']['G'] = score_matrix_['G']['G'] = match_score;
-    score_matrix_['t']['t'] = score_matrix_['T']['t'] = score_matrix_['t']['T'] = score_matrix_['T']['T'] = match_score;
-}
+DBGAlignerConfig::DBGAlignerConfig(const ScoreMatrix &score_matrix,
+                                   int8_t gap_opening,
+                                   int8_t gap_extension)
+      : gap_opening_penalty(gap_opening),
+        gap_extension_penalty(gap_extension),
+        score_matrix_(score_matrix) { }
 
-void DBGAlignerConfig::set_mismatch_transition_score(int8_t mm_transition) {
-    mm_transition_ = mm_transition;
-    score_matrix_['a']['g'] = score_matrix_['A']['g'] = score_matrix_['a']['G'] = score_matrix_['A']['G'] = mm_transition;
-    score_matrix_['g']['a'] = score_matrix_['G']['a'] = score_matrix_['g']['A'] = score_matrix_['G']['A'] = mm_transition;
-    score_matrix_['c']['t'] = score_matrix_['C']['t'] = score_matrix_['c']['T'] = score_matrix_['C']['T'] = mm_transition;
-    score_matrix_['t']['c'] = score_matrix_['T']['c'] = score_matrix_['t']['C'] = score_matrix_['T']['C'] = mm_transition;
-}
+DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
+                                   int8_t gap_opening,
+                                   int8_t gap_extension)
+      : gap_opening_penalty(gap_opening),
+        gap_extension_penalty(gap_extension),
+        score_matrix_(std::move(score_matrix)) { }
 
-void DBGAlignerConfig::set_mismatch_transversion_score(int8_t mm_transversion) {
-    mm_transversion_ = mm_transversion;
+DBGAlignerConfig::DBGAlignerConfig(const Config &config, const DeBruijnGraph &graph)
+      : queue_size(config.alignment_queue_size),
+        num_alternative_paths(config.alignment_num_alternative_paths),
+        min_seed_length(config.alignment_min_seed_length),
+        max_seed_length(config.alignment_max_seed_length),
+        max_num_seeds_per_locus(config.alignment_max_num_seeds_per_locus),
+        min_cell_score(config.alignment_min_cell_score),
+        gap_opening_penalty(-config.alignment_gap_opening_penalty),
+        gap_extension_penalty(-config.alignment_gap_extension_penalty),
+        score_matrix_(config.alignment_edit_distance
+                          ? unit_scoring_matrix(1, graph.alphabet())
+                          : scoring_matrix(config, graph)) { }
 
-    // Set the default score to be the transversion penalty
-    for (auto& row : score_matrix_) {
-        row.fill(mm_transversion_);
+DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
+::scoring_matrix(const Config &config, const DeBruijnGraph &graph) {
+    auto range = get_alphabet_boundaries(graph.alphabet());
+
+    if (std::equal(range.first, range.second, alphabets::kAlphabetDNA)) {
+        return dna_scoring_matrix(config.alignment_match_score,
+                                  -config.alignment_mm_transition,
+                                  -config.alignment_mm_transversion);
+    } else if (std::equal(range.first, range.second, alphabets::kAlphabetProtein)) {
+        return score_matrix_blosum62;
     }
 
-    // Uncomment these if the default value is anything other than the transversion penalty
-    // score_matrix_['a']['c'] = score_matrix_['A']['c'] = score_matrix_['a']['C'] = score_matrix_['A']['C'] = mm_transversion;
-    // score_matrix_['a']['t'] = score_matrix_['A']['t'] = score_matrix_['a']['T'] = score_matrix_['A']['T'] = mm_transversion;
-    // score_matrix_['g']['c'] = score_matrix_['G']['c'] = score_matrix_['g']['C'] = score_matrix_['G']['C'] = mm_transversion;
-    // score_matrix_['g']['t'] = score_matrix_['G']['t'] = score_matrix_['g']['T'] = score_matrix_['G']['T'] = mm_transversion;
-    // score_matrix_['c']['a'] = score_matrix_['C']['a'] = score_matrix_['c']['A'] = score_matrix_['C']['A'] = mm_transversion;
-    // score_matrix_['c']['g'] = score_matrix_['C']['g'] = score_matrix_['c']['G'] = score_matrix_['C']['G'] = mm_transversion;
-    // score_matrix_['t']['a'] = score_matrix_['T']['a'] = score_matrix_['t']['A'] = score_matrix_['T']['A'] = mm_transversion;
-    // score_matrix_['t']['g'] = score_matrix_['T']['g'] = score_matrix_['t']['G'] = score_matrix_['T']['G'] = mm_transversion;
-
-    // Correct other scores
-    set_match_score(match_score_);
-    set_mismatch_transition_score(mm_transition_);
+    return unit_scoring_matrix(1, graph.alphabet());
 }
 
+DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
+::dna_scoring_matrix(int8_t match_score,
+                     int8_t mm_transition,
+                     int8_t mm_transversion) {
+    ScoreMatrix score_matrix;
+    for (auto& row : score_matrix) {
+        row.fill(mm_transversion);
+    }
 
+    score_matrix['a']['g'] = score_matrix['A']['g'] = score_matrix['a']['G'] = score_matrix['A']['G'] = mm_transition;
+    score_matrix['g']['a'] = score_matrix['G']['a'] = score_matrix['g']['A'] = score_matrix['G']['A'] = mm_transition;
+    score_matrix['c']['t'] = score_matrix['C']['t'] = score_matrix['c']['T'] = score_matrix['C']['T'] = mm_transition;
+    score_matrix['t']['c'] = score_matrix['T']['c'] = score_matrix['t']['C'] = score_matrix['T']['C'] = mm_transition;
+    score_matrix['a']['a'] = score_matrix['A']['a'] = score_matrix['a']['A'] = score_matrix['A']['A'] = match_score;
+    score_matrix['c']['c'] = score_matrix['C']['c'] = score_matrix['c']['C'] = score_matrix['C']['C'] = match_score;
+    score_matrix['g']['g'] = score_matrix['G']['g'] = score_matrix['g']['G'] = score_matrix['G']['G'] = match_score;
+    score_matrix['t']['t'] = score_matrix['T']['t'] = score_matrix['t']['T'] = score_matrix['T']['T'] = match_score;
 
+    return score_matrix;
+}
 
+DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
+::unit_scoring_matrix(int8_t match_score, const std::string &alphabet) {
+    ScoreMatrix score_matrix;
+    for (auto& row : score_matrix) {
+        row.fill(-match_score);
+    }
 
+    auto range = get_alphabet_boundaries(alphabet);
 
+    for (const char *it = range.first; it != range.second; ++it) {
+        char upper = toupper(*it);
+        char lower = tolower(*it);
+
+        score_matrix[upper][upper]
+            = score_matrix[upper][lower]
+            = score_matrix[lower][upper]
+            = score_matrix[lower][lower] = match_score;
+    }
+
+    return score_matrix;
+}
+
+DBGAlignerConfig::ScoreMatrix blosum62_scoring_matrix() {
+    std::string alphabet = "ARNDCQEGHILKMFPSTWYVBZX";
+
+    std::vector<std::vector<int8_t>> scores = {
+        {  4, -1, -2, -2,  0, -1, -1,  0, -2, -1, -1, -1, -1, -2, -1,  1,  0, -3, -2,  0, -2, -1,  0 },
+        { -1,  5,  0, -2, -3,  1,  0, -2,  0, -3, -2,  2, -1, -3, -2, -1, -1, -3, -2, -3, -1,  0, -1 },
+        { -2,  0,  6,  1, -3,  0,  0,  0,  1, -3, -3,  0, -2, -3, -2,  1,  0, -4, -2, -3,  3,  0, -1 },
+        { -2, -2,  1,  6, -3,  0,  2, -1, -1, -3, -4, -1, -3, -3, -1,  0, -1, -4, -3, -3,  4,  1, -1 },
+        {  0, -3, -3, -3,  9, -3, -4, -3, -3, -1, -1, -3, -1, -2, -3, -1, -1, -2, -2, -1, -3, -3, -2 },
+        { -1,  1,  0,  0, -3,  5,  2, -2,  0, -3, -2,  1,  0, -3, -1,  0, -1, -2, -1, -2,  0,  3, -1 },
+        { -1,  0,  0,  2, -4,  2,  5, -2,  0, -3, -3,  1, -2, -3, -1,  0, -1, -3, -2, -2,  1,  4, -1 },
+        {  0, -2,  0, -1, -3, -2, -2,  6, -2, -4, -4, -2, -3, -3, -2,  0, -2, -2, -3, -3, -1, -2, -1 },
+        { -2,  0,  1, -1, -3,  0,  0, -2,  8, -3, -3, -1, -2, -1, -2, -1, -2, -2,  2, -3,  0,  0, -1 },
+        { -1, -3, -3, -3, -1, -3, -3, -4, -3,  4,  2, -3,  1,  0, -3, -2, -1, -3, -1,  3, -3, -3, -1 },
+        { -1, -2, -3, -4, -1, -2, -3, -4, -3,  2,  4, -2,  2,  0, -3, -2, -1, -2, -1,  1, -4, -3, -1 },
+        { -1,  2,  0, -1, -3,  1,  1, -2, -1, -3, -2,  5, -1, -3, -1,  0, -1, -3, -2, -2,  0,  1, -1 },
+        { -1, -1, -2, -3, -1,  0, -2, -3, -2,  1,  2, -1,  5,  0, -2, -1, -1, -1, -1,  1, -3, -1, -1 },
+        { -2, -3, -3, -3, -2, -3, -3, -3, -1,  0,  0, -3,  0,  6, -4, -2, -2,  1,  3, -1, -3, -3, -1 },
+        { -1, -2, -2, -1, -3, -1, -1, -2, -2, -3, -3, -1, -2, -4,  7, -1, -1, -4, -3, -2, -2, -1, -2 },
+        {  1, -1,  1,  0, -1,  0,  0,  0, -1, -2, -2,  0, -1, -2, -1,  4,  1, -3, -2, -2,  0,  0,  0 },
+        {  0, -1,  0, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -2, -1,  1,  5, -2, -2,  0, -1, -1,  0 },
+        { -3, -3, -4, -4, -2, -2, -3, -2, -2, -3, -2, -3, -1,  1, -4, -3, -2, 11,  2, -3, -4, -3, -2 },
+        { -2, -2, -2, -3, -2, -1, -2, -3,  2, -1, -1, -2, -1,  3, -3, -2, -2,  2,  7, -1, -3, -2, -1 },
+        {  0, -3, -3, -3, -1, -2, -2, -3, -3,  3,  1, -2,  1, -1, -2, -2,  0, -3, -1,  4, -3, -2, -1 },
+        { -2, -1,  3,  4, -3,  0,  1, -1,  0, -3, -4,  0, -3, -3, -2,  0, -1, -4, -3, -3,  4,  1, -1 },
+        { -1,  0,  0,  1, -3,  3,  4, -2,  0, -3, -3,  1, -1, -3, -1,  0, -1, -3, -2, -2,  1,  4, -1 },
+        {  0, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2,  0,  0, -2, -1, -1, -1, -1, -1 }
+    };
+
+    DBGAlignerConfig::ScoreMatrix score_matrix;
+
+    for (size_t i = 0; i < score_matrix.size(); ++i) {
+        score_matrix[i].fill(-4);
+
+        // meant to handle the letters J, O, U
+        score_matrix[i][i] = 1;
+    }
+
+    for (size_t i = 0; i < alphabet.size(); ++i) {
+        char a_upper = alphabet[i];
+        char a_lower = tolower(alphabet[i]);
+
+        for (size_t j = 0; j < alphabet.size(); ++j) {
+            char b_upper = alphabet[j];
+            char b_lower = tolower(alphabet[j]);
+
+            score_matrix[a_lower][b_lower]
+                = score_matrix[a_lower][b_upper]
+                = score_matrix[a_upper][b_lower]
+                = score_matrix[a_upper][b_upper] = scores[i][j];
+        }
+    }
+
+    return score_matrix;
+}
+
+const DBGAlignerConfig::ScoreMatrix DBGAlignerConfig::score_matrix_blosum62
+    = blosum62_scoring_matrix();
 
 template <typename NodeType>
 Alignment<NodeType>::Alignment(const DPTable &dp_table,

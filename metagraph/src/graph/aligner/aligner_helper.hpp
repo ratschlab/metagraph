@@ -18,16 +18,18 @@ class Cigar {
     enum Operator {
         CLIPPED,
         MATCH,
-        MISMATCH_TRANSITION,
-        MISMATCH_TRANSVERSION,
+        MISMATCH,
         INSERTION,
         DELETION
     };
 
-    static const std::array<std::array<Operator, 128>, 128> char_to_op;
     typedef uint32_t LengthType;
+    typedef std::array<Operator, 128> OperatorTableRow;
+    typedef std::array<OperatorTableRow, 128> OperatorTable;
 
-    static const std::array<Operator, 128>& get_op_row(char a) { return char_to_op[a]; }
+    static OperatorTable char_to_op;
+    static const OperatorTableRow& get_op_row(char a) { return char_to_op[a]; }
+    static void initialize_opt_table(const std::string &alphabet);
 
     Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
@@ -62,8 +64,6 @@ class Cigar {
 
   private:
     std::vector<std::pair<Operator, LengthType>> cigar_;
-
-    static std::array<std::array<Operator, 128>, 128> initialize_opt_table();
 };
 
 typedef int32_t score_t;
@@ -71,40 +71,18 @@ typedef int32_t score_t;
 class DBGAlignerConfig {
   public:
     typedef ::score_t score_t;
+    typedef std::array<int8_t, 128> ScoreMatrixRow;
+    typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
-    DBGAlignerConfig() {
-        set_match_score(match_score_);
-        set_mismatch_transition_score(mm_transition_);
-        set_mismatch_transversion_score(mm_transversion_);
-    }
+    DBGAlignerConfig(const ScoreMatrix &score_matrix,
+                     int8_t gap_opening = -3,
+                     int8_t gap_extension = -1);
 
-    explicit DBGAlignerConfig(const Config &config)
-          : queue_size(config.alignment_queue_size),
-            num_alternative_paths(config.alignment_num_alternative_paths),
-            min_seed_length(config.alignment_min_seed_length),
-            max_seed_length(config.alignment_max_seed_length),
-            max_num_seeds_per_locus(config.alignment_max_num_seeds_per_locus),
-            gap_opening_penalty(-config.alignment_gap_opening_penalty),
-            gap_extension_penalty(-config.alignment_gap_extension_penalty),
-            min_cell_score(config.alignment_min_cell_score),
-            mm_transition_(-config.alignment_mm_transition),
-            match_score_(config.alignment_match_score) {
-        set_mismatch_transversion_score(-config.alignment_mm_transversion);
-    }
+    explicit DBGAlignerConfig(const Config &config, const DeBruijnGraph &graph);
 
-    explicit DBGAlignerConfig(const std::array<std::array<int8_t, 128>, 128> &score_matrix,
-                              size_t gap_opening,
-                              size_t gap_extension)
-          : gap_opening_penalty(gap_opening),
-            gap_extension_penalty(gap_extension),
-            score_matrix_(score_matrix) { }
-
-    DBGAlignerConfig(std::array<std::array<int8_t, 128>, 128>&& score_matrix,
-                     size_t gap_opening,
-                     size_t gap_extension)
-          : gap_opening_penalty(gap_opening),
-            gap_extension_penalty(gap_extension),
-            score_matrix_(std::move(score_matrix)) { }
+    DBGAlignerConfig(ScoreMatrix&& score_matrix,
+                     int8_t gap_opening = -3,
+                     int8_t gap_extension = -1);
 
     template <class StringIt>
     score_t score_sequences(StringIt a_begin, StringIt a_end,
@@ -129,17 +107,7 @@ class DBGAlignerConfig {
         return score_sequences(begin, end, begin, end);
     }
 
-    void set_match_score(int8_t match_score);
-
-    void set_mismatch_transition_score(int8_t mm_transition);
-
-    void set_mismatch_transversion_score(int8_t mm_transversion);
-
-    int8_t get_match_score() const { return match_score_; }
-    int8_t get_mismatch_transition_score() const { return mm_transition_; }
-    int8_t get_mismatch_transversion_score() const { return mm_transversion_; }
-
-    const std::array<int8_t, 128>& get_row(char char_in_query) const {
+    const ScoreMatrixRow& get_row(char char_in_query) const {
         return score_matrix_[char_in_query];
     }
 
@@ -148,27 +116,26 @@ class DBGAlignerConfig {
     size_t min_seed_length = 1;
     size_t max_seed_length = std::numeric_limits<size_t>::max();
     size_t max_num_seeds_per_locus = 1;
-
-    // affine costs
-    int8_t gap_opening_penalty = -3;
-    int8_t gap_extension_penalty = -1;
-    // unit costs
-    // int8_t gap_opening_penalty = -1;
-    // int8_t gap_extension_penalty = -1;
-
     score_t min_cell_score = 0;
 
-  private:
-    // affine costs
-    int8_t mm_transition_ = -1;
-    int8_t mm_transversion_ = -2;
-    int8_t match_score_ = 2;
-    // unit costs
-    // int8_t mm_transition_ = -1;
-    // int8_t mm_transversion_ = -1;
-    // int8_t match_score_ = 1;
+    int8_t gap_opening_penalty;
+    int8_t gap_extension_penalty;
 
-    std::array<std::array<int8_t, 128>, 128> score_matrix_;
+    static ScoreMatrix scoring_matrix(const Config &config,
+                                      const DeBruijnGraph &graph);
+
+    // Protein matrices
+    static const ScoreMatrix score_matrix_blosum62;
+
+    static ScoreMatrix dna_scoring_matrix(int8_t match_score,
+                                          int8_t mm_transition,
+                                          int8_t mm_transversion);
+
+    static ScoreMatrix unit_scoring_matrix(int8_t match_score,
+                                           const std::string &alphabet);
+
+  private:
+    ScoreMatrix score_matrix_;
 };
 
 

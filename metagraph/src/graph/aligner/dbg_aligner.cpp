@@ -21,7 +21,7 @@ DBGAligner::DBGAligner(const DeBruijnGraph &graph,
                        const Extender &extend,
                        const PriorityFunction &priority_function)
       : DBGAligner(graph,
-                   DBGAlignerConfig(config),
+                   DBGAlignerConfig(config, graph),
                    seed,
                    extend,
                    priority_function) { }
