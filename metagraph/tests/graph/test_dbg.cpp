@@ -187,6 +187,45 @@ TYPED_TEST(DeBruijnGraphTest, AddSequences) {
     }
 }
 
+TYPED_TEST(DeBruijnGraphTest, traverse_string) {
+    for (size_t k = 2; k < 11; ++k) {
+        std::string sequence = "AGCTTCGAAGGCCTT";
+        auto graph = build_graph_batch<TypeParam>(k, { sequence });
+
+        for (size_t i = 0; i + k <= sequence.size(); ++i) {
+            auto cur_node = graph->kmer_to_node(sequence.substr(i, k));
+            ASSERT_NE(DeBruijnGraph::npos, cur_node);
+
+            std::string path;
+            graph->traverse(
+                cur_node,
+                sequence.data() + i + k, sequence.data() + sequence.size(),
+                [&](auto node) {
+                    path += graph->get_node_sequence(node).back();
+                }
+            );
+            EXPECT_EQ(std::string(sequence.begin() + i + k, sequence.end()), path);
+        }
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, traverse_string_stop_when_no_edge) {
+    size_t k = 4;
+    std::string sequence = "AGGCCTGTTTG";
+    auto graph = build_graph_batch<TypeParam>(k, { sequence });
+
+    std::string query = "CCCTGTTTG";
+    graph->traverse(
+        graph->kmer_to_node("AGGC"),
+        query.data() + 4,
+        query.data() + query.size(),
+        [&](auto node) {
+            EXPECT_FALSE(true) << node << " " << graph->get_node_sequence(node);
+        },
+        []() { return false; }
+    );
+}
+
 TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
     for (size_t k = 2; k <= 10; ++k) {
         auto empty = build_graph<TypeParam>(k);

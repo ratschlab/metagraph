@@ -177,6 +177,7 @@ include_directories(
   external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
+  external-libraries/nvbio/contrib/priority-deque
   ${INCLUDE_DIRS}
 )
 

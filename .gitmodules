@@ -46,3 +46,6 @@
 [submodule "metagraph/external-libraries/DYNAMIC"]
 	path = metagraph/external-libraries/DYNAMIC
 	url = https://github.com/karasikov/DYNAMIC.git
+[submodule "metagraph/external-libraries/nvbio"]
+	path = metagraph/external-libraries/nvbio
+	url = https://github.com/NVlabs/nvbio

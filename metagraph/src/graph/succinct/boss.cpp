@@ -639,134 +639,6 @@ size_t BOSS::indegree(node_index i) const {
 
 
 /**
- * Given a string str and a maximal number of edit operations
- * max_distance, this function returns all nodes with labels at most
- * max_distance many edits away from str.
- */
-std::vector<HitInfo> BOSS::index_fuzzy(const std::string &str,
-                                       size_t max_distance) const {
-    std::vector<HitInfo> result;
-    std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
-    std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits2;
-    uint64_t rl;
-    uint64_t ru;
-
-    // walk through pattern, thereby collecting possible partial matches
-    // once the end of the pattern is reached, add match to results
-
-    // init match/mismatch to first pattern position
-    TAlphabet s = encode(str[0]);
-    assert(alph_size == 6 && "This function is defined for DNA sequences only");
-    // TODO: review and test out this function for protein graphs
-    for (TAlphabet b = 1; b < 5; ++b) {
-        rl = F_[b] + 1 < W_->size()
-             ? succ_last(F_[b] + 1)
-             : W_->size();
-        ru = b + 1 < alph_size
-             ? F_[b + 1]
-             : W_->size() - 1;
-        //std::cout << "pushing: rl " << rl << " ru " << ru << " str_pos 1 max_distance " << (uint64_t) (b != s) << std::endl;
-        //std::cout << "s " << s << " b " << b << std::endl;
-        std::vector<uint64_t> tmp;
-        hits.push({ rl, ru, 1, 1, static_cast<uint64_t>(b != s),
-                    std::string(1, decode(b)), tmp });
-
-        // opening/extending a gap in the pattern starting with the first position
-        if (max_distance > 0) {
-            for (size_t p = 1; p < str.length() - 1; ++p) {
-                TAlphabet ss = encode(str[p]);
-                if ((p + (b != ss)) > max_distance)
-                    break;
-                hits.push({ rl, ru, p + 1, 1, p + (b != ss),
-                            std::string(p, 'd') + std::string(1, decode(b)), tmp });
-                //std::cout << "a) adding '-'" << std::endl;
-            }
-        }
-    }
-
-    // walk through pattern thereby extending all partial hits
-    while (hits.size() > 0) {
-        while (hits.size() > 0) {
-            HitInfo curr_hit(hits.top());
-            hits.pop();
-            //std::cout << "loaded: rl " << curr_hit.rl << " ru " << curr_hit.ru << " dist " << curr_hit.distance << std::endl;
-
-            if (curr_hit.str_pos < str.length()) {
-
-                // opening/extending a gap in the graph, leaving current pattern position unmatched
-                if (curr_hit.distance < max_distance) {
-                    hits2.push({ curr_hit.rl, curr_hit.ru, curr_hit.str_pos + 1,
-                                 curr_hit.graph_pos, curr_hit.distance + 1,
-                                 curr_hit.cigar + 'd', curr_hit.path });
-                    //std::cout << "b) " << curr_hit.cigar << " adding '-'" << std::endl;
-                }
-
-                s = encode(str[curr_hit.str_pos]);
-
-                // has the number of matches exceeded the node length?
-                // there are three possible scenarios for extension of the path:
-                //  1) pattern is shorter than the node length --> get an interval of matching nodes
-                //  2) pattern length exactly mathces the node length --> there is one correponding node
-                //  3) pattern is longer than the node length --> we append to a path
-                if (curr_hit.graph_pos >= k_) {
-                //    std::cout << "push back tp path " << curr_hit.rl << std::endl;
-                    curr_hit.path.push_back(curr_hit.rl);
-                }
-
-                // iterate through all possible extensions of current position
-                for (TAlphabet b = 1; b < 5; ++b) {
-                    if (curr_hit.distance <= max_distance) {
-
-                        // we cannot afford any more mismatches
-                        if ((curr_hit.distance + (b != s)) > max_distance)
-                            continue;
-
-                        // re-define range of nodes to check for outgoing nodes
-                        rl = std::min(succ_W(pred_last(curr_hit.rl - 1) + 1, b),
-                                      succ_W(pred_last(curr_hit.rl - 1) + 1, b + alph_size));
-                        ru = std::max(pred_W(curr_hit.ru, b),
-                                      pred_W(curr_hit.ru, b + alph_size));
-
-                        // the current range in W does not contain our next symbol
-                        if (rl >= W_->size() || ru >= W_->size() || rl > ru)
-                            continue;
-
-                        // update the SA range with the current symbol b
-                        rl = fwd(rl);
-                        ru = fwd(ru);
-
-                        // range is empty
-                        if ((rl == 0) && (ru == 0))
-                            continue;
-
-                        // add hit for extension in next step
-                        hits2.push({ rl, ru, curr_hit.str_pos + 1,
-                                     curr_hit.graph_pos + 1, curr_hit.distance + (b != s),
-                                     curr_hit.cigar + decode(b), curr_hit.path });
-
-                        // opening/extending a gap in the pattern, leaving current graph position unmatched
-                        // --> choose any available mismatching next edge
-                        if (b != s) {
-                            hits2.push({ rl, ru, curr_hit.str_pos,
-                                         curr_hit.graph_pos + 1, curr_hit.distance + 1,
-                                         curr_hit.cigar + 'i', curr_hit.path });
-                        }
-                    }
-                }
-            } else {
-                // collect results
-                //std::make_pair(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl, curr_hit.cigar));
-                result.push_back(curr_hit);
-            }
-        }
-        hits.swap(hits2);
-    }
-
-    return result;
-}
-
-
-/**
  * Given a node label kmer, this function returns the index
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
@@ -906,41 +778,9 @@ void BOSS::map_to_nodes(const std::string &sequence,
     }
 }
 
-std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence,
-                                           size_t kmer_size) const {
-    if (kmer_size == 0 || kmer_size > k_)
-        kmer_size = k_;
-
-    if (sequence.size() < kmer_size)
-        return {};
-
-    auto seq_encoded = encode(sequence);
-
+std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence) const {
     std::vector<node_index> indices;
-
-    for (size_t i = 0; i + kmer_size <= seq_encoded.size(); ++i) {
-        edge_index edge = index_range(seq_encoded.data() + i,
-                                      seq_encoded.data() + i + kmer_size).second;
-        node_index node = edge ? get_source_node(edge) : npos;
-        indices.push_back(node);
-
-        if (!edge || kmer_size != k_ || !indices.back())
-            continue;
-
-        // This boost is valid only if alignment length equals k since
-        // otherwise, when alignment length is less than k,
-        // the existence of an edge between node ending with preceeding
-        // aligned substring and node ending with the next aligned substring
-        // is not guaranteed. It may be a suffix of some other k-mer.
-        while (i + kmer_size < seq_encoded.size()) {
-            node = outgoing(node, seq_encoded[i + kmer_size]);
-            if (!node)
-                break;
-
-            indices.push_back(node);
-            i++;
-        }
-    }
+    map_to_nodes(sequence, [&](node_index node) { indices.emplace_back(node); });
 
     return indices;
 }
@@ -1106,26 +946,6 @@ bool BOSS::find(const std::string &sequence,
     }
 
     return num_kmers_missing <= max_kmers_missing;
-}
-
-std::vector<std::vector<HitInfo>> BOSS::align_fuzzy(const std::string &sequence,
-                                                    size_t alignment_length,
-                                                    size_t max_distance) const {
-    std::vector<std::vector<HitInfo>> hit_list;
-
-    if (alignment_length == 0) {
-
-    } else {
-        alignment_length = alignment_length < 2 ? 2 : alignment_length;
-        alignment_length = alignment_length < sequence.size()
-                                    ? alignment_length
-                                    : sequence.size();
-        for (size_t i = 0; i < sequence.size() - alignment_length + 1; ++i) {
-            std::string kmer(sequence.data() + i, sequence.data() + i + alignment_length);
-            hit_list.push_back(index_fuzzy(kmer, max_distance));
-        }
-    }
-    return hit_list;
 }
 
 /**

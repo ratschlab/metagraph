@@ -2381,3 +2381,296 @@ TEST(BOSS, call_outgoing_kmers_source) {
 
     EXPECT_EQ(ref, obs);
 }
+
+TEST(BOSS, CallNodesWithSuffix) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "GG";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix(
+        query.begin(), query.end(),
+        [&](auto node, auto length) {
+            EXPECT_EQ(query.size(), length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
+        }
+    );
+
+    std::multiset<DBGSuccinct::node_index> ref_nodes {
+        graph->kmer_to_node("AGGG"),
+        graph->kmer_to_node("CAGG"),
+        graph->kmer_to_node("GGGG")
+    };
+
+    std::multiset<std::string> ref_node_str {
+        "AGGG",
+        "CAGG",
+        "GGGG"
+    };
+
+    EXPECT_EQ(ref_nodes, nodes) << *graph;
+    EXPECT_EQ(ref_node_str, node_str);
+}
+
+TEST(BOSS, CallNodesWithSuffixMinLength) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "CAGC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix(
+        query.begin(), std::min(query.end(), query.begin() + 4),
+        [&](auto node, auto length) {
+            EXPECT_EQ(query.size(), length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
+        },
+        4
+    );
+
+    EXPECT_TRUE(nodes.empty());
+    EXPECT_TRUE(node_str.empty());
+}
+
+TEST(BOSS, CallNodesWithSuffixK) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "GGCC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix(
+        query.begin(), query.end(),
+        [&](auto node, auto length) {
+            EXPECT_EQ(query.size(), length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
+        }
+    );
+
+    std::multiset<DBGSuccinct::node_index> ref_nodes {
+        graph->kmer_to_node("GGCC")
+    };
+
+    std::multiset<std::string> ref_node_str {
+        "GGCC"
+    };
+
+    EXPECT_EQ(ref_nodes, nodes) << *graph;
+    EXPECT_EQ(ref_node_str, node_str);
+}
+
+TEST(BOSS, CallNodesWithSuffixKEarlyCutoff) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "GGCC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix(
+        query.begin(), std::min(query.end(), query.begin() + 2),
+        [&](auto node, auto length) {
+            EXPECT_EQ(2u, length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query.substr(0, 2), ins->substr(ins->size() - 2));
+        }
+    );
+
+    std::multiset<DBGSuccinct::node_index> ref_nodes {
+        graph->kmer_to_node("AGGG"),
+        graph->kmer_to_node("CAGG"),
+        graph->kmer_to_node("GGGG")
+    };
+
+    std::multiset<std::string> ref_node_str {
+        "AGGG",
+        "CAGG",
+        "GGGG"
+    };
+
+    EXPECT_EQ(ref_nodes, nodes) << *graph;
+    EXPECT_EQ(ref_node_str, node_str);
+}
+
+TEST(BOSS, CallNodesWithSuffixEarlyCutoffKMinusOne) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "GGGG";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix(
+        query.begin(), std::min(query.end(), query.begin() + 3),
+        [&](auto node, auto length) {
+            EXPECT_EQ(3u, length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query.substr(0, 3), ins->substr(ins->size() - 3));
+        }
+    );
+
+    std::multiset<DBGSuccinct::node_index> ref_nodes {
+        graph->kmer_to_node("AGGG"),
+        graph->kmer_to_node("GGGG")
+    };
+
+    std::multiset<std::string> ref_node_str {
+        "AGGG",
+        "GGGG"
+    };
+
+    EXPECT_EQ(ref_nodes, nodes) << *graph;
+    EXPECT_EQ(ref_node_str, node_str);
+}
+
+TEST(BOSS, CallNodesWithSuffixKMinusOne) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "GCC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix(
+        query.begin(), query.end(),
+        [&](auto node, auto length) {
+            EXPECT_EQ(query.size(), length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
+        }
+    );
+
+    std::multiset<DBGSuccinct::node_index> ref_nodes {
+        graph->kmer_to_node("GGCC")
+    };
+
+    std::multiset<std::string> ref_node_str {
+        "GGCC"
+    };
+
+    EXPECT_EQ(ref_nodes, nodes) << *graph;
+    EXPECT_EQ(ref_node_str, node_str);
+}
+
+TEST(BOSS, CallNodesWithSuffixKMinusOneBeginning) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "GGC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix(
+        query.begin(), query.end(),
+        [&](auto node, auto length) {
+            EXPECT_EQ(query.size(), length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
+        }
+    );
+
+    EXPECT_TRUE(nodes.empty());
+    EXPECT_TRUE(node_str.empty());
+}
+
+TEST(BOSS, CallNodesWithSuffixMinusTwoBeginning) {
+    size_t k = 4;
+    std::string reference = "TGCCCAGGGGTC";
+
+    std::string query = "TG";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix(
+        query.begin(), query.end(),
+        [&](auto node, auto length) {
+            EXPECT_EQ(query.size(), length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
+        }
+    );
+
+    EXPECT_TRUE(nodes.empty());
+    EXPECT_TRUE(node_str.empty());
+}
+
+TEST(BOSS, CallNodesWithSuffixMultipleOut) {
+    size_t k = 3;
+    std::vector<std::string> sequences {
+        "GGGGGGATGTAG",
+        "GGGGGGATGCCTAATTAA"
+    };
+
+    std::string query = "TGC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(sequences[0]);
+    graph->add_sequence(sequences[1]);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> ref_nodes { graph->kmer_to_node("TGC") };
+    std::multiset<std::string> ref_node_str { "TGC" };
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+
+    graph->call_nodes_with_suffix(
+        query.begin(), query.end(),
+        [&](auto node, auto length) {
+            EXPECT_EQ(query.size(), length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query, ins->substr(0, length));
+        }
+    );
+
+    EXPECT_EQ(ref_nodes, nodes) << *graph;
+    EXPECT_EQ(ref_node_str, node_str) << *graph;
+}

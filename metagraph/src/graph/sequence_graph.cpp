@@ -50,6 +50,26 @@ bool DeBruijnGraph::operator==(const DeBruijnGraph &) const {
     return false;
 }
 
+void DeBruijnGraph::traverse(node_index start,
+                             const char* begin,
+                             const char* end,
+                             const std::function<void(node_index)> &callback,
+                             const std::function<bool()> &terminate) const {
+    assert(start != npos);
+    assert(end >= begin);
+    if (terminate())
+        return;
+
+    for (; begin != end && !terminate(); ++begin) {
+        start = traverse(start, *begin);
+
+        if (start == npos)
+            return;
+
+        callback(start);
+    }
+}
+
 void DeBruijnGraph::call_nodes(const std::function<void(node_index)> &callback,
                                const std::function<bool()> &stop_early) const {
     const auto nnodes = num_nodes();

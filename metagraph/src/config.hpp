@@ -41,6 +41,7 @@ class Config {
     bool greedy_brwt = false;
     bool separately = false;
     bool call_bubbles = false;
+    bool map_sequences = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
@@ -64,6 +65,25 @@ class Config {
     unsigned int min_unitig_median_kmer_abundance = 1;
     unsigned int fallback_abundance_cutoff = 1;
     unsigned int port = 5555;
+
+    // Alignment options
+    bool alignment_seed_unimems = false;
+    bool alignment_edit_distance = false;
+
+    int8_t alignment_match_score = 2;
+    int8_t alignment_mm_transition = 1;
+    int8_t alignment_mm_transversion = 2;
+    int8_t alignment_gap_opening_penalty = 3;
+    int8_t alignment_gap_extension_penalty = 1;
+
+    int64_t alignment_min_cell_score = 0;
+    int64_t alignment_min_path_score = 0;
+
+    size_t alignment_queue_size = 50;
+    size_t alignment_num_alternative_paths = 1;
+    size_t alignment_min_seed_length = 0;
+    size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
+    size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
     double discovery_fraction = 1.0;
     double label_mask_out_fraction = 0.0;

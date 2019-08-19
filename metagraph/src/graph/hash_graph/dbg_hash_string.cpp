@@ -272,6 +272,17 @@ std::vector<std::string> DBGHashString::encode_sequence(const std::string &seque
 
             it = std::next(jt);
         }
+    #elif _PROTEIN_GRAPH
+        results.push_back(sequence);
+
+        std::replace_if(results[0].begin(), results[0].end(),
+                        [&](char c) {
+                            return alphabet_.find(c) == std::string::npos;
+                        },
+                        'X');
+
+        if (results[0].size() < k_)
+            return {};
     #else
         results.push_back(sequence);
 
@@ -280,6 +291,9 @@ std::vector<std::string> DBGHashString::encode_sequence(const std::string &seque
                             return alphabet_.find(c) == std::string::npos;
                         },
                         'N');
+
+        if (results[0].size() < k_)
+            return {};
     #endif
 
     return results;

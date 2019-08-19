@@ -159,8 +159,38 @@ Config::Config(int argc, const char *argv[]) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
+        } else if (!strcmp(argv[i], "--map")) {
+            map_sequences = true;
+        } else if (!strcmp(argv[i], "--align-seed-unimems")) {
+            alignment_seed_unimems = true;
+        } else if (!strcmp(argv[i], "--align-edit-distance")) {
+            alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-queue-size")) {
+            alignment_queue_size = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-match-score")) {
+            alignment_match_score = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-mm-transition-penalty")) {
+            alignment_mm_transition = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-mm-transversion-penalty")) {
+            alignment_mm_transversion = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-gap-open-penalty")) {
+            alignment_gap_opening_penalty = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-gap-extension-penalty")) {
+            alignment_gap_extension_penalty = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-alternative-alignments")) {
+            alignment_num_alternative_paths = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-min-cell-score")) {
+            alignment_min_cell_score = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-min-path-score")) {
+            alignment_min_path_score = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-min-seed-length")) {
+            alignment_min_seed_length = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-max-seed-length")) {
+            alignment_max_seed_length = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-max-num-seeds-per-locus")) {
+            alignment_max_num_seeds_per_locus = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -309,6 +339,19 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
+    if (identity == ALIGN &&
+            (alignment_mm_transition < 0
+            || alignment_mm_transversion < 0
+            || alignment_gap_opening_penalty < 0
+            || alignment_gap_extension_penalty < 0)) {
+        std::cerr << "Error: alignment penalties should be given as positive integers"
+                  << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (count_kmers || query_presence)
+        map_sequences = true;
+
     if ((identity == QUERY || identity == SERVER_QUERY) && infbase.empty())
         print_usage_and_exit = true;
 
@@ -376,6 +419,11 @@ Config::Config(int argc, const char *argv[]) {
     if (min_count >= max_count) {
         std::cerr << "Error: max-count must be greater than min-count" << std::endl;
         print_usage(argv[0], identity);
+    }
+
+    if (alignment_max_seed_length < alignment_min_seed_length) {
+        std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
+        print_usage_and_exit = true;
     }
 
     if (outfbase.size()
@@ -604,15 +652,37 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
-            fprintf(stderr, "Available options for align:\n");
-            fprintf(stderr, "\t-r --reverse \t\t\talign reverse complement sequences as well [off]\n");
-            fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence [off]\n");
-            fprintf(stderr, "\t   --kmer-mapping-mode \t\tlevel of heuristics to use for unmapped k-mers (0, 1, or 2) [0]\n");
+            fprintf(stderr, "\t-r --reverse \t\t\tmap/align reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
+            fprintf(stderr, "\t         \t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
+            fprintf(stderr, "\t-k --kmer-length [INT]\t\tlength of mapped k-mers (at most graph's k) [k]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of k-mers required to count sequence [1.0]\n");
-            fprintf(stderr, "\t   --filter-present \t\treport only present input sequences [off]\n");
-            fprintf(stderr, "\t   --count-kmers \t\tquery the number of k-mers discovered [off]\n");
-            fprintf(stderr, "\t   --align-length [INT]\t\tlength of subsequences to align [k]\n");
-            fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
+            fprintf(stderr, "\t   --kmer-mapping-mode \t\tlevel of heuristics to use for mapping k-mers (0, 1, or 2) [0]\n");
+            fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
+            fprintf(stderr, "\n");
+            // fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "Available options for alignment:\n");
+            fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximum exact matches in unitigs as seeds [off]\n");
+            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
+            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
+            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [1]\n");
+            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [2]\n");
+            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [3]\n");
+            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [1]\n");
+            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [50]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
+            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
+            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");
         } break;
         case COMPARE: {
             fprintf(stderr, "Usage: %s compare [options] GRAPH1 GRAPH2\n\n", prog_name.c_str());

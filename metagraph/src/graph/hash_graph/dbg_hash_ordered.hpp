@@ -40,6 +40,18 @@ class DBGHashOrdered : public DeBruijnGraph {
         hash_dbg_->map_to_nodes_sequentially(begin, end, callback, terminate);
     }
 
+    // Given a starting node, traverse the graph forward following the edge
+    // sequence delimited by begin and end. Terminate the traversal if terminate()
+    // returns true, or if the sequence is exhausted.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    void traverse(node_index start,
+                  const char* begin,
+                  const char* end,
+                  const std::function<void(node_index)> &callback,
+                  const std::function<bool()> &terminate = [](){ return false; }) const {
+        hash_dbg_->traverse(start, begin, end, callback, terminate);
+    }
+
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const {
         hash_dbg_->call_outgoing_kmers(node, callback);
