@@ -386,7 +386,7 @@ class BOSS {
     // file dump extension
     static constexpr auto kExtension = ".dbg";
 
-    const KmerExtractor kmer_extractor_;
+    const KmerExtractorBOSS kmer_extractor_;
     const size_t bits_per_char_W_;
 
     // k-mer size

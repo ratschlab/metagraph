@@ -117,11 +117,10 @@ void recover_source_dummy_nodes(size_t k,
                           num_threads);
 }
 
-template <class KmerExtractor>
-inline std::vector<typename KmerExtractor::TAlphabet>
+inline std::vector<KmerExtractorBOSS::TAlphabet>
 encode_filter_suffix_boss(const std::string &filter_suffix) {
-    KmerExtractor kmer_extractor;
-    std::vector<typename KmerExtractor::TAlphabet> filter_suffix_encoded;
+    KmerExtractorBOSS kmer_extractor;
+    std::vector<typename KmerExtractorBOSS::TAlphabet> filter_suffix_encoded;
     std::transform(
         filter_suffix.begin(), filter_suffix.end(),
         std::back_inserter(filter_suffix_encoded),
@@ -151,12 +150,12 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          bool verbose = false)
           : kmer_storage_(k + 1,
                           canonical_mode,
-                          encode_filter_suffix_boss<KmerExtractor>(filter_suffix),
+                          encode_filter_suffix_boss(filter_suffix),
                           num_threads,
                           memory_preallocated,
                           verbose) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
-            kmer_storage_.insert_dummy(std::vector<KmerExtractor::TAlphabet>(k + 1, BOSS::kSentinelCode));
+            kmer_storage_.insert_dummy(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
 
@@ -211,54 +210,52 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 template <template <typename KMER> class KmerContainer, typename... Args>
 static std::unique_ptr<IBOSSChunkConstructor>
 initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
-    using Extractor = KmerExtractor;
-
-    if ((k + 1) * Extractor::bits_per_char <= 64) {
+    if ((k + 1) * KmerExtractorBOSS::bits_per_char <= 64) {
         return std::unique_ptr<IBOSSChunkConstructor>(
-            new BOSSChunkConstructor<KmerContainer<typename Extractor::Kmer64>>(k, args...)
+            new BOSSChunkConstructor<KmerContainer<KmerExtractorBOSS::Kmer64>>(k, args...)
         );
-    } else if ((k + 1) * Extractor::bits_per_char <= 128) {
+    } else if ((k + 1) * KmerExtractorBOSS::bits_per_char <= 128) {
         return std::unique_ptr<IBOSSChunkConstructor>(
-            new BOSSChunkConstructor<KmerContainer<typename Extractor::Kmer128>>(k, args...)
+            new BOSSChunkConstructor<KmerContainer<KmerExtractorBOSS::Kmer128>>(k, args...)
         );
     } else {
         return std::unique_ptr<IBOSSChunkConstructor>(
-            new BOSSChunkConstructor<KmerContainer<typename Extractor::Kmer256>>(k, args...)
+            new BOSSChunkConstructor<KmerContainer<KmerExtractorBOSS::Kmer256>>(k, args...)
         );
     }
 }
 
 template <typename KMER>
-using KmerCounterVector = KmerCounter<KMER, KmerExtractor, uint8_t,
+using KmerCounterVector = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
                                       Vector<std::pair<KMER, uint8_t>>,
                                       utils::NoCleanup>;
 template <typename KMER>
-using KmerCounterVectorClean = KmerCounter<KMER, KmerExtractor, uint8_t,
+using KmerCounterVectorClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
                                            Vector<std::pair<KMER, uint8_t>>,
                                            utils::DummyKmersCleaner>;
 template <typename KMER>
-using KmerCollectorVector = KmerCollector<KMER, KmerExtractor,
+using KmerCollectorVector = KmerCollector<KMER, KmerExtractorBOSS,
                                           Vector<KMER>,
                                           utils::NoCleanup>;
 template <typename KMER>
-using KmerCollectorVectorClean = KmerCollector<KMER, KmerExtractor,
+using KmerCollectorVectorClean = KmerCollector<KMER, KmerExtractorBOSS,
                                                Vector<KMER>,
                                                utils::DummyKmersCleaner>;
 
 template <typename KMER>
-using KmerCounterDeque = KmerCounter<KMER, KmerExtractor, uint8_t,
+using KmerCounterDeque = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
                                      utils::DequeStorage<std::pair<KMER, uint8_t>>,
                                      utils::NoCleanup>;
 template <typename KMER>
-using KmerCounterDequeClean = KmerCounter<KMER, KmerExtractor, uint8_t,
+using KmerCounterDequeClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
                                           utils::DequeStorage<std::pair<KMER, uint8_t>>,
                                           utils::DummyKmersCleaner>;
 template <typename KMER>
-using KmerCollectorDeque = KmerCollector<KMER, KmerExtractor,
+using KmerCollectorDeque = KmerCollector<KMER, KmerExtractorBOSS,
                                          utils::DequeStorage<KMER>,
                                          utils::NoCleanup>;
 template <typename KMER>
-using KmerCollectorDequeClean = KmerCollector<KMER, KmerExtractor,
+using KmerCollectorDequeClean = KmerCollector<KMER, KmerExtractorBOSS,
                                               utils::DequeStorage<KMER>,
                                               utils::DummyKmersCleaner>;
 

@@ -933,10 +933,10 @@ int main(int argc, const char *argv[]) {
                 if (config->suffix.size()) {
                     suffixes = { config->suffix };
                 } else {
-                    suffixes = KmerExtractor::generate_suffixes(config->suffix_len);
+                    suffixes = KmerExtractorBOSS::generate_suffixes(config->suffix_len);
                 }
 
-                BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), boss_graph->get_k());
+                BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), boss_graph->get_k());
 
                 //one pass per suffix
                 for (const std::string &suffix : suffixes) {
@@ -1584,7 +1584,7 @@ int main(int argc, const char *argv[]) {
                 assert(config->infbase.size());
 
                 const auto sorted_suffixes = config->graph_type == Config::GraphType::SUCCINCT
-                        ? KmerExtractor().generate_suffixes(config->suffix_len)
+                        ? KmerExtractorBOSS().generate_suffixes(config->suffix_len)
                         : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
 
                 for (const std::string &suffix : sorted_suffixes) {

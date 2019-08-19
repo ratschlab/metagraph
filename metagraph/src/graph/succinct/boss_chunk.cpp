@@ -16,12 +16,12 @@ inline const KMER& get_kmer(const KMER &kmer) {
     return kmer;
 }
 
-static_assert(utils::is_pair<std::pair<KmerExtractor::Kmer64,uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractor::Kmer128,uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractor::Kmer256,uint8_t>>::value);
-static_assert(!utils::is_pair<KmerExtractor::Kmer64>::value);
-static_assert(!utils::is_pair<KmerExtractor::Kmer128>::value);
-static_assert(!utils::is_pair<KmerExtractor::Kmer256>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64,uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128,uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer256,uint8_t>>::value);
+static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer64>::value);
+static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer128>::value);
+static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer256>::value);
 
 //TODO cleanup
 // k is node length
@@ -136,9 +136,9 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const Vector<KMER> &kmers)
     initialize_chunk(alph_size_, kmers.begin(), kmers.end(), k_, &W_, &last_, &F_);
 }
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<KmerExtractor::Kmer64>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<KmerExtractor::Kmer128>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<KmerExtractor::Kmer256>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<KmerExtractorBOSS::Kmer64>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<KmerExtractorBOSS::Kmer128>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<KmerExtractorBOSS::Kmer256>&);
 
 template <typename KMER>
 BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const utils::DequeStorage<KMER> &kmers)
@@ -150,9 +150,9 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const utils::DequeStorage<KMER>
     initialize_chunk(alph_size_, kmers.begin(), kmers.end(), k_, &W_, &last_, &F_);
 }
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<KmerExtractor::Kmer64>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<KmerExtractor::Kmer128>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<KmerExtractor::Kmer256>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<KmerExtractorBOSS::Kmer64>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<KmerExtractorBOSS::Kmer128>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<KmerExtractorBOSS::Kmer256>&);
 
 template <typename KMER, typename COUNT>
 BOSS::Chunk::Chunk(uint64_t alph_size,
@@ -167,9 +167,9 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
     initialize_chunk(alph_size_, kmers.begin(), kmers.end(), k_, &W_, &last_, &F_, &weights_);
 }
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<std::pair<KmerExtractor::Kmer64, uint8_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<std::pair<KmerExtractor::Kmer128, uint8_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<std::pair<KmerExtractor::Kmer256, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>> &, uint8_t);
 
 template <typename KMER, typename COUNT>
 BOSS::Chunk::Chunk(uint64_t alph_size,
@@ -184,9 +184,9 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
     initialize_chunk(alph_size_, kmers.begin(), kmers.end(), k_, &W_, &last_, &F_, &weights_);
 }
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<std::pair<KmerExtractor::Kmer64, uint8_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<std::pair<KmerExtractor::Kmer128, uint8_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<std::pair<KmerExtractor::Kmer256, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, const utils::DequeStorage<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>> &, uint8_t);
 
 void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     assert(W < 2 * alph_size_);
