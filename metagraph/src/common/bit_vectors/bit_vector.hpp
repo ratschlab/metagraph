@@ -76,7 +76,7 @@ class bit_vector_dyn : public bit_vector {
     explicit bit_vector_dyn(const sdsl::bit_vector &vector);
     bit_vector_dyn(std::initializer_list<bool> init);
 
-    virtual std::unique_ptr<bit_vector> copy() const override;
+    std::unique_ptr<bit_vector> copy() const override;
 
     uint64_t rank1(uint64_t id) const override;
     uint64_t select1(uint64_t id) const override;
@@ -122,7 +122,7 @@ class bit_vector_stat : public bit_vector {
     bit_vector_stat& operator=(const bit_vector_stat &other);
     bit_vector_stat& operator=(bit_vector_stat&& other) noexcept;
 
-    virtual std::unique_ptr<bit_vector> copy() const override;
+    std::unique_ptr<bit_vector> copy() const override;
 
     uint64_t rank1(uint64_t id) const override;
     uint64_t select1(uint64_t id) const override;
@@ -145,7 +145,7 @@ class bit_vector_stat : public bit_vector {
 
     sdsl::bit_vector to_vector() const override { return vector_; }
 
-    virtual void add_to(sdsl::bit_vector *other) const override;
+    void add_to(sdsl::bit_vector *other) const override;
 
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const override;
@@ -181,7 +181,7 @@ class bit_vector_sd : public bit_vector {
     bit_vector_sd& operator=(const bit_vector_sd &other);
     bit_vector_sd& operator=(bit_vector_sd&& other) noexcept;
 
-    virtual std::unique_ptr<bit_vector> copy() const override;
+    std::unique_ptr<bit_vector> copy() const override;
 
     uint64_t rank1(uint64_t id) const override;
     uint64_t select0(uint64_t id) const;
@@ -236,7 +236,7 @@ class bit_vector_rrr : public bit_vector {
     bit_vector_rrr& operator=(const bit_vector_rrr &other);
     bit_vector_rrr& operator=(bit_vector_rrr&& other) noexcept;
 
-    virtual std::unique_ptr<bit_vector> copy() const override;
+    std::unique_ptr<bit_vector> copy() const override;
 
     uint64_t rank1(uint64_t id) const override;
     uint64_t select0(uint64_t id) const;
