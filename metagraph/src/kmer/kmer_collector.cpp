@@ -239,7 +239,10 @@ void KmerStorage<KMER, KmerExtractor, Container>::join() {
                                SortedSet<KMER, CONTAINER<KMER>, CLEANUP>>; \
     template class KmerStorage<KMER, \
                                KMER_EXTRACTOR, \
-                               SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>, CLEANUP>>;
+                               SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>, CLEANUP>>; \
+    template class KmerStorage<KMER, \
+                               KMER_EXTRACTOR, \
+                               SortedMultiset<KMER, uint32_t, CONTAINER<std::pair<KMER, uint32_t>>, CLEANUP>>;
 
 
 INSTANTIATE_KMER_STORAGE(KmerExtractor, KmerExtractor::Kmer64, Vector, utils::NoCleanup)
@@ -263,6 +266,6 @@ INSTANTIATE_KMER_STORAGE(KmerExtractor, KmerExtractor::Kmer64, utils::DequeStora
 INSTANTIATE_KMER_STORAGE(KmerExtractor, KmerExtractor::Kmer128, utils::DequeStorage, utils::DummyKmersCleaner)
 INSTANTIATE_KMER_STORAGE(KmerExtractor, KmerExtractor::Kmer256, utils::DequeStorage, utils::DummyKmersCleaner)
 
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, utils::DequeStorage, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, utils::DequeStorage, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, utils::DequeStorage, utils::NoCleanup)
+// INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, utils::DequeStorage, utils::NoCleanup)
+// INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, utils::DequeStorage, utils::NoCleanup)
+// INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, utils::DequeStorage, utils::NoCleanup)
