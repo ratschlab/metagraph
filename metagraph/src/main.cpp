@@ -1312,38 +1312,43 @@ int main(int argc, const char *argv[]) {
                     }
                 );
 
-                sdsl::int_vector<> kmer_counts(graph->num_nodes() + 1, 0, kBitsPerCount);
+                if (config->count_kmers) {
+                    sdsl::int_vector<> kmer_counts(graph->num_nodes() + 1, 0, kBitsPerCount);
 
-                parse_sequences(files, *config, timer,
-                    [&graph,&kmer_counts](std::string&& seq) {
-                        graph->map_to_nodes(seq, [&](uint64_t i) {
-                            if (i > 0) {
-                                assert(i <= graph->num_nodes());
-                                kmer_counts[i]++;
-                            }
-                        });
-                    },
-                    [&graph,&kmer_counts](std::string&& kmer, uint32_t count) {
-                        graph->map_to_nodes(kmer, [&](uint64_t i) {
-                            if (i > 0) {
-                                assert(i <= graph->num_nodes());
-                                kmer_counts[i] += count;
-                            }
-                        });
-                    },
-                    [&graph,&kmer_counts](const auto &loop) {
-                        loop([&graph,&kmer_counts](const auto &seq) {
+                    parse_sequences(files, *config, timer,
+                        [&graph,&kmer_counts](std::string&& seq) {
                             graph->map_to_nodes(seq, [&](uint64_t i) {
                                 if (i > 0) {
                                     assert(i <= graph->num_nodes());
                                     kmer_counts[i]++;
                                 }
                             });
-                        });
-                    }
-                );
+                        },
+                        [&graph,&kmer_counts](std::string&& kmer, uint32_t count) {
+                            graph->map_to_nodes(kmer, [&](uint64_t i) {
+                                if (i > 0) {
+                                    assert(i <= graph->num_nodes());
+                                    kmer_counts[i] += count;
+                                }
+                            });
+                        },
+                        [&graph,&kmer_counts](const auto &loop) {
+                            loop([&graph,&kmer_counts](const auto &seq) {
+                                graph->map_to_nodes(seq, [&](uint64_t i) {
+                                    if (i > 0) {
+                                        assert(i <= graph->num_nodes());
+                                        kmer_counts[i]++;
+                                    }
+                                });
+                            });
+                        }
+                    );
 
-                dynamic_cast<IWeighted<uint64_t, sdsl::int_vector<>>&>(*graph).set_weights(std::move(kmer_counts));
+                    auto *weighted_graph
+                        = dynamic_cast<IWeighted<uint64_t, sdsl::int_vector<>>*>(graph.get());
+                    assert(weighted_graph);
+                    weighted_graph->set_weights(std::move(kmer_counts));
+                }
             }
 
             if (config->verbose)
