@@ -247,8 +247,6 @@ Config::Config(int argc, const char *argv[]) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
-        } else if (!strcmp(argv[i], "--internal")) {
-            internal = true;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
             suffix_len = atoi(get_value(i++));
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
@@ -687,8 +685,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case COMPARE: {
             fprintf(stderr, "Usage: %s compare [options] GRAPH1 GRAPH2\n\n", prog_name.c_str());
 
-            fprintf(stderr, "Available options for compare:\n");
-            fprintf(stderr, "\t   --internal \t\tcompare internal graph representations\n");
+            // fprintf(stderr, "Available options for compare:\n");
+            // fprintf(stderr, "\t   --internal \t\tcompare internal graph representations\n");
         } break;
         case MERGE: {
             fprintf(stderr, "Usage: %s merge -o <graph_basename> [options] GRAPH1 GRAPH2 [[GRAPH3] ...]\n\n", prog_name.c_str());

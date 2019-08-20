@@ -34,7 +34,6 @@ class Config {
     bool fast = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
-    bool internal = false;
     bool clear_dummy = false;
     bool count_dummy = false;
     bool canonical_mode = false;

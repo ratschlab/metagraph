@@ -122,7 +122,6 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
     return std::shared_ptr<Graph> { graph };
 }
 
-template <class DefaultGraphType = DBGSuccinct>
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     auto graph_type = parse_graph_extension(filename);
     switch (graph_type) {
@@ -1730,15 +1729,13 @@ int main(int argc, const char *argv[]) {
         case Config::COMPARE: {
             assert(files.size());
 
-            std::cout << "Opening file                " << files.at(0) << std::endl;
-            auto graph = load_critical_graph_from_file(files.at(0));
+            std::cout << "Loading graph                " << files.at(0) << std::endl;
+            auto graph = load_critical_dbg(files.at(0));
 
             for (size_t f = 1; f < files.size(); ++f) {
-                std::cout << "Opening file for comparison " << files[f] << std::endl;
-                auto second = load_critical_graph_from_file(files[f]);
-                if (config->internal
-                        ? graph->equals_internally(*second, config->verbose)
-                        : *graph == *second) {
+                std::cout << "Loading graph for comparison " << files[f] << std::endl;
+                auto second = load_critical_dbg(files[f]);
+                if (*graph == *second) {
                     std::cout << "Graphs are identical" << std::endl;
                 } else {
                     std::cout << "Graphs are not identical" << std::endl;

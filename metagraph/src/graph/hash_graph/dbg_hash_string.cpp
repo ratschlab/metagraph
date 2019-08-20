@@ -237,21 +237,24 @@ bool DBGHashString::load(const std::string &filename) {
 }
 
 bool DBGHashString::operator==(const DeBruijnGraph &other) const {
-    if (!dynamic_cast<const DBGHashString*>(&other)) {
+    if (get_k() != other.get_k()
+            || num_nodes() != other.num_nodes()
+            || is_canonical_mode() != other.is_canonical_mode())
+        return false;
+
+    if (!dynamic_cast<const DBGHashString*>(&other))
         throw std::runtime_error("Not implemented");
-        return false;
-    }
 
-    const auto& other_hash = *dynamic_cast<const DBGHashString*>(&other);
-    if (k_ != other_hash.k_)
-        return false;
+    const auto &other_hash = *dynamic_cast<const DBGHashString*>(&other);
+    if (this == &other_hash)
+        return true;
 
-    for (const auto &kmer : kmers_) {
-        if (other_hash.indices_.find(kmer) == other_hash.indices_.end())
-            return false;
-    }
+    assert(k_ == other_hash.k_);
+    assert(indices_.size() == other_hash.indices_.size());
+    assert(kmers_.size() == other_hash.kmers_.size());
+    assert(canonical_mode_ == other_hash.canonical_mode_);
 
-    return true;
+    return kmers_ == other_hash.kmers_;
 }
 
 std::vector<std::string> DBGHashString::encode_sequence(const std::string &sequence) const {

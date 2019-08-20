@@ -80,21 +80,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
 
     std::string file_extension() const { return kExtension; }
 
-    bool operator==(const DeBruijnGraph &other) const {
-        if (!dynamic_cast<const DBGHashOrderedImpl<KMER>*>(&other))
-            throw std::runtime_error("Not implemented");
-
-        const auto& other_hash = *dynamic_cast<const DBGHashOrderedImpl<KMER>*>(&other);
-        if (k_ != other_hash.k_ || canonical_mode_ != other_hash.canonical_mode_)
-            return false;
-
-        for (const auto &kmer : kmers_) {
-            if (other_hash.kmers_.find(kmer) == other_hash.kmers_.end())
-                return false;
-        }
-
-        return true;
-    }
+    bool operator==(const DeBruijnGraph &other) const;
 
     const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
@@ -104,7 +90,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     }
 
     node_index get_index(const Kmer &kmer) const;
-    Kmer get_kmer(node_index node) const;
+    const Kmer& get_kmer(node_index node) const;
 
     size_t k_;
     bool canonical_mode_;
@@ -357,6 +343,28 @@ bool DBGHashOrderedImpl<KMER>::load(const std::string &filename) {
 }
 
 template <typename KMER>
+bool DBGHashOrderedImpl<KMER>::operator==(const DeBruijnGraph &other) const {
+    if (get_k() != other.get_k()
+            || is_canonical_mode() != other.is_canonical_mode()
+            || num_nodes() != other.num_nodes())
+        return false;
+
+    if (!dynamic_cast<const DBGHashOrderedImpl*>(&other))
+        throw std::runtime_error("Not implemented");
+
+    const auto &other_hash = *dynamic_cast<const DBGHashOrderedImpl*>(&other);
+
+    if (this == &other_hash)
+        return true;
+
+    assert(k_ == other_hash.k_);
+    assert(canonical_mode_ == other_hash.canonical_mode_);
+    assert(kmers_.size() == other_hash.kmers_.size());
+
+    return kmers_ == other_hash.kmers_;
+}
+
+template <typename KMER>
 typename DBGHashOrderedImpl<KMER>::node_index
 DBGHashOrderedImpl<KMER>::get_index(const Kmer &kmer) const {
     auto find = kmers_.find(kmer);
@@ -367,12 +375,12 @@ DBGHashOrderedImpl<KMER>::get_index(const Kmer &kmer) const {
 }
 
 template <typename KMER>
-KMER DBGHashOrderedImpl<KMER>::get_kmer(node_index node) const {
+const KMER& DBGHashOrderedImpl<KMER>::get_kmer(node_index node) const {
     assert(node > 0);
     assert(node <= kmers_.size());
-    assert(node == get_index(*(kmers_.begin() + (node - 1))));
+    assert(node == get_index(*(kmers_.nth(node - 1))));
 
-    return *(kmers_.begin() + (node - 1));
+    return *(kmers_.nth(node - 1));
 }
 
 

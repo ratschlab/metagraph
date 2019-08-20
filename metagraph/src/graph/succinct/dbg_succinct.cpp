@@ -695,13 +695,29 @@ DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) con
 }
 
 bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
+    if (get_k() != other.get_k()
+            || num_nodes() != other.num_nodes()
+            || is_canonical_mode() != other.is_canonical_mode())
+        return false;
+
     if (dynamic_cast<const DBGSuccinct*>(&other)) {
-        const auto& other_succ = *dynamic_cast<const DBGSuccinct*>(&other);
-        if (boss_graph_.get() == other_succ.boss_graph_.get())
+        const auto &other_succ = *dynamic_cast<const DBGSuccinct*>(&other);
+
+        if (this == &other_succ)
             return true;
 
-        if (!boss_graph_.get() || !other_succ.boss_graph_.get())
+        // only one of the mask vectors is defined
+        if (bool(valid_edges_.get()) != bool(other_succ.valid_edges_.get()))
             return false;
+
+        // different mask vectors
+        if (valid_edges_.get() && *valid_edges_ != *other_succ.valid_edges_)
+            return false;
+
+        // TODO: what if graphs have same real nodes, different
+        // sets of dummy nodes but they all are masked out?
+
+        assert(boss_graph_.get() && other_succ.boss_graph_.get());
 
         return boss_graph_->equals_internally(*other_succ.boss_graph_, false);
     }
