@@ -66,7 +66,7 @@ class BoundedPriorityQueue {
   private:
     size_t max_size_;
     MinMaxHeap minmaxheap_;
-    static constexpr Compare compare_;
+    static constexpr Compare compare_ = Compare();
 };
 
 #endif //  __BOUNDED_PRIORITY_QUEUE_HPP__

@@ -252,7 +252,7 @@ bool DBGHashString::operator==(const DeBruijnGraph &other) const {
     assert(k_ == other_hash.k_);
     assert(indices_.size() == other_hash.indices_.size());
     assert(kmers_.size() == other_hash.kmers_.size());
-    assert(canonical_mode_ == other_hash.canonical_mode_);
+    assert(is_canonical_mode() == other_hash.is_canonical_mode());
 
     return kmers_ == other_hash.kmers_;
 }
