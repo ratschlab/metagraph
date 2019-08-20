@@ -374,8 +374,10 @@ Config::Config(int argc, const char *argv[]) {
 
     if ((identity == ANNOTATE || identity == ANNOTATE_COORDINATES)
             && outfbase.empty())
-        outfbase = utils::remove_suffix(infbase, ".orhashdbg", ".bitmapdbg", ".dbg");
-
+        outfbase = utils::remove_suffix(infbase, ".dbg",
+                                                 ".orhashdbg",
+                                                 ".hashstrdbg",
+                                                 ".bitmapdbg");
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
@@ -516,12 +518,19 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
 Config::GraphType Config::string_to_graphtype(const std::string &string) {
     if (string == "succinct") {
         return GraphType::SUCCINCT;
+
     } else if (string == "hash") {
         return GraphType::HASH;
+
+    } else if (string == "hashpacked") {
+        return GraphType::HASH_PACKED;
+
     } else if (string == "hashstr") {
         return GraphType::HASH_STR;
+
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
+
     } else {
         std::cerr << "Error: unknown graph representation" << std::endl;
         exit(1);
@@ -540,14 +549,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available commands:\n");
 
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
-            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
 
             fprintf(stderr, "\tclean\t\tclean an existing graph and extract sequences from it\n");
             fprintf(stderr, "\t\t\tin fast[a|q] formats\n\n");
 
             fprintf(stderr, "\textend\t\textend an existing graph with new sequences from\n");
-            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats\n\n");
 
             fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
@@ -558,8 +565,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tcompare\t\tcheck whether two given graphs are identical\n\n");
 
-            fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files\n");
-            fprintf(stderr, "\t\t\tto graph\n\n");
+            fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files to graph\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
 
@@ -605,7 +611,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr [succinct]\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashpacked / hashstr [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");

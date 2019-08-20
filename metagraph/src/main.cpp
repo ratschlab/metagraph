@@ -91,7 +91,10 @@ bool graph_has_weights_file(const std::string &filename) {
 }
 
 std::string remove_graph_extension(const std::string &filename) {
-    return utils::remove_suffix(filename, ".dbg", ".orhashdbg", ".bitmapdbg");
+    return utils::remove_suffix(filename, ".dbg",
+                                          ".orhashdbg",
+                                          ".hashstrdbg",
+                                          ".bitmapdbg");
 }
 
 template <class Graph = BOSS>
@@ -129,6 +132,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGSuccinct>(filename);
 
         case Config::GraphType::HASH:
+            return load_critical_graph_from_file<DBGHashOrdered>(filename);
+
+        case Config::GraphType::HASH_PACKED:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
 
         case Config::GraphType::HASH_STR:
@@ -1274,9 +1280,17 @@ int main(int argc, const char *argv[]) {
 
                     case Config::GraphType::HASH:
                         if (config->count_kmers) {
-                            graph.reset(new WeightedDBGHashOrdered(config->k, config->canonical));
+                            graph.reset(new WeightedDBGHashOrdered(config->k, config->canonical, false));
                         } else {
-                            graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                            graph.reset(new DBGHashOrdered(config->k, config->canonical, false));
+                        }
+                        break;
+
+                    case Config::GraphType::HASH_PACKED:
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGHashOrdered(config->k, config->canonical, true));
+                        } else {
+                            graph.reset(new DBGHashOrdered(config->k, config->canonical, true));
                         }
                         break;
 

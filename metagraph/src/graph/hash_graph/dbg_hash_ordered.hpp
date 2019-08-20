@@ -11,7 +11,9 @@
 
 class DBGHashOrdered : public DeBruijnGraph {
   public:
-    explicit DBGHashOrdered(size_t k, bool canonical_mode = false);
+    explicit DBGHashOrdered(size_t k,
+                            bool canonical_mode = false,
+                            bool packed_serialization = false);
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -134,7 +136,7 @@ class DBGHashOrdered : public DeBruijnGraph {
 
   private:
     static std::unique_ptr<DBGHashOrderedInterface>
-    initialize_graph(size_t k, bool canonical_mode);
+    initialize_graph(size_t k, bool canonical_mode, bool packed_serialization);
 
     std::unique_ptr<DBGHashOrderedInterface> hash_dbg_;
 };
