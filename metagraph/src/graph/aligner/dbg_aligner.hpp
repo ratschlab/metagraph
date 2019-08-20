@@ -51,7 +51,9 @@ class DBGAligner {
     extend_mapping_forward_and_reverse_complement(const std::string &query,
                                                   const std::string &reverse_complement_query,
                                                   score_t min_path_score
-                                                      = std::numeric_limits<score_t>::min()) const;
+                                                      = std::numeric_limits<score_t>::min(),
+                                                  const SeederMaker &seeder_maker
+                                                      = make_unimem_seeder) const;
 
     const DeBruijnGraph& get_graph() const { return graph_; }
     const DBGAlignerConfig& get_config() const { return config_; }

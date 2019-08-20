@@ -15,6 +15,8 @@ typedef std::function<std::vector<DBGAlignment>(const DeBruijnGraph&,
                                                 bool // orientation
                                                 )> Seeder;
 
+typedef std::function<Seeder(const std::vector<DeBruijnGraph::node_index> &)> SeederMaker;
+
 typedef std::function<void(const DeBruijnGraph&,
                            const DBGAlignment&,
                            std::vector<DBGAlignment>*, // output vector
