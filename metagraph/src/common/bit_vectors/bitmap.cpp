@@ -9,6 +9,8 @@ const size_t bitmap_adaptive::kMaxNumIndicesLogRatio = 8;
 const size_t bitmap_adaptive::kNumIndicesMargin = 2;
 const size_t bitmap_adaptive::kRowCutoff = 1'000'000;
 
+const size_t SPARSE_DENSE_FACTOR = 128;
+
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
     sdsl::bit_vector result(vector.size(), 0);
@@ -132,7 +134,7 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
 ////////////////////////////////////////////////////////////////
 
 bool bitmap::operator==(const bitmap &other) const {
-    if (size() != other.size())
+    if (size() != other.size() || num_set_bits() != other.num_set_bits())
         return false;
 
     const bitmap *bitmap_p[] = { this, &other };
@@ -158,6 +160,15 @@ bool bitmap::operator==(const bitmap &other) const {
             && dynamic_cast<const bitmap_set&>(*bitmap_p[0]).data()
                 == dynamic_cast<const bitmap_set&>(*bitmap_p[1]).data();
     }
+
+    // for very sparse vectors
+    if (num_set_bits() * SPARSE_DENSE_FACTOR < size()) {
+        bool equal = true;
+        call_ones([&other,&equal](auto i) { if (equal && !other[i]) equal = false; });
+        return equal;
+    }
+
+    // TODO: implement call_zeros and add the same thing for very dense vectors
 
     uint64_t i;
     const uint64_t end = size();
