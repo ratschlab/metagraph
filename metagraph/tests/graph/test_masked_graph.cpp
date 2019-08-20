@@ -16,67 +16,76 @@ template <typename Graph>
 class MaskedDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
 TYPED_TEST_CASE(MaskedDeBruijnGraphTest, GraphTypes);
 
+template <typename Graph>
+class MaskedStableDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
+TYPED_TEST_CASE(MaskedStableDeBruijnGraphTest, StableGraphTypes);
+
+
+TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, sequences));
+
+            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
+                k,
+                [&](const auto &callback) { graph.call_sequences(callback); }
+            ));
+            EXPECT_EQ(graph, reconstructed)
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
+        }
+    }
+}
+
+TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsNoMask) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, sequences));
+
+            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
+                k,
+                [&](const auto &callback) { graph.call_unitigs(callback); }
+            ));
+            EXPECT_EQ(graph, reconstructed)
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
+        }
+    }
+}
+
 TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
     for (size_t k = 3; k <= 10; ++k) {
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACACTAG",
-                                                                        "AACGACATG" }));
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
+            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, sequences));
+
+            MaskedDeBruijnGraph stable_graph(build_graph_batch<DBGSuccinct>(k, sequences));
+
+            MaskedDeBruijnGraph reconstructed(build_graph_iterative<DBGSuccinct>(
                 k,
                 [&](const auto &callback) { graph.call_sequences(callback); }
             ));
-            EXPECT_EQ(graph, reconstructed)
-                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
-                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
-        }
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AGACACTGA"
-                                                                        "GACTACGTA"
-                                                                        "ACTAACGTA" }));
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_sequences(callback); }
-            ));
-            EXPECT_EQ(graph, reconstructed)
-                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
-                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
-        }
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AGACACAGT"
-                                                                        "GACTTGCAG"
-                                                                        "ACTAGTCAG" }));
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_sequences(callback); }
-            ));
-            EXPECT_EQ(graph, reconstructed)
-                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
-                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
-        }
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACTCGTAGC",
-                                                                        "AAATGCGTAGC" }));
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_sequences(callback); }
-            ));
-            EXPECT_EQ(graph, reconstructed)
-                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
-                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
-        }
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACT",
-                                                                        "AAATG" }));
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_sequences(callback); }
-            ));
-            EXPECT_EQ(graph, reconstructed)
+            EXPECT_EQ(stable_graph, reconstructed)
                 << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
                 << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
@@ -85,76 +94,153 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
     for (size_t k = 3; k <= 10; ++k) {
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACACTAG",
-                                                                        "AACGACATG" }));
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
+            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, sequences));
+
+            MaskedDeBruijnGraph stable_graph(build_graph_batch<DBGSuccinct>(k, sequences));
+
+            MaskedDeBruijnGraph reconstructed(build_graph_iterative<DBGSuccinct>(
                 k,
                 [&](const auto &callback) { graph.call_unitigs(callback); }
             ));
-            EXPECT_EQ(graph, reconstructed)
-                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
-                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
-        }
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AGACACTGA"
-                                                                        "GACTACGTA"
-                                                                        "ACTAACGTA" }));
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_unitigs(callback); }
-            ));
-            EXPECT_EQ(graph, reconstructed)
-                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
-                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
-        }
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AGACACAGT"
-                                                                        "GACTTGCAG"
-                                                                        "ACTAGTCAG" }));
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_unitigs(callback); }
-            ));
-            EXPECT_EQ(graph, reconstructed)
-                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
-                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
-        }
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACTCGTAGC",
-                                                                        "AAATGCGTAGC" }));
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_unitigs(callback); }
-            ));
-            EXPECT_EQ(graph, reconstructed)
-                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
-                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
-        }
-        {
-            MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACT",
-                                                                        "AAATG" }));
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_unitigs(callback); }
-            ));
-            EXPECT_EQ(graph, reconstructed)
+            EXPECT_EQ(stable_graph, reconstructed)
                 << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
                 << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
     }
 }
 
+TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsMaskFirstKmer) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
+            MaskedDeBruijnGraph graph(
+                full_graph,
+                [&](const auto &index) {
+                    return index != DeBruijnGraph::npos
+                        && full_graph->get_node_sequence(index) != first_kmer;
+                }
+            );
+
+            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
+                k,
+                [&](const auto &callback) { graph.call_sequences(callback); }
+            ));
+
+            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
+                k,
+                [&](const auto &callback) {
+                    graph.call_nodes([&](const auto &index) {
+                        callback(graph.get_node_sequence(index));
+                    });
+                }
+            ));
+            EXPECT_EQ(ref, reconstructed)
+                << *full_graph << std::endl
+                << first_kmer << std::endl
+                << graph << std::endl
+                << ref << std::endl
+                << reconstructed;
+
+            std::set<std::string> ref_nodes;
+            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
+                ref_nodes.insert(full_graph->get_node_sequence(i));
+            }
+
+            std::set<std::string> rec_nodes;
+            reconstructed.call_nodes([&](const auto &index) {
+                rec_nodes.insert(reconstructed.get_node_sequence(index));
+            });
+            if (ref_nodes.size())
+                rec_nodes.insert(first_kmer);
+            EXPECT_EQ(ref_nodes, rec_nodes);
+        }
+    }
+}
+
+TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
+            MaskedDeBruijnGraph graph(
+                full_graph,
+                [&](const auto &index) {
+                    return index != DeBruijnGraph::npos
+                        && full_graph->get_node_sequence(index) != first_kmer;
+                }
+            );
+
+            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
+                k,
+                [&](const auto &callback) { graph.call_unitigs(callback); }
+            ));
+
+            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
+                k,
+                [&](const auto &callback) {
+                    graph.call_nodes([&](const auto &index) {
+                        callback(graph.get_node_sequence(index));
+                    });
+                }
+            ));
+            EXPECT_EQ(ref, reconstructed)
+                << *full_graph << std::endl
+                << first_kmer << std::endl
+                << graph << std::endl
+                << ref << std::endl
+                << reconstructed;
+
+            std::set<std::string> ref_nodes;
+            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
+                ref_nodes.insert(full_graph->get_node_sequence(i));
+            }
+
+            std::set<std::string> rec_nodes;
+            reconstructed.call_nodes([&](const auto &index) {
+                rec_nodes.insert(reconstructed.get_node_sequence(index));
+            });
+            if (ref_nodes.size())
+                rec_nodes.insert(first_kmer);
+            EXPECT_EQ(ref_nodes, rec_nodes);
+        }
+    }
+}
+
 TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
     for (size_t k = 3; k <= 10; ++k) {
-        {
-            std::vector<std::string> sequences{ "AAACACTAG",
-                                                "AACGACATG" };
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
             auto full_graph = build_graph_batch<TypeParam>(k, sequences);
 
             auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
@@ -166,202 +252,12 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 }
             );
 
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
+            MaskedDeBruijnGraph reconstructed(build_graph_iterative<DBGSuccinct>(
                 k,
                 [&](const auto &callback) { graph.call_sequences(callback); }
             ));
 
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) {
-                    graph.call_nodes([&](const auto &index) {
-                        callback(graph.get_node_sequence(index));
-                    });
-                }
-            ));
-            EXPECT_EQ(ref, reconstructed)
-                << *full_graph << std::endl
-                << first_kmer << std::endl
-                << graph << std::endl
-                << ref << std::endl
-                << reconstructed;
-
-            std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::set<std::string> rec_nodes;
-            reconstructed.call_nodes([&](const auto &index) {
-                rec_nodes.insert(reconstructed.get_node_sequence(index));
-            });
-            if (ref_nodes.size())
-                rec_nodes.insert(first_kmer);
-            EXPECT_EQ(ref_nodes, rec_nodes);
-        }
-        {
-            const std::vector<std::string> sequences{ "AGACACTGA",
-                                                      "GACTACGTA",
-                                                      "ACTAACGTA" };
-            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
-
-            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-            MaskedDeBruijnGraph graph(
-                full_graph,
-                [&](const auto &index) {
-                    return index != DeBruijnGraph::npos
-                        && full_graph->get_node_sequence(index) != first_kmer;
-                }
-            );
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_sequences(callback); }
-            ));
-
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) {
-                    graph.call_nodes([&](const auto &index) {
-                        callback(graph.get_node_sequence(index));
-                    });
-                }
-            ));
-            EXPECT_EQ(ref, reconstructed)
-                << *full_graph << std::endl
-                << first_kmer << std::endl
-                << graph << std::endl
-                << ref << std::endl
-                << reconstructed;
-
-            std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::set<std::string> rec_nodes;
-            reconstructed.call_nodes([&](const auto &index) {
-                rec_nodes.insert(reconstructed.get_node_sequence(index));
-            });
-            if (ref_nodes.size())
-                rec_nodes.insert(first_kmer);
-            EXPECT_EQ(ref_nodes, rec_nodes);
-        }
-        {
-            std::vector<std::string> sequences{ "AGACACAGT",
-                                                "GACTTGCAG",
-                                                "ACTAGTCAG" };
-            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
-
-            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-            MaskedDeBruijnGraph graph(
-                full_graph,
-                [&](const auto &index) {
-                    return index != DeBruijnGraph::npos
-                        && full_graph->get_node_sequence(index) != first_kmer;
-                }
-            );
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_sequences(callback); }
-            ));
-
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) {
-                    graph.call_nodes([&](const auto &index) {
-                        callback(graph.get_node_sequence(index));
-                    });
-                }
-            ));
-            EXPECT_EQ(ref, reconstructed)
-                << *full_graph << std::endl
-                << first_kmer << std::endl
-                << graph << std::endl
-                << ref << std::endl
-                << reconstructed;
-
-            std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::set<std::string> rec_nodes;
-            reconstructed.call_nodes([&](const auto &index) {
-                rec_nodes.insert(reconstructed.get_node_sequence(index));
-            });
-            if (ref_nodes.size())
-                rec_nodes.insert(first_kmer);
-            EXPECT_EQ(ref_nodes, rec_nodes);
-        }
-        {
-            std::vector<std::string> sequences{ "AAACTCGTAGC",
-                                                "AAATGCGTAGC" };
-            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
-
-            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-            MaskedDeBruijnGraph graph(
-                full_graph,
-                [&](const auto &index) {
-                    return index != DeBruijnGraph::npos
-                        && full_graph->get_node_sequence(index) != first_kmer;
-                }
-            );
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_sequences(callback); }
-            ));
-
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) {
-                    graph.call_nodes([&](const auto &index) {
-                        callback(graph.get_node_sequence(index));
-                    });
-                }
-            ));
-            EXPECT_EQ(ref, reconstructed)
-                << *full_graph << std::endl
-                << first_kmer << std::endl
-                << graph << std::endl
-                << ref << std::endl
-                << reconstructed;
-
-            std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::set<std::string> rec_nodes;
-            reconstructed.call_nodes([&](const auto &index) {
-                rec_nodes.insert(reconstructed.get_node_sequence(index));
-            });
-            if (ref_nodes.size())
-                rec_nodes.insert(first_kmer);
-            EXPECT_EQ(ref_nodes, rec_nodes);
-        }
-        {
-            std::vector<std::string> sequences{ "AAACT",
-                                                "AAATG" };
-            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
-
-            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-            MaskedDeBruijnGraph graph(
-                full_graph,
-                [&](const auto &index) {
-                    return index != DeBruijnGraph::npos
-                        && full_graph->get_node_sequence(index) != first_kmer;
-                }
-            );
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_sequences(callback); }
-            ));
-
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
+            MaskedDeBruijnGraph ref(build_graph_iterative<DBGSuccinct>(
                 k,
                 [&](const auto &callback) {
                     graph.call_nodes([&](const auto &index) {
@@ -394,9 +290,14 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
     for (size_t k = 3; k <= 10; ++k) {
-        {
-            std::vector<std::string> sequences{ "AAACACTAG",
-                                                "AACGACATG" };
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
             auto full_graph = build_graph_batch<TypeParam>(k, sequences);
 
             auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
@@ -408,201 +309,12 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 }
             );
 
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
+            MaskedDeBruijnGraph reconstructed(build_graph_iterative<DBGSuccinct>(
                 k,
                 [&](const auto &callback) { graph.call_unitigs(callback); }
             ));
 
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) {
-                    graph.call_nodes([&](const auto &index) {
-                        callback(graph.get_node_sequence(index));
-                    });
-                }
-            ));
-            EXPECT_EQ(ref, reconstructed)
-                << *full_graph << std::endl
-                << first_kmer << std::endl
-                << graph << std::endl
-                << ref << std::endl
-                << reconstructed;
-
-            std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::set<std::string> rec_nodes;
-            reconstructed.call_nodes([&](const auto &index) {
-                rec_nodes.insert(reconstructed.get_node_sequence(index));
-            });
-            if (ref_nodes.size())
-                rec_nodes.insert(first_kmer);
-            EXPECT_EQ(ref_nodes, rec_nodes);
-        }
-        {
-            const std::vector<std::string> sequences{ "AGACACTGA",
-                                                      "GACTACGTA",
-                                                      "ACTAACGTA" };
-            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
-
-            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-            MaskedDeBruijnGraph graph(
-                full_graph,
-                [&](const auto &index) {
-                    return index != DeBruijnGraph::npos
-                        && full_graph->get_node_sequence(index) != first_kmer;
-                }
-            );
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_unitigs(callback); }
-            ));
-
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) {
-                    graph.call_nodes([&](const auto &index) {
-                        callback(graph.get_node_sequence(index));
-                    });
-                }
-            ));
-            EXPECT_EQ(ref, reconstructed)
-                << *full_graph << std::endl
-                << first_kmer << std::endl
-                << graph << std::endl
-                << ref << std::endl
-                << reconstructed;
-
-            std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::set<std::string> rec_nodes;
-            reconstructed.call_nodes([&](const auto &index) {
-                rec_nodes.insert(reconstructed.get_node_sequence(index));
-            });
-            if (ref_nodes.size())
-                rec_nodes.insert(first_kmer);
-            EXPECT_EQ(ref_nodes, rec_nodes);
-        }
-        {
-            std::vector<std::string> sequences{ "AGACACAGT",
-                                                "GACTTGCAG",
-                                                "ACTAGTCAG" };
-            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
-
-            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-            MaskedDeBruijnGraph graph(
-                full_graph,
-                [&](const auto &index) {
-                    return index != DeBruijnGraph::npos
-                        && full_graph->get_node_sequence(index) != first_kmer;
-                }
-            );
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_unitigs(callback); }
-            ));
-
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) {
-                    graph.call_nodes([&](const auto &index) {
-                        callback(graph.get_node_sequence(index));
-                    });
-                }
-            ));
-            EXPECT_EQ(ref, reconstructed)
-                << *full_graph << std::endl
-                << first_kmer << std::endl
-                << graph << std::endl
-                << ref << std::endl
-                << reconstructed;
-
-            std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::set<std::string> rec_nodes;
-            reconstructed.call_nodes([&](const auto &index) {
-                rec_nodes.insert(reconstructed.get_node_sequence(index));
-            });
-            if (ref_nodes.size())
-                rec_nodes.insert(first_kmer);
-            EXPECT_EQ(ref_nodes, rec_nodes);
-        }
-        {
-            std::vector<std::string> sequences{ "AAACTCGTAGC",
-                                                "AAATGCGTAGC" };
-            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
-
-            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-            MaskedDeBruijnGraph graph(
-                full_graph,
-                [&](const auto &index) {
-                    return index != DeBruijnGraph::npos
-                        && full_graph->get_node_sequence(index) != first_kmer;
-                }
-            );
-
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_unitigs(callback); }
-            ));
-
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) {
-                    graph.call_nodes([&](const auto &index) {
-                        callback(graph.get_node_sequence(index));
-                    });
-                }
-            ));
-            EXPECT_EQ(ref, reconstructed)
-                << *full_graph << std::endl
-                << first_kmer << std::endl
-                << graph << std::endl
-                << ref << std::endl
-                << reconstructed;
-
-            std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::set<std::string> rec_nodes;
-            reconstructed.call_nodes([&](const auto &index) {
-                rec_nodes.insert(reconstructed.get_node_sequence(index));
-            });
-            if (ref_nodes.size())
-                rec_nodes.insert(first_kmer);
-            EXPECT_EQ(ref_nodes, rec_nodes);
-        }
-        {
-            std::vector<std::string> sequences{ "AAACT",
-                                                "AAATG" };
-            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
-
-            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-            MaskedDeBruijnGraph graph(
-                full_graph,
-                [&](const auto &index) {
-                    return index != DeBruijnGraph::npos
-                        && full_graph->get_node_sequence(index) != first_kmer;
-                }
-            );
-            MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
-                k,
-                [&](const auto &callback) { graph.call_unitigs(callback); }
-            ));
-
-            MaskedDeBruijnGraph ref(build_graph_iterative<TypeParam>(
+            MaskedDeBruijnGraph ref(build_graph_iterative<DBGSuccinct>(
                 k,
                 [&](const auto &callback) {
                     graph.call_nodes([&](const auto &index) {

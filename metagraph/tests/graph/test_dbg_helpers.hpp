@@ -43,4 +43,11 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered,
                          DBGSuccinct> GraphTypes;
 
+// in stable graphs the order of input sequences
+// does not change the order of k-mers and their indexes
+template <typename Graph>
+class StableDeBruijnGraphTest : public ::testing::Test { };
+typedef ::testing::Types<DBGBitmap,
+                         DBGSuccinct> StableGraphTypes;
+
 #endif // __TEST_DBG_HELPERS_HPP__
