@@ -236,6 +236,8 @@ std::vector<DBGAligner::DBGAlignment> DBGAligner
 ::align_forward_and_reverse_complement(const std::string &query,
                                        const std::string &reverse_complement_query,
                                        score_t min_path_score) const {
+    assert(query.size() == reverse_complement_query.size());
+
     auto paths = align(query, false, min_path_score);
     auto size = paths.size();
 
@@ -263,20 +265,24 @@ std::vector<DBGAligner::DBGAlignment> DBGAligner
                                                 const std::string &reverse_complement_query,
                                                 score_t min_path_score,
                                                 const SeederMaker &seeder_maker) const {
+    assert(query.size() == reverse_complement_query.size());
+
     std::vector<node_index> nodes;
-    graph_.map_to_nodes_sequentially(
-        query.begin(),
-        query.end(),
-        [&](auto node) { nodes.emplace_back(node); }
-    );
+    nodes.reserve(query.size() - graph_.get_k() + 1);
+    graph_.map_to_nodes_sequentially(query.begin(),
+                                     query.end(),
+                                     [&](auto node) { nodes.emplace_back(node); });
+    assert(nodes.size() == query.size() - graph_.get_k() + 1);
+
     auto seeder = seeder_maker(nodes);
 
     std::vector<node_index> rc_nodes;
-    graph_.map_to_nodes_sequentially(
-        reverse_complement_query.begin(),
-        reverse_complement_query.end(),
-        [&](auto node) { rc_nodes.emplace_back(node); }
-    );
+    rc_nodes.reserve(nodes.size());
+    graph_.map_to_nodes_sequentially(reverse_complement_query.begin(),
+                                     reverse_complement_query.end(),
+                                     [&](auto node) { rc_nodes.emplace_back(node); });
+    assert(rc_nodes.size() == nodes.size());
+
     auto rc_seeder = seeder_maker(rc_nodes);
 
     auto paths = DBGAligner(graph_, config_, seeder, extend_, priority_function_).align(
