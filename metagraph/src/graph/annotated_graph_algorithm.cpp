@@ -7,10 +7,10 @@
 
 namespace annotated_graph_algorithm {
 
-typedef DeBruijnGraph::node_index NodeIndex;
+typedef DeBruijnGraph::node_index node_index;
 
 uint64_t count_node_labels(const AnnotatedDBG &anno_graph,
-                           const NodeIndex &index,
+                           const node_index &index,
                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_to_check) {
     uint64_t count = 0;
     for (const auto &label : labels_to_check) {
@@ -166,8 +166,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
 void
 call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
-                       std::function<void(NodeIndex, NodeIndex, std::string&&)> callback,
-                       std::function<bool(NodeIndex, NodeIndex, const std::string&)> stop_path,
+                       std::function<void(node_index, node_index, std::string&&)> callback,
+                       std::function<bool(node_index, node_index, const std::string&)> stop_path,
                        std::function<bool()> terminate = []() { return false; }) {
     bit_vector_stat visited(masked_graph.num_nodes() + 1, false);
 
@@ -188,7 +188,7 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
                 return;
             }
 
-            std::stack<std::tuple<NodeIndex, NodeIndex, std::string>> paths;
+            std::stack<std::tuple<node_index, node_index, std::string>> paths;
             paths.emplace(start, start, std::move(node_seq));
             while (paths.size()) {
                 auto path = std::move(paths.top());
@@ -280,13 +280,13 @@ using IndexSeqLabelCallback = std::function<void(const Index&,
                                                  const std::string&,
                                                  VLabels&&)>;
 
-typedef IndexSeqLabelCallback<NodeIndex, std::vector<AnnotatedDBG::Annotator::Label>>
+typedef IndexSeqLabelCallback<node_index, std::vector<AnnotatedDBG::Annotator::Label>>
     AnnotatedDBGIndexSeqLabelsCallback;
 
 void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
                             const MaskedDeBruijnGraph &background,
                             const AnnotatedDBG &anno_graph,
-                            NodeIndex first,
+                            node_index first,
                             std::string seq,
                             AnnotatedDBGIndexSeqLabelsCallback callback,
                             std::function<bool()> terminate) {
