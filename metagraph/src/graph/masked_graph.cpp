@@ -198,38 +198,21 @@ std::string MaskedDeBruijnGraph::get_node_sequence(node_index index) const {
 }
 
 bool MaskedDeBruijnGraph::operator==(const MaskedDeBruijnGraph &other) const {
-    if (graph_ != other.graph_) {
-        if (!graph_ || !other.graph_)
-            return false;
-
-        if (*graph_ != *other.graph_)
-            return false;
-    }
-
-    if (is_target_mask_.get() == other.is_target_mask_.get())
-        return true;
-
-    if (!is_target_mask_.get() || !other.is_target_mask_.get())
-        return false;
-
-    if (is_target_mask_->num_set_bits() != other.is_target_mask_->num_set_bits())
-        return false;
-
-    uint64_t count = 0;
-    uint64_t i = 0;
-    is_target_mask_->call_ones([&](const auto &index) {
-        if (i == count && (*other.is_target_mask_)[index])
-            ++count;
-
-        ++i;
-    });
-
-    return i == count;
+    return get_k() == other.get_k()
+            && is_canonical_mode() == other.is_canonical_mode()
+            && num_nodes() == other.num_nodes()
+            && *is_target_mask_ == *other.is_target_mask_
+            && *graph_ == *other.graph_;
 }
 
 bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
-    if (dynamic_cast<const MaskedDeBruijnGraph*>(&other))
-        return operator==(*dynamic_cast<const MaskedDeBruijnGraph*>(&other));
+    if (get_k() != other.get_k()
+            || is_canonical_mode() != other.is_canonical_mode()
+            || num_nodes() != other.num_nodes())
+        return false;
 
-    return *graph_ == other;
+    if (dynamic_cast<const MaskedDeBruijnGraph*>(&other))
+        return operator==(dynamic_cast<const MaskedDeBruijnGraph&>(other));
+
+    throw std::runtime_error("Not implemented");
 }
