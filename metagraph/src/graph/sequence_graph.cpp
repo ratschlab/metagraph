@@ -1,6 +1,9 @@
 #include "sequence_graph.hpp"
 
 #include <cassert>
+#include <progress_bar.hpp>
+
+#include "utils.hpp"
 
 typedef DeBruijnGraph::node_index node_index;
 
@@ -83,6 +86,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          const std::function<void(const std::string&)> &callback,
                          sdsl::bit_vector *visited,
                          sdsl::bit_vector *discovered,
+                         ProgressBar &progress_bar,
                          bool call_unitigs = false,
                          uint64_t min_tip_size = 0) {
     assert((min_tip_size <= 1 || call_unitigs)
@@ -115,6 +119,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
             sequence.push_back(next_char);
             assert(sequence.length() >= graph.get_k());
             (*visited)[node] = true;
+            ++progress_bar;
 
             targets.clear();
             graph.call_outgoing_kmers(node,
@@ -172,12 +177,15 @@ void call_sequences(const DeBruijnGraph &graph,
     sdsl::bit_vector discovered(graph.num_nodes() + 1, false);
     sdsl::bit_vector visited(graph.num_nodes() + 1, false);
 
+    ProgressBar progress_bar(graph.num_nodes(), "Traverse graph", std::cerr, !utils::get_verbose());
+
     auto call_paths_from = [&](const auto &node) {
         call_sequences_from(graph,
                             node,
                             callback,
                             &visited,
                             &discovered,
+                            progress_bar,
                             call_unitigs,
                             min_tip_size);
     };
