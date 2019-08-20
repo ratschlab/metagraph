@@ -589,17 +589,18 @@ align_sequences(const DeBruijnGraph &graph,
                 bool forward_and_reverse_complement = false,
                 const std::string &reverse_complement_query = "") {
     if (forward_and_reverse_complement) {
+        DBGAligner aligner(graph, DBGAlignerConfig(config, graph));
+
         return config.alignment_seed_unimems
-            ? extend_mapping_forward_and_reverse_complement(
+            ? aligner.extend_mapping_forward_and_reverse_complement(
                   query,
                   reverse_complement_query,
-                  graph,
-                  DBGAlignerConfig(config, graph),
                   config.alignment_min_path_score
               )
-            : DBGAligner(graph,
-                         DBGAlignerConfig(config, graph)).align_forward_and_reverse_complement(
-                  query, reverse_complement_query, config.alignment_min_path_score
+            : aligner.align_forward_and_reverse_complement(
+                  query,
+                  reverse_complement_query,
+                  config.alignment_min_path_score
               );
     }
 

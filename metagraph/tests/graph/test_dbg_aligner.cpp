@@ -227,11 +227,9 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     EXPECT_EQ(14u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
 
-    auto ext_paths = extend_mapping_forward_and_reverse_complement(
+    auto ext_paths = aligner.extend_mapping_forward_and_reverse_complement(
         query,
-        reference,
-        *graph,
-        config
+        reference
     );
 
     EXPECT_TRUE(std::equal(paths.begin(), paths.end(),

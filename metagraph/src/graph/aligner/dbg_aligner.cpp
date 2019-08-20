@@ -258,57 +258,48 @@ std::vector<DBGAligner::DBGAlignment> DBGAligner
     return paths;
 }
 
-std::vector<DBGAligner::DBGAlignment>
-extend_mapping_forward_and_reverse_complement(const std::string &query,
-                                              const std::string &reverse_complement_query,
-                                              const DeBruijnGraph &graph,
-                                              const DBGAlignerConfig &config,
-                                              DBGAligner::score_t min_path_score,
-                                              const Extender &extend,
-                                              const PriorityFunction &priority_function) {
-    std::vector<DeBruijnGraph::node_index> nodes;
-    graph.map_to_nodes_sequentially(
+std::vector<DBGAligner::DBGAlignment> DBGAligner
+::extend_mapping_forward_and_reverse_complement(const std::string &query,
+                                                const std::string &reverse_complement_query,
+                                                score_t min_path_score) const {
+    std::vector<node_index> nodes;
+    graph_.map_to_nodes_sequentially(
         query.begin(),
         query.end(),
         [&](auto node) { nodes.emplace_back(node); }
     );
     auto seeder = make_unimem_seeder(nodes);
 
-    std::vector<DeBruijnGraph::node_index> rc_nodes;
-    graph.map_to_nodes_sequentially(
+    std::vector<node_index> rc_nodes;
+    graph_.map_to_nodes_sequentially(
         reverse_complement_query.begin(),
         reverse_complement_query.end(),
         [&](auto node) { rc_nodes.emplace_back(node); }
     );
     auto rc_seeder = make_unimem_seeder(rc_nodes);
 
-    auto paths = DBGAligner(graph,
-                            config,
-                            seeder,
-                            extend,
-                            priority_function).align(query, false, min_path_score);
+    auto paths = DBGAligner(graph_, config_, seeder, extend_, priority_function_).align(
+        query, false, min_path_score
+    );
+
     auto size = paths.size();
 
-    DBGAligner(graph,
-               config,
-               rc_seeder,
-               extend,
-               priority_function).align(
+    DBGAligner(graph_, config_, rc_seeder, extend_, priority_function_).align(
         reverse_complement_query.begin(),
         reverse_complement_query.end(),
         [&](DBGAlignment&& alignment) { paths.emplace_back(std::move(alignment)); },
         true,
-        size >= config.num_alternative_paths
-            ? paths[config.num_alternative_paths - 1].get_score() - 1
+        size >= config_.num_alternative_paths
+            ? paths[config_.num_alternative_paths - 1].get_score() - 1
             : min_path_score
     );
 
     std::inplace_merge(paths.begin(),
                        paths.begin() + size,
                        paths.end(),
-                       std::greater<DBGAligner::DBGAlignment>());
+                       std::greater<DBGAlignment>());
 
-    paths.erase(paths.begin() + std::min(paths.size(), config.num_alternative_paths),
+    paths.erase(paths.begin() + std::min(paths.size(), config_.num_alternative_paths),
                 paths.end());
 
     return paths;

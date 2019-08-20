@@ -41,11 +41,17 @@ class DBGAligner {
           bool orientation = false,
           score_t min_path_score = std::numeric_limits<score_t>::min()) const;
 
-    std::vector<DBGAligner::DBGAlignment>
+    std::vector<DBGAlignment>
     align_forward_and_reverse_complement(const std::string &query,
                                          const std::string &reverse_complement_query,
                                          score_t min_path_score
-                                             = std::numeric_limits<DBGAligner::score_t>::min()) const;
+                                             = std::numeric_limits<score_t>::min()) const;
+
+    std::vector<DBGAlignment>
+    extend_mapping_forward_and_reverse_complement(const std::string &query,
+                                                  const std::string &reverse_complement_query,
+                                                  score_t min_path_score
+                                                      = std::numeric_limits<score_t>::min()) const;
 
     const DeBruijnGraph& get_graph() const { return graph_; }
     const DBGAlignerConfig& get_config() const { return config_; }
@@ -60,17 +66,6 @@ class DBGAligner {
     const Extender extend_;
     const PriorityFunction priority_function_;
 };
-
-std::vector<DBGAligner::DBGAlignment>
-extend_mapping_forward_and_reverse_complement(const std::string &query,
-                                              const std::string &reverse_complement_query,
-                                              const DeBruijnGraph &graph,
-                                              const DBGAlignerConfig &config,
-                                              DBGAligner::score_t min_path_score
-                                                  = std::numeric_limits<DBGAligner::score_t>::min(),
-                                              const Extender &extend = default_extender,
-                                              const PriorityFunction &priority_function
-                                                  = std::less<DBGAligner::DBGAlignment>());
 
 
 #endif // __DBG_ALIGNER_HPP__
