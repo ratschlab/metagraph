@@ -159,10 +159,7 @@ void MaskedDeBruijnGraph
                const std::function<bool()> &terminate) const {
     graph_->map_to_nodes(
         sequence,
-        [&](const node_index &index) {
-            if (in_graph(index))
-                callback(index);
-        },
+        [&](const node_index &index) { callback(in_graph(index) ? index : npos); },
         terminate
     );
 }
@@ -177,10 +174,7 @@ void MaskedDeBruijnGraph
                             const std::function<bool()> &terminate) const {
     graph_->map_to_nodes_sequentially(
         begin, end,
-        [&](const node_index &index) {
-            if (in_graph(index))
-                callback(index);
-        },
+        [&](const node_index &index) { callback(in_graph(index) ? index : npos); },
         terminate
     );
 }

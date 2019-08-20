@@ -130,20 +130,30 @@ void test_find_breakpoints(size_t pool_size = 0) {
 
         auto masked_dbg = build_masked_graph(*anno_graph, ingroup, outgroup);
 
+        std::atomic<size_t> counter = 0;
         annotated_graph_algorithm::call_breakpoints(
             masked_dbg,
             *anno_graph,
             [&](const auto &index, const auto &ref, const auto &var, const auto &vlabels) {
-                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index)) << k;
-                EXPECT_TRUE(all_mapped_match_first(masked_dbg, ref + var, index)) << k;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index))
+                    << k << " " << ref;
+                EXPECT_TRUE(all_mapped_match_first(masked_dbg, ref, index))
+                    << k << " " << ref;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref + var, index))
+                    << k << " " << ref + var;
+                EXPECT_FALSE(all_mapped_match_first(masked_dbg, ref + var, index))
+                    << k << " " << ref + var;
                 EXPECT_EQ(std::vector<std::string>{ "B" },
                           anno_graph->get_labels(ref + var, 1.0)) << k;
                 for (const auto &label : vlabels) {
                     EXPECT_EQ(std::string("B"), label) << k;
                 }
+                ++counter;
             },
             &thread_pool
         );
+
+        EXPECT_NE(0u, counter);
     }
 }
 
@@ -188,8 +198,13 @@ void test_find_bubbles(size_t pool_size = 0) {
             masked_dbg,
             *anno_graph,
             [&](const auto &index, const auto &ref, const auto &var, const auto &vlabels) {
-                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index)) << k;
-                EXPECT_TRUE(all_mapped_match_first(masked_dbg, var, index)) << k;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index))
+                    << k << " " << ref;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), var, index))
+                    << k << " " << var;
+                EXPECT_FALSE(all_mapped_match_first(masked_dbg, var, index))
+                    << k << " " << var;
+                EXPECT_TRUE(all_mapped_match_first(masked_dbg, var.substr(0, k), index));
                 EXPECT_EQ(std::vector<std::string>{ "A" },
                           anno_graph->get_labels(ref, 1.0)) << k;
                 EXPECT_EQ(std::vector<std::string>{ "B" },
@@ -242,23 +257,31 @@ void test_find_bubbles_incomplete(size_t pool_size = 0) {
 
         auto masked_dbg = build_masked_graph(*anno_graph, ingroup, outgroup);
 
+        size_t counter = 0;
         annotated_graph_algorithm::call_bubbles(
             masked_dbg,
             *anno_graph,
             [&](const auto &index, const auto &ref, const auto &var, const auto &vlabels) {
-                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index)) << k;
-                EXPECT_TRUE(all_mapped_match_first(masked_dbg, var, index)) << k;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index))
+                    << k << " " << ref;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), var, index))
+                    << k << " " << var;
+                EXPECT_FALSE(all_mapped_match_first(masked_dbg, var, index))
+                    << k << " " << var;
+                EXPECT_TRUE(all_mapped_match_first(masked_dbg, var.substr(0, k), index));
                 EXPECT_EQ(std::vector<std::string>{ "A" },
                           anno_graph->get_labels(ref, 1.0)) << k;
                 EXPECT_EQ(std::vector<std::string>{ "B" },
                           anno_graph->get_labels(var, 1.0)) << k;
                 std::lock_guard<std::mutex> lock(add_mutex);
                 obs_labels.insert(vlabels.begin(), vlabels.end());
+                ++counter;
             },
             &thread_pool
         );
 
         EXPECT_EQ(std::unordered_set<std::string>{}, obs_labels) << k;
+        EXPECT_EQ(0u, counter);
     }
 }
 
@@ -295,23 +318,31 @@ void test_find_bubbles_inner_loop(size_t pool_size = 0) {
 
         auto masked_dbg = build_masked_graph(*anno_graph, ingroup, outgroup);
 
+        size_t counter = 0;
         annotated_graph_algorithm::call_bubbles(
             masked_dbg,
             *anno_graph,
             [&](const auto &index, const auto &ref, const auto &var, const auto &vlabels) {
-                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index)) << k;
-                EXPECT_TRUE(all_mapped_match_first(masked_dbg, var, index)) << k;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index))
+                    << k << " " << ref;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), var, index))
+                    << k << " " << var;
+                EXPECT_FALSE(all_mapped_match_first(masked_dbg, var, index))
+                    << k << " " << var;
+                EXPECT_TRUE(all_mapped_match_first(masked_dbg, var.substr(0, k), index));
                 EXPECT_EQ(std::vector<std::string>{ "A" },
                           anno_graph->get_labels(ref, 1.0)) << k;
                 EXPECT_EQ(std::vector<std::string>{ "B" },
                           anno_graph->get_labels(var, 1.0)) << k;
                 std::lock_guard<std::mutex> lock(add_mutex);
                 obs_labels.insert(vlabels.begin(), vlabels.end());
+                ++counter;
             },
             &thread_pool
         );
 
         EXPECT_EQ(std::unordered_set<std::string>{}, obs_labels) << k;
+        EXPECT_EQ(0u, counter);
     }
 }
 
