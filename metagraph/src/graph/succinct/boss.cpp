@@ -1704,7 +1704,7 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
  */
 void BOSS::call_paths(Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
-                      bool split_to_contigs) const {
+                      bool split_to_unitigs) const {
     // keep track of reached edges
     sdsl::bit_vector discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
@@ -1718,7 +1718,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     auto last_source = succ_last(1);
     for (uint64_t i = 1; i <= last_source; ++i) {
-        call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+        call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
     }
 
     // then all forks
@@ -1727,13 +1727,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i] && !is_single_outgoing(i))
-            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+            call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
     }
 
     // process all the cycles left that have not been traversed
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i])
-            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+            call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
     }
 }
 
@@ -1745,7 +1745,7 @@ struct Edge {
 void BOSS::call_paths(edge_index starting_kmer,
                       Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
-                      bool split_to_contigs,
+                      bool split_to_unitigs,
                       sdsl::bit_vector *discovered_ptr,
                       sdsl::bit_vector *visited_ptr,
                       ProgressBar &progress_bar) const {
@@ -1780,9 +1780,9 @@ void BOSS::call_paths(edge_index starting_kmer,
             if (!sequence.back())
                 break;
 
-            // stop traversing if we call contigs and this
+            // stop traversing if we call unitigs and this
             // is not the only incoming edge
-            bool continue_traversal = !split_to_contigs || is_single_incoming(edge);
+            bool continue_traversal = !split_to_unitigs || is_single_incoming(edge);
 
             // make one traversal step
             edge = fwd(edge);
@@ -1798,7 +1798,7 @@ void BOSS::call_paths(edge_index starting_kmer,
 
             // loop over outgoing edges
             do {
-                if (!next_edge && !split_to_contigs && !visited[edge]) {
+                if (!next_edge && !split_to_unitigs && !visited[edge]) {
                     // save the edge for visiting if we extract arbitrary paths
                     discovered[edge] = true;
                     next_edge = edge;
