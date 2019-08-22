@@ -1767,6 +1767,8 @@ int main(int argc, const char *argv[]) {
 
             auto chunk_files = files;
 
+            Timer timer;
+
             if (!files.size()) {
                 assert(config->infbase.size());
 
@@ -1796,7 +1798,23 @@ int main(int argc, const char *argv[]) {
             switch (config->graph_type) {
                 case Config::GraphType::SUCCINCT: {
                     auto p = BOSS::Chunk::build_boss_from_chunks(chunk_files, config->verbose);
-                    graph.reset(new DBGSuccinct(p.first, p.second));
+                    auto dbg_succ = std::make_unique<DBGSuccinct>(p.first, p.second);
+
+                    if (config->verbose) {
+                        std::cout << "Chunks concatenated in "
+                                  << timer.elapsed() << "sec" << std::endl;
+                    }
+
+                    if (config->clear_dummy) {
+                        if (config->verbose) {
+                            std::cout << "Traverse source dummy edges,"
+                                      << " remove redundant ones, and mark"
+                                      << " those that cannot be removed."
+                                      << std::endl;
+                        }
+                        dbg_succ->mask_dummy_kmers(config->parallel, true);
+                    }
+                    graph = std::move(dbg_succ);
                     break;
                 }
                 case Config::GraphType::BITMAP: {
@@ -1813,7 +1831,8 @@ int main(int argc, const char *argv[]) {
             assert(graph.get());
 
             if (config->verbose) {
-                std::cout << "Graph has been assembled" << std::endl;
+                std::cout << "Graph was assembled in "
+                          << timer.elapsed() << "sec" << std::endl;
                 print_stats(*graph);
                 if (config->graph_type == Config::GraphType::SUCCINCT) {
                     print_boss_stats(
