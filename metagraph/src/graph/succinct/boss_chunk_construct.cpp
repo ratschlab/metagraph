@@ -196,6 +196,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         // kmer_collector stores (BOSS::k_ + 1)-mers
         BOSS::Chunk *result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
                                               kmer_storage_.get_k() - 1,
+                                              kmer_storage_.is_both_strands_mode(),
                                               kmers);
         kmer_storage_.clear();
 

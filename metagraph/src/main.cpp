@@ -1083,6 +1083,9 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
+            if (config->canonical)
+                config->forward_and_reverse = false;
+
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
                     std::cerr << "Error: Only bitmap-graph can be built"
@@ -1107,7 +1110,9 @@ int main(int argc, const char *argv[]) {
                     suffixes = KmerExtractorBOSS::generate_suffixes(config->suffix_len);
                 }
 
-                BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), boss_graph->get_k());
+                BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(),
+                                       boss_graph->get_k(),
+                                       config->canonical);
 
                 //one pass per suffix
                 for (const std::string &suffix : suffixes) {
@@ -1775,26 +1780,35 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
+            if (!chunk_files.size()) {
+                std::cerr << "Error: no input files provided, nothing to concatenate" << std::endl;
+                exit(1);
+            }
+
             for (auto &filename : chunk_files) {
                 filename = utils::remove_suffix(filename,
-                                                    BOSS::Chunk::kFileExtension,
-                                                    DBGBitmap::kChunkFileExtension);
+                                                BOSS::Chunk::kFileExtension,
+                                                DBGBitmap::kChunkFileExtension);
             }
 
             // collect results on an external merge or construction
             std::unique_ptr<DeBruijnGraph> graph;
-            if (config->graph_type == Config::GraphType::SUCCINCT) {
-                graph.reset(
-                    new DBGSuccinct(BOSS::Chunk::build_boss_from_chunks(
-                        chunk_files, config->verbose
-                    ), config->canonical)
-                );
-            } else if (config->graph_type == Config::GraphType::BITMAP) {
-                graph.reset(
-                    DBGBitmapConstructor::build_graph_from_chunks(
+            switch (config->graph_type) {
+                case Config::GraphType::SUCCINCT: {
+                    auto p = BOSS::Chunk::build_boss_from_chunks(chunk_files, config->verbose);
+                    graph.reset(new DBGSuccinct(p.first, p.second));
+                    break;
+                }
+                case Config::GraphType::BITMAP: {
+                    graph.reset(DBGBitmapConstructor::build_graph_from_chunks(
                         chunk_files, config->canonical, config->verbose
-                    )
-                );
+                    ));
+                    break;
+                }
+                default:
+                    std::cout << "ERROR: Cannot concatenate chunks for "
+                              << "this graph representation" << std::endl;
+                    exit(1);
             }
             assert(graph.get());
 
