@@ -100,8 +100,8 @@ Config::Config(int argc, const char *argv[]) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
-        } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
-            reverse = true;
+        } else if (!strcmp(argv[i], "--fwd-and-reverse")) {
+            forward_and_reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
             canonical = true;
         } else if (!strcmp(argv[i], "--complete")) {
@@ -609,7 +609,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count-q [INT] \tmin k-mer abundance quantile (min-count is used by default) [0.0]\n");
             fprintf(stderr, "\t   --max-count-q [INT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashpacked / hashstr [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
@@ -647,7 +647,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to extend []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
@@ -656,11 +656,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
-            fprintf(stderr, "\t-r --reverse \t\t\tmap/align reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \t\talign both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
-            fprintf(stderr, "\t         \t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
+            fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT]\t\tlength of mapped k-mers (at most graph's k) [k]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
@@ -732,16 +732,16 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tAssemble contigs from de Bruijn graph and dump to compressed FASTA file.\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --prune-tips [INT] \t\t\tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --unitigs \t\t\t\textract unitigs [off]\n");
-            fprintf(stderr, "\t   --header [STR] \t\t\theader for sequences in FASTA output []\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --unitigs \t\textract unitigs [off]\n");
+            fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
             fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
             fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
             fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
-            fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
+            fprintf(stderr, "\t                                     \t\tall matching mask-in and mask-out labels [0.0]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -763,7 +763,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tprocess both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation: column / row [column]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
@@ -784,7 +784,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s coordinate -i <GRAPH> [options] FASTA1 [[FASTA2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t-r --reverse \t\t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \t\tprocess both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<GRAPH>]\n");
             fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
@@ -830,7 +830,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for query:\n");
-            fprintf(stderr, "\t-r --reverse \t\tquery reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tquery both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");

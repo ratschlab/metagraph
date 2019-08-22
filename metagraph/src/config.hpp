@@ -15,7 +15,7 @@ class Config {
     bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
-    bool reverse = false;
+    bool forward_and_reverse = false;
     bool canonical = false;
     bool complete = false;
     bool dynamic = false;

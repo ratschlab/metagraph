@@ -36,7 +36,7 @@ for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do \
         "find ~/metagenome/data/BIGSI/ -name \"*fasta.gz\" \
             | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph build -v \
                 -k 31 \
-                --reverse \
+                --canonical \
                 --parallel 30 \
                 --mem-cap-gb 300 \
                 --suffix $F \

@@ -156,7 +156,7 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    AnnotatedDBG *anno_graph,
-                   bool reverse,
+                   bool forward_and_reverse,
                    size_t min_count,
                    size_t max_count,
                    bool filename_anno,
@@ -195,7 +195,7 @@ void annotate_data(const std::vector<std::string> &files,
 
                     anno_graph->annotate_sequence(seq, labels);
                 },
-                reverse
+                forward_and_reverse
             );
         } else if (utils::get_filetype(file) == "KMC") {
             std::vector<std::string> labels;
@@ -265,7 +265,7 @@ void annotate_data(const std::vector<std::string> &files,
                         std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
                 },
-                reverse
+                forward_and_reverse
             );
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -290,7 +290,7 @@ void annotate_data(const std::vector<std::string> &files,
 
 void annotate_coordinates(const std::vector<std::string> &files,
                           AnnotatedDBG *anno_graph,
-                          bool reverse,
+                          bool forward_and_reverse,
                           size_t genome_bin_size,
                           bool verbose) {
     size_t total_seqs = 0;
@@ -317,7 +317,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     std::vector<std::string> labels {
                         file,
                         read_stream->name.s,
-                        std::to_string(reverse && (total_seqs % 2)), // whether the read is reverse
+                        std::to_string(forward_and_reverse && (total_seqs % 2)), // whether the read is reverse
                         "",
                     };
 
@@ -353,10 +353,10 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     // If we read both strands, the next sequence is
                     // either reverse (if the current one is forward)
                     // or new (if the current one is reverse), and therefore forward
-                    if (reverse)
+                    if (forward_and_reverse)
                         forward_strand = !forward_strand;
                 },
-                reverse
+                forward_and_reverse
             );
         } else {
             std::cerr << "ERROR: the type of file "
@@ -591,9 +591,9 @@ std::vector<DBGAligner::DBGAlignment>
 align_sequences(const DeBruijnGraph &graph,
                 const Config &config,
                 const std::string &query,
-                bool forward_and_reverse_complement = false,
+                bool forward_and_reverse = false,
                 const std::string &reverse_complement_query = "") {
-    if (forward_and_reverse_complement) {
+    if (forward_and_reverse) {
         DBGAligner aligner(graph, DBGAlignerConfig(config, graph));
 
         return config.alignment_seed_unimems
@@ -740,7 +740,7 @@ void map_sequences_in_file(const std::string &file,
             }
         }
 
-    }, config.reverse);
+    }, config.forward_and_reverse);
 
     if (config.verbose) {
         std::cout << "File processed in "
@@ -862,9 +862,9 @@ template <class Callback, class CountedKmer, class Loop>
 void parse_sequences(const std::vector<std::string> &files,
                      const Config &config,
                      const Timer &timer,
-                     Callback call_read,
+                     Callback call_sequence,
                      CountedKmer call_kmer,
-                     Loop call_reads) {
+                     Loop call_sequences) {
     // iterate over input files
     for (const auto &file : files) {
         if (config.verbose) {
@@ -878,9 +878,9 @@ void parse_sequences(const std::vector<std::string> &files,
                                    config.refpath,
                                    config.k,
                                    [&](std::string&& sequence) {
-                                       call_read(std::move(sequence));
+                                       call_sequence(std::move(sequence));
                                    },
-                                   config.reverse);
+                                   config.forward_and_reverse);
         } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
 
@@ -936,22 +936,22 @@ void parse_sequences(const std::vector<std::string> &files,
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
             if (files.size() >= config.parallel) {
-                auto reverse = config.reverse;
+                auto forward_and_reverse = config.forward_and_reverse;
                 auto file_copy = file;
 
                 // capture all required values by copying to be able
                 // to run task from other threads
-                call_reads([=](auto callback) {
+                call_sequences([=](auto callback) {
                     read_fasta_file_critical(file_copy, [=](kseq_t *read_stream) {
                         // add read to the graph constructor as a callback
                         callback(read_stream->seq.s);
-                    }, reverse);
+                    }, forward_and_reverse);
                 });
             } else {
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     // add read to the graph constructor as a callback
-                    call_read(read_stream->seq.s);
-                }, config.reverse);
+                    call_sequence(read_stream->seq.s);
+                }, config.forward_and_reverse);
             }
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -1501,7 +1501,7 @@ int main(int argc, const char *argv[]) {
                 annotate_data(files,
                               config->refpath,
                               anno_graph.get(),
-                              config->reverse,
+                              config->forward_and_reverse,
                               config->min_count,
                               config->max_count,
                               config->filename_anno,
@@ -1528,7 +1528,7 @@ int main(int argc, const char *argv[]) {
                             annotate_data({ filename },
                                           config->refpath,
                                           anno_graph.get(),
-                                          config->reverse,
+                                          config->forward_and_reverse,
                                           config->min_count,
                                           config->max_count,
                                           config->filename_anno,
@@ -1579,7 +1579,7 @@ int main(int argc, const char *argv[]) {
 
             annotate_coordinates(files,
                                  &anno_graph,
-                                 config->reverse,
+                                 config->forward_and_reverse,
                                  config->genome_binsize_anno,
                                  config->verbose);
 
@@ -1669,7 +1669,7 @@ int main(int argc, const char *argv[]) {
                             std::ref(std::cout)
                         );
                     },
-                    config->reverse
+                    config->forward_and_reverse
                 );
                 if (config->verbose) {
                     std::cout << "Finished extracting sequences from file " << file
@@ -2701,7 +2701,7 @@ int main(int argc, const char *argv[]) {
                                             std::string header) {
                             std::string rc_query;
 
-                            if (config.reverse) {
+                            if (config.forward_and_reverse) {
                                 rc_query = query;
                                 reverse_complement(rc_query.begin(), rc_query.end());
                             }
@@ -2709,7 +2709,7 @@ int main(int argc, const char *argv[]) {
                             auto paths = align_sequences(*graph_ptr,
                                                          config,
                                                          query,
-                                                         config.reverse,
+                                                         config.forward_and_reverse,
                                                          rc_query);
 
                             auto lock = std::lock_guard<std::mutex>(print_mutex);
