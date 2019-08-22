@@ -937,12 +937,11 @@ void parse_sequences(const std::vector<std::string> &files,
                     || utils::get_filetype(file) == "FASTQ") {
             if (files.size() >= config.parallel) {
                 auto forward_and_reverse = config.forward_and_reverse;
-                auto file_copy = file;
 
                 // capture all required values by copying to be able
                 // to run task from other threads
                 call_sequences([=](auto callback) {
-                    read_fasta_file_critical(file_copy, [=](kseq_t *read_stream) {
+                    read_fasta_file_critical(file, [=](kseq_t *read_stream) {
                         // add read to the graph constructor as a callback
                         callback(read_stream->seq.s);
                     }, forward_and_reverse);
