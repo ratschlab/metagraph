@@ -72,6 +72,7 @@ void DBGAligner::align(StringIt query_begin_it,
         for (auto&& seed : seeds) {
             assert(seed.size());
             assert(seed.get_score() > config_.min_cell_score);
+            assert(seed.is_valid(graph_));
 
             if (seed.get_num_matches() >= graph_.get_k())
                 full_seed = true;
