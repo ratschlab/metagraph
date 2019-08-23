@@ -249,6 +249,8 @@ class Alignment {
             && query_begin_ + cigar_.begin()->second == query_end_;
     }
 
+    bool is_valid(const DeBruijnGraph &graph) const;
+
   private:
     Alignment(const char* query_begin,
               const char* query_end,

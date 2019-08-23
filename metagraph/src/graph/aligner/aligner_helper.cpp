@@ -340,4 +340,148 @@ void Alignment<NodeType>::append(Alignment&& other, size_t overlap, int8_t match
     query_end_ = other.query_end_;
 }
 
+template <typename NodeType>
+bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
+    // TODO: check score
+
+    if (query_begin_ > query_end_) {
+        std::cerr << "ERROR: query begin after query end" << std::endl
+                  << *this << std::endl;
+        return false;
+    }
+
+    auto query_it = query_begin_;
+    auto node_it = nodes_.begin();
+    auto cigar_it = cigar_.begin() + static_cast<bool>(cigar_.get_clipping());
+
+    size_t ref_counter = offset_;
+    std::string path;
+    if (nodes_.size())
+        path = graph.get_node_sequence(nodes_.front()).substr(offset_);
+
+    size_t path_steps = 0;
+
+    for (; cigar_it != cigar_.end(); ++cigar_it) {
+        if (query_it >= query_end_ && cigar_it->first != Cigar::Operator::DELETION) {
+            std::cerr << "ERROR: end of query reached before end of CIGAR" << std::endl
+                      << "Processed " << cigar_it - cigar_.begin()
+                      << " of " << cigar_.size() << " operations" << std::endl
+                      << *this << std::endl
+                      << std::string(query_begin_, query_end_) << std::endl;
+            return false;
+        }
+
+        if (node_it == nodes_.end() && cigar_it->first != Cigar::Operator::INSERTION) {
+            std::cerr << "ERROR: end of nodes reached before end of CIGAR" << std::endl
+                      << "Processed " << cigar_it - cigar_.begin()
+                      << " of " << cigar_.size() << " operations" << std::endl
+                      << *this << std::endl
+                      << std::string(query_begin_, query_end_) << std::endl;
+            return false;
+        }
+
+        switch (cigar_it->first) {
+            case Cigar::Operator::MATCH:
+            case Cigar::Operator::MISMATCH:
+            case Cigar::Operator::DELETION: {
+                auto cur_query_it = query_it;
+                auto cur_path_steps = path_steps;
+
+                if (cigar_it->first != Cigar::Operator::DELETION)
+                    query_it += cigar_it->second;
+
+                path_steps += cigar_it->second;
+                size_t old_ref_counter = ref_counter;
+                ref_counter += cigar_it->second;
+
+                if (ref_counter >= graph.get_k()) {
+                    size_t shift = 0;
+                    if (old_ref_counter < graph.get_k()) {
+                        assert(ref_counter - graph.get_k() + 1 <= cigar_it->second);
+                        shift = ref_counter - graph.get_k() + 1;
+                    } else {
+                        shift = cigar_it->second;
+                    }
+
+                    for (size_t i = 0; i < shift; ++i) {
+                        ++node_it;
+                        if (node_it != nodes_.end()) {
+                            graph.call_outgoing_kmers(
+                                *(node_it - 1),
+                                [&](auto node, char c) {
+                                    if (node == *node_it)
+                                        path += c;
+                                }
+                            );
+                        }
+                    }
+                }
+
+                if (cigar_it->first == Cigar::Operator::MATCH
+                        && strncmp(cur_query_it,
+                                   path.c_str() + cur_path_steps,
+                                   path_steps - cur_path_steps)) {
+                    std::cerr << "ERROR: mismatch found despite MATCH in CIGAR"
+                              << *this << std::endl
+                              << std::string(query_begin_, query_end_) << std::endl;
+                    return false;
+                } else if (cigar_it->first == Cigar::Operator::MISMATCH
+                        && std::mismatch(cur_query_it,
+                                         query_it,
+                                         path.c_str() + cur_path_steps,
+                                         path.c_str() + path_steps).first != cur_query_it) {
+                    std::cerr << "ERROR: match found despite MISMATCH in CIGAR"
+                              << *this << std::endl
+                              << std::string(query_begin_, query_end_) << std::endl;
+                    return false;
+                }
+            } break;
+            case Cigar::Operator::INSERTION: query_it += cigar_it->second; break;
+            case Cigar::Operator::CLIPPED: {
+                std::cerr << "ERROR: internal clipping in CIGAR" << std::endl
+                          << *this << std::endl
+                          << std::string(query_begin_, query_end_) << std::endl;
+                return false;
+            }
+        }
+    }
+
+    path = path.substr(0, path_steps);
+
+    if (path_steps != sequence_.size()) {
+        std::cerr << "ERROR: stored sequence is incorrect size" << std::endl
+                  << *this << std::endl
+                  << std::string(query_begin_, query_end_) << std::endl;
+        return false;
+    }
+
+    if (path.size() != sequence_.size()) {
+        std::cerr << "ERROR: stored sequence is incorrect" << std::endl
+                  << "Reconstructed sequence: " << path << std::endl
+                  << *this << std::endl
+                  << std::string(query_begin_, query_end_) << std::endl;
+        return false;
+    }
+
+    if (query_it != query_end_) {
+        std::cerr << "ERROR: end of CIGAR reached before end of query" << std::endl
+                  << "Processed " << query_it - query_begin_
+                  << " of " << query_end_ - query_begin_ << " characters" << std::endl
+                  << *this << std::endl
+                  << std::string(query_begin_, query_end_) << std::endl;
+        return false;
+    }
+
+    if (node_it != nodes_.end()) {
+        std::cerr << "ERROR: end of CIGAR reached before end of path" << std::endl
+                  << "Processed " << node_it - nodes_.begin()
+                  << " of " << nodes_.size() << " nodes" << std::endl
+                  << *this << std::endl
+                  << std::string(query_begin_, query_end_) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 template class Alignment<DeBruijnGraph::node_index>;
