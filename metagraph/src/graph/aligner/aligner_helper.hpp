@@ -8,6 +8,7 @@
 #include <array>
 #include <ostream>
 #include <unordered_map>
+#include <json/json.h>
 
 #include "config.hpp"
 #include "sequence_graph.hpp"
@@ -249,6 +250,16 @@ class Alignment {
             && query_begin_ + cigar_.begin()->second == query_end_;
     }
 
+    Json::Value to_json(const char* query_start,
+                        const DeBruijnGraph &graph,
+                        bool is_secondary = false,
+                        const std::string &name = "",
+                        const std::string &label = "") const;
+
+    void load_from_json(const Json::Value &alignment,
+                        const char *query_start,
+                        const DeBruijnGraph &graph);
+
     bool is_valid(const DeBruijnGraph &graph) const;
 
   private:
@@ -271,6 +282,8 @@ class Alignment {
             cigar_(Cigar::Operator::CLIPPED, clipping),
             orientation_(orientation),
             offset_(offset) { cigar_.append(std::move(cigar)); }
+
+    Json::Value path_json(size_t node_size) const;
 
     const char* query_begin_;
     const char* query_end_;

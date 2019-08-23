@@ -591,9 +591,8 @@ std::vector<DBGAligner::DBGAlignment>
 align_sequences(const DeBruijnGraph &graph,
                 const Config &config,
                 const std::string &query,
-                bool forward_and_reverse = false,
                 const std::string &reverse_complement_query = "") {
-    if (forward_and_reverse) {
+    if (config.forward_and_reverse) {
         DBGAligner aligner(graph, DBGAlignerConfig(config, graph));
 
         return config.alignment_seed_unimems
@@ -2726,41 +2725,88 @@ int main(int argc, const char *argv[]) {
 
                 Timer data_reading_timer;
 
+                std::ostream *outstream = config->outfbase.size()
+                    ? new std::ofstream(config->outfbase)
+                    : &std::cout;
+
+                std::unique_ptr<Json::StreamWriter> json_writer;
+                if (utils::ends_with(config->outfbase, ".json")) {
+                    Json::StreamWriterBuilder builder;
+                    builder["indentation"] = "";
+                    json_writer.reset(builder.newStreamWriter());
+                }
+
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                    thread_pool.enqueue([&](auto graph_ptr,
-                                            const Config &config,
-                                            std::string query,
+                    thread_pool.enqueue([&](std::string query,
                                             std::string header) {
                             std::string rc_query;
 
-                            if (config.forward_and_reverse) {
+                            if (config->forward_and_reverse) {
                                 rc_query = query;
                                 reverse_complement(rc_query.begin(), rc_query.end());
                             }
 
-                            auto paths = align_sequences(*graph_ptr,
-                                                         config,
+                            auto paths = align_sequences(*graph,
+                                                         *config,
                                                          query,
-                                                         config.forward_and_reverse,
                                                          rc_query);
 
                             auto lock = std::lock_guard<std::mutex>(print_mutex);
-                            for (const auto &path : paths) {
-                                std::cout << header << "\t"
-                                          << query << "\t"
-                                          << path
-                                          << std::endl;
-                            }
+                            if (!json_writer.get()) {
+                                for (const auto &path : paths) {
+                                    *outstream << header << "\t"
+                                               << query << "\t"
+                                               << path
+                                               << std::endl;
+                                }
 
-                            if (paths.empty())
-                                std::cout << header << "\t"
-                                          << query << "\t"
-                                          << "*\t*\t"
-                                          << config.alignment_min_path_score << "\t*\t*"
-                                          << std::endl;
+                                if (paths.empty())
+                                    *outstream << header << "\t"
+                                               << query << "\t"
+                                               << "*\t*\t"
+                                               << config->alignment_min_path_score << "\t*\t*"
+                                               << std::endl;
+                            } else {
+                                bool secondary = false;
+                                for (const auto &path : paths) {
+                                    auto query_begin = path.get_orientation()
+                                        ? rc_query.c_str()
+                                        : query.c_str();
+
+                                    assert(path.get_query_begin() >= query_begin);
+                                    assert(path.get_query_end()
+                                        <= (path.get_orientation()
+                                            ? &*rc_query.cend()
+                                            : &*query.cend()));
+
+                                    json_writer->write(
+                                        path.to_json(query_begin,
+                                                     *graph,
+                                                     secondary,
+                                                     header),
+                                        outstream
+                                    );
+
+                                    *outstream << std::endl;
+
+                                    secondary = true;
+                                }
+
+                                if (paths.empty()) {
+                                    json_writer->write(
+                                        DBGAligner::DBGAlignment().to_json(
+                                            nullptr,
+                                            *graph,
+                                            secondary,
+                                            header
+                                        ),
+                                        outstream
+                                    );
+
+                                    *outstream << std::endl;
+                                }
+                            }
                         },
-                        graph,
-                        *config,
                         std::string(read_stream->seq.s),
                         config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
                             && read_stream->comment.l
@@ -2782,6 +2828,9 @@ int main(int argc, const char *argv[]) {
                 });
 
                 thread_pool.join();
+
+                if (config->outfbase.size())
+                    delete outstream;
             }
 
             return 0;

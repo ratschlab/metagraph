@@ -108,6 +108,35 @@ bool check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                       ext_paths.begin(), ext_paths.end());
 }
 
+void check_json_dump_load(const DeBruijnGraph &graph,
+                          const DBGAlignment &alignment,
+                          const std::string &query,
+                          const std::string &rc_query = "") {
+    ASSERT_TRUE(!alignment.get_orientation() || query.size() == rc_query.size());
+
+    auto start = alignment.get_orientation() ? rc_query.c_str() : query.c_str();
+    auto end = alignment.get_orientation() ? &*rc_query.cend() : &*query.cend();
+    ASSERT_EQ(std::string(start + alignment.get_clipping(), end),
+              std::string(alignment.get_query_begin(), alignment.get_query_end()));
+
+    DBGAlignment load_alignment;
+    load_alignment.load_from_json(alignment.to_json(start, graph), start, graph);
+
+    EXPECT_EQ(alignment, load_alignment)
+        << alignment.get_orientation() << " "
+        << load_alignment.get_orientation() << "\n"
+        << alignment.get_score() << " "
+        << load_alignment.get_score() << "\n"
+        << alignment.get_num_matches() << " "
+        << load_alignment.get_num_matches() << "\n"
+        << alignment.get_sequence() << " "
+        << load_alignment.get_sequence() << "\n"
+        << alignment.get_cigar().to_string() << " "
+        << load_alignment.get_cigar().to_string() << "\n"
+        << std::string(alignment.get_query_begin(), alignment.get_query_end()) << " "
+        << std::string(load_alignment.get_query_begin(), load_alignment.get_query_end()) << "\n";
+}
+
 template <typename Graph>
 class DBGAlignerTest : public DeBruijnGraphTest<Graph> {};
 
@@ -150,6 +179,7 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -180,6 +210,7 @@ TYPED_TEST(DBGAlignerTest, align_iterators_straight) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -208,6 +239,7 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
 }
@@ -238,6 +270,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query, reference);
 
     auto ext_paths = aligner.extend_mapping_forward_and_reverse_complement(
         query,
@@ -274,6 +307,7 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -303,6 +337,7 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -331,6 +366,7 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -360,6 +396,7 @@ TYPED_TEST(DBGAlignerTest, variation) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -395,6 +432,7 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -424,6 +462,7 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -459,6 +498,7 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -491,6 +531,7 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
         EXPECT_EQ(0u, path.get_clipping());
         EXPECT_EQ(0u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph));
+        check_json_dump_load(*graph, path, query);
     }
 
     // TODO check with extend_mapping
@@ -521,6 +562,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
 }
@@ -550,6 +592,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
 }
@@ -582,6 +625,7 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     Cigar cigar1, cigar2;
     cigar1.append(Cigar::Operator::MATCH, 6);
@@ -626,6 +670,7 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
 }
@@ -656,6 +701,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
     EXPECT_EQ(2u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
@@ -685,6 +731,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
     EXPECT_EQ(2u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
 }
@@ -715,6 +762,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     EXPECT_EQ(2u, path.get_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
 }
@@ -748,6 +796,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp_min_seed_length) {
         EXPECT_EQ(2u, path.get_clipping());
         EXPECT_EQ(0u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph));
+        check_json_dump_load(*graph, path, query);
 
         EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
     }
@@ -772,6 +821,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp_min_seed_length) {
         EXPECT_EQ(0u, path.get_clipping());
         EXPECT_EQ(6u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph));
+        check_json_dump_load(*graph, path, query);
 
         // the unimem alignment mode skips partial k-mer matches in the beginning
         EXPECT_FALSE(check_extend(graph, aligner.get_config(), paths, query));
@@ -806,6 +856,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp) {
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(6u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph));
+    check_json_dump_load(*graph, path, query);
 
     // the unimem alignment mode skips partial k-mer matches in the beginning
     EXPECT_FALSE(check_extend(graph, aligner.get_config(), paths, query));
