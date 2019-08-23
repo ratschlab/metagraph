@@ -66,7 +66,8 @@ const Seeder default_seeder = [](const DeBruijnGraph &graph,
                                                 { node },
                                                 match_score,
                                                 clipping,
-                                                orientation));
+                                                orientation,
+                                                graph.get_k() - seed_length));
         },
         config.min_seed_length,
         config.max_num_seeds_per_locus

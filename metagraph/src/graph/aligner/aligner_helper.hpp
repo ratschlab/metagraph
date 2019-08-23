@@ -62,6 +62,14 @@ class Cigar {
 
     bool operator!=(const Cigar &other) const { return !(*this == other); }
 
+    void clear() { cigar_.clear(); }
+
+    LengthType get_clipping() const {
+        return cigar_.size() && cigar_.front().first == Operator::CLIPPED
+            ? cigar_.front().second
+            : 0;
+    }
+
   private:
     std::vector<std::pair<Operator, LengthType>> cigar_;
 };
@@ -160,12 +168,13 @@ class Alignment {
     typedef std::unordered_map<NodeType, Column> DPTable;
 
     // Used for constructing seeds
-    Alignment(const char* query_begin,
-              const char* query_end,
-              std::vector<NodeType>&& nodes,
-              score_t score,
+    Alignment(const char* query_begin = nullptr,
+              const char* query_end = nullptr,
+              std::vector<NodeType>&& nodes = {},
+              score_t score = 0,
               size_t clipping = 0,
-              bool orientation = false)
+              bool orientation = false,
+              size_t offset = 0)
           : Alignment(query_begin,
                       query_end,
                       std::move(nodes),
@@ -174,8 +183,9 @@ class Alignment {
                       score,
                       Cigar(Cigar::Operator::MATCH, query_end - query_begin),
                       clipping,
-                      orientation) {
-        assert(clipping || is_exact_match());
+                      orientation,
+                      offset) {
+        assert(nodes.empty() || clipping || is_exact_match());
     }
 
     // TODO: construct multiple alignments from the same starting point
@@ -207,6 +217,8 @@ class Alignment {
     void set_cigar(Cigar&& cigar) { cigar_ = std::move(cigar); }
 
     bool get_orientation() const { return orientation_; }
+    size_t get_offset() const { return offset_; }
+    Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
 
     bool operator<(const Alignment &other) const { return score_ < other.score_; }
     bool operator>(const Alignment &other) const { return score_ > other.score_; }
@@ -246,7 +258,8 @@ class Alignment {
               score_t score = 0,
               Cigar&& cigar = Cigar(),
               size_t clipping = 0,
-              bool orientation = false)
+              bool orientation = false,
+              size_t offset = 0)
           : query_begin_(query_begin),
             query_end_(query_end),
             nodes_(std::move(nodes)),
@@ -254,7 +267,8 @@ class Alignment {
             num_matches_(num_matches),
             score_(score),
             cigar_(Cigar::Operator::CLIPPED, clipping),
-            orientation_(orientation) { cigar_.append(std::move(cigar)); }
+            orientation_(orientation),
+            offset_(offset) { cigar_.append(std::move(cigar)); }
 
     const char* query_begin_;
     const char* query_end_;
@@ -264,6 +278,7 @@ class Alignment {
     score_t score_;
     Cigar cigar_;
     bool orientation_;
+    size_t offset_;
 };
 
 template <typename NodeType>
