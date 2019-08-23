@@ -343,7 +343,8 @@ void Alignment<NodeType>::append(Alignment&& other, size_t overlap, int8_t match
 // derived from:
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
 template <typename NodeType>
-Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
+Json::Value Alignment<NodeType>::path_json(size_t node_size,
+                                           const std::string &label) const {
     assert(nodes_.size());
 
     Json::Value path;
@@ -364,9 +365,13 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
     Json::Value mapping;
     Json::Value position;
     position["node_id"] = nodes_.front();
-    position["offset"] = cur_pos;
+
+    if (cur_pos)
+        position["offset"] = cur_pos;
+
     // set to true if the node is the reverse complement of the query
-    position["is_reverse"] = false;
+    //position["is_reverse"] = false;
+
     mapping["position"] = position;
 
     while (cur_pos < node_size && cigar_it != cigar_.end()) {
@@ -388,14 +393,14 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
             case Cigar::Operator::INSERTION: {
                 assert(query_start + next_size <= query_end_);
                 // this assumes that INSERTIONS can't happen right after deletions
-                edit["from_length"] = 0;
+                //edit["from_length"] = 0;
                 edit["to_length"] = next_size;
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
             } break;
             case Cigar::Operator::DELETION: {
                 edit["from_length"] = next_size;
-                edit["to_length"] = 0;
+                //edit["to_length"] = 0;
             } break;
             case Cigar::Operator::MATCH: {
                 edit["from_length"] = next_size;
@@ -428,7 +433,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
         position["node_id"] = *node_it;
         position["offset"] = node_size - 1;
         // set to true if the node is the reverse complement of the query
-        position["is_reverse"] = false;
+        //position["is_reverse"] = false;
         mapping["position"] = position;
 
         if (cigar_it->first == Cigar::Operator::INSERTION) {
@@ -436,7 +441,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
             size_t length = cigar_it->second - cigar_offset;
             assert(query_start + length < query_end_);
             // this assumes that INSERTIONS can't happen right after deletions
-            edit["from_length"] = 0;
+            //edit["from_length"] = 0;
             edit["to_length"] = length;
             edit["sequence"] = std::string(query_start, length);
             query_start += length;
@@ -457,7 +462,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
             } break;
             case Cigar::Operator::DELETION: {
                 edit["from_length"] = 1;
-                edit["to_length"] = 0;
+                //edit["to_length"] = 0;
             } break;
             case Cigar::Operator::MATCH: {
                 edit["from_length"] = 1;
@@ -484,6 +489,9 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
     path["length"] = nodes_.size();
     //path["is_circular"]; // bool
 
+    if (label.size())
+        path["name"] = label;
+
     return path;
 }
 
@@ -499,52 +507,59 @@ Json::Value Alignment<NodeType>::to_json(const char *query_start,
     assert(query_start + cigar_.get_clipping() == query_begin_);
     assert(is_valid(graph));
 
-    // encode path
-    Json::Value path;
-    if (nodes_.size()) {
-        path = path_json(graph.get_k());
-
-        if (label.size())
-            path["name"] = label;
-    }
-
     // encode alignment
     Json::Value alignment;
 
-    alignment["sequence"] = std::string(query_begin_, query_end_);
-    alignment["path"] = path;
     alignment["name"] = read_name;
+    if (query_end_ == query_begin_)
+        return alignment;
+
+    alignment["sequence"] = std::string(query_begin_, query_end_);
+
+    // encode path
+    if (nodes_.size())
+        alignment["path"] = path_json(graph.get_k(), label);
+
+    alignment["score"] = static_cast<int32_t>(score_);
+
+    if (query_begin_ > query_start)
+        alignment["query_position"] = static_cast<int32_t>(query_begin_ - query_start);
+
+    if (is_secondary)
+        alignment["is_secondary"] = is_secondary;
+
+    alignment["identity"] = query_end_ != query_begin_
+        ? static_cast<double>(num_matches_) / (query_end_ - query_begin_)
+        : 0;
+
+    alignment["read_mapped"] = (query_end_ != query_begin_);
+
+    if (orientation_)
+        alignment["read_on_reverse_strand"] = orientation_;
+
+
+    if (cigar_.get_clipping())
+        alignment["soft_clipped"] = static_cast<bool>(cigar_.get_clipping());
+
+    // Unused flags (for now)
     //alignment["quality"]; // bytes
     //alignment["mapping_quality"]; // int32
-    alignment["score"] = static_cast<int32_t>(score_);
-    alignment["query_position"] = static_cast<int32_t>(query_begin_ - query_start);
     //alignment["sample_name"]; // string
     //alignment["read_group"]; // string
     //alignment["fragment_prev"]; // Alignment
     //alignment["fragment_next"]; // Alignment
-    alignment["is_secondary"] = is_secondary;
-    alignment["identity"] = query_end_ != query_begin_
-        ? static_cast<double>(num_matches_) / (query_end_ - query_begin_)
-        : 0;
     //alignment["fragment"]; // Path
     //alignment["refpos"]; // Position
-
-    // // SAMTools-style flags
     //alignment["read_paired"]; // bool
-    alignment["read_mapped"] = (query_end_ != query_begin_);
     //alignment["mate_unmapped"]; // bool
-    alignment["read_on_reverse_strand"] = orientation_;
     //alignment["mate_on_reverse_strand"]; // bool
-    alignment["soft_clipped"] = static_cast<bool>(cigar_.get_clipping());
     //alignment["discordant_insert_size"]; // bool
     //alignment["uniqueness"]; // double
     //alignment["correct"]; // double
     //alignment["secondary_score"]; // repeated int32
     //alignment["fragment_score"]; // double
     //alignment["mate_mapped_to_disjoint_subgraph"]; // bool
-
     //alignment["fragment_length_distribution"]; // string
-
     //alignment["haplotype_scored"]; // bool
     //alignment["haplotype_logprob"]; // double
     //alignment["time_used"]; // double

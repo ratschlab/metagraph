@@ -283,7 +283,7 @@ class Alignment {
             orientation_(orientation),
             offset_(offset) { cigar_.append(std::move(cigar)); }
 
-    Json::Value path_json(size_t node_size) const;
+    Json::Value path_json(size_t node_size, const std::string &label = "") const;
 
     const char* query_begin_;
     const char* query_end_;
