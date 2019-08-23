@@ -265,7 +265,7 @@ std::vector<DBGAligner::DBGAlignment> DBGAligner
 ::extend_mapping_forward_and_reverse_complement(const std::string &query,
                                                 const std::string &reverse_complement_query,
                                                 score_t min_path_score,
-                                                const SeederMaker &seeder_maker) const {
+                                                const MapExtendSeederBuilder &seeder_builder) const {
     assert(query.size() == reverse_complement_query.size());
 
     std::vector<node_index> nodes;
@@ -275,7 +275,7 @@ std::vector<DBGAligner::DBGAlignment> DBGAligner
                                      [&](auto node) { nodes.emplace_back(node); });
     assert(nodes.size() == query.size() - graph_.get_k() + 1);
 
-    auto seeder = seeder_maker(nodes);
+    auto seeder = seeder_builder(nodes, graph_);
 
     std::vector<node_index> rc_nodes;
     rc_nodes.reserve(nodes.size());
@@ -284,7 +284,7 @@ std::vector<DBGAligner::DBGAlignment> DBGAligner
                                      [&](auto node) { rc_nodes.emplace_back(node); });
     assert(rc_nodes.size() == nodes.size());
 
-    auto rc_seeder = seeder_maker(rc_nodes);
+    auto rc_seeder = seeder_builder(rc_nodes, graph_);
 
     auto paths = DBGAligner(graph_, config_, seeder, extend_, priority_function_).align(
         query, false, min_path_score

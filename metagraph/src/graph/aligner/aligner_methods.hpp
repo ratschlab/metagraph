@@ -15,7 +15,8 @@ typedef std::function<std::vector<DBGAlignment>(const DeBruijnGraph&,
                                                 bool // orientation
                                                 )> Seeder;
 
-typedef std::function<Seeder(const std::vector<DeBruijnGraph::node_index> &)> SeederMaker;
+template <class... Args>
+using SeederBuilder = std::function<Seeder(Args&&... args)>;
 
 typedef std::function<void(const DeBruijnGraph&,
                            const DBGAlignment&,
@@ -29,7 +30,15 @@ typedef std::function<void(const DeBruijnGraph&,
 typedef std::function<bool(const DBGAlignment&, const DBGAlignment&)> PriorityFunction;
 
 
-Seeder make_unimem_seeder(const std::vector<DeBruijnGraph::node_index> &nodes);
+class DBGAligner;
+
+Seeder build_mem_seeder(const std::vector<DeBruijnGraph::node_index> &nodes,
+                        std::function<bool(DeBruijnGraph::node_index,
+                                           const DeBruijnGraph &)> stop_matching,
+                        const DeBruijnGraph &graph);
+
+Seeder build_unimem_seeder(const std::vector<DeBruijnGraph::node_index> &nodes,
+                           const DeBruijnGraph &graph);
 
 extern const Seeder default_seeder;
 extern const Extender default_extender;

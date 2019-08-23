@@ -98,7 +98,7 @@ bool check_extend(std::shared_ptr<const DeBruijnGraph> graph,
 
     auto ext_paths = DBGAligner(*graph,
                                 config,
-                                make_unimem_seeder(nodes)).align(
+                                build_unimem_seeder(nodes, *graph)).align(
         query,
         false,
         min_path_score

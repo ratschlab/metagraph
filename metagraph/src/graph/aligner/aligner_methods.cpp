@@ -76,66 +76,6 @@ const Seeder default_seeder = [](const DeBruijnGraph &graph,
     return seeds;
 };
 
-Seeder make_unimem_seeder(const std::vector<node_index> &nodes) {
-    return [nodes](const DeBruijnGraph &graph,
-                   const DBGAlignerConfig &config,
-                   const char* seed_begin,
-                   const char* seed_end,
-                   size_t clipping,
-                   bool orientation) -> std::vector<DBGAlignment> {
-        assert(seed_end >= seed_begin);
-
-        if (seed_begin == seed_end)
-            return {};
-
-        assert(nodes.begin() + clipping < nodes.end());
-        assert(static_cast<size_t>(seed_end - seed_begin) + clipping
-                   == nodes.size() + graph.get_k() - 1);
-
-        auto start = std::find_if(
-            nodes.begin() + clipping,
-            nodes.end(),
-            [](auto node) { return node != DeBruijnGraph::npos; }
-        );
-
-        if (start != nodes.begin() + clipping)
-            return {};
-
-        assert(*start != DeBruijnGraph::npos);
-        auto next = std::find_if(
-            start, nodes.end(),
-            [&](auto node) { return node == DeBruijnGraph::npos
-                                 || graph.outdegree(node) > 1
-                                 || graph.indegree(node) > 1; }
-        );
-
-        if (UNLIKELY(next != nodes.end() && *next != DeBruijnGraph::npos))
-            next++;
-
-        assert(next != start);
-
-        auto end_it = next == nodes.end()
-            ? seed_end
-            : seed_begin + (next - nodes.begin() - clipping) + graph.get_k() - 1;
-
-        assert(end_it >= seed_begin);
-        assert(end_it <= seed_end);
-        assert(static_cast<size_t>(end_it - seed_begin) >= graph.get_k());
-
-        auto match_score = config.match_score(seed_begin, end_it);
-
-        if (match_score <= config.min_cell_score)
-            return {};
-
-        return { DBGAlignment(seed_begin,
-                              end_it,
-                              std::vector<node_index>(start, next),
-                              config.match_score(seed_begin, end_it),
-                              clipping,
-                              orientation) };
-    };
-}
-
 DPTable initialize_dp_table(node_index start_node,
                             char start_char,
                             score_t initial_score,
@@ -497,3 +437,77 @@ const Extender default_extender = [](const DeBruijnGraph &graph,
         }
     }
 };
+
+Seeder build_mem_seeder(const std::vector<DeBruijnGraph::node_index> &nodes,
+                        std::function<bool(DeBruijnGraph::node_index,
+                                           const DeBruijnGraph &)> stop_matching,
+                        const DeBruijnGraph &graph) {
+    auto stop_matching_mapped = [stop_matching, &graph](DeBruijnGraph::node_index node) {
+        return node == DeBruijnGraph::npos || stop_matching(node, graph);
+    };
+
+    return [nodes,
+            stop_matching_mapped](const DeBruijnGraph &graph,
+                                  const DBGAlignerConfig &config,
+                                  const char* seed_begin,
+                                  const char* seed_end,
+                                  size_t clipping,
+                                  bool orientation) -> std::vector<DBGAlignment> {
+        assert(seed_end >= seed_begin);
+
+        if (seed_begin == seed_end)
+            return {};
+
+        assert(nodes.begin() + clipping < nodes.end());
+        assert(static_cast<size_t>(seed_end - seed_begin) + clipping
+                   == nodes.size() + graph.get_k() - 1);
+
+        auto start = std::find_if(
+            nodes.begin() + clipping,
+            nodes.end(),
+            [](auto node) { return node != DeBruijnGraph::npos; }
+        );
+
+        if (start != nodes.begin() + clipping)
+            return {};
+
+        assert(*start != DeBruijnGraph::npos);
+        auto next = std::find_if(start, nodes.end(), stop_matching_mapped);
+
+        if (UNLIKELY(next != nodes.end() && *next != DeBruijnGraph::npos))
+            next++;
+
+        assert(next != start);
+
+        auto end_it = next == nodes.end()
+            ? seed_end
+            : seed_begin + (next - nodes.begin() - clipping) + graph.get_k() - 1;
+
+        assert(end_it >= seed_begin);
+        assert(end_it <= seed_end);
+        assert(static_cast<size_t>(end_it - seed_begin) >= graph.get_k());
+
+        auto match_score = config.match_score(seed_begin, end_it);
+
+        if (match_score <= config.min_cell_score)
+            return {};
+
+        return { DBGAlignment(seed_begin,
+                              end_it,
+                              std::vector<node_index>(start, next),
+                              config.match_score(seed_begin, end_it),
+                              clipping,
+                              orientation) };
+    };
+}
+
+Seeder build_unimem_seeder(const std::vector<node_index> &nodes,
+                           const DeBruijnGraph &graph) {
+    return build_mem_seeder(
+        nodes,
+        [](DeBruijnGraph::node_index node, const DeBruijnGraph &graph) {
+            return graph.outdegree(node) > 1 || graph.indegree(node) > 1;
+        },
+        graph
+    );
+}

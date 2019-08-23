@@ -618,7 +618,7 @@ align_sequences(const DeBruijnGraph &graph,
             [&](auto node) { nodes.emplace_back(node); }
         );
 
-        seeder = make_unimem_seeder(nodes);
+        seeder = build_unimem_seeder(nodes, graph);
     }
 
     return DBGAligner(graph, DBGAlignerConfig(config, graph), seeder).align(
