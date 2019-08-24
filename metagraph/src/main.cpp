@@ -590,13 +590,13 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
         std::cout << timer.elapsed() << "sec" << std::endl;
 }
 
-std::vector<DBGAligner::DBGAlignment>
+std::vector<DBGAligner<>::DBGAlignment>
 align_sequences(const DeBruijnGraph &graph,
                 const Config &config,
                 const std::string &query,
                 const std::string &reverse_complement_query = "") {
     if (config.forward_and_reverse) {
-        DBGAligner aligner(graph, DBGAlignerConfig(config, graph));
+        DBGAligner<> aligner(graph, DBGAlignerConfig(config, graph));
 
         return config.alignment_seed_unimems
             ? aligner.extend_mapping_forward_and_reverse_complement(
@@ -623,7 +623,7 @@ align_sequences(const DeBruijnGraph &graph,
         seeder = build_unimem_seeder<DeBruijnGraph::node_index>(nodes, graph);
     }
 
-    return DBGAligner(graph, DBGAlignerConfig(config, graph), seeder).align(
+    return DBGAligner<>(graph, DBGAlignerConfig(config, graph), seeder).align(
         query, false, config.alignment_min_path_score
     );
 }
@@ -2794,7 +2794,7 @@ int main(int argc, const char *argv[]) {
 
                                 if (paths.empty()) {
                                     json_writer->write(
-                                        DBGAligner::DBGAlignment().to_json(
+                                        DBGAligner<>::DBGAlignment().to_json(
                                             "",
                                             *graph,
                                             secondary,

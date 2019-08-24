@@ -153,7 +153,8 @@ std::vector<Alignment<NodeType>> suffix_seeder(const DeBruijnGraph &graph,
     return seeds;
 }
 
-template <typename NodeType>
+
+template <typename NodeType, class Compare>
 void default_extender(const DeBruijnGraph &graph,
                       const Alignment<NodeType> &path,
                       std::vector<Alignment<NodeType>>* next_paths,
@@ -175,7 +176,8 @@ void default_extender(const DeBruijnGraph &graph,
     size_t size = sequence_end - align_start + 1;
 
     // branch and bound
-    if (path.get_score() + config.match_score(align_start, sequence_end) < min_path_score)
+    if (path.get_score() + config.match_score(align_start,
+                                              sequence_end) < min_path_score)
         return;
 
     // used for branch and bound checks below
@@ -186,8 +188,18 @@ void default_extender(const DeBruijnGraph &graph,
                      [&](score_t sum, char c) { return sum + config.get_row(c)[c]; });
 
     // keep track of which columns to use next
-    // TODO: priority function here
-    BoundedPriorityQueue<std::pair<score_t, node_index>> columns_to_update(
+    struct PriorityFunction {
+        bool operator()(typename DPTable::value_type* a,
+                        typename DPTable::value_type* b) const {
+            return compare_(a->second, b->second);
+        }
+
+        const Compare compare_ = Compare();
+    };
+
+    BoundedPriorityQueue<typename DPTable::value_type*,
+                         std::vector<typename DPTable::value_type*>,
+                         PriorityFunction> columns_to_update(
         config.queue_size
     );
 
@@ -214,10 +226,12 @@ void default_extender(const DeBruijnGraph &graph,
 
     // dynamic programming
     assert(dp_table.find(path.back()) != dp_table.end());
-    columns_to_update.emplace(std::get<0>(dp_table[path.back()]).front(),
-                              path.back());
+    //columns_to_update.emplace(std::get<0>(dp_table[path.back()]).front(),
+    //                          path.back());
+    columns_to_update.emplace(&*dp_table.begin());
     while (columns_to_update.size()) {
-        auto cur_node = std::get<1>(columns_to_update.pop_top());
+        //auto cur_node = std::get<1>(columns_to_update.pop_top());
+        auto cur_node = columns_to_update.pop_top()->first;
         // get next columns
         out_columns.clear();
         graph.call_outgoing_kmers(
@@ -231,7 +245,7 @@ void default_extender(const DeBruijnGraph &graph,
                              0 }
                 );
 
-                // if the emplace didn't happen, make sure the character stored is correct
+                // if the emplace didn't happen, correct the stored character
                 if (!emplace.second)
                     std::get<2>(emplace.first->second) = c;
 
@@ -321,8 +335,10 @@ void default_extender(const DeBruijnGraph &graph,
                 );
 
                 for (size_t i = 0; i < size; ++i) {
-                    if (std::get<0>(current_step[i]) == Cigar::Operator::CLIPPED
-                            || std::get<0>(current_step[i]) == Cigar::Operator::INSERTION)
+                    // disabled check for deletion after insertion
+                    // if (std::get<0>(current_step[i]) == Cigar::Operator::INSERTION)
+                    //     continue;
+                    if (current[i] == config.min_cell_score)
                         continue;
 
                     if (current[i] + gap_scores[i] > std::get<1>(updates[i]))
@@ -336,8 +352,9 @@ void default_extender(const DeBruijnGraph &graph,
             // compute insert scores
             for (size_t i = 1; i < size; ++i) {
                 auto prev_op = std::get<0>(std::get<0>(updates[i - 1]));
-                if (prev_op == Cigar::Operator::DELETION)
-                    continue;
+                // disabled check for insertion after deletion
+                // if (prev_op == Cigar::Operator::DELETION)
+                //     continue;
 
                 score_t insert_score = std::get<1>(updates[i - 1])
                     + (prev_op == Cigar::Operator::INSERTION
@@ -385,7 +402,7 @@ void default_extender(const DeBruijnGraph &graph,
                                        [best_score](auto a, auto b) {
                                            return a + b < best_score;
                                        }))
-                    columns_to_update.emplace(*max_pos, next_node);
+                    columns_to_update.emplace(&*iter);
             }
         }
     }

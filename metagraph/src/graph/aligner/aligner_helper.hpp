@@ -165,6 +165,12 @@ class Alignment {
                        size_t>
             Column;
 
+    struct ColumnCompare {
+        bool operator()(const Column &a, const Column &b) const {
+            return std::get<0>(a).at(std::get<3>(a)) < std::get<0>(b).at(std::get<3>(b));
+        }
+    };
+
     // storage for DP table
     typedef std::unordered_map<NodeType, Column> DPTable;
 

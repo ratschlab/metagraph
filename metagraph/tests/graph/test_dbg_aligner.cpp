@@ -15,7 +15,7 @@
 #include "test_dbg_helpers.hpp"
 
 
-typedef DBGAligner::score_t score_t;
+typedef DBGAligner<>::score_t score_t;
 
 int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b) {
     return config.get_row(a)[b];
@@ -84,7 +84,7 @@ const DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
 
 bool check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                   const DBGAlignerConfig &config,
-                  const std::vector<DBGAligner::DBGAlignment> &paths,
+                  const std::vector<DBGAligner<>::DBGAlignment> &paths,
                   const std::string &query,
                   score_t min_path_score = std::numeric_limits<score_t>::min()) {
     assert(graph.get());
@@ -96,9 +96,9 @@ bool check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                                      query.end(),
                                      [&](auto node) { nodes.emplace_back(node); });
 
-    auto ext_paths = DBGAligner(*graph,
-                                config,
-                                build_unimem_seeder(nodes, *graph)).align(
+    auto ext_paths = DBGAligner<>(*graph,
+                                  config,
+                                  build_unimem_seeder(nodes, *graph)).align(
         query,
         false,
         min_path_score
@@ -121,7 +121,7 @@ TYPED_TEST(DBGAlignerTest, align_sequence_too_short) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto alt_paths = aligner.align(query);
 
     EXPECT_EQ(0ull, alt_paths.size());
@@ -134,7 +134,7 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -163,8 +163,8 @@ TYPED_TEST(DBGAlignerTest, align_iterators_straight) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
-    std::vector<DBGAligner::DBGAlignment> alt_paths;
+    DBGAligner<> aligner(*graph, config);
+    std::vector<DBGAligner<>::DBGAlignment> alt_paths;
     aligner.align(query.begin(), query.end(),
                   [&](auto&& alignment) { alt_paths.emplace_back(std::move(alignment)); });
     ASSERT_FALSE(alt_paths.empty());
@@ -194,7 +194,7 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -225,7 +225,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
 
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align_forward_and_reverse_complement(query, reference);
     ASSERT_FALSE(paths.empty());
 
@@ -262,7 +262,7 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -292,7 +292,7 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -321,7 +321,7 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -350,7 +350,7 @@ TYPED_TEST(DBGAlignerTest, variation) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -383,7 +383,7 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     Cigar::initialize_opt_table(graph->alphabet());
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
 
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
@@ -416,7 +416,7 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -450,7 +450,7 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
     config.num_alternative_paths = 2;
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
 
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
@@ -489,7 +489,7 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
     config.num_alternative_paths = 2;
     config.queue_size = 100;
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
 
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
@@ -516,7 +516,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -546,7 +546,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -577,7 +577,7 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -623,7 +623,7 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -655,7 +655,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
     auto graph = std::make_shared<DBGSuccinct>(k);
     Cigar::initialize_opt_table(graph->alphabet());
     graph->add_sequence(reference);
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto alt_paths = aligner.align(query);
     ASSERT_FALSE(alt_paths.empty());
 
@@ -686,7 +686,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
     auto graph = std::make_shared<DBGSuccinct>(k);
     Cigar::initialize_opt_table(graph->alphabet());
     graph->add_sequence(reference);
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
@@ -719,7 +719,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
 
     DBGAlignerConfig config = ::config;
     config.min_cell_score = std::numeric_limits<score_t>::min();
-    DBGAligner aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -753,7 +753,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.min_seed_length = 2;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min();
-        DBGAligner aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
+        DBGAligner<> aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
         auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
@@ -777,7 +777,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.min_seed_length = 1;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min();
-        DBGAligner aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
+        DBGAligner<> aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
         auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
@@ -812,7 +812,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     DBGAlignerConfig config = ::config;
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min();
-    DBGAligner aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
+    DBGAligner<> aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
     auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();

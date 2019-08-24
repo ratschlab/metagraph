@@ -35,10 +35,6 @@ using Extender = std::function<void(
     typename Alignment<NodeType>::score_t // min path score
 )>;
 
-template <typename NodeType>
-using PriorityFunction = std::function<bool(const Alignment<NodeType>&,
-                                            const Alignment<NodeType>&)>;
-
 
 template <typename NodeType>
 Seeder<NodeType>
@@ -69,7 +65,7 @@ suffix_seeder(const DeBruijnGraph &graph,
                size_t clipping = 0,
                bool orientation = false);
 
-template <typename NodeType>
+template <typename NodeType, class Compare = typename Alignment<NodeType>::ColumnCompare>
 void default_extender(const DeBruijnGraph &graph,
                       const Alignment<NodeType> &path,
                       std::vector<Alignment<NodeType>> *next_paths, // output vector
