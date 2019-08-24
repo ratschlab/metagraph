@@ -17,15 +17,15 @@ class DBGAligner {
 
     explicit DBGAligner(const DeBruijnGraph &graph,
                         const DBGAlignerConfig &config,
-                        const Seeder &seed = default_seeder,
-                        const Extender &extend = default_extender,
-                        const PriorityFunction &priority_function = std::less<DBGAlignment>());
+                        const Seeder<node_index> &seed = suffix_seeder<node_index>,
+                        const Extender<node_index> &extend = default_extender<node_index>,
+                        const PriorityFunction<node_index> &priority_function = std::less<DBGAlignment>());
 
     explicit DBGAligner(const DeBruijnGraph &graph,
                         const Config &config,
-                        const Seeder &seed = default_seeder,
-                        const Extender &extend = default_extender,
-                        const PriorityFunction &priority_function = std::less<DBGAlignment>());
+                        const Seeder<node_index> &seed = suffix_seeder<node_index>,
+                        const Extender<node_index> &extend = default_extender<node_index>,
+                        const PriorityFunction<node_index> &priority_function = std::less<DBGAlignment>());
 
     // Align a sequence to the graph
     template <class StringIt>
@@ -47,29 +47,26 @@ class DBGAligner {
                                          score_t min_path_score
                                              = std::numeric_limits<score_t>::min()) const;
 
-    typedef SeederBuilder<const std::vector<node_index>&,
-                          const DeBruijnGraph&> MapExtendSeederBuilder;
-
     std::vector<DBGAlignment>
     extend_mapping_forward_and_reverse_complement(const std::string &query,
                                                   const std::string &reverse_complement_query,
                                                   score_t min_path_score
                                                       = std::numeric_limits<score_t>::min(),
-                                                  const MapExtendSeederBuilder &seeder_builder
-                                                      = build_unimem_seeder) const;
+                                                  const MapExtendSeederBuilder<node_index> &seeder_builder
+                                                      = build_unimem_seeder<node_index>) const;
 
     const DeBruijnGraph& get_graph() const { return graph_; }
     const DBGAlignerConfig& get_config() const { return config_; }
-    const Seeder& get_seeder() const { return seed_; }
-    const Extender& get_extender() const { return extend_; }
-    const PriorityFunction& get_priority_function() const { return priority_function_; }
+    const Seeder<node_index>& get_seeder() const { return seed_; }
+    const Extender<node_index>& get_extender() const { return extend_; }
+    const PriorityFunction<node_index>& get_priority_function() const { return priority_function_; }
 
   private:
     const DeBruijnGraph& graph_;
     DBGAlignerConfig config_;
-    const Seeder seed_;
-    const Extender extend_;
-    const PriorityFunction priority_function_;
+    const Seeder<node_index> seed_;
+    const Extender<node_index> extend_;
+    const PriorityFunction<node_index> priority_function_;
 };
 
 

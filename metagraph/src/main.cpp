@@ -611,7 +611,7 @@ align_sequences(const DeBruijnGraph &graph,
               );
     }
 
-    auto seeder = default_seeder;
+    Seeder<DeBruijnGraph::node_index> seeder = suffix_seeder<DeBruijnGraph::node_index>;
     if (config.alignment_seed_unimems) {
         std::vector<DeBruijnGraph::node_index> nodes;
         graph.map_to_nodes_sequentially(
@@ -620,7 +620,7 @@ align_sequences(const DeBruijnGraph &graph,
             [&](auto node) { nodes.emplace_back(node); }
         );
 
-        seeder = build_unimem_seeder(nodes, graph);
+        seeder = build_unimem_seeder<DeBruijnGraph::node_index>(nodes, graph);
     }
 
     return DBGAligner(graph, DBGAlignerConfig(config, graph), seeder).align(

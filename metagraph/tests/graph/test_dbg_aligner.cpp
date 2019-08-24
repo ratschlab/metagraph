@@ -739,7 +739,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
 }
 
-TEST(DBGAlignerTest, align_inexact_seed_snp_min_seed_length) {
+TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     size_t k = 7;
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";
     std::string query =        "AC" "CTTTCGAGGCCAA";
@@ -753,7 +753,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp_min_seed_length) {
         config.min_seed_length = 2;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min();
-        DBGAligner aligner(*graph, config);
+        DBGAligner aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
         auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
@@ -777,7 +777,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp_min_seed_length) {
         config.min_seed_length = 1;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min();
-        DBGAligner aligner(*graph, config);
+        DBGAligner aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
         auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
@@ -800,7 +800,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp_min_seed_length) {
     }
 }
 
-TEST(DBGAlignerTest, align_inexact_seed_snp) {
+TEST(DBGAlignerTest, align_suffix_seed_snp) {
     size_t k = 7;
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";
     std::string query =        "AC" "CTTTCGAGGCCAA";
@@ -812,7 +812,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp) {
     DBGAlignerConfig config = ::config;
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min();
-    DBGAligner aligner(*graph, config);
+    DBGAligner aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
     auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();

@@ -6,9 +6,9 @@
 
 DBGAligner::DBGAligner(const DeBruijnGraph &graph,
                        const DBGAlignerConfig &config,
-                       const Seeder &seed,
-                       const Extender &extend,
-                       const PriorityFunction &priority_function)
+                       const Seeder<node_index> &seed,
+                       const Extender<node_index> &extend,
+                       const PriorityFunction<node_index> &priority_function)
       : graph_(graph),
         config_(config),
         seed_(seed),
@@ -17,9 +17,9 @@ DBGAligner::DBGAligner(const DeBruijnGraph &graph,
 
 DBGAligner::DBGAligner(const DeBruijnGraph &graph,
                        const Config &config,
-                       const Seeder &seed,
-                       const Extender &extend,
-                       const PriorityFunction &priority_function)
+                       const Seeder<node_index> &seed,
+                       const Extender<node_index> &extend,
+                       const PriorityFunction<node_index> &priority_function)
       : DBGAligner(graph,
                    DBGAlignerConfig(config, graph),
                    seed,
@@ -266,7 +266,7 @@ std::vector<DBGAligner::DBGAlignment> DBGAligner
 ::extend_mapping_forward_and_reverse_complement(const std::string &query,
                                                 const std::string &reverse_complement_query,
                                                 score_t min_path_score,
-                                                const MapExtendSeederBuilder &seeder_builder) const {
+                                                const MapExtendSeederBuilder<node_index> &seeder_builder) const {
     assert(query.size() == reverse_complement_query.size());
 
     std::vector<node_index> nodes;

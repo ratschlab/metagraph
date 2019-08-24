@@ -6,84 +6,16 @@
 #include "bounded_priority_queue.hpp"
 
 
-typedef DBGAlignment::node_index node_index;
-typedef DBGAlignment::score_t score_t;
-typedef DBGAlignment::DPTable DPTable;
-typedef DBGAlignment::Step Step;
-typedef DBGAlignment::Column Column;
-
-
-const Seeder default_seeder = [](const DeBruijnGraph &graph,
-                                 const DBGAlignerConfig &config,
-                                 const char* seed_begin,
-                                 const char* seed_end,
-                                 size_t clipping,
-                                 bool orientation) -> std::vector<DBGAlignment> {
-    assert(seed_end >= seed_begin);
-
-    if (seed_begin == seed_end)
-        return {};
-
-    if (config.max_seed_length >= graph.get_k()
-            && static_cast<size_t>(seed_end - seed_begin) >= graph.get_k()) {
-        auto exact = graph.kmer_to_node(std::string(seed_begin,
-                                                    seed_begin + graph.get_k()));
-
-        if (exact != DeBruijnGraph::npos) {
-            auto match_score = config.match_score(seed_begin,
-                                                  seed_begin + graph.get_k());
-
-            if (match_score <= config.min_cell_score)
-                return {};
-
-            return { DBGAlignment(seed_begin,
-                                  seed_begin + graph.get_k(),
-                                  { exact },
-                                  match_score,
-                                  clipping,
-                                  orientation)};
-        }
-    }
-
-    const auto* dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
-    if (!dbg_succ)
-        return {};
-
-    // PARTIAL SEEDING
-    std::vector<DBGAlignment> seeds;
-
-    dbg_succ->call_nodes_with_suffix(
-        seed_begin,
-        seed_begin + std::min(graph.get_k(), config.max_seed_length),
-        [&](DeBruijnGraph::node_index node, uint64_t seed_length) {
-            assert(node != DeBruijnGraph::npos);
-
-            auto match_score = config.match_score(seed_begin, seed_begin + seed_length);
-
-            if (match_score > config.min_cell_score)
-                seeds.emplace_back(DBGAlignment(seed_begin,
-                                                seed_begin + seed_length,
-                                                { node },
-                                                match_score,
-                                                clipping,
-                                                orientation,
-                                                graph.get_k() - seed_length));
-        },
-        config.min_seed_length,
-        config.max_num_seeds_per_locus
-    );
-
-    return seeds;
-};
-
-DPTable initialize_dp_table(node_index start_node,
-                            char start_char,
-                            score_t initial_score,
-                            score_t min_score,
-                            size_t size,
-                            int8_t gap_opening_penalty,
-                            int8_t gap_extension_penalty) {
-    DPTable dp_table;
+template <typename NodeType>
+typename Alignment<NodeType>::DPTable
+initialize_dp_table(NodeType start_node,
+                    char start_char,
+                    typename Alignment<NodeType>::score_t initial_score,
+                    typename Alignment<NodeType>::score_t min_score,
+                    size_t size,
+                    int8_t gap_opening_penalty,
+                    int8_t gap_extension_penalty) {
+    typename Alignment<NodeType>::DPTable dp_table;
 
     // Initialize first column
     auto& table_init = dp_table[start_node];
@@ -119,15 +51,123 @@ DPTable initialize_dp_table(node_index start_node,
     return dp_table;
 }
 
+bool early_cutoff(const DeBruijnGraph &graph,
+                  const DBGAlignerConfig &config,
+                  const char *seed_begin,
+                  const char *seed_end) {
+    if (seed_begin == seed_end)
+        return true;
 
-const Extender default_extender = [](const DeBruijnGraph &graph,
-                                     const DBGAlignment &path,
-                                     std::vector<DBGAlignment>* next_paths,
-                                     const char* sequence_end,
-                                     const DBGAlignerConfig &config,
-                                     bool orientation,
-                                     score_t min_path_score
-                                         = std::numeric_limits<score_t>::min()) {
+    if (config.min_seed_length > std::min(graph.get_k(),
+                                          static_cast<size_t>(seed_end - seed_begin)))
+        return true;
+
+    return false;
+}
+
+
+template <typename NodeType>
+std::vector<Alignment<NodeType>> exact_seeder(const DeBruijnGraph &graph,
+                                              const DBGAlignerConfig &config,
+                                              const char *seed_begin,
+                                              const char *seed_end,
+                                              size_t clipping,
+                                              bool orientation) {
+    assert(seed_end >= seed_begin);
+
+    if (early_cutoff(graph, config, seed_begin, seed_end)
+            || config.max_seed_length < graph.get_k()
+            || static_cast<size_t>(seed_end - seed_begin) < graph.get_k())
+        return {};
+
+    auto exact = graph.kmer_to_node(std::string(seed_begin,
+                                                seed_begin + graph.get_k()));
+
+    if (exact == DeBruijnGraph::npos)
+        return {};
+
+    auto match_score = config.match_score(seed_begin,
+                                          seed_begin + graph.get_k());
+
+    if (match_score <= config.min_cell_score)
+        return {};
+
+    return { Alignment<NodeType>(seed_begin,
+                                 seed_begin + graph.get_k(),
+                                 { exact },
+                                 match_score,
+                                 clipping,
+                                 orientation) };
+}
+
+template <typename NodeType>
+std::vector<Alignment<NodeType>> suffix_seeder(const DeBruijnGraph &graph,
+                                               const DBGAlignerConfig &config,
+                                               const char *seed_begin,
+                                               const char *seed_end,
+                                               size_t clipping,
+                                               bool orientation) {
+    assert(seed_end >= seed_begin);
+
+    if (early_cutoff(graph, config, seed_begin, seed_end))
+        return {};
+
+    auto seeds = exact_seeder<NodeType>(graph,
+                                        config,
+                                        seed_begin,
+                                        seed_end,
+                                        clipping,
+                                        orientation);
+
+    if (seeds.size())
+        return seeds;
+
+    const auto* dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+    if (!dbg_succ)
+        return {};
+
+    auto max_seed_length = std::min(static_cast<size_t>(seed_end - seed_begin),
+                                    std::min(config.max_seed_length, graph.get_k()));
+    dbg_succ->call_nodes_with_suffix(
+        seed_begin,
+        seed_begin + max_seed_length,
+        [&](auto node, uint64_t seed_length) {
+            assert(node != DeBruijnGraph::npos);
+
+            auto match_score = config.match_score(seed_begin,
+                                                  seed_begin + seed_length);
+
+            if (match_score > config.min_cell_score)
+                seeds.emplace_back(seed_begin,
+                                   seed_begin + seed_length,
+                                   std::vector<NodeType>{ node },
+                                   match_score,
+                                   clipping,
+                                   orientation,
+                                   graph.get_k() - seed_length);
+        },
+        config.min_seed_length,
+        config.max_num_seeds_per_locus
+    );
+
+    return seeds;
+}
+
+template <typename NodeType>
+void default_extender(const DeBruijnGraph &graph,
+                      const Alignment<NodeType> &path,
+                      std::vector<Alignment<NodeType>>* next_paths,
+                      const char* sequence_end,
+                      const DBGAlignerConfig &config,
+                      bool orientation,
+                      typename Alignment<NodeType>::score_t min_path_score) {
+    typedef Alignment<NodeType> DBGAlignment;
+    typedef typename DBGAlignment::node_index node_index;
+    typedef typename DBGAlignment::score_t score_t;
+    typedef typename DBGAlignment::DPTable DPTable;
+    typedef typename DBGAlignment::Step Step;
+    typedef typename DBGAlignment::Column Column;
+
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query_begin());
 
@@ -165,7 +205,7 @@ const Extender default_extender = [](const DeBruijnGraph &graph,
     auto start_node = &*dp_table.begin();
 
     // for storage of intermediate values
-    std::vector<DPTable::value_type*> out_columns;
+    std::vector<typename DPTable::value_type*> out_columns;
     std::vector<node_index> in_nodes;
     std::vector<std::pair<Step, score_t>> updates(size);
     std::vector<int8_t> char_scores(size);
@@ -448,13 +488,17 @@ const Extender default_extender = [](const DeBruijnGraph &graph,
             visited_nodes.insert(next_paths->back().begin(), next_paths->back().end());
         }
     }
-};
+}
 
-Seeder build_mem_seeder(const std::vector<DeBruijnGraph::node_index> &nodes,
-                        std::function<bool(DeBruijnGraph::node_index,
-                                           const DeBruijnGraph &)> stop_matching,
-                        const DeBruijnGraph &graph) {
-    auto stop_matching_mapped = [stop_matching, &graph](DeBruijnGraph::node_index node) {
+template <typename NodeType>
+Seeder<NodeType>
+build_mem_seeder(const std::vector<NodeType> &nodes,
+                 std::function<bool(NodeType,
+                                    const DeBruijnGraph &)> stop_matching,
+                 const DeBruijnGraph &graph) {
+    typedef Alignment<NodeType> DBGAlignment;
+
+    auto stop_matching_mapped = [stop_matching, &graph](auto node) {
         return node == DeBruijnGraph::npos || stop_matching(node, graph);
     };
 
@@ -506,20 +550,68 @@ Seeder build_mem_seeder(const std::vector<DeBruijnGraph::node_index> &nodes,
 
         return { DBGAlignment(seed_begin,
                               end_it,
-                              std::vector<node_index>(start, next),
+                              std::vector<NodeType>(start, next),
                               config.match_score(seed_begin, end_it),
                               clipping,
                               orientation) };
     };
 }
 
-Seeder build_unimem_seeder(const std::vector<node_index> &nodes,
-                           const DeBruijnGraph &graph) {
-    return build_mem_seeder(
+
+template <typename NodeType>
+Seeder<NodeType> build_unimem_seeder(const std::vector<NodeType> &nodes,
+                                     const DeBruijnGraph &graph) {
+    return build_mem_seeder<NodeType>(
         nodes,
-        [](DeBruijnGraph::node_index node, const DeBruijnGraph &graph) {
+        [](auto node, const DeBruijnGraph &graph) {
             return graph.outdegree(node) > 1 || graph.indegree(node) > 1;
         },
         graph
     );
 }
+
+
+template std::vector<Alignment<DeBruijnGraph::node_index>>
+exact_seeder<DeBruijnGraph::node_index>(
+    const DeBruijnGraph&,
+    const DBGAlignerConfig&,
+    const char*,
+    const char*,
+    size_t,
+    bool
+);
+
+template std::vector<Alignment<DeBruijnGraph::node_index>>
+suffix_seeder<DeBruijnGraph::node_index>(
+    const DeBruijnGraph&,
+    const DBGAlignerConfig&,
+    const char*,
+    const char*,
+    size_t,
+    bool
+);
+
+template void
+default_extender<DeBruijnGraph::node_index>(
+    const DeBruijnGraph&,
+    const Alignment<DeBruijnGraph::node_index>&,
+    std::vector<Alignment<DeBruijnGraph::node_index>>*,
+    const char*,
+    const DBGAlignerConfig&,
+    bool,
+    typename Alignment<DeBruijnGraph::node_index>::score_t
+);
+
+template Seeder<DeBruijnGraph::node_index>
+build_mem_seeder(
+    const std::vector<DeBruijnGraph::node_index> &,
+    std::function<bool(DeBruijnGraph::node_index,
+                       const DeBruijnGraph &)>,
+    const DeBruijnGraph &
+);
+
+template Seeder<DeBruijnGraph::node_index>
+build_unimem_seeder(
+    const std::vector<DeBruijnGraph::node_index> &,
+    const DeBruijnGraph &
+);
