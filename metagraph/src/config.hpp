@@ -40,6 +40,7 @@ class Config {
     bool greedy_brwt = false;
     bool separately = false;
     bool call_bubbles = false;
+    bool call_breakpoints = false;
     bool map_sequences = false;
 
     unsigned int k = 3;

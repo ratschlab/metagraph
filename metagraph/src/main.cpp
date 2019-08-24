@@ -503,46 +503,48 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
 }
 
 std::unique_ptr<MaskedDeBruijnGraph>
-mask_graph(const AnnotatedDBG &anno_graph,
-           const Config &config) {
+mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");
 
-    std::vector<std::string> mask_in, mask_out;
-
     // Remove non-present labels
-    std::copy_if(config.label_mask_in.begin(),
-                 config.label_mask_in.end(),
-                 std::back_inserter(mask_in),
-                 [&](const auto &label) {
-                     bool exists = anno_graph.label_exists(label);
-                     if (!exists && config.verbose)
-                         std::cout << "Removing mask-in label " << label << std::endl;
+    config->label_mask_in.erase(
+        std::remove_if(config->label_mask_in.begin(),
+                       config->label_mask_in.end(),
+                       [&](const auto &label) {
+                           bool exists = anno_graph.label_exists(label);
+                           if (!exists && config->verbose)
+                               std::cout << "Removing mask-in label " << label << std::endl;
 
-                     return exists;
-                 });
+                           return !exists;
+                       }),
+        config->label_mask_in.end()
+    );
 
-    std::copy_if(config.label_mask_out.begin(),
-                 config.label_mask_out.end(),
-                 std::back_inserter(mask_out),
-                 [&](const auto &label) {
-                     bool exists = anno_graph.label_exists(label);
-                     if (!exists && config.verbose)
-                         std::cout << "Removing mask-out label " << label << std::endl;
+    config->label_mask_out.erase(
+        std::remove_if(config->label_mask_out.begin(),
+                       config->label_mask_out.end(),
+                       [&](const auto &label) {
+                           bool exists = anno_graph.label_exists(label);
+                           if (!exists && config->verbose)
+                               std::cout << "Removing mask-out label " << label << std::endl;
 
-                     return exists;
-                 });
+                           return !exists;
+                       }),
+        config->label_mask_out.end()
+    );
 
-    if (config.verbose) {
+    if (config->verbose) {
         std::cout << "Masked in:";
-        for (const auto &in : mask_in) {
+        for (const auto &in : config->label_mask_in) {
             std::cout << " " << in;
         }
         std::cout << std::endl;
+
         std::cout << "Masked out:";
-        for (const auto &out : mask_out) {
+        for (const auto &out : config->label_mask_out) {
             std::cout << " " << out;
         }
         std::cout << std::endl;
@@ -552,14 +554,15 @@ mask_graph(const AnnotatedDBG &anno_graph,
         std::move(graph),
         annotated_graph_algorithm::mask_nodes_by_label(
             anno_graph,
-            mask_in, mask_out,
-            [&](UInt64Callback counter_in, UInt64Callback counter_out) {
+            config->label_mask_in,
+            config->label_mask_out,
+            [&](const UInt64Callback &counter_in, const UInt64Callback &counter_out) {
                 auto count_in = counter_in();
-                if (count_in != mask_in.size())
+                if (count_in != config->label_mask_in.size())
                     return false;
 
                 auto count_out = counter_out();
-                return count_out <= config.label_mask_out_fraction * (count_in + count_out);
+                return count_out <= config->label_mask_out_fraction * (count_in + count_out);
             }
         ).release()
     );
@@ -2550,7 +2553,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Masking graph...\t" << std::flush;
                 }
 
-                graph = mask_graph(*anno_graph, *config);
+                graph = mask_graph(*anno_graph, config.get());
 
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
@@ -2846,7 +2849,7 @@ int main(int argc, const char *argv[]) {
             }
 
             auto anno_graph = initialize_annotated_dbg(*config);
-            auto masked_graph = mask_graph(*anno_graph, *config);
+            auto masked_graph = mask_graph(*anno_graph, config.get());
 
             if (config->verbose) {
                 std::cout << "Filter out:";
@@ -2856,20 +2859,42 @@ int main(int argc, const char *argv[]) {
                 std::cout << std::endl;
             }
 
+            std::ostream *outstream = config->outfbase.size()
+                ? new std::ofstream(config->outfbase)
+                : &std::cout;
+
+            std::unique_ptr<Json::StreamWriter> json_writer;
+            if (utils::ends_with(config->outfbase, ".json")) {
+                Json::StreamWriterBuilder builder;
+                builder["indentation"] = "";
+                json_writer.reset(builder.newStreamWriter());
+            } else {
+                *outstream << "Index"
+                           << "\t" << "Ref"
+                           << "\t" << "Var"
+                           << "\t" << "Label";
+
+                if (taxid_mapper.get())
+                    *outstream << "\t" << "TaxID";
+
+                *outstream << std::endl;
+            }
+
             std::sort(config->label_filter.begin(), config->label_filter.end());
 
             ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
             std::mutex print_label_mutex;
             std::atomic_uint64_t num_calls = 0;
 
-            auto print_index_ref_var_label =
-                [&](const auto &first, const auto &ref, const auto &var, auto&& labels) {
-                    std::lock_guard<std::mutex> lock(print_label_mutex);
+            auto mask_in_labels = utils::join_strings(config->label_mask_in, ",");
 
-                    std::sort(labels.begin(), labels.end());
+            auto print_variant =
+                [&](auto&& alignment, std::string&& query, auto&& vlabels) {
+                    // filter out labels
+                    std::sort(vlabels.begin(), vlabels.end());
 
                     auto it = config->label_filter.begin();
-                    for (const auto &label : labels) {
+                    for (const auto &label : vlabels) {
                         while (it != config->label_filter.end() && *it < label)
                             ++it;
 
@@ -2880,74 +2905,72 @@ int main(int argc, const char *argv[]) {
                             return;
                     }
 
-                    num_calls += labels.size();
+                    num_calls++;
 
-                    std::cout << first
-                              << "\t" << ref
-                              << "\t" << var
-                              << "\t" << utils::join_strings(labels, ",");
+                    auto label = utils::join_strings(vlabels, ",");
 
+                    // map labels to Taxonomy IDs
                     if (taxid_mapper.get()) {
-                        std::transform(
-                            labels.begin(), labels.end(),
-                            labels.begin(),
-                            [&](const auto &label) {
-                                return std::to_string(taxid_mapper->gb_to_taxid(label));
+                        label += "\t" + std::accumulate(
+                            vlabels.begin(),
+                            vlabels.end(),
+                            std::string(),
+                            [&](std::string &taxids, const std::string &label) {
+                                return std::move(taxids) + ","
+                                    + std::to_string(taxid_mapper->gb_to_taxid(label));
                             }
                         );
-
-                        std::cout << "\t" << utils::join_strings(labels, ",");
                     }
 
-                    std::cout << std::endl;
+                    // print labels
+                    std::lock_guard<std::mutex> lock(print_label_mutex);
+                    if (utils::ends_with(config->outfbase, ".json")) {
+                        json_writer->write(
+                            alignment.to_json(
+                                query,
+                                masked_graph->get_graph(),
+                                false,
+                                mask_in_labels + ":" + std::to_string(num_calls),
+                                label
+                            ),
+                            outstream
+                        );
+
+                        *outstream << std::endl;
+                    } else {
+                        std::cout << alignment.front() << "\t"
+                                  << query << "\t"
+                                  << alignment.get_sequence() << "\t"
+                                  << label << std::endl;
+                    }
                 };
 
             if (config->call_bubbles) {
-                std::cout << "Index"
-                          << "\t" << "Ref"
-                          << "\t" << "Var"
-                          << "\t" << "Label";
-
-                if (taxid_mapper.get())
-                    std::cout << "\t" << "TaxID";
-
-                std::cout << std::endl;
-
-                annotated_graph_algorithm::call_bubbles(*masked_graph,
-                                                        *anno_graph,
-                                                        print_index_ref_var_label,
-                                                        &thread_pool);
-                thread_pool.join();
-
-                if (config->verbose) {
-                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
-                              << std::endl
-                              << "# bubbles called: " << num_calls
-                              << std::endl;
-                }
+                annotated_graph_algorithm::call_bubbles(
+                    *masked_graph,
+                    *anno_graph,
+                    print_variant,
+                    &thread_pool
+                );
+            } else if (config->call_breakpoints) {
+                annotated_graph_algorithm::call_breakpoints(
+                    *masked_graph,
+                    *anno_graph,
+                    print_variant,
+                    &thread_pool
+                );
             } else {
-                std::cout << "Index"
-                          << "\t" << "Node"
-                          << "\t" << "Edge"
-                          << "\t" << "Label";
+                std::cerr << "ERROR: no variant calling mode selected. Exiting" << std::endl;
+                exit(1);
+            }
 
-                if (taxid_mapper.get())
-                    std::cout << "\t" << "TaxID";
+            thread_pool.join();
 
-                std::cout << std::endl;
-
-                annotated_graph_algorithm::call_breakpoints(*masked_graph,
-                                                            *anno_graph,
-                                                            print_index_ref_var_label,
-                                                            &thread_pool);
-                thread_pool.join();
-
-                if (config->verbose) {
-                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
-                              << std::endl
-                              << "# breakpoints called: " << num_calls
-                              << std::endl;
-                }
+            if (config->verbose) {
+                std::cout << "# nodes checked: " << masked_graph->num_nodes()
+                          << std::endl
+                          << "# called: " << num_calls
+                          << std::endl;
             }
 
             return 0;

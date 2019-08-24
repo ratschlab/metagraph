@@ -83,7 +83,8 @@ std::unique_ptr<bitmap>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
-                    const std::function<bool(UInt64Callback, UInt64Callback)> &keep_node) {
+                    const std::function<bool(const UInt64Callback&,
+                                             const UInt64Callback&)> &keep_node) {
     if (!anno_graph.get_graph().num_nodes())
         return {};
 
@@ -166,9 +167,9 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
 void
 call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
-                       std::function<void(node_index, node_index, std::string&&)> callback,
-                       std::function<bool(node_index, node_index, const std::string&)> stop_path,
-                       std::function<bool()> terminate = []() { return false; }) {
+                       const std::function<void(node_index, node_index, std::string&&)> &callback,
+                       const std::function<bool(node_index, node_index, const std::string&)> &stop_path,
+                       const std::function<bool()> &terminate = []() { return false; }) {
     bit_vector_stat visited(masked_graph.num_nodes() + 1, false);
 
     bool stop = false;
@@ -203,7 +204,7 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
                                               std::get<2>(path).end()));
                 }
 
-                while (!stop_path(std::get<0>(path), std::get<1>(path), std::get<2>(path))) {
+                while (!std::apply(stop_path, path)) {
                     size_t cur_size = std::get<2>(path).size();
 
                     masked_graph.call_outgoing_kmers(
@@ -235,35 +236,84 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
     );
 }
 
-
 void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
                       const AnnotatedDBG &anno_graph,
-                      AnnotatedDBGIndexRefVarLabelsCallback callback,
+                      const VariantLabelCallback &callback,
                       ThreadPool *thread_pool,
-                      std::function<bool()> terminate) {
+                      const std::function<bool()> &terminate) {
     assert(&masked_graph.get_graph()
         == dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph()));
 
     thread_pool = nullptr;
 
+    const DBGAlignerConfig variant_config(
+        DBGAlignerConfig::unit_scoring_matrix(1, masked_graph.get_graph().alphabet()),
+        -1, -1
+    );
+
     bool stop = false;
     call_paths_from_branch(masked_graph,
         [&](auto first, auto, auto&& sequence) {
-            MaskedDeBruijnGraph background(
-                masked_graph.get_graph_ptr(),
-                [&](const auto &i) {
+            assert(sequence.size() == masked_graph.get_k());
+
+            std::vector<std::pair<MaskedDeBruijnGraph::node_index, char>> outgoing;
+            masked_graph.call_outgoing_kmers(first,
+                                             [&](const auto &next_index, char c) {
+                                                 outgoing.emplace_back(next_index, c);
+                                             });
+
+            // if outgoing is empty, we don't have to check for it to be excluded
+            // from the mask
+            std::function<bool(const DeBruijnGraph::node_index&)> in_background;
+
+            if (outgoing.size()) {
+                in_background = [&](const auto &i) {
                     return i != DeBruijnGraph::npos
                         && (i == first || !masked_graph.in_graph(i));
-                }
-            );
+                };
+            } else {
+                in_background = [](const auto &i) { return i != DeBruijnGraph::npos; };
+            }
+
+            MaskedDeBruijnGraph background(masked_graph.get_graph_ptr(),
+                                           std::move(in_background));
 
             background.call_outgoing_kmers(
                 first,
                 [&](const auto &next_index, char c) {
-                    if (!stop && !(stop = terminate()))
-                        callback(first,
-                                 std::move(sequence), std::string(1, c),
-                                 anno_graph.get_labels(next_index));
+                    if ((stop = terminate()))
+                        return;
+
+                    auto var = sequence + c;
+                    auto ref = const_cast<const std::string&>(sequence);
+
+                    if (outgoing.size())
+                        ref += outgoing.front().second;
+
+                    auto score = variant_config.score_sequences(ref.begin(),
+                                                                ref.end(),
+                                                                var.begin());
+
+                    if (ref.size() != var.size()) {
+                        auto difference = ref.size() > var.size()
+                            ? ref.size() - var.size() - 1
+                            : var.size() - ref.size() - 1;
+
+                        score += variant_config.gap_opening_penalty
+                            + difference * variant_config.gap_extension_penalty;
+                    }
+
+                    auto breakpoint = MaskedAlignment(ref.c_str(),
+                                                      &*ref.end(),
+                                                      { first, next_index },
+                                                      std::move(var),
+                                                      score);
+
+                    assert(breakpoint.is_valid(background));
+
+                    callback(std::move(breakpoint),
+                             std::move(ref),
+                             anno_graph.get_labels(next_index));
                 }
             );
         },
@@ -275,45 +325,42 @@ void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
         thread_pool->join();
 }
 
-template <class Index, class VLabels>
-using IndexSeqLabelCallback = std::function<void(const Index&,
-                                                 const std::string&,
-                                                 VLabels&&)>;
-
-typedef IndexSeqLabelCallback<node_index, std::vector<AnnotatedDBG::Annotator::Label>>
-    AnnotatedDBGIndexSeqLabelsCallback;
-
 void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
                             const MaskedDeBruijnGraph &background,
                             const AnnotatedDBG &anno_graph,
                             node_index first,
-                            std::string seq,
-                            AnnotatedDBGIndexSeqLabelsCallback callback,
-                            std::function<bool()> terminate) {
+                            const std::string &ref,
+                            const VariantLabelCallback &callback,
+                            const std::function<bool()> &terminate,
+                            const DBGAlignerConfig &variant_config) {
     if (foreground.get_graph_ptr() != background.get_graph_ptr())
         throw std::runtime_error("ERROR: bubble calling in matching graphs not implemented");
 
-    assert(seq.length() == foreground.get_k() * 2 + 1);
+    assert(ref.length() == foreground.get_k() * 2 + 1);
 
-    char ref = seq[foreground.get_k()];
+    const char ref_char = ref[foreground.get_k()];
     bool stop = false;
     background.call_outgoing_kmers(
         first,
         [&](auto, char c) {
-            if (stop)
+            if ((stop = terminate()))
                 return;
 
-            if (c == ref)
+            if (c == ref_char)
                 return;
 
             // For each outgoing edge, traverse path and intersect labels
-            seq[foreground.get_k()] = c;
+            auto var = ref;
+            var[foreground.get_k()] = c;
 
             bool in_foreground = true;
             bool in_background = true;
+            std::vector<MaskedDeBruijnGraph::node_index> nodes { first };
             anno_graph.get_graph().map_to_nodes_sequentially(
-                seq.begin() + 1, seq.end(),
+                var.begin() + 1,
+                var.end(),
                 [&](const auto &i) {
+                    nodes.emplace_back(i);
                     in_foreground &= foreground.in_graph(i);
                     in_background &= background.in_graph(i);
                 },
@@ -323,20 +370,38 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
             if (in_foreground || !in_background)
                 return;
 
-            auto labels = anno_graph.get_labels(seq, 1.0);
-            if (labels.size() && !(stop = terminate()))
-                callback(first, seq, std::move(labels));
+            auto labels = anno_graph.get_labels(var, 1.0);
+            if (labels.size()) {
+                auto score = variant_config.score_sequences(ref.begin(),
+                                                            ref.end(),
+                                                            var.begin());
+
+                auto ref_copy = ref;
+                auto bubble = MaskedAlignment(ref_copy.c_str(),
+                                              &*ref_copy.end(),
+                                              std::move(nodes),
+                                              std::move(var),
+                                              score);
+                assert(bubble.is_valid(background.get_graph()));
+
+                callback(std::move(bubble), std::move(ref_copy), std::move(labels));
+            }
         }
     );
 }
 
 void call_bubbles(const MaskedDeBruijnGraph &masked_graph,
                   const AnnotatedDBG &anno_graph,
-                  AnnotatedDBGIndexRefVarLabelsCallback callback,
+                  const VariantLabelCallback &callback,
                   ThreadPool *thread_pool,
-                  std::function<bool()> terminate) {
+                  const std::function<bool()> &terminate) {
     assert(&masked_graph.get_graph()
         == dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph()));
+
+    const DBGAlignerConfig variant_config(
+        DBGAlignerConfig::unit_scoring_matrix(1, masked_graph.get_graph().alphabet()),
+        -1, -1
+    );
 
     size_t path_length = masked_graph.get_k() * 2 + 1;
 
@@ -353,10 +418,9 @@ void call_bubbles(const MaskedDeBruijnGraph &masked_graph,
                     anno_graph,
                     first,
                     sequence,
-                    [&](const auto &index, const auto &variant, auto&& labels) {
-                        callback(index, sequence, variant, std::move(labels));
-                    },
-                    terminate
+                    callback,
+                    terminate,
+                    variant_config
                 );
             };
 

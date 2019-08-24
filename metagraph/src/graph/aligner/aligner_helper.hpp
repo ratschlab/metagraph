@@ -189,6 +189,15 @@ class Alignment {
         assert(nodes.empty() || clipping || is_exact_match());
     }
 
+    Alignment(const char* query_begin,
+              const char* query_end,
+              std::vector<NodeType>&& nodes,
+              std::string&& sequence,
+              score_t score,
+              size_t clipping = 0,
+              bool orientation = false,
+              size_t offset = 0);
+
     // TODO: construct multiple alignments from the same starting point
     Alignment(const DPTable &dp_table,
               const typename DPTable::value_type *column,

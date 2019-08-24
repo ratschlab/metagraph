@@ -230,17 +230,61 @@ const DBGAlignerConfig::ScoreMatrix DBGAlignerConfig::score_matrix_blosum62
     = blosum62_scoring_matrix();
 
 template <typename NodeType>
+Alignment<NodeType>::Alignment(const char* query_begin,
+                               const char* query_end,
+                               std::vector<NodeType>&& nodes,
+                               std::string&& sequence,
+                               score_t score,
+                               size_t clipping,
+                               bool orientation,
+                               size_t offset)
+      : query_begin_(query_begin),
+        query_end_(query_end),
+        nodes_(std::move(nodes)),
+        sequence_(std::move(sequence)),
+        num_matches_(0),
+        score_(score),
+        orientation_(orientation),
+        offset_(offset) {
+    assert(query_begin_);
+    assert(query_end_);
+
+    size_t query_size = query_end_ - query_begin_;
+    size_t min_length = std::min(query_size, sequence_.size());
+
+    cigar_ = std::inner_product(
+        query_begin_,
+        query_begin_ + min_length,
+        sequence_.c_str(),
+        Cigar(Cigar::Operator::CLIPPED, clipping),
+        [&](Cigar &cigar, bool equal) -> Cigar& {
+            num_matches_ += equal;
+            cigar.append(equal
+                  ? Cigar::Operator::MATCH
+                  : Cigar::Operator::MISMATCH
+              );
+            return cigar;
+        },
+        std::equal_to<char>()
+    );
+
+    assert(!(query_size - min_length) || (sequence_.size() - min_length));
+    cigar_.append(Cigar::Operator::INSERTION, query_size - min_length);
+    cigar_.append(Cigar::Operator::DELETION, sequence_.size() - min_length);
+}
+
+template <typename NodeType>
 Alignment<NodeType>::Alignment(const DPTable &dp_table,
                                const typename DPTable::value_type *column,
                                size_t start_pos,
                                score_t score,
                                const char* path_end,
                                bool orientation)
-          : query_begin_(NULL),
-            query_end_(NULL),
-            num_matches_(0),
-            score_(score),
-            orientation_(orientation) {
+      : query_begin_(NULL),
+        query_end_(NULL),
+        num_matches_(0),
+        score_(score),
+        orientation_(orientation) {
     assert(column != &*dp_table.end());
 
     auto [cigar_op, prev_node] = std::get<1>(column->second).at(start_pos);

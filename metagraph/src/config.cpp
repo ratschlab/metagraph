@@ -274,6 +274,8 @@ Config::Config(int argc, const char *argv[]) {
             label_filter.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--call-bubbles")) {
             call_bubbles = true;
+        } else if (!strcmp(argv[i], "--call-breakpoints")) {
+            call_breakpoints = true;
         } else if (!strcmp(argv[i], "--accession")) {
             accession2taxid = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy")) {
@@ -857,15 +859,17 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [1,000,000]\n");
         } break;
         case CALL_VARIANTS: {
-            fprintf(stderr, "Usage: %s call_variants -a <annotation> [options]\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s call_variants -i <GRAPH> -a <annotation> [options]\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for call_variants:\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph []\n");
             fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph []\n");
             fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
             fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles\n");
+            fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles [off]\n");
+            fprintf(stderr, "\t   --call-breakpoints \t\tcall labels from breakpoints [off]\n");
             fprintf(stderr, "\t   --label-filter [STR] \tdiscard variants with this label []\n");
             fprintf(stderr, "\t   --taxonomy-map [STR] \tfilename of taxonomy map file []\n");
             fprintf(stderr, "\t   --cache-size [INT] \t\tnumber of uncompressed rows to store in the cache [1,000,000]\n");
