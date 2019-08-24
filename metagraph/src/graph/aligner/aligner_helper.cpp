@@ -740,7 +740,10 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                             );
 
                             if (!node_found) {
-                                std::cerr << "ERROR: invalid node index " << *node_it << std::endl
+                                std::cerr << "ERROR: invalid node index "
+                                          << *node_it << std::endl
+                                          << "Processed " << cigar_it - cigar_.begin()
+                                          << " of " << cigar_.size() << " operations" << std::endl
                                           << *this << std::endl
                                           << std::string(query_begin_, query_end_) << std::endl;
                                 return false;
@@ -754,8 +757,12 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                                    path.c_str() + cur_path_steps,
                                    path_steps - cur_path_steps)) {
                     std::cerr << "ERROR: mismatch found despite MATCH in CIGAR" << std::endl
+                              << "Processed " << cigar_it - cigar_.begin()
+                              << " of " << cigar_.size() << " operations" << std::endl
                               << *this << std::endl
-                              << std::string(query_begin_, query_end_) << std::endl;
+                              << std::string(query_begin_, query_end_) << "\n\n"
+                              << std::string(cur_query_it, path_steps - cur_path_steps) << " "
+                              << std::string(path.c_str() + cur_path_steps, path_steps - cur_path_steps) << std::endl;
                     return false;
                 } else if (cigar_it->first == Cigar::Operator::MISMATCH
                         && std::mismatch(cur_query_it,
@@ -763,8 +770,12 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                                          path.c_str() + cur_path_steps,
                                          path.c_str() + path_steps).first != cur_query_it) {
                     std::cerr << "ERROR: match found despite MISMATCH in CIGAR" << std::endl
+                              << "Processed " << cigar_it - cigar_.begin()
+                              << " of " << cigar_.size() << " operations" << std::endl
                               << *this << std::endl
-                              << std::string(query_begin_, query_end_) << std::endl;
+                              << std::string(query_begin_, query_end_) << std::endl
+                              << std::string(cur_query_it, path_steps - cur_path_steps) << " "
+                              << std::string(path.c_str() + cur_path_steps, path_steps - cur_path_steps) << std::endl;
                     return false;
                 }
             } break;
