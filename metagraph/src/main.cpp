@@ -2769,18 +2769,15 @@ int main(int argc, const char *argv[]) {
                             } else {
                                 bool secondary = false;
                                 for (const auto &path : paths) {
-                                    auto query_begin = path.get_orientation()
-                                        ? rc_query.c_str()
-                                        : query.c_str();
+                                    const auto& path_query = path.get_orientation()
+                                        ? rc_query
+                                        : query;
 
-                                    assert(path.get_query_begin() >= query_begin);
-                                    assert(path.get_query_end()
-                                        <= (path.get_orientation()
-                                            ? &*rc_query.cend()
-                                            : &*query.cend()));
+                                    assert(path.get_query_begin() >= &*path_query.begin());
+                                    assert(path.get_query_end() <= &*path_query.end());
 
                                     json_writer->write(
-                                        path.to_json(query_begin,
+                                        path.to_json(path_query,
                                                      *graph,
                                                      secondary,
                                                      header),
@@ -2795,7 +2792,7 @@ int main(int argc, const char *argv[]) {
                                 if (paths.empty()) {
                                     json_writer->write(
                                         DBGAligner::DBGAlignment().to_json(
-                                            nullptr,
+                                            "",
                                             *graph,
                                             secondary,
                                             header

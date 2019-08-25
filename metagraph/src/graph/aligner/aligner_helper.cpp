@@ -496,12 +496,12 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 }
 
 template <typename NodeType>
-Json::Value Alignment<NodeType>::to_json(const char *query_start,
+Json::Value Alignment<NodeType>::to_json(const std::string &query,
                                          const DeBruijnGraph &graph,
                                          bool is_secondary,
                                          const std::string &read_name,
                                          const std::string &label) const {
-    assert(query_start || (!query_begin_ && !query_end_));
+    auto query_start = query.c_str();
     assert(query_begin_ >= query_start);
     assert(query_end_ >= query_start);
     assert(query_start + cigar_.get_clipping() == query_begin_);
@@ -511,10 +511,13 @@ Json::Value Alignment<NodeType>::to_json(const char *query_start,
     Json::Value alignment;
 
     alignment["name"] = read_name;
+    alignment["sequence"] = query;
+
+    if (sequence_.size())
+        alignment["annotation"]["ref_sequence"] = sequence_;
+
     if (query_end_ == query_begin_)
         return alignment;
-
-    alignment["sequence"] = std::string(query_begin_, query_end_);
 
     // encode path
     if (nodes_.size())
@@ -570,23 +573,20 @@ Json::Value Alignment<NodeType>::to_json(const char *query_start,
 }
 
 template <typename NodeType>
-void Alignment<NodeType>::load_from_json(const Json::Value &alignment,
-                                         const char *query_start,
-                                         const DeBruijnGraph &graph) {
+std::shared_ptr<const std::string> Alignment<NodeType>
+::load_from_json(const Json::Value &alignment,
+                 const DeBruijnGraph &graph) {
     cigar_.clear();
     nodes_.clear();
     num_matches_ = 0;
     sequence_.clear();
 
-    assert(query_start || !alignment["query_position"].asInt());
+    auto query_sequence = std::make_shared<const std::string>(
+        alignment["sequence"].asString()
+    );
+    auto query_start = query_sequence->c_str();
+
     query_begin_ = query_start + alignment["query_position"].asInt();
-    query_end_ = query_begin_ + alignment["sequence"].asString().size();
-    assert(query_begin_ || !query_end_);
-
-    assert(!strncmp(query_begin_,
-                    alignment["sequence"].asCString(),
-                    query_end_ - query_begin_));
-
     orientation_ = alignment["read_on_reverse_strand"].asBool();
     score_ = alignment["score"].asInt();
 
@@ -598,9 +598,7 @@ void Alignment<NodeType>::load_from_json(const Json::Value &alignment,
 
     size_t path_steps = 0;
 
-    #ifndef NDEBUG
-    size_t query_steps = 0;
-    #endif
+    query_end_ = query_begin_;
 
     cigar_.append(Cigar::Operator::CLIPPED, query_begin_ - query_start);
     for (; i < mapping.size(); ++i) {
@@ -633,10 +631,7 @@ void Alignment<NodeType>::load_from_json(const Json::Value &alignment,
                 }
 
                 path_steps += edits[j]["from_length"].asUInt64();
-
-                #ifndef NDEBUG
-                query_steps += edits[j]["to_length"].asUInt64();
-                #endif
+                query_end_ += edits[j]["to_length"].asUInt64();
             } else if (edits[j]["from_length"].asUInt64()) {
                 cigar_.append(Cigar::Operator::DELETION,
                               edits[j]["from_length"].asUInt64());
@@ -647,19 +642,19 @@ void Alignment<NodeType>::load_from_json(const Json::Value &alignment,
                 cigar_.append(Cigar::Operator::INSERTION,
                               edits[j]["to_length"].asUInt64());
 
-                #ifndef NDEBUG
-                query_steps += edits[j]["to_length"].asUInt64();
-                #endif
+                query_end_ += edits[j]["to_length"].asUInt64();
             }
         }
     }
 
     sequence_ = sequence_.substr(0, path_steps);
-
-    assert(query_begin_ + query_steps == query_end_);
+    assert(!alignment["annotation"]["ref_sequence"]
+        || alignment["annotation"]["ref_sequence"] == sequence_);
 
     if (!is_valid(graph))
         throw std::runtime_error("ERROR: JSON reconstructs invalid alignment");
+
+    return query_sequence;
 }
 
 template <typename NodeType>

@@ -114,13 +114,18 @@ void check_json_dump_load(const DeBruijnGraph &graph,
                           const std::string &rc_query = "") {
     ASSERT_TRUE(!alignment.get_orientation() || query.size() == rc_query.size());
 
-    auto start = alignment.get_orientation() ? rc_query.c_str() : query.c_str();
+    const auto& path_query = alignment.get_orientation() ? rc_query : query;
     auto end = alignment.get_orientation() ? &*rc_query.cend() : &*query.cend();
-    ASSERT_EQ(std::string(start + alignment.get_clipping(), end),
+    ASSERT_EQ(std::string(path_query.c_str() + alignment.get_clipping(), end),
               std::string(alignment.get_query_begin(), alignment.get_query_end()));
 
     DBGAlignment load_alignment;
-    load_alignment.load_from_json(alignment.to_json(start, graph), start, graph);
+    auto load_sequence = load_alignment.load_from_json(
+        alignment.to_json(path_query, graph),
+        graph
+    );
+
+    EXPECT_EQ(path_query, *load_sequence);
 
     EXPECT_EQ(alignment, load_alignment)
         << alignment.get_orientation() << " "
