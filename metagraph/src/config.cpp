@@ -278,6 +278,8 @@ Config::Config(int argc, const char *argv[]) {
             call_bubbles = true;
         } else if (!strcmp(argv[i], "--call-breakpoints")) {
             call_breakpoints = true;
+        } else if (!strcmp(argv[i], "--call-variants")) {
+            call_variants = true;
         } else if (!strcmp(argv[i], "--accession")) {
             accession2taxid = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy")) {
@@ -874,6 +876,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles [off]\n");
             fprintf(stderr, "\t   --call-breakpoints \t\tcall labels from breakpoints [off]\n");
+            fprintf(stderr, "\t   --call-variants \t\tcall labels from variants [off]\n");
             fprintf(stderr, "\t   --label-filter [STR] \tdiscard variants with this label []\n");
             fprintf(stderr, "\t   --taxonomy-map [STR] \tfilename of taxonomy map file []\n");
             fprintf(stderr, "\t   --cache-size [INT] \t\tnumber of uncompressed rows to store in the cache [1,000,000]\n");

@@ -2966,6 +2966,15 @@ int main(int argc, const char *argv[]) {
                     print_variant,
                     &thread_pool
                 );
+            } else if (config->call_variants) {
+                annotated_graph_algorithm::call_variants(
+                    *masked_graph,
+                    *anno_graph,
+                    print_variant,
+                    DBGAlignerConfig(*config, *masked_graph),
+                    default_extender<DeBruijnGraph::node_index>,
+                    &thread_pool
+                );
             } else {
                 std::cerr << "ERROR: no variant calling mode selected. Exiting" << std::endl;
                 exit(1);

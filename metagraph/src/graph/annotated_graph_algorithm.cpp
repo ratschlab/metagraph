@@ -526,4 +526,55 @@ build_masked_graph_extender(const AnnotatedDBG &anno_graph,
 }
 
 
+MapExtendSeederBuilder<DeBruijnGraph::node_index>
+build_breakpoint_seeder_builder(const DeBruijnGraph &background) {
+    return [&](const std::vector<node_index> &nodes,
+               const DeBruijnGraph &foreground) {
+        return build_mem_seeder<node_index>(
+            nodes,
+            [&background](node_index node, const DeBruijnGraph &foreground) {
+                assert(node != DeBruijnGraph::npos);
+                assert(foreground.in_graph(node));
+                assert(background.in_graph(node));
+                return background.outdegree(node) > foreground.outdegree(node);
+            },
+            foreground
+        );
+    };
+}
+
+Extender<DeBruijnGraph::node_index>
+build_background_graph_extender(const DeBruijnGraph &background,
+                                Extender<DeBruijnGraph::node_index>&& extender) {
+    return [&, base_extender = std::move(extender)](const DeBruijnGraph &foreground,
+                                                    const auto &path,
+                                                    std::vector<auto>* next_paths,
+                                                    const char *sequence_end,
+                                                    const DBGAlignerConfig &config,
+                                                    bool orientation,
+                                                    auto min_path_score) {
+        if (path.empty())
+            return;
+
+        // TODO: fix this hax for generating a shared_ptr from a const reference
+        base_extender(
+            MaskedDeBruijnGraph({ std::shared_ptr<const DeBruijnGraph>{}, &background },
+                                [&, seed_node = path.back()](const auto &node) {
+                                    // check if node is not in the foreground, or
+                                    // if it's a breakpoint
+                                    return node == seed_node
+                                        || !foreground.in_graph(node)
+                                        || (!background.has_single_incoming(node)
+                                               && foreground.has_single_incoming(node));
+                                }),
+            path,
+            next_paths,
+            sequence_end,
+            config,
+            orientation,
+            min_path_score
+        );
+    };
+}
+
 } // namespace annotated_graph_algorithm

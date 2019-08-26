@@ -41,6 +41,7 @@ class Config {
     bool separately = false;
     bool call_bubbles = false;
     bool call_breakpoints = false;
+    bool call_variants = false;
     bool map_sequences = false;
 
     unsigned int k = 3;

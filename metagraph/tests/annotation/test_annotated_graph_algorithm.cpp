@@ -470,3 +470,228 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, AlignToMaskedGraphParallel) {
     test_align_to_masked_graph<typename TypeParam::first_type,
                                typename TypeParam::second_type>(3);
 }
+
+
+template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+void test_find_variants(size_t pool_size = 0) {
+    const std::vector<std::string> ingroup { "A" };
+    const std::vector<std::string> outgroup { };
+
+    for (size_t k = 5; k < 11; ++k) {
+        std::unordered_map<char, char> complement { { 'A', 'T' },
+                                                    { 'T', 'A' },
+                                                    { 'C', 'G' },
+                                                    { 'G', 'C' } };
+        std::vector<std::string> sequences {
+            "ATGCAGTACTCAG",
+            "ATGCAGTACTCAG"
+        };
+        const std::vector<std::string> labels { "A", "B" };
+        sequences[1][k] = complement[sequences[1][k]];
+
+        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+        std::unordered_set<std::string> obs_labels;
+        std::mutex add_mutex;
+        ThreadPool thread_pool(pool_size);
+        const std::unordered_set<std::string> ref { "B" };
+
+        auto masked_dbg = build_masked_graph(*anno_graph, ingroup, outgroup);
+
+        Cigar::initialize_opt_table(masked_dbg.get_graph().alphabet());
+
+        auto score_matrix = DBGAlignerConfig::unit_scoring_matrix(
+            1, masked_dbg.get_graph().alphabet()
+        );
+
+        annotated_graph_algorithm::call_variants(
+            masked_dbg,
+            *anno_graph,
+            [&](auto&& path, const std::string &query_sequence, auto&& vlabels) {
+                check_json_dump_load(masked_dbg.get_graph(), path, query_sequence);
+
+                auto ref = std::string(path.get_query_begin(), path.get_query_end());
+                const auto& var = path.get_sequence();
+
+                ASSERT_EQ(query_sequence.c_str() + path.get_clipping(),
+                          path.get_query_begin());
+
+                auto index = path.front();
+                auto cigar = path.get_cigar().to_string();
+
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index))
+                    << k << " " << ref << " " << var;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), var, index))
+                    << k << " " << ref << " " << var;
+                EXPECT_FALSE(all_mapped_match_first(masked_dbg, var, index))
+                    << k << " " << ref << " " << var;
+                EXPECT_TRUE(all_mapped_match_first(masked_dbg, var.substr(0, k), index));
+
+                EXPECT_EQ(std::vector<std::string>{ "A" },
+                          anno_graph->get_labels(ref, 1.0)) << k << " " << ref;
+                EXPECT_EQ(std::vector<std::string>{ "B" },
+                          anno_graph->get_labels(var, 1.0)) << k << " " << var;
+
+                ASSERT_FALSE(cigar.empty());
+
+                EXPECT_EQ(std::string(std::to_string(k) + "=1X"),
+                          std::string(cigar.begin(), cigar.end() - 2))
+                    << k << " " << query_sequence << " " << ref << " " << var << " " << cigar;
+                EXPECT_EQ('=', cigar.back())
+                    << k << " " << query_sequence << " " << ref << " " << var << " " << cigar;
+
+                std::lock_guard<std::mutex> lock(add_mutex);
+                obs_labels.insert(vlabels.begin(), vlabels.end());
+            },
+            DBGAlignerConfig(score_matrix),
+            default_extender<DeBruijnGraph::node_index>,
+            &thread_pool
+        );
+
+        EXPECT_EQ(ref, obs_labels) << k;
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, FindVariants) {
+    test_find_variants<typename TypeParam::first_type,
+                       typename TypeParam::second_type>();
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, FindVariantsParallel) {
+    test_find_variants<typename TypeParam::first_type,
+                       typename TypeParam::second_type>(3);
+}
+
+template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+void test_breakpoint_seeder() {
+    const std::vector<std::string> ingroup { "A" };
+    const std::vector<std::string> outgroup { };
+    size_t k = 5;
+
+    {
+        std::vector<std::string> sequences {
+            "TCATTGCGGACCTTGGCCC",
+            "TCATTGCTACCTGGCCC",
+            "TCATTGCCACCCTTTGGCCC"
+        };
+        const std::vector<std::string> labels { "A", "B", "C" };
+
+        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+        auto& background = dynamic_cast<const DeBruijnGraph&>(anno_graph->get_graph());
+        auto foreground = build_masked_graph(*anno_graph, ingroup, outgroup);
+
+        Cigar::initialize_opt_table(foreground.get_graph().alphabet());
+
+        auto config = DBGAlignerConfig(DBGAlignerConfig::unit_scoring_matrix(
+            1, foreground.get_graph().alphabet()
+        ));
+
+        foreground.call_unitigs([&](auto unitig) {
+            EXPECT_EQ(sequences[0], unitig);
+
+            std::vector<DeBruijnGraph::node_index> nodes;
+            foreground.map_to_nodes(unitig, [&](auto i) { nodes.push_back(i); });
+            auto seeds = annotated_graph_algorithm::build_breakpoint_seeder_builder(background)(
+                nodes, foreground
+            )(
+                foreground,
+                config,
+                &*unitig.begin(),
+                &*unitig.end(),
+                0,
+                false
+            );
+
+            EXPECT_EQ(1u, seeds.size());
+            EXPECT_EQ("TCATTGC", seeds.front().get_sequence());
+        });
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, BreakpointSeeder) {
+    test_breakpoint_seeder<typename TypeParam::first_type,
+                           typename TypeParam::second_type>();
+}
+
+template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+void test_find_variants_indel(size_t pool_size = 0) {
+    const std::vector<std::string> ingroup { "A" };
+    const std::vector<std::string> outgroup { };
+    size_t k = 5;
+
+    {
+        std::vector<std::string> sequences {
+            "TCATTGC""GGACC"  "TTGGCCC",
+            "TCATTGC"  "ACC"  "TTGGCCC", // 7=2I6= (CTTGGCCC masked out)
+            "TCATTGC" "CACCCT""TTGGCCC"  // 7=1I1X3=2D6= (GGCCC masked out)
+        };
+        const std::vector<std::string> labels { "A", "B", "C" };
+
+        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+        std::unordered_set<std::string> obs_labels;
+        std::mutex add_mutex;
+        ThreadPool thread_pool(pool_size);
+        const std::unordered_set<std::string> ref { "B" };
+
+        auto masked_dbg = build_masked_graph(*anno_graph, ingroup, outgroup);
+
+        Cigar::initialize_opt_table(masked_dbg.get_graph().alphabet());
+
+        auto score_matrix = DBGAlignerConfig::unit_scoring_matrix(
+            1, masked_dbg.get_graph().alphabet()
+        );
+
+        annotated_graph_algorithm::call_variants(
+            masked_dbg,
+            *anno_graph,
+            [&](auto&& path, const std::string &query_sequence, auto&& vlabels) {
+                auto ref = std::string(path.get_query_begin(), path.get_query_end());
+                const auto& var = path.get_sequence();
+
+                ASSERT_EQ(query_sequence.c_str() + path.get_clipping(),
+                          path.get_query_begin());
+
+                auto index = path.front();
+                auto cigar = path.get_cigar().to_string();
+
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), ref, index))
+                    << k << " " << ref << " " << var;
+                EXPECT_TRUE(all_mapped_match_first(anno_graph->get_graph(), var, index))
+                    << k << " " << ref << " " << var;
+                EXPECT_FALSE(all_mapped_match_first(masked_dbg, var, index))
+                    << k << " " << ref << " " << var;
+                EXPECT_TRUE(all_mapped_match_first(masked_dbg, var.substr(0, k), index));
+
+                EXPECT_EQ(std::vector<std::string>{ "A" },
+                          anno_graph->get_labels(ref, 1.0)) << k << " " << ref;
+                EXPECT_EQ(std::vector<std::string>{ "B" },
+                          anno_graph->get_labels(var, 1.0)) << k << " " << var;
+
+                ASSERT_FALSE(cigar.empty());
+
+                EXPECT_EQ("7=2I6=", cigar)
+                    << k << " " << query_sequence << " " << ref << " " << var << " " << cigar;
+
+                std::lock_guard<std::mutex> lock(add_mutex);
+                obs_labels.insert(vlabels.begin(), vlabels.end());
+            },
+            DBGAlignerConfig(score_matrix),
+            default_extender<DeBruijnGraph::node_index>,
+            &thread_pool
+        );
+
+        EXPECT_EQ(ref, obs_labels) << k;
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, FindVariantsIndel) {
+    test_find_variants_indel<typename TypeParam::first_type,
+                             typename TypeParam::second_type>();
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, FindVariantsIndelParallel) {
+    test_find_variants_indel<typename TypeParam::first_type,
+                             typename TypeParam::second_type>(3);
+}
+
