@@ -388,7 +388,7 @@ TYPED_TEST(DBGAlignerTest, variation) {
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.score_sequences(query.begin(), query.end(),
-                                     reference.begin(), reference.end()),
+                                     reference.begin()),
               path.get_score());
     EXPECT_EQ("5=1X6=", path.get_cigar().to_string());
     EXPECT_EQ(11u, path.get_num_matches());
@@ -454,7 +454,7 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.score_sequences(query.begin(), query.end(),
-                                     reference.begin(), reference.end()),
+                                     reference.begin()),
               path.get_score());
     EXPECT_EQ("6=1X6=1X1=1X4=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_num_matches());
@@ -490,7 +490,7 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference_1, path.get_sequence());
     EXPECT_EQ(config.score_sequences(query.begin(), query.end(),
-                                     reference_1.begin(), reference_1.end()),
+                                     reference_1.begin()),
               path.get_score());
     EXPECT_EQ("4=1X6=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_num_matches());
@@ -554,7 +554,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.score_sequences(query.begin(), query.end(),
-                                     reference.begin(), reference.end()),
+                                     reference.begin()),
               path.get_score());
     EXPECT_EQ("4=1X9=1X6=", path.get_cigar().to_string());
     EXPECT_EQ(19u, path.get_num_matches());
@@ -813,7 +813,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp_min_seed_length) {
         EXPECT_EQ(15u, path.size()); // includes dummy k-mers
         EXPECT_EQ(reference.substr(3), path.get_sequence());
         EXPECT_EQ(config.score_sequences(query.begin(), query.end(),
-                                         reference.begin() + 3, reference.end()),
+                                         reference.begin() + 3),
                   path.get_score());
         EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
         EXPECT_EQ(14u, path.get_num_matches());
@@ -848,7 +848,7 @@ TEST(DBGAlignerTest, align_inexact_seed_snp) {
     EXPECT_EQ(15u, path.size()); // includes dummy k-mers
     EXPECT_EQ(reference.substr(3), path.get_sequence());
     EXPECT_EQ(config.score_sequences(query.begin(), query.end(),
-                                     reference.begin() + 3, reference.end()),
+                                     reference.begin() + 3),
               path.get_score());
     EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_num_matches());

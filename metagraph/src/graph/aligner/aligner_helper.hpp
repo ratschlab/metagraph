@@ -93,27 +93,26 @@ class DBGAlignerConfig {
                      int8_t gap_opening = -3,
                      int8_t gap_extension = -1);
 
-    template <class StringIt>
-    score_t score_sequences(StringIt a_begin, StringIt a_end,
-                            StringIt b_begin, StringIt b_end) const {
+    template <class StringItA, class StringItB>
+    score_t score_sequences(StringItA a_begin, StringItA a_end,
+                            StringItB b_begin) const {
         assert(a_end >= a_begin);
-        assert(b_end >= b_begin);
-        assert(a_end - a_begin == b_end - b_begin);
-
-        std::ignore = b_end;
 
         return std::inner_product(
-            a_begin, a_end,
+            a_begin,
+            a_end,
             b_begin,
             score_t(0),
             std::plus<score_t>(),
-            [&](const char &a, const char &b) -> score_t { return score_matrix_[a][b];}
+            [&](const char &a, const char &b) -> score_t {
+                return score_matrix_[a][b];
+            }
         );
     }
 
     template <class StringIt>
     score_t match_score(StringIt begin, StringIt end) const {
-        return score_sequences(begin, end, begin, end);
+        return score_sequences(begin, end, begin);
     }
 
     const ScoreMatrixRow& get_row(char char_in_query) const {
