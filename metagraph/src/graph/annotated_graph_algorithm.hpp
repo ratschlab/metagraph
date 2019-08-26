@@ -6,8 +6,10 @@
 
 #include "annotated_dbg.hpp"
 #include "bitmap.hpp"
+#include "dbg_aligner.hpp"
 #include "threading.hpp"
 #include "aligner_helper.hpp"
+#include "aligner_methods.hpp"
 
 
 typedef std::function<uint64_t()> UInt64Callback;
@@ -53,6 +55,15 @@ void call_breakpoints(const DeBruijnGraph &graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool = nullptr,
                       const std::function<bool()> &terminate = []() { return false; });
+
+// Given a seed, construct a masked graph that only includes the labels of the seed node,
+// then extend on that.
+Extender<DeBruijnGraph::node_index>
+build_masked_graph_extender(const AnnotatedDBG &anno_graph,
+                            double seed_label_discovery_fraction = 1.0,
+                            Extender<DeBruijnGraph::node_index>&& extender
+                                = default_extender<DeBruijnGraph::node_index>);
+
 
 
 } // namespace annotated_graph_algorithm

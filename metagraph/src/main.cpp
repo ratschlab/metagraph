@@ -597,9 +597,19 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 DBGAligner<>::DBGQueryAlignment
 align_sequences(const DeBruijnGraph &graph,
                 const Config &config,
-                const std::string &query) {
+                const std::string &query,
+                const AnnotatedDBG *anno_graph = nullptr) {
+    Seeder<DeBruijnGraph::node_index> seeder = suffix_seeder<DeBruijnGraph::node_index>;
+
+    auto extender = anno_graph
+        ? annotated_graph_algorithm::build_masked_graph_extender(*anno_graph)
+        : default_extender<DeBruijnGraph::node_index>;
+
     if (config.forward_and_reverse) {
-        DBGAligner<> aligner(graph, DBGAlignerConfig(config, graph));
+        DBGAligner<> aligner(graph,
+                             DBGAlignerConfig(config, graph),
+                             seeder,
+                             extender);
 
         return config.alignment_seed_unimems
             ? aligner.extend_mapping_forward_and_reverse_complement(
@@ -612,7 +622,6 @@ align_sequences(const DeBruijnGraph &graph,
               );
     }
 
-    Seeder<DeBruijnGraph::node_index> seeder = suffix_seeder<DeBruijnGraph::node_index>;
     if (config.alignment_seed_unimems) {
         std::vector<DeBruijnGraph::node_index> nodes;
         graph.map_to_nodes_sequentially(
@@ -624,7 +633,10 @@ align_sequences(const DeBruijnGraph &graph,
         seeder = build_unimem_seeder<DeBruijnGraph::node_index>(nodes, graph);
     }
 
-    return DBGAligner<>(graph, DBGAlignerConfig(config, graph), seeder).align(
+    return DBGAligner<>(graph,
+                        DBGAlignerConfig(config, graph),
+                        seeder,
+                        extender).align(
         query, false, config.alignment_min_path_score
     );
 }
@@ -2613,6 +2625,10 @@ int main(int argc, const char *argv[]) {
 
             // initialize aligner
             auto graph = load_critical_dbg(config->infbase);
+            std::unique_ptr<AnnotatedDBG> anno_graph;
+            if (config->infbase_annotators.size())
+                anno_graph = initialize_annotated_dbg(graph, *config);
+
             auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
             // This speeds up mapping, and allows for node suffix matching
@@ -2716,22 +2732,42 @@ int main(int argc, const char *argv[]) {
                                             std::string header) {
                             auto paths = align_sequences(*graph,
                                                          *config,
-                                                         query);
+                                                         query,
+                                                         anno_graph.get());
+
+                            std::vector<std::string> labels;
+                            if (anno_graph.get()) {
+                                for (const auto &path : paths) {
+                                    labels.emplace_back(utils::join_strings(
+                                        anno_graph->get_labels(path.get_sequence(), 1.0),
+                                        ","
+                                    ));
+                                }
+                            }
 
                             auto lock = std::lock_guard<std::mutex>(print_mutex);
                             if (!json_writer.get()) {
-                                for (const auto &path : paths) {
-                                    const auto& path_query = path.get_orientation()
+                                bool secondary = false;
+                                for (size_t i = 0; i < paths.size(); ++i) {
+                                    if (anno_graph.get() && labels[i].empty())
+                                        continue;
+
+                                    const auto& path_query = paths[i].get_orientation()
                                         ? paths.get_query_reverse_complement()
                                         : paths.get_query();
 
                                     *outstream << header << "\t"
                                                << path_query << "\t"
-                                               << path
+                                               << (anno_graph.get()
+                                                      ? labels.at(i) + "\t"
+                                                      : "")
+                                               << paths[i]
                                                << std::endl;
+
+                                    secondary = true;
                                 }
 
-                                if (paths.empty())
+                                if (!secondary)
                                     *outstream << header << "\t"
                                                << query << "\t"
                                                << "*\t*\t"
@@ -2739,16 +2775,22 @@ int main(int argc, const char *argv[]) {
                                                << std::endl;
                             } else {
                                 bool secondary = false;
-                                for (const auto &path : paths) {
-                                    const auto& path_query = path.get_orientation()
+                                for (size_t i = 0; i < paths.size(); ++i) {
+                                    if (anno_graph.get() && labels[i].empty())
+                                        continue;
+
+                                    const auto& path_query = paths[i].get_orientation()
                                         ? paths.get_query_reverse_complement()
                                         : paths.get_query();
 
                                     json_writer->write(
-                                        path.to_json(path_query,
-                                                     *graph,
-                                                     secondary,
-                                                     header),
+                                        paths[i].to_json(path_query,
+                                                         *graph,
+                                                         secondary,
+                                                         header,
+                                                         anno_graph.get()
+                                                             ? labels.at(i) + "\t"
+                                                             : ""),
                                         outstream
                                     );
 
@@ -2757,7 +2799,7 @@ int main(int argc, const char *argv[]) {
                                     secondary = true;
                                 }
 
-                                if (paths.empty()) {
+                                if (!secondary) {
                                     json_writer->write(
                                         DBGAligner<>::DBGAlignment().to_json(
                                             query,

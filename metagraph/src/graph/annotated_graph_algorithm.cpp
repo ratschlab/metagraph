@@ -482,4 +482,48 @@ void call_bubbles(const DeBruijnGraph &graph,
 }
 
 
+Extender<DeBruijnGraph::node_index>
+build_masked_graph_extender(const AnnotatedDBG &anno_graph,
+                            double seed_label_discovery_fraction,
+                            Extender<DeBruijnGraph::node_index>&& extender) {
+    assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
+
+    return [&anno_graph,
+            seed_label_discovery_fraction,
+            extender = std::move(extender)](const DeBruijnGraph &graph,
+                                            const auto &path,
+                                            std::vector<auto>* next_paths,
+                                            const char* sequence_end,
+                                            const DBGAlignerConfig &config,
+                                            bool orientation,
+                                            auto min_path_score) {
+        auto labels = anno_graph.get_labels(path.get_sequence(),
+                                            seed_label_discovery_fraction);
+
+        if (labels.empty())
+            return;
+
+        extender(MaskedDeBruijnGraph(
+                     std::dynamic_pointer_cast<const DeBruijnGraph>(
+                         anno_graph.get_graph_ptr()
+                     ),
+                     [&, labels](const auto &node) {
+                         assert(node != DeBruijnGraph::npos);
+                         return graph.in_graph(node)
+                             && std::all_of(labels.begin(), labels.end(),
+                                            [&](const auto &label) {
+                                                return anno_graph.has_label(node, label);
+                                            });
+                     }
+                 ),
+                 path,
+                 next_paths,
+                 sequence_end,
+                 config,
+                 orientation,
+                 min_path_score);
+    };
+}
+
+
 } // namespace annotated_graph_algorithm

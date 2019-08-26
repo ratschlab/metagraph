@@ -389,3 +389,84 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, FindBubblesInnerLoopParallel) {
     test_find_bubbles_inner_loop<typename TypeParam::first_type,
                                  typename TypeParam::second_type>(3);
 }
+
+template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+void test_align_to_masked_graph(size_t pool_size = 0) {
+    const std::vector<std::string> ingroup { "A" };
+    const std::vector<std::string> outgroup { };
+
+    size_t k = 4;
+
+    // TTGC      GCACGGGTC
+    //      TGCA
+    // ATGC      GCAGTGGTC
+    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto config = DBGAlignerConfig(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    std::vector<std::pair<std::string,
+                          std::vector<std::pair<std::string,
+                                                score_t>>>> query_best_paths {
+        { sequences[0],  { { sequences[0],  22 }, { sequences[0],  22 } } },
+        { sequences[1],  { { sequences[1],  22 }, { sequences[1],  22 } } },
+        { "TTGCAGTGGTC", { { "TTGCAGTGGTC", 22 }, { sequences[0],  14 } } },
+        { "ATGCACGGGTC", { { "ATGCACGGGTC", 22 }, { sequences[1],  14 } } },
+        { "TTGCAGTGGT",  { { "TTGCAGTGGT",  20 }, { "TTGCACGGGT",  12 } } },
+        { "ATGCACGGGT",  { { "ATGCACGGGT",  20 }, { "ATGCAGTGGT",  12 } } },
+        { "TTGCAGTGG",   { { "TTGCAGTGG",   18 }, { "TTGCA",       10 } } },
+        { "ATGCACGGG",   { { "ATGCACGGG",   18 }, { "ATGCA",       10 } } },
+        { "TTGCAGTG",    { { "TTGCAGTG",    16 }, { "TTGCA",       10 } } },
+        { "ATGCACGG",    { { "ATGCACGG",    16 }, { "ATGCA",       10 } } },
+        { "TTGCAGT",     { { "TTGCAGT",     14 }, { "TTGCA",       10 } } },
+        { "ATGCACG",     { { "ATGCACG",     14 }, { "ATGCA",       10 } } },
+        { "TTGCAG",      { { "TTGCAG",      12 }, { "TTGCA",       10 } } },
+        { "ATGCAC",      { { "ATGCAC",      12 }, { "ATGCA",       10 } } },
+        { "TTGCA",       { { "TTGCA",       10 }, { "TTGCA",       10 } } },
+        { "ATGCA",       { { "ATGCA",       10 }, { "ATGCA",       10 } } }
+    };
+
+    auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+    const auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
+        anno_graph->get_graph_ptr()
+    );
+    ASSERT_TRUE(graph.get());
+
+    std::unordered_set<std::string> obs_labels;
+    std::mutex add_mutex;
+    ThreadPool thread_pool(pool_size);
+    const std::unordered_set<std::string> ref { "B" };
+
+    Cigar::initialize_opt_table(graph->alphabet());
+
+    std::vector<DBGAligner<>> aligners {
+        DBGAligner<>(*graph, config),
+        DBGAligner<>(*graph,
+                     config,
+                     suffix_seeder<DeBruijnGraph::node_index>,
+                     annotated_graph_algorithm::build_masked_graph_extender(*anno_graph))
+    };
+
+    size_t j = 0;
+    for (const auto& [query, paths] : query_best_paths) {
+        ASSERT_EQ(paths.size(), aligners.size());
+
+        for (size_t i = 0; i < paths.size(); ++i) {
+            for (auto&& alignment : aligners[i].align(query)) {
+                EXPECT_EQ(paths[i].first, alignment.get_sequence()) << j << " " << i;
+                EXPECT_EQ(paths[i].second, alignment.get_score()) << j << " " << i;
+            }
+        }
+
+        ++j;
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, AlignToMaskedGraph) {
+    test_align_to_masked_graph<typename TypeParam::first_type,
+                               typename TypeParam::second_type>();
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, AlignToMaskedGraphParallel) {
+    test_align_to_masked_graph<typename TypeParam::first_type,
+                               typename TypeParam::second_type>(3);
+}

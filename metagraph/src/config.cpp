@@ -679,6 +679,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            fprintf(stderr, "\t-a --annotator [STR] \tannotator to use for masking []\n");
             fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximum exact matches in unitigs as seeds [off]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
