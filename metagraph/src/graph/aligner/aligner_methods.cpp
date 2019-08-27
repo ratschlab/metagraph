@@ -138,6 +138,13 @@ const Extender default_extender = [](const DeBruijnGraph &graph,
     if (path.get_score() + config.match_score(align_start, sequence_end) < min_path_score)
         return;
 
+    // used for branch and bound checks below
+    std::vector<score_t> partial_sum(size - 1);
+    std::partial_sum(std::make_reverse_iterator(sequence_end),
+                     std::make_reverse_iterator(align_start),
+                     partial_sum.rbegin(),
+                     [&](score_t sum, char c) { return sum + config.get_row(c)[c]; });
+
     // keep track of which columns to use next
     // TODO: priority function here
     BoundedPriorityQueue<std::pair<score_t, node_index>> columns_to_update(
@@ -325,14 +332,19 @@ const Extender default_extender = [](const DeBruijnGraph &graph,
                     std::get<0>(start_node->second).at(std::get<3>(start_node->second))
                 );
 
-                if (*max_pos > best_score)
+                if (*max_pos > best_score) {
                     start_node = &*iter;
+                    best_score = *max_pos;
+                }
 
                 // branch and bound if we're only interested in the top path
                 if (config.num_alternative_paths > 1
-                        || *max_pos + (config.match_score(
-                                           align_start + std::get<3>(next_column),
-                                           sequence_end)) >= best_score)
+                        || !std::equal(partial_sum.begin(),
+                                       partial_sum.end(),
+                                       std::get<0>(start_node->second).begin(),
+                                       [best_score](auto a, auto b) {
+                                           return a + b < best_score;
+                                       }))
                     columns_to_update.emplace(*max_pos, next_node);
             }
         }
