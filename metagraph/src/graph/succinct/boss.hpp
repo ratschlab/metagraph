@@ -107,12 +107,15 @@ class BOSS {
     // exactly all edges in graph
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
-                    bool split_to_contigs = false) const;
+                    bool split_to_contigs = false,
+                    bitmap *mask = NULL) const;
 
-    void call_sequences(Call<const std::string&> callback) const;
+    void call_sequences(Call<const std::string&> callback,
+                        bitmap *mask = NULL) const;
 
     void call_unitigs(Call<const std::string&> callback,
-                      size_t max_pruned_dead_end_size = 0) const;
+                      size_t max_pruned_dead_end_size = 0,
+                      bitmap *mask = NULL) const;
 
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;
@@ -486,6 +489,7 @@ class BOSS {
                     bool split_to_contigs,
                     sdsl::bit_vector *discovered_ptr,
                     sdsl::bit_vector *visited_ptr,
+                    bitmap *mask,
                     ProgressBar &progress_bar) const;
 
     /**

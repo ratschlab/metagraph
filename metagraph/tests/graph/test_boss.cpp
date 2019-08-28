@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 #include <mutex>
+#include <unordered_set>
 
 #include <zlib.h>
 #include <htslib/kseq.h>
@@ -2673,4 +2674,28 @@ TEST(BOSS, CallNodesWithSuffixMultipleOut) {
 
     EXPECT_EQ(ref_nodes, nodes) << *graph;
     EXPECT_EQ(ref_node_str, node_str) << *graph;
+}
+
+TEST(BOSS, CallUnitigsMasked) {
+    size_t k = 3;
+    // TTGC      GCACGGGTC
+    //      TGCA
+    // ATGC      GCAGTGGTC
+    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
+    BOSSConstructor constructor(k);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+
+    bit_vector_stat mask(graph.num_edges() + 1, false);
+    graph.map_to_edges(
+        sequences[0],
+        [&](auto edge) { mask.set(edge, true); }
+    );
+
+    std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
+    std::unordered_multiset<std::string> obs;
+
+    graph.call_unitigs([&](auto unitig) { obs.insert(unitig); }, 0, &mask);
+
+    EXPECT_EQ(obs, ref);
 }
