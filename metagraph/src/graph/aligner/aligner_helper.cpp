@@ -411,7 +411,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     position["node_id"] = nodes_.front();
 
     if (cur_pos)
-        position["offset"] = cur_pos;
+        position["offset"] = Json::Value::UInt64(cur_pos);
 
     // set to true if the node is the reverse complement of the query
     //position["is_reverse"] = false;
@@ -429,8 +429,8 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         switch (cigar_it->first) {
             case Cigar::Operator::MISMATCH: {
                 assert(query_start + next_size <= query_end_);
-                edit["from_length"] = next_size;
-                edit["to_length"] = next_size;
+                edit["from_length"] = Json::Value::UInt64(next_size);
+                edit["to_length"] = Json::Value::UInt64(next_size);
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
             } break;
@@ -438,17 +438,17 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
                 assert(query_start + next_size <= query_end_);
                 // this assumes that INSERTIONS can't happen right after deletions
                 //edit["from_length"] = 0;
-                edit["to_length"] = next_size;
+                edit["to_length"] = Json::Value::UInt64(next_size);
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
             } break;
             case Cigar::Operator::DELETION: {
-                edit["from_length"] = next_size;
+                edit["from_length"] = Json::Value::UInt64(next_size);
                 //edit["to_length"] = 0;
             } break;
             case Cigar::Operator::MATCH: {
-                edit["from_length"] = next_size;
-                edit["to_length"] = next_size;
+                edit["from_length"] = Json::Value::UInt64(next_size);
+                edit["to_length"] = Json::Value::UInt64(next_size);
                 query_start += next_size;
             } break;
             case Cigar::Operator::CLIPPED: { assert(false); }
@@ -475,7 +475,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         Json::Value mapping;
         Json::Value position;
         position["node_id"] = *node_it;
-        position["offset"] = node_size - 1;
+        position["offset"] = Json::Value::UInt64(node_size - 1);
         // set to true if the node is the reverse complement of the query
         //position["is_reverse"] = false;
         mapping["position"] = position;
@@ -486,7 +486,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
             assert(query_start + length < query_end_);
             // this assumes that INSERTIONS can't happen right after deletions
             //edit["from_length"] = 0;
-            edit["to_length"] = length;
+            edit["to_length"] = Json::Value::UInt64(length);
             edit["sequence"] = std::string(query_start, length);
             query_start += length;
             ++cigar_it;
@@ -530,7 +530,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     assert(query_start == query_end_);
     assert(cigar_it == cigar_.end());
 
-    path["length"] = nodes_.size();
+    path["length"] = Json::Value::UInt64(nodes_.size());
     //path["is_circular"]; // bool
 
     if (label.size())
