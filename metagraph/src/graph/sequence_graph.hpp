@@ -134,6 +134,12 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+  protected:
+    static void call_sequences(const DeBruijnGraph &graph,
+                               const std::function<void(const std::string&)> &callback,
+                               bool call_unitigs,
+                               uint64_t min_tip_size = 0);
 };
 
 

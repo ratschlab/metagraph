@@ -170,10 +170,10 @@ void call_sequences_from(const DeBruijnGraph &graph,
     }
 }
 
-void call_sequences(const DeBruijnGraph &graph,
-                    const std::function<void(const std::string&)> &callback,
-                    bool call_unitigs,
-                    uint64_t min_tip_size = 0) {
+void DeBruijnGraph::call_sequences(const DeBruijnGraph &graph,
+                                   const std::function<void(const std::string&)> &callback,
+                                   bool call_unitigs,
+                                   uint64_t min_tip_size) {
     sdsl::bit_vector discovered(graph.num_nodes() + 1, false);
     sdsl::bit_vector visited(graph.num_nodes() + 1, false);
 
@@ -223,13 +223,13 @@ void call_sequences(const DeBruijnGraph &graph,
 
 void DeBruijnGraph
 ::call_sequences(const std::function<void(const std::string&)> &callback) const {
-    ::call_sequences(*this, callback, false);
+    DeBruijnGraph::call_sequences(*this, callback, false);
 }
 
 void DeBruijnGraph
 ::call_unitigs(const std::function<void(const std::string&)> &callback,
                size_t min_tip_size) const {
-    ::call_sequences(*this, callback, true, min_tip_size);
+    DeBruijnGraph::call_sequences(*this, callback, true, min_tip_size);
 }
 
 /**
