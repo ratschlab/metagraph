@@ -10,7 +10,8 @@
 MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, bitmap *mask)
       : graph_(graph),
-        is_target_mask_(mask) {
+        is_target_mask_(mask),
+        masked_(mask) {
     if (!is_target_mask_.get())
         is_target_mask_.reset(new bitmap_lazy(
             [&](const auto &i) { return i != DeBruijnGraph::npos; },
@@ -129,6 +130,53 @@ uint64_t MaskedDeBruijnGraph
 uint64_t MaskedDeBruijnGraph
 ::unmasked_indegree(node_index node) const {
     return graph_->indegree(node);
+}
+
+void MaskedDeBruijnGraph
+::call_sequences(const std::function<void(const std::string&)> &callback) const {
+    if (!dynamic_cast<const DBGSuccinct*>(graph_.get())) {
+        DeBruijnGraph::call_sequences(*this, callback, false);
+        return;
+    }
+
+    const auto& dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_.get());
+    const auto& boss = dbg_succ.get_boss();
+    if (masked_) {
+        std::unique_ptr<bitmap> mask {
+            new bitmap_lazy(
+                [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
+                boss.num_edges() + 1
+            )
+        };
+
+        boss.call_sequences(callback, mask.get());
+    } else {
+        boss.call_sequences(callback);
+    }
+}
+
+void MaskedDeBruijnGraph
+::call_unitigs(const std::function<void(const std::string&)> &callback,
+               size_t min_tip_size) const {
+    if (!dynamic_cast<const DBGSuccinct*>(graph_.get())) {
+        DeBruijnGraph::call_sequences(*this, callback, true, min_tip_size);
+        return;
+    }
+
+    const auto& dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_.get());
+    const auto& boss = dbg_succ.get_boss();
+    if (masked_) {
+        std::unique_ptr<bitmap> mask {
+            new bitmap_lazy(
+                [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
+                boss.num_edges() + 1
+            )
+        };
+
+        boss.call_unitigs(callback, min_tip_size, mask.get());
+    } else {
+        boss.call_unitigs(callback, min_tip_size);
+    }
 }
 
 void MaskedDeBruijnGraph

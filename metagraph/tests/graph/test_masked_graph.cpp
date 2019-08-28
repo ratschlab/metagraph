@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "test_dbg_helpers.hpp"
+#include "../annotation/test_annotated_dbg_helpers.hpp"
 
 #include <set>
 
@@ -343,6 +344,27 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
             EXPECT_EQ(ref_nodes, rec_nodes);
         }
     }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
+    size_t k = 4;
+    // TTGC      GCACGGGTC
+    //      TGCA
+    // ATGC      GCAGTGGTC
+    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
+    const std::vector<std::string> labels { "A", "B" };
+    auto anno_graph = build_anno_graph<TypeParam,
+                                       annotate::ColumnCompressed<>>(
+        k, sequences, labels
+    );
+
+    auto masked_dbg = build_masked_graph(*anno_graph, { "A" }, {});
+    std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
+    std::unordered_multiset<std::string> obs;
+
+    masked_dbg.call_unitigs([&](auto unitig) { obs.insert(unitig); });
+
+    EXPECT_EQ(obs, ref);
 }
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
