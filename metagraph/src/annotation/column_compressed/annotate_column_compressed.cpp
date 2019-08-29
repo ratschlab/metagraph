@@ -528,7 +528,7 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
 
 template <typename Label>
 bool ColumnCompressed<Label>
-::dump_columns(const std::string &prefix, bool binary, uint64_t num_threads) const {
+::dump_columns(const std::string &prefix, bool binary, size_t num_threads) const {
     bool success = true;
 
     if (binary) {
