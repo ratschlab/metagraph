@@ -19,19 +19,43 @@ namespace annotate {
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
-                                          bool verbose)
+                                          bool verbose,
+                                          size_t row_cache_size)
       : num_rows_(num_rows),
-        cached_columns_(
-            num_columns_cached,
-            caches::LRUCachePolicy<size_t>(),
-            [this](size_t j, bitmap *col_uncompressed) {
-                assert(col_uncompressed);
-                this->flush(j, *col_uncompressed);
-                delete col_uncompressed;
-            }
-        ),
+        cached_columns_(num_columns_cached,
+                        caches::LRUCachePolicy<size_t>(),
+                        [this](size_t j, bitmap *col_uncompressed) {
+                            assert(col_uncompressed);
+                            this->flush(j, *col_uncompressed);
+                            delete col_uncompressed;
+                        }),
         verbose_(verbose) {
     assert(num_columns_cached > 0);
+    MultiLabelEncoded<uint64_t, Label>::reset_row_cache(row_cache_size);
+}
+
+template <typename Label>
+ColumnCompressed<Label>::ColumnCompressed(ColumnCompressed&& other) noexcept
+      : num_rows_(other.num_rows_),
+        cached_columns_(other.cached_columns_.Size(),
+                        caches::LRUCachePolicy<size_t>(),
+                        [this](size_t j, bitmap *col_uncompressed) {
+                            assert(col_uncompressed);
+                            this->flush(j, *col_uncompressed);
+                            delete col_uncompressed;
+                        }) {
+    other.cached_columns_.Clear();
+    bitmatrix_ = std::move(other.bitmatrix_);
+
+    MultiLabelEncoded<uint64_t, Label>::label_encoder_
+        = std::move(other.MultiLabelEncoded<uint64_t, Label>::label_encoder_);
+
+    MultiLabelEncoded<uint64_t, Label>::reset_row_cache(
+        other.cached_rows_.get() ? other.cached_rows_->Size() : 0
+    );
+
+    assert(label_encoder_.size() == bitmatrix_.size());
+    assert(!bitmatrix_.size() || num_rows_ == bitmatrix_.front()->size());
 }
 
 template <typename Label>
@@ -73,12 +97,28 @@ template <typename Label>
 std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
     assert(i < num_rows_);
 
-    std::vector<uint64_t> label_indices;
-    for (size_t j = 0; j < num_labels(); ++j) {
-        if (is_set(i, j))
-            label_indices.push_back(j);
+    if (!cached_rows_.get()) {
+        std::vector<uint64_t> label_indices;
+        for (size_t j = 0; j < num_labels(); ++j) {
+            if (is_set(i, j))
+                label_indices.push_back(j);
+        }
+
+        return label_indices;
     }
-    return label_indices;
+
+    try {
+        return cached_rows_->Get(i);
+    } catch (...) {
+        std::vector<uint64_t> label_indices;
+        for (size_t j = 0; j < num_labels(); ++j) {
+            if (is_set(i, j))
+                label_indices.push_back(j);
+        }
+
+        cached_rows_->Put(i, label_indices);
+        return label_indices;
+    }
 }
 
 template <typename Label>
@@ -489,7 +529,7 @@ void ColumnCompressed<Label>
 
     ProgressBar progress_bar(num_rows_, "Processed rows", std::cerr, !utils::get_verbose());
 
-    annotator->reinitialize(num_rows_);
+    annotator->reinitialize(num_rows_, cached_rows_.get() ? cached_rows_->Size() : 0);
     annotator->label_encoder_ = label_encoder_;
 
     if (num_threads <= 1) {

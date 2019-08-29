@@ -158,12 +158,6 @@ std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
-void StaticBinRelAnnotator<BinaryMatrixType, Label>
-::reset_row_cache(size_t size) {
-    cached_rows_.reset(size ? new RowCacheType(size) : nullptr);
-}
-
-template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::dump_columns(const std::string &prefix, bool binary, uint64_t num_threads) const {
     size_t m = num_labels();
@@ -226,7 +220,7 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 template <class BinaryMatrixType, typename Label>
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::StaticBinRelAnnotator(size_t row_cache_size) : matrix_(new BinaryMatrixType()) {
-    reset_row_cache(row_cache_size);
+    MultiLabelEncoded<uint64_t, Label>::reset_row_cache(row_cache_size);
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -235,7 +229,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
                         const LabelEncoder<Label> &label_encoder,
                         size_t row_cache_size) : matrix_(std::move(matrix)) {
     assert(matrix_.get());
-    reset_row_cache(row_cache_size);
+    MultiLabelEncoded<uint64_t, Label>::reset_row_cache(row_cache_size);
     label_encoder_ = label_encoder;
 }
 

@@ -17,21 +17,25 @@ namespace annotate {
 
 
 template <typename Label>
-RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse)  {
+RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse, size_t row_cache_size) {
     if (sparse) {
         matrix_.reset(new EigenSpMat(num_rows));
     } else {
         matrix_.reset(new VectorRowBinMat(num_rows));
     }
+
+    MultiLabelEncoded<uint64_t, Label>::reset_row_cache(row_cache_size);
 }
 
 template <typename Label>
-void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
+void RowCompressed<Label>::reinitialize(uint64_t num_rows, size_t row_cache_size) {
     if (dynamic_cast<EigenSpMat*>(matrix_.get())) {
         matrix_.reset(new EigenSpMat(num_rows));
     } else {
         matrix_.reset(new VectorRowBinMat(num_rows));
     }
+
+    MultiLabelEncoded<uint64_t, Label>::reset_row_cache(row_cache_size);
 
     label_encoder_.clear();
 }
@@ -45,10 +49,24 @@ void RowCompressed<Label>::set_labels(Index i, const VLabels &labels) {
 }
 
 template <typename Label>
+std::vector<uint64_t> RowCompressed<Label>::get_label_codes(Index i) const {
+    if (!cached_rows_.get())
+        return matrix_->get_row(i);
+
+    try {
+        return cached_rows_->Get(i);
+    } catch (...) {
+        auto row = matrix_->get_row(i);
+        cached_rows_->Put(i, row);
+        return row;
+    }
+}
+
+template <typename Label>
 typename RowCompressed<Label>::VLabels
 RowCompressed<Label>::get_labels(Index i) const {
     VLabels labels;
-    for (auto col : matrix_->get_row(i)) {
+    for (auto col : get_label_codes(i)) {
         labels.push_back(label_encoder_.decode(col));
     }
     return labels;
@@ -127,7 +145,7 @@ bool RowCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
         return false;
     }
     std::set<size_t> encoded_labels;
-    for (auto col : matrix_->get_row(i)) {
+    for (auto col : get_label_codes(i)) {
         encoded_labels.insert(col);
     }
     return std::includes(encoded_labels.begin(), encoded_labels.end(),

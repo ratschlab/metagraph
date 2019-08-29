@@ -98,12 +98,7 @@ void AnnotatorTest<RowCompressedSparse<>>
 template<>
 void AnnotatorTest<annotate::ColumnCompressed<>>
 ::set(annotate::ColumnCompressed<>&& column_annotator) {
-    // TODO: introduce move constructor for ColumnCompressed
-    //annotation.reset(new annotate::ColumnCompressed<>(std::move(column_annotator)));
-    annotation.reset(new annotate::ColumnCompressed<>(column_annotator.num_objects()));
-    for (annotate::ColumnCompressed<>::Index i = 0; i < column_annotator.num_objects(); ++i) {
-        annotation->add_labels(i, std::move(column_annotator.get_labels(i)));
-    }
+    annotation.reset(new annotate::ColumnCompressed<>(std::move(column_annotator)));
 }
 
 template <typename Annotator>
@@ -175,7 +170,11 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
                          annotate::BRWTCompressed<>> AnnotatorStaticTypes;
-typedef ::testing::Types<annotate::BRWTCompressed<>> AnnotatorStaticLargeTypes;
+typedef ::testing::Types<annotate::BRWTCompressed<>,
+                         annotate::RainbowfishAnnotator,
+                         annotate::RowFlatAnnotator,
+                         annotate::ColumnCompressed<>,
+                         annotate::RowCompressed<>> AnnotatorStaticLargeTypes;
 typedef ::testing::Types<annotate::ColumnCompressed<>,
                          annotate::RowCompressed<>,
                          RowCompressedParallel<>,
@@ -1537,40 +1536,33 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMergeAll) {
 TYPED_TEST(AnnotatorStaticLargeTest, CheckCache) {
     size_t num_rows = 20000;
     size_t num_columns = 200;
-    BitVectorPtrArray columns, copy;
-    annotate::LabelEncoder label_encoder;
 
+    annotate::ColumnCompressed<> column_annotator(num_rows), copy_annotator(num_rows);
     for (size_t j = 0; j < num_columns; ++j) {
-
-        columns.emplace_back(new bit_vector_stat(num_rows));
-
-        for (size_t i = 0; i < num_rows; ++i) {
-            columns.back()->set(i, (i + 2 * j) % 1000);
+        std::vector<uint64_t> indices;
+        size_t start = std::ceil(static_cast<double>(2 * j) / 1000) * 1000;
+        for (size_t i = start; i < num_rows; i += 1000) {
+            indices.push_back(i);
         }
-        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
 
-        label_encoder.insert_and_encode(std::to_string(j));
+        column_annotator.add_labels(indices, { std::to_string(j) });
+        copy_annotator.add_labels(indices, { std::to_string(j) });
     }
 
-    auto annotator = TypeParam(
-        std::make_unique<typename TypeParam::binary_matrix_type>(
-            build_matrix_from_columns<typename TypeParam::binary_matrix_type>(
-                std::move(copy), num_rows
-            )
-        ),
-        label_encoder,
-        1000000
-    );
+    this->set(std::move(column_annotator));
+    this->annotation->reset_row_cache(num_rows / 1000);
 
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < num_rows; i += 1000) {
-        rows.emplace_back(annotator.get_labels(i));
+        rows.emplace_back(this->annotation->get_labels(i));
     }
 
     auto it = rows.begin();
     for (size_t i = 0; i < num_rows; i += 1000) {
         ASSERT_NE(rows.end(), it);
-        EXPECT_EQ(*it++, annotator.get_labels(i));
+        EXPECT_EQ(*it, this->annotation->get_labels(i));
+        EXPECT_EQ(*it, copy_annotator.get_labels(i));
+        it++;
     }
 }
 
@@ -1578,50 +1570,41 @@ TYPED_TEST(AnnotatorStaticLargeTest, CheckCache) {
 TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
     size_t num_rows = 2000000;
     size_t num_columns = 200;
-    BitVectorPtrArray columns, copy;
-    annotate::LabelEncoder label_encoder;
 
+    annotate::ColumnCompressed<> column_annotator(num_rows), copy_annotator(num_rows);
     for (size_t j = 0; j < num_columns; ++j) {
-
-        columns.emplace_back(new bit_vector_stat(num_rows));
-
-        for (size_t i = 0; i < num_rows; ++i) {
-            columns.back()->set(i, (i + 2 * j) % 1000);
+        std::vector<uint64_t> indices;
+        size_t start = std::ceil(static_cast<double>(2 * j) / 1000) * 1000;
+        for (size_t i = start; i < num_rows; i += 1000) {
+            indices.push_back(i);
         }
-        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
 
-        label_encoder.insert_and_encode(std::to_string(j));
+        column_annotator.add_labels(indices, { std::to_string(j) });
+        copy_annotator.add_labels(indices, { std::to_string(j) });
     }
 
-    auto annotator = TypeParam(
-        std::make_unique<typename TypeParam::binary_matrix_type>(
-            build_matrix_from_columns<typename TypeParam::binary_matrix_type>(
-                std::move(copy), num_rows
-            )
-        ),
-        label_encoder
-    );
+    this->set(std::move(column_annotator));
 
     for (size_t cache_size : { 0, 1000, 10000, 100000, 1000000, 10000000 }) {
-        annotator.reset_row_cache(cache_size);
+        this->annotation->reset_row_cache(cache_size);
         Timer timer;
-        for (size_t i = 0; i < num_rows; ++i) {
-            annotator.get_labels(i);
+        for (size_t j = 0; j < 1000; ++j) {
+            for (size_t i = 0; i < num_rows; i += 1000) {
+                this->annotation->get_labels(i);
+            }
         }
-        TEST_COUT << "Query all rows\t"
+        TEST_COUT << "Query some rows repeatedly\t"
                   << "Cache size:\t" << cache_size << "\t\t"
                   << "Time:\t" << timer.elapsed();
     }
 
     for (size_t cache_size : { 0, 1000, 10000, 100000, 1000000, 10000000 }) {
-        annotator.reset_row_cache(cache_size);
+        this->annotation->reset_row_cache(cache_size);
         Timer timer;
-        for (size_t j = 0; j < 1000; ++j) {
-            for (size_t i = 0; i < num_rows; i += 1000) {
-                annotator.get_labels(i);
-            }
+        for (size_t i = 0; i < num_rows; ++i) {
+            this->annotation->get_labels(i);
         }
-        TEST_COUT << "Query some rows repeatedly\t"
+        TEST_COUT << "Query all rows\t"
                   << "Cache size:\t" << cache_size << "\t\t"
                   << "Time:\t" << timer.elapsed();
     }

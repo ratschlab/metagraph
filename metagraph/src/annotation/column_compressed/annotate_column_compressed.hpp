@@ -32,10 +32,14 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
-                     bool verbose = false);
+                     bool verbose = false,
+                     size_t row_cache_size = 0);
 
     ColumnCompressed(const ColumnCompressed&) = delete;
     ColumnCompressed& operator=(const ColumnCompressed&) = delete;
+
+    ColumnCompressed(ColumnCompressed&& other) noexcept;
+    ColumnCompressed& operator=(ColumnCompressed&& other) noexcept = delete;
 
     ~ColumnCompressed();
 
@@ -114,6 +118,10 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     LabelEncoder<Label> &label_encoder_ {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
+    };
+
+    std::unique_ptr<typename MultiLabelEncoded<uint64_t, Label>::RowCacheType> &cached_rows_ {
+        MultiLabelEncoded<uint64_t, Label>::cached_rows_
     };
 
     bool verbose_;

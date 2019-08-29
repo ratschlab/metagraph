@@ -8,6 +8,9 @@
 #include <memory>
 #include <functional>
 
+#include <cache.hpp>
+#include <lru_cache_policy.hpp>
+
 
 namespace annotate {
 
@@ -193,8 +196,17 @@ class MultiLabelEncoded
 
     virtual std::string file_extension() const override = 0;
 
+    virtual void reset_row_cache(size_t size) final {
+        cached_rows_.reset(size ? new RowCacheType(size) : nullptr);
+    }
+
   protected:
     LabelEncoder<Label> label_encoder_;
+
+    typedef caches::fixed_sized_cache<Index,
+                                      std::vector<uint64_t>,
+                                      caches::LRUCachePolicy<Index>> RowCacheType;
+    mutable std::unique_ptr<RowCacheType> cached_rows_;
 };
 
 } // namespace annotate

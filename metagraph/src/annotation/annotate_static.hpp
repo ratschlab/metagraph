@@ -4,9 +4,6 @@
 #include <memory>
 #include <vector>
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
-
 #include "annotate.hpp"
 
 
@@ -50,8 +47,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
 
-    void reset_row_cache(size_t size);
-
     std::string file_extension() const override;
 
   private:
@@ -63,12 +58,11 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    std::vector<uint64_t> get_label_codes(Index i) const override;
+    std::unique_ptr<typename MultiLabelEncoded<uint64_t, Label>::RowCacheType> &cached_rows_ {
+        MultiLabelEncoded<uint64_t, Label>::cached_rows_
+    };
 
-    typedef caches::fixed_sized_cache<Index,
-                                      std::vector<uint64_t>,
-                                      caches::LRUCachePolicy<Index>> RowCacheType;
-    mutable std::unique_ptr<RowCacheType> cached_rows_;
+    std::vector<uint64_t> get_label_codes(Index i) const override;
 
     static const std::string kExtension;
 };

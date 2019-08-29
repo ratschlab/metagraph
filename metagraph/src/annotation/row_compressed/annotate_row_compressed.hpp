@@ -40,7 +40,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
-    RowCompressed(uint64_t num_rows = 0, bool sparse = false);
+    RowCompressed(uint64_t num_rows = 0, bool sparse = false, size_t row_cache_size = 0);
 
     void set_labels(Index i, const VLabels &labels);
     VLabels get_labels(Index i) const;
@@ -68,12 +68,16 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     std::string file_extension() const { return kExtension; }
 
   private:
-    void reinitialize(uint64_t num_rows);
+    void reinitialize(uint64_t num_rows, size_t row_cache_size = 0);
 
     std::unique_ptr<BinaryMatrixRowDynamic> matrix_;
 
     LabelEncoder<Label> &label_encoder_ {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
+    };
+
+    std::unique_ptr<typename MultiLabelEncoded<uint64_t, Label>::RowCacheType> &cached_rows_ {
+        MultiLabelEncoded<uint64_t, Label>::cached_rows_
     };
 
     static std::unique_ptr<LabelEncoder<Label>>
@@ -98,9 +102,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void(BinaryMatrix::RowCallback&)> &call_rows);
 
-    std::vector<uint64_t> get_label_codes(Index i) const {
-        return matrix_->get_row(i);
-    }
+    std::vector<uint64_t> get_label_codes(Index i) const;
 
     static constexpr auto kExtension = kRowAnnotatorExtension;
 };
