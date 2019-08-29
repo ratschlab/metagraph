@@ -48,7 +48,7 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
         }
 
         auto k = graph.get_k();
-        for (size_t i = 0; i < sequence.size() - k; ++i) {
+        for (size_t i = 0; i + k <= sequence.size(); ++i) {
             add_kmer(graph, sequence.substr(i, k), 1);
         }
     };
@@ -66,7 +66,7 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
         while (--j >= i) {
             weights_[j + 1] = weights_[j];
         }
-        weights_[i] = 1;
+        weights_[i] = 0;
     };
 
     template <class Vector>
