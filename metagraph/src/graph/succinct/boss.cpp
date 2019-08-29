@@ -1727,17 +1727,18 @@ bool masked_is_single_outgoing(const BOSS &boss, uint64_t i, const bitmap *mask)
     if (!mask)
         return boss.is_single_outgoing(i);
 
-    uint64_t edge = 0;
+    bool found = false;
     do {
         if ((*mask)[i]) {
-            if (!edge) {
-                edge = i;
+            if (!found) {
+                found = true;
             } else {
                 return false;
             }
         }
     } while (--i > 0 && !boss.get_last(i));
 
+    // Return true if either one or no edges (simulating a sink) were found
     return true;
 }
 
@@ -1774,19 +1775,19 @@ bool masked_incoming_dead_end(const BOSS &boss,
     if (!mask)
         return !boss.get_minus_k_value(i, boss.get_k()).first;
 
-    uint8_t counter = 0;
+    bool found = false;
     boss.call_adjacent_incoming_edges(
         boss.bwd(i),
         [&](auto next_edge) {
-            if (counter)
+            if (found)
                 return;
 
-            counter += (boss.get_W(next_edge) != BOSS::kSentinelCode
+            found |= (boss.get_W(next_edge) != BOSS::kSentinelCode
                 && (*mask)[next_edge]);
         }
     );
 
-    return !counter;
+    return !found;
 }
 
 uint8_t masked_indegree(const BOSS &boss, uint64_t i, const bitmap *mask) {
