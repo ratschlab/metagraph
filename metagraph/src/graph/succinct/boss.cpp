@@ -1796,12 +1796,7 @@ uint8_t masked_indegree(const BOSS &boss, uint64_t i, const bitmap *mask) {
     uint8_t counter = 0;
     boss.call_adjacent_incoming_edges(
         i,
-        [&](auto next_edge) {
-            if (counter > 1)
-                return;
-
-            counter += (*mask)[next_edge];
-        }
+        [&](auto next_edge) { counter += (*mask)[next_edge]; }
     );
 
     return counter;
