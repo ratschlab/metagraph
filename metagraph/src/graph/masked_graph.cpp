@@ -10,8 +10,7 @@
 MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, bitmap *mask)
       : graph_(graph),
-        is_target_mask_(mask),
-        masked_(mask) {
+        is_target_mask_(mask) {
     if (!is_target_mask_.get())
         is_target_mask_.reset(new bitmap_lazy(
             [&](const auto &i) { return i != DeBruijnGraph::npos; },
@@ -141,18 +140,14 @@ void MaskedDeBruijnGraph
 
     const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(*graph_);
     const auto &boss = dbg_succ.get_boss();
-    if (masked_) {
-        std::unique_ptr<bitmap> mask {
-            new bitmap_lazy(
-                [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
-                boss.num_edges() + 1
-            )
-        };
+    std::unique_ptr<bitmap> mask {
+        new bitmap_lazy(
+            [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
+            boss.num_edges() + 1
+        )
+    };
 
-        boss.call_sequences(callback, mask.get());
-    } else {
-        boss.call_sequences(callback);
-    }
+    boss.call_sequences(callback, mask.get());
 }
 
 void MaskedDeBruijnGraph
@@ -165,18 +160,14 @@ void MaskedDeBruijnGraph
 
     const auto& dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_.get());
     const auto& boss = dbg_succ.get_boss();
-    if (masked_) {
-        std::unique_ptr<bitmap> mask {
-            new bitmap_lazy(
-                [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
-                boss.num_edges() + 1
-            )
-        };
+    std::unique_ptr<bitmap> mask {
+        new bitmap_lazy(
+            [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
+            boss.num_edges() + 1
+        )
+    };
 
-        boss.call_unitigs(callback, min_tip_size, mask.get());
-    } else {
-        boss.call_unitigs(callback, min_tip_size);
-    }
+    boss.call_unitigs(callback, min_tip_size, mask.get());
 }
 
 void MaskedDeBruijnGraph

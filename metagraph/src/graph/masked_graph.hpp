@@ -86,29 +86,21 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual uint64_t unmasked_indegree(node_index node) const;
 
     virtual inline bool in_graph(node_index node) const {
-        assert(is_target_mask_.get());
-
-        return node != DeBruijnGraph::npos
-            && (!masked_ || (*is_target_mask_)[node]);
+        return node == DeBruijnGraph::npos || !is_target_mask_.get()
+            ? false
+            : (*is_target_mask_)[node];
     }
 
     virtual bool operator==(const MaskedDeBruijnGraph &other) const;
     virtual bool operator==(const DeBruijnGraph &other) const override;
 
-    virtual void set_mask(bitmap *mask) {
-        masked_ = mask;
-        is_target_mask_.reset(mask);
-    }
+    virtual void set_mask(bitmap *mask) { is_target_mask_.reset(mask); }
 
     virtual const bitmap& get_mask() const { return *is_target_mask_; }
-
-    virtual bool is_masked() const { return masked_; }
 
   private:
     std::shared_ptr<const DeBruijnGraph> graph_;
     std::unique_ptr<bitmap> is_target_mask_;
-
-    bool masked_;
 };
 
 
