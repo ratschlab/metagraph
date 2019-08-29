@@ -1700,27 +1700,33 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
 
 
 // Methods for inferring node degrees with a mask
+
+// If a single outgoing edge is found, return its index. If multiple are found, return 0
+// If none are found, return the initial index i
 uint64_t masked_pick_single_outgoing(const BOSS &boss, uint64_t i, const bitmap *mask) {
     assert(i);
 
     if (!mask)
         return boss.is_single_outgoing(i) ? i : 0;
 
-    uint64_t edge = 0;
+    uint64_t edge = i;
+    uint64_t j = i;
     do {
-        if ((*mask)[i]) {
-            if (!edge) {
-                edge = i;
+        if ((*mask)[j]) {
+            if (edge == i) {
+                edge = j;
             } else {
                 edge = 0;
                 break;
             }
         }
-    } while (--i > 0 && !boss.get_last(i));
+    } while (--j > 0 && !boss.get_last(j));
 
+    // if no outgoing edge is found, return the starting edge
     return edge;
 }
 
+// If a single outgoing edge or no edges are found (simulating a sink edge), return true
 bool masked_is_single_outgoing(const BOSS &boss, uint64_t i, const bitmap *mask) {
     assert(i);
 
@@ -1790,6 +1796,7 @@ bool masked_incoming_dead_end(const BOSS &boss,
     return !found;
 }
 
+// Return the indegree of the edge i on masked-in edges
 uint8_t masked_indegree(const BOSS &boss, uint64_t i, const bitmap *mask) {
     assert(i);
 
@@ -1802,6 +1809,7 @@ uint8_t masked_indegree(const BOSS &boss, uint64_t i, const bitmap *mask) {
     return counter;
 }
 
+// If there is a single or no incoming edges, return true.
 bool masked_is_single_incoming(const BOSS &boss, uint64_t i, const bitmap *mask) {
     assert(i);
 
@@ -1916,10 +1924,12 @@ void BOSS::call_paths(edge_index starting_kmer,
             edge = fwd(edge);
 
             // traverse if there is only one outgoing edge
-            if (continue_traversal && masked_is_single_outgoing(*this, edge, mask)) {
-                edge = masked_pick_single_outgoing(*this, edge, mask);
-                if (!edge)
+            auto outgoing = masked_pick_single_outgoing(*this, edge, mask);
+            if (continue_traversal && outgoing) {
+                if (mask && !(*mask)[outgoing])
                     break;
+
+                edge = outgoing;
 
                 discovered[edge] = true;
                 continue;
