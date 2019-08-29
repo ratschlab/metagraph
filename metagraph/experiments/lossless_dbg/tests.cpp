@@ -16,8 +16,7 @@
 #define protected public
 
 //#define FULL_INCOMING_TABLE
-#define DISABLE_TRANSFORMATIONS
-// todo use transformations
+#define DISABLE_TRANSFORMATIONS // TODO: fix this hotfix
 
 #include "utilities.hpp"
 #include "path_database_list_of_bifurcation_choices.hpp"
@@ -119,6 +118,8 @@ vector<string> reads_for_testing_short = {"ATGCGATCGATATGCGAGA",
                                           //"GAGCTCGGGACTTGAATAG",
                                           //"GAGCTCGAGACTTGAATAG",// as previous with one change
                                           "ACTGACGAGACACAGATGC"};
+// Will create these kmers: $$$$$ $$$$A $$$$G $$$AC CACAG GACAC GACAT CAGAT GAGAC TAGAC ACGAG ACGAT GCGAG GCGAT TCGAG TCGAT ATGAC CTGAC GATAG GATAT ACTAC $GTAC $$ACT ACACA AGACA AGACT TGACG CTACG GTACG ATGCG GATCG $$$GT ACAGA CGAGA ATAGA GACGA TACGA TGCGA ATCGA CATGA GATGC TATGC ACTGA ACATG AGATG CGATA CGATC ATATG $ACTG GACTA $$GTA
+
 
 template <typename T>
 void check_compression_decompression(T& db,vector<string>& reads) {
