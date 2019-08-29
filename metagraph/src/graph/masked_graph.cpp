@@ -139,8 +139,8 @@ void MaskedDeBruijnGraph
         return;
     }
 
-    const auto& dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_.get());
-    const auto& boss = dbg_succ.get_boss();
+    const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(*graph_);
+    const auto &boss = dbg_succ.get_boss();
     if (masked_) {
         std::unique_ptr<bitmap> mask {
             new bitmap_lazy(
