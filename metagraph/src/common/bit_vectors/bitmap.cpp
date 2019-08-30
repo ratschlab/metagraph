@@ -310,7 +310,7 @@ void bitmap_vector::set(uint64_t id, bool val) {
 }
 
 void bitmap_vector::insert_zeros(const std::vector<uint64_t> &pos) {
-    utils::insert_default_values(pos, &bit_vector_);
+    utils::insert(&bit_vector_, pos, 0);
 }
 
 bitmap_vector& bitmap_vector::operator|=(const bitmap &other) {

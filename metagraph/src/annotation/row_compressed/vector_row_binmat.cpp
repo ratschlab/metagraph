@@ -64,7 +64,7 @@ VectorRowBinMat::get_column(Column column) const {
 
 void VectorRowBinMat::insert_rows(const std::vector<Row> &rows) {
     assert(std::is_sorted(rows.begin(), rows.end()));
-    utils::insert_default_values(rows, &vector_);
+    utils::insert(&vector_, rows, {});
 }
 
 bool VectorRowBinMat::load(std::istream &instream) {
