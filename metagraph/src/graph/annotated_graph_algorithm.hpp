@@ -6,7 +6,6 @@
 
 #include "annotated_dbg.hpp"
 #include "bitmap.hpp"
-#include "masked_graph.hpp"
 #include "threading.hpp"
 #include "aligner_helper.hpp"
 
@@ -33,17 +32,21 @@ using VariantCallback = std::function<void(Alignment<Index>&&,
                                            std::string&&, // query sequence
                                            Args&&...)>;
 
-typedef Alignment<MaskedDeBruijnGraph::node_index> MaskedAlignment;
-typedef VariantCallback<MaskedDeBruijnGraph::node_index,
+typedef Alignment<DeBruijnGraph::node_index> MaskedAlignment;
+typedef VariantCallback<DeBruijnGraph::node_index,
                         std::vector<AnnotatedDBG::Annotator::Label>&&> VariantLabelCallback;
 
-void call_bubbles(const MaskedDeBruijnGraph &masked_graph,
+
+// These functions will callback nothing if graph is equal to the graph stored
+// in anno_graph
+
+void call_bubbles(const DeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
                   const VariantLabelCallback &callback,
                   ThreadPool *thread_pool = nullptr,
                   const std::function<bool()> &terminate = []() { return false; });
 
-void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
+void call_breakpoints(const DeBruijnGraph &graph,
                       const AnnotatedDBG &anno_graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool = nullptr,

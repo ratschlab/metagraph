@@ -11,14 +11,19 @@
 
 class MaskedDeBruijnGraph : public DeBruijnGraph {
   public:
-    MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, bitmap *mask = nullptr);
+    MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
+                        std::unique_ptr<bitmap>&& kmers_in_graph);
 
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::function<bool(const DeBruijnGraph::node_index&)>&& callback,
                         size_t num_set_bits = -1);
 
-    virtual void add_sequence(const std::string &sequence,
-                              bit_vector_dyn *nodes_inserted = NULL) override;
+    virtual ~MaskedDeBruijnGraph() {}
+
+    virtual void add_sequence(const std::string &,
+                              bit_vector_dyn *) override {
+        throw std::runtime_error("Not implemented");
+    }
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -52,8 +57,14 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
 
     virtual uint64_t num_nodes() const override;
 
-    virtual bool load(const std::string &filename_base) override;
-    virtual void serialize(const std::string &filename_base) const override;
+    virtual bool load(const std::string &) override {
+        throw std::runtime_error("Not implemented");
+    }
+
+    virtual void serialize(const std::string &) const override {
+        throw std::runtime_error("Not implemented");
+    }
+
     virtual std::string file_extension() const override { return graph_->file_extension(); }
 
     virtual const std::string& alphabet() const override { return graph_->alphabet(); }
@@ -78,25 +89,23 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual const DeBruijnGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }
 
-    virtual uint64_t unmasked_outdegree(node_index node) const;
-    virtual uint64_t unmasked_indegree(node_index node) const;
+    virtual inline bool in_graph(node_index node) const override {
+        assert(node > 0 && node <= graph_->num_nodes());
+        assert(kmers_in_graph_.get());
 
-    virtual inline bool in_graph(node_index node) const {
-        return node == DeBruijnGraph::npos || !is_target_mask_.get()
-            ? false
-            : (*is_target_mask_)[node];
+        return (*kmers_in_graph_)[node] && graph_->in_graph(node);
     }
 
     virtual bool operator==(const MaskedDeBruijnGraph &other) const;
     virtual bool operator==(const DeBruijnGraph &other) const override;
 
-    virtual void set_mask(bitmap *mask) { is_target_mask_.reset(mask); }
+    virtual void set_mask(bitmap *mask) { kmers_in_graph_.reset(mask); }
 
-    virtual const bitmap& get_mask() const { return *is_target_mask_; }
+    virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
 
   private:
     std::shared_ptr<const DeBruijnGraph> graph_;
-    std::unique_ptr<bitmap> is_target_mask_;
+    std::unique_ptr<bitmap> kmers_in_graph_;
 };
 
 

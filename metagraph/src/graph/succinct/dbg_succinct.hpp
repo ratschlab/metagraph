@@ -121,6 +121,9 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void print(std::ostream &out) const override final;
 
+    // Check if the index is valid (there is a node assigned to it)
+    virtual bool in_graph(node_index node) const override final;
+
   protected:
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 

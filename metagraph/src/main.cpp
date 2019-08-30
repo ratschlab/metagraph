@@ -451,6 +451,7 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
+    // TODO: introduce something like graph->max_node_index() to replace num_nodes() here
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(parse_annotation_type(config.infbase_annotators.at(0)), config, 0)
             : initialize_annotation(config.anno_type, config, graph->num_nodes());
@@ -543,7 +544,7 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
                 auto count_out = counter_out();
                 return count_out <= config->label_mask_out_fraction * (count_in + count_out);
             }
-        ).release()
+        )
     );
 }
 

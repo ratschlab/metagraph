@@ -59,6 +59,9 @@ class SequenceGraph {
     // Get string corresponding to |node|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index node) const = 0;
+
+    // Check if the node index is a valid node in the graph
+    virtual bool in_graph(node_index node) const = 0;
 };
 
 template <class DBG>
@@ -145,6 +148,9 @@ class DeBruijnGraph : public SequenceGraph,
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+    // Check if the node index is a valid node in the graph
+    virtual bool in_graph(node_index node) const = 0;
 
     virtual bool load_extensions(const std::string &filename_base);
     virtual void serialize_extensions(const std::string &filename_base) const;
