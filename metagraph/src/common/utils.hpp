@@ -273,6 +273,39 @@ namespace utils {
         std::hash<std::bitset<sizeof(T) * 8>> hasher;
     };
 
+    template <class Vector>
+    void insert(Vector *vector,
+                const bitmap &new_indexes,
+                const typename Vector::value_type &value) {
+        assert(vector);
+        assert(new_indexes.size() == vector->size() + new_indexes.num_set_bits());
+
+        if (!new_indexes.num_set_bits())
+            return;
+
+        vector->resize(vector->size() + new_indexes.num_set_bits());
+
+        // need to move everything to the right as we call ones from left to right
+        std::move_backward(vector->begin(),
+                           vector->end() - new_indexes.num_set_bits(),
+                           vector->end());
+
+        size_t i = new_indexes.num_set_bits();
+        size_t curpos = 0;
+
+        // call ones from left to right
+        new_indexes.call_ones([&](auto new_index) {
+            assert(new_index >= curpos);
+
+            // move block
+            while (curpos < new_index) {
+                (*vector)[curpos++] = std::move((*vector)[i++]);
+            }
+            // insert new value
+            (*vector)[curpos++] = value;
+        });
+    }
+
     // indexes - positions of inserted elements in the final vector
     template <typename Index, class Vector>
     void insert_default_values(const std::vector<Index> &indexes, Vector *vector);

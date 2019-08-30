@@ -63,27 +63,3 @@ void call_nonzeros(const sdsl::int_vector<> &vector,
                                       uint64_t /* value */)> callback) {
     return call_nonzeros(vector, 0, vector.size(), callback);
 }
-
-template <class Vector>
-void insert_new_indexes(Vector &vector, bit_vector_dyn *new_indexes) {
-    size_t curpos = vector.size() - 1;
-    assert(new_indexes->size() - vector.size() == new_indexes->num_set_bits());
-    vector.resize(new_indexes->size());
-    size_t i = vector.size() - 1;
-
-    while (true) {
-        if ((*new_indexes)[i]) {
-            vector[i] = 0;
-        } else {
-            assert(curpos < vector.size());
-            vector[i] = vector[curpos];
-            curpos--;
-        }
-        if (0 == i)
-            break;
-        i--;
-    }
-}
-
-
-template void insert_new_indexes<sdsl::int_vector<>>(sdsl::int_vector<> &vector, bit_vector_dyn *new_indexes);

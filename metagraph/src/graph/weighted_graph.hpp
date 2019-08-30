@@ -30,7 +30,7 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
                               bit_vector_dyn *nodes_inserted = nullptr) {
 
         if (nodes_inserted)
-            insert_new_indexes(weights_, nodes_inserted);
+            utils::insert(&weights_, *nodes_inserted, 0);
 
         auto k = graph.get_k();
         for (size_t i = 0; i + k <= sequence.size(); ++i) {
