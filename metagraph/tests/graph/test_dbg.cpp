@@ -13,6 +13,7 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 
 TYPED_TEST_CASE(DeBruijnGraphTest, GraphTypes);
+TYPED_TEST_CASE(StableDeBruijnGraphTest, StableGraphTypes);
 
 TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {
     TypeParam *graph = nullptr;
@@ -215,6 +216,45 @@ TYPED_TEST(DeBruijnGraphTest, AddSequences) {
     }
 }
 
+TYPED_TEST(DeBruijnGraphTest, traverse_string) {
+    for (size_t k = 2; k < 11; ++k) {
+        std::string sequence = "AGCTTCGAAGGCCTT";
+        auto graph = build_graph_batch<TypeParam>(k, { sequence });
+
+        for (size_t i = 0; i + k <= sequence.size(); ++i) {
+            auto cur_node = graph->kmer_to_node(sequence.substr(i, k));
+            ASSERT_NE(DeBruijnGraph::npos, cur_node);
+
+            std::string path;
+            graph->traverse(
+                cur_node,
+                sequence.data() + i + k, sequence.data() + sequence.size(),
+                [&](auto node) {
+                    path += graph->get_node_sequence(node).back();
+                }
+            );
+            EXPECT_EQ(std::string(sequence.begin() + i + k, sequence.end()), path);
+        }
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, traverse_string_stop_when_no_edge) {
+    size_t k = 4;
+    std::string sequence = "AGGCCTGTTTG";
+    auto graph = build_graph_batch<TypeParam>(k, { sequence });
+
+    std::string query = "CCCTGTTTG";
+    graph->traverse(
+        graph->kmer_to_node("AGGC"),
+        query.data() + 4,
+        query.data() + query.size(),
+        [&](auto node) {
+            EXPECT_FALSE(true) << node << " " << graph->get_node_sequence(node);
+        },
+        []() { return false; }
+    );
+}
+
 TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
     for (size_t k = 2; k <= 10; ++k) {
         auto empty = build_graph<TypeParam>(k);
@@ -352,160 +392,102 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
     }
 }
 
+TYPED_TEST(StableDeBruijnGraphTest, CallPaths) {
+    for (size_t k = 2; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto graph = build_graph_batch<TypeParam>(k, sequences);
+
+            std::vector<std::string> reconst;
+
+            graph->call_sequences([&](const auto &sequence) {
+                reconst.push_back(sequence);
+            });
+            auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst);
+
+            EXPECT_EQ(*graph, *reconstructed_graph);
+        }
+    }
+}
+
+TYPED_TEST(StableDeBruijnGraphTest, CallUnitigs) {
+    for (size_t k = 2; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto graph = build_graph_batch<TypeParam>(k, sequences);
+
+            std::vector<std::string> reconst;
+
+            graph->call_unitigs([&](const auto &sequence) {
+                reconst.push_back(sequence);
+            });
+            auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst);
+
+            EXPECT_EQ(*graph, *reconstructed_graph);
+        }
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, CallPaths) {
     for (size_t k = 2; k <= 10; ++k) {
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AAACACTAG",
-                                                           "AACGACATG" });
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-            std::vector<std::string> reconst;
+            auto graph = build_graph_batch<TypeParam>(k, sequences);
 
-            graph->call_sequences([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
+            // in stable graphs the order of input sequences
+            // does not change the order of k-mers and their indexes
+            auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
 
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AGACACTGA",
-                                                           "GACTACGTA",
-                                                           "ACTAACGTA" });
+            auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
+                k,
+                [&](const auto &callback) { graph->call_sequences(callback); }
+            );
 
-            std::vector<std::string> reconst;
-
-            graph->call_sequences([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AGACACAGT",
-                                                           "GACTTGCAG",
-                                                           "ACTAGTCAG" });
-
-            std::vector<std::string> reconst;
-
-            graph->call_sequences([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AAACTCGTAGC",
-                                                           "AAATGCGTAGC" });
-
-            std::vector<std::string> reconst;
-
-            graph->call_sequences([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AAACT",
-                                                           "AAATG" });
-
-            std::vector<std::string> reconst;
-
-            graph->call_sequences([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "ATGCAGTACTCAG",
-                                                           "ATGCAGTAGTCAG",
-                                                           "GGGGGGGGGGGGG" });
-
-            std::vector<std::string> reconst;
-
-            graph->call_sequences([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
+            EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
         }
     }
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigs) {
     for (size_t k = 2; k <= 10; ++k) {
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AAACACTAG",
-                                                           "AACGACATG" });
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-            std::vector<std::string> reconst;
+            auto graph = build_graph_batch<TypeParam>(k, sequences);
 
-            graph->call_unitigs([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
+            // in stable graphs the order of input sequences
+            // does not change the order of k-mers and their indexes
+            auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
 
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AGACACTGA",
-                                                           "GACTACGTA",
-                                                           "ACTAACGTA" });
+            auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
+                k,
+                [&](const auto &callback) { graph->call_unitigs(callback); }
+            );
 
-            std::vector<std::string> reconst;
-
-            graph->call_unitigs([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AGACACAGT",
-                                                           "GACTTGCAG",
-                                                           "ACTAGTCAG" });
-
-            std::vector<std::string> reconst;
-
-            graph->call_unitigs([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AAACTCGTAGC",
-                                                           "AAATGCGTAGC" });
-
-            std::vector<std::string> reconst;
-
-            graph->call_unitigs([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
-        }
-        {
-            auto graph = build_graph_batch<TypeParam>(k, { "AAACT",
-                                                           "AAATG" });
-
-            std::vector<std::string> reconst;
-
-            graph->call_unitigs([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed);
+            EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
         }
     }
 }

@@ -256,7 +256,8 @@ BOSS::Chunk* merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
         std::cout << "Collecting results" << std::endl;
 
     BOSS::Chunk *result = new BOSS::Chunk(graphs.at(0)->alph_size,
-                                          graphs.at(0)->get_k());
+                                          graphs.at(0)->get_k(),
+                                          false);
     concatenate_boss_chunks(blocks, result);
     return result;
 }
@@ -320,7 +321,9 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
 
-    BOSS::Chunk *chunk = new BOSS::Chunk(Gv.at(0)->alph_size, Gv.at(0)->get_k());
+    BOSS::Chunk *chunk = new BOSS::Chunk(Gv.at(0)->alph_size,
+                                         Gv.at(0)->get_k(),
+                                         false);
 
     const size_t alph_size = Gv.at(0)->alph_size;
 

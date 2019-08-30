@@ -18,19 +18,21 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
                                        std::deque<Kmer, std::allocator<Kmer>>,
                                        std::uint64_t>;
   public:
-    explicit DBGHashOrderedImpl(size_t k, bool canonical_mode = false);
+    explicit DBGHashOrderedImpl(size_t k,
+                                bool canonical_mode,
+                                bool packed_serialization);
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
     // to the number of nodes in graph.
     void add_sequence(const std::string &sequence,
-                      bit_vector_dyn *nodes_inserted = NULL);
+                      bit_vector_dyn *nodes_inserted);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     void map_to_nodes(const std::string &sequence,
                       const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate = [](){ return false; }) const;
+                      const std::function<bool()> &terminate) const;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
@@ -39,7 +41,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     void map_to_nodes_sequentially(std::string::const_iterator begin,
                                    std::string::const_iterator end,
                                    const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate = [](){ return false; }) const;
+                                   const std::function<bool()> &terminate) const;
 
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const;
@@ -81,21 +83,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
 
     std::string file_extension() const { return kExtension; }
 
-    bool operator==(const DeBruijnGraph &other) const {
-        if (!dynamic_cast<const DBGHashOrderedImpl<KMER>*>(&other))
-            throw std::runtime_error("Not implemented");
-
-        const auto& other_hash = *dynamic_cast<const DBGHashOrderedImpl<KMER>*>(&other);
-        if (k_ != other_hash.k_ || canonical_mode_ != other_hash.canonical_mode_)
-            return false;
-
-        for (const auto &kmer : kmers_) {
-            if (other_hash.kmers_.find(kmer) == other_hash.kmers_.end())
-                return false;
-        }
-
-        return true;
-    }
+    bool operator==(const DeBruijnGraph &other) const;
 
     const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
@@ -105,7 +93,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     }
 
     node_index get_index(const Kmer &kmer) const;
-    Kmer get_kmer(node_index node) const;
+    const Kmer& get_kmer(node_index node) const;
 
     size_t k_;
     bool canonical_mode_;
@@ -113,12 +101,18 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     KmerIndex kmers_;
     KmerExtractor2Bit seq_encoder_;
 
+    bool packed_serialization_;
+
     static constexpr auto kExtension = DBGHashOrdered::kExtension;
 };
 
 template <typename KMER>
-DBGHashOrderedImpl<KMER>::DBGHashOrderedImpl(size_t k, bool canonical_mode)
-      : k_(k), canonical_mode_(canonical_mode) {}
+DBGHashOrderedImpl<KMER>::DBGHashOrderedImpl(size_t k,
+                                             bool canonical_mode,
+                                             bool packed_serialization)
+      : k_(k),
+        canonical_mode_(canonical_mode),
+        packed_serialization_(packed_serialization) {}
 
 template <typename KMER>
 void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
@@ -318,16 +312,53 @@ std::string DBGHashOrderedImpl<KMER>::get_node_sequence(node_index node) const {
     return seq_encoder_.kmer_to_sequence(get_kmer(node), k_);
 }
 
+class Serializer {
+  public:
+    explicit Serializer(std::ostream &os) : os_(os) {}
+
+    template <class T>
+    void operator()(const T &value) {
+        os_.write(reinterpret_cast<const char *>(&value), sizeof(T));
+    }
+
+  private:
+    std::ostream &os_;
+};
+
+class Deserializer {
+  public:
+    explicit Deserializer(std::istream &is) : is_(is) {}
+
+    template <class T>
+    T operator()() {
+        T value;
+        is_.read(reinterpret_cast<char *>(&value), sizeof(T));
+        return value;
+    }
+
+  private:
+    std::istream &is_;
+};
+
 template <typename KMER>
 void DBGHashOrderedImpl<KMER>::serialize(std::ostream &out) const {
     if (!out.good())
         throw std::ofstream::failure("Error: trying to dump graph to a bad stream");
 
+    out.exceptions(out.badbit | out.failbit);
+
     serialize_number(out, k_);
-    serialize_number(out, kmers_.size());
-    for (const auto &kmer : kmers_) {
-        out.write(reinterpret_cast<const char *>(&kmer), sizeof(kmer));
+
+    Serializer serializer(out);
+
+    if (packed_serialization_) {
+        serialize_number(out, kmers_.size());
+        std::for_each(kmers_.begin(), kmers_.end(), serializer);
+    } else {
+        serialize_number(out, std::numeric_limits<uint64_t>::max());
+        kmers_.serialize(serializer);
     }
+
     serialize_number(out, canonical_mode_);
 }
 
@@ -344,16 +375,30 @@ bool DBGHashOrderedImpl<KMER>::load(std::istream &in) {
     if (!in.good())
         return false;
 
+    in.exceptions(in.badbit | in.failbit | in.eofbit);
+
     kmers_.clear();
 
     try {
         k_ = load_number(in);
-        const auto size = load_number(in);
-        kmers_.reserve(size + 1);
-        Kmer kmer;
-        for (uint64_t i = 0; i < size; ++i) {
-            in.read(reinterpret_cast<char *>(&kmer), sizeof(kmer));
-            kmers_.insert(kmer);
+
+        Deserializer deserializer(in);
+
+        uint64_t tag = load_number(in);
+
+        if (tag < std::numeric_limits<uint64_t>::max()) {
+            packed_serialization_ = true;
+
+            const auto size = tag;
+            kmers_.reserve(size + 1);
+            for (uint64_t i = 0; i < size; ++i) {
+                kmers_.insert(deserializer.operator()<Kmer>());
+            }
+
+        } else {
+            packed_serialization_ = false;
+
+            kmers_ = KmerIndex::deserialize(deserializer, true);
         }
 
         canonical_mode_ = load_number(in);
@@ -373,6 +418,28 @@ bool DBGHashOrderedImpl<KMER>::load(const std::string &filename) {
 }
 
 template <typename KMER>
+bool DBGHashOrderedImpl<KMER>::operator==(const DeBruijnGraph &other) const {
+    if (get_k() != other.get_k()
+            || is_canonical_mode() != other.is_canonical_mode()
+            || num_nodes() != other.num_nodes())
+        return false;
+
+    if (!dynamic_cast<const DBGHashOrderedImpl*>(&other))
+        throw std::runtime_error("Not implemented");
+
+    const auto &other_hash = *dynamic_cast<const DBGHashOrderedImpl*>(&other);
+
+    if (this == &other_hash)
+        return true;
+
+    assert(k_ == other_hash.k_);
+    assert(canonical_mode_ == other_hash.canonical_mode_);
+    assert(kmers_.size() == other_hash.kmers_.size());
+
+    return kmers_ == other_hash.kmers_;
+}
+
+template <typename KMER>
 typename DBGHashOrderedImpl<KMER>::node_index
 DBGHashOrderedImpl<KMER>::get_index(const Kmer &kmer) const {
     auto find = kmers_.find(kmer);
@@ -383,34 +450,38 @@ DBGHashOrderedImpl<KMER>::get_index(const Kmer &kmer) const {
 }
 
 template <typename KMER>
-KMER DBGHashOrderedImpl<KMER>::get_kmer(node_index node) const {
+const KMER& DBGHashOrderedImpl<KMER>::get_kmer(node_index node) const {
     assert(node > 0);
     assert(node <= kmers_.size());
-    assert(node == get_index(*(kmers_.begin() + (node - 1))));
+    assert(node == get_index(*(kmers_.nth(node - 1))));
 
-    return *(kmers_.begin() + (node - 1));
+    return *(kmers_.nth(node - 1));
 }
 
 
 std::unique_ptr<DBGHashOrdered::DBGHashOrderedInterface>
-DBGHashOrdered::initialize_graph(size_t k, bool canonical_mode) {
+DBGHashOrdered::initialize_graph(size_t k,
+                                 bool canonical_mode,
+                                 bool packed_serialization) {
     if (k * KmerExtractor2Bit::bits_per_char <= 64) {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer64>>(
-            k, canonical_mode
+            k, canonical_mode, packed_serialization
         );
     } else if (k * KmerExtractor2Bit::bits_per_char <= 128) {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer128>>(
-            k, canonical_mode
+            k, canonical_mode, packed_serialization
         );
     } else {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer256>>(
-            k, canonical_mode
+            k, canonical_mode, packed_serialization
         );
     }
 }
 
-DBGHashOrdered::DBGHashOrdered(size_t k, bool canonical_mode) {
-    hash_dbg_ = initialize_graph(k, canonical_mode);
+DBGHashOrdered::DBGHashOrdered(size_t k,
+                               bool canonical_mode,
+                               bool packed_serialization) {
+    hash_dbg_ = initialize_graph(k, canonical_mode, packed_serialization);
 }
 
 bool DBGHashOrdered::load(std::istream &in) {
@@ -423,7 +494,7 @@ bool DBGHashOrdered::load(std::istream &in) {
         in.seekg(pos, in.beg);
 
         // the actual value of |canonical| will be set in load
-        hash_dbg_ = initialize_graph(k, false);
+        hash_dbg_ = initialize_graph(k, false, false);
         return hash_dbg_->load(in) && in.good();
     } catch (...) {
         return false;

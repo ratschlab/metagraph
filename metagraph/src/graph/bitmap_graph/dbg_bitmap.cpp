@@ -282,6 +282,11 @@ Vector<DBGBitmap::Kmer> DBGBitmap::sequence_to_kmers(const std::string &sequence
 }
 
 bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
+    if (get_k() != other.get_k()
+            || is_canonical_mode() != other.is_canonical_mode()
+            || num_nodes() != other.num_nodes())
+        return false;
+
     if (dynamic_cast<const DBGBitmap*>(&other))
         return equals(*dynamic_cast<const DBGBitmap*>(&other), false);
 
@@ -289,48 +294,30 @@ bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
 }
 
 bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
-    if (verbose) {
-        if (k_ != other.k_) {
-            std::cerr << "k: " << k_ << " != " << other.k_ << std::endl;
-            return false;
-        }
-
-        if (canonical_mode_ != other.canonical_mode_) {
-            std::cerr << "canonical: " << canonical_mode_
-                      << " != " << other.canonical_mode_ << std::endl;
-            return false;
-        }
-
-        if (kmers_.num_set_bits() != other.kmers_.num_set_bits()) {
-            std::cerr << "setbits: " << kmers_.num_set_bits()
-                      << " != " << other.kmers_.num_set_bits() << std::endl;
-            return false;
-        }
-
-        uint64_t cur_one = 1;
-        uint64_t mismatch = 0;
-        kmers_.call_ones(
-            [&](const auto &pos) {
-                mismatch += (pos != other.kmers_.select1(cur_one++));
-            }
-        );
-        return cur_one == other.kmers_.num_set_bits() + 1 && !mismatch;
+    if (!verbose) {
+        return k_ == other.k_
+                && canonical_mode_ == other.canonical_mode_
+                && kmers_ == other.kmers_;
     }
 
-    if (k_ == other.k_
-            && canonical_mode_ == other.canonical_mode_
-            && kmers_.num_set_bits() == other.kmers_.num_set_bits()) {
-        uint64_t cur_one = 1;
-        uint64_t mismatch = 0;
-        kmers_.call_ones(
-            [&](const auto &pos) {
-                mismatch += (pos != other.kmers_.select1(cur_one++));
-            }
-        );
-        return cur_one == other.kmers_.num_set_bits() + 1 && !mismatch;
+    if (k_ != other.k_) {
+        std::cerr << "k: " << k_ << " != " << other.k_ << std::endl;
+        return false;
     }
 
-    return false;
+    if (canonical_mode_ != other.canonical_mode_) {
+        std::cerr << "canonical: " << canonical_mode_
+                  << " != " << other.canonical_mode_ << std::endl;
+        return false;
+    }
+
+    if (kmers_.num_set_bits() != other.kmers_.num_set_bits()) {
+        std::cerr << "setbits: " << kmers_.num_set_bits()
+                  << " != " << other.kmers_.num_set_bits() << std::endl;
+        return false;
+    }
+
+    return kmers_ == other.kmers_;
 }
 
 void DBGBitmap::print(std::ostream &out) const {

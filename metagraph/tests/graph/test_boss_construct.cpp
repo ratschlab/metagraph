@@ -43,23 +43,23 @@ class BOSSConfigurationType {
 template <typename KMER, bool Weighted>
 const bool BOSSConfigurationType<KMER, Weighted>::kWeighted;
 
-typedef ::testing::Types<BOSSConfigurationType<KMerBOSS<uint64_t, KmerExtractor::bits_per_char>, false>,
-                         BOSSConfigurationType<KMerBOSS<sdsl::uint128_t, KmerExtractor::bits_per_char>, false>,
-                         BOSSConfigurationType<KMerBOSS<sdsl::uint256_t, KmerExtractor::bits_per_char>, false>,
-                         BOSSConfigurationType<KMerBOSS<uint64_t, KmerExtractor::bits_per_char>, true>,
-                         BOSSConfigurationType<KMerBOSS<sdsl::uint128_t, KmerExtractor::bits_per_char>, true>,
-                         BOSSConfigurationType<KMerBOSS<sdsl::uint256_t, KmerExtractor::bits_per_char>, true>> KmerAndWeightedTypes;
+typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, false>,
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer128, false>,
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, false>,
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer64, true>,
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer128, true>,
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, true>> KmerAndWeightedTypes;
 
 TYPED_TEST_CASE(BOSSConstruct, KmerAndWeightedTypes);
 
-typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractor::bits_per_char>,
-                         KMerBOSS<sdsl::uint128_t, KmerExtractor::bits_per_char>,
-                         KMerBOSS<sdsl::uint256_t, KmerExtractor::bits_per_char>> KmerTypes;
+typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
+                         KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
+                         KMerBOSS<sdsl::uint256_t, KmerExtractorBOSS::bits_per_char>> KmerTypes;
 
 TYPED_TEST_CASE(CollectKmers, KmerTypes);
 TYPED_TEST_CASE(CountKmers, KmerTypes);
 
-#define kMaxK ( sizeof(typename TypeParam::Kmer) * 8 / KmerExtractor::bits_per_char )
+#define kMaxK ( sizeof(typename TypeParam::Kmer) * 8 / KmerExtractorBOSS::bits_per_char )
 
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {
@@ -207,9 +207,9 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
                                         + std::string(100, 'G'));
 
         for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
-            BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), k);
+            BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
 
-            for (const std::string &suffix : KmerExtractor::generate_suffixes(suffix_len)) {
+            for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                 std::unique_ptr<IBOSSChunkConstructor> constructor(
                     IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted, suffix)
                 );
@@ -243,9 +243,9 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
                                         + std::string(100, 'G'));
 
         for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
-            BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), k);
+            BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
 
-            for (const std::string &suffix : KmerExtractor::generate_suffixes(suffix_len)) {
+            for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                 std::unique_ptr<IBOSSChunkConstructor> constructor(
                     IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted, suffix, num_threads)
                 );
@@ -269,11 +269,11 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
 }
 
 
-template <typename KMER, class KmerExtractor>
+template <typename KMER, class KmerExtractor, class Container>
 void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
-                   bool canonical_mode,
-                   SortedSet<KMER> *kmers,
+                   bool both_strands_mode,
+                   Container *kmers,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true);
 
@@ -282,11 +282,11 @@ template <typename KMER>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         SortedSet<KMER> *kmers,
-                                        const std::vector<KmerExtractor::TAlphabet> &suffix,
+                                        const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    extract_kmers<KMER, KmerExtractor>(
+    extract_kmers<KMER, KmerExtractorBOSS, SortedSet<KMER>>(
         [reads](CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
@@ -473,11 +473,11 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
     ASSERT_EQ(5u, result.data().size());
 }
 
-template <typename KMER, class KmerExtractor, typename KmerCount>
+template <typename KMER, class KmerExtractor, class Container>
 void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
-                 SortedMultiset<KMER, KmerCount> *kmers,
+                 Container *kmers,
                  const std::vector<typename KmerExtractor::TAlphabet> &suffix);
 
 // TODO: k is node length
@@ -485,10 +485,10 @@ template <typename TypeParam, typename KmerCount>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         SortedMultiset<TypeParam, KmerCount> *kmers,
-                                        const std::vector<KmerExtractor::TAlphabet> &suffix,
+                                        const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    count_kmers<TypeParam, KmerExtractor, KmerCount>(
+    count_kmers<TypeParam, KmerExtractorBOSS, SortedMultiset<TypeParam, KmerCount>>(
         [reads](CallStringCount callback) {
             for (const auto &read : *reads) {
                 callback(read, 1);

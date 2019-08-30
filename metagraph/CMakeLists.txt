@@ -91,10 +91,31 @@ if(result)
 endif()
 
 
-# Profile build type
+# Profile with gprof
 set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O1 -g")
 set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
 set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
+
+# Profile with gperftools
+set(CMAKE_CXX_FLAGS_GPROFILE "-fno-omit-frame-pointer -DNDEBUG -O2 -g")
+set(CMAKE_EXE_LINKER_FLAGS_GPROFILE "-g")
+set(CMAKE_SHARED_LINKER_FLAGS_GPROFILE "-g")
+
+set(PROFILER_LIBRARIES PROFILER_LIBRARIES-NOTFOUND)
+find_library(PROFILER_LIBRARIES
+  NAMES profiler
+  HINTS
+  ENV LD_LIBRARY_PATH
+  PATHS
+    ~/.linuxbrew/lib
+)
+if(${CMAKE_BUILD_TYPE} MATCHES GPROFILE)
+  if(PROFILER_LIBRARIES)
+    set(METALIBS ${METALIBS} -lprofiler)
+  else()
+    message(FATAL_ERROR "Could not find -lprofiler installed")
+  endif()
+endif()
 
 # Debug build type
 set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
@@ -156,6 +177,7 @@ include_directories(
   external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
+  external-libraries/nvbio/contrib/priority-deque
   ${INCLUDE_DIRS}
 )
 
@@ -214,6 +236,9 @@ file(GLOB src_files
   "src/*/*/*.cpp"
 )
 
+# for compiling faster
+list(REVERSE src_files)
+
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
@@ -236,7 +261,7 @@ endif()
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
-  set(METALIBS ${METALIBS} -lssl -lbz2 -llzma -lcurl -lcrypto)
+  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl -lssl -lcrypto)
 endif()
 
 # check for std::filesystem::temp_directory_path
@@ -400,7 +425,6 @@ target_link_libraries(unit_tests gtest_main gtest
 target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
 add_test(NAME unit_tests COMMAND unit_tests)
-
 
 #-------------------
 # Python interfaces

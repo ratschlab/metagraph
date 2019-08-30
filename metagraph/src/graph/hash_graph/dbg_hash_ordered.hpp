@@ -11,7 +11,9 @@
 
 class DBGHashOrdered : public DeBruijnGraph {
   public:
-    explicit DBGHashOrdered(size_t k, bool canonical_mode = false);
+    explicit DBGHashOrdered(size_t k,
+                            bool canonical_mode = false,
+                            bool packed_serialization = false);
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -38,6 +40,18 @@ class DBGHashOrdered : public DeBruijnGraph {
                                    const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &terminate = [](){ return false; }) const {
         hash_dbg_->map_to_nodes_sequentially(begin, end, callback, terminate);
+    }
+
+    // Given a starting node, traverse the graph forward following the edge
+    // sequence delimited by begin and end. Terminate the traversal if terminate()
+    // returns true, or if the sequence is exhausted.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    virtual void traverse(node_index start,
+                  const char* begin,
+                  const char* end,
+                  const std::function<void(node_index)> &callback,
+                  const std::function<bool()> &terminate = [](){ return false; }) const {
+        hash_dbg_->traverse(start, begin, end, callback, terminate);
     }
 
     virtual void call_outgoing_kmers(node_index node,
@@ -103,12 +117,10 @@ class DBGHashOrdered : public DeBruijnGraph {
     virtual std::string file_extension() const { return kExtension; }
 
     virtual bool operator==(const DeBruijnGraph &other) const {
-        if (!dynamic_cast<const DBGHashOrdered*>(&other)) {
-            throw std::runtime_error("Not implemented");
-            return false;
-        }
+        if (this == &other)
+            return true;
 
-        return *hash_dbg_ == *dynamic_cast<const DBGHashOrdered*>(&other)->hash_dbg_;
+        return other == *hash_dbg_;
     }
 
     virtual const std::string& alphabet() const { return hash_dbg_->alphabet(); }
@@ -134,7 +146,7 @@ class DBGHashOrdered : public DeBruijnGraph {
 
   private:
     static std::unique_ptr<DBGHashOrderedInterface>
-    initialize_graph(size_t k, bool canonical_mode);
+    initialize_graph(size_t k, bool canonical_mode, bool packed_serialization);
 
     std::unique_ptr<DBGHashOrderedInterface> hash_dbg_;
 };

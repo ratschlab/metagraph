@@ -81,7 +81,7 @@ popd
 
 
 ### Build types: `cmake .. <arguments>` where arguments are:
-- `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Release` by default)
+- `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]` -- build modes (`Release` by default)
 - `-DBUILD_STATIC=[ON|OFF]` -- link statically (`OFF` by default)
 - `-DLINK_OPT=[ON|OFF]` -- enable link time optimization (`OFF` by default)
 - `-DPYTHON_INTERFACE=[ON|OFF]` -- compile python interface (requires shared libraries, `OFF` by default)

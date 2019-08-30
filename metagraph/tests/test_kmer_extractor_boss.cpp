@@ -12,17 +12,17 @@
 template <typename Kmer>
 class ExtractKmers : public ::testing::Test { };
 
-typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractor::bits_per_char>,
-                         KMerBOSS<sdsl::uint128_t, KmerExtractor::bits_per_char>,
-                         KMerBOSS<sdsl::uint256_t, KmerExtractor::bits_per_char>> KmerTypes;
+typedef ::testing::Types<KmerExtractorBOSS::Kmer64,
+                         KmerExtractorBOSS::Kmer128,
+                         KmerExtractorBOSS::Kmer256> KmerTypes;
 
 TYPED_TEST_CASE(ExtractKmers, KmerTypes);
 
-#define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractor::bits_per_char )
+#define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractorBOSS::bits_per_char )
 
 
 TEST(ExtractKmers, encode_decode) {
-    KmerExtractor encoder;
+    KmerExtractorBOSS encoder;
     EXPECT_EQ('A', encoder.decode(encoder.encode('A')));
     EXPECT_EQ('C', encoder.decode(encoder.encode('C')));
     EXPECT_EQ('G', encoder.decode(encoder.encode('G')));
@@ -39,15 +39,15 @@ TEST(ExtractKmers, encode_decode) {
 #endif
 }
 
-KmerExtractor::Kmer64 to_kmer(const KmerExtractor &encoder,
-                              const std::string &kmer) {
-    Vector<KmerExtractor::Kmer64> kmers;
+KmerExtractorBOSS::Kmer64 to_kmer(const KmerExtractorBOSS &encoder,
+                                  const std::string &kmer) {
+    Vector<KmerExtractorBOSS::Kmer64> kmers;
     encoder.sequence_to_kmers(kmer, kmer.size(), {}, &kmers);
     return kmers.at(1);
 }
 
 TEST(ExtractKmers, encode_decode_kmer) {
-    KmerExtractor encoder;
+    KmerExtractorBOSS encoder;
     std::string kmer;
 
     kmer = "ACGT";
@@ -74,16 +74,16 @@ TEST(ExtractKmers, encode_decode_kmer) {
 }
 
 TEST(ExtractKmers, encode_decode_string) {
-    KmerExtractor encoder;
+    KmerExtractorBOSS encoder;
     std::string first_part = "AAGGCAGCCTAC";
     std::string last_part = "CCCTCTG";
     std::string sequence = first_part + 'N' + last_part;
     for (uint64_t k = 2; k <= sequence.length(); ++k) {
-        Vector<KmerExtractor::Kmer256> kmers;
+        Vector<KmerExtractorBOSS::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
         auto valid = encoder.valid_kmers(sequence, k);
-        EXPECT_EQ(kmers, encoder.sequence_to_kmers<KmerExtractor::Kmer256>(sequence, k));
+        EXPECT_EQ(kmers, encoder.sequence_to_kmers<KmerExtractorBOSS::Kmer256>(sequence, k));
 #if _DNA_GRAPH
         ASSERT_EQ(k <= last_part.size()
                     ? sequence.size() - 2 * k + 1 + 4
@@ -144,7 +144,7 @@ TEST(ExtractKmers, encode_decode_string) {
 }
 
 TEST(ExtractKmers, encode_decode_string_suffix) {
-    KmerExtractor encoder;
+    KmerExtractorBOSS encoder;
     std::string sequence = "AAGGCAGCCTACCCCTCTG";
     std::vector<bool> bits(sequence.size(), false);
     for (uint64_t k = 2; k <= sequence.length(); ++k) {
@@ -155,11 +155,11 @@ TEST(ExtractKmers, encode_decode_string_suffix) {
                 std::vector<uint8_t> suffix_encoded;
                 std::transform(suffix.begin(), suffix.end(), std::back_inserter(suffix_encoded),
                     [&](char c) { return c == '$' ? 0 : encoder.encode(c); });
-                Vector<KmerExtractor::Kmer256> kmers;
+                Vector<KmerExtractorBOSS::Kmer256> kmers;
                 encoder.sequence_to_kmers(sequence, k, suffix_encoded, &kmers);
                 EXPECT_EQ(
                     kmers,
-                    encoder.sequence_to_kmers<KmerExtractor::Kmer256>(
+                    encoder.sequence_to_kmers<KmerExtractorBOSS::Kmer256>(
                         sequence, k, false, suffix_encoded
                     )
                 );
@@ -191,7 +191,7 @@ TEST(ExtractKmers, encode_decode_string_suffix) {
 }
 
 TEST(ExtractKmers, encode_decode_string_canonical_suffix) {
-    KmerExtractor encoder;
+    KmerExtractorBOSS encoder;
     std::string sequence = "AAGGCAGCCTACCCCTCTG";
     std::vector<bool> bits;
     for (uint64_t k = 2; k <= sequence.length(); ++k) {
@@ -199,14 +199,14 @@ TEST(ExtractKmers, encode_decode_string_canonical_suffix) {
         for (size_t len = 1; len < std::min(k - 1, uint64_t(5)); ++len) {
             bits.assign(sequence.length() + 1, false);
             for (const auto &suffix : utils::generate_strings(encoder.alphabet, len)) {
-                Vector<KmerExtractor::Kmer256> kmers;
+                Vector<KmerExtractorBOSS::Kmer256> kmers;
                 std::vector<uint8_t> encoded;
                 std::transform(suffix.begin(), suffix.end(), std::back_inserter(encoded),
                     [&](auto c) { return c == '$' ? 0 : encoder.encode(c); });
                 encoder.sequence_to_kmers(sequence, k, encoded, &kmers, true);
                 EXPECT_EQ(
                     kmers,
-                    encoder.sequence_to_kmers<KmerExtractor::Kmer256>(
+                    encoder.sequence_to_kmers<KmerExtractorBOSS::Kmer256>(
                         sequence, k, true, encoded
                     )
                 );
@@ -244,7 +244,7 @@ TEST(ExtractKmers, encode_decode_string_canonical_suffix) {
     }
 }
 
-using TAlphabet = KmerExtractor::TAlphabet;
+using TAlphabet = KmerExtractorBOSS::TAlphabet;
 
 TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithoutFiltering) {
     for (size_t k = 2; k <= kMaxK; ++k) {
@@ -252,7 +252,7 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithoutFiltering) {
 
         // AAA -> $AAA$
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor::sequence_to_kmers(
+            KmerExtractorBOSS::sequence_to_kmers(
                 std::string(length, 'A'), k, {}, &result
             );
             ASSERT_TRUE(result.empty()) << "k: " << k
@@ -261,7 +261,7 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithoutFiltering) {
 
         for (size_t length = k; length < 500; ++length) {
             result.clear();
-            KmerExtractor::sequence_to_kmers(
+            KmerExtractorBOSS::sequence_to_kmers(
                 std::string(length, 'A'), k, {}, &result
             );
             ASSERT_EQ(length - k + 3, result.size()) << "k: " << k
@@ -277,7 +277,7 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringOne) {
         Vector<TypeParam> result;
 
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor::sequence_to_kmers(
+            KmerExtractorBOSS::sequence_to_kmers(
                 std::string(length, 'A'), k, suffix, &result
             );
             ASSERT_TRUE(result.empty());
@@ -285,7 +285,7 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringOne) {
 
         for (size_t length = k; length < 500; ++length) {
             result.clear();
-            KmerExtractor::sequence_to_kmers(
+            KmerExtractorBOSS::sequence_to_kmers(
                 std::string(length, 'A'), k, suffix, &result
             );
             ASSERT_EQ(1u, result.size()) << "k: " << k
@@ -293,12 +293,12 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringOne) {
         }
     }
 
-    suffix.assign({ KmerExtractor::encode('A') });
+    suffix.assign({ KmerExtractorBOSS::encode('A') });
     for (size_t k = 2; k <= kMaxK; ++k) {
         Vector<TypeParam> result;
 
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor::sequence_to_kmers(
+            KmerExtractorBOSS::sequence_to_kmers(
                 std::string(length, 'A'), k, suffix, &result
             );
             ASSERT_TRUE(result.empty());
@@ -309,7 +309,7 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringOne) {
         // AAAA -> $$$AAAA$
         for (size_t length = k; length < 500; ++length) {
             result.clear();
-            KmerExtractor::sequence_to_kmers(
+            KmerExtractorBOSS::sequence_to_kmers(
                 std::string(length, 'A'), k, suffix, &result
             );
             ASSERT_EQ(length, result.size()) << "k: " << k
@@ -324,8 +324,8 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
         Vector<TypeParam> result;
 
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor::sequence_to_kmers(
-                std::string(length, 'T'), k, KmerExtractor::encode("TT"), &result
+            KmerExtractorBOSS::sequence_to_kmers(
+                std::string(length, 'T'), k, KmerExtractorBOSS::encode("TT"), &result
             );
             ASSERT_TRUE(result.empty()) << "k: " << k
                                         << ", length: " << length;
@@ -334,20 +334,20 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
         // TTT -> $TTT$
         for (size_t length = k; length < 200; ++length) {
             result.clear();
-            KmerExtractor::sequence_to_kmers(
+            KmerExtractorBOSS::sequence_to_kmers(
                 std::string(length, 'T'), k, { 0, 0 }, &result
             );
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
-            KmerExtractor::sequence_to_kmers(
-                std::string(length, 'T'), k, { 0, KmerExtractor::encode('T') }, &result
+            KmerExtractorBOSS::sequence_to_kmers(
+                std::string(length, 'T'), k, { 0, KmerExtractorBOSS::encode('T') }, &result
             );
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
-            KmerExtractor::sequence_to_kmers(
-                std::string(length, 'T'), k, KmerExtractor::encode("TT"), &result
+            KmerExtractorBOSS::sequence_to_kmers(
+                std::string(length, 'T'), k, KmerExtractorBOSS::encode("TT"), &result
             );
 
             // TTT  -> $$TTT$
@@ -359,8 +359,8 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
         result.clear();
 
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor::sequence_to_kmers(
-                std::string(length, 'T'), k, KmerExtractor::encode("TA"), &result
+            KmerExtractorBOSS::sequence_to_kmers(
+                std::string(length, 'T'), k, KmerExtractorBOSS::encode("TA"), &result
             );
             ASSERT_TRUE(result.empty());
         }
@@ -371,8 +371,8 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
             std::string sequence(length, 'T');
             sequence[k - 1] = 'A';
 
-            KmerExtractor::sequence_to_kmers(
-                sequence, k, KmerExtractor::encode("TA"), &result
+            KmerExtractorBOSS::sequence_to_kmers(
+                sequence, k, KmerExtractorBOSS::encode("TA"), &result
             );
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
@@ -384,12 +384,12 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringAppend) {
     Vector<TypeParam> result;
 
     // A...A -> $A...A$
-    KmerExtractor::sequence_to_kmers(
+    KmerExtractorBOSS::sequence_to_kmers(
         std::string(500, 'A'), 2, {}, &result
     );
     ASSERT_EQ(501u, result.size());
 
-    KmerExtractor::sequence_to_kmers(
+    KmerExtractorBOSS::sequence_to_kmers(
         std::string(500, 'A'), 2, {}, &result
     );
     ASSERT_EQ(501u * 2, result.size());

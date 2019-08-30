@@ -37,6 +37,32 @@ sdsl::int_vector<> pack_vector(const sdsl::int_vector<> &vector,
     return packed;
 }
 
+bool wavelet_tree::operator==(const wavelet_tree &other) const {
+    if (size() != other.size())
+        return false;
+
+    const wavelet_tree *bitmap_p[] = { this, &other };
+    const sdsl::int_vector<> *bv_p[] = { nullptr, nullptr };
+
+    for (int i : { 0, 1 }) {
+        if (dynamic_cast<const wavelet_tree_stat*>(bitmap_p[i])) {
+            bv_p[i] = &dynamic_cast<const wavelet_tree_stat&>(*bitmap_p[i]).data();
+        } else if (dynamic_cast<const wavelet_tree_fast*>(bitmap_p[i])) {
+            bv_p[i] = &dynamic_cast<const wavelet_tree_fast&>(*bitmap_p[i]).data();
+        }
+    }
+
+    if (bv_p[0] && bv_p[1])
+        return *bv_p[0] == *bv_p[1];
+
+    const uint64_t end = size();
+    for (uint64_t i = 0; i < end; ++i) {
+        if ((*this)[i] != other[i])
+            return false;
+    }
+    return true;
+}
+
 template <class WaveletTree>
 WaveletTree wavelet_tree::convert_to() {
     if (dynamic_cast<WaveletTree*>(this)) {
@@ -220,7 +246,6 @@ void wavelet_tree_stat::set(uint64_t id, uint64_t val) {
         return;
 
     if (!requires_update_) {
-        std::unique_lock<std::mutex> lock(mu_);
         wwt_ = decltype(wwt_)();
         requires_update_ = true;
     }

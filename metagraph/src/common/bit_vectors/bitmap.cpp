@@ -1,5 +1,6 @@
 #include "bitmap.hpp"
 #include "utils.hpp"
+#include "bit_vector.hpp"
 
 
 // since std::set needs 32 bytes per element
@@ -7,6 +8,8 @@
 const size_t bitmap_adaptive::kMaxNumIndicesLogRatio = 8;
 const size_t bitmap_adaptive::kNumIndicesMargin = 2;
 const size_t bitmap_adaptive::kRowCutoff = 1'000'000;
+
+const size_t SPARSE_DENSE_FACTOR = 128;
 
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
@@ -129,6 +132,56 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
 ////////////////////////////////////////////////////////////////
 //                           bitmap                           //
 ////////////////////////////////////////////////////////////////
+
+bool bitmap::operator==(const bitmap &other) const {
+    if (size() != other.size() || num_set_bits() != other.num_set_bits())
+        return false;
+
+    const bitmap *bitmap_p[] = { this, &other };
+    const sdsl::bit_vector *bv_p[] = { nullptr, nullptr };
+
+    for (int i : { 0, 1 }) {
+        while (dynamic_cast<const bitmap_adaptive*>(bitmap_p[i])) {
+            bitmap_p[i] = &dynamic_cast<const bitmap_adaptive&>(*bitmap_p[i]).data();
+        }
+        if (dynamic_cast<const bitmap_vector*>(bitmap_p[i])) {
+            bv_p[i] = &dynamic_cast<const bitmap_vector&>(*bitmap_p[i]).data();
+        } else if (dynamic_cast<const bit_vector_stat*>(bitmap_p[i])) {
+            bv_p[i] = &dynamic_cast<const bit_vector_stat&>(*bitmap_p[i]).data();
+        }
+    }
+
+    if (bv_p[0] && bv_p[1]) {
+        return *bv_p[0] == *bv_p[1];
+    } else if (dynamic_cast<const bitmap_set*>(bitmap_p[0])
+                && dynamic_cast<const bitmap_set*>(bitmap_p[1])) {
+        return dynamic_cast<const bitmap_set&>(*bitmap_p[0]).size()
+                == dynamic_cast<const bitmap_set&>(*bitmap_p[1]).size()
+            && dynamic_cast<const bitmap_set&>(*bitmap_p[0]).data()
+                == dynamic_cast<const bitmap_set&>(*bitmap_p[1]).data();
+    }
+
+    // for very sparse vectors
+    if (num_set_bits() * SPARSE_DENSE_FACTOR < size()) {
+        bool equal = true;
+        call_ones([&other,&equal](auto i) { if (equal && !other[i]) equal = false; });
+        return equal;
+    }
+
+    // TODO: implement call_zeros and add the same thing for very dense vectors
+
+    uint64_t i;
+    const uint64_t end = size();
+    for (i = 0; i + 64 <= end; i += 64) {
+        if (get_int(i, 64) != other.get_int(i, 64))
+            return false;
+    }
+    if (i < size()) {
+        if (get_int(i, size() - i) != other.get_int(i, size() - i))
+            return false;
+    }
+    return true;
+}
 
 void bitmap::add_to(sdsl::bit_vector *other) const {
     assert(other);

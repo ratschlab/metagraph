@@ -35,6 +35,9 @@ class bitmap {
   public:
     virtual ~bitmap() {}
 
+    virtual bool operator==(const bitmap &other) const final;
+    virtual bool operator!=(const bitmap &other) const final { return !(*this == other); }
+
     virtual void set(uint64_t id, bool val) = 0;
 
     virtual bool operator[](uint64_t id) const = 0;
@@ -69,17 +72,17 @@ class bitmap_set : public bitmap_dyn {
     bitmap_set(uint64_t size, std::set<uint64_t>&& bits) noexcept;
     bitmap_set(uint64_t size, std::initializer_list<uint64_t> init);
 
-    virtual void set(uint64_t id, bool val) override;
-    virtual void insert_zeros(const std::vector<uint64_t> &pos) override;
+    void set(uint64_t id, bool val) override;
+    void insert_zeros(const std::vector<uint64_t> &pos) override;
 
-    virtual bool operator[](uint64_t id) const override { return bits_.count(id); }
-    virtual uint64_t get_int(uint64_t id, uint32_t width) const override;
+    bool operator[](uint64_t id) const override { return bits_.count(id); }
+    uint64_t get_int(uint64_t id, uint32_t width) const override;
 
-    virtual uint64_t size() const override { return size_; }
-    virtual uint64_t num_set_bits() const override { return bits_.size(); }
+    uint64_t size() const override { return size_; }
+    uint64_t num_set_bits() const override { return bits_.size(); }
 
-    virtual void call_ones_in_range(uint64_t begin, uint64_t end,
-                                    const VoidCall<uint64_t> &callback) const override;
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override;
 
     const std::set<uint64_t>& data() const { return bits_; }
 
@@ -97,21 +100,21 @@ class bitmap_vector : public bitmap_dyn {
     bitmap_vector(sdsl::bit_vector&& vector) noexcept;
     bitmap_vector(std::initializer_list<bool> bitmap);
 
-    virtual void set(uint64_t id, bool val) override;
-    virtual void insert_zeros(const std::vector<uint64_t> &pos) override;
-    virtual bitmap_vector& operator|=(const bitmap &other) override;
+    void set(uint64_t id, bool val) override;
+    void insert_zeros(const std::vector<uint64_t> &pos) override;
+    bitmap_vector& operator|=(const bitmap &other) override;
 
-    virtual bool operator[](uint64_t id) const override { return bit_vector_[id]; }
-    virtual uint64_t get_int(uint64_t id, uint32_t width) const override {
+    bool operator[](uint64_t id) const override { return bit_vector_[id]; }
+    uint64_t get_int(uint64_t id, uint32_t width) const override {
         return bit_vector_.get_int(id, width);
     }
 
-    virtual uint64_t size() const override { return bit_vector_.size(); }
-    virtual uint64_t num_set_bits() const override { return num_set_bits_; }
+    uint64_t size() const override { return bit_vector_.size(); }
+    uint64_t num_set_bits() const override { return num_set_bits_; }
 
-    virtual void add_to(sdsl::bit_vector *other) const override;
-    virtual void call_ones_in_range(uint64_t begin, uint64_t end,
-                                    const VoidCall<uint64_t> &callback) const override;
+    void add_to(sdsl::bit_vector *other) const override;
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override;
 
     const sdsl::bit_vector& data() const { return bit_vector_; }
 
@@ -133,21 +136,21 @@ class bitmap_adaptive : public bitmap_dyn {
     bitmap_adaptive(uint64_t size, std::set<uint64_t>&& bits) noexcept;
     bitmap_adaptive(uint64_t size, std::initializer_list<uint64_t> bits);
 
-    virtual void set(uint64_t id, bool val) override;
-    virtual void insert_zeros(const std::vector<uint64_t> &pos) override;
-    virtual bitmap_adaptive& operator|=(const bitmap &other) override;
+    void set(uint64_t id, bool val) override;
+    void insert_zeros(const std::vector<uint64_t> &pos) override;
+    bitmap_adaptive& operator|=(const bitmap &other) override;
 
-    virtual bool operator[](uint64_t id) const override { return (*bitmap_)[id]; }
-    virtual uint64_t get_int(uint64_t id, uint32_t width) const override {
+    bool operator[](uint64_t id) const override { return (*bitmap_)[id]; }
+    uint64_t get_int(uint64_t id, uint32_t width) const override {
         return bitmap_->get_int(id, width);
     }
 
-    virtual uint64_t size() const override { return bitmap_->size(); }
-    virtual uint64_t num_set_bits() const override { return bitmap_->num_set_bits(); }
+    uint64_t size() const override { return bitmap_->size(); }
+    uint64_t num_set_bits() const override { return bitmap_->num_set_bits(); }
 
-    virtual void add_to(sdsl::bit_vector *other) const override { bitmap_->add_to(other); }
-    virtual void call_ones_in_range(uint64_t begin, uint64_t end,
-                                    const VoidCall<uint64_t> &callback) const override {
+    void add_to(sdsl::bit_vector *other) const override { bitmap_->add_to(other); }
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override {
         bitmap_->call_ones_in_range(begin, end, callback);
     }
 

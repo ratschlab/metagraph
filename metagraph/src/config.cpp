@@ -75,6 +75,19 @@ Config::Config(int argc, const char *argv[]) {
         row_cache_size = 1000000;
     }
 
+    const auto get_value = [&](int i) {
+        assert(i > 0);
+        assert(i < argc);
+
+        if (i + 1 == argc) {
+            std::cerr << "Error: no value provided for option "
+                      << argv[i] << std::endl;
+            print_usage(argv[0], identity);
+            exit(-1);
+        }
+        return argv[i + 1];
+    };
+
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
@@ -87,8 +100,8 @@ Config::Config(int argc, const char *argv[]) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
-        } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
-            reverse = true;
+        } else if (!strcmp(argv[i], "--fwd-and-reverse")) {
+            forward_and_reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
             canonical = true;
         } else if (!strcmp(argv[i], "--complete")) {
@@ -101,10 +114,12 @@ Config::Config(int argc, const char *argv[]) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
             fasta_anno = true;
+        } else if (!strcmp(argv[i], "--header-comment-delim")) {
+            fasta_anno_comment_delim = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--anno-label")) {
-            anno_labels.emplace_back(argv[++i]);
+            anno_labels.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--coord-binsize")) {
-            genome_binsize_anno = atoi(argv[++i]);
+            genome_binsize_anno = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--suppress-unlabeled")) {
             suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--sparse")) {
@@ -112,73 +127,107 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
-            parallel = atoi(argv[++i]);
+            parallel = atoi(get_value(i++));
             set_num_threads(parallel);
         } else if (!strcmp(argv[i], "--parts-total")) {
-            parts_total = atoi(argv[++i]);
+            parts_total = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--part-idx")) {
-            part_idx = atoi(argv[++i]);
+            part_idx = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-b") || !strcmp(argv[i], "--bins-per-thread")) {
-            num_bins_per_thread = atoi(argv[++i]);
+            num_bins_per_thread = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
-            k = atoi(argv[++i]);
+            k = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--min-count")) {
-            min_count = std::max(atoi(argv[++i]), 1);
+            min_count = std::max(atoi(get_value(i++)), 1);
         } else if (!strcmp(argv[i], "--max-count")) {
-            max_count = atoi(argv[++i]);
+            max_count = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--min-count-q")) {
+            min_count_quantile = std::max(std::stod(get_value(i++)), 0.);
+        } else if (!strcmp(argv[i], "--max-count-q")) {
+            max_count_quantile = std::min(std::stod(get_value(i++)), 1.);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
-            memory_available = atoi(argv[++i]);
+            memory_available = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
             dump_raw_anno = true;
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
-            discovery_fraction = std::stof(argv[++i]);
+            discovery_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
+        } else if (!strcmp(argv[i], "--map")) {
+            map_sequences = true;
+        } else if (!strcmp(argv[i], "--align-seed-unimems")) {
+            alignment_seed_unimems = true;
+        } else if (!strcmp(argv[i], "--align-edit-distance")) {
+            alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-length")) {
-            alignment_length = atoi(argv[++i]);
+            alignment_length = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-queue-size")) {
+            alignment_queue_size = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-match-score")) {
+            alignment_match_score = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-mm-transition-penalty")) {
+            alignment_mm_transition = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-mm-transversion-penalty")) {
+            alignment_mm_transversion = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-gap-open-penalty")) {
+            alignment_gap_opening_penalty = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-gap-extension-penalty")) {
+            alignment_gap_extension_penalty = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-alternative-alignments")) {
+            alignment_num_alternative_paths = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-min-cell-score")) {
+            alignment_min_cell_score = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-min-path-score")) {
+            alignment_min_path_score = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-min-seed-length")) {
+            alignment_min_seed_length = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-max-seed-length")) {
+            alignment_max_seed_length = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-max-num-seeds-per-locus")) {
+            alignment_max_num_seeds_per_locus = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
-            frequency = atoi(argv[++i]);
+            frequency = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
-            distance = atoi(argv[++i]);
+            distance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-o") || !strcmp(argv[i], "--outfile-base")) {
-            outfbase = std::string(argv[++i]);
+            outfbase = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--reference")) {
-            refpath = std::string(argv[++i]);
+            refpath = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--header-delimiter")) {
-            fasta_header_delimiter = std::string(argv[++i]);
+            fasta_header_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--labels-delimiter")) {
-            anno_labels_delimiter = std::string(argv[++i]);
+            anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
         } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
-            kmer_mapping_mode = atoi(argv[++i]);
+            kmer_mapping_mode = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
-            num_top_labels = atoi(argv[++i]);
+            num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
-            port = atoi(argv[++i]);
+            port = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--suffix")) {
-            suffix = argv[++i];
+            suffix = get_value(i++);
         } else if (!strcmp(argv[i], "--state")) {
-            state = string_to_state(argv[++i]);
+            state = string_to_state(get_value(i++));
 
         } else if (!strcmp(argv[i], "--anno-type")) {
-            anno_type = string_to_annotype(argv[++i]);
+            anno_type = string_to_annotype(get_value(i++));
         } else if (!strcmp(argv[i], "--graph")) {
-            graph_type = string_to_graphtype(argv[++i]);
+            graph_type = string_to_graphtype(get_value(i++));
         } else if (!strcmp(argv[i], "--rename-cols")) {
-            rename_instructions_file = std::string(argv[++i]);
+            rename_instructions_file = std::string(get_value(i++));
         //} else if (!strcmp(argv[i], "--db-path")) {
-        //    dbpath = std::string(argv[++i]);
+        //    dbpath = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
-            infbase_annotators.emplace_back(argv[++i]);
+            infbase_annotators.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
-            infbase = std::string(argv[++i]);
+            infbase = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "--to-fasta")) {
@@ -187,52 +236,52 @@ Config::Config(int argc, const char *argv[]) {
             to_fasta = true;
             unitigs = true;
         } else if (!strcmp(argv[i], "--header")) {
-            header = std::string(argv[++i]);
+            header = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-tips")) {
-            min_tip_size = atoi(argv[++i]);
+            min_tip_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-unitigs")) {
-            min_unitig_median_kmer_abundance = atoi(argv[++i]);
+            min_unitig_median_kmer_abundance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fallback")) {
-            fallback_abundance_cutoff = atoi(argv[++i]);
+            fallback_abundance_cutoff = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--count-dummy")) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
-        } else if (!strcmp(argv[i], "--internal")) {
-            internal = true;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
-            suffix_len = atoi(argv[++i]);
+            suffix_len = atoi(get_value(i++));
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
-        //    num_threads = atoi(argv[++i]);
+        //    num_threads = atoi(get_value(i++));
         //} else if (!strcmp(argv[i], "--debug")) {
         //    debug = true;
         } else if (!strcmp(argv[i], "--greedy")) {
             greedy_brwt = true;
         } else if (!strcmp(argv[i], "--arity")) {
-            arity_brwt = atoi(argv[++i]);
+            arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--relax-arity")) {
-            relax_arity_brwt = atoi(argv[++i]);
+            relax_arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--cache-size")) {
-            row_cache_size = atoi(argv[++i]);
+            row_cache_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_usage(argv[0], identity);
             exit(0);
         } else if (!strcmp(argv[i], "--label-mask-in")) {
-            label_mask_in.emplace_back(argv[++i]);
+            label_mask_in.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--label-mask-out")) {
-            label_mask_out.emplace_back(argv[++i]);
+            label_mask_out.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
-            label_mask_out_fraction = std::stof(argv[++i]);
+            label_mask_out_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--label-filter")) {
-            label_filter.emplace_back(argv[++i]);
+            label_filter.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--call-bubbles")) {
             call_bubbles = true;
+        } else if (!strcmp(argv[i], "--call-breakpoints")) {
+            call_breakpoints = true;
         } else if (!strcmp(argv[i], "--accession")) {
-            accession2taxid = std::string(argv[++i]);
+            accession2taxid = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy")) {
-            taxonomy_nodes = std::string(argv[++i]);
+            taxonomy_nodes = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy-map")) {
-            taxonomy_map = std::string(argv[++i]);
+            taxonomy_map = std::string(get_value(i++));
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -290,6 +339,19 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
+    if (identity == ALIGN &&
+            (alignment_mm_transition < 0
+            || alignment_mm_transversion < 0
+            || alignment_gap_opening_penalty < 0
+            || alignment_gap_extension_penalty < 0)) {
+        std::cerr << "Error: alignment penalties should be given as positive integers"
+                  << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (count_kmers || query_presence)
+        map_sequences = true;
+
     if ((identity == QUERY || identity == SERVER_QUERY) && infbase.empty())
         print_usage_and_exit = true;
 
@@ -314,8 +376,10 @@ Config::Config(int argc, const char *argv[]) {
 
     if ((identity == ANNOTATE || identity == ANNOTATE_COORDINATES)
             && outfbase.empty())
-        outfbase = utils::remove_suffix(infbase, ".orhashdbg", ".bitmapdbg", ".dbg");
-
+        outfbase = utils::remove_suffix(infbase, ".dbg",
+                                                 ".orhashdbg",
+                                                 ".hashstrdbg",
+                                                 ".bitmapdbg");
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
@@ -357,6 +421,11 @@ Config::Config(int argc, const char *argv[]) {
     if (min_count >= max_count) {
         std::cerr << "Error: max-count must be greater than min-count" << std::endl;
         print_usage(argv[0], identity);
+    }
+
+    if (alignment_max_seed_length < alignment_min_seed_length) {
+        std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
+        print_usage_and_exit = true;
     }
 
     if (outfbase.size()
@@ -451,12 +520,19 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
 Config::GraphType Config::string_to_graphtype(const std::string &string) {
     if (string == "succinct") {
         return GraphType::SUCCINCT;
+
     } else if (string == "hash") {
         return GraphType::HASH;
+
+    } else if (string == "hashpacked") {
+        return GraphType::HASH_PACKED;
+
     } else if (string == "hashstr") {
         return GraphType::HASH_STR;
+
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
+
     } else {
         std::cerr << "Error: unknown graph representation" << std::endl;
         exit(1);
@@ -475,14 +551,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available commands:\n");
 
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
-            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
 
             fprintf(stderr, "\tclean\t\tclean an existing graph and extract sequences from it\n");
             fprintf(stderr, "\t\t\tin fast[a|q] formats\n\n");
 
             fprintf(stderr, "\textend\t\textend an existing graph with new sequences from\n");
-            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats\n\n");
 
             fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
@@ -493,8 +567,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tcompare\t\tcheck whether two given graphs are identical\n\n");
 
-            fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files\n");
-            fprintf(stderr, "\t\t\tto graph\n\n");
+            fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files to graph\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
 
@@ -535,10 +608,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --min-count-q [INT] \tmin k-mer abundance quantile (min-count is used by default) [0.0]\n");
+            fprintf(stderr, "\t   --max-count-q [INT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr [succinct]\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashpacked / hashstr [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
@@ -574,7 +649,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to extend []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
@@ -583,21 +658,44 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
-            fprintf(stderr, "Available options for align:\n");
-            fprintf(stderr, "\t-r --reverse \t\t\talign reverse complement sequences as well [off]\n");
-            fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence [off]\n");
-            fprintf(stderr, "\t   --kmer-mapping-mode \t\tlevel of heuristics to use for unmapped k-mers (0, 1, or 2) [0]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \t\talign both forward and reverse complement sequences [off]\n");
+            fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
+            fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
+            fprintf(stderr, "\t-k --kmer-length [INT]\t\tlength of mapped k-mers (at most graph's k) [k]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of k-mers required to count sequence [1.0]\n");
-            fprintf(stderr, "\t   --filter-present \t\treport only present input sequences [off]\n");
-            fprintf(stderr, "\t   --count-kmers \t\tquery the number of k-mers discovered [off]\n");
-            fprintf(stderr, "\t   --align-length [INT]\t\tlength of subsequences to align [k]\n");
-            fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
+            fprintf(stderr, "\t   --kmer-mapping-mode \t\tlevel of heuristics to use for mapping k-mers (0, 1, or 2) [0]\n");
+            fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
+            fprintf(stderr, "\n");
+            // fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "Available options for alignment:\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximum exact matches in unitigs as seeds [off]\n");
+            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
+            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
+            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [1]\n");
+            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [2]\n");
+            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [3]\n");
+            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [1]\n");
+            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [50]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
+            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
+            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");
         } break;
         case COMPARE: {
             fprintf(stderr, "Usage: %s compare [options] GRAPH1 GRAPH2\n\n", prog_name.c_str());
 
-            fprintf(stderr, "Available options for compare:\n");
-            fprintf(stderr, "\t   --internal \t\tcompare internal graph representations\n");
+            // fprintf(stderr, "Available options for compare:\n");
+            // fprintf(stderr, "\t   --internal \t\tcompare internal graph representations\n");
         } break;
         case MERGE: {
             fprintf(stderr, "Usage: %s merge -o <graph_basename> [options] GRAPH1 GRAPH2 [[GRAPH3] ...]\n\n", prog_name.c_str());
@@ -617,7 +715,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.<type>.chunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffixes of the length given [0]\n");
             fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
-            // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM: {
             fprintf(stderr, "Usage: %s transform -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
@@ -637,16 +736,16 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tAssemble contigs from de Bruijn graph and dump to compressed FASTA file.\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --prune-tips [INT] \t\t\tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --unitigs \t\t\t\textract unitigs [off]\n");
-            fprintf(stderr, "\t   --header [STR] \t\t\theader for sequences in FASTA output []\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --unitigs \t\textract unitigs [off]\n");
+            fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
             fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
             fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
             fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
-            fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
+            fprintf(stderr, "\t                                     \t\tall matching mask-in and mask-out labels [0.0]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -668,7 +767,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tprocess both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation: column / row [column]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
@@ -678,6 +777,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
+            fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
             fprintf(stderr, "\n");
@@ -688,7 +788,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s coordinate -i <GRAPH> [options] FASTA1 [[FASTA2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t-r --reverse \t\t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \t\tprocess both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<GRAPH>]\n");
             fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
@@ -734,7 +834,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for query:\n");
-            fprintf(stderr, "\t-r --reverse \t\tquery reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tquery both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
@@ -759,15 +859,17 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [1,000,000]\n");
         } break;
         case CALL_VARIANTS: {
-            fprintf(stderr, "Usage: %s call_variants -a <annotation> [options]\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s call_variants -i <GRAPH> -a <annotation> [options]\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for call_variants:\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph []\n");
             fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph []\n");
             fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
             fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles\n");
+            fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles [off]\n");
+            fprintf(stderr, "\t   --call-breakpoints \t\tcall labels from breakpoints [off]\n");
             fprintf(stderr, "\t   --label-filter [STR] \tdiscard variants with this label []\n");
             fprintf(stderr, "\t   --taxonomy-map [STR] \tfilename of taxonomy map file []\n");
             fprintf(stderr, "\t   --cache-size [INT] \t\tnumber of uncompressed rows to store in the cache [1,000,000]\n");

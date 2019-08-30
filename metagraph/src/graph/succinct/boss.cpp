@@ -75,7 +75,7 @@ BOSS::~BOSS() {
  */
 bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     // compare size
-    if (W_->size() != other.W_->size()) {
+    if (num_edges() != other.num_edges()) {
         if (verbose)
             std::cout << "sizes of graphs differ"
                       << "\n1: " << W_->size()
@@ -85,6 +85,13 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     }
 
     assert(F_.size() == other.F_.size());
+
+    bool all_equal = (*W_ == *other.W_
+                        && *last_ == *other.last_
+                        && F_ == other.F_);
+
+    if (all_equal || !verbose)
+        return all_equal;
 
     // compare last
     for (size_t i = 0; i < W_->size(); ++i) {
@@ -122,6 +129,7 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
         }
     }
 
+    assert(all_equal);
     return true;
 }
 
@@ -639,134 +647,6 @@ size_t BOSS::indegree(node_index i) const {
 
 
 /**
- * Given a string str and a maximal number of edit operations
- * max_distance, this function returns all nodes with labels at most
- * max_distance many edits away from str.
- */
-std::vector<HitInfo> BOSS::index_fuzzy(const std::string &str,
-                                       size_t max_distance) const {
-    std::vector<HitInfo> result;
-    std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
-    std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits2;
-    uint64_t rl;
-    uint64_t ru;
-
-    // walk through pattern, thereby collecting possible partial matches
-    // once the end of the pattern is reached, add match to results
-
-    // init match/mismatch to first pattern position
-    TAlphabet s = encode(str[0]);
-    assert(alph_size == 6 && "This function is defined for DNA sequences only");
-    // TODO: review and test out this function for protein graphs
-    for (TAlphabet b = 1; b < 5; ++b) {
-        rl = F_[b] + 1 < W_->size()
-             ? succ_last(F_[b] + 1)
-             : W_->size();
-        ru = b + 1 < alph_size
-             ? F_[b + 1]
-             : W_->size() - 1;
-        //std::cout << "pushing: rl " << rl << " ru " << ru << " str_pos 1 max_distance " << (uint64_t) (b != s) << std::endl;
-        //std::cout << "s " << s << " b " << b << std::endl;
-        std::vector<uint64_t> tmp;
-        hits.push({ rl, ru, 1, 1, static_cast<uint64_t>(b != s),
-                    std::string(1, decode(b)), tmp });
-
-        // opening/extending a gap in the pattern starting with the first position
-        if (max_distance > 0) {
-            for (size_t p = 1; p < str.length() - 1; ++p) {
-                TAlphabet ss = encode(str[p]);
-                if ((p + (b != ss)) > max_distance)
-                    break;
-                hits.push({ rl, ru, p + 1, 1, p + (b != ss),
-                            std::string(p, 'd') + std::string(1, decode(b)), tmp });
-                //std::cout << "a) adding '-'" << std::endl;
-            }
-        }
-    }
-
-    // walk through pattern thereby extending all partial hits
-    while (hits.size() > 0) {
-        while (hits.size() > 0) {
-            HitInfo curr_hit(hits.top());
-            hits.pop();
-            //std::cout << "loaded: rl " << curr_hit.rl << " ru " << curr_hit.ru << " dist " << curr_hit.distance << std::endl;
-
-            if (curr_hit.str_pos < str.length()) {
-
-                // opening/extending a gap in the graph, leaving current pattern position unmatched
-                if (curr_hit.distance < max_distance) {
-                    hits2.push({ curr_hit.rl, curr_hit.ru, curr_hit.str_pos + 1,
-                                 curr_hit.graph_pos, curr_hit.distance + 1,
-                                 curr_hit.cigar + 'd', curr_hit.path });
-                    //std::cout << "b) " << curr_hit.cigar << " adding '-'" << std::endl;
-                }
-
-                s = encode(str[curr_hit.str_pos]);
-
-                // has the number of matches exceeded the node length?
-                // there are three possible scenarios for extension of the path:
-                //  1) pattern is shorter than the node length --> get an interval of matching nodes
-                //  2) pattern length exactly mathces the node length --> there is one correponding node
-                //  3) pattern is longer than the node length --> we append to a path
-                if (curr_hit.graph_pos >= k_) {
-                //    std::cout << "push back tp path " << curr_hit.rl << std::endl;
-                    curr_hit.path.push_back(curr_hit.rl);
-                }
-
-                // iterate through all possible extensions of current position
-                for (TAlphabet b = 1; b < 5; ++b) {
-                    if (curr_hit.distance <= max_distance) {
-
-                        // we cannot afford any more mismatches
-                        if ((curr_hit.distance + (b != s)) > max_distance)
-                            continue;
-
-                        // re-define range of nodes to check for outgoing nodes
-                        rl = std::min(succ_W(pred_last(curr_hit.rl - 1) + 1, b),
-                                      succ_W(pred_last(curr_hit.rl - 1) + 1, b + alph_size));
-                        ru = std::max(pred_W(curr_hit.ru, b),
-                                      pred_W(curr_hit.ru, b + alph_size));
-
-                        // the current range in W does not contain our next symbol
-                        if (rl >= W_->size() || ru >= W_->size() || rl > ru)
-                            continue;
-
-                        // update the SA range with the current symbol b
-                        rl = fwd(rl);
-                        ru = fwd(ru);
-
-                        // range is empty
-                        if ((rl == 0) && (ru == 0))
-                            continue;
-
-                        // add hit for extension in next step
-                        hits2.push({ rl, ru, curr_hit.str_pos + 1,
-                                     curr_hit.graph_pos + 1, curr_hit.distance + (b != s),
-                                     curr_hit.cigar + decode(b), curr_hit.path });
-
-                        // opening/extending a gap in the pattern, leaving current graph position unmatched
-                        // --> choose any available mismatching next edge
-                        if (b != s) {
-                            hits2.push({ rl, ru, curr_hit.str_pos,
-                                         curr_hit.graph_pos + 1, curr_hit.distance + 1,
-                                         curr_hit.cigar + 'i', curr_hit.path });
-                        }
-                    }
-                }
-            } else {
-                // collect results
-                //std::make_pair(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl, curr_hit.cigar));
-                result.push_back(curr_hit);
-            }
-        }
-        hits.swap(hits2);
-    }
-
-    return result;
-}
-
-
-/**
  * Given a node label kmer, this function returns the index
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
@@ -906,41 +786,9 @@ void BOSS::map_to_nodes(const std::string &sequence,
     }
 }
 
-std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence,
-                                           size_t kmer_size) const {
-    if (kmer_size == 0 || kmer_size > k_)
-        kmer_size = k_;
-
-    if (sequence.size() < kmer_size)
-        return {};
-
-    auto seq_encoded = encode(sequence);
-
+std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence) const {
     std::vector<node_index> indices;
-
-    for (size_t i = 0; i + kmer_size <= seq_encoded.size(); ++i) {
-        edge_index edge = index_range(seq_encoded.data() + i,
-                                      seq_encoded.data() + i + kmer_size).second;
-        node_index node = edge ? get_source_node(edge) : npos;
-        indices.push_back(node);
-
-        if (!edge || kmer_size != k_ || !indices.back())
-            continue;
-
-        // This boost is valid only if alignment length equals k since
-        // otherwise, when alignment length is less than k,
-        // the existence of an edge between node ending with preceeding
-        // aligned substring and node ending with the next aligned substring
-        // is not guaranteed. It may be a suffix of some other k-mer.
-        while (i + kmer_size < seq_encoded.size()) {
-            node = outgoing(node, seq_encoded[i + kmer_size]);
-            if (!node)
-                break;
-
-            indices.push_back(node);
-            i++;
-        }
-    }
+    map_to_nodes(sequence, [&](node_index node) { indices.emplace_back(node); });
 
     return indices;
 }
@@ -1106,26 +954,6 @@ bool BOSS::find(const std::string &sequence,
     }
 
     return num_kmers_missing <= max_kmers_missing;
-}
-
-std::vector<std::vector<HitInfo>> BOSS::align_fuzzy(const std::string &sequence,
-                                                    size_t alignment_length,
-                                                    size_t max_distance) const {
-    std::vector<std::vector<HitInfo>> hit_list;
-
-    if (alignment_length == 0) {
-
-    } else {
-        alignment_length = alignment_length < 2 ? 2 : alignment_length;
-        alignment_length = alignment_length < sequence.size()
-                                    ? alignment_length
-                                    : sequence.size();
-        for (size_t i = 0; i < sequence.size() - alignment_length + 1; ++i) {
-            std::string kmer(sequence.data() + i, sequence.data() + i + alignment_length);
-            hit_list.push_back(index_fuzzy(kmer, max_distance));
-        }
-    }
-    return hit_list;
 }
 
 /**
@@ -1469,7 +1297,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
  * may invalidate the BOSS table (if leaves nodes with no incoming edges).
  * Returns the number of edges erased.
  */
-uint64_t BOSS::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
+uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
     size_t num_edges_to_remove = std::count(edges_to_remove_mask.begin(),
                                             edges_to_remove_mask.end(), true);
     if (!num_edges_to_remove)
@@ -1491,7 +1319,7 @@ uint64_t BOSS::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
 
     // update W
     sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, bits_per_char_W_);
-    std::vector<bool> first_removed(alph_size, false);
+    sdsl::bit_vector first_removed(alph_size, false);
 
     for (size_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
         TAlphabet c = get_W(i);
@@ -1572,12 +1400,12 @@ void BOSS::edge_DFT(edge_index start,
  * Traverse the entire dummy subtree
  * and find all redundant dummy edges.
  */
-template <typename T, typename U>
+template <typename Array, typename U>
 void traverse_dummy_edges(const BOSS &graph,
                           edge_index subtree_root,
                           size_t check_depth,
-                          std::vector<T> *redundant_mask,
-                          std::vector<T> *traversed_mask,
+                          Array *redundant_mask,
+                          Array *traversed_mask,
                           U *num_dummy_traversed,
                           bool verbose) {
     assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
@@ -1599,17 +1427,17 @@ void traverse_dummy_edges(const BOSS &graph,
             assert(graph.get_W(edge) < graph.alph_size);
 
             if (traversed_mask)
-                traversed_mask->at(edge) = 1;
+                (*traversed_mask)[edge] = 1;
 
             if (redundant_path.back())
-                redundant_mask->at(edge) = 2;
+                (*redundant_mask)[edge] = 2;
 
             redundant_path.pop_back();
         },
         [&](edge_index edge) {
             if (redundant_path.size() == check_depth) {
                 if (!redundant_mask
-                        || (!redundant_mask->at(edge)
+                        || (!(*redundant_mask)[edge]
                                 && graph.is_single_incoming(edge))) {
                     // the last dummy edge is not redundant and hence the
                     // entire path has to remain in the graph
@@ -1635,15 +1463,15 @@ void traverse_dummy_edges(const BOSS &graph,
  * dummy source edges and return number of these edges.
  */
 uint64_t traverse_dummy_edges(const BOSS &graph,
-                              std::vector<bool> *redundant_mask,
-                              std::vector<bool> *traversed_mask,
+                              sdsl::bit_vector *redundant_mask,
+                              sdsl::bit_vector *traversed_mask,
                               size_t num_threads,
                               bool verbose) {
     assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
     assert(!traversed_mask || traversed_mask->size() == graph.get_W().size());
 
     if (traversed_mask)
-        traversed_mask->at(1) = true;
+        (*traversed_mask)[1] = true;
 
     if (graph.get_last(1))
         return 1;
@@ -1710,9 +1538,9 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
     if (edges_threadsafe.get()) {
         for (size_t i = 0; i < edges_threadsafe->size(); ++i) {
             if ((*edges_threadsafe)[i] && traversed_mask)
-                traversed_mask->at(i) = true;
+                (*traversed_mask)[i] = true;
             if ((*edges_threadsafe)[i] == 2 && redundant_mask)
-                redundant_mask->at(i) = true;
+                (*redundant_mask)[i] = true;
         }
         edges_threadsafe.reset();
     }
@@ -1737,15 +1565,16 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
  * of non-redundant dummy source edges.
  * Return value: edges removed from the BOSS graph.
  */
-std::vector<bool>
-BOSS::erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges,
+sdsl::bit_vector
+BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
                                   size_t num_threads,
                                   bool verbose) {
-    std::vector<bool> redundant_dummy_edges_mask(W_->size(), false);
+    sdsl::bit_vector redundant_dummy_edges_mask(W_->size(), false);
 
     if (source_dummy_edges) {
-        source_dummy_edges->assign(W_->size(), false);
-        source_dummy_edges->at(1) = true;
+        (*source_dummy_edges) = sdsl::bit_vector();
+        (*source_dummy_edges) = sdsl::bit_vector(W_->size(), false);
+        (*source_dummy_edges)[1] = true;
     }
 
     if (get_last(1))
@@ -1774,7 +1603,7 @@ BOSS::erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges,
     return redundant_dummy_edges_mask;
 }
 
-uint64_t BOSS::mark_source_dummy_edges(std::vector<bool> *mask,
+uint64_t BOSS::mark_source_dummy_edges(sdsl::bit_vector *mask,
                                        size_t num_threads,
                                        bool verbose) const {
     assert(!mask || mask->size() == W_->size());
@@ -1782,7 +1611,7 @@ uint64_t BOSS::mark_source_dummy_edges(std::vector<bool> *mask,
     return traverse_dummy_edges(*this, NULL, mask, num_threads, verbose);
 }
 
-uint64_t BOSS::mark_sink_dummy_edges(std::vector<bool> *mask) const {
+uint64_t BOSS::mark_sink_dummy_edges(sdsl::bit_vector *mask) const {
     if (!mask)
         return rank_W(num_edges(), 0) - 1;
 
@@ -1794,7 +1623,7 @@ uint64_t BOSS::mark_sink_dummy_edges(std::vector<bool> *mask) const {
     for (uint64_t i = 2; i < W_->size(); ++i) {
         assert(get_W(i) != alph_size);
         if (!get_W(i)) {
-            mask->at(i) = true;
+            (*mask)[i] = true;
             num_dummy_sink_edges++;
         }
     }
@@ -1804,8 +1633,8 @@ uint64_t BOSS::mark_sink_dummy_edges(std::vector<bool> *mask) const {
     return num_dummy_sink_edges;
 }
 
-std::vector<bool> BOSS::mark_all_dummy_edges(size_t num_threads) const {
-    std::vector<bool> edge_mask(num_edges() + 1, 0);
+sdsl::bit_vector BOSS::mark_all_dummy_edges(size_t num_threads) const {
+    sdsl::bit_vector edge_mask(num_edges() + 1, 0);
 
     mark_source_dummy_edges(&edge_mask, num_threads);
     mark_sink_dummy_edges(&edge_mask);
@@ -1816,8 +1645,8 @@ std::vector<bool> BOSS::mark_all_dummy_edges(size_t num_threads) const {
     return edge_mask;
 }
 
-std::vector<bool> BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
-    std::vector<bool> edge_mask(num_edges() + 1, 0);
+sdsl::bit_vector BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
+    sdsl::bit_vector edge_mask(num_edges() + 1, 0);
 
     erase_redundant_dummy_edges(&edge_mask, num_threads);
     mark_sink_dummy_edges(&edge_mask);
@@ -1875,7 +1704,7 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
  */
 void BOSS::call_paths(Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
-                      bool split_to_contigs) const {
+                      bool split_to_unitigs) const {
     // keep track of reached edges
     sdsl::bit_vector discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
@@ -1889,7 +1718,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     auto last_source = succ_last(1);
     for (uint64_t i = 1; i <= last_source; ++i) {
-        call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+        call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
     }
 
     // then all forks
@@ -1898,13 +1727,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i] && !is_single_outgoing(i))
-            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+            call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
     }
 
     // process all the cycles left that have not been traversed
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i])
-            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+            call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
     }
 }
 
@@ -1916,7 +1745,7 @@ struct Edge {
 void BOSS::call_paths(edge_index starting_kmer,
                       Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
-                      bool split_to_contigs,
+                      bool split_to_unitigs,
                       sdsl::bit_vector *discovered_ptr,
                       sdsl::bit_vector *visited_ptr,
                       ProgressBar &progress_bar) const {
@@ -1951,9 +1780,9 @@ void BOSS::call_paths(edge_index starting_kmer,
             if (!sequence.back())
                 break;
 
-            // stop traversing if we call contigs and this
+            // stop traversing if we call unitigs and this
             // is not the only incoming edge
-            bool continue_traversal = !split_to_contigs || is_single_incoming(edge);
+            bool continue_traversal = !split_to_unitigs || is_single_incoming(edge);
 
             // make one traversal step
             edge = fwd(edge);
@@ -1969,7 +1798,7 @@ void BOSS::call_paths(edge_index starting_kmer,
 
             // loop over outgoing edges
             do {
-                if (!next_edge && !split_to_contigs && !visited[edge]) {
+                if (!next_edge && !split_to_unitigs && !visited[edge]) {
                     // save the edge for visiting if we extract arbitrary paths
                     discovered[edge] = true;
                     next_edge = edge;

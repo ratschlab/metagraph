@@ -15,6 +15,9 @@ class wavelet_tree {
   public:
     virtual ~wavelet_tree() {};
 
+    virtual bool operator==(const wavelet_tree &other) const final;
+    virtual bool operator!=(const wavelet_tree &other) const final { return !(*this == other); }
+
     virtual uint64_t rank(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t select(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t operator[](uint64_t id) const = 0;
@@ -80,6 +83,7 @@ class wavelet_tree_stat : public wavelet_tree {
     void clear();
 
     sdsl::int_vector<> to_vector() const;
+    const sdsl::int_vector<>& data() const { return int_vector_; }
 
   private:
     void init_wt() const;
@@ -122,7 +126,7 @@ class wavelet_tree_fast : public wavelet_tree {
     void clear();
 
     sdsl::int_vector<> to_vector() const { return int_vector_; }
-    const sdsl::int_vector<>& get_vector() const { return int_vector_; }
+    const sdsl::int_vector<>& data() const { return int_vector_; }
 
   private:
     sdsl::int_vector<> int_vector_;

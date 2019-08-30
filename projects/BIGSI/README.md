@@ -36,7 +36,7 @@ for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do \
         "find ~/metagenome/data/BIGSI/ -name \"*fasta.gz\" \
             | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph build -v \
                 -k 31 \
-                --reverse \
+                --canonical \
                 --parallel 30 \
                 --mem-cap-gb 300 \
                 --suffix $F \
@@ -66,4 +66,110 @@ for list in x*; do
                 2>&1 | tee ~/metagenome/data/BIGSI/annotate_${list}.log"; \
 done
 cd ..
+```
+
+## Generate subsets
+```bash
+cat temp/files_to_annotate.txt | shuf > subsets/files_shuffled.txt
+cd subsets
+for i in {1..20}; do N=$((750 * i)); head -n $N files_shuffled.txt > files_$N.txt; done
+```
+
+### Build graphs for subsets
+```bash
+mkdir ~/metagenome/data/BIGSI/subsets
+for i in {1..20}; do
+    N=$((750 * i));
+    bsub -J "subset_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.lsf \
+         -W 24:00 \
+         -n 15 -R "rusage[mem=23000] span[hosts=1]" \
+        "cat subsets/files_${N}.txt \
+            | /usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA build -v \
+                -k 31 \
+                --canonical \
+                --parallel 30 \
+                --mem-cap-gb 300 \
+                -o ~/metagenome/data/BIGSI/subsets/graph_subset_${N} \
+                2>&1"; \
+done
+```
+
+## Annotate graphs for subsets
+```bash
+for i in {20..1}; do
+    N=$((750 * i));
+    mkdir ~/metagenome/data/BIGSI/subsets/graph_subset_${N}
+    bsub -J "annotate_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/annotate_subset_${N}.lsf \
+         -W 96:00 \
+         -n 15 -R "rusage[mem=3000] span[hosts=1]" \
+        "cat subsets/files_${N}.txt \
+            | /usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA annotate -v \
+                -i ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.dbg \
+                --parallel 15 \
+                --anno-filename \
+                --separately \
+                -o ~/metagenome/data/BIGSI/subsets/graph_subset_${N} \
+                2>&1"; \
+done
+
+for i in {1..20}; do
+    N=$((750 * i));
+    bsub -J "merge_columns_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/merge_columns_subset_${N}.lsf \
+         -W 96:00 \
+         -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
+        "find ~/metagenome/data/BIGSI/subsets/graph_subset_${N}/ -name *.annodbg | sort \
+            | /usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA merge_anno -v \
+                -o ~/metagenome/data/BIGSI/subsets/annotation_subset_${N} \
+                --parallel 20 \
+                2>&1"; \
+done
+```
+
+## Transform annotation
+```bash
+for i in {1..20}; do
+    N=$((750 * i));
+    bsub -J "to_row_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/columns_to_rows_subset_${N}.lsf \
+         -W 96:00 \
+         -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
+        "/usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA transform_anno -v \
+                --anno-type row \
+                -o ~/metagenome/data/BIGSI/subsets/annotation_subset_${N} \
+                ~/metagenome/data/BIGSI/subsets/annotation_subset_${N}.column.annodbg \
+                --parallel 20 \
+                2>&1"; \
+done
+
+
+for i in {20..1}; do
+    N=$((750 * i));
+    bsub -J "to_flat_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/rows_to_flat_subset_${N}.lsf \
+         -W 96:00 \
+         -n 1 -R "rusage[mem=$((N * 10 + 15000))] span[hosts=1]" \
+        "/usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA transform_anno -v \
+                --anno-type flat \
+                -o ~/metagenome/data/BIGSI/subsets/annotation_subset_${N} \
+                ~/metagenome/data/BIGSI/subsets/annotation_subset_${N}.row.annodbg \
+                2>&1"; \
+done
+
+
+for i in {1..20}; do
+    N=$((750 * i));
+    bsub -J "to_brwt_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/columns_to_brwt_subset_${N}.lsf \
+         -W 96:00 \
+         -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
+        "/usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA transform_anno -v \
+                --anno-type brwt --greedy \
+                -o ~/metagenome/data/BIGSI/subsets/annotation_subset_${N} \
+                ~/metagenome/data/BIGSI/subsets/annotation_subset_${N}.column.annodbg \
+                --parallel 20 \
+                2>&1"; \
+done
 ```

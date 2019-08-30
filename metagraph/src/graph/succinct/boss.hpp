@@ -6,7 +6,6 @@
 #include <progress_bar.hpp>
 
 #include "sequence_graph.hpp"
-#include "datatypes.hpp"
 #include "config.hpp"
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
@@ -73,12 +72,8 @@ class BOSS {
     /**
      * Breaks the sequence into k-mers and searches for the index of each
      * k-mer in the graph. Returns these indices.
-     * Default: kmer_size = k
      */
-    // TODO: remove parameter kmer_size and implement the arbitrary k-mer size
-    // functionality in align_fuzzy()
-    std::vector<node_index> map_to_nodes(const std::string &sequence,
-                                         size_t kmer_size = 0) const;
+    std::vector<node_index> map_to_nodes(const std::string &sequence) const;
 
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
@@ -96,11 +91,6 @@ class BOSS {
     bool find(const std::string &sequence,
               double kmer_discovery_fraction,
               size_t kmer_mapping_mode) const;
-
-    // TODO: revise the implementation, write unit tests
-    std::vector<std::vector<HitInfo>> align_fuzzy(const std::string &sequence,
-                                                  size_t max_distance = 0,
-                                                  size_t alignment_length = 0) const;
 
     template <class... T>
     using Call = typename std::function<void(T...)>;
@@ -150,27 +140,25 @@ class BOSS {
      * of non-redundant dummy source edges.
      * Return value: edges removed from the initial graph.
      */
-    std::vector<bool>
-    erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges = NULL,
+    sdsl::bit_vector
+    erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges = NULL,
                                 size_t num_threads = 0,
                                 bool verbose = false);
 
-    uint64_t mark_source_dummy_edges(std::vector<bool> *mask = NULL,
+    uint64_t mark_source_dummy_edges(sdsl::bit_vector *mask = NULL,
                                      size_t num_threads = 0,
                                      bool verbose = false) const;
 
     // Do not include the main dummy edge (with edge_index = 1)
-    uint64_t mark_sink_dummy_edges(std::vector<bool> *mask = NULL) const;
+    uint64_t mark_sink_dummy_edges(sdsl::bit_vector *mask = NULL) const;
 
     // Mark npos, i.e. 0, as well as all the source
     // and all the sink dummy edges in graph.
-    std::vector<bool>
-    mark_all_dummy_edges(size_t num_threads) const;
+    sdsl::bit_vector mark_all_dummy_edges(size_t num_threads) const;
 
     // Prune redundant dummy edges in graph
     // and mark all dummy edges that cannot be removed.
-    std::vector<bool>
-    prune_and_mark_all_dummy_edges(size_t num_threads);
+    sdsl::bit_vector prune_and_mark_all_dummy_edges(size_t num_threads);
 
     /**
      * Depth first edge traversal.
@@ -378,6 +366,67 @@ class BOSS {
     TAlphabet encode(char s) const;
     std::vector<TAlphabet> encode(const std::string &sequence) const;
 
+    /**
+     * Given iterators to an input sequence, this function finds the index range
+     * of nodes with the maximal length suffix matching a prefix of the sequence.
+     * The tuple includes the indices of the boundary nodes (inclusive) and an
+     * iterator to the first character in the input not matched (end if the full
+     * sequence matched). If a match is not found, it returns std::make_tuple(0, 0, begin)
+     */
+    template <typename RandomAccessIt>
+    std::tuple<edge_index, edge_index, RandomAccessIt>
+    index_range(RandomAccessIt begin, RandomAccessIt end) const {
+        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
+                      "Only encoded sequences can be queried");
+
+        assert(end >= begin);
+        assert(end <= begin + k_);
+
+        if (begin == end)
+            return std::make_tuple(edge_index(1), edge_index(1), begin);
+
+        // check if all characters belong to the alphabet
+        if (std::any_of(begin, end, [&](TAlphabet c) { return c >= alph_size; }))
+            return std::make_tuple(edge_index(0), edge_index(0), begin);
+
+        // get first
+        TAlphabet s = *begin;
+
+        // initial range
+        edge_index rl = F_.at(s) + 1 < W_->size()
+                        ? succ_last(F_.at(s) + 1)
+                        : W_->size(); // lower bound
+        edge_index ru = s < F_.size() - 1
+                        ? F_.at(s + 1)
+                        : W_->size() - 1; // upper bound
+        if (rl > ru)
+            return std::make_tuple(edge_index(0), edge_index(0), begin);
+
+        auto it = begin + 1;
+        // update range iteratively while scanning through s
+        for (; it != end; ++it) {
+            s = *it;
+
+            // Include the head of the first node with the given suffix.
+            rl = pred_last(rl - 1) + 1;
+
+            // Tighten the range including all edges where
+            // the source nodes have the given suffix.
+            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
+            uint64_t rk_ru = rank_W(ru, s);
+            if (rk_rl > rk_ru)
+                return std::make_tuple(rl, ru, it);
+
+            uint64_t offset = rank_last(F_[s]);
+
+            // select the index of the position in last that is rank many positions after offset
+            ru = select_last(offset + rk_ru);
+            rl = select_last(offset + rk_rl);
+        }
+        assert(rl <= ru);
+        return std::make_tuple(rl, ru, it);
+    }
+
     const TAlphabet alph_size;
     const std::string &alphabet;
 
@@ -388,7 +437,7 @@ class BOSS {
     // file dump extension
     static constexpr auto kExtension = ".dbg";
 
-    const KmerExtractor kmer_extractor_;
+    const KmerExtractorBOSS kmer_extractor_;
     const size_t bits_per_char_W_;
 
     // k-mer size
@@ -427,7 +476,7 @@ class BOSS {
      * may invalidate the graph (if leaves nodes with no incoming edges).
      * Returns the number of edges erased.
      */
-    uint64_t erase_edges(const std::vector<bool> &edges_to_remove_mask);
+    uint64_t erase_edges(const sdsl::bit_vector &edges_to_remove_mask);
 
     // traverse graph from the specified (k+1)-mer/edge and call
     // all paths reachable from it
@@ -478,70 +527,12 @@ class BOSS {
     uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
         static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
                       "Only encoded sequences can be queried");
-
         assert(begin + k_ == end);
 
-        return index_range(begin, end).second;
+        auto match = index_range(begin, end);
+
+        return std::get<2>(match) == end ? std::get<1>(match) : 0;
     }
-
-    /**
-     * Given a node label str, this function returns the index range
-     * of nodes sharing the suffix str, if no such range exists, the pair
-     * (0, 0) is returnd.
-     */
-    template <typename RandomAccessIt>
-    std::pair<uint64_t, uint64_t> index_range(RandomAccessIt begin,
-                                              RandomAccessIt end) const {
-        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
-                      "Only encoded sequences can be queried");
-
-        assert(end > begin);
-        assert(end <= begin + k_);
-
-        // check if all characters belong to the alphabet
-        if (std::any_of(begin, end, [&](TAlphabet c) { return c >= alph_size; }))
-            return std::make_pair(0, 0);
-
-        // get first
-        TAlphabet s = *begin;
-
-        // initial range
-        edge_index rl = F_.at(s) + 1 < W_->size()
-                        ? succ_last(F_.at(s) + 1)
-                        : W_->size(); // lower bound
-        edge_index ru = s < F_.size() - 1
-                        ? F_.at(s + 1)
-                        : W_->size() - 1; // upper bound
-        if (rl > ru)
-            return std::make_pair(0, 0);
-
-        // update range iteratively while scanning through s
-        for (auto it = ++begin; it != end; ++it) {
-            s = *it;
-
-            // Include the head of the first node with the given suffix.
-            rl = pred_last(rl - 1) + 1;
-
-            // Tighten the range including all edges where
-            // the source nodes have the given suffix.
-            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
-            uint64_t rk_ru = rank_W(ru, s);
-            if (rk_rl > rk_ru)
-                return std::make_pair(0, 0);
-
-            uint64_t offset = rank_last(F_[s]);
-
-            // select the index of the position in last that is rank many positions after offset
-            ru = select_last(offset + rk_ru);
-            rl = select_last(offset + rk_rl);
-        }
-        assert(rl <= ru);
-        return std::make_pair(rl, ru);
-    }
-
-    // TODO: revise the implementation, write unit tests
-    std::vector<HitInfo> index_fuzzy(const std::string &str,
-                                     size_t max_distance) const;
 
     void verbose_cout() const {}
 

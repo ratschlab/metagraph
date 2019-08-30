@@ -11,7 +11,7 @@ class BOSS::Chunk {
     typedef uint8_t TAlphabet;
 
     // Alphabet size without extra characters
-    Chunk(uint64_t alph_size, size_t k);
+    Chunk(uint64_t alph_size, size_t k, bool canonical);
 
     /**
      * Assumes that kmers are distinct and sorted
@@ -19,11 +19,22 @@ class BOSS::Chunk {
     template <typename KMER, typename COUNT>
     Chunk(uint64_t alph_size,
           size_t k,
+          bool canonical,
           const Vector<std::pair<KMER, COUNT>> &kmers,
           uint8_t bits_per_count = 8);
 
+    template <typename KMER, typename COUNT>
+    Chunk(uint64_t alph_size,
+          size_t k,
+          bool canonical,
+          const utils::DequeStorage<std::pair<KMER, COUNT>> &kmers,
+          uint8_t bits_per_count = 8);
+
     template <typename KMER>
-    Chunk(uint64_t alph_size, size_t k, const Vector<KMER> &kmers);
+    Chunk(uint64_t alph_size, size_t k, bool canonical, const Vector<KMER> &kmers);
+
+    template <typename KMER>
+    Chunk(uint64_t alph_size, size_t k, bool canonical, const utils::DequeStorage<KMER> &kmers);
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
 
@@ -44,7 +55,7 @@ class BOSS::Chunk {
     /**
      * Merge BOSS chunks loaded from the files passed
      */
-    static BOSS*
+    static std::pair<BOSS* /* boss */, bool /* is_canonical */>
     build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                            bool verbose = false,
                            sdsl::int_vector<> *weights = nullptr);
@@ -56,6 +67,7 @@ class BOSS::Chunk {
 
     size_t alph_size_;
     size_t k_;
+    bool canonical_;
     std::vector<TAlphabet> W_;
     std::vector<bool> last_;
     std::vector<uint64_t> F_;

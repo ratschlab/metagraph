@@ -9,11 +9,13 @@ class Config {
   public:
     Config(int argc, const char *argv[]);
 
+    static constexpr auto UNINITIALIZED_STR = "\0";
+
     bool verbose = false;
     bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
-    bool reverse = false;
+    bool forward_and_reverse = false;
     bool canonical = false;
     bool complete = false;
     bool dynamic = false;
@@ -32,13 +34,14 @@ class Config {
     bool fast = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
-    bool internal = false;
     bool clear_dummy = false;
     bool count_dummy = false;
     bool canonical_mode = false;
     bool greedy_brwt = false;
     bool separately = false;
     bool call_bubbles = false;
+    bool call_breakpoints = false;
+    bool map_sequences = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
@@ -63,8 +66,29 @@ class Config {
     unsigned int fallback_abundance_cutoff = 1;
     unsigned int port = 5555;
 
+    // Alignment options
+    bool alignment_seed_unimems = false;
+    bool alignment_edit_distance = false;
+
+    int8_t alignment_match_score = 2;
+    int8_t alignment_mm_transition = 1;
+    int8_t alignment_mm_transversion = 2;
+    int8_t alignment_gap_opening_penalty = 3;
+    int8_t alignment_gap_extension_penalty = 1;
+
+    int64_t alignment_min_cell_score = 0;
+    int64_t alignment_min_path_score = 0;
+
+    size_t alignment_queue_size = 50;
+    size_t alignment_num_alternative_paths = 1;
+    size_t alignment_min_seed_length = 0;
+    size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
+    size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+
     double discovery_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
+    double min_count_quantile = 0.;
+    double max_count_quantile = 1.;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;
@@ -80,6 +104,7 @@ class Config {
     std::string suffix;
     std::string fasta_header_delimiter;
     std::string anno_labels_delimiter = ":";
+    std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string annotation_label = "";
     std::string header = "";
     std::string accession2taxid;
@@ -131,6 +156,7 @@ class Config {
         INVALID = -1,
         SUCCINCT = 1,
         HASH,
+        HASH_PACKED,
         HASH_STR,
         BITMAP,
     };

@@ -1,4 +1,5 @@
 #include <json/json.h>
+#include <ips4o.hpp>
 
 #include "unix_tools.hpp"
 #include "config.hpp"
@@ -22,6 +23,8 @@
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
 #include "graph_cleaning.hpp"
+#include "dbg_aligner.hpp"
+#include "aligner_methods.hpp"
 #include "server.hpp"
 #include "weighted_graph.hpp"
 #include "masked_graph.hpp"
@@ -83,7 +86,10 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 }
 
 std::string remove_graph_extension(const std::string &filename) {
-    return utils::remove_suffix(filename, ".dbg", ".orhashdbg", ".bitmapdbg");
+    return utils::remove_suffix(filename, ".dbg",
+                                          ".orhashdbg",
+                                          ".hashstrdbg",
+                                          ".bitmapdbg");
 }
 
 template <class Graph = BOSS>
@@ -98,7 +104,6 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
     return graph;
 }
 
-template <class DefaultGraphType = DBGSuccinct>
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     auto graph_type = parse_graph_extension(filename);
     switch (graph_type) {
@@ -106,6 +111,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGSuccinct>(filename);
 
         case Config::GraphType::HASH:
+            return load_critical_graph_from_file<DBGHashOrdered>(filename);
+
+        case Config::GraphType::HASH_PACKED:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
 
         case Config::GraphType::HASH_STR:
@@ -127,11 +135,12 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    AnnotatedDBG *anno_graph,
-                   bool reverse,
+                   bool forward_and_reverse,
                    size_t min_count,
                    size_t max_count,
                    bool filename_anno,
                    bool fasta_anno,
+                   const std::string &fasta_anno_comment_delim,
                    const std::string &fasta_header_delimiter,
                    const std::vector<std::string> &anno_labels,
                    bool verbose) {
@@ -165,7 +174,7 @@ void annotate_data(const std::vector<std::string> &files,
 
                     anno_graph->annotate_sequence(seq, labels);
                 },
-                reverse
+                forward_and_reverse
             );
         } else if (utils::get_filetype(file) == "KMC") {
             std::vector<std::string> labels;
@@ -203,8 +212,16 @@ void annotate_data(const std::vector<std::string> &files,
                     std::vector<std::string> labels;
 
                     if (fasta_anno) {
-                        labels = utils::split_string(read_stream->name.s,
-                                                     fasta_header_delimiter);
+                        labels = utils::split_string(
+                            fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                                && read_stream->comment.l
+                                    ? utils::join_strings(
+                                        { read_stream->name.s, read_stream->comment.s },
+                                        fasta_anno_comment_delim,
+                                        true)
+                                    : read_stream->name.s,
+                            fasta_header_delimiter
+                        );
                     }
                     if (filename_anno) {
                         labels.push_back(file);
@@ -227,7 +244,7 @@ void annotate_data(const std::vector<std::string> &files,
                         std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
                 },
-                reverse
+                forward_and_reverse
             );
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -252,7 +269,7 @@ void annotate_data(const std::vector<std::string> &files,
 
 void annotate_coordinates(const std::vector<std::string> &files,
                           AnnotatedDBG *anno_graph,
-                          bool reverse,
+                          bool forward_and_reverse,
                           size_t genome_bin_size,
                           bool verbose) {
     size_t total_seqs = 0;
@@ -279,7 +296,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     std::vector<std::string> labels {
                         file,
                         read_stream->name.s,
-                        std::to_string(reverse && (total_seqs % 2)), // whether the read is reverse
+                        std::to_string(forward_and_reverse && (total_seqs % 2)), // whether the read is reverse
                         "",
                     };
 
@@ -315,10 +332,10 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     // If we read both strands, the next sequence is
                     // either reverse (if the current one is forward)
                     // or new (if the current one is reverse), and therefore forward
-                    if (reverse)
+                    if (forward_and_reverse)
                         forward_strand = !forward_strand;
                 },
-                reverse
+                forward_and_reverse
             );
         } else {
             std::cerr << "ERROR: the type of file "
@@ -465,46 +482,48 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
 }
 
 std::unique_ptr<MaskedDeBruijnGraph>
-mask_graph(const AnnotatedDBG &anno_graph,
-           const Config &config) {
+mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");
 
-    std::vector<std::string> mask_in, mask_out;
-
     // Remove non-present labels
-    std::copy_if(config.label_mask_in.begin(),
-                 config.label_mask_in.end(),
-                 std::back_inserter(mask_in),
-                 [&](const auto &label) {
-                     bool exists = anno_graph.label_exists(label);
-                     if (!exists && config.verbose)
-                         std::cout << "Removing mask-in label " << label << std::endl;
+    config->label_mask_in.erase(
+        std::remove_if(config->label_mask_in.begin(),
+                       config->label_mask_in.end(),
+                       [&](const auto &label) {
+                           bool exists = anno_graph.label_exists(label);
+                           if (!exists && config->verbose)
+                               std::cout << "Removing mask-in label " << label << std::endl;
 
-                     return exists;
-                 });
+                           return !exists;
+                       }),
+        config->label_mask_in.end()
+    );
 
-    std::copy_if(config.label_mask_out.begin(),
-                 config.label_mask_out.end(),
-                 std::back_inserter(mask_out),
-                 [&](const auto &label) {
-                     bool exists = anno_graph.label_exists(label);
-                     if (!exists && config.verbose)
-                         std::cout << "Removing mask-out label " << label << std::endl;
+    config->label_mask_out.erase(
+        std::remove_if(config->label_mask_out.begin(),
+                       config->label_mask_out.end(),
+                       [&](const auto &label) {
+                           bool exists = anno_graph.label_exists(label);
+                           if (!exists && config->verbose)
+                               std::cout << "Removing mask-out label " << label << std::endl;
 
-                     return exists;
-                 });
+                           return !exists;
+                       }),
+        config->label_mask_out.end()
+    );
 
-    if (config.verbose) {
+    if (config->verbose) {
         std::cout << "Masked in:";
-        for (const auto &in : mask_in) {
+        for (const auto &in : config->label_mask_in) {
             std::cout << " " << in;
         }
         std::cout << std::endl;
+
         std::cout << "Masked out:";
-        for (const auto &out : mask_out) {
+        for (const auto &out : config->label_mask_out) {
             std::cout << " " << out;
         }
         std::cout << std::endl;
@@ -514,14 +533,15 @@ mask_graph(const AnnotatedDBG &anno_graph,
         std::move(graph),
         annotated_graph_algorithm::mask_nodes_by_label(
             anno_graph,
-            mask_in, mask_out,
-            [&](UInt64Callback counter_in, UInt64Callback counter_out) {
+            config->label_mask_in,
+            config->label_mask_out,
+            [&](const UInt64Callback &counter_in, const UInt64Callback &counter_out) {
                 auto count_in = counter_in();
-                if (count_in != mask_in.size())
+                if (count_in != config->label_mask_in.size())
                     return false;
 
                 auto count_out = counter_out();
-                return count_out <= config.label_mask_out_fraction * (count_in + count_out);
+                return count_out <= config->label_mask_out_fraction * (count_in + count_out);
             }
         ).release()
     );
@@ -547,6 +567,170 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
     target_annotator->serialize(config.outfbase);
     if (config.verbose)
         std::cout << timer.elapsed() << "sec" << std::endl;
+}
+
+std::vector<DBGAligner<>::DBGAlignment>
+align_sequences(const DeBruijnGraph &graph,
+                const Config &config,
+                const std::string &query,
+                const std::string &reverse_complement_query = "") {
+    if (config.forward_and_reverse) {
+        DBGAligner<> aligner(graph, DBGAlignerConfig(config, graph));
+
+        return config.alignment_seed_unimems
+            ? aligner.extend_mapping_forward_and_reverse_complement(
+                  query,
+                  reverse_complement_query,
+                  config.alignment_min_path_score
+              )
+            : aligner.align_forward_and_reverse_complement(
+                  query,
+                  reverse_complement_query,
+                  config.alignment_min_path_score
+              );
+    }
+
+    Seeder<DeBruijnGraph::node_index> seeder = suffix_seeder<DeBruijnGraph::node_index>;
+    if (config.alignment_seed_unimems) {
+        std::vector<DeBruijnGraph::node_index> nodes;
+        graph.map_to_nodes_sequentially(
+            query.begin(),
+            query.end(),
+            [&](auto node) { nodes.emplace_back(node); }
+        );
+
+        seeder = build_unimem_seeder<DeBruijnGraph::node_index>(nodes, graph);
+    }
+
+    return DBGAligner<>(graph, DBGAlignerConfig(config, graph), seeder).align(
+        query, false, config.alignment_min_path_score
+    );
+}
+
+void map_sequences_in_file(const std::string &file,
+                           const DeBruijnGraph &graph,
+                           std::shared_ptr<DBGSuccinct> dbg,
+                           const Config &config,
+                           const Timer &timer,
+                           ThreadPool *thread_pool = nullptr,
+                           std::mutex *print_mutex = nullptr) {
+    // TODO: multithreaded
+    std::ignore = std::tie(thread_pool, print_mutex);
+
+    Timer data_reading_timer;
+
+    std::function<bool(std::string)> map_kmers;
+    if (dbg) {
+        map_kmers = [&](std::string sequence) {
+            return dbg->get_boss().find(sequence,
+                                        config.discovery_fraction,
+                                        config.kmer_mapping_mode);
+        };
+    } else {
+        map_kmers = [&](std::string sequence) {
+            return graph.find(sequence, config.discovery_fraction);
+        };
+    }
+
+    read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+        if (config.verbose)
+            std::cout << "Sequence: " << read_stream->seq.s << "\n";
+
+        if (config.query_presence
+                && config.alignment_length == graph.get_k()) {
+            if (config.filter_present) {
+                if (map_kmers(std::string(read_stream->seq.s)))
+                    std::cout << ">" << read_stream->name.s << "\n"
+                                     << read_stream->seq.s << "\n";
+            } else {
+                std::cout << map_kmers(std::string(read_stream->seq.s)) << "\n";
+            }
+            return;
+        }
+
+        assert(config.alignment_length <= graph.get_k());
+
+        std::vector<DeBruijnGraph::node_index> graphindices;
+        if (config.alignment_length == graph.get_k()) {
+            graph.map_to_nodes(read_stream->seq.s,
+                               [&](const auto &node) {
+                                   graphindices.emplace_back(node);
+                               });
+        } else if (config.query_presence || config.count_kmers) {
+            // TODO: make more efficient
+            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
+                dbg->call_nodes_with_suffix(
+                    read_stream->seq.s + i,
+                    read_stream->seq.s + i + config.alignment_length,
+                    [&](auto node, auto) {
+                        if (graphindices.empty())
+                            graphindices.emplace_back(node);
+                    },
+                    config.alignment_length
+                );
+            }
+        }
+
+        size_t num_discovered = std::count_if(graphindices.begin(),
+                                              graphindices.end(),
+                                              [](const auto &x) { return x > 0; });
+
+        const size_t num_kmers = graphindices.size();
+
+        if (config.query_presence) {
+            const size_t min_kmers_discovered =
+                num_kmers - num_kmers * (1 - config.discovery_fraction);
+            if (config.filter_present) {
+                if (num_discovered >= min_kmers_discovered)
+                    std::cout << ">" << read_stream->name.s << "\n"
+                                     << read_stream->seq.s << "\n";
+            } else {
+                std::cout << (num_discovered >= min_kmers_discovered) << "\n";
+            }
+            return;
+        }
+
+        if (config.count_kmers) {
+            std::cout << "Kmers matched (discovered/total): "
+                      << num_discovered << "/"
+                      << num_kmers << "\n";
+            return;
+        }
+
+        if (config.alignment_length == graph.get_k()) {
+            for (size_t i = 0; i < graphindices.size(); ++i) {
+                assert(i + config.alignment_length <= read_stream->seq.l);
+                std::cout << std::string(read_stream->seq.s + i, config.alignment_length)
+                          << ": " << graphindices[i] << "\n";
+            }
+        } else {
+            // map input subsequences to multiple nodes
+            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
+                // TODO: make more efficient
+                std::string subseq(read_stream->seq.s + i,
+                                   read_stream->seq.s + i + config.alignment_length);
+
+                dbg->call_nodes_with_suffix(subseq.begin(),
+                                            subseq.end(),
+                                            [&](auto node, auto) {
+                                                std::cout << subseq << ": "
+                                                          << node
+                                                          << "\n";
+                                            },
+                                            config.alignment_length);
+            }
+        }
+
+    }, config.forward_and_reverse);
+
+    if (config.verbose) {
+        std::cout << "File processed in "
+                  << data_reading_timer.elapsed()
+                  << "sec, current mem usage: "
+                  << (get_curr_RSS() >> 20) << " MiB"
+                  << ", total time: " << timer.elapsed()
+                  << "sec" << std::endl;
+    }
 }
 
 
@@ -654,14 +838,13 @@ void print_stats(const Annotator &annotation) {
     std::cout << "========================================================" << std::endl;
 }
 
-
 template <class Callback, class CountedKmer, class Loop>
 void parse_sequences(const std::vector<std::string> &files,
                      const Config &config,
                      const Timer &timer,
-                     Callback call_read,
+                     Callback call_sequence,
                      CountedKmer call_kmer,
-                     Loop call_reads) {
+                     Loop call_sequences) {
     // iterate over input files
     for (const auto &file : files) {
         if (config.verbose) {
@@ -675,11 +858,46 @@ void parse_sequences(const std::vector<std::string> &files,
                                    config.refpath,
                                    config.k,
                                    [&](std::string&& sequence) {
-                                       call_read(std::move(sequence));
+                                       call_sequence(std::move(sequence));
                                    },
-                                   config.reverse);
+                                   config.forward_and_reverse);
         } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
+
+            auto min_count = config.min_count;
+            auto max_count = config.max_count;
+
+            if (config.min_count_quantile > 0 || config.max_count_quantile < 1) {
+                std::unordered_map<uint64_t, uint64_t> count_hist;
+                kmc::read_kmers(
+                    file,
+                    [&](std::string&&, uint32_t count) {
+                        count_hist[count]++;
+                    }
+                );
+
+                if (count_hist.size()) {
+                    std::vector<std::pair<uint64_t, uint64_t>> count_hist_v(count_hist.begin(),
+                                                                            count_hist.end());
+
+                    ips4o::parallel::sort(count_hist_v.begin(), count_hist_v.end(),
+                        [](const auto &first, const auto &second) {
+                            return first.first < second.first;
+                        },
+                        config.parallel
+                    );
+
+                    if (config.min_count_quantile > 0)
+                        min_count = utils::get_quantile(count_hist_v, config.min_count_quantile);
+                    if (config.max_count_quantile < 1)
+                        max_count = utils::get_quantile(count_hist_v, config.max_count_quantile);
+
+                    std::cout << "Used k-mer count thresholds:\n"
+                              << "min (including): " << min_count << "\n"
+                              << "max (excluding): " << max_count << std::endl;
+                }
+            }
+
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence, uint32_t count) {
@@ -692,28 +910,27 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                     call_kmer(std::move(sequence), count);
                 },
-                config.min_count,
-                config.max_count
+                min_count,
+                max_count
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
             if (files.size() >= config.parallel) {
-                auto reverse = config.reverse;
-                auto file_copy = file;
+                auto forward_and_reverse = config.forward_and_reverse;
 
                 // capture all required values by copying to be able
                 // to run task from other threads
-                call_reads([=](auto callback) {
-                    read_fasta_file_critical(file_copy, [=](kseq_t *read_stream) {
+                call_sequences([=](auto callback) {
+                    read_fasta_file_critical(file, [=](kseq_t *read_stream) {
                         // add read to the graph constructor as a callback
                         callback(read_stream->seq.s);
-                    }, reverse);
+                    }, forward_and_reverse);
                 });
             } else {
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     // add read to the graph constructor as a callback
-                    call_read(read_stream->seq.s);
-                }, config.reverse);
+                    call_sequence(read_stream->seq.s);
+                }, config.forward_and_reverse);
             }
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -794,10 +1011,8 @@ std::string form_client_reply(const std::string &received_message,
             read_fasta_from_string(
                 fasta.asString(),
                 [&](kseq_t *read_stream) {
-                    execute_server_query(
-                        std::string(read_stream->name.s),
-                        std::string(read_stream->seq.s)
-                    );
+                    execute_server_query(read_stream->name.s,
+                                         read_stream->seq.s);
                 }
             );
         } else {
@@ -848,6 +1063,9 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
+            if (config->canonical)
+                config->forward_and_reverse = false;
+
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
                     std::cerr << "Error: Only bitmap-graph can be built"
@@ -869,10 +1087,12 @@ int main(int argc, const char *argv[]) {
                 if (config->suffix.size()) {
                     suffixes = { config->suffix };
                 } else {
-                    suffixes = KmerExtractor::generate_suffixes(config->suffix_len);
+                    suffixes = KmerExtractorBOSS::generate_suffixes(config->suffix_len);
                 }
 
-                BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), boss_graph->get_k());
+                BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(),
+                                       boss_graph->get_k(),
+                                       config->canonical);
 
                 //one pass per suffix
                 for (const std::string &suffix : suffixes) {
@@ -1025,6 +1245,10 @@ int main(int argc, const char *argv[]) {
 
                     case Config::GraphType::HASH:
                         graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        break;
+
+                    case Config::GraphType::HASH_PACKED:
+                        graph.reset(new DBGHashOrdered(config->k, config->canonical, true));
                         break;
 
                     case Config::GraphType::HASH_STR:
@@ -1208,11 +1432,12 @@ int main(int argc, const char *argv[]) {
                 annotate_data(files,
                               config->refpath,
                               anno_graph.get(),
-                              config->reverse,
+                              config->forward_and_reverse,
                               config->min_count,
                               config->max_count,
                               config->filename_anno,
                               config->fasta_anno,
+                              config->fasta_anno_comment_delim,
                               config->fasta_header_delimiter,
                               config->anno_labels,
                               config->verbose);
@@ -1234,11 +1459,12 @@ int main(int argc, const char *argv[]) {
                             annotate_data({ filename },
                                           config->refpath,
                                           anno_graph.get(),
-                                          config->reverse,
+                                          config->forward_and_reverse,
                                           config->min_count,
                                           config->max_count,
                                           config->filename_anno,
                                           config->fasta_anno,
+                                          config->fasta_anno_comment_delim,
                                           config->fasta_header_delimiter,
                                           config->anno_labels,
                                           config->verbose);
@@ -1284,7 +1510,7 @@ int main(int argc, const char *argv[]) {
 
             annotate_coordinates(files,
                                  &anno_graph,
-                                 config->reverse,
+                                 config->forward_and_reverse,
                                  config->genome_binsize_anno,
                                  config->verbose);
 
@@ -1363,7 +1589,7 @@ int main(int argc, const char *argv[]) {
                     [&](kseq_t *read_stream) {
                         thread_pool.enqueue(execute_query,
                             std::to_string(seq_count++) + "\t"
-                                + std::string(read_stream->name.s),
+                                + read_stream->name.s,
                             std::string(read_stream->seq.s),
                             config->count_labels,
                             config->suppress_unlabeled,
@@ -1374,7 +1600,7 @@ int main(int argc, const char *argv[]) {
                             std::ref(std::cout)
                         );
                     },
-                    config->reverse
+                    config->forward_and_reverse
                 );
                 if (config->verbose) {
                     std::cout << "Finished extracting sequences from file " << file
@@ -1448,15 +1674,13 @@ int main(int argc, const char *argv[]) {
         case Config::COMPARE: {
             assert(files.size());
 
-            std::cout << "Opening file                " << files.at(0) << std::endl;
-            auto graph = load_critical_graph_from_file(files.at(0));
+            std::cout << "Loading graph                " << files.at(0) << std::endl;
+            auto graph = load_critical_dbg(files.at(0));
 
             for (size_t f = 1; f < files.size(); ++f) {
-                std::cout << "Opening file for comparison " << files[f] << std::endl;
-                auto second = load_critical_graph_from_file(files[f]);
-                if (config->internal
-                        ? graph->equals_internally(*second, config->verbose)
-                        : *graph == *second) {
+                std::cout << "Loading graph for comparison " << files[f] << std::endl;
+                auto second = load_critical_dbg(files[f]);
+                if (*graph == *second) {
                     std::cout << "Graphs are identical" << std::endl;
                 } else {
                     std::cout << "Graphs are not identical" << std::endl;
@@ -1470,11 +1694,13 @@ int main(int argc, const char *argv[]) {
 
             auto chunk_files = files;
 
+            Timer timer;
+
             if (!files.size()) {
                 assert(config->infbase.size());
 
                 const auto sorted_suffixes = config->graph_type == Config::GraphType::SUCCINCT
-                        ? KmerExtractor().generate_suffixes(config->suffix_len)
+                        ? KmerExtractorBOSS().generate_suffixes(config->suffix_len)
                         : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
 
                 for (const std::string &suffix : sorted_suffixes) {
@@ -1483,31 +1709,57 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
+            if (!chunk_files.size()) {
+                std::cerr << "Error: no input files provided, nothing to concatenate" << std::endl;
+                exit(1);
+            }
+
             for (auto &filename : chunk_files) {
                 filename = utils::remove_suffix(filename,
-                                                    BOSS::Chunk::kFileExtension,
-                                                    DBGBitmap::kChunkFileExtension);
+                                                BOSS::Chunk::kFileExtension,
+                                                DBGBitmap::kChunkFileExtension);
             }
 
             // collect results on an external merge or construction
             std::unique_ptr<DeBruijnGraph> graph;
-            if (config->graph_type == Config::GraphType::SUCCINCT) {
-                graph.reset(
-                    new DBGSuccinct(BOSS::Chunk::build_boss_from_chunks(
-                        chunk_files, config->verbose
-                    ), config->canonical)
-                );
-            } else if (config->graph_type == Config::GraphType::BITMAP) {
-                graph.reset(
-                    DBGBitmapConstructor::build_graph_from_chunks(
+            switch (config->graph_type) {
+                case Config::GraphType::SUCCINCT: {
+                    auto p = BOSS::Chunk::build_boss_from_chunks(chunk_files, config->verbose);
+                    auto dbg_succ = std::make_unique<DBGSuccinct>(p.first, p.second);
+
+                    if (config->verbose) {
+                        std::cout << "Chunks concatenated in "
+                                  << timer.elapsed() << "sec" << std::endl;
+                    }
+
+                    if (config->clear_dummy) {
+                        if (config->verbose) {
+                            std::cout << "Traverse source dummy edges,"
+                                      << " remove redundant ones, and mark"
+                                      << " those that cannot be removed."
+                                      << std::endl;
+                        }
+                        dbg_succ->mask_dummy_kmers(config->parallel, true);
+                    }
+                    graph = std::move(dbg_succ);
+                    break;
+                }
+                case Config::GraphType::BITMAP: {
+                    graph.reset(DBGBitmapConstructor::build_graph_from_chunks(
                         chunk_files, config->canonical, config->verbose
-                    )
-                );
+                    ));
+                    break;
+                }
+                default:
+                    std::cout << "ERROR: Cannot concatenate chunks for "
+                              << "this graph representation" << std::endl;
+                    exit(1);
             }
             assert(graph.get());
 
             if (config->verbose) {
-                std::cout << "Graph has been assembled" << std::endl;
+                std::cout << "Graph was assembled in "
+                          << timer.elapsed() << "sec" << std::endl;
                 print_stats(*graph);
                 if (config->graph_type == Config::GraphType::SUCCINCT) {
                     print_boss_stats(
@@ -2226,7 +2478,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Masking graph...\t" << std::flush;
                 }
 
-                graph = mask_graph(*anno_graph, *config);
+                graph = mask_graph(*anno_graph, config.get());
 
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
@@ -2312,153 +2564,198 @@ int main(int argc, const char *argv[]) {
         case Config::ALIGN: {
             assert(config->infbase.size());
 
-            // load graph
-            auto graph = load_critical_graph_from_file(config->infbase);
+            // initialize aligner
+            auto graph = load_critical_dbg(config->infbase);
+            auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
-            if (!config->alignment_length) {
-                if (config->distance > 0) {
-                    config->alignment_length = graph->get_k();
-                } else {
-                    config->alignment_length = graph->get_k() + 1;
-                }
-            }
-
-            if (config->alignment_length > graph->get_k() + 1) {
-                // std::cerr << "ERROR: Alignment patterns longer than"
-                //           << " the graph edge size are not supported."
-                //           << " Decrease the alignment length." << std::endl;
-                // exit(1);
-                std::cerr << "Warning: Aligning to k-mers"
-                          << " longer than k+1 is not supported." << std::endl;
-                config->alignment_length = graph->get_k() + 1;
-            }
-            if (config->distance > 0
-                    && config->alignment_length != graph->get_k()) {
-                std::cerr << "Warning: Aligning to k-mers longer or shorter than k"
-                          << " is not supported for fuzzy alignment." << std::endl;
-                config->alignment_length = graph->get_k();
-            }
+            // This speeds up mapping, and allows for node suffix matching
+            if (dbg)
+                dbg->reset_mask();
 
             Timer timer;
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            std::mutex print_mutex;
 
-            std::cout << "Align sequences against the de Bruijn graph with ";
-            std::cout << "k=" << graph->get_k() << "\n"
-                      << "Length of aligning k-mers: "
-                      << config->alignment_length << std::endl;
+            if (config->map_sequences) {
+                if (!config->alignment_length) {
+                    config->alignment_length = graph->get_k();
+                } else if (config->alignment_length > graph->get_k()) {
+                    std::cerr << "Warning: Mapping to k-mers"
+                              << " longer than k is not supported." << std::endl;
+                    config->alignment_length = graph->get_k();
+                }
+
+                if (!dbg && config->alignment_length != graph->get_k()) {
+                    std::cerr << "Error: matching k-mers shorter than k only supported for DBGSuccinct"
+                              << std::endl;
+                    exit(1);
+                }
+
+                if (utils::get_verbose()) {
+                    std::cout << "Map sequences against the de Bruijn graph with "
+                              << "k = " << graph->get_k() << "\n"
+                              << "Length of mapped k-mers: "
+                              << config->alignment_length << std::endl;
+                }
+
+                for (const auto &file : files) {
+                    if (utils::get_verbose())
+                        std::cout << "Map sequences from file " << file << std::endl;
+
+                    map_sequences_in_file(file,
+                                          *graph,
+                                          dbg,
+                                          *config,
+                                          timer,
+                                          &thread_pool,
+                                          &print_mutex);
+                }
+
+                thread_pool.join();
+
+                return 0;
+            }
+
+            // fix seed length bounds
+            if (!config->alignment_min_seed_length || config->alignment_seed_unimems)
+                config->alignment_min_seed_length = graph->get_k();
+
+            if (config->alignment_max_seed_length == std::numeric_limits<size_t>::max()
+                    && !config->alignment_seed_unimems)
+                config->alignment_max_seed_length = graph->get_k();
+
+            if (config->verbose) {
+                std::cout << "Alignment settings:" << "\n"
+                          << "\t Seeding: " << (config->alignment_seed_unimems ? "unimems" : "nodes") << "\n"
+                          << "\t Alignments to report: " << config->alignment_num_alternative_paths << "\n"
+                          << "\t Priority queue size: " << config->alignment_queue_size << "\n"
+                          << "\t Min seed length: " << config->alignment_min_seed_length << "\n"
+                          << "\t Max seed length: " << config->alignment_max_seed_length << "\n"
+                          << "\t Max num seeds per locus: " << config->alignment_max_num_seeds_per_locus << "\n"
+                          << "\t Scoring matrix: " << (config->alignment_edit_distance ? "unit costs" : "matrix") << "\n"
+                          << "\t Gap opening penalty: " << int64_t(config->alignment_gap_opening_penalty) << "\n"
+                          << "\t Gap extension penalty: " << int64_t(config->alignment_gap_extension_penalty) << "\n"
+                          << "\t Min DP table cell score: " << int64_t(config->alignment_min_cell_score) << "\n"
+                          << "\t Min alignment score: " << config->alignment_min_path_score << std::endl;
+
+                if (!config->alignment_edit_distance)
+                    std::cout << "\t Match score: " << int64_t(config->alignment_match_score) << "\n"
+                              << "\t (DNA) Transition score: " << int64_t(config->alignment_mm_transition) << "\n"
+                              << "\t (DNA) Transversion score: " << int64_t(config->alignment_mm_transversion) << "\n";
+
+                std::cout << std::endl;
+            }
+
+            Cigar::initialize_opt_table(graph->alphabet());
 
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
 
                 Timer data_reading_timer;
 
+                std::ostream *outstream = config->outfbase.size()
+                    ? new std::ofstream(config->outfbase)
+                    : &std::cout;
+
+                std::unique_ptr<Json::StreamWriter> json_writer;
+                if (utils::ends_with(config->outfbase, ".json")) {
+                    Json::StreamWriterBuilder builder;
+                    builder["indentation"] = "";
+                    json_writer.reset(builder.newStreamWriter());
+                }
+
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                    if (config->distance > 0) {
-                        uint64_t aln_len = read_stream->seq.l;
+                    thread_pool.enqueue([&](std::string query,
+                                            std::string header) {
+                            std::string rc_query;
 
-                        // since we set aln_len = read_stream->seq.l, we only get a single hit vector
-                        auto graphindices = graph->align_fuzzy(
-                            std::string(read_stream->seq.s, read_stream->seq.l),
-                            aln_len,
-                            config->distance
-                        );
-                        //for (size_t i = 0; i < graphindices.size(); ++i) {
-                        size_t i = 0;
-
-                        int print_len = i + aln_len < read_stream->seq.l
-                                        ? aln_len
-                                        : (read_stream->seq.l - i);
-
-                        printf("%.*s: ", print_len, read_stream->seq.s + i);
-
-                        for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
-                            HitInfo curr_hit(graphindices.at(i).at(l));
-                            for (size_t m = 0; m < curr_hit.path.size(); ++m) {
-                                std::cout << curr_hit.path.at(m) << ':';
+                            if (config->forward_and_reverse) {
+                                rc_query = query;
+                                reverse_complement(rc_query.begin(), rc_query.end());
                             }
-                            for (size_t m = curr_hit.rl; m <= curr_hit.ru; ++m) {
-                                std::cout << m << " ";
+
+                            auto paths = align_sequences(*graph,
+                                                         *config,
+                                                         query,
+                                                         rc_query);
+
+                            auto lock = std::lock_guard<std::mutex>(print_mutex);
+                            if (!json_writer.get()) {
+                                for (const auto &path : paths) {
+                                    *outstream << header << "\t"
+                                               << query << "\t"
+                                               << path
+                                               << std::endl;
+                                }
+
+                                if (paths.empty())
+                                    *outstream << header << "\t"
+                                               << query << "\t"
+                                               << "*\t*\t"
+                                               << config->alignment_min_path_score << "\t*\t*"
+                                               << std::endl;
+                            } else {
+                                bool secondary = false;
+                                for (const auto &path : paths) {
+                                    const auto& path_query = path.get_orientation()
+                                        ? rc_query
+                                        : query;
+
+                                    assert(path.get_query_begin() >= &*path_query.begin());
+                                    assert(path.get_query_end() <= &*path_query.end());
+
+                                    json_writer->write(
+                                        path.to_json(path_query,
+                                                     *graph,
+                                                     secondary,
+                                                     header),
+                                        outstream
+                                    );
+
+                                    *outstream << std::endl;
+
+                                    secondary = true;
+                                }
+
+                                if (paths.empty()) {
+                                    json_writer->write(
+                                        DBGAligner<>::DBGAlignment().to_json(
+                                            "",
+                                            *graph,
+                                            secondary,
+                                            header
+                                        ),
+                                        outstream
+                                    );
+
+                                    *outstream << std::endl;
+                                }
                             }
-                            std::cout << "[" << curr_hit.cigar << "] ";
-                        }
-                        //}
-                        std::cout << std::endl;
-
-                        return;
-                    }
-
-                    // Non-fuzzy mode
-
-                    if (config->verbose) {
-                        std::cout << "Sequence: " << read_stream->seq.s << "\n";
-                    }
-
-                    if (config->query_presence
-                            && config->alignment_length == graph->get_k() + 1) {
-                        if (config->filter_present) {
-                            if (graph->find(read_stream->seq.s,
-                                            config->discovery_fraction,
-                                            config->kmer_mapping_mode))
-                                std::cout << ">" << read_stream->name.s << "\n"
-                                                 << read_stream->seq.s << "\n";
-                        } else {
-                            std::cout << graph->find(read_stream->seq.s,
-                                                     config->discovery_fraction,
-                                                     config->kmer_mapping_mode) << "\n";
-                        }
-                        return;
-                    }
-
-                    assert(config->alignment_length <= graph->get_k() + 1);
-
-                    std::vector<uint64_t> graphindices;
-
-                    if (config->alignment_length == graph->get_k() + 1) {
-                        graphindices = graph->map_to_edges(read_stream->seq.s);
-                    } else {
-                        graphindices = graph->map_to_nodes(read_stream->seq.s,
-                                                           config->alignment_length);
-                    }
-
-                    size_t num_discovered = std::count_if(
-                        graphindices.begin(), graphindices.end(),
-                        [](const auto &x) { return x > 0; }
+                        },
+                        std::string(read_stream->seq.s),
+                        config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                            && read_stream->comment.l
+                                ? utils::join_strings(
+                                    { read_stream->name.s, read_stream->comment.s },
+                                    config->fasta_anno_comment_delim,
+                                    true)
+                                : std::string(read_stream->name.s)
                     );
 
-                    const size_t num_kmers = graphindices.size();
-
-                    if (config->query_presence) {
-                        const size_t min_kmers_discovered =
-                            num_kmers - num_kmers * (1 - config->discovery_fraction);
-                        if (config->filter_present) {
-                            if (num_discovered >= min_kmers_discovered)
-                                std::cout << ">" << read_stream->name.s << "\n"
-                                                 << read_stream->seq.s << "\n";
-                        } else {
-                            std::cout << (num_discovered >= min_kmers_discovered) << "\n";
-                        }
-                        return;
+                    if (config->verbose) {
+                        std::cout << "File processed in "
+                                  << data_reading_timer.elapsed()
+                                  << "sec, current mem usage: "
+                                  << (get_curr_RSS() >> 20) << " MiB"
+                                  << ", total time: " << timer.elapsed()
+                                  << "sec" << std::endl;
                     }
+                });
 
-                    if (config->count_kmers) {
-                        std::cout << "Kmers matched (discovered/total): " << num_discovered << "/" << num_kmers << "\n";
-                        return;
-                    }
+                thread_pool.join();
 
-                    for (size_t i = 0; i < graphindices.size(); ++i) {
-                        assert(i + config->alignment_length <= read_stream->seq.l);
-                        std::cout << std::string(read_stream->seq.s + i, config->alignment_length);
-                        std::cout << ": " << graphindices[i] << "\n";
-                    }
-                }, config->reverse);
-
-                if (config->verbose) {
-                    std::cout << "File processed in "
-                              << data_reading_timer.elapsed()
-                              << "sec, current mem usage: "
-                              << (get_curr_RSS() >> 20) << " MiB"
-                              << ", total time: " << timer.elapsed()
-                              << "sec" << std::endl;
-                }
+                if (config->outfbase.size())
+                    delete outstream;
             }
 
             return 0;
@@ -2477,7 +2774,7 @@ int main(int argc, const char *argv[]) {
             }
 
             auto anno_graph = initialize_annotated_dbg(*config);
-            auto masked_graph = mask_graph(*anno_graph, *config);
+            auto masked_graph = mask_graph(*anno_graph, config.get());
 
             if (config->verbose) {
                 std::cout << "Filter out:";
@@ -2487,20 +2784,42 @@ int main(int argc, const char *argv[]) {
                 std::cout << std::endl;
             }
 
+            std::ostream *outstream = config->outfbase.size()
+                ? new std::ofstream(config->outfbase)
+                : &std::cout;
+
+            std::unique_ptr<Json::StreamWriter> json_writer;
+            if (utils::ends_with(config->outfbase, ".json")) {
+                Json::StreamWriterBuilder builder;
+                builder["indentation"] = "";
+                json_writer.reset(builder.newStreamWriter());
+            } else {
+                *outstream << "Index"
+                           << "\t" << "Ref"
+                           << "\t" << "Var"
+                           << "\t" << "Label";
+
+                if (taxid_mapper.get())
+                    *outstream << "\t" << "TaxID";
+
+                *outstream << std::endl;
+            }
+
             std::sort(config->label_filter.begin(), config->label_filter.end());
 
             ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
             std::mutex print_label_mutex;
             std::atomic_uint64_t num_calls = 0;
 
-            auto print_index_ref_var_label =
-                [&](const auto &first, const auto &ref, const auto &var, auto&& labels) {
-                    std::lock_guard<std::mutex> lock(print_label_mutex);
+            auto mask_in_labels = utils::join_strings(config->label_mask_in, ",");
 
-                    std::sort(labels.begin(), labels.end());
+            auto print_variant =
+                [&](auto&& alignment, std::string&& query, auto&& vlabels) {
+                    // filter out labels
+                    std::sort(vlabels.begin(), vlabels.end());
 
                     auto it = config->label_filter.begin();
-                    for (const auto &label : labels) {
+                    for (const auto &label : vlabels) {
                         while (it != config->label_filter.end() && *it < label)
                             ++it;
 
@@ -2511,74 +2830,72 @@ int main(int argc, const char *argv[]) {
                             return;
                     }
 
-                    num_calls += labels.size();
+                    num_calls++;
 
-                    std::cout << first
-                              << "\t" << ref
-                              << "\t" << var
-                              << "\t" << utils::join_strings(labels, ",");
+                    auto label = utils::join_strings(vlabels, ",");
 
+                    // map labels to Taxonomy IDs
                     if (taxid_mapper.get()) {
-                        std::transform(
-                            labels.begin(), labels.end(),
-                            labels.begin(),
-                            [&](const auto &label) {
-                                return std::to_string(taxid_mapper->gb_to_taxid(label));
+                        label += "\t" + std::accumulate(
+                            vlabels.begin(),
+                            vlabels.end(),
+                            std::string(),
+                            [&](std::string &taxids, const std::string &label) {
+                                return std::move(taxids) + ","
+                                    + std::to_string(taxid_mapper->gb_to_taxid(label));
                             }
                         );
-
-                        std::cout << "\t" << utils::join_strings(labels, ",");
                     }
 
-                    std::cout << std::endl;
+                    // print labels
+                    std::lock_guard<std::mutex> lock(print_label_mutex);
+                    if (utils::ends_with(config->outfbase, ".json")) {
+                        json_writer->write(
+                            alignment.to_json(
+                                query,
+                                masked_graph->get_graph(),
+                                false,
+                                mask_in_labels + ":" + std::to_string(num_calls),
+                                label
+                            ),
+                            outstream
+                        );
+
+                        *outstream << std::endl;
+                    } else {
+                        std::cout << alignment.front() << "\t"
+                                  << query << "\t"
+                                  << alignment.get_sequence() << "\t"
+                                  << label << std::endl;
+                    }
                 };
 
             if (config->call_bubbles) {
-                std::cout << "Index"
-                          << "\t" << "Ref"
-                          << "\t" << "Var"
-                          << "\t" << "Label";
-
-                if (taxid_mapper.get())
-                    std::cout << "\t" << "TaxID";
-
-                std::cout << std::endl;
-
-                annotated_graph_algorithm::call_bubbles(*masked_graph,
-                                                        *anno_graph,
-                                                        print_index_ref_var_label,
-                                                        &thread_pool);
-                thread_pool.join();
-
-                if (config->verbose) {
-                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
-                              << std::endl
-                              << "# bubbles called: " << num_calls
-                              << std::endl;
-                }
+                annotated_graph_algorithm::call_bubbles(
+                    *masked_graph,
+                    *anno_graph,
+                    print_variant,
+                    &thread_pool
+                );
+            } else if (config->call_breakpoints) {
+                annotated_graph_algorithm::call_breakpoints(
+                    *masked_graph,
+                    *anno_graph,
+                    print_variant,
+                    &thread_pool
+                );
             } else {
-                std::cout << "Index"
-                          << "\t" << "Node"
-                          << "\t" << "Edge"
-                          << "\t" << "Label";
+                std::cerr << "ERROR: no variant calling mode selected. Exiting" << std::endl;
+                exit(1);
+            }
 
-                if (taxid_mapper.get())
-                    std::cout << "\t" << "TaxID";
+            thread_pool.join();
 
-                std::cout << std::endl;
-
-                annotated_graph_algorithm::call_breakpoints(*masked_graph,
-                                                            *anno_graph,
-                                                            print_index_ref_var_label,
-                                                            &thread_pool);
-                thread_pool.join();
-
-                if (config->verbose) {
-                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
-                              << std::endl
-                              << "# breakpoints called: " << num_calls
-                              << std::endl;
-                }
+            if (config->verbose) {
+                std::cout << "# nodes checked: " << masked_graph->num_nodes()
+                          << std::endl
+                          << "# called: " << num_calls
+                          << std::endl;
             }
 
             return 0;

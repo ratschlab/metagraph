@@ -219,6 +219,154 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
     );
 }
 
+template <class StringIt>
+void DBGSuccinct
+::call_nodes_with_suffix(StringIt begin,
+                         StringIt end,
+                         const std::function<void(node_index, uint64_t /* match length */)>& callback,
+                         size_t min_match_length,
+                         size_t max_num_allowed_matches) const {
+    if (begin >= end || !max_num_allowed_matches)
+        return;
+
+    assert(get_k() >= static_cast<size_t>(end - begin));
+
+    if (static_cast<size_t>(end - begin) < min_match_length)
+        return;
+
+    auto encoded = boss_graph_->encode(std::string(begin, end));
+    auto index_range = boss_graph_->index_range(
+        encoded.begin(),
+        std::min(encoded.begin() + get_k() - 1, encoded.end())
+    );
+
+    if (std::get<0>(index_range) == 0 || std::get<1>(index_range) == 0)
+        return;
+
+    if (std::get<2>(index_range) == encoded.begin()) {
+        callback(std::get<0>(index_range), 0);
+        return;
+    }
+
+    // since we can only match up to get_k() - 1 in BOSS, check for this
+    // case and simply pick the appropriate BOSS edge
+    if (encoded.size() == get_k() && std::get<2>(index_range) + 1 == encoded.end()) {
+        assert(std::get<0>(index_range) == std::get<1>(index_range));
+        auto edge = boss_graph_->pick_edge(
+            std::get<1>(index_range),
+            boss_graph_->get_source_node(std::get<1>(index_range)),
+            encoded.back()
+        );
+        if (edge) {
+            auto kmer_index = boss_to_kmer_index(edge);
+            if (kmer_index != npos) {
+                callback(kmer_index, end - begin);
+                return;
+            }
+        }
+    }
+
+    uint64_t match_size = std::get<2>(index_range) - encoded.begin();
+    if (match_size < min_match_length)
+        return;
+
+    auto rank_first = boss_graph_->rank_last(std::get<0>(index_range));
+    auto rank_last = boss_graph_->rank_last(std::get<1>(index_range));
+    if (max_num_allowed_matches < std::numeric_limits<size_t>::max()) {
+        std::vector<node_index> nodes;
+
+        for (auto i = rank_first; i <= rank_last && nodes.size() <= max_num_allowed_matches; ++i) {
+            boss_graph_->call_adjacent_incoming_edges(
+                boss_graph_->select_last(i),
+                [&](BOSS::edge_index incoming_edge_idx) {
+                    auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
+                    if (kmer_index != npos)
+                        nodes.emplace_back(kmer_index);
+                }
+            );
+        }
+
+        if (nodes.size() > max_num_allowed_matches)
+            return;
+
+        for (auto node : nodes) {
+            callback(node, match_size);
+        }
+    } else {
+        for (auto i = rank_first; i <= rank_last; ++i) {
+            boss_graph_->call_adjacent_incoming_edges(
+                boss_graph_->select_last(i),
+                [&](BOSS::edge_index incoming_edge_idx) {
+                    auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
+                    if (kmer_index != npos)
+                        callback(kmer_index, match_size);
+                }
+            );
+        }
+    }
+}
+
+template void DBGSuccinct
+::call_nodes_with_suffix<const char*>(const char*,
+                                      const char*,
+                                      const std::function<void(node_index, uint64_t)>&,
+                                      size_t,
+                                      size_t) const;
+
+template void DBGSuccinct
+::call_nodes_with_suffix<char*>(char*,
+                                char*,
+                                const std::function<void(node_index, uint64_t)>&,
+                                size_t,
+                                size_t) const;
+
+template void DBGSuccinct
+::call_nodes_with_suffix<std::string::const_iterator>(std::string::const_iterator,
+                                                      std::string::const_iterator,
+                                                      const std::function<void(node_index, uint64_t)>&,
+                                                      size_t,
+                                                      size_t) const;
+
+template void DBGSuccinct
+::call_nodes_with_suffix<std::string::iterator>(std::string::iterator,
+                                                std::string::iterator,
+                                                const std::function<void(node_index, uint64_t)>&,
+                                                size_t,
+                                                size_t) const;
+
+void DBGSuccinct::traverse(node_index start,
+                           const char* begin,
+                           const char* end,
+                           const std::function<void(node_index)> &callback,
+                           const std::function<bool()> &terminate) const {
+    assert(start != npos);
+    assert(end >= begin);
+
+    if (terminate())
+        return;
+
+    auto edge = kmer_to_boss_index(start);
+    assert(edge);
+
+    for (; begin != end && !terminate() && boss_graph_->get_W(edge); ++begin) {
+        edge = boss_graph_->fwd(edge);
+        edge = boss_graph_->pick_edge(edge,
+                                      boss_graph_->get_source_node(edge),
+                                      boss_graph_->encode(*begin));
+
+        if (!edge)
+            return;
+
+        start = boss_to_kmer_index(edge);
+
+        if (start != npos) {
+            callback(start);
+        } else {
+            return;
+        }
+    }
+}
+
 // Map sequence k-mers to the canonical graph nodes
 // and run callback for each node until the termination condition is satisfied
 void DBGSuccinct::map_to_nodes(const std::string &sequence,
@@ -505,29 +653,27 @@ Config::StateType DBGSuccinct::get_state() const {
 void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     valid_edges_.reset();
 
-    //TODO: use sdsl::bit_vector as mask
     auto vector_mask = with_pruning
         ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
         : boss_graph_->mark_all_dummy_edges(num_threads);
 
-    auto vector = to_sdsl(std::move(vector_mask));
-    vector.flip();
+    vector_mask.flip();
 
     switch (get_state()) {
         case Config::STAT: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
             break;
         }
         case Config::FAST: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
             break;
         }
         case Config::DYN: {
-            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector_mask));
             break;
         }
         case Config::SMALL: {
-            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
             break;
         }
     }
@@ -538,6 +684,10 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
 
     if (auto weights = this->get_extension<DBGWeights<>>())
         weights->remove_masked_weights(*valid_edges_);
+}
+
+void DBGSuccinct::reset_mask() {
+    valid_edges_.reset();
 }
 
 uint64_t DBGSuccinct::kmer_to_boss_index(node_index kmer_index) const {
@@ -563,13 +713,29 @@ DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) con
 }
 
 bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
+    if (get_k() != other.get_k()
+            || num_nodes() != other.num_nodes()
+            || is_canonical_mode() != other.is_canonical_mode())
+        return false;
+
     if (dynamic_cast<const DBGSuccinct*>(&other)) {
-        const auto& other_succ = *dynamic_cast<const DBGSuccinct*>(&other);
-        if (boss_graph_.get() == other_succ.boss_graph_.get())
+        const auto &other_succ = *dynamic_cast<const DBGSuccinct*>(&other);
+
+        if (this == &other_succ)
             return true;
 
-        if (!boss_graph_.get() || !other_succ.boss_graph_.get())
+        // only one of the mask vectors is defined
+        if (bool(valid_edges_.get()) != bool(other_succ.valid_edges_.get()))
             return false;
+
+        // different mask vectors
+        if (valid_edges_.get() && *valid_edges_ != *other_succ.valid_edges_)
+            return false;
+
+        // TODO: what if graphs have same real nodes, different
+        // sets of dummy nodes but they all are masked out?
+
+        assert(boss_graph_.get() && other_succ.boss_graph_.get());
 
         return boss_graph_->equals_internally(*other_succ.boss_graph_, false);
     }

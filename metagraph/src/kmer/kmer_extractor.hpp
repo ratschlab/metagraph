@@ -14,7 +14,7 @@
 #include "alphabets.hpp"
 
 
-class KmerExtractor {
+class KmerExtractorBOSS {
   public:
 
     #if _PROTEIN_GRAPH
@@ -39,7 +39,7 @@ class KmerExtractor {
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
 
-    KmerExtractor();
+    KmerExtractorBOSS();
 
     /**
      * Break the sequence into kmers and add them to the kmer storage.
