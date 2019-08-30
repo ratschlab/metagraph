@@ -433,6 +433,41 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckNodes) {
     }
 }
 
+TYPED_TEST(MaskedDeBruijnGraphTest, CheckNonExistant) {
+    for (size_t k = 3; k <= 10; ++k) {
+        std::vector<std::string> sequences { "ATGCAGTACTCAG",
+                                             "ATGCAGTACTGAG",
+                                             "GGGGGGGGGGGGG" };
+        std::string nonexistant = "TTTTTTTTTTTT";
+        auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+        for (const auto &sequence : sequences) {
+            auto mask = std::make_unique<bit_vector_stat>(
+                full_graph->num_nodes() + 1, true
+            );
+            mask->set(DeBruijnGraph::npos, false);
+            std::set<std::string> erased;
+            full_graph->map_to_nodes(
+                sequence,
+                [&](const auto &index) {
+                    erased.insert(full_graph->get_node_sequence(index));
+                    mask->set(index, false);
+                }
+            );
+
+            MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+
+            graph.map_to_nodes(nonexistant, [&](auto node) {
+                EXPECT_EQ(DeBruijnGraph::npos, node);
+            });
+
+            graph.map_to_nodes(sequence, [&](auto node) {
+                EXPECT_EQ(DeBruijnGraph::npos, node);
+            });
+        }
+    }
+}
+
 TYPED_TEST(MaskedDeBruijnGraphTest, CheckOutgoingNodes) {
     for (size_t k = 3; k <= 10; ++k) {
         std::vector<std::string> sequences { "ATGCAGTACTCAG",

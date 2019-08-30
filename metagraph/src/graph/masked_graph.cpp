@@ -31,13 +31,13 @@ MaskedDeBruijnGraph
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 ::traverse(node_index node, char next_char) const {
     auto index = graph_->traverse(node, next_char);
-    return in_graph(index) ? index : DeBruijnGraph::npos;
+    return index && in_graph(index) ? index : DeBruijnGraph::npos;
 }
 // Traverse the incoming edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 ::traverse_back(node_index node, char prev_char) const {
     auto index = graph_->traverse_back(node, prev_char);
-    return in_graph(index) ? index : DeBruijnGraph::npos;
+    return index && in_graph(index) ? index : DeBruijnGraph::npos;
 }
 
 size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
@@ -126,7 +126,9 @@ void MaskedDeBruijnGraph
                const std::function<bool()> &terminate) const {
     graph_->map_to_nodes(
         sequence,
-        [&](const node_index &index) { callback(in_graph(index) ? index : npos); },
+        [&](const node_index &index) {
+            callback(index && in_graph(index) ? index : npos);
+        },
         terminate
     );
 }
@@ -141,7 +143,9 @@ void MaskedDeBruijnGraph
                             const std::function<bool()> &terminate) const {
     graph_->map_to_nodes_sequentially(
         begin, end,
-        [&](const node_index &index) { callback(in_graph(index) ? index : npos); },
+        [&](const node_index &index) {
+            callback(index && in_graph(index) ? index : npos);
+        },
         terminate
     );
 }
