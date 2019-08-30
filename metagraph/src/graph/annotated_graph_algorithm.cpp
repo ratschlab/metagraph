@@ -4,6 +4,7 @@
 #include "utils.hpp"
 #include "progress_bar.hpp"
 #include "int_vector.hpp"
+#include "masked_graph.hpp"
 
 namespace annotated_graph_algorithm {
 
@@ -166,21 +167,24 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 }
 
 void
-call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
+call_paths_from_branch(const DeBruijnGraph &graph,
+                       const DeBruijnGraph &full_graph,
                        const std::function<void(node_index, node_index, std::string&&)> &callback,
                        const std::function<bool(node_index, node_index, const std::string&)> &stop_path,
                        const std::function<bool()> &terminate = []() { return false; }) {
-    bit_vector_stat visited(masked_graph.num_nodes() + 1, false);
+    assert(&graph != &full_graph);
+
+    bit_vector_stat visited(graph.num_nodes() + 1, false);
 
     bool stop = false;
-    masked_graph.call_nodes(
+    graph.call_nodes(
         [&](auto start) {
-            if (visited[start] || masked_graph.unmasked_outdegree(start) <= 1)
+            if (visited[start] || full_graph.outdegree(start) <= 1)
                 return;
 
             visited.set(start, true);
 
-            auto node_seq = masked_graph.get_node_sequence(start);
+            auto node_seq = graph.get_node_sequence(start);
 
             if (stop_path(start, start, node_seq)) {
                 if (!(stop = terminate()))
@@ -196,28 +200,31 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
                 paths.pop();
 
                 if (!visited[std::get<1>(path)]
-                        && masked_graph.unmasked_outdegree(std::get<1>(path)) > 1) {
+                        && full_graph.outdegree(std::get<1>(path)) > 1) {
                     visited.set(std::get<1>(path), true);
                     paths.emplace(std::get<1>(path),
                                   std::get<1>(path),
-                                  std::string(std::get<2>(path).end() - masked_graph.get_k(),
+                                  std::string(std::get<2>(path).end() - graph.get_k(),
                                               std::get<2>(path).end()));
                 }
 
                 while (!std::apply(stop_path, path)) {
                     size_t cur_size = std::get<2>(path).size();
 
-                    masked_graph.call_outgoing_kmers(
+                    graph.call_outgoing_kmers(
                         std::get<1>(path),
                         [&](const auto &index, char out_char) {
                             if (std::get<2>(path).size() == cur_size) {
                                 std::get<2>(path).push_back(out_char);
                                 std::get<1>(path) = index;
                             } else {
-                                paths.emplace(std::get<0>(path),
-                                              index,
-                                              std::get<2>(path).substr(0, std::get<2>(path).length() - 1)
-                                                  + out_char);
+                                paths.emplace(
+                                    std::get<0>(path),
+                                    index,
+                                    std::get<2>(path).substr(
+                                        0, std::get<2>(path).length() - 1
+                                    ) + out_char
+                                );
                             }
                         }
                     );
@@ -236,31 +243,41 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
     );
 }
 
-void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
+void call_breakpoints(const DeBruijnGraph &graph,
                       const AnnotatedDBG &anno_graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool,
                       const std::function<bool()> &terminate) {
-    assert(&masked_graph.get_graph()
-        == dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph()));
+    const auto dbg_succ = dynamic_pointer_cast<const DeBruijnGraph>(
+        anno_graph.get_graph_ptr()
+    );
+
+    assert(dbg_succ.get());
+
+    if (&graph == dbg_succ.get())
+        return;
 
     thread_pool = nullptr;
 
     const DBGAlignerConfig variant_config(
-        DBGAlignerConfig::unit_scoring_matrix(1, masked_graph.get_graph().alphabet()),
+        DBGAlignerConfig::unit_scoring_matrix(1, graph.alphabet()),
         -1, -1
     );
 
     bool stop = false;
-    call_paths_from_branch(masked_graph,
+    call_paths_from_branch(
+        graph,
+        *dbg_succ,
         [&](auto first, auto, auto&& sequence) {
-            assert(sequence.size() == masked_graph.get_k());
+            assert(sequence.size() == graph.get_k());
 
-            std::vector<std::pair<MaskedDeBruijnGraph::node_index, char>> outgoing;
-            masked_graph.call_outgoing_kmers(first,
-                                             [&](const auto &next_index, char c) {
-                                                 outgoing.emplace_back(next_index, c);
-                                             });
+            std::vector<std::pair<DeBruijnGraph::node_index, char>> outgoing;
+            graph.call_outgoing_kmers(
+                first,
+                [&](const auto &next_index, char c) {
+                    outgoing.emplace_back(next_index, c);
+                }
+            );
 
             // if outgoing is empty, we don't have to check for it to be excluded
             // from the mask
@@ -269,14 +286,13 @@ void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
             if (outgoing.size()) {
                 in_background = [&](const auto &i) {
                     return i != DeBruijnGraph::npos
-                        && (i == first || !masked_graph.in_graph(i));
+                        && (i == first || !graph.in_graph(i));
                 };
             } else {
                 in_background = [](const auto &i) { return i != DeBruijnGraph::npos; };
             }
 
-            MaskedDeBruijnGraph background(masked_graph.get_graph_ptr(),
-                                           std::move(in_background));
+            MaskedDeBruijnGraph background(dbg_succ, std::move(in_background));
 
             background.call_outgoing_kmers(
                 first,
@@ -325,17 +341,15 @@ void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
         thread_pool->join();
 }
 
-void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
-                            const MaskedDeBruijnGraph &background,
+void call_bubbles_from_path(const DeBruijnGraph &foreground,
+                            const DeBruijnGraph &background,
                             const AnnotatedDBG &anno_graph,
                             node_index first,
                             const std::string &ref,
                             const VariantLabelCallback &callback,
                             const std::function<bool()> &terminate,
                             const DBGAlignerConfig &variant_config) {
-    if (foreground.get_graph_ptr() != background.get_graph_ptr())
-        throw std::runtime_error("ERROR: bubble calling in matching graphs not implemented");
-
+    assert(&foreground != &background);
     assert(ref.length() == foreground.get_k() * 2 + 1);
 
     const char ref_char = ref[foreground.get_k()];
@@ -355,7 +369,7 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
 
             bool in_foreground = true;
             bool in_background = true;
-            std::vector<MaskedDeBruijnGraph::node_index> nodes { first };
+            std::vector<DeBruijnGraph::node_index> nodes { first };
             anno_graph.get_graph().map_to_nodes_sequentially(
                 var.begin() + 1,
                 var.end(),
@@ -382,7 +396,7 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
                                               std::move(nodes),
                                               std::move(var),
                                               score);
-                assert(bubble.is_valid(background.get_graph()));
+                assert(bubble.is_valid(background));
 
                 callback(std::move(bubble), std::move(ref_copy), std::move(labels));
             }
@@ -390,31 +404,38 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
     );
 }
 
-void call_bubbles(const MaskedDeBruijnGraph &masked_graph,
+void call_bubbles(const DeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
                   const VariantLabelCallback &callback,
                   ThreadPool *thread_pool,
                   const std::function<bool()> &terminate) {
-    assert(&masked_graph.get_graph()
-        == dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph()));
+    const auto dbg_succ = dynamic_pointer_cast<const DeBruijnGraph>(
+        anno_graph.get_graph_ptr()
+    );
+
+    assert(dbg_succ.get());
+
+    if (&graph == dbg_succ.get())
+        return;
 
     const DBGAlignerConfig variant_config(
-        DBGAlignerConfig::unit_scoring_matrix(1, masked_graph.get_graph().alphabet()),
+        DBGAlignerConfig::unit_scoring_matrix(1, graph.alphabet()),
         -1, -1
     );
 
-    size_t path_length = masked_graph.get_k() * 2 + 1;
+    size_t path_length = graph.get_k() * 2 + 1;
 
-    call_paths_from_branch(masked_graph,
+    call_paths_from_branch(
+        graph,
+        *dbg_succ,
         [&](auto first, auto last, auto&& sequence) {
-            if (sequence.size() != path_length
-                    || masked_graph.unmasked_indegree(last) <= 1)
+            if (sequence.size() != path_length || dbg_succ->indegree(last) <= 1)
                 return;
 
-            auto process_path = [&,first,sequence]() {
+            auto process_path = [&, first, sequence]() {
                 call_bubbles_from_path(
-                    masked_graph,
-                    MaskedDeBruijnGraph(masked_graph.get_graph_ptr()),
+                    graph,
+                    *dbg_succ,
                     anno_graph,
                     first,
                     sequence,

@@ -4,22 +4,16 @@
 
 #include "sequence_graph.hpp"
 #include "serialization.hpp"
-#include "dbg_succinct.hpp"
 
 
 MaskedDeBruijnGraph
-::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, bitmap *mask)
+::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
+                      std::unique_ptr<bitmap>&& kmers_in_graph)
       : graph_(graph),
-        is_target_mask_(mask) {
-    if (!is_target_mask_.get())
-        is_target_mask_.reset(new bitmap_lazy(
-            [&](const auto &i) { return i != DeBruijnGraph::npos; },
-            graph->num_nodes() + 1,
-            graph->num_nodes()
-        ));
-
-    assert(is_target_mask_->size() == graph->num_nodes() + 1);
-    assert(!(*is_target_mask_)[DeBruijnGraph::npos]);
+        kmers_in_graph_(std::move(kmers_in_graph)) {
+    assert(kmers_in_graph_.get());
+    assert(kmers_in_graph_->size() == graph->num_nodes() + 1);
+    assert(!(*kmers_in_graph_)[DeBruijnGraph::npos]);
 }
 
 MaskedDeBruijnGraph
@@ -27,74 +21,51 @@ MaskedDeBruijnGraph
                       std::function<bool(const DeBruijnGraph::node_index&)>&& callback,
                       size_t num_set_bits)
       : MaskedDeBruijnGraph(graph,
-                            new bitmap_lazy(std::move(callback),
-                                            graph->num_nodes() + 1,
-                                            num_set_bits)) {}
+                            std::make_unique<bitmap_lazy>(
+                                std::move(callback),
+                                graph->num_nodes() + 1,
+                                num_set_bits)
+                            ) {}
 
 // Traverse the outgoing edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 ::traverse(node_index node, char next_char) const {
     auto index = graph_->traverse(node, next_char);
-    return in_graph(index) ? index : DeBruijnGraph::npos;
+    return index && in_graph(index) ? index : DeBruijnGraph::npos;
 }
 // Traverse the incoming edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 ::traverse_back(node_index node, char prev_char) const {
     auto index = graph_->traverse_back(node, prev_char);
-    return in_graph(index) ? index : DeBruijnGraph::npos;
+    return index && in_graph(index) ? index : DeBruijnGraph::npos;
 }
 
 size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
-    std::vector<node_index> outgoing;
-    graph_->adjacent_outgoing_nodes(node, &outgoing);
-    return std::count_if(outgoing.begin(), outgoing.end(),
-                         [&](const auto &index) { return in_graph(index); });
+    size_t outdegree = 0;
+    graph_->adjacent_outgoing_nodes(node, [&](auto index) { outdegree += in_graph(index); });
+    return outdegree;
 }
 
 size_t MaskedDeBruijnGraph::indegree(node_index node) const {
-    auto dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get());
-    if (dbg_succ) {
-        // avoid calls to indegree computation for DBGSuccinct
-        const auto &boss = dbg_succ->get_boss();
-        auto prev_boss_edge = boss.bwd(dbg_succ->kmer_to_boss_index(node));
-
-        if (boss.is_single_incoming(prev_boss_edge))
-            return in_graph(dbg_succ->boss_to_kmer_index(prev_boss_edge));
-    }
-
-    std::vector<node_index> incoming;
-    graph_->adjacent_incoming_nodes(node, &incoming);
-    return std::count_if(incoming.begin(), incoming.end(),
-                         [&](const auto &index) { return in_graph(index); });
+    size_t indegree = 0;
+    graph_->adjacent_incoming_nodes(node, [&](auto index) { indegree += in_graph(index); });
+    return indegree;
 }
 
-// Given a node index and a pointer to a vector of node indices, iterates
-// over all the outgoing edges and pushes back indices of their target nodes.
 void MaskedDeBruijnGraph
-::adjacent_outgoing_nodes(node_index node, std::vector<node_index>* target_nodes) const {
-    assert(target_nodes);
-
-    graph_->adjacent_outgoing_nodes(node, target_nodes);
-    target_nodes->erase(
-        std::remove_if(target_nodes->begin(), target_nodes->end(),
-                       [&](const auto &index) { return !in_graph(index); }),
-        target_nodes->end()
-    );
+::adjacent_outgoing_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+    graph_->adjacent_outgoing_nodes(node, [&](auto node) {
+        if (in_graph(node))
+            callback(node);
+    });
 }
 
-// Given a node index and a pointer to a vector of node indices, iterates
-// over all the incoming edges and pushes back indices of their source nodes.
 void MaskedDeBruijnGraph
-::adjacent_incoming_nodes(node_index node,
-                          std::vector<node_index> *source_nodes) const {
-    assert(source_nodes);
-
-    graph_->adjacent_incoming_nodes(node, source_nodes);
-    source_nodes->erase(
-        std::remove_if(source_nodes->begin(), source_nodes->end(),
-                       [&](const auto &index) { return !in_graph(index); }),
-        source_nodes->end()
-    );
+::adjacent_incoming_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+    graph_->adjacent_incoming_nodes(node, [&](auto node) {
+        if (in_graph(node))
+            callback(node);
+    });
 }
 
 void MaskedDeBruijnGraph
@@ -119,16 +90,6 @@ void MaskedDeBruijnGraph
                 callback(index, c);
         }
     );
-}
-
-uint64_t MaskedDeBruijnGraph
-::unmasked_outdegree(node_index node) const {
-    return graph_->outdegree(node);
-}
-
-uint64_t MaskedDeBruijnGraph
-::unmasked_indegree(node_index node) const {
-    return graph_->indegree(node);
 }
 
 void MaskedDeBruijnGraph
@@ -173,21 +134,12 @@ void MaskedDeBruijnGraph
 void MaskedDeBruijnGraph
 ::call_nodes(const std::function<void(node_index)> &callback,
              const std::function<bool()> &stop_early) const {
-    assert(is_target_mask_.get());
-
-    is_target_mask_->call_ones(
+    kmers_in_graph_->call_ones(
         [&](auto index) {
             if (!stop_early())
                 callback(index);
         }
     );
-}
-
-
-void MaskedDeBruijnGraph
-::add_sequence(const std::string &,
-               bit_vector_dyn *) {
-    throw std::runtime_error("Not implemented");
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -198,7 +150,9 @@ void MaskedDeBruijnGraph
                const std::function<bool()> &terminate) const {
     graph_->map_to_nodes(
         sequence,
-        [&](const node_index &index) { callback(in_graph(index) ? index : npos); },
+        [&](const node_index &index) {
+            callback(index && in_graph(index) ? index : npos);
+        },
         terminate
     );
 }
@@ -213,21 +167,18 @@ void MaskedDeBruijnGraph
                             const std::function<bool()> &terminate) const {
     graph_->map_to_nodes_sequentially(
         begin, end,
-        [&](const node_index &index) { callback(in_graph(index) ? index : npos); },
+        [&](const node_index &index) {
+            callback(index && in_graph(index) ? index : npos);
+        },
         terminate
     );
 }
 
+// TODO: This should ideally return kmers_in_graph_->num_set_bits(), but the
+//       API assumes that all node indices from 1 to num_nodes are valid. Until
+//       we remove that restriction that, this will stay like this.
 uint64_t MaskedDeBruijnGraph::num_nodes() const {
     return graph_->num_nodes();
-}
-
-bool MaskedDeBruijnGraph::load(const std::string &) {
-    throw std::runtime_error("Not implemented");
-}
-
-void MaskedDeBruijnGraph::serialize(const std::string &) const {
-    throw std::runtime_error("Not implemented");
 }
 
 // Get string corresponding to |node_index|.
@@ -240,7 +191,7 @@ bool MaskedDeBruijnGraph::operator==(const MaskedDeBruijnGraph &other) const {
     return get_k() == other.get_k()
             && is_canonical_mode() == other.is_canonical_mode()
             && num_nodes() == other.num_nodes()
-            && *is_target_mask_ == *other.is_target_mask_
+            && *kmers_in_graph_ == *other.kmers_in_graph_
             && *graph_ == *other.graph_;
 }
 
@@ -253,5 +204,5 @@ bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
     if (dynamic_cast<const MaskedDeBruijnGraph*>(&other))
         return operator==(dynamic_cast<const MaskedDeBruijnGraph&>(other));
 
-    throw std::runtime_error("Not implemented");
+    return DeBruijnGraph::operator==(other);
 }

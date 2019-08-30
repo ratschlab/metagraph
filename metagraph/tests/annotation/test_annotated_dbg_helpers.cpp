@@ -39,7 +39,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                     std::move(dynamic_cast<annotate::ColumnCompressed<>&>(
                         *anno_graph->annotator_
                     )
-                )).release()
+                ))
             )
         );
 
@@ -71,7 +71,7 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                 return incount == ingroup.size()
                     && outcount <= cutoff * (incount + outcount);
             }
-        ).release()
+        )
     );
 }
 
@@ -91,6 +91,6 @@ MaskedDeBruijnGraph build_masked_graph_lazy(const AnnotatedDBG &anno_graph,
                 uint64_t outcount = outcounter();
                 return outcount <= cutoff * (incount + outcount);
             }
-        ).release()
+        )
     );
 }
