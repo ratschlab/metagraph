@@ -563,6 +563,8 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
     if (query_end_ == query_begin_)
         return alignment;
 
+    alignment["annotation"]["cigar"] = cigar_.to_string();
+
     // encode path
     if (nodes_.size())
         alignment["path"] = path_json(graph.get_k(), label);
@@ -694,6 +696,8 @@ std::shared_ptr<const std::string> Alignment<NodeType>
     sequence_ = sequence_.substr(0, path_steps);
     assert(!alignment["annotation"]["ref_sequence"]
         || alignment["annotation"]["ref_sequence"] == sequence_);
+    assert(!alignment["annotation"]["cigar"]
+        || alignment["annotation"]["cigar"] == cigar_.to_string());
 
     if (!is_valid(graph))
         throw std::runtime_error("ERROR: JSON reconstructs invalid alignment");
