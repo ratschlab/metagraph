@@ -116,21 +116,19 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
 }
 
 void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
-                                          std::vector<node_index> *target_nodes) const {
+                                          const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
-    assert(target_nodes);
 
     call_outgoing(*boss_graph_, kmer_to_boss_index(node), [&](auto i) {
         auto next = boss_to_kmer_index(i);
         if (next != npos)
-            target_nodes->emplace_back(next);
+            callback(next);
     });
 }
 
 void DBGSuccinct::adjacent_incoming_nodes(node_index node,
-                                          std::vector<node_index> *source_nodes) const {
+                                          const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
-    assert(source_nodes);
 
     auto edge = kmer_to_boss_index(node);
 
@@ -141,7 +139,7 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
 
             auto prev = boss_to_kmer_index(incoming_boss_edge);
             if (prev != npos)
-                source_nodes->emplace_back(prev);
+                callback(prev);
         }
     );
 }

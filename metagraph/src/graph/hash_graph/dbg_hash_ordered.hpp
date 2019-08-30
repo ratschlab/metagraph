@@ -74,18 +74,16 @@ class DBGHashOrdered : public DeBruijnGraph {
         return hash_dbg_->traverse_back(node, prev_char);
     }
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the outgoing edges and pushes back indices of their target nodes.
+    // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
-                                 std::vector<node_index> *target_nodes) const {
-        hash_dbg_->adjacent_outgoing_nodes(node, target_nodes);
+                                 const std::function<void(node_index)> &callback) const {
+        hash_dbg_->adjacent_outgoing_nodes(node, callback);
     }
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the incoming edges and pushes back indices of their source nodes.
+    // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
-                                 std::vector<node_index> *source_nodes) const {
-        hash_dbg_->adjacent_incoming_nodes(node, source_nodes);
+                                 const std::function<void(node_index)> &callback) const {
+        hash_dbg_->adjacent_incoming_nodes(node, callback);
     }
 
 

@@ -341,19 +341,18 @@ size_t incoming_edge_rank(const DeBruijnGraph &graph,
     assert(graph.get_node_sequence(source).substr(1)
                 == graph.get_node_sequence(target).substr(0, graph.get_k() - 1));
 
-    std::vector<node_index> adjacent_nodes;
-    adjacent_nodes.reserve(10);
+    size_t edge_rank = 0;
+    bool done = false;
 
-    graph.adjacent_incoming_nodes(target, &adjacent_nodes);
-
-    uint64_t edge_rank = 0;
-
-    for (node_index node : adjacent_nodes) {
+    graph.adjacent_incoming_nodes(target, [&](auto node) {
         if (node == source)
-            return edge_rank;
+            done = true;
 
-        edge_rank++;
-    }
+        if (!done)
+            edge_rank++;
+    });
 
-    throw std::runtime_error("the edge does not exist in graph");
+    assert(done && "the edge must exist in graph");
+
+    return edge_rank;
 }

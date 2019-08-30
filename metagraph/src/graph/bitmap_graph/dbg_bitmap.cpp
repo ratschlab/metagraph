@@ -160,23 +160,17 @@ size_t DBGBitmap::indegree(node_index node) const {
 }
 
 void DBGBitmap::adjacent_outgoing_nodes(node_index node,
-                                        std::vector<node_index> *target_nodes) const {
+                                        const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
-    assert(target_nodes);
 
-    call_outgoing_kmers(node, [target_nodes](node_index target, char) {
-        target_nodes->push_back(target);
-    });
+    call_outgoing_kmers(node, [&](node_index child, char) { callback(child); });
 }
 
 void DBGBitmap::adjacent_incoming_nodes(node_index node,
-                                        std::vector<node_index> *source_nodes) const {
+                                        const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
-    assert(source_nodes);
 
-    call_incoming_kmers(node, [source_nodes](node_index source, char) {
-        source_nodes->push_back(source);
-    });
+    call_incoming_kmers(node, [&](node_index parent, char) { callback(parent); });
 }
 
 DBGBitmap::node_index

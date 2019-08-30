@@ -54,14 +54,12 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     // Traverse the incoming edge
     node_index traverse_back(node_index node, char prev_char) const;
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the outgoing edges and pushes back indices of their target nodes.
+    // Given a node index, call the target nodes of all edges outgoing from it.
     void adjacent_outgoing_nodes(node_index node,
-                                 std::vector<node_index> *target_nodes) const;
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the incoming edges and pushes back indices of their source nodes.
+                                 const std::function<void(node_index)> &callback) const;
+    // Given a node index, call the source nodes of all edges incoming to it.
     void adjacent_incoming_nodes(node_index node,
-                                 std::vector<node_index> *source_nodes) const;
+                                 const std::function<void(node_index)> &callback) const;
 
     size_t outdegree(node_index) const;
     size_t indegree(node_index) const;
@@ -253,21 +251,23 @@ DBGHashOrderedImpl<KMER>::traverse_back(node_index node, char prev_char) const {
 }
 
 template <typename KMER>
-void DBGHashOrderedImpl<KMER>::adjacent_outgoing_nodes(node_index node,
-                                                       std::vector<node_index> *target_nodes) const {
+void
+DBGHashOrderedImpl<KMER>
+::adjacent_outgoing_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
-    assert(target_nodes);
 
-    call_outgoing_kmers(node, [&](auto i, char) { target_nodes->push_back(i); });
+    call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
 }
 
 template <typename KMER>
-void DBGHashOrderedImpl<KMER>::adjacent_incoming_nodes(node_index node,
-                                                       std::vector<node_index> *source_nodes) const {
+void
+DBGHashOrderedImpl<KMER>
+::adjacent_incoming_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
-    assert(source_nodes);
 
-    call_incoming_kmers(node, [&](auto i, char) { source_nodes->push_back(i); });
+    call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
 }
 
 template <typename KMER>

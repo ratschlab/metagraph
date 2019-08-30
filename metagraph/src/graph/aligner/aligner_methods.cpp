@@ -277,7 +277,7 @@ void default_extender(const DeBruijnGraph &graph,
                 in_nodes.assign(1, cur_node);
             } else {
                 in_nodes.clear();
-                graph.adjacent_incoming_nodes(next_node, &in_nodes);
+                graph.adjacent_incoming_nodes(next_node, [&](auto i) { in_nodes.push_back(i); });
             }
 
             // match and deletion scores

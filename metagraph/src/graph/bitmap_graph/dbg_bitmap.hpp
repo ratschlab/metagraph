@@ -53,14 +53,12 @@ class DBGBitmap : public DeBruijnGraph {
     // Traverse the incoming edge
     node_index traverse_back(node_index node, char prev_char) const;
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the outgoing edges and pushes back indices of their target nodes.
+    // Given a node index, call the target nodes of all edges outgoing from it.
     void adjacent_outgoing_nodes(node_index node,
-                                 std::vector<node_index> *target_nodes) const;
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the incoming edges and pushes back indices of their source nodes.
+                                 const std::function<void(node_index)> &callback) const;
+    // Given a node index, call the source nodes of all edges incoming to it.
     void adjacent_incoming_nodes(node_index node,
-                                 std::vector<node_index> *source_nodes) const;
+                                 const std::function<void(node_index)> &callback) const;
 
     size_t outdegree(node_index node) const;
 

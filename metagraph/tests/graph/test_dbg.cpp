@@ -1050,7 +1050,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         auto it = graph->kmer_to_node(std::string(k, 'A'));
         map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { EXPECT_EQ(it, i); });
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<SequenceGraph::node_index>{ it, graph->traverse(it, 'C') }),
@@ -1060,7 +1060,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // AC, AAAAC
         it = graph->traverse(it, 'C');
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         auto outset = convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'C') });
         if (k == 2) {
             outset.insert(graph->traverse(it, 'G'));
@@ -1076,7 +1076,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         it = graph->kmer_to_node(std::string(k, 'C'));
         map_to_nodes_sequentially(std::string(k, 'C'), [&](auto i) { EXPECT_EQ(it, i); });
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<SequenceGraph::node_index>{
@@ -1089,7 +1089,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // CG, CCCCG
         it = graph->traverse(it, 'G');
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'G') }),
@@ -1101,7 +1101,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         it = graph->kmer_to_node(std::string(k, 'G'));
         map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { EXPECT_EQ(it, i); });
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'G') }),
@@ -1121,7 +1121,7 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // AA, AAAAA
         auto it = graph->kmer_to_node(std::string(k, 'A'));
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{ it }),
@@ -1131,7 +1131,7 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // AC, AAAAC
         it = graph->traverse(it, 'C');
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{ graph->traverse_back(it, 'A') }),
@@ -1141,7 +1141,7 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // CC, CCCCC
         it = graph->kmer_to_node(std::string(k, 'C'));
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{
@@ -1154,7 +1154,7 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // CG, CCCCG
         it = graph->traverse(it, 'G');
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{
@@ -1167,7 +1167,7 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // GG, GGGGG
         it = graph->kmer_to_node(std::string(k, 'G'));
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{
@@ -1411,7 +1411,7 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_incoming_indegree) {
 
         for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
             std::vector<DeBruijnGraph::node_index> incoming_nodes;
-            graph->adjacent_incoming_nodes(node, &incoming_nodes);
+            graph->adjacent_incoming_nodes(node, [&](auto i) { incoming_nodes.push_back(i); });
             EXPECT_EQ(graph->indegree(node), incoming_nodes.size())
                 << "adjacent_incoming_nodes and indegree are inconsistent for node: " << node;
         }
@@ -1455,7 +1455,7 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
                     num_incoming_edges++;
             }
             std::vector<DeBruijnGraph::node_index> incoming_nodes;
-            graph->adjacent_incoming_nodes(node, &incoming_nodes);
+            graph->adjacent_incoming_nodes(node, [&](auto i) { incoming_nodes.push_back(i); });
             EXPECT_EQ(num_incoming_edges, incoming_nodes.size())
                 << "adjacent_incoming_nodes and traverse_back are inconsistent for node: " << node;
         }
