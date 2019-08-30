@@ -39,10 +39,9 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const override;
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the outgoing edges and pushes back indices of their target nodes.
+    // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
-                                         std::vector<node_index> *target_nodes) const override;
+                                         const std::function<void(node_index)> &callback) const override;
 
     virtual void call_outgoing_kmers(node_index kmer,
                                      const OutgoingEdgeCallback &callback) const override;
@@ -50,10 +49,9 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual void call_incoming_kmers(node_index kmer,
                                      const IncomingEdgeCallback &callback) const override;
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the incoming edges and pushes back indices of their source nodes.
+    // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
-                                         std::vector<node_index> *source_nodes) const override;
+                                         const std::function<void(node_index)> &callback) const override;
 
     virtual uint64_t num_nodes() const override;
 

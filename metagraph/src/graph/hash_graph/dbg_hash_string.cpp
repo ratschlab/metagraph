@@ -78,33 +78,18 @@ DBGHashString::traverse_back(node_index node, char prev_char) const {
 
 void DBGHashString
 ::adjacent_outgoing_nodes(node_index node,
-                          std::vector<node_index> *target_nodes) const {
+                          const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
-    assert(target_nodes);
 
-    auto prefix = node_to_kmer(node).substr(1);
-
-    for (char c : alphabet_) {
-        auto next = kmer_to_node(prefix + c);
-        if (next != npos)
-            target_nodes->push_back(next);
-    }
+    call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
 }
 
 void DBGHashString
 ::adjacent_incoming_nodes(node_index node,
-                          std::vector<node_index> *source_nodes) const {
+                          const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
-    assert(source_nodes);
 
-    auto suffix = node_to_kmer(node);
-    suffix.pop_back();
-
-    for (char c : alphabet_) {
-        auto next = kmer_to_node(std::string(1, c) + suffix);
-        if (next != npos)
-            source_nodes->push_back(next);
-    }
+    call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
 }
 
 void DBGHashString
@@ -130,9 +115,9 @@ void DBGHashString
     suffix.pop_back();
 
     for (char c : alphabet_) {
-        auto next = kmer_to_node(std::string(1, c) + suffix);
-        if (next != npos)
-            callback(next, c);
+        auto prev = kmer_to_node(std::string(1, c) + suffix);
+        if (prev != npos)
+            callback(prev, c);
     }
 }
 

@@ -494,10 +494,10 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckOutgoingNodes) {
             graph.call_nodes(
                 [&](const auto &node) {
                     std::vector<MaskedDeBruijnGraph::node_index> outnodes;
-                    graph.adjacent_outgoing_nodes(node, &outnodes);
+                    graph.adjacent_outgoing_nodes(node, [&](auto i) { outnodes.push_back(i); });
                     EXPECT_EQ(outnodes.size(), graph.outdegree(node));
                     std::vector<MaskedDeBruijnGraph::node_index> outnodes_full;
-                    full_graph->adjacent_outgoing_nodes(node, &outnodes_full);
+                    full_graph->adjacent_outgoing_nodes(node, [&](auto i) { outnodes_full.push_back(i); });
                     outnodes_full.erase(std::remove_if(outnodes_full.begin(),
                                                        outnodes_full.end(),
                                                        [&](auto i) {
@@ -537,10 +537,10 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckIncomingNodes) {
             graph.call_nodes(
                 [&](const auto &node) {
                     std::vector<MaskedDeBruijnGraph::node_index> innodes;
-                    graph.adjacent_incoming_nodes(node, &innodes);
+                    graph.adjacent_incoming_nodes(node, [&](auto i) { innodes.push_back(i); });
                     EXPECT_EQ(innodes.size(), graph.indegree(node));
                     std::vector<MaskedDeBruijnGraph::node_index> innodes_full;
-                    full_graph->adjacent_incoming_nodes(node, &innodes_full);
+                    full_graph->adjacent_incoming_nodes(node, [&](auto i) { innodes_full.push_back(i); });
                     innodes_full.erase(std::remove_if(innodes_full.begin(),
                                                       innodes_full.end(),
                                                       [&](auto i) {

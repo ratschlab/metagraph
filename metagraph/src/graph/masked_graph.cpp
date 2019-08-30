@@ -41,46 +41,31 @@ MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 }
 
 size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
-    std::vector<node_index> outgoing;
-    graph_->adjacent_outgoing_nodes(node, &outgoing);
-    return std::count_if(outgoing.begin(), outgoing.end(),
-                         [&](const auto &index) { return in_graph(index); });
+    size_t outdegree = 0;
+    graph_->adjacent_outgoing_nodes(node, [&](auto index) { outdegree += in_graph(index); });
+    return outdegree;
 }
 
 size_t MaskedDeBruijnGraph::indegree(node_index node) const {
-    std::vector<node_index> incoming;
-    graph_->adjacent_incoming_nodes(node, &incoming);
-    return std::count_if(incoming.begin(), incoming.end(),
-                         [&](const auto &index) { return in_graph(index); });
+    size_t indegree = 0;
+    graph_->adjacent_incoming_nodes(node, [&](auto index) { indegree += in_graph(index); });
+    return indegree;
 }
 
-// Given a node index and a pointer to a vector of node indices, iterates
-// over all the outgoing edges and pushes back indices of their target nodes.
 void MaskedDeBruijnGraph
-::adjacent_outgoing_nodes(node_index node, std::vector<node_index>* target_nodes) const {
-    assert(target_nodes);
-
-    graph_->adjacent_outgoing_nodes(node, target_nodes);
-    target_nodes->erase(
-        std::remove_if(target_nodes->begin(), target_nodes->end(),
-                       [&](const auto &index) { return !in_graph(index); }),
-        target_nodes->end()
-    );
+::adjacent_outgoing_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+    graph_->adjacent_outgoing_nodes(node, [&](auto node) {
+        if (in_graph(node))
+            callback(node);
+    });
 }
 
-// Given a node index and a pointer to a vector of node indices, iterates
-// over all the incoming edges and pushes back indices of their source nodes.
 void MaskedDeBruijnGraph
-::adjacent_incoming_nodes(node_index node,
-                          std::vector<node_index> *source_nodes) const {
-    assert(source_nodes);
-
-    graph_->adjacent_incoming_nodes(node, source_nodes);
-    source_nodes->erase(
-        std::remove_if(source_nodes->begin(), source_nodes->end(),
-                       [&](const auto &index) { return !in_graph(index); }),
-        source_nodes->end()
-    );
+::adjacent_incoming_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+    graph_->adjacent_incoming_nodes(node, [&](auto node) {
+        if (in_graph(node))
+            callback(node);
+    });
 }
 
 void MaskedDeBruijnGraph
