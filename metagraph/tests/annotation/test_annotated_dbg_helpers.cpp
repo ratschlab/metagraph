@@ -17,9 +17,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
         std::move(graph),
-        std::unique_ptr<AnnotatedDBG::Annotator>(
-            new annotate::ColumnCompressed<>(num_nodes)
-        )
+        std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
     );
 
     for (size_t i = 0; i < sequences.size(); ++i) {
