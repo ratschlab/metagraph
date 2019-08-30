@@ -89,8 +89,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     if (!anno_graph.get_graph().num_nodes())
         return {};
 
-    std::unique_ptr<bitmap> mask(
-        new bitmap_vector(anno_graph.get_graph().num_nodes() + 1, false)
+    auto mask = std::make_unique<bitmap_vector>(
+        anno_graph.get_graph().num_nodes() + 1, false
     );
 
     if (mask_in.empty())
