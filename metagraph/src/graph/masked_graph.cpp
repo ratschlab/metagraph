@@ -4,6 +4,7 @@
 
 #include "sequence_graph.hpp"
 #include "serialization.hpp"
+#include "dbg_succinct.hpp"
 
 
 MaskedDeBruijnGraph
