@@ -7,6 +7,7 @@
 
 #include "sequence_graph.hpp"
 #include "utils.hpp"
+#include "int_vector.hpp"
 
 
 template <typename Weights = sdsl::int_vector<>>
@@ -27,25 +28,9 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
     virtual void add_sequence(const DeBruijnGraph &graph,
                               const std::string&& sequence,
                               bit_vector_dyn *nodes_inserted = nullptr) {
-        if (nodes_inserted) {
-            node_index curpos = weights_.size() - 1;
-            assert(nodes_inserted->size() - weights_.size() == nodes_inserted->num_set_bits());
-            weights_.resize(nodes_inserted->size());
-            node_index i = weights_.size() - 1;
 
-            while (true) {
-                if ((*nodes_inserted)[i]) {
-                    weights_[i] = 1;
-                } else {
-                    assert(curpos < weights_.size());
-                    weights_[i] = weights_[curpos];
-                    curpos--;
-                }
-                if (0 == i)
-                    break;
-                i--;
-            }
-        }
+        if (nodes_inserted)
+            insert_new_indexes(weights_, nodes_inserted);
 
         auto k = graph.get_k();
         for (size_t i = 0; i + k <= sequence.size(); ++i) {

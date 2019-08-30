@@ -4,6 +4,7 @@
 #include <functional>
 
 #include <sdsl/int_vector.hpp>
+#include "bit_vector.hpp"
 
 
 void call_nonzeros(const sdsl::int_vector<> &vector,
@@ -14,5 +15,8 @@ void call_nonzeros(const sdsl::int_vector<> &vector,
 void call_nonzeros(const sdsl::int_vector<> &vector,
                    std::function<void(uint64_t /* index */,
                                       uint64_t /* value */)> callback);
+
+template <class Vector>
+void insert_new_indexes(Vector &vector, bit_vector_dyn *new_indexes);
 
 #endif // __INT_VECTOR_HPP__
