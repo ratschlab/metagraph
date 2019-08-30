@@ -102,12 +102,10 @@ void MaskedDeBruijnGraph
 
     const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(*graph_);
     const auto &boss = dbg_succ.get_boss();
-    std::unique_ptr<bitmap> mask {
-        new bitmap_lazy(
-            [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
-            boss.num_edges() + 1
-        )
-    };
+    auto mask = std::make_unique<bitmap_lazy>(
+        [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
+        boss.num_edges() + 1
+    );
 
     boss.call_sequences(callback, mask.get());
 }
@@ -122,12 +120,10 @@ void MaskedDeBruijnGraph
 
     const auto& dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_.get());
     const auto& boss = dbg_succ.get_boss();
-    std::unique_ptr<bitmap> mask {
-        new bitmap_lazy(
-            [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
-            boss.num_edges() + 1
-        )
-    };
+    auto mask = std::make_unique<bitmap_lazy>(
+        [&](const auto &i) { return in_graph(dbg_succ.boss_to_kmer_index(i)); },
+        boss.num_edges() + 1
+    );
 
     boss.call_unitigs(callback, min_tip_size, mask.get());
 }
