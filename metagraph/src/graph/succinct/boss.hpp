@@ -104,18 +104,18 @@ class BOSS {
     void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;
 
     // call paths (or simple paths if |split_to_contigs| is true) that cover
-    // exactly all edges in graph
+    // exactly all edges in graph (or subgraph, if |subgraph_mask| is specified)
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
                     bool split_to_contigs = false,
-                    bitmap *mask = NULL) const;
+                    bitmap *subgraph_mask = NULL) const;
 
     void call_sequences(Call<const std::string&> callback,
-                        bitmap *mask = NULL) const;
+                        bitmap *subgraph_mask = NULL) const;
 
     void call_unitigs(Call<const std::string&> callback,
                       size_t max_pruned_dead_end_size = 0,
-                      bitmap *mask = NULL) const;
+                      bitmap *subgraph_mask = NULL) const;
 
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;

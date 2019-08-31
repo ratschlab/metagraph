@@ -1826,8 +1826,8 @@ bool masked_is_single_incoming(const BOSS &boss, uint64_t i, const bitmap *mask)
 void BOSS::call_paths(Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
                       bool split_to_unitigs,
-                      bitmap *mask) const {
-    assert(!mask || mask->size() == W_->size());
+                      bitmap *subgraph_mask) const {
+    assert(!subgraph_mask || subgraph_mask->size() == W_->size());
 
     // keep track of reached edges
     sdsl::bit_vector discovered(W_->size(), false);
@@ -1842,14 +1842,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     auto last_source = succ_last(1);
     for (uint64_t i = 1; i <= last_source; ++i) {
-        if (!mask || (*mask)[i])
-            call_paths(i, callback, split_to_unitigs, &discovered, &visited, mask, progress_bar);
+        if (!subgraph_mask || (*subgraph_mask)[i])
+            call_paths(i, callback, split_to_unitigs, &discovered, &visited, subgraph_mask, progress_bar);
     }
 
-    if (mask) {
+    if (subgraph_mask) {
         for (uint64_t i = 1; i < W_->size(); ++i) {
-            if (!visited[i] && (*mask)[i] && !masked_indegree(*this, i, mask)) {
-                call_paths(i, callback, split_to_unitigs, &discovered, &visited, mask, progress_bar);
+            if (!visited[i] && (*subgraph_mask)[i] && !masked_indegree(*this, i, subgraph_mask)) {
+                call_paths(i, callback, split_to_unitigs, &discovered, &visited, subgraph_mask, progress_bar);
             }
         }
     }
@@ -1859,14 +1859,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (!visited[i] && !masked_is_single_outgoing(*this, i, mask))
-            call_paths(i, callback, split_to_unitigs, &discovered, &visited, mask, progress_bar);
+        if (!visited[i] && !masked_is_single_outgoing(*this, i, subgraph_mask))
+            call_paths(i, callback, split_to_unitigs, &discovered, &visited, subgraph_mask, progress_bar);
     }
 
     // process all the cycles left that have not been traversed
     for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (!visited[i] && (!mask || (*mask)[i]))
-            call_paths(i, callback, split_to_unitigs, &discovered, &visited, mask, progress_bar);
+        if (!visited[i] && (!subgraph_mask || (*subgraph_mask)[i]))
+            call_paths(i, callback, split_to_unitigs, &discovered, &visited, subgraph_mask, progress_bar);
     }
 }
 
@@ -1881,7 +1881,7 @@ void BOSS::call_paths(edge_index starting_kmer,
                       bool split_to_unitigs,
                       sdsl::bit_vector *discovered_ptr,
                       sdsl::bit_vector *visited_ptr,
-                      bitmap *mask,
+                      bitmap *subgraph_mask,
                       ProgressBar &progress_bar) const {
     assert(discovered_ptr && visited_ptr);
 
@@ -1903,7 +1903,7 @@ void BOSS::call_paths(edge_index starting_kmer,
         // the first edge that has been already visited
         while (!visited[edge]) {
             assert(edge > 0 && discovered[edge]);
-            assert(!mask || (*mask)[edge]);
+            assert(!subgraph_mask || (*subgraph_mask)[edge]);
 
             // visit the edge
             sequence.push_back(get_W(edge) % alph_size);
@@ -1918,15 +1918,15 @@ void BOSS::call_paths(edge_index starting_kmer,
             // stop traversing if we call unitigs and this
             // is not the only incoming edge
             bool continue_traversal = !split_to_unitigs
-                || masked_is_single_incoming(*this, edge, mask);
+                || masked_is_single_incoming(*this, edge, subgraph_mask);
 
             // make one traversal step
             edge = fwd(edge);
 
             // traverse if there is only one outgoing edge
-            auto outgoing = masked_pick_single_outgoing(*this, edge, mask);
+            auto outgoing = masked_pick_single_outgoing(*this, edge, subgraph_mask);
             if (continue_traversal && outgoing) {
-                if (mask && !(*mask)[outgoing])
+                if (subgraph_mask && !(*subgraph_mask)[outgoing])
                     break;
 
                 edge = outgoing;
@@ -1940,7 +1940,7 @@ void BOSS::call_paths(edge_index starting_kmer,
 
             // loop over outgoing edges
             do {
-                if (mask && !(*mask)[edge])
+                if (subgraph_mask && !(*subgraph_mask)[edge])
                     continue;
 
                 if (!next_edge && !split_to_unitigs && !visited[edge]) {
@@ -1969,7 +1969,7 @@ void BOSS::call_paths(edge_index starting_kmer,
 }
 
 void BOSS::call_sequences(Call<const std::string&> callback,
-                          bitmap *mask) const {
+                          bitmap *subgraph_mask) const {
     std::string sequence;
 
     call_paths([&](auto&&, auto&& path) {
@@ -1983,12 +1983,12 @@ void BOSS::call_sequences(Call<const std::string&> callback,
 
         if (sequence.size())
             callback(sequence);
-    }, false, mask);
+    }, false, subgraph_mask);
 }
 
 void BOSS::call_unitigs(Call<const std::string&> callback,
                         size_t min_tip_size,
-                        bitmap *mask) const {
+                        bitmap *subgraph_mask) const {
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
 
@@ -2034,27 +2034,27 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
         bool outgoing_dead_end = masked_outgoing_dead_end(*this,
                                                           edges.back(),
                                                           path.back(),
-                                                          mask);
+                                                          subgraph_mask);
 
         bool incoming_dead_end = masked_incoming_dead_end(*this,
                                                           edges.front(),
                                                           path.front(),
-                                                          mask);
+                                                          subgraph_mask);
 
         if ((!outgoing_dead_end && !incoming_dead_end)
                 // this is a short dead-end
                 // ...check if not a source tip
                 || (incoming_dead_end
                         && !outgoing_dead_end
-                        && !masked_is_single_outgoing(*this, fwd(edges.back()), mask))
+                        && !masked_is_single_outgoing(*this, fwd(edges.back()), subgraph_mask))
                 // this is a short dead-end but not a source tip
                 // ...check if not a sink tip
                 || (outgoing_dead_end
                         && !incoming_dead_end
-                        && !masked_is_single_incoming(*this, bwd(edges.front()), mask)))
+                        && !masked_is_single_incoming(*this, bwd(edges.front()), subgraph_mask)))
             callback(sequence);
 
-    }, true, mask);
+    }, true, subgraph_mask);
 }
 
 void BOSS::call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const {
