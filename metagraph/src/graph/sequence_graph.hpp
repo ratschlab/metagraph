@@ -138,12 +138,6 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Check if the node index is a valid node in the graph
     virtual bool in_graph(node_index node) const = 0;
-
-  protected:
-    static void call_sequences(const DeBruijnGraph &graph,
-                               const std::function<void(const std::string&)> &callback,
-                               bool call_unitigs,
-                               uint64_t min_tip_size = 0);
 };
 
 
