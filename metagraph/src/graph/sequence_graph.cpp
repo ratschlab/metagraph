@@ -175,10 +175,13 @@ void call_sequences(const DeBruijnGraph &graph,
                     const std::function<void(const std::string&)> &callback,
                     bool call_unitigs,
                     uint64_t min_tip_size = 0) {
-    sdsl::bit_vector discovered(graph.num_nodes() + 1, false);
-    sdsl::bit_vector visited(graph.num_nodes() + 1, false);
+    sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
+    graph.call_nodes([&](auto node) { discovered[node] = false; });
+    sdsl::bit_vector visited = discovered;
 
-    ProgressBar progress_bar(graph.num_nodes(), "Traverse graph", std::cerr, !utils::get_verbose());
+    ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(discovered),
+                             "Traverse graph",
+                             std::cerr, !utils::get_verbose());
 
     auto call_paths_from = [&](const auto &node) {
         call_sequences_from(graph,
@@ -195,7 +198,7 @@ void call_sequences(const DeBruijnGraph &graph,
     //  .____  or  .____
     //              \___
     //
-    graph.call_source_nodes([&](const auto &node) {
+    graph.call_source_nodes([&](auto node) {
         assert(!visited[node]);
         assert(!graph.indegree(node));
 
@@ -206,9 +209,9 @@ void call_sequences(const DeBruijnGraph &graph,
     //  ____.____
     //       \___
     //
-    graph.call_nodes([&](const auto &node) {
-        if (!visited[node] && graph.outdegree(node) > 1) {
-            graph.call_outgoing_kmers(node, [&](const auto &next, char) {
+    call_zeros(visited, [&](auto node) {
+        if (graph.outdegree(node) > 1) {
+            graph.adjacent_outgoing_nodes(node, [&](auto next) {
                 if (!visited[next] && graph.outdegree(next) == 1)
                     call_paths_from(next);
             });
@@ -216,10 +219,7 @@ void call_sequences(const DeBruijnGraph &graph,
     });
 
     // then the rest (loops)
-    graph.call_nodes([&](const auto &node) {
-        if (!visited[node])
-            call_paths_from(node);
-    });
+    call_zeros(visited, [&](auto node) { call_paths_from(node); });
 }
 
 void DeBruijnGraph
