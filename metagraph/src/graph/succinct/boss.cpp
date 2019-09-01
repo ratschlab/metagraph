@@ -1901,24 +1901,47 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
          *          1 ..._._._._._$
          *          2 ..._._./
          */
-        bool outgoing_dead_end = path.back() == kSentinelCode
-                                    || !get_W(fwd(edges.back()));
 
-        bool incoming_dead_end = path.front() == kSentinelCode
-                                    || !get_minus_k_value(edges.front(), k_).first;
+        uint64_t last_fwd = 0;
 
-        if ((!outgoing_dead_end && !incoming_dead_end)
-                // this is a short dead-end
-                // ...check if not a source tip
-                || (incoming_dead_end
-                        && !outgoing_dead_end
-                        && !is_single_outgoing(fwd(edges.back())))
-                // this is a short dead-end but not a source tip
-                // ...check if not a sink tip
-                || (outgoing_dead_end
-                        && !incoming_dead_end
-                        && !is_single_incoming(bwd(edges.front()))))
+        // if the last node has multiple outgoing edges,
+        // it is clearly neither a sink tip nor a source tip.
+        if (path.back() != kSentinelCode
+                && !is_single_outgoing(last_fwd = fwd(edges.back()))) {
             callback(sequence);
+            return;
+        }
+
+        uint64_t first_bwd = 0;
+
+        // if the first node has multiple incoming edges,
+        // it is clearly neither a source tip nor a sink tip.
+        // TODO: This doesn't work properly if graph has redundant dummy edges.
+        //       Make sure there are no redundant dummy edges when this
+        //       function is called.
+        if (path.front() != kSentinelCode
+                && !is_single_incoming(first_bwd = bwd(edges.front()))) {
+            callback(sequence);
+            return;
+        }
+
+        // this unitig has only one incoming and one
+        // outgoing edges (which may be dummy edges)
+
+        // skip all sink dead ends, as they are also sink
+        // tips (because there is only one edge incoming to the first node)
+        if (path.back() == kSentinelCode
+                || !get_W(last_fwd))
+            return;
+
+        // skip all source dead ends, as they are also source
+        // tips (because there is only one edge outgoing from the last node)
+        if (path.front() == kSentinelCode
+                || !get_minus_k_value(first_bwd, k_ - 1).first)
+            return;
+
+        // this is not a tip
+        callback(sequence);
 
     }, true);
 }
