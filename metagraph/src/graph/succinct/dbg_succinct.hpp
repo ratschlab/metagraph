@@ -92,8 +92,13 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final;
 
-    virtual size_t outdegree(node_index node) const override final;
-    virtual size_t indegree(node_index node) const override final;
+    virtual size_t outdegree(node_index) const override final;
+    virtual bool has_single_outgoing(node_index) const override final;
+    virtual bool has_multiple_outgoing(node_index) const override final;
+    virtual size_t indegree(node_index) const override final;
+    virtual bool has_no_incoming(node_index) const override final;
+    virtual bool has_single_incoming(node_index) const override final;
+
     virtual uint64_t num_nodes() const override final;
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
@@ -122,7 +127,6 @@ class DBGSuccinct : public DeBruijnGraph {
     // Check if the index is valid (there is a node assigned to it)
     virtual bool in_graph(node_index node) const override final;
 
-  protected:
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
   private:

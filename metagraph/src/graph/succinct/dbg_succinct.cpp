@@ -456,6 +456,46 @@ size_t DBGSuccinct::outdegree(node_index node) const {
     return last_target_kmer - boss_graph_->pred_last(last_target_kmer - 1);
 }
 
+bool DBGSuccinct::has_single_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return boss_graph_->succ_last(1) == 2;
+
+    if (!boss_graph_->get_W(boss_edge)) {
+        // |node| is a sink dummy boss edge, hence has no outgoing edges
+        return false;
+    }
+
+    auto last_target_kmer = boss_graph_->fwd(boss_edge);
+
+    if (!boss_graph_->get_W(last_target_kmer)) {
+        // There is a sink dummy target, hence this is the only outgoing edge
+        // skip boss dummy sink edges
+        return false;
+    }
+
+    return boss_graph_->is_single_outgoing(last_target_kmer);
+}
+
+bool DBGSuccinct::has_multiple_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return boss_graph_->succ_last(1) > 2;
+
+    if (!boss_graph_->get_W(boss_edge)) {
+        // |node| is a sink dummy boss edge, hence has no outgoing edges
+        return false;
+    }
+
+    return !boss_graph_->get_last(boss_graph_->fwd(boss_edge) - 1);
+}
+
 size_t DBGSuccinct::indegree(node_index node) const {
     assert(in_graph(node));
 
@@ -464,7 +504,50 @@ size_t DBGSuccinct::indegree(node_index node) const {
     if (boss_edge == 1)
         return 1;
 
+    auto x = boss_graph_->bwd(boss_edge);
+
+    size_t first_valid = !valid_edges_.get() || (*valid_edges_)[x];
+
+    if (x + 1 == boss_graph_->get_W().size())
+        return first_valid;
+
     auto d = boss_graph_->get_node_last_value(boss_edge);
+    uint64_t y = boss_graph_->succ_W(x + 1, d);
+    return first_valid + boss_graph_->rank_W(y - 1, d + boss_graph_->alph_size)
+                        - boss_graph_->rank_W(x - 1, d + boss_graph_->alph_size);
+}
+
+bool DBGSuccinct::has_no_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return false;
+
+    auto x = boss_graph_->bwd(boss_edge);
+
+    size_t first_valid = !valid_edges_.get() || (*valid_edges_)[x];
+
+    if (first_valid)
+        return false;
+
+    if (x + 1 == boss_graph_->get_W().size())
+        return true;
+
+    auto d = boss_graph_->get_node_last_value(boss_edge);
+
+    return boss_graph_->succ_W(x + 1, d)
+            <= boss_graph_->succ_W(x + 1, d + boss_graph_->alph_size);
+}
+
+bool DBGSuccinct::has_single_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return false;
 
     auto x = boss_graph_->bwd(boss_edge);
 
@@ -473,9 +556,13 @@ size_t DBGSuccinct::indegree(node_index node) const {
     if (x + 1 == boss_graph_->get_W().size())
         return first_valid;
 
+    if (first_valid)
+        return boss_graph_->is_single_incoming(x);
+
+    auto d = boss_graph_->get_node_last_value(boss_edge);
     uint64_t y = boss_graph_->succ_W(x + 1, d);
-    return first_valid + boss_graph_->rank_W(y - 1, d + boss_graph_->alph_size)
-                        - boss_graph_->rank_W(x - 1, d + boss_graph_->alph_size);
+    return boss_graph_->rank_W(y - 1, d + boss_graph_->alph_size)
+            == boss_graph_->rank_W(x - 1, d + boss_graph_->alph_size) + 1;
 }
 
 uint64_t DBGSuccinct::num_nodes() const {

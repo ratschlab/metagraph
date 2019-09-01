@@ -60,9 +60,13 @@ class DBGBitmap : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  const std::function<void(node_index)> &callback) const;
 
-    size_t outdegree(node_index node) const;
+    size_t outdegree(node_index) const;
+    bool has_single_outgoing(node_index) const;
+    bool has_multiple_outgoing(node_index) const;
 
-    size_t indegree(node_index node) const;
+    size_t indegree(node_index) const;
+    bool has_no_incoming(node_index) const;
+    bool has_single_incoming(node_index) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
 
