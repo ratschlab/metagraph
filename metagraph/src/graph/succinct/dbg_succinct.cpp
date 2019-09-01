@@ -324,8 +324,8 @@ template void DBGSuccinct
                                                 size_t) const;
 
 void DBGSuccinct::traverse(node_index start,
-                           const char* begin,
-                           const char* end,
+                           const char *begin,
+                           const char *end,
                            const std::function<void(node_index)> &callback,
                            const std::function<bool()> &terminate) const {
     assert(in_graph(start));
@@ -508,13 +508,7 @@ size_t DBGSuccinct::indegree(node_index node) const {
 
     size_t first_valid = !valid_edges_.get() || (*valid_edges_)[x];
 
-    if (x + 1 == boss_graph_->get_W().size())
-        return first_valid;
-
-    auto d = boss_graph_->get_node_last_value(boss_edge);
-    uint64_t y = boss_graph_->succ_W(x + 1, d);
-    return first_valid + boss_graph_->rank_W(y - 1, d + boss_graph_->alph_size)
-                        - boss_graph_->rank_W(x - 1, d + boss_graph_->alph_size);
+    return boss_graph_->num_incoming_to_target(x) - !first_valid;
 }
 
 bool DBGSuccinct::has_no_incoming(node_index node) const {
@@ -529,16 +523,7 @@ bool DBGSuccinct::has_no_incoming(node_index node) const {
 
     size_t first_valid = !valid_edges_.get() || (*valid_edges_)[x];
 
-    if (first_valid)
-        return false;
-
-    if (x + 1 == boss_graph_->get_W().size())
-        return true;
-
-    auto d = boss_graph_->get_node_last_value(boss_edge);
-
-    return boss_graph_->succ_W(x + 1, d)
-            <= boss_graph_->succ_W(x + 1, d + boss_graph_->alph_size);
+    return !first_valid && boss_graph_->is_single_incoming(x);
 }
 
 bool DBGSuccinct::has_single_incoming(node_index node) const {
@@ -559,10 +544,7 @@ bool DBGSuccinct::has_single_incoming(node_index node) const {
     if (first_valid)
         return boss_graph_->is_single_incoming(x);
 
-    auto d = boss_graph_->get_node_last_value(boss_edge);
-    uint64_t y = boss_graph_->succ_W(x + 1, d);
-    return boss_graph_->rank_W(y - 1, d + boss_graph_->alph_size)
-            == boss_graph_->rank_W(x - 1, d + boss_graph_->alph_size) + 1;
+    return boss_graph_->num_incoming_to_target(x) == 2;
 }
 
 uint64_t DBGSuccinct::num_nodes() const {

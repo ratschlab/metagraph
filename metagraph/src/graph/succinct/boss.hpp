@@ -238,6 +238,12 @@ class BOSS {
     size_t indegree(node_index i) const;
 
     /**
+     * Given an edge index i (first incoming), this function returns
+     * the number of edges incoming to its target node.
+     */
+    size_t num_incoming_to_target(edge_index i) const;
+
+    /**
      * Given an edge index i, this function returns true if that is
      * the only edge incoming to its target node.
      */
@@ -331,10 +337,15 @@ class BOSS {
     uint64_t pred_W(uint64_t i, TAlphabet c) const;
 
     /**
-     * This is a convenience function that returns for array W, a position i and
-     * a character c the first index of a character c in W[i..N].
+     * Return position of the first occurrence of |c| in W[i..N].
      */
     uint64_t succ_W(uint64_t i, TAlphabet c) const;
+
+    /**
+     * For characters |first| and |second|, return the first occurrence
+     * of them in W[i..N], i.e. min(succ_W(i, first), succ_W(i, second)).
+     */
+    std::pair<uint64_t, TAlphabet> succ_W(uint64_t i, TAlphabet first, TAlphabet second) const;
 
     /**
      * Return value of F vector at index k.

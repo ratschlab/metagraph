@@ -31,6 +31,11 @@ using TAlphabet = BOSS::TAlphabet;
 typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
 
+// TODO: run benchmarks and optimize these parameters
+const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
+const size_t MAX_ITER_WAVELET_TREE_DYN = 0;
+const size_t MAX_ITER_WAVELET_TREE_SMALL = 10;
+
 
 BOSS::BOSS(size_t k)
       : alph_size(kmer_extractor_.alphabet.size()),
@@ -311,13 +316,76 @@ uint64_t BOSS::pred_W(uint64_t i, TAlphabet c) const {
 }
 
 /**
- * This is a convenience function that returns for array W, a position i and
- * a character c the first index of a character c in W[i..N].
+ * Return the position of the first occurrence of |c| in W[i..N].
  */
 uint64_t BOSS::succ_W(uint64_t i, TAlphabet c) const {
     CHECK_INDEX(i);
 
     return W_->next(i, c);
+}
+
+// get next character without optimizations (via rank/select calls)
+inline uint64_t get_next(const wavelet_tree &W, uint64_t i, TAlphabet c) {
+    assert(i);
+
+    uint64_t r = W.rank(c, i - 1) + 1;
+    if (r <= W.rank(c, W.size() - 1)) {
+        return W.select(c, r);
+    } else {
+        return W.size();
+    }
+}
+
+/**
+ * For characters |first| and |second|, return the first occurrence
+ * of them in W[i..N], i.e. min(succ_W(i, first), succ_W(i, second)).
+ */
+std::pair<uint64_t, TAlphabet>
+BOSS::succ_W(uint64_t i, TAlphabet first, TAlphabet second) const {
+    CHECK_INDEX(i);
+
+    if (first == second) {
+        auto next = succ_W(i, first);
+        return std::make_pair(next, next < W_->size() ? first : 0);
+    }
+
+    // trying to avoid calls of succ_W
+    uint64_t max_iter;
+    if (dynamic_cast<const wavelet_tree_stat*>(W_)
+            || dynamic_cast<const wavelet_tree_fast*>(W_)) {
+        max_iter = MAX_ITER_WAVELET_TREE_STAT;
+    } else if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
+        max_iter = MAX_ITER_WAVELET_TREE_DYN;
+    } else if (dynamic_cast<const wavelet_tree_small*>(W_)) {
+        max_iter = MAX_ITER_WAVELET_TREE_SMALL;
+    } else {
+        assert(false);
+        max_iter = 0;
+    }
+
+    uint64_t end = std::min(W_->size(), i + max_iter);
+
+    while (i < end) {
+        if (get_W(i) == first)
+            return std::make_pair(i, first);
+        if (get_W(i) == second)
+            return std::make_pair(i, second);
+        i++;
+    }
+
+    if (i == W_->size())
+        return std::make_pair(W_->size(), 0);
+
+    uint64_t select_first = get_next(*W_, i, first);
+    uint64_t select_second = get_next(*W_, i, second);
+
+    if (select_second == select_first) {
+        return std::make_pair(W_->size(), 0);
+    } else if (select_first < select_second) {
+        return std::make_pair(select_first, first);
+    } else {
+        return std::make_pair(select_second, second);
+    }
 }
 
 /**
@@ -526,6 +594,7 @@ node_index BOSS::incoming(node_index i, TAlphabet c) const {
     if (x + 1 == W_->size())
         return npos;
 
+    // TODO: could be improved. implement without succ_W.
     TAlphabet d = get_node_last_value(edge);
     uint64_t y = succ_W(x + 1, d);
 
@@ -565,6 +634,7 @@ void BOSS::call_adjacent_incoming_edges(edge_index edge,
 
     // iterate through all indices with edge label d + alph_size
     // which are less than the next index with edge label d
+    // TODO: could be improved. implement without succ_W.
     const auto ubound = succ_W(next_incoming + 1, d);
 
     while (++next_incoming < ubound
@@ -610,19 +680,8 @@ bool BOSS::is_single_incoming(edge_index i) const {
     // start from the next edge
     i++;
 
-    // trying to avoid calls of succ_W
-    size_t max_iter = 1000;
-    size_t end = std::min(W_->size(), i + max_iter);
-
-    while (i < end) {
-        if (get_W(i) == c + alph_size)
-            return false;
-        if (get_W(i) == c)
-            return true;
-        i++;
-    }
-
-    return i == W_->size() || succ_W(i, c) <= succ_W(i, c + alph_size);
+    return i == W_->size()
+            || succ_W(i, c, c + alph_size).second != c + alph_size;
 }
 
 /**
@@ -636,14 +695,41 @@ size_t BOSS::indegree(node_index i) const {
         return 1;
 
     edge_index edge = select_last(i);
-    uint64_t x = bwd(edge);
+
+    return num_incoming_to_target(bwd(edge));
+}
+
+/**
+ * Given an edge index i (first incoming), this function returns
+ * the number of edges incoming to its target node.
+ */
+size_t BOSS::num_incoming_to_target(edge_index x) const {
+    CHECK_INDEX(x);
+
+    assert(get_W(x) < alph_size && "must be the first incoming edge");
+
     if (x + 1 == W_->size())
         return 1;
 
-    TAlphabet d = get_node_last_value(edge);
+    TAlphabet d = get_W(x);
 
-    uint64_t y = succ_W(x + 1, d);
-    return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
+    if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
+        uint64_t y = succ_W(x + 1, d);
+        return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
+
+    } else {
+        size_t indeg = 1;
+        TAlphabet c;
+        do {
+            std::tie(x, c) = succ_W(x + 1, d, d + alph_size);
+            if (c != d + alph_size)
+                break;
+            indeg++;
+        } while (x + 1 < W_->size());
+
+        assert(indeg && "there is always at least one incoming edge");
+        return indeg;
+    }
 }
 
 
@@ -686,8 +772,7 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
         }
         assert(s > 0);
 
-        last_target = std::min(succ_W(last_, s),
-                               succ_W(last_, s + alph_size));
+        last_target = succ_W(last_, s, s + alph_size).first;
 
         if (last_target < W_->size()) {
             last_ = fwd(last_target);
@@ -1266,18 +1351,11 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
         uint64_t edge_id = edge - shift;
 
         uint64_t d = get_W(edge_id);
-        if (d < alph_size) {
+        if (d < alph_size && edge_id + 1 < W_->size()) {
             //fix W array
-            uint64_t next = edge_id + 1;
-            uint64_t j = next < W_->size()
-                            ? succ_W(next, d)
-                            : W_->size();
-            for (uint64_t i = next; i < j; ++i) {
-                if (get_W(i) == d + alph_size) {
-                    W_->set(i, d);
-                    break;
-                }
-            }
+            auto [next, d_next] = succ_W(edge_id + 1, d, d + alph_size);
+            if (d_next == d + alph_size)
+                W_->set(next, d);
         }
         W_->remove(edge_id);
         update_F(get_node_last_value(edge_id), -1);
