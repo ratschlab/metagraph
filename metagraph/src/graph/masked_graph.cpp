@@ -98,14 +98,14 @@ void MaskedDeBruijnGraph
 
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
 
-        auto mask = std::make_unique<bitmap_lazy>(
+        bitmap_lazy mask(
             [&](const auto &i) { return in_graph(dbg_succ->boss_to_kmer_index(i)); },
             dbg_succ->get_boss().num_edges() + 1
         );
 
         // TODO: call_sequences will eventually call all indexes in bitmap_lazy
         // this is inefficient! pass sdsl::bit_vector instead
-        dbg_succ->get_boss().call_sequences(callback, mask.get());
+        dbg_succ->get_boss().call_sequences(callback, &mask);
 
     } else {
         DeBruijnGraph::call_sequences(callback);
