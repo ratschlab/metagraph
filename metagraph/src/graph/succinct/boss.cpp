@@ -7,6 +7,7 @@
 #include <string>
 #include <cstdio>
 
+#include <progress_bar.hpp>
 #include <boost/multiprecision/integer.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
@@ -1698,6 +1699,17 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
     } while (!get_last(root++));
 }
 
+// traverse graph from the specified (k+1)-mer/edge and call
+// all paths reachable from it
+void call_paths(const BOSS &boss,
+                edge_index starting_kmer,
+                BOSS::Call<std::vector<edge_index>&&,
+                           std::vector<TAlphabet>&&> callback,
+                bool split_to_unitigs,
+                sdsl::bit_vector *discovered_ptr,
+                sdsl::bit_vector *visited_ptr,
+                ProgressBar &progress_bar);
+
 /**
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
@@ -1709,8 +1721,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     sdsl::bit_vector discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
     sdsl::bit_vector visited(W_->size(), false);
+    visited[0] = discovered[0] = true;
 
-    ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS", std::cerr, !utils::get_verbose());
+    ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS",
+                             std::cerr, !utils::get_verbose());
 
     // process source dummy edges first
     //
@@ -1718,23 +1732,25 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     auto last_source = succ_last(1);
     for (uint64_t i = 1; i <= last_source; ++i) {
-        call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
+        ::call_paths(*this, i, callback, split_to_unitigs,
+                     &discovered, &visited, progress_bar);
     }
 
     // then all forks
     //  ____.____
     //       \___
     //
-    for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (!visited[i] && !is_single_outgoing(i))
-            call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
-    }
+    call_zeros(visited, [&](uint64_t i) {
+        if (!is_single_outgoing(i))
+            ::call_paths(*this, i, callback, split_to_unitigs,
+                         &discovered, &visited, progress_bar);
+    });
 
     // process all the cycles left that have not been traversed
-    for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (!visited[i])
-            call_paths(i, callback, split_to_unitigs, &discovered, &visited, progress_bar);
-    }
+    call_zeros(visited, [&](uint64_t i) {
+        ::call_paths(*this, i, callback, split_to_unitigs,
+                     &discovered, &visited, progress_bar);
+    });
 }
 
 struct Edge {
@@ -1742,13 +1758,14 @@ struct Edge {
     std::vector<TAlphabet> source_kmer;
 };
 
-void BOSS::call_paths(edge_index starting_kmer,
-                      Call<std::vector<edge_index>&&,
+void call_paths(const BOSS &boss,
+                edge_index starting_kmer,
+                BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
-                      bool split_to_unitigs,
-                      sdsl::bit_vector *discovered_ptr,
-                      sdsl::bit_vector *visited_ptr,
-                      ProgressBar &progress_bar) const {
+                bool split_to_unitigs,
+                sdsl::bit_vector *discovered_ptr,
+                sdsl::bit_vector *visited_ptr,
+                ProgressBar &progress_bar) {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
@@ -1756,7 +1773,7 @@ void BOSS::call_paths(edge_index starting_kmer,
     // store all branch nodes on the way
     std::vector<TAlphabet> kmer;
     discovered[starting_kmer] = true;
-    std::deque<Edge> edges { { starting_kmer, get_node_seq(starting_kmer) } };
+    std::deque<Edge> edges { { starting_kmer, boss.get_node_seq(starting_kmer) } };
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
@@ -1771,7 +1788,7 @@ void BOSS::call_paths(edge_index starting_kmer,
             assert(edge > 0 && discovered[edge]);
 
             // visit the edge
-            sequence.push_back(get_W(edge) % alph_size);
+            sequence.push_back(boss.get_W(edge) % boss.alph_size);
             path.push_back(edge);
             visited[edge] = true;
             ++progress_bar;
@@ -1782,18 +1799,18 @@ void BOSS::call_paths(edge_index starting_kmer,
 
             // stop traversing if we call unitigs and this
             // is not the only incoming edge
-            bool continue_traversal = !split_to_unitigs || is_single_incoming(edge);
+            bool continue_traversal = !split_to_unitigs || boss.is_single_incoming(edge);
 
             // make one traversal step
-            edge = fwd(edge);
+            edge = boss.fwd(edge);
 
             // traverse if there is only one outgoing edge
-            if (continue_traversal && is_single_outgoing(edge)) {
+            if (continue_traversal && boss.is_single_outgoing(edge)) {
                 discovered[edge] = true;
                 continue;
             }
 
-            kmer.assign(sequence.end() - k_, sequence.end());
+            kmer.assign(sequence.end() - boss.get_k(), sequence.end());
             edge_index next_edge = 0;
 
             // loop over outgoing edges
@@ -1807,7 +1824,7 @@ void BOSS::call_paths(edge_index starting_kmer,
                     discovered[edge] = true;
                     edges.push_back({ edge, kmer });
                 }
-            } while (--edge > 0 && !get_last(edge));
+            } while (--edge > 0 && !boss.get_last(edge));
 
             // stop traversing this sequence if the next edge was not selected
             if (!next_edge)

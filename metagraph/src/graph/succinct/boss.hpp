@@ -3,8 +3,6 @@
 
 #include <type_traits>
 
-#include <progress_bar.hpp>
-
 #include "sequence_graph.hpp"
 #include "config.hpp"
 #include "wavelet_tree.hpp"
@@ -477,16 +475,6 @@ class BOSS {
      * Returns the number of edges erased.
      */
     uint64_t erase_edges(const sdsl::bit_vector &edges_to_remove_mask);
-
-    // traverse graph from the specified (k+1)-mer/edge and call
-    // all paths reachable from it
-    void call_paths(edge_index starting_kmer,
-                    Call<std::vector<edge_index>&&,
-                         std::vector<TAlphabet>&&> callback,
-                    bool split_to_contigs,
-                    sdsl::bit_vector *discovered_ptr,
-                    sdsl::bit_vector *visited_ptr,
-                    ProgressBar &progress_bar) const;
 
     /**
      * This function gets two edge indices and returns if their source
