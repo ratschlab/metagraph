@@ -14,7 +14,6 @@ MaskedDeBruijnGraph
         kmers_in_graph_(std::move(kmers_in_graph)) {
     assert(kmers_in_graph_.get());
     assert(kmers_in_graph_->size() == graph->num_nodes() + 1);
-    assert(!(*kmers_in_graph_)[DeBruijnGraph::npos]);
 }
 
 MaskedDeBruijnGraph
@@ -159,6 +158,11 @@ void MaskedDeBruijnGraph
              const std::function<bool()> &stop_early) const {
     kmers_in_graph_->call_ones(
         [&](auto index) {
+            if (!index)
+                return;
+
+            assert(in_graph(index));
+
             if (!stop_early())
                 callback(index);
         }
