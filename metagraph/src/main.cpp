@@ -2045,7 +2045,7 @@ int main(int argc, const char *argv[]) {
                     config->min_tip_size
                 );
 
-            } else if (config->unitigs) {
+            } else if (config->unitigs || config->min_tip_size > 1) {
                 // subgraph->call_unitigs(dump_sequence);
                 graph_with_unitigs->call_unitigs(dump_sequence, config->min_tip_size);
 
