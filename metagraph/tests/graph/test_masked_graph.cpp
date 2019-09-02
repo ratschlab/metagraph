@@ -409,6 +409,63 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
     }
 }
 
+TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
+    size_t k = 4;
+    std::vector<std::string> sequences { "GCATGGTACT",
+                                         "ACCGGTACT",
+                                         "TAGGTACT",
+                                         "GGGTACT",
+                                         "GGGGGGGGGGGG" };
+    std::vector<std::string> masked_out { "GTACT",
+                                          "GGGGGGGGGGGG" };
+    std::vector<std::multiset<std::string>> unitig_sets {
+        { "GGTA", "GCATGGT", "ACCGGT", "TAGGT", "GGGT" },
+        { "GGTA", "GCATGGT", "ACCGGT", "TAGGT" },
+        { "GGTA", "GCATGGT", "ACCGGT" },
+        { "GGTA", "GCATGGT" },
+    };
+
+    auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+    auto mask = std::make_unique<bit_vector_stat>(
+        full_graph->num_nodes() + 1, true
+    );
+
+    for (const auto &mask_out : masked_out) {
+        full_graph->map_to_nodes(
+            mask_out,
+            [&](const auto &index) { mask->set(index, false); }
+        );
+    }
+
+    MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+
+    for (const auto &mask_out : masked_out) {
+        graph.map_to_nodes(
+            mask_out,
+            [](const auto &index) { ASSERT_EQ(DeBruijnGraph::npos, index); }
+        );
+    }
+
+    for (size_t min_tip_size = 1; min_tip_size <= 4; ++min_tip_size) {
+        std::multiset<std::string> unitigs;
+        graph.call_unitigs(
+            [&](const auto &unitig) {
+                graph.map_to_nodes(
+                    unitig,
+                    [&](const auto &index) {
+                        EXPECT_TRUE(graph.in_graph(index));
+                        EXPECT_NE(DeBruijnGraph::npos, index);
+                    }
+                );
+                unitigs.insert(unitig);
+            },
+            min_tip_size
+        );
+        EXPECT_EQ(unitig_sets[min_tip_size - 1], unitigs) << min_tip_size;
+    }
+}
+
 TYPED_TEST(MaskedDeBruijnGraphTest, CheckNodes) {
     for (size_t k = 3; k <= 10; ++k) {
         std::vector<std::string> sequences { "ATGCAGTACTCAG",

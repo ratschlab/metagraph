@@ -149,7 +149,7 @@ void MaskedDeBruijnGraph
         dbg_succ->get_boss().call_unitigs(callback, min_tip_size, &mask);
 
     } else {
-        DeBruijnGraph::call_unitigs(callback);
+        DeBruijnGraph::call_unitigs(callback, min_tip_size);
     }
 }
 
