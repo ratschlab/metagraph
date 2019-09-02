@@ -100,7 +100,7 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
         return all_equal;
 
     // compare last
-    for (size_t i = 0; i < W_->size(); ++i) {
+    for (uint64_t i = 0; i < W_->size(); ++i) {
         if (get_last(i) != other.get_last(i)) {
             if (verbose)
                 std::cout << "last differs at position " << i
@@ -112,7 +112,7 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     }
 
     // compare W
-    for (size_t i = 0; i < W_->size(); ++i) {
+    for (uint64_t i = 0; i < W_->size(); ++i) {
         if (get_W(i) != other.get_W(i)) {
             if (verbose)
                 std::cout << "W differs at position " << i
@@ -124,7 +124,7 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     }
 
     // compare F
-    for (size_t i = 0; i < F_.size(); ++i) {
+    for (uint64_t i = 0; i < F_.size(); ++i) {
         if (get_F(i) != other.get_F(i)) {
             if (verbose)
                 std::cout << "F differs at position " << i
@@ -1377,8 +1377,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
  * Returns the number of edges erased.
  */
 uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
-    size_t num_edges_to_remove = std::count(edges_to_remove_mask.begin(),
-                                            edges_to_remove_mask.end(), true);
+    uint64_t num_edges_to_remove = sdsl::util::cnt_one_bits(edges_to_remove_mask);
     if (!num_edges_to_remove)
         return 0;
 
@@ -1400,7 +1399,7 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
     sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, bits_per_char_W_);
     sdsl::bit_vector first_removed(alph_size, false);
 
-    for (size_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
+    for (uint64_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
         TAlphabet c = get_W(i);
         if (edges_to_remove_mask[i]) {
             if (c < alph_size)
@@ -1615,7 +1614,7 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
     }
 
     if (edges_threadsafe.get()) {
-        for (size_t i = 0; i < edges_threadsafe->size(); ++i) {
+        for (uint64_t i = 0; i < edges_threadsafe->size(); ++i) {
             if ((*edges_threadsafe)[i] && traversed_mask)
                 (*traversed_mask)[i] = true;
             if ((*edges_threadsafe)[i] == 2 && redundant_mask)
