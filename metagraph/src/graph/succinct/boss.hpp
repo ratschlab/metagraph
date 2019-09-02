@@ -331,10 +331,15 @@ class BOSS {
     uint64_t select_W(uint64_t i, TAlphabet c) const;
 
     /**
-     * This is a convenience function that returns for array W, a position i and
-     * a character c the last index of a character c preceding in W[1..i].
+     * Return position of the last occurrence of |c| in W[1..i].
      */
     uint64_t pred_W(uint64_t i, TAlphabet c) const;
+
+    /**
+     * For characters |first| and |second|, return the last occurrence
+     * of them in W[1..i], i.e. max(pred_W(i, first), pred_W(i, second)).
+     */
+    uint64_t pred_W(uint64_t i, TAlphabet first, TAlphabet second) const;
 
     /**
      * Return position of the first occurrence of |c| in W[i..N].

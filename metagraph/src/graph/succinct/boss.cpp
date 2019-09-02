@@ -304,8 +304,7 @@ uint64_t BOSS::select_W(uint64_t i, TAlphabet c) const {
 }
 
 /**
- * This is a convenience function that returns for array W, a position i and
- * a character c the last index of a character c preceding in W[1..i].
+ * Return position of the last occurrence of |c| in W[1..i].
  */
 uint64_t BOSS::pred_W(uint64_t i, TAlphabet c) const {
     CHECK_INDEX(i);
@@ -313,6 +312,68 @@ uint64_t BOSS::pred_W(uint64_t i, TAlphabet c) const {
     uint64_t prev = W_->prev(i, c);
 
     return prev < W_->size() ? prev : 0;
+}
+
+// get prev character without optimizations (via rank/select calls)
+inline uint64_t get_prev(const wavelet_tree &W, uint64_t i, TAlphabet c) {
+    assert(i);
+
+    if (W[i] == c)
+        return i;
+
+    uint64_t r = W.rank(c, i);
+    return r ? W.select(c, r) : 0;
+}
+
+/**
+ * For characters |first| and |second|, return the last occurrence
+ * of them in W[1..i], i.e. max(pred_W(i, first), pred_W(i, second)).
+ */
+uint64_t BOSS::pred_W(uint64_t i, TAlphabet first, TAlphabet second) const {
+    CHECK_INDEX(i);
+
+    if (first == second)
+        return pred_W(i, first);
+
+    // trying to avoid calls of succ_W
+    uint64_t max_iter;
+    if (dynamic_cast<const wavelet_tree_stat*>(W_)
+            || dynamic_cast<const wavelet_tree_fast*>(W_)) {
+        max_iter = MAX_ITER_WAVELET_TREE_STAT;
+    } else if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
+        max_iter = MAX_ITER_WAVELET_TREE_DYN;
+    } else if (dynamic_cast<const wavelet_tree_small*>(W_)) {
+        max_iter = MAX_ITER_WAVELET_TREE_SMALL;
+    } else {
+        assert(false);
+        max_iter = 0;
+    }
+
+    uint64_t end = i > max_iter
+                    ? i - max_iter
+                    : 0;
+
+    while (i > end) {
+        if (get_W(i) == first)
+            return i;
+        if (get_W(i) == second)
+            return i;
+        i--;
+    }
+
+    if (!i)
+        return 0;
+
+    uint64_t select_first = get_prev(*W_, i, first);
+    uint64_t select_second = get_prev(*W_, i, second);
+
+    if (select_second == select_first) {
+        return 0;
+    } else if (select_first > select_second) {
+        return select_first;
+    } else {
+        return select_second;
+    }
 }
 
 /**
@@ -530,11 +591,7 @@ edge_index BOSS::pick_edge(edge_index edge, node_index node, TAlphabet c) const 
 
     assert(get_source_node(edge) == node);
 
-    uint64_t j = pred_W(edge, c);
-    if (!j || get_source_node(j) == node)
-        return j;
-
-    j = pred_W(edge, c + alph_size);
+    uint64_t j = pred_W(edge, c, c + alph_size);
     if (!j || get_source_node(j) == node)
         return j;
 
@@ -762,8 +819,7 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
             continue;
         }
 
-        uint64_t last_target = std::max(pred_W(last_, s),
-                                        pred_W(last_, s + alph_size));
+        uint64_t last_target = pred_W(last_, s, s + alph_size);
         if (last_target > 0) {
             if (rank_last(last_target - 1) < rank_last(last_ - 1))
                 shift = 0;
@@ -1245,8 +1301,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     uint64_t end = succ_last(source_node) + 1;
 
     // get position of the first occurence of c or c- in W after p
-    uint64_t prev_c_pos = std::max(pred_W(end - 1, c),
-                                   pred_W(end - 1, c + alph_size));
+    uint64_t prev_c_pos = pred_W(end - 1, c, c + alph_size);
     // if the edge already exists, traverse it and return the index
     if (prev_c_pos >= begin)
         return fwd(prev_c_pos);
