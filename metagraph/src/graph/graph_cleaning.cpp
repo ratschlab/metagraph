@@ -54,12 +54,7 @@ uint64_t estimate_min_kmer_abundance(const bitmap &node_mask,
         hist[kmer_count]++;
     });
 
-    if (hist.size() < 10) {
-        std::cerr << "Warning: Less than 10 distinct k-mer counts in histogram."
-                     " Cannot estimate expected minimum k-mer abundance."
-                     " Use fallback value." << std::endl;
-        return -1;
-    }
+    hist.resize(std::max(uint64_t(hist.size()), uint64_t(10)), 0);
 
     double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
     auto cutoff = cleaning_pick_kmer_threshold(hist.data(), hist.size(),
