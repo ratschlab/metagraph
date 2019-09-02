@@ -31,23 +31,31 @@ MaskedDeBruijnGraph
 // Traverse the outgoing edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 ::traverse(node_index node, char next_char) const {
+    assert(in_graph(node));
+
     auto index = graph_->traverse(node, next_char);
     return index && in_graph(index) ? index : DeBruijnGraph::npos;
 }
 // Traverse the incoming edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 ::traverse_back(node_index node, char prev_char) const {
+    assert(in_graph(node));
+
     auto index = graph_->traverse_back(node, prev_char);
     return index && in_graph(index) ? index : DeBruijnGraph::npos;
 }
 
 size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
+    assert(in_graph(node));
+
     size_t outdegree = 0;
     graph_->adjacent_outgoing_nodes(node, [&](auto index) { outdegree += in_graph(index); });
     return outdegree;
 }
 
 size_t MaskedDeBruijnGraph::indegree(node_index node) const {
+    assert(in_graph(node));
+
     size_t indegree = 0;
     graph_->adjacent_incoming_nodes(node, [&](auto index) { indegree += in_graph(index); });
     return indegree;
@@ -55,6 +63,8 @@ size_t MaskedDeBruijnGraph::indegree(node_index node) const {
 
 void MaskedDeBruijnGraph
 ::adjacent_outgoing_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+    assert(in_graph(node));
+
     graph_->adjacent_outgoing_nodes(node, [&](auto node) {
         if (in_graph(node))
             callback(node);
@@ -63,6 +73,8 @@ void MaskedDeBruijnGraph
 
 void MaskedDeBruijnGraph
 ::adjacent_incoming_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+    assert(in_graph(node));
+
     graph_->adjacent_incoming_nodes(node, [&](auto node) {
         if (in_graph(node))
             callback(node);
@@ -72,6 +84,8 @@ void MaskedDeBruijnGraph
 void MaskedDeBruijnGraph
 ::call_outgoing_kmers(node_index kmer,
                       const OutgoingEdgeCallback &callback) const {
+    assert(in_graph(kmer));
+
     graph_->call_outgoing_kmers(
         kmer,
         [&](const auto &index, auto c) {
@@ -84,6 +98,8 @@ void MaskedDeBruijnGraph
 void MaskedDeBruijnGraph
 ::call_incoming_kmers(node_index kmer,
                       const IncomingEdgeCallback &callback) const {
+    assert(in_graph(kmer));
+
     graph_->call_incoming_kmers(
         kmer,
         [&](const auto &index, auto c) {
@@ -99,7 +115,10 @@ void MaskedDeBruijnGraph
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
 
         bitmap_lazy mask(
-            [&](const auto &i) { return in_graph(dbg_succ->boss_to_kmer_index(i)); },
+            [&](const auto &i) {
+                auto node = dbg_succ->boss_to_kmer_index(i);
+                return node && in_graph(node);
+            },
             dbg_succ->get_boss().num_edges() + 1
         );
 
@@ -119,7 +138,10 @@ void MaskedDeBruijnGraph
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
 
         bitmap_lazy mask(
-            [&](const auto &i) { return in_graph(dbg_succ->boss_to_kmer_index(i)); },
+            [&](const auto &i) {
+                auto node = dbg_succ->boss_to_kmer_index(i);
+                return node && in_graph(node);
+            },
             dbg_succ->get_boss().num_edges() + 1
         );
 
@@ -185,6 +207,8 @@ uint64_t MaskedDeBruijnGraph::num_nodes() const {
 // Get string corresponding to |node_index|.
 // Note: Not efficient if sequences in nodes overlap. Use sparingly.
 std::string MaskedDeBruijnGraph::get_node_sequence(node_index index) const {
+    assert(in_graph(index));
+
     return graph_->get_node_sequence(index);
 }
 

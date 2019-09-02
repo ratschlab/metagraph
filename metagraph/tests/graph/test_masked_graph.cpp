@@ -377,6 +377,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
             );
 
             MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+            EXPECT_EQ(*full_graph, graph.get_graph());
 
             size_t counter = 0;
             graph.map_to_nodes(
@@ -389,20 +390,10 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
 
             EXPECT_EQ(sequence.size() + 1 - graph.get_k(), counter);
 
+            // check if reconstructed graph matches
             auto reconstructed = build_graph_iterative<TypeParam>(
                 k, [&](const auto &callback) { graph.call_sequences(callback); }
             );
-
-            std::multiset<std::string> all_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
-                all_nodes.insert(full_graph->get_node_sequence(i));
-            }
-
-            std::multiset<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= graph.num_nodes(); ++i) {
-                ref_nodes.insert(graph.get_node_sequence(i));
-            }
-            EXPECT_EQ(all_nodes, ref_nodes);
 
             std::multiset<std::string> called_nodes;
             graph.call_nodes([&](const auto &index) {
