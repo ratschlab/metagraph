@@ -297,31 +297,39 @@ void ColumnCompressed<Label>
 template <typename Label>
 void ColumnCompressed<Label>
 ::rename_labels(const std::unordered_map<Label, Label> &dict) {
-    cached_columns_.Clear();
-
-    std::vector<Label> old_index_to_label(label_encoder_.size());
-    for (size_t i = 0; i < old_index_to_label.size(); ++i) {
-        old_index_to_label[i] = label_encoder_.decode(i);
+    std::vector<Label> index_to_label(label_encoder_.size());
+    // old labels
+    for (size_t i = 0; i < index_to_label.size(); ++i) {
+        index_to_label[i] = label_encoder_.decode(i);
     }
+    // new labels
     for (const auto &pair : dict) {
-        old_index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+        try {
+            index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+        } catch (const std::runtime_error&) {
+            std::cerr << "Warning: label '" << pair.first << "' not"
+                      << " found in annotation. Skipping instruction"
+                      << " '" << pair.first << " -> " << pair.second << "'."
+                      << std::endl;
+        }
     }
 
-    std::vector<Label> index_to_label;
+    std::vector<Label> new_index_to_label;
     std::unordered_map<Label, std::set<size_t>> old_columns;
-    for (size_t i = 0; i < old_index_to_label.size(); ++i) {
-        if (!old_columns.count(old_index_to_label[i]))
-            index_to_label.push_back(old_index_to_label[i]);
+    for (size_t i = 0; i < index_to_label.size(); ++i) {
+        if (!old_columns.count(index_to_label[i]))
+            new_index_to_label.push_back(index_to_label[i]);
 
-        old_columns[old_index_to_label[i]].insert(i);
+        old_columns[index_to_label[i]].insert(i);
     }
 
+    cached_columns_.Clear();
     std::vector<std::unique_ptr<bit_vector>> old_bitmatrix;
     old_bitmatrix.swap(bitmatrix_);
 
     label_encoder_.clear();
 
-    for (const auto &label : index_to_label) {
+    for (const auto &label : new_index_to_label) {
         label_encoder_.insert_and_encode(label);
 
         const auto &cols = old_columns[label];
