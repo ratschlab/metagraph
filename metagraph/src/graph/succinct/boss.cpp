@@ -303,17 +303,6 @@ uint64_t BOSS::select_W(uint64_t i, TAlphabet c) const {
     return i == 0 ? 0 : W_->select(c, i + (c == 0));
 }
 
-/**
- * Return position of the last occurrence of |c| in W[1..i].
- */
-uint64_t BOSS::pred_W(uint64_t i, TAlphabet c) const {
-    CHECK_INDEX(i);
-
-    uint64_t prev = W_->prev(i, c);
-
-    return prev < W_->size() ? prev : 0;
-}
-
 // get prev character without optimizations (via rank/select calls)
 inline uint64_t get_prev(const wavelet_tree &W, uint64_t i, TAlphabet c) {
     assert(i);
@@ -332,8 +321,10 @@ inline uint64_t get_prev(const wavelet_tree &W, uint64_t i, TAlphabet c) {
 uint64_t BOSS::pred_W(uint64_t i, TAlphabet first, TAlphabet second) const {
     CHECK_INDEX(i);
 
-    if (first == second)
-        return pred_W(i, first);
+    if (first == second) {
+        uint64_t prev = W_->prev(i, first);
+        return prev < W_->size() ? prev : 0;
+    }
 
     // trying to avoid calls of succ_W
     uint64_t max_iter;
@@ -566,17 +557,6 @@ BOSS::get_minus_k_value(edge_index i, size_t k) const {
 }
 
 /**
- * Given a node index i and an edge label c, this function returns the
- * index of the outgoing edge with label c if it exists and npos otherwise.
- */
-edge_index BOSS::outgoing_edge_idx(node_index i, TAlphabet c) const {
-    CHECK_NODE(i);
-    assert(c < alph_size);
-
-    return pick_edge(select_last(i), i, c);
-}
-
-/**
  * Given an edge index i and a character c, get the index of the edge with
  * label c outgoing from the same source node if such exists and npos otherwise.
  */
@@ -596,28 +576,6 @@ edge_index BOSS::pick_edge(edge_index edge, node_index node, TAlphabet c) const 
         return j;
 
     return npos;
-}
-
-/**
- * Given a node index i and an edge label c, this function returns the
- * index of the node the edge is pointing to.
- */
-node_index BOSS::outgoing(node_index i, TAlphabet c) const {
-    CHECK_NODE(i);
-
-    assert(c <= alph_size);
-
-    if (c == alph_size)
-        return npos;
-
-    edge_index j = outgoing_edge_idx(i, c);
-    if (j == npos)
-        return npos;
-
-    uint64_t offset = F_[c];
-    uint64_t rank = rank_W(j, c);
-
-    return rank_last(offset) + rank;
 }
 
 /**
@@ -665,14 +623,6 @@ node_index BOSS::incoming(node_index i, TAlphabet c) const {
     return npos;
 }
 
-BOSS::node_index BOSS::traverse(node_index node, char edge_label) const {
-    return outgoing(node, encode(edge_label));
-}
-
-BOSS::node_index BOSS::traverse_back(node_index node, char edge_label) const {
-    return incoming(node, encode(edge_label));
-}
-
 void BOSS::call_adjacent_incoming_edges(edge_index edge,
                                         std::function<void(edge_index)> callback) const {
     CHECK_INDEX(edge);
@@ -682,7 +632,7 @@ void BOSS::call_adjacent_incoming_edges(edge_index edge,
     callback(next_incoming);
 
     if (next_incoming + 1 == W_->size()) {
-        assert(indegree(get_source_node(edge)) == 1);
+        assert(num_incoming_to_target(next_incoming) == 1);
         return;
     }
 
@@ -739,21 +689,6 @@ bool BOSS::is_single_incoming(edge_index i) const {
 
     return i == W_->size()
             || succ_W(i, c, c + alph_size).second != c + alph_size;
-}
-
-/**
- * Given a node index i, this function returns the number of incoming
- * edges to the node i.
- */
-size_t BOSS::indegree(node_index i) const {
-    CHECK_NODE(i);
-
-    if (i == 1)
-        return 1;
-
-    edge_index edge = select_last(i);
-
-    return num_incoming_to_target(bwd(edge));
 }
 
 /**
@@ -862,6 +797,10 @@ bool BOSS::compare_node_suffix(edge_index first, edge_index second) const {
     return true;
 }
 
+/**
+ * This function gets an edge indix and checks if its source
+ * node has the same k-1 suffix as k-mer |second|.
+ */
 bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const {
     for (auto it = second + k_ - 1; it > second; --it) {
         if (get_node_last_value(first) != *it) {
@@ -898,41 +837,6 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index k_node) const {
 std::string BOSS::get_node_str(edge_index k_node) const {
     CHECK_INDEX(k_node);
     return decode(get_node_seq(k_node));
-}
-
-void BOSS::map_to_nodes(const std::string &sequence,
-                        const std::function<void(node_index)> &callback,
-                        const std::function<bool()> &terminate) const {
-    auto seq_encoded = encode(sequence);
-
-    for (size_t i = 0; i + k_ - 1 < seq_encoded.size() && !terminate(); ++i) {
-        auto node = map_to_node(seq_encoded.data() + i,
-                                seq_encoded.data() + i + k_);
-        callback(node);
-
-        if (!node)
-            continue;
-
-        while (i + k_ < seq_encoded.size()) {
-            node = outgoing(node, seq_encoded[i + k_]);
-            if (!node)
-                break;
-
-            if (terminate())
-                return;
-
-            callback(node);
-
-            i++;
-        }
-    }
-}
-
-std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence) const {
-    std::vector<node_index> indices;
-    map_to_nodes(sequence, [&](node_index node) { indices.emplace_back(node); });
-
-    return indices;
 }
 
 void BOSS::map_to_edges(const std::string &sequence,

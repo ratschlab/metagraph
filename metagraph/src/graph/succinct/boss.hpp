@@ -60,19 +60,6 @@ class BOSS {
     bool load(std::ifstream &instream);
     void serialize(std::ofstream &outstream) const;
 
-    // Traverse graph mapping k-mers from sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    // Call npos if a k-mer can't be mapped to the graph nodes
-    void map_to_nodes(const std::string &sequence,
-                      const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate = [](){ return false; }) const;
-
-    /**
-     * Breaks the sequence into k-mers and searches for the index of each
-     * k-mer in the graph. Returns these indices.
-     */
-    std::vector<node_index> map_to_nodes(const std::string &sequence) const;
-
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
     // Call npos if a k-mer can't be mapped to the graph edges
@@ -111,9 +98,6 @@ class BOSS {
 
     void call_unitigs(Call<const std::string&> callback,
                       size_t max_pruned_dead_end_size = 0) const;
-
-    node_index traverse(node_index node, char edge_label) const;
-    node_index traverse_back(node_index node, char edge_label) const;
 
     void call_adjacent_incoming_edges(edge_index edge,
                                       std::function<void(edge_index)> callback) const;
@@ -232,12 +216,6 @@ class BOSS {
     bool is_single_outgoing(edge_index i) const;
 
     /**
-     * Given a node index i, this function returns the number of incoming
-     * edges to node i.
-     */
-    size_t indegree(node_index i) const;
-
-    /**
      * Given an edge index i (first incoming), this function returns
      * the number of edges incoming to its target node.
      */
@@ -251,21 +229,9 @@ class BOSS {
 
     /**
      * Given a node index i and an edge label c, this function returns the
-     * index of the node the edge is pointing to.
-     */
-    node_index outgoing(node_index i, TAlphabet c) const;
-
-    /**
-     * Given a node index i and an edge label c, this function returns the
      * index of the node the incoming edge belongs to.
      */
     node_index incoming(node_index i, TAlphabet c) const;
-
-    /**
-     * Given a node index i and an edge label c, this function returns the
-     * index of the outgoing edge with label c if it exists and npos otherwise.
-     */
-    edge_index outgoing_edge_idx(node_index i, TAlphabet c) const;
 
     /**
      * Given an edge index i and a character c, get the index of the edge with
@@ -329,11 +295,6 @@ class BOSS {
      * the alphabet and returns the positions of the i-th occurence of c in W.
      */
     uint64_t select_W(uint64_t i, TAlphabet c) const;
-
-    /**
-     * Return position of the last occurrence of |c| in W[1..i].
-     */
-    uint64_t pred_W(uint64_t i, TAlphabet c) const;
 
     /**
      * For characters |first| and |second|, return the last occurrence
@@ -497,17 +458,11 @@ class BOSS {
      * node labels share a k-1 suffix.
      */
     bool compare_node_suffix(edge_index first, edge_index second) const;
-    bool compare_node_suffix(edge_index first, const TAlphabet *second) const;
-
     /**
-     * Given a k-mer, this function returns the index
-     * of the corresponding node, if such exists and 0 otherwise.
+     * This function gets an edge indix and checks if its source
+     * node has the same k-1 suffix as k-mer |second|.
      */
-    template <typename RandomAccessIt>
-    node_index map_to_node(RandomAccessIt begin, RandomAccessIt end) const {
-        uint64_t edge = index(begin, end);
-        return edge ? get_source_node(edge) : npos;
-    }
+    bool compare_node_suffix(edge_index first, const TAlphabet *second) const;
 
     /**
      * Given a (k+1)-mer, this function returns the index

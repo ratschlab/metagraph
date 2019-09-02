@@ -53,14 +53,15 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
     auto boss_edge = kmer_to_boss_index(node);
 
     auto boss_node = boss_graph_->get_source_node(boss_edge);
-    auto source_node = boss_graph_->traverse_back(boss_node, prev_char);
+    auto source_node = boss_graph_->incoming(boss_node, boss_graph_->encode(prev_char));
 
     if (!source_node)
         return npos;
 
     return boss_to_kmer_index(
-        boss_graph_->outgoing_edge_idx(source_node,
-                                       boss_graph_->get_node_last_value(boss_edge))
+        boss_graph_->pick_edge(boss_graph_->select_last(source_node),
+                               source_node,
+                               boss_graph_->get_node_last_value(boss_edge))
     );
 }
 

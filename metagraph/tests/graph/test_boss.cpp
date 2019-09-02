@@ -167,7 +167,9 @@ TEST(BOSS, SmallGraphTraversal) {
                                            8, 0, 10, 21, 11, 11, 13, 0, 22, 16, 17 };
     ASSERT_EQ(outgoing_edges.size(), graph->num_edges() + 1);
 
-    EXPECT_EQ(1u, graph->outgoing(1, BOSS::kSentinelCode));
+    uint64_t dummy_edge = graph->select_last(1);
+    EXPECT_EQ(1u, graph->pick_edge(dummy_edge, 1, BOSS::kSentinelCode));
+    EXPECT_EQ(dummy_edge, graph->fwd(1));
 
     for (size_t i = 1; i <= graph->num_edges(); ++i) {
         //test forward traversal given an output edge label
@@ -175,20 +177,23 @@ TEST(BOSS, SmallGraphTraversal) {
             uint64_t node_idx = graph->rank_last(i - 1) + 1;
 
             EXPECT_EQ(outgoing_edges[i],
-                graph->select_last(graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size))
+                graph->fwd(graph->pick_edge(i, node_idx, graph->get_W(i) % graph->alph_size))
             ) << "Edge index: " << i << "\n"
-              << "Outgoing: " << graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size) << "\n"
               << *graph;
 
             EXPECT_EQ(node_idx,
-                graph->incoming(graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size),
+                graph->incoming(graph->get_source_node(graph->fwd(graph->pick_edge(
+                                    i, node_idx, graph->get_W(i) % graph->alph_size
+                                ))),
                                 graph->get_minus_k_value(i, graph->get_k() - 1).first)
             );
             for (int c = 0; c < graph->alph_size; ++c) {
                 uint64_t prev_node = graph->incoming(node_idx, c);
                 if (prev_node) {
                     EXPECT_EQ(node_idx,
-                        graph->outgoing(prev_node, graph->get_node_last_value(i))
+                        graph->get_source_node(graph->fwd(graph->pick_edge(
+                            graph->select_last(prev_node), prev_node, graph->get_node_last_value(i)
+                        )))
                     );
                 }
             }
@@ -1887,16 +1892,6 @@ TEST(BOSS, FindSequence) {
         graph->add_sequence(std::string(100, 'A'));
 
         uint64_t index = 777;
-        graph->map_to_nodes(std::string(k - 1, 'A'), [&](uint64_t i) { index = i; });
-        EXPECT_EQ(777u, index) << *graph;
-        graph->map_to_nodes(std::string(k, 'A'), [&](uint64_t i) { index = i; });
-        EXPECT_EQ(k + 1, index) << *graph;
-
-        index = 777;
-        graph->map_to_nodes(std::string(2 * k, 'A'), [&](uint64_t i) { index = i; });
-        EXPECT_EQ(k + 1, index) << *graph;
-
-        index = 777;
         graph->map_to_edges(std::string(k - 1, 'A'), [&](uint64_t i) { index = i; });
         EXPECT_EQ(777u, index);
         graph->map_to_edges(std::string(k, 'A'), [&](uint64_t i) { index = i; });
@@ -2113,52 +2108,6 @@ TEST(BOSS, KmerMappingMode) {
     }
 }
 
-TEST(BOSS, Traversals) {
-    for (size_t k = 1; k < 10; ++k) {
-        auto graph = std::make_unique<BOSS>(k);
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-
-        uint64_t it = 0;
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        ASSERT_EQ(k + 1, it);
-        EXPECT_EQ(it, graph->traverse(it, 'A'));
-        EXPECT_EQ(it + 1, graph->traverse(it, 'C'));
-        EXPECT_EQ(it, graph->traverse_back(it + 1, 'A'));
-        EXPECT_EQ(BOSS::npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(BOSS::npos, graph->traverse_back(it + 1, 'G'));
-    }
-}
-
-TEST(BOSS, map_to_nodes) {
-    for (size_t k = 1; k < 10; ++k) {
-        std::unique_ptr<BOSS> graph { new BOSS(k) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-
-        std::vector<BOSS::node_index> expected_result {
-            SequenceGraph::npos, SequenceGraph::npos,
-            k + 1, k + 1, k + 1, k + 1
-        };
-        for (size_t i = 1; i <= k; ++i) {
-            expected_result.push_back(k + 1 + i);
-        }
-        for (size_t i = 0; i < k; ++i) {
-            expected_result.push_back(k + 1 + k);
-        }
-
-        std::string sequence_to_map = std::string(2, 'T')
-                                        + std::string(k + 3, 'A')
-                                        + std::string(2 * k, 'C');
-
-        EXPECT_EQ(expected_result, graph->map_to_nodes(sequence_to_map));
-
-        size_t pos = 0;
-        graph->map_to_nodes(sequence_to_map,
-                            [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
-    }
-}
-
 TEST(BOSS, map_to_edges) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> graph { new BOSS(k) };
@@ -2185,35 +2134,6 @@ TEST(BOSS, map_to_edges) {
         size_t pos = 0;
         graph->map_to_edges(sequence_to_map,
                             [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
-    }
-}
-
-TEST(BOSS, map_to_nodes_BOSS_vs_DBG) {
-    for (size_t k = 1; k < 10; ++k) {
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k)) };
-        std::unique_ptr<BOSS> boss { new BOSS(k) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        boss->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-
-        std::string sequence_to_map = std::string(2, 'T')
-                                        + std::string(k + 3, 'A')
-                                        + std::string(2 * k, 'C');
-
-        std::vector<BOSS::edge_index> boss_indexes;
-
-        boss->map_to_edges(
-            sequence_to_map,
-            [&boss_indexes](auto i) { boss_indexes.push_back(i); }
-        );
-        std::vector<BOSS::edge_index> dbg_indexes;
-
-        graph->map_to_nodes(
-            sequence_to_map,
-            [&dbg_indexes](auto i) { dbg_indexes.push_back(i); }
-        );
-
-        EXPECT_EQ(boss_indexes, dbg_indexes);
     }
 }
 
@@ -2305,22 +2225,6 @@ TEST(BOSS, get_degree_with_source_and_sink_dummy) {
         EXPECT_EQ(0ull, graph->outdegree(node_T));
         EXPECT_EQ(1ull, graph->indegree(node_T));
     }
-}
-
-TEST(BOSS, get_node_sequence) {
-    size_t k = 4;
-    std::string reference = "AGCTTCGAGGCCAA";
-    std::string query = "AGCT";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-
-    std::string mapped_query = "";
-    graph->map_to_nodes(query, [&](DBGSuccinct::node_index node) {
-        mapped_query += graph->get_node_sequence(node);
-    });
-
-    EXPECT_EQ(query, mapped_query);
 }
 
 TEST(BOSS, is_single_outgoing_simple) {
