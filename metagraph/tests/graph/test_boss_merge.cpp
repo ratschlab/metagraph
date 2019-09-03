@@ -1,15 +1,8 @@
-#include <stdio.h>
-#include <string>
-#include <sstream>
-
-#include <zlib.h>
-#include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
 #include "boss.hpp"
 #include "boss_merge.hpp"
 #include "boss_construct.hpp"
-#include "utils.hpp"
 
 const std::string test_data_dir = "../tests/data";
 

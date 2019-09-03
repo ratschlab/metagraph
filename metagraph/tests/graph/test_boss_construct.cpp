@@ -11,13 +11,10 @@
 #define private public
 
 #include "boss.hpp"
-#include "boss_merge.hpp"
 #include "boss_construct.hpp"
-#include "utils.hpp"
 #include "reverse_complement.hpp"
 #include "sorted_set.hpp"
 #include "sorted_multiset.hpp"
-#include "kmer_collector.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -472,6 +469,8 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
     // $$$A, $$AA, $AAA, AAAA, AAA$
     ASSERT_EQ(5u, result.data().size());
 }
+
+typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
 
 template <typename KMER, class KmerExtractor, class Container>
 void count_kmers(std::function<void(CallStringCount)> generate_reads,

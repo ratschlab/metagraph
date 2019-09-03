@@ -3,6 +3,7 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+
 template <typename TypeParam>
 void left_shift(TypeParam *num, size_t bits) {
     (*num) = num->operator<<(bits);

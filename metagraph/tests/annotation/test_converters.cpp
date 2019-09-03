@@ -6,9 +6,7 @@
 #include "annotate_row_compressed.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
-#include "utils.hpp"
 #include "binary_matrix.hpp"
-
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";

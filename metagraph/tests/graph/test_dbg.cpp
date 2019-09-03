@@ -4,8 +4,6 @@
 #define protected public
 
 #include "test_dbg_helpers.hpp"
-#include "utils.hpp"
-#include "reverse_complement.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";

@@ -1,9 +1,9 @@
 #include "gtest/gtest.h"
 
-#include "static_annotators_def.hpp"
-#include "threading.hpp"
 #include "../graph/test_dbg_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
+
+#include "threading.hpp"
 #include "annotated_graph_algorithm.hpp"
 
 

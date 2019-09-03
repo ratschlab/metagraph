@@ -9,16 +9,15 @@
 
 #define protected public
 #define private public
-
 #include "annotated_dbg.hpp"
 #include "annotate_column_compressed.hpp"
 #include "static_annotators_def.hpp"
-#include "masked_graph.hpp"
 
 #include "dbg_succinct.hpp"
 #include "dbg_hash_string.hpp"
 #include "dbg_hash_ordered.hpp"
 #include "dbg_bitmap.hpp"
+#include "masked_graph.hpp"
 
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,

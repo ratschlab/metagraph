@@ -4,18 +4,15 @@
 
 #include "gtest/gtest.h"
 
-#define private public
+#include "../test_helpers.hpp"
 
+#define private public
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
-#include "utils.hpp"
 #include "test_matrix_helpers.hpp"
 #include "unix_tools.hpp"
-#include "serialization.hpp"
-
-#include "../test_helpers.hpp"
 
 
 template <typename... Args>

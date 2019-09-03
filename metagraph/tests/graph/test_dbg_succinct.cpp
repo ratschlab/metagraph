@@ -1,7 +1,6 @@
 #include "gtest/gtest.h"
 
 #include "dbg_succinct.hpp"
-#include "reverse_complement.hpp"
 
 
 TEST(DBGSuccinct, get_degree_with_source_dummy) {

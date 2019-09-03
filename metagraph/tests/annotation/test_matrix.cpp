@@ -4,15 +4,9 @@
 
 #include "test_matrix_helpers.hpp"
 
-#include "binary_matrix.hpp"
-#include "bit_vector.hpp"
-#include "BRWT.hpp"
-#include "BRWT_builders.hpp"
 #include "bin_rel_wt.hpp"
-#include "column_major.hpp"
 #include "bin_rel_wt_sdsl.hpp"
-#include "utils.hpp"
-#include "rainbowfish.hpp"
+#include "column_major.hpp"
 
 
 template <typename BinMat>
