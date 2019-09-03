@@ -125,9 +125,6 @@ class AnnotatorPreset3Test : public AnnotatorTest<Annotator> {
 };
 
 template <typename Annotator>
-class AnnotatorPresetDumpTest : public AnnotatorPreset2Test<Annotator> { };
-
-template <typename Annotator>
 class AnnotatorDynamicTest : public AnnotatorPreset2Test<Annotator> { };
 
 template <typename Annotator>
@@ -160,13 +157,6 @@ typedef ::testing::Types<annotate::ColumnCompressed<>,
                          RowCompressedParallel<>,
                          RowCompressedDynamic<>> AnnotatorDynamicNoSparseTypes;
 
-typedef ::testing::Types<annotate::BinRelWTAnnotator,
-                         annotate::BinRelWT_sdslAnnotator,
-                         annotate::BRWTCompressed<>,
-                         annotate::RainbowfishAnnotator,
-                         annotate::RowFlatAnnotator,
-                         annotate::ColumnCompressed<>> AnnotatorDumpTestTypes;
-
 
 TYPED_TEST_CASE(AnnotatorTest, AnnotatorTypes);
 TYPED_TEST_CASE(AnnotatorPresetTest, AnnotatorTypes);
@@ -176,7 +166,6 @@ TYPED_TEST_CASE(AnnotatorStaticTest, AnnotatorStaticTypes);
 TYPED_TEST_CASE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
 TYPED_TEST_CASE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
 TYPED_TEST_CASE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
-TYPED_TEST_CASE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
 
 
 std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
