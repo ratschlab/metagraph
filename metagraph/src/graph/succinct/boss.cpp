@@ -1750,7 +1750,7 @@ bool masked_outgoing_dead_end(const BOSS &boss,
     return true;
 }
 
-// Return the indegree of the edge i on masked-in edges
+// Return true if the indegree if i's corresponding node is zero
 bool masked_indegree_zero(const BOSS &boss,
                           uint64_t i,
                           const bitmap &subgraph_mask) {
