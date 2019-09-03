@@ -1636,7 +1636,7 @@ TEST(BOSS, CallKmersTwoLoops) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto &sequence) {
-            EXPECT_EQ(std::string(k, 'A'), sequence) << sequence;
+            EXPECT_EQ(std::string(k + 1, 'A'), sequence) << sequence;
             num_kmers++;
         });
         EXPECT_EQ(1u, num_kmers);
@@ -1655,9 +1655,9 @@ TEST(BOSS, CallKmersFourLoops) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto &sequence) {
-            EXPECT_TRUE(std::string(k, 'A') == sequence
-                        || std::string(k, 'G') == sequence
-                        || std::string(k, 'C') == sequence) << sequence;
+            EXPECT_TRUE(std::string(k + 1, 'A') == sequence
+                        || std::string(k + 1, 'G') == sequence
+                        || std::string(k + 1, 'C') == sequence) << sequence;
             num_kmers++;
         });
         EXPECT_EQ(3u, num_kmers);
@@ -1673,12 +1673,12 @@ TEST(BOSS, CallKmersFourLoopsDynamic) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto &sequence) {
-            EXPECT_TRUE(std::string(k, 'A') == sequence
-                        || std::string(k, 'G') == sequence
-                        || std::string(k, 'C') == sequence) << sequence;
+            EXPECT_TRUE(std::string(k + 1, 'A') == sequence
+                        || std::string(k + 1, 'G') == sequence
+                        || std::string(k + 1, 'C') == sequence) << sequence;
             num_kmers++;
         });
-        EXPECT_EQ(3u, num_kmers);
+        EXPECT_EQ(3u, num_kmers) << graph;
     }
 }
 
@@ -1689,7 +1689,7 @@ TEST(BOSS, CallKmersTestPath) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
-        EXPECT_EQ(k + 1, num_kmers);
+        EXPECT_EQ(k + 1, num_kmers) << graph;
     }
 }
 
@@ -1702,7 +1702,7 @@ TEST(BOSS, CallKmersTestPathACA) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
-        EXPECT_EQ(2 * k, num_kmers);
+        EXPECT_EQ(k + 1 + k, num_kmers) << graph;
     }
 }
 
@@ -1732,7 +1732,7 @@ TEST(BOSS, CallKmersTestPathDisconnected2) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
-        EXPECT_EQ(3u, num_kmers) << graph;
+        EXPECT_EQ(2u, num_kmers) << graph;
     }
 }
 

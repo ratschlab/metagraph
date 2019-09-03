@@ -393,26 +393,19 @@ void DBGSuccinct
 ::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
     assert(boss_graph_.get());
     boss_graph_->call_kmers([&](auto index, const std::string &seq) {
-        assert(boss_graph_->get_last(index));
-        do {
-            auto cur_W = boss_graph_->get_W(index);
-            if (!cur_W)
-                break;
-
-            auto node = boss_to_kmer_index(index);
-            if (node != npos)
-                callback(node, seq + boss_graph_->decode(cur_W % boss_graph_->alph_size));
-        } while (!boss_graph_->get_last(--index));
+        auto node = boss_to_kmer_index(index);
+        assert(node != npos);
+        callback(node, seq);
     });
 }
 
 void DBGSuccinct
 ::call_source_nodes(const std::function<void(node_index)> &callback) const {
     boss_graph_->call_start_edges([&](auto boss_edge) {
-        auto index = boss_to_kmer_index(boss_edge);
-        assert(index != npos);
-        assert(!indegree(index));
-        callback(index);
+        auto node = boss_to_kmer_index(boss_edge);
+        assert(node != npos);
+        assert(!indegree(node));
+        callback(node);
     });
 }
 

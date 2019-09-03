@@ -1966,68 +1966,70 @@ void BOSS::call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) 
     });
 }
 
-struct Node {
-    BOSS::node_index id;
-    std::string kmer;
-};
-
 /**
- * Traverse graph and iterate over all nodes
+ * Traverse boss graph and call all its edges
+ * except for the dummy source of sink ones
  */
-void BOSS::call_kmers(Call<node_index, const std::string&> callback) const {
-    // sdsl::bit_vector discovered(W_->size(), false);
+void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
     sdsl::bit_vector visited(W_->size(), false);
 
     // store all branch nodes on the way
-    std::queue<Node> branchnodes;
+    std::queue<std::pair<edge_index, std::string>> branchnodes;
 
-    // start at the source node
-    for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (!get_last(i) || visited[i])
+    // start from the second edge (skip dummy main source)
+    for (uint64_t i = 2; i < W_->size(); ++i) {
+        if (visited[i] || !get_last(i))
             continue;
 
         //TODO: traverse backwards
 
-        branchnodes.push({ i, get_node_str(i) });
+        // TODO: bound size of queue to reduce memory usage
+        branchnodes.push({ i, get_node_str(i) + '\0' });
 
         // keep traversing until we have worked off all branches from the queue
         while (!branchnodes.empty()) {
-            uint64_t node = branchnodes.front().id;
-            std::string kmer = std::move(branchnodes.front().kmer);
+            auto [edge, kmer] = std::move(branchnodes.front());
             branchnodes.pop();
 
             // traverse forwards until we reach a sink or
-            // the first node that has been already visited
-            while (!visited[node]) {
-                assert(node > 0);
+            // the first edge that has been already visited
+            while (!visited[edge]) {
+                assert(edge > 0);
+                assert(get_last(edge));
 
-                if (kmer.front() != BOSS::kSentinel)
-                    callback(node, kmer);
-
-                visited[node] = true;
+                visited[edge] = true;
 
                 // stop traversing if it's a sink
-                if (!get_W(node))
+                if (!get_W(edge))
                     break;
 
-                std::copy(kmer.begin() + 1, kmer.end(), kmer.begin());
-
                 // traverse if there is only one outgoing edge
-                if (is_single_outgoing(node)) {
-                    node = fwd(node);
-                    kmer.back() = BOSS::decode(get_node_last_value(node));
+                if (is_single_outgoing(edge)) {
+                    auto next_edge = fwd(edge);
+
+                    kmer.back() = decode(get_node_last_value(next_edge));
+                    if (kmer.front() != BOSS::kSentinel)
+                        callback(edge, kmer);
+
+                    edge = next_edge;
+                    std::copy(kmer.begin() + 1, kmer.end(), kmer.begin());
+
                 } else {
                     // loop over outgoing edges
                     do {
-                        assert(get_W(node));
+                        assert(get_W(edge));
 
-                        uint64_t target_node = fwd(node);
+                        auto next_edge = fwd(edge);
 
-                        if (target_node && !visited[target_node]) {
-                            kmer.back() = BOSS::decode(get_node_last_value(target_node));
-                            branchnodes.push({ target_node, kmer });
-                        }
-                    } while (--node > 1 && !get_last(node));
+                        kmer.back() = decode(get_node_last_value(next_edge));
+                        if (kmer.front() != BOSS::kSentinel)
+                            callback(edge, kmer);
+
+                        if (!visited[next_edge])
+                            branchnodes.push({ next_edge, kmer.substr(1) + '\0' });
+
+                    } while (--edge > 1 && !get_last(edge));
+
                     break;
                 }
             }

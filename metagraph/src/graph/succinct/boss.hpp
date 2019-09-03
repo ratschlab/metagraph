@@ -80,8 +80,11 @@ class BOSS {
     template <class... T>
     using Call = typename std::function<void(T...)>;
 
-    // traverse all nodes in graph except for the dummy source of sink ones
-    void call_kmers(Call<node_index, const std::string&> callback) const;
+    /**
+     * Traverse boss graph and call all its edges
+     * except for the dummy source of sink ones
+     */
+    void call_kmers(Call<edge_index, const std::string&> callback) const;
 
     // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;
