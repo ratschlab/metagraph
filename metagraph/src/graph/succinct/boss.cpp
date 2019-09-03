@@ -1779,20 +1779,24 @@ bool masked_incoming_dead_end(const BOSS &boss,
 }
 
 // Return the indegree of the edge i on masked-in edges
-uint8_t masked_indegree(const BOSS &boss,
-                        uint64_t i,
-                        const bitmap &subgraph_mask) {
+bool masked_indegree_zero(const BOSS &boss,
+                          uint64_t i,
+                          const bitmap &subgraph_mask) {
     assert(i);
     assert(subgraph_mask[i]);
 
-    uint8_t counter = 0;
-
+    bool found = false;
     boss.call_adjacent_incoming_edges(
         i,
-        [&](auto next_edge) { counter += subgraph_mask[next_edge]; }
+        [&](auto next_edge) {
+            if (found)
+                return;
+
+            found |= subgraph_mask[next_edge];
+        }
     );
 
-    return counter;
+    return !found;
 }
 
 // If there is a single or no incoming edges, return true.
@@ -1857,7 +1861,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     if (subgraph_mask) {
         for (uint64_t i = 1; i < W_->size(); ++i) {
-            if (!visited[i] && (*subgraph_mask)[i] && !masked_indegree(*this, i, *subgraph_mask)) {
+            if (!visited[i]
+                    && (*subgraph_mask)[i]
+                    && masked_indegree_zero(*this, i, *subgraph_mask)) {
                 call_paths(i, callback, split_to_unitigs, &discovered, &visited, subgraph_mask, progress_bar);
             }
         }
