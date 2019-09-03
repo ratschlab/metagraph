@@ -1702,7 +1702,7 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
 // Methods for inferring node degrees with a mask
 
 // If a single outgoing edge is found, return <index, true>.
-// If multiple are found, return <0, false>
+// If multiple are found, return <i, false>
 // If none are found, return <i, true>
 std::pair<uint64_t, bool> masked_pick_single_outgoing(const BOSS &boss,
                                                       uint64_t i,
@@ -1710,21 +1710,20 @@ std::pair<uint64_t, bool> masked_pick_single_outgoing(const BOSS &boss,
     assert(i);
 
     if (!subgraph_mask)
-        return boss.is_single_outgoing(i)
-            ? std::make_pair(i, true)
-            : std::make_pair(uint64_t(0), false);
+        return std::make_pair(i, boss.is_single_outgoing(i));
 
+    bool found = false;
     uint64_t edge = i;
-    uint64_t j = i;
     do {
-        if ((*subgraph_mask)[j]) {
-            if (edge == i) {
-                edge = j;
+        if ((*subgraph_mask)[i]) {
+            if (!found) {
+                edge = i;
+                found = true;
             } else {
                 return std::make_pair(0, false);
             }
         }
-    } while (--j > 0 && !boss.get_last(j));
+    } while (--i > 0 && !boss.get_last(i));
 
     // if no outgoing edge is found, return the starting edge
     return std::make_pair(edge, true);
