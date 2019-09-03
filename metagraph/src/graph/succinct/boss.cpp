@@ -1783,7 +1783,7 @@ bool masked_incoming_dead_end(const BOSS &boss,
 
     bool found = false;
     boss.call_adjacent_incoming_edges(
-        boss.bwd(i),
+        i,
         [&](auto next_edge) {
             if (found)
                 return;
@@ -1797,13 +1797,15 @@ bool masked_incoming_dead_end(const BOSS &boss,
 }
 
 // Return the indegree of the edge i on masked-in edges
-uint8_t masked_indegree(const BOSS &boss, uint64_t i, const bitmap *mask) {
+uint8_t masked_indegree(const BOSS &boss, uint64_t i, const bitmap &mask) {
     assert(i);
+    assert(mask[i]);
 
     uint8_t counter = 0;
+
     boss.call_adjacent_incoming_edges(
         i,
-        [&](auto next_edge) { counter += (*mask)[next_edge]; }
+        [&](auto next_edge) { counter += mask[next_edge]; }
     );
 
     return counter;
@@ -1816,7 +1818,31 @@ bool masked_is_single_incoming(const BOSS &boss, uint64_t i, const bitmap *mask)
     if (!mask)
         return boss.is_single_incoming(i);
 
-    return masked_indegree(boss, i, mask) <= 1;
+    assert((*mask)[i]);
+
+    auto d = boss.get_W(i);
+    auto begin = i;
+    if (d >= boss.alph_size) {
+        d = d % boss.alph_size;
+        begin = boss.pred_W(i, d);
+    }
+    auto end = i + 1 <= boss.num_edges() ? boss.succ_W(i + 1, d) : i + 1;
+    d += boss.alph_size;
+
+    bool found = false;
+    for (i = begin; i < end; i = boss.succ_W(i + 1, d)) {
+        if ((*mask)[i]) {
+            if (found)
+                return false;
+
+            found = true;
+        }
+
+        if (i + 1 >= end)
+            return true;
+    }
+
+    return true;
 }
 
 /**
@@ -1848,7 +1874,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     if (subgraph_mask) {
         for (uint64_t i = 1; i < W_->size(); ++i) {
-            if (!visited[i] && (*subgraph_mask)[i] && !masked_indegree(*this, i, subgraph_mask)) {
+            if (!visited[i] && (*subgraph_mask)[i] && !masked_indegree(*this, i, *subgraph_mask)) {
                 call_paths(i, callback, split_to_unitigs, &discovered, &visited, subgraph_mask, progress_bar);
             }
         }
