@@ -99,8 +99,9 @@ class BOSS {
     void call_unitigs(Call<const std::string&> callback,
                       size_t max_pruned_dead_end_size = 0) const;
 
-    void call_adjacent_incoming_edges(edge_index edge,
-                                      std::function<void(edge_index)> callback) const;
+    // |edge| must be the first incoming edge
+    void call_incoming_to_target(edge_index edge,
+                                 std::function<void(edge_index)> callback) const;
 
     /**
      * Add a full sequence to the graph.

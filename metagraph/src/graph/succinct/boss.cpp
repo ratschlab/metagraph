@@ -622,30 +622,26 @@ edge_index BOSS::pick_incoming_edge(edge_index x, TAlphabet c) const {
     return npos;
 }
 
-void BOSS::call_adjacent_incoming_edges(edge_index edge,
-                                        std::function<void(edge_index)> callback) const {
+void BOSS::call_incoming_to_target(edge_index edge,
+                                   std::function<void(edge_index)> callback) const {
     CHECK_INDEX(edge);
+    assert(get_W(edge) < alph_size && "must be the first incoming edge");
 
-    edge_index next_incoming = bwd(edge);
+    callback(edge);
 
-    callback(next_incoming);
-
-    if (next_incoming + 1 == W_->size()) {
-        assert(num_incoming_to_target(next_incoming) == 1);
-        return;
-    }
-
-    TAlphabet d = get_node_last_value(edge);
-    assert(d == get_W(next_incoming));
+    const TAlphabet d = get_W(edge);
 
     // iterate through all indices with edge label d + alph_size
     // which are less than the next index with edge label d
-    // TODO: could be improved. implement without succ_W.
-    const auto ubound = succ_W(next_incoming + 1, d);
+    TAlphabet d_next;
+    while (++edge < W_->size()) {
 
-    while (++next_incoming < ubound
-            && (next_incoming = succ_W(next_incoming, d + alph_size)) < ubound) {
-        callback(next_incoming);
+        std::tie(edge, d_next) = succ_W(edge, d, d + alph_size);
+
+        if (d_next != d + alph_size)
+            break;
+
+        callback(edge);
     }
 }
 
@@ -702,22 +698,14 @@ size_t BOSS::num_incoming_to_target(edge_index x) const {
     if (x + 1 == W_->size())
         return 1;
 
-    TAlphabet d = get_W(x);
-
     if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
+        TAlphabet d = get_W(x);
         uint64_t y = succ_W(x + 1, d);
         return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
 
     } else {
-        size_t indeg = 1;
-        TAlphabet c;
-        do {
-            std::tie(x, c) = succ_W(x + 1, d, d + alph_size);
-            if (c != d + alph_size)
-                break;
-            indeg++;
-        } while (x + 1 < W_->size());
-
+        size_t indeg = 0;
+        call_incoming_to_target(x, [&indeg](auto) { indeg++; });
         assert(indeg && "there is always at least one incoming edge");
         return indeg;
     }

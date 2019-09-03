@@ -40,7 +40,7 @@ void test_graph(BOSS *graph, const std::string &last,
         EXPECT_EQ((graph->get_W())[i], graph->get_W(i));
 
         auto last_outgoing = graph->succ_last(i);
-        graph->call_adjacent_incoming_edges(i, [&](auto incoming) {
+        graph->call_incoming_to_target(graph->bwd(i), [&](auto incoming) {
             EXPECT_EQ(last_outgoing, graph->fwd(incoming));
         });
     }
