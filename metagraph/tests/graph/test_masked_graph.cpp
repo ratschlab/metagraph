@@ -415,14 +415,14 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
                                          "ACCGGTACT",
                                          "TAGGTACT",
                                          "GGGTACT",
-                                         "GGGGGGGGGGGG" };
-    std::vector<std::string> masked_out { "GTACT",
-                                          "GGGGGGGGGGGG" };
+                                         "GGGGGGGGGGGG",
+                                         "GTATT" };
+    std::vector<std::string> masked_out { "GTATT", "GGGGGGGGGGGG" };
     std::vector<std::multiset<std::string>> unitig_sets {
-        { "GGTA", "GCATGGT", "ACCGGT", "TAGGT", "GGGT" },
-        { "GGTA", "GCATGGT", "ACCGGT", "TAGGT" },
-        { "GGTA", "GCATGGT", "ACCGGT" },
-        { "GGTA", "GCATGGT" },
+        { "GGTACT", "GCATGGT", "ACCGGT", "TAGGT", "GGGT" },
+        { "GGTACT", "GCATGGT", "ACCGGT", "TAGGT" },
+        { "GGTACT", "GCATGGT", "ACCGGT" },
+        { "GGTACT", "GCATGGT" },
     };
 
     auto full_graph = build_graph_batch<TypeParam>(k, sequences);
