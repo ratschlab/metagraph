@@ -135,7 +135,6 @@ void MaskedDeBruijnGraph
                size_t min_tip_size) const {
 
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-
         bitmap_lazy mask(
             [&](const auto &i) {
                 auto node = dbg_succ->boss_to_kmer_index(i);
