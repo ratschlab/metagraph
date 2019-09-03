@@ -168,33 +168,29 @@ TEST(BOSS, SmallGraphTraversal) {
     ASSERT_EQ(outgoing_edges.size(), graph->num_edges() + 1);
 
     uint64_t dummy_edge = graph->select_last(1);
-    EXPECT_EQ(1u, graph->pick_edge(dummy_edge, 1, BOSS::kSentinelCode));
+    EXPECT_EQ(1u, graph->pick_edge(dummy_edge, BOSS::kSentinelCode));
     EXPECT_EQ(dummy_edge, graph->fwd(1));
 
     for (size_t i = 1; i <= graph->num_edges(); ++i) {
         //test forward traversal given an output edge label
         if (graph->get_W(i) != BOSS::kSentinelCode) {
-            uint64_t node_idx = graph->rank_last(i - 1) + 1;
-
             EXPECT_EQ(outgoing_edges[i],
-                graph->fwd(graph->pick_edge(i, node_idx, graph->get_W(i) % graph->alph_size))
+                graph->fwd(graph->pick_edge(graph->succ_last(i),
+                                            graph->get_W(i) % graph->alph_size))
             ) << "Edge index: " << i << "\n"
               << *graph;
 
-            EXPECT_EQ(node_idx,
-                graph->incoming(graph->get_source_node(graph->fwd(graph->pick_edge(
-                                    i, node_idx, graph->get_W(i) % graph->alph_size
-                                ))),
-                                graph->get_minus_k_value(i, graph->get_k() - 1).first)
+            EXPECT_EQ(i,
+                graph->pick_incoming_edge(
+                    graph->bwd(graph->fwd(i)),
+                    graph->get_minus_k_value(i, graph->get_k() - 1).first
+                )
             );
             for (int c = 0; c < graph->alph_size; ++c) {
-                uint64_t prev_node = graph->incoming(node_idx, c);
-                if (prev_node) {
-                    EXPECT_EQ(node_idx,
-                        graph->get_source_node(graph->fwd(graph->pick_edge(
-                            graph->select_last(prev_node), prev_node, graph->get_node_last_value(i)
-                        )))
-                    );
+                uint64_t prev_edge = graph->pick_incoming_edge(graph->bwd(i), c);
+                if (prev_edge) {
+                    EXPECT_EQ(i, graph->pick_edge(graph->fwd(prev_edge),
+                                                  graph->get_W(i) % graph->alph_size));
                 }
             }
 

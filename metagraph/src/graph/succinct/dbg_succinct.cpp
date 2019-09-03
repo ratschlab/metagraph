@@ -39,9 +39,7 @@ node_index DBGSuccinct::traverse(node_index node, char next_char) const {
     // dbg node is a boss edge
     BOSS::edge_index edge = boss_graph_->fwd(kmer_to_boss_index(node));
     return boss_to_kmer_index(
-        boss_graph_->pick_edge(edge,
-                               boss_graph_->get_source_node(edge),
-                               boss_graph_->encode(next_char))
+        boss_graph_->pick_edge(edge, boss_graph_->encode(next_char))
     );
 }
 
@@ -49,19 +47,10 @@ node_index DBGSuccinct::traverse(node_index node, char next_char) const {
 node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
     assert(in_graph(node));
 
-    // map dbg node, i.e. a boss edge, to a boss node
-    auto boss_edge = kmer_to_boss_index(node);
-
-    auto boss_node = boss_graph_->get_source_node(boss_edge);
-    auto source_node = boss_graph_->incoming(boss_node, boss_graph_->encode(prev_char));
-
-    if (!source_node)
-        return npos;
-
+    // dbg node is a boss edge
+    BOSS::edge_index edge = boss_graph_->bwd(kmer_to_boss_index(node));
     return boss_to_kmer_index(
-        boss_graph_->pick_edge(boss_graph_->select_last(source_node),
-                               source_node,
-                               boss_graph_->get_node_last_value(boss_edge))
+        boss_graph_->pick_incoming_edge(edge, boss_graph_->encode(prev_char))
     );
 }
 
@@ -242,11 +231,7 @@ void DBGSuccinct
     // case and simply pick the appropriate BOSS edge
     if (encoded.size() == get_k() && std::get<2>(index_range) + 1 == encoded.end()) {
         assert(std::get<0>(index_range) == std::get<1>(index_range));
-        auto edge = boss_graph_->pick_edge(
-            std::get<1>(index_range),
-            boss_graph_->get_source_node(std::get<1>(index_range)),
-            encoded.back()
-        );
+        auto edge = boss_graph_->pick_edge(std::get<1>(index_range), encoded.back());
         if (edge) {
             auto kmer_index = boss_to_kmer_index(edge);
             if (kmer_index != npos) {
@@ -340,9 +325,7 @@ void DBGSuccinct::traverse(node_index start,
 
     for (; begin != end && !terminate() && boss_graph_->get_W(edge); ++begin) {
         edge = boss_graph_->fwd(edge);
-        edge = boss_graph_->pick_edge(edge,
-                                      boss_graph_->get_source_node(edge),
-                                      boss_graph_->encode(*begin));
+        edge = boss_graph_->pick_edge(edge, boss_graph_->encode(*begin));
 
         if (!edge)
             return;

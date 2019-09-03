@@ -492,6 +492,9 @@ uint64_t BOSS::succ_last(uint64_t i) const {
 uint64_t BOSS::bwd(uint64_t i) const {
     CHECK_INDEX(i);
 
+    if (i == 1)
+        return 1;
+
     uint64_t node_rank = get_source_node(i);
 
     // get value of last position in node i
@@ -557,36 +560,40 @@ BOSS::get_minus_k_value(edge_index i, size_t k) const {
 }
 
 /**
- * Given an edge index i and a character c, get the index of the edge with
+ * Given an edge index |i| and a character |c|, get the index of the edge with
  * label c outgoing from the same source node if such exists and npos otherwise.
  */
-edge_index BOSS::pick_edge(edge_index edge, node_index node, TAlphabet c) const {
+edge_index BOSS::pick_edge(edge_index edge, TAlphabet c) const {
     CHECK_INDEX(edge);
-    CHECK_NODE(node);
-
+    assert(get_last(edge) && "must be the last outgoing edge");
     assert(c <= alph_size);
 
     if (c == alph_size)
         return npos;
 
-    assert(get_source_node(edge) == node);
-
-    uint64_t j = pred_W(edge, c, c + alph_size);
-    if (!j || get_source_node(j) == node)
-        return j;
+    do {
+        TAlphabet w = get_W(edge);
+        if (w == c || w == c + alph_size)
+            return edge;
+    } while (--edge && !get_last(edge));
 
     return npos;
 }
 
 /**
- * Given a node index i and an edge label c, this function returns the
- * index of the node the incoming edge belongs to.
+ * Given an edge index |x| and a character |c|, get the index of an adjacent
+ * incoming edge with the first character c if such exists and npos otherwise.
  */
-node_index BOSS::incoming(node_index i, TAlphabet c) const {
-    CHECK_NODE(i);
+edge_index BOSS::pick_incoming_edge(edge_index x, TAlphabet c) const {
+    CHECK_INDEX(x);
+    assert(get_W(x) < alph_size && "must be the first incoming edge");
+    assert(c <= alph_size);
+
+    if (c == alph_size)
+        return npos;
 
     // only one incoming edge for the dummy source node
-    if (i == 1) {
+    if (x == 1) {
         if (c == kSentinelCode) {
             return 1;
         } else {
@@ -594,30 +601,22 @@ node_index BOSS::incoming(node_index i, TAlphabet c) const {
         }
     }
 
-    assert(c <= alph_size);
-
-    if (c == alph_size)
-        return npos;
-
     // check if the first incoming edge has label `c`
-    edge_index edge = select_last(i);
-    uint64_t x = bwd(edge);
-
     if (get_minus_k_value(x, k_ - 1).first == c)
-        return x ? get_source_node(x) : npos;
+        return x;
 
     if (x + 1 == W_->size())
         return npos;
 
     // TODO: could be improved. implement without succ_W.
-    TAlphabet d = get_node_last_value(edge);
+    TAlphabet d = get_W(x);
     uint64_t y = succ_W(x + 1, d);
 
     // iterate over the rest of the incoming edges
     while (x + 1 < y) {
         x = succ_W(x + 1, d + alph_size);
         if (x < y && get_minus_k_value(x, k_ - 1).first == c) {
-            return x ? get_source_node(x) : npos;
+            return x;
         }
     }
     return npos;
@@ -851,7 +850,7 @@ void BOSS::map_to_edges(const std::string &sequence,
 
         while (edge && i + k_ + 1 < seq_encoded.size()) {
             edge = fwd(edge);
-            edge = pick_edge(edge, get_source_node(edge), seq_encoded[i + k_ + 1]);
+            edge = pick_edge(edge, seq_encoded[i + k_ + 1]);
 
             if (terminate())
                 return;
@@ -935,7 +934,7 @@ bool BOSS::find(const std::string &sequence,
 
         while (edge && i + kmer_size < seq_encoded.size()) {
             edge = fwd(edge);
-            edge = pick_edge(edge, get_source_node(edge), seq_encoded[i + kmer_size]);
+            edge = pick_edge(edge, seq_encoded[i + kmer_size]);
             if (edge) {
                 num_kmers_discovered++;
             } else {
@@ -983,7 +982,7 @@ bool BOSS::find(const std::string &sequence,
         while (edge && j + 1 < skipped_kmers.size()
                     && i + 1 == skipped_kmers[j + 1]) {
             edge = fwd(edge);
-            edge = pick_edge(edge, get_source_node(edge), seq_encoded[i + kmer_size]);
+            edge = pick_edge(edge, seq_encoded[i + kmer_size]);
             if (edge) {
                 num_kmers_discovered++;
             } else {

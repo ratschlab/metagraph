@@ -228,16 +228,16 @@ class BOSS {
     bool is_single_incoming(edge_index i) const;
 
     /**
-     * Given a node index i and an edge label c, this function returns the
-     * index of the node the incoming edge belongs to.
+     * Given an edge index |i| and a character |c|, get the index of an adjacent
+     * incoming edge with the first character c if such exists and npos otherwise.
      */
-    node_index incoming(node_index i, TAlphabet c) const;
+    edge_index pick_incoming_edge(edge_index i, TAlphabet c) const;
 
     /**
-     * Given an edge index i and a character c, get the index of the edge with
+     * Given an edge index |i| and a character |c|, get the index of the edge with
      * label c outgoing from the same source node if such exists and npos otherwise.
      */
-    edge_index pick_edge(edge_index edge, node_index node, TAlphabet c) const;
+    edge_index pick_edge(edge_index i, TAlphabet c) const;
 
     /**
      * Given a node label kmer, this function returns the index
@@ -474,8 +474,7 @@ class BOSS {
 
         uint64_t edge = index(begin, end - 1);
 
-        return edge ? pick_edge(edge, get_source_node(edge), *(end - 1))
-                    : npos;
+        return edge ? pick_edge(edge, *(end - 1)) : npos;
     }
 
     /**
