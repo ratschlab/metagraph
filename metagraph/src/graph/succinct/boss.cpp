@@ -1751,33 +1751,6 @@ bool masked_outgoing_dead_end(const BOSS &boss,
     return true;
 }
 
-bool masked_incoming_dead_end(const BOSS &boss,
-                              uint64_t i,
-                              TAlphabet s,
-                              const bitmap *subgraph_mask) {
-    assert(i);
-
-    if (s == BOSS::kSentinelCode)
-        return true;
-
-    if (!subgraph_mask)
-        return !boss.get_minus_k_value(i, boss.get_k()).first;
-
-    bool found = false;
-    boss.call_adjacent_incoming_edges(
-        i,
-        [&](auto next_edge) {
-            if (found)
-                return;
-
-            found |= (boss.get_W(next_edge) != BOSS::kSentinelCode
-                && (*subgraph_mask)[next_edge]);
-        }
-    );
-
-    return !found;
-}
-
 // Return the indegree of the edge i on masked-in edges
 bool masked_indegree_zero(const BOSS &boss,
                           uint64_t i,
@@ -1797,6 +1770,21 @@ bool masked_indegree_zero(const BOSS &boss,
     );
 
     return !found;
+}
+
+bool masked_incoming_dead_end(const BOSS &boss,
+                              uint64_t i,
+                              TAlphabet s,
+                              const bitmap *subgraph_mask) {
+    assert(i);
+
+    if (s == BOSS::kSentinelCode)
+        return true;
+
+    if (!subgraph_mask || !masked_indegree_zero(boss, i, *subgraph_mask))
+        return !boss.get_minus_k_value(i, boss.get_k()).first;
+
+    return true;
 }
 
 // If there is a single or no incoming edges, return true.
