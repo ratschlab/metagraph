@@ -47,11 +47,14 @@ uint64_t estimate_min_kmer_abundance(const bitmap &node_mask,
     std::vector<uint64_t> hist;
     node_mask.call_ones([&](auto i) {
         uint64_t kmer_count = node_weights.get_weight(i);
+        assert(kmer_count && "All k-mers in graph must have non-zero counts");
         while (kmer_count >= hist.size()) {
             hist.push_back(0);
         }
         hist[kmer_count]++;
     });
+
+    hist.resize(std::max(uint64_t(hist.size()), uint64_t(10)), 0);
 
     double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
     auto cutoff = cleaning_pick_kmer_threshold(hist.data(), hist.size(),
@@ -61,7 +64,7 @@ uint64_t estimate_min_kmer_abundance(const bitmap &node_mask,
     if (cutoff != -1)
         return cutoff;
 
-    std::cerr << "Warning: Cannot estimate minimum k-mer abundance."
+    std::cerr << "Warning: Cannot estimate expected minimum k-mer abundance."
               << " Use fallback value." << std::endl;
 
     return fallback_cutoff;
