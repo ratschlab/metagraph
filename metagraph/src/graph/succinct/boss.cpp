@@ -1701,15 +1701,18 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
 
 // Methods for inferring node degrees with a mask
 
-// If a single outgoing edge is found, return its index. If multiple are found, return 0
-// If none are found, return the initial index i
-uint64_t masked_pick_single_outgoing(const BOSS &boss,
-                                     uint64_t i,
-                                     const bitmap *subgraph_mask) {
+// If a single outgoing edge is found, return <index, true>.
+// If multiple are found, return <0, false>
+// If none are found, return <i, true>
+std::pair<uint64_t, bool> masked_pick_single_outgoing(const BOSS &boss,
+                                                      uint64_t i,
+                                                      const bitmap *subgraph_mask) {
     assert(i);
 
     if (!subgraph_mask)
-        return boss.is_single_outgoing(i) ? i : 0;
+        return boss.is_single_outgoing(i)
+            ? std::make_pair(i, true)
+            : std::make_pair(uint64_t(0), false);
 
     uint64_t edge = i;
     uint64_t j = i;
@@ -1718,38 +1721,13 @@ uint64_t masked_pick_single_outgoing(const BOSS &boss,
             if (edge == i) {
                 edge = j;
             } else {
-                edge = 0;
-                break;
+                return std::make_pair(0, false);
             }
         }
     } while (--j > 0 && !boss.get_last(j));
 
     // if no outgoing edge is found, return the starting edge
-    return edge;
-}
-
-// If a single outgoing edge or no edges are found (simulating a sink edge), return true
-bool masked_is_single_outgoing(const BOSS &boss,
-                               uint64_t i,
-                               const bitmap *subgraph_mask) {
-    assert(i);
-
-    if (!subgraph_mask)
-        return boss.is_single_outgoing(i);
-
-    bool found = false;
-    do {
-        if ((*subgraph_mask)[i]) {
-            if (!found) {
-                found = true;
-            } else {
-                return false;
-            }
-        }
-    } while (--i > 0 && !boss.get_last(i));
-
-    // Return true if either one or no edges (simulating a sink) were found
-    return true;
+    return std::make_pair(edge, true);
 }
 
 bool masked_outgoing_dead_end(const BOSS &boss,
@@ -1890,7 +1868,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (!visited[i] && !masked_is_single_outgoing(*this, i, subgraph_mask))
+        if (!visited[i] && !masked_pick_single_outgoing(*this, i, subgraph_mask).second)
             call_paths(i, callback, split_to_unitigs, &discovered, &visited, subgraph_mask, progress_bar);
     }
 
@@ -1955,8 +1933,10 @@ void BOSS::call_paths(edge_index starting_kmer,
             edge = fwd(edge);
 
             // traverse if there is only one outgoing edge
-            auto outgoing = masked_pick_single_outgoing(*this, edge, subgraph_mask);
-            if (continue_traversal && outgoing) {
+            auto [outgoing, is_single] = masked_pick_single_outgoing(
+                *this, edge, subgraph_mask
+            );
+            if (continue_traversal && is_single) {
                 if (subgraph_mask && !(*subgraph_mask)[outgoing])
                     break;
 
@@ -2077,7 +2057,7 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
                 // ...check if not a source tip
                 || (incoming_dead_end
                         && !outgoing_dead_end
-                        && !masked_is_single_outgoing(*this, fwd(edges.back()), subgraph_mask))
+                        && !masked_pick_single_outgoing(*this, fwd(edges.back()), subgraph_mask).second)
                 // this is a short dead-end but not a source tip
                 // ...check if not a sink tip
                 || (outgoing_dead_end
