@@ -1703,16 +1703,18 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
 
 // If a single outgoing edge is found, return its index. If multiple are found, return 0
 // If none are found, return the initial index i
-uint64_t masked_pick_single_outgoing(const BOSS &boss, uint64_t i, const bitmap *mask) {
+uint64_t masked_pick_single_outgoing(const BOSS &boss,
+                                     uint64_t i,
+                                     const bitmap *subgraph_mask) {
     assert(i);
 
-    if (!mask)
+    if (!subgraph_mask)
         return boss.is_single_outgoing(i) ? i : 0;
 
     uint64_t edge = i;
     uint64_t j = i;
     do {
-        if ((*mask)[j]) {
+        if ((*subgraph_mask)[j]) {
             if (edge == i) {
                 edge = j;
             } else {
@@ -1727,15 +1729,17 @@ uint64_t masked_pick_single_outgoing(const BOSS &boss, uint64_t i, const bitmap 
 }
 
 // If a single outgoing edge or no edges are found (simulating a sink edge), return true
-bool masked_is_single_outgoing(const BOSS &boss, uint64_t i, const bitmap *mask) {
+bool masked_is_single_outgoing(const BOSS &boss,
+                               uint64_t i,
+                               const bitmap *subgraph_mask) {
     assert(i);
 
-    if (!mask)
+    if (!subgraph_mask)
         return boss.is_single_outgoing(i);
 
     bool found = false;
     do {
-        if ((*mask)[i]) {
+        if ((*subgraph_mask)[i]) {
             if (!found) {
                 found = true;
             } else {
@@ -1751,18 +1755,18 @@ bool masked_is_single_outgoing(const BOSS &boss, uint64_t i, const bitmap *mask)
 bool masked_outgoing_dead_end(const BOSS &boss,
                               uint64_t i,
                               TAlphabet s,
-                              const bitmap *mask) {
+                              const bitmap *subgraph_mask) {
     assert(i);
 
     if (s == BOSS::kSentinelCode)
         return true;
 
     i = boss.fwd(i);
-    if (!mask)
+    if (!subgraph_mask)
         return !boss.get_W(i);
 
     do {
-        if (s != BOSS::kSentinelCode && (*mask)[i])
+        if (s != BOSS::kSentinelCode && (*subgraph_mask)[i])
             return false;
     } while (--i > 0 && !boss.get_last(i));
 
@@ -1772,13 +1776,13 @@ bool masked_outgoing_dead_end(const BOSS &boss,
 bool masked_incoming_dead_end(const BOSS &boss,
                               uint64_t i,
                               TAlphabet s,
-                              const bitmap *mask) {
+                              const bitmap *subgraph_mask) {
     assert(i);
 
     if (s == BOSS::kSentinelCode)
         return true;
 
-    if (!mask)
+    if (!subgraph_mask)
         return !boss.get_minus_k_value(i, boss.get_k()).first;
 
     bool found = false;
@@ -1789,7 +1793,7 @@ bool masked_incoming_dead_end(const BOSS &boss,
                 return;
 
             found |= (boss.get_W(next_edge) != BOSS::kSentinelCode
-                && (*mask)[next_edge]);
+                && (*subgraph_mask)[next_edge]);
         }
     );
 
@@ -1797,28 +1801,32 @@ bool masked_incoming_dead_end(const BOSS &boss,
 }
 
 // Return the indegree of the edge i on masked-in edges
-uint8_t masked_indegree(const BOSS &boss, uint64_t i, const bitmap &mask) {
+uint8_t masked_indegree(const BOSS &boss,
+                        uint64_t i,
+                        const bitmap &subgraph_mask) {
     assert(i);
-    assert(mask[i]);
+    assert(subgraph_mask[i]);
 
     uint8_t counter = 0;
 
     boss.call_adjacent_incoming_edges(
         i,
-        [&](auto next_edge) { counter += mask[next_edge]; }
+        [&](auto next_edge) { counter += subgraph_mask[next_edge]; }
     );
 
     return counter;
 }
 
 // If there is a single or no incoming edges, return true.
-bool masked_is_single_incoming(const BOSS &boss, uint64_t i, const bitmap *mask) {
+bool masked_is_single_incoming(const BOSS &boss,
+                               uint64_t i,
+                               const bitmap *subgraph_mask) {
     assert(i);
 
-    if (!mask)
+    if (!subgraph_mask)
         return boss.is_single_incoming(i);
 
-    assert((*mask)[i]);
+    assert((*subgraph_mask)[i]);
 
     auto d = boss.get_W(i);
     auto begin = i;
@@ -1831,7 +1839,7 @@ bool masked_is_single_incoming(const BOSS &boss, uint64_t i, const bitmap *mask)
 
     bool found = false;
     for (i = begin; i < end; i = i + 1 < end ? boss.succ_W(i + 1, d) : end) {
-        if ((*mask)[i]) {
+        if ((*subgraph_mask)[i]) {
             if (found)
                 return false;
 
