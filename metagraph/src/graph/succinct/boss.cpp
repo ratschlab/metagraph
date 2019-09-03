@@ -495,7 +495,7 @@ uint64_t BOSS::bwd(uint64_t i) const {
     if (i == 1)
         return 1;
 
-    uint64_t node_rank = get_source_node(i);
+    uint64_t node_rank = rank_last(i - 1) + 1;
 
     // get value of last position in node i
     TAlphabet c = get_node_last_value(i);
@@ -521,11 +521,6 @@ uint64_t BOSS::fwd(uint64_t i) const {
     uint64_t r = rank_W(i, c);
     // select the index of the position in last that is rank many positions after offset
     return select_last(rank_last(o) + r);
-}
-
-node_index BOSS::get_source_node(edge_index i) const {
-    CHECK_INDEX(i);
-    return rank_last(i - 1) + 1;
 }
 
 /**
@@ -643,16 +638,6 @@ void BOSS::call_incoming_to_target(edge_index edge,
 
         callback(edge);
     }
-}
-
-/**
- * Given a node index i, this function returns the number of outgoing
- * edges from node i.
- */
-size_t BOSS::outdegree(node_index i) const {
-    CHECK_NODE(i);
-
-    return select_last(i) - (i == 1 ? 0 : select_last(i - 1));
 }
 
 /**

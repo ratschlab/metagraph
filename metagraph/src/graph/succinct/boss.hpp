@@ -205,12 +205,6 @@ class BOSS {
 
 
     /**
-     * Given a node index i, this function returns the number of outgoing
-     * edges from the node i.
-     */
-    size_t outdegree(node_index i) const;
-
-    /**
      * Given an edge index i, this function returns true if that is
      * the only outgoing edge from its source node.
      */
@@ -251,7 +245,6 @@ class BOSS {
      * Return value of last at position i.
      */
     bool get_last(uint64_t i) const { return (*last_)[i]; }
-
     const bit_vector& get_last() const { return *last_; }
 
     /**
@@ -332,8 +325,6 @@ class BOSS {
      * position in W that corresponds to the i-th node's last character.
      */
     uint64_t bwd(uint64_t i) const;
-
-    node_index get_source_node(edge_index i) const;
 
     // Given the alphabet index return the corresponding symbol
     char decode(TAlphabet s) const;
@@ -470,7 +461,7 @@ class BOSS {
      * of the corresponding edge, if such exists and 0 otherwise.
      */
     template <typename RandomAccessIt>
-    node_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
+    edge_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
         assert(begin + k_ + 1 == end);
 
         uint64_t edge = index(begin, end - 1);
