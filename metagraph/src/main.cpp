@@ -1202,6 +1202,9 @@ int main(int argc, const char *argv[]) {
                     if (!suffix.size()) {
                         assert(suffixes.size() == 1);
 
+                        auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
+                        constructor->build_graph(bitmap_graph.get());
+                        graph.reset(bitmap_graph.release());
                     } else {
                         std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
                         if (config->verbose) {
