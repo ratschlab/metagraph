@@ -1830,16 +1830,13 @@ bool masked_is_single_incoming(const BOSS &boss, uint64_t i, const bitmap *mask)
     d += boss.alph_size;
 
     bool found = false;
-    for (i = begin; i < end; i = boss.succ_W(i + 1, d)) {
+    for (i = begin; i < end; i = i + 1 < end ? boss.succ_W(i + 1, d) : end) {
         if ((*mask)[i]) {
             if (found)
                 return false;
 
             found = true;
         }
-
-        if (i + 1 >= end)
-            return true;
     }
 
     return true;
