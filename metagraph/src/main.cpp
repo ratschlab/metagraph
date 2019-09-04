@@ -785,15 +785,11 @@ void print_stats(const DeBruijnGraph &graph) {
 
     if (auto weighted = graph.get_extension<DBGWeights<>>()) {
         double sum_weights = 0;
-        for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-            sum_weights += weighted->get_weight(i);
-        }
+        graph.call_nodes([&](auto i) { sum_weights += weighted->get_weight(i); });
         std::cout << "sum weights: " << sum_weights << std::endl;
 
         if (utils::get_verbose()) {
-            for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-                std::cout << weighted->get_weight(i) << " ";
-            }
+            graph.call_nodes([&](auto i) { std::cout << weighted->get_weight(i) << " "; });
             std::cout << std::endl;
         }
     }

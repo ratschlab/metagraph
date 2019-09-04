@@ -32,10 +32,7 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
         if (nodes_inserted)
             utils::insert(&weights_, *nodes_inserted, 0);
 
-        auto k = graph.get_k();
-        for (size_t i = 0; i + k <= sequence.size(); ++i) {
-            add_kmer(graph, sequence.substr(i, k), 1);
-        }
+        graph.map_to_nodes(sequence, [&](auto node) { add_weight(node, 1); });
     };
 
     virtual void insert_node(node_index i) {
