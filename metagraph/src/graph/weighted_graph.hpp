@@ -102,7 +102,14 @@ bool DBGWeights<Weights>::load(const DeBruijnGraph &graph, const std::string &fi
     try {
         std::ifstream instream(weights_filename, std::ios::binary);
         this->weights_.load(instream);
-        return graph.num_nodes() + 1 == this->weights_.size();
+
+        if (graph.num_nodes() + 1 != this->weights_.size()) {
+            std::cerr << "ERROR: weights file does not match number of nodes in graph "
+                      << weights_filename << std::endl;
+            return false;
+        }
+
+        return true;
     } catch (...) {
         std::cerr << "ERROR: Cannot load graph weights from file "
                   << weights_filename << std::endl;

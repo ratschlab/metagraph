@@ -1274,24 +1274,22 @@ int main(int argc, const char *argv[]) {
                 }
                 assert(graph.get());
 
-                std::unique_ptr<sdsl::int_vector<>> weights;
                 if (config->count_kmers)
-                   weights.reset(new sdsl::int_vector<>(0, 0, 8));
+                    graph->add_extension(std::make_shared<DBGWeights<>>());
+                auto node_weights = graph->get_extension<DBGWeights<>>();
 
                 parse_sequences(files, *config, timer,
                     [&graph](std::string&& seq) { graph->add_sequence(seq); },
-                    [&graph, &weights](std::string&& kmer, uint32_t count) {
-                        graph->add_sequence(std::move(kmer));
-                        if (weights)
-                            (*weights)[graph->kmer_to_node(kmer)] = count;
+                    [&graph, &node_weights](std::string&& kmer, uint32_t count) {
+                        graph->add_sequence(kmer);
+                        if (node_weights)
+                            node_weights->add_kmer(*graph, std::move(kmer), count);
                     },
                     [&graph](const auto &loop) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
                 );
 
-                if (weights)
-                    graph->add_extension(std::make_shared<DBGWeights<>>(std::move(*weights)));
             }
 
             if (config->verbose)

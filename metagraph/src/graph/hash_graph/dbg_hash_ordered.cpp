@@ -521,7 +521,7 @@ bool DBGHashOrdered::load(std::istream &in) {
 bool DBGHashOrdered::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
-    return load(in);
+    return hash_dbg_->load(filename);
 }
 
 bool DBGHashOrdered::load_extensions(const std::string &filename_base) {
