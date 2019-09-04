@@ -1847,13 +1847,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }
 
     if (subgraph_mask) {
-        for (uint64_t i = 1; i < W_->size(); ++i) {
-            if (!visited[i]
-                    && (*subgraph_mask)[i]
+        call_zeros(visited, [&](uint64_t i) {
+            if ((*subgraph_mask)[i]
                     && masked_indegree_zero(*this, i, *subgraph_mask)) {
-                call_paths(i, callback, split_to_unitigs, &discovered, &visited, subgraph_mask, progress_bar);
+                call_paths(i, callback, split_to_unitigs,
+                           &discovered, &visited, subgraph_mask, progress_bar);
             }
-        }
+        });
     }
 
     // then all forks
