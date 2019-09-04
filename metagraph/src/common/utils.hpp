@@ -273,9 +273,35 @@ namespace utils {
         std::hash<std::bitset<sizeof(T) * 8>> hasher;
     };
 
-    // indexes - positions of inserted elements in the final vector
-    template <typename Index, class Vector>
-    void insert_default_values(const std::vector<Index> &indexes, Vector *vector);
+    // new_indexes - positions of inserted values in the final vector
+    template <class Vector>
+    void insert(Vector *vector,
+                const std::vector<uint64_t> &new_indexes,
+                const typename Vector::value_type &value) {
+        assert(vector);
+        assert(std::is_sorted(new_indexes.begin(), new_indexes.end()));
+        assert(!new_indexes.size()
+                    || new_indexes.back() < vector->size() + new_indexes.size());
+
+        if (!new_indexes.size())
+            return;
+
+        vector->resize(vector->size() + new_indexes.size());
+
+        uint64_t i = vector->size() - 1;
+        uint64_t shift = new_indexes.size();
+
+        for (auto it = new_indexes.rbegin(); it != new_indexes.rend(); ++it) {
+            while (i > *it) {
+                assert(i >= shift && "Invalid indexes for insertion");
+                (*vector)[i] = std::move((*vector)[i - shift]);
+                i--;
+            }
+            // insert new value
+            shift--;
+            (*vector)[i--] = value;
+        }
+    }
 
     template <class Array, class Mask>
     void erase(Array *vector, const Mask &erase_mask) {

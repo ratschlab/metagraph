@@ -158,60 +158,6 @@ std::deque<std::string> generate_strings(const std::string &alphabet,
     return suffixes;
 }
 
-// indexes - positions of inserted elements in the final vector
-template <typename Index, class Vector>
-void insert_default_values(const std::vector<Index> &indexes, Vector *vector) {
-    assert(std::is_sorted(indexes.begin(), indexes.end()));
-    assert(vector);
-    assert(!indexes.size() || indexes.back() < vector->size() + indexes.size());
-
-    vector->resize(vector->size() + indexes.size());
-
-    uint64_t i = vector->size() - 1;
-    uint64_t shift = indexes.size();
-
-    for (auto it = indexes.rbegin(); it != indexes.rend(); ++it) {
-        while (i > *it) {
-            assert(i - shift >= 0 && "Invalid indexes for insertion");
-            (*vector)[i] = std::move((*vector)[i - shift]);
-            i--;
-        }
-        // insert default value
-        shift--;
-        (*vector)[i--] = typename Vector::value_type();
-    }
-}
-
-template
-void insert_default_values(const std::vector<uint64_t> &, std::vector<bool> *);
-
-template
-void insert_default_values(const std::vector<uint64_t> &, sdsl::bit_vector *);
-
-template
-void insert_default_values(const std::vector<uint64_t> &, std::vector<SmallVector> *);
-
-template <>
-void insert_default_values(const std::vector<uint64_t> &indexes,
-                           std::set<uint64_t> *vector) {
-    assert(vector);
-
-    if (indexes.empty())
-        return;
-
-    std::set<uint64_t> bits;
-    uint64_t offset = 0;
-    for (auto i : *vector) {
-        while (offset < indexes.size() && i + offset >= indexes[offset]) {
-            ++offset;
-        }
-        bits.emplace_hint(bits.end(), i + offset);
-    }
-    assert(vector->size() == bits.size());
-
-    std::swap(bits, *vector);
-}
-
 
 RowsFromColumnsTransformer
 ::RowsFromColumnsTransformer(uint64_t num_rows,
