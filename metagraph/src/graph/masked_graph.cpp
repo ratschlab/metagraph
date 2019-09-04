@@ -110,21 +110,19 @@ void MaskedDeBruijnGraph
 
 void MaskedDeBruijnGraph
 ::call_sequences(const std::function<void(const std::string&)> &callback) const {
-
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-
-        bitmap_lazy mask(
-            [&](const auto &i) {
-                auto node = dbg_succ->boss_to_kmer_index(i);
-                return node && in_graph(node);
-            },
-            dbg_succ->get_boss().num_edges() + 1
+        sdsl::bit_vector mask_bv(dbg_succ->get_boss().num_edges() + 1, false);
+        kmers_in_graph_->call_ones(
+            [&](auto i) {
+                assert(graph_->in_graph(i));
+                assert(dbg_succ->kmer_to_boss_index(i));
+                mask_bv[dbg_succ->kmer_to_boss_index(i)] = true;
+            }
         );
 
-        // TODO: call_sequences will eventually call all indexes in bitmap_lazy
-        // this is inefficient! pass sdsl::bit_vector instead
-        dbg_succ->get_boss().call_sequences(callback, &mask);
+        bit_vector_stat mask(std::move(mask_bv));
 
+        dbg_succ->get_boss().call_sequences(callback, &mask);
     } else {
         DeBruijnGraph::call_sequences(callback);
     }
@@ -133,18 +131,18 @@ void MaskedDeBruijnGraph
 void MaskedDeBruijnGraph
 ::call_unitigs(const std::function<void(const std::string&)> &callback,
                size_t min_tip_size) const {
-
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-        bitmap_lazy mask(
-            [&](const auto &i) {
-                auto node = dbg_succ->boss_to_kmer_index(i);
-                return node && in_graph(node);
-            },
-            dbg_succ->get_boss().num_edges() + 1
+        sdsl::bit_vector mask_bv(dbg_succ->get_boss().num_edges() + 1, false);
+        kmers_in_graph_->call_ones(
+            [&](auto i) {
+                assert(graph_->in_graph(i));
+                assert(dbg_succ->kmer_to_boss_index(i));
+                mask_bv[dbg_succ->kmer_to_boss_index(i)] = true;
+            }
         );
 
-        // TODO: call_sequences will eventually call all indexes in bitmap_lazy
-        // this is inefficient! pass sdsl::bit_vector instead
+        bit_vector_stat mask(std::move(mask_bv));
+
         dbg_succ->get_boss().call_unitigs(callback, min_tip_size, &mask);
 
     } else {

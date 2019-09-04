@@ -431,21 +431,28 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
     auto full_graph = build_graph_batch<TypeParam>(k, sequences);
 
     auto mask = std::make_unique<bit_vector_stat>(
-        full_graph->num_nodes() + 1, true
+        full_graph->num_nodes() + 1, false
     );
 
-    for (const auto &mask_out : masked_out) {
+    for (const auto &sequence : sequences) {
         full_graph->map_to_nodes(
-            mask_out,
+            sequence,
+            [&](const auto &index) { mask->set(index, true); }
+        );
+    }
+
+    for (const auto &sequence_out : masked_out) {
+        full_graph->map_to_nodes(
+            sequence_out,
             [&](const auto &index) { mask->set(index, false); }
         );
     }
 
     MaskedDeBruijnGraph graph(full_graph, std::move(mask));
 
-    for (const auto &mask_out : masked_out) {
+    for (const auto &sequence_out : masked_out) {
         graph.map_to_nodes(
-            mask_out,
+            sequence_out,
             [](const auto &index) { ASSERT_EQ(DeBruijnGraph::npos, index); }
         );
     }
