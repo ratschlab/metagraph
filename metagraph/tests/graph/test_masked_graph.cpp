@@ -411,6 +411,14 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
     size_t k = 4;
+
+    /*
+    GCATGGT\     GTACT
+     ACCGGT\    /
+            GGTA
+      TAGGT/    \
+       GGGT/     GTATT (masked out)
+    */
     std::vector<std::string> sequences { "GCATGGTACT",
                                          "ACCGGTACT",
                                          "TAGGTACT",
