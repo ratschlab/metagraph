@@ -1955,63 +1955,50 @@ int main(int argc, const char *argv[]) {
 
             auto graph = load_critical_dbg(files.at(0));
 
-            auto node_weights = std::dynamic_pointer_cast<const IWeighted<DeBruijnGraph::node_index>>(graph);
-            std::unique_ptr<MaskedDeBruijnGraph> subgraph;
+            auto node_weights
+                = std::dynamic_pointer_cast<const IWeighted<DeBruijnGraph::node_index>>(graph);
 
-            // TODO: fix unitig extraction from subgraph in order for this
-            // to work properly when k-mers are filtered
-            const DeBruijnGraph *graph_with_unitigs = graph.get();
+            if (!node_weights.get()
+                    && (config->min_count > 1
+                        || config->max_count < std::numeric_limits<unsigned int>::max()
+                        || config->min_unitig_median_kmer_abundance != 1)) {
+                std::cerr << "ERROR: Cannot load weighted graph from "
+                          << files.at(0) << std::endl;
+                exit(1);
+            }
 
             if (config->min_count > 1
-                    || config->max_count < std::numeric_limits<unsigned int>::max()
-                    || config->min_unitig_median_kmer_abundance != 1) {
+                    || config->max_count < std::numeric_limits<unsigned int>::max()) {
+                assert(node_weights.get());
 
-                if (!node_weights.get()) {
-                    std::cerr << "ERROR: Cannot load weighted graph from "
-                              << files.at(0) << std::endl;
-                    exit(1);
-                }
-
-                subgraph.reset(new MaskedDeBruijnGraph(graph,
+                graph = std::make_shared<MaskedDeBruijnGraph>(graph,
                     [&](auto i) { return node_weights->get_weight(i) >= config->min_count
-                                        && node_weights->get_weight(i) <= config->max_count; }
-                ));
+                                        && node_weights->get_weight(i) <= config->max_count; });
+            }
 
-                graph_with_unitigs = subgraph.get();
+            if (config->min_unitig_median_kmer_abundance == 0) {
+                assert(node_weights.get());
+
+                config->min_unitig_median_kmer_abundance
+                    = estimate_min_kmer_abundance(*graph, *node_weights,
+                                                  config->fallback_abundance_cutoff);
             }
 
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
 
-            if (config->verbose)
-                std::cout << "Extracting sequences from subgraph..." << std::endl;
+            if (config->verbose) {
+                if (dynamic_cast<const MaskedDeBruijnGraph*>(graph.get())) {
+                    std::cout << "Extracting sequences from subgraph..." << std::endl;
+                } else {
+                    std::cout << "Extracting sequences from graph..." << std::endl;
+                }
+            }
 
             timer.reset();
 
-            auto out_filename
-                = utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz";
-
-            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
-
-            if (out_fasta_gz == Z_NULL) {
-                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
-                exit(1);
-            }
-
-            uint64_t counter = 0;
-            const auto &dump_sequence = [&](const auto &sequence) {
-                if (!write_fasta(out_fasta_gz,
-                                 utils::join_strings({ config->header,
-                                                        std::to_string(counter) },
-                                                     ".",
-                                                     true),
-                                 sequence)) {
-                    std::cerr << "ERROR: Can't write extracted sequences to "
-                              << out_filename << std::endl;
-                    exit(1);
-                }
-                counter++;
-            };
+            FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
+                               config->header, true);
 
             // TODO: if DBGSuccinct is used, make sure it doesn't contain
             // any redundant dummy k-mers. Otherwise, it will split
@@ -2023,38 +2010,26 @@ int main(int argc, const char *argv[]) {
 
                 assert(node_weights.get());
 
-                if (config->min_unitig_median_kmer_abundance == 0) {
-                    config->min_unitig_median_kmer_abundance
-                        = estimate_min_kmer_abundance(subgraph->get_mask(), *node_weights,
-                                                      config->fallback_abundance_cutoff);
-                }
-
-                assert(subgraph->num_nodes() == graph->num_nodes());
-
                 if (config->verbose)
                     std::cout << "Threshold for median k-mer abundance in unitigs: "
                               << config->min_unitig_median_kmer_abundance << std::endl;
 
-                // subgraph->call_unitigs(
-                graph_with_unitigs->call_unitigs(
-                    [&](const auto &sequence) {
-                        if (!is_unreliable_unitig(sequence, *graph, *node_weights,
+                graph->call_unitigs(
+                    [&](const auto &unitig) {
+                        if (!is_unreliable_unitig(unitig, *graph, *node_weights,
                                                   config->min_unitig_median_kmer_abundance))
-                            dump_sequence(sequence);
+                            writer.write(unitig);
                     },
                     config->min_tip_size
                 );
 
             } else if (config->unitigs || config->min_tip_size > 1) {
-                // subgraph->call_unitigs(dump_sequence);
-                graph_with_unitigs->call_unitigs(dump_sequence, config->min_tip_size);
+                graph->call_unitigs([&](const auto &unitig) { writer.write(unitig); },
+                                    config->min_tip_size);
 
             } else {
-                // subgraph->call_sequences(dump_sequence);
-                graph_with_unitigs->call_sequences(dump_sequence);
+                graph->call_sequences([&](const auto &contig) { writer.write(contig); });
             }
-
-            gzclose(out_fasta_gz);
 
             if (config->verbose)
                 std::cout << "Graph cleaning finished in "
@@ -2568,39 +2543,15 @@ int main(int argc, const char *argv[]) {
 
             timer.reset();
 
-            auto out_filename
-                = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
-                    + ".fasta.gz";
-
-            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
-
-            if (out_fasta_gz == Z_NULL) {
-                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
-                exit(1);
-            }
-
-            uint64_t counter = 0;
-            const auto &dump_sequence = [&](const auto &sequence) {
-                if (!write_fasta(out_fasta_gz,
-                                 utils::join_strings({ config->header,
-                                                        std::to_string(counter) },
-                                                     ".",
-                                                     true),
-                                 sequence)) {
-                    std::cerr << "ERROR: Can't write extracted sequences to "
-                              << out_filename << std::endl;
-                    exit(1);
-                }
-                counter++;
-            };
+            FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
+                               config->header, true);
 
             if (config->unitigs || config->min_tip_size > 1) {
-                graph->call_unitigs(dump_sequence, config->min_tip_size);
+                graph->call_unitigs([&](const auto &unitig) { writer.write(unitig); },
+                                    config->min_tip_size);
             } else {
-                graph->call_sequences(dump_sequence);
+                graph->call_sequences([&](const auto &contig) { writer.write(contig); });
             }
-
-            gzclose(out_fasta_gz);
 
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;

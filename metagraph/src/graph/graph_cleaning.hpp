@@ -10,7 +10,7 @@ bool is_unreliable_unitig(const std::string &sequence,
                           const IWeighted<DeBruijnGraph::node_index> &node_weights,
                           uint64_t min_median_abundance);
 
-uint64_t estimate_min_kmer_abundance(const bitmap &node_mask,
+uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const IWeighted<DeBruijnGraph::node_index> &node_weights,
                                      uint64_t fallback_cutoff);
 

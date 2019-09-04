@@ -254,8 +254,23 @@ uint64_t bitmap_set::get_int(uint64_t id, uint32_t width) const {
 }
 
 void bitmap_set::insert_zeros(const std::vector<uint64_t> &pos) {
+    assert(std::is_sorted(pos.begin(), pos.end()));
+    assert(!pos.size() || pos.back() < size_ + pos.size());
+
     size_ += pos.size();
-    utils::insert_default_values(pos, &bits_);
+
+    std::set<uint64_t> bits;
+    uint64_t offset = 0;
+
+    for (auto i : bits_) {
+        while (offset < pos.size() && i + offset >= pos[offset]) {
+            ++offset;
+        }
+        bits.emplace_hint(bits.end(), i + offset);
+    }
+    assert(bits.size() == bits_.size());
+
+    bits_ = std::move(bits);
 }
 
 void bitmap_set::call_ones_in_range(uint64_t begin, uint64_t end,
@@ -295,7 +310,7 @@ void bitmap_vector::set(uint64_t id, bool val) {
 }
 
 void bitmap_vector::insert_zeros(const std::vector<uint64_t> &pos) {
-    utils::insert_default_values(pos, &bit_vector_);
+    utils::insert(&bit_vector_, pos, 0);
 }
 
 bitmap_vector& bitmap_vector::operator|=(const bitmap &other) {
