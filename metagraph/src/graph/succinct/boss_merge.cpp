@@ -297,10 +297,7 @@ std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const
             continue;
 
         for (TAlphabet a = 0; a < alph_size; a++) {
-            uint64_t pred_pos = std::max(
-                Gv.at(i)->pred_W(kv.at(i) - 1, a),
-                Gv.at(i)->pred_W(kv.at(i) - 1, a + alph_size)
-            );
+            uint64_t pred_pos = Gv.at(i)->pred_W(kv.at(i) - 1, a, a + alph_size);
             if (pred_pos == 0)
                 continue;
 

@@ -5,7 +5,6 @@
 #include <string>
 #include <memory>
 
-#include "binary_matrix.hpp"
 #include "BRWT.hpp"
 #include "BRWT_builders.hpp"
 #include "rainbowfish.hpp"

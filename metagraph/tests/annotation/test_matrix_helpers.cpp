@@ -7,15 +7,13 @@
 #include "BRWT.hpp"
 #include "BRWT_builders.hpp"
 #include "bin_rel_wt.hpp"
-#include "column_major.hpp"
 #include "bin_rel_wt_sdsl.hpp"
+#include "column_major.hpp"
 #include "utils.hpp"
-#include "bit_vector.hpp"
-#include "annotate_column_compressed.hpp"
-
 
 typedef std::vector<BinaryMatrix::Column> RowSetBits;
 typedef std::function<void(const RowSetBits &)> RowCallback;
+
 
 // Used to generate a set of columns from a row generator
 template <typename BinMat>

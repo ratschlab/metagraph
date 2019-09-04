@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "test_dbg_helpers.hpp"
-#include "utils.hpp"
+
 #include "reverse_complement.hpp"
 
 const std::string test_data_dir = "../tests/data";

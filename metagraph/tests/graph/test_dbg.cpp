@@ -4,8 +4,6 @@
 #define protected public
 
 #include "test_dbg_helpers.hpp"
-#include "utils.hpp"
-#include "reverse_complement.hpp"
 #include "weighted_graph.hpp"
 
 const std::string test_data_dir = "../tests/data";
@@ -1270,6 +1268,40 @@ TYPED_TEST(DeBruijnGraphTest, get_maximum_outdegree) {
     }
 }
 
+void check_degree_functions(const DeBruijnGraph &graph) {
+    graph.call_nodes([&](auto i) {
+
+        size_t outdegree = graph.outdegree(i);
+        if (outdegree == 0) {
+            ASSERT_FALSE(graph.has_single_outgoing(i));
+            ASSERT_FALSE(graph.has_multiple_outgoing(i));
+        } else if (outdegree == 1) {
+            ASSERT_TRUE(graph.has_single_outgoing(i));
+            ASSERT_FALSE(graph.has_multiple_outgoing(i));
+        } else {
+            ASSERT_FALSE(graph.has_single_outgoing(i));
+            ASSERT_TRUE(graph.has_multiple_outgoing(i));
+        }
+    });
+
+    graph.call_nodes([&](auto i) {
+
+        size_t indegree = graph.indegree(i);
+
+        if (indegree == 0) {
+            ASSERT_TRUE(graph.has_no_incoming(i));
+            ASSERT_FALSE(graph.has_single_incoming(i));
+        } else if (indegree == 1) {
+            ASSERT_FALSE(graph.has_no_incoming(i));
+            ASSERT_TRUE(graph.has_single_incoming(i));
+        } else {
+            ASSERT_FALSE(graph.has_no_incoming(i));
+            ASSERT_FALSE(graph.has_single_incoming(i));
+        }
+
+    });
+}
+
 TYPED_TEST(DeBruijnGraphTest, get_outdegree_loop) {
     for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, {
@@ -1288,14 +1320,19 @@ TYPED_TEST(DeBruijnGraphTest, get_outdegree_loop) {
                 EXPECT_EQ(1ull, graph->outdegree(i));
             }
         }
+
+        check_degree_functions(*graph);
     }
 }
 
 TYPED_TEST(DeBruijnGraphTest, get_indegree_single_node) {
     for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(k - 1, 'A') + 'C' });
+
         EXPECT_EQ(1ull, graph->num_nodes());
         EXPECT_EQ(0ull, graph->indegree(1));
+
+        check_degree_functions(*graph);
     }
 }
 
@@ -1318,6 +1355,8 @@ TYPED_TEST(DeBruijnGraphTest, get_maximum_indegree) {
                 EXPECT_EQ(0ull, graph->indegree(i));
             }
         }
+
+        check_degree_functions(*graph);
     }
 }
 
@@ -1340,6 +1379,8 @@ TYPED_TEST(DeBruijnGraphTest, get_indegree_loop) {
                 EXPECT_EQ(1ull, graph->indegree(i));
             }
         }
+
+        check_degree_functions(*graph);
     }
 }
 
@@ -1354,6 +1395,8 @@ TYPED_TEST(DeBruijnGraphTest, indegree1) {
 
     EXPECT_EQ(2u, graph->indegree(graph->kmer_to_node("AAA")));
     EXPECT_EQ(2u, graph->outdegree(graph->kmer_to_node("AAA")));
+
+    check_degree_functions(*graph);
 }
 
 TYPED_TEST(DeBruijnGraphTest, get_degree1) {
@@ -1375,6 +1418,8 @@ TYPED_TEST(DeBruijnGraphTest, get_degree1) {
         ASSERT_NE(DeBruijnGraph::npos, node_T);
         EXPECT_EQ(1ull, graph->outdegree(node_T));
         EXPECT_EQ(2ull, graph->indegree(node_T));
+
+        check_degree_functions(*graph);
     }
 }
 
@@ -1397,6 +1442,8 @@ TYPED_TEST(DeBruijnGraphTest, get_degree2) {
         ASSERT_NE(DeBruijnGraph::npos, node_T);
         EXPECT_EQ(0ull, graph->outdegree(node_T));
         EXPECT_EQ(1ull, graph->indegree(node_T));
+
+        check_degree_functions(*graph);
     }
 }
 
@@ -1415,6 +1462,8 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_incoming_indegree) {
             EXPECT_EQ(graph->indegree(node), incoming_nodes.size())
                 << "adjacent_incoming_nodes and indegree are inconsistent for node: " << node;
         }
+
+        check_degree_functions(*graph);
     }
 }
 
@@ -1436,6 +1485,8 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_indegree_traverse_back) {
             EXPECT_EQ(graph->indegree(node), num_incoming_edges)
                 << "traverse_back and indegree are inconsistent for node: " << node;
         }
+
+        check_degree_functions(*graph);
     }
 }
 
@@ -1459,6 +1510,8 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
             EXPECT_EQ(num_incoming_edges, incoming_nodes.size())
                 << "adjacent_incoming_nodes and traverse_back are inconsistent for node: " << node;
         }
+
+        check_degree_functions(*graph);
     }
 }
 

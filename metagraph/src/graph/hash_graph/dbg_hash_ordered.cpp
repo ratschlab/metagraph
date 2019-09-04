@@ -62,7 +62,12 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
                                  const std::function<void(node_index)> &callback) const;
 
     size_t outdegree(node_index) const;
+    bool has_single_outgoing(node_index) const;
+    bool has_multiple_outgoing(node_index) const;
+
     size_t indegree(node_index) const;
+    bool has_no_incoming(node_index) const;
+    bool has_single_incoming(node_index) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
 
@@ -290,6 +295,52 @@ size_t DBGHashOrderedImpl<KMER>::outdegree(node_index node) const {
 }
 
 template <typename KMER>
+bool DBGHashOrderedImpl<KMER>::has_single_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    bool outgoing_edge_detected = false;
+
+    const auto &kmer = get_kmer(node);
+
+    for (char c : seq_encoder_.alphabet) {
+        auto next_kmer = kmer;
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
+
+        if (get_index(next_kmer) != npos) {
+            if (outgoing_edge_detected)
+                return false;
+
+            outgoing_edge_detected = true;
+        }
+    }
+
+    return outgoing_edge_detected;
+}
+
+template <typename KMER>
+bool DBGHashOrderedImpl<KMER>::has_multiple_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    bool outgoing_edge_detected = false;
+
+    const auto &kmer = get_kmer(node);
+
+    for (char c : seq_encoder_.alphabet) {
+        auto next_kmer = kmer;
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
+
+        if (get_index(next_kmer) != npos) {
+            if (outgoing_edge_detected)
+                return true;
+
+            outgoing_edge_detected = true;
+        }
+    }
+
+    return false;
+}
+
+template <typename KMER>
 size_t DBGHashOrderedImpl<KMER>::indegree(node_index node) const {
     assert(in_graph(node));
 
@@ -298,14 +349,54 @@ size_t DBGHashOrderedImpl<KMER>::indegree(node_index node) const {
     const auto &kmer = get_kmer(node);
 
     for (char c : seq_encoder_.alphabet) {
-        auto next_kmer = kmer;
-        next_kmer.to_prev(k_, seq_encoder_.encode(c));
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
 
-        if (get_index(next_kmer) != npos)
+        if (get_index(prev_kmer) != npos)
             indegree++;
     }
 
     return indegree;
+}
+
+template <typename KMER>
+bool DBGHashOrderedImpl<KMER>::has_no_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    const auto &kmer = get_kmer(node);
+
+    for (char c : seq_encoder_.alphabet) {
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        if (get_index(prev_kmer) != npos)
+            return false;
+    }
+
+    return true;
+}
+
+template <typename KMER>
+bool DBGHashOrderedImpl<KMER>::has_single_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    bool incoming_edge_detected = false;
+
+    const auto &kmer = get_kmer(node);
+
+    for (char c : seq_encoder_.alphabet) {
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        if (get_index(prev_kmer) != npos) {
+            if (incoming_edge_detected)
+                return false;
+
+            incoming_edge_detected = true;
+        }
+    }
+
+    return incoming_edge_detected;
 }
 
 template <typename KMER>

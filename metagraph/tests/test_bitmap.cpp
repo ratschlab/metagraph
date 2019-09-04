@@ -515,6 +515,95 @@ TYPED_TEST(BitmapTest, call_ones_sparse_set) {
     }
 }
 
+
+template <class Bitmap>
+Bitmap build_bitmap(const std::vector<bool> &bv);
+
+template<> bitmap_set build_bitmap<bitmap_set>(const std::vector<bool> &bv) {
+    std::set<uint64_t> bits;
+    for (size_t i = 0; i < bv.size(); ++i) {
+        if (bv[i])
+            bits.insert(i);
+    }
+    return bitmap_set(bv.size(), std::move(bits));
+}
+template<> bitmap_vector build_bitmap<bitmap_vector>(const std::vector<bool> &bv) {
+    return bitmap_vector(to_sdsl(bv));
+}
+template<> bitmap_adaptive build_bitmap<bitmap_adaptive>(const std::vector<bool> &bv) {
+    return bitmap_adaptive(to_sdsl(bv));
+}
+
+std::vector<bool> insert_reference_impl(std::vector<bool> vector,
+                                        const std::vector<uint64_t> &new_pos) {
+    assert(std::is_sorted(new_pos.begin(), new_pos.end()));
+    for (auto i : new_pos) {
+        vector.insert(vector.begin() + i, 0);
+    }
+    return vector;
+}
+
+TYPED_TEST(BitmapDynTest, insert_zeros_to_empty) {
+    std::vector<bool> vector_init(0);
+
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, 4, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, 4, 5, }) }) {
+
+        TypeParam bitmap = build_bitmap<TypeParam>(vector_init);
+        bitmap.insert_zeros(new_pos);
+
+        EXPECT_EQ(build_bitmap<TypeParam>(insert_reference_impl(vector_init, new_pos)), bitmap)
+            << to_sdsl(insert_reference_impl(vector_init, new_pos));
+    }
+}
+
+TYPED_TEST(BitmapDynTest, insert_zeros_to_all_zeros) {
+    std::vector<bool> vector_init(50, 0);
+
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 50, }),
+                                 std::vector<uint64_t>({ 50, 51, }),
+                                 std::vector<uint64_t>({ 50, 51, 52, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, 51, 52, 53, 54, 55, }) }) {
+
+        TypeParam bitmap = build_bitmap<TypeParam>(vector_init);
+        bitmap.insert_zeros(new_pos);
+
+        EXPECT_EQ(build_bitmap<TypeParam>(insert_reference_impl(vector_init, new_pos)), bitmap)
+            << to_sdsl(insert_reference_impl(vector_init, new_pos));
+    }
+}
+
+TYPED_TEST(BitmapDynTest, insert_zeros_to_all_ones) {
+    std::vector<bool> vector_init(50, 1);
+
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 50, }),
+                                 std::vector<uint64_t>({ 50, 51, }),
+                                 std::vector<uint64_t>({ 50, 51, 52, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, 51, 52, 53, 54, 55, }) }) {
+
+        TypeParam bitmap = build_bitmap<TypeParam>(vector_init);
+        bitmap.insert_zeros(new_pos);
+
+        EXPECT_EQ(build_bitmap<TypeParam>(insert_reference_impl(vector_init, new_pos)), bitmap)
+            << to_sdsl(insert_reference_impl(vector_init, new_pos));
+    }
+}
+
 TYPED_TEST(BitmapTest, operator_eq) {
     for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 100000 }) {
         for (bool value : { false, true }) {

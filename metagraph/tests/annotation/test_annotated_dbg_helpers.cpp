@@ -2,14 +2,9 @@
 
 #include "../graph/test_dbg_helpers.hpp"
 
-#include "dbg_succinct.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_bitmap.hpp"
-
 #include "annotation_converters.hpp"
-#include "static_annotators_def.hpp"
 #include "annotated_graph_algorithm.hpp"
+
 
 template <class Graph, class Annotation>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,

@@ -86,9 +86,13 @@ class DBGHashOrdered : public DeBruijnGraph {
         hash_dbg_->adjacent_incoming_nodes(node, callback);
     }
 
-
     size_t outdegree(node_index node) const { return hash_dbg_->outdegree(node); }
+    bool has_single_outgoing(node_index node) const { return hash_dbg_->has_single_outgoing(node); }
+    bool has_multiple_outgoing(node_index node) const { return hash_dbg_->has_multiple_outgoing(node); }
+
     size_t indegree(node_index node) const { return hash_dbg_->indegree(node); }
+    bool has_no_incoming(node_index node) const { return hash_dbg_->has_no_incoming(node); }
+    bool has_single_incoming(node_index node) const { return hash_dbg_->has_single_incoming(node); }
 
     node_index kmer_to_node(const std::string &kmer) const {
         return hash_dbg_->kmer_to_node(kmer);

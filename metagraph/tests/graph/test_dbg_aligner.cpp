@@ -1,18 +1,15 @@
 #include <gtest/gtest.h>
 
+#include "test_dbg_helpers.hpp"
+#include "../test_helpers.hpp"
+
 #define private public
 #include "dbg_aligner.hpp"
 #include "aligner_methods.hpp"
 
-#include "boss.hpp"
-#include "dbg_succinct.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
 #include "annotate_column_compressed.hpp"
 #include "reverse_complement.hpp"
 #include "alphabets.hpp"
-#include "../test_helpers.hpp"
-#include "test_dbg_helpers.hpp"
 
 
 typedef DBGAligner<>::score_t score_t;

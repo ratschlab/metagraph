@@ -2,7 +2,6 @@
 
 #include "test_matrix_helpers.hpp"
 #include "rainbowfish.hpp"
-#include "bit_vector.hpp"
 
 
 template <int BufferSize>

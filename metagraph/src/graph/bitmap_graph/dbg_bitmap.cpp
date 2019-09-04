@@ -111,18 +111,62 @@ size_t DBGBitmap::outdegree(node_index node) const {
     assert(in_graph(node));
 
     size_t outdegree = 0;
+
     const auto &kmer = node_to_kmer(node);
 
     for (char c : alphabet()) {
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
 
-        auto next_index = to_node(next_kmer);
-        if (next_index != npos)
+        if (to_node(next_kmer) != npos)
             outdegree++;
     }
 
     return outdegree;
+}
+
+bool DBGBitmap::has_single_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    bool outgoing_edge_detected = false;
+
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet()) {
+        auto next_kmer = kmer;
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
+
+        if (to_node(next_kmer) != npos) {
+            if (outgoing_edge_detected)
+                return false;
+
+            outgoing_edge_detected = true;
+        }
+    }
+
+    return outgoing_edge_detected;
+}
+
+bool DBGBitmap::has_multiple_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    bool outgoing_edge_detected = false;
+
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet()) {
+        auto next_kmer = kmer;
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
+
+        if (to_node(next_kmer) != npos) {
+            if (outgoing_edge_detected)
+                return true;
+
+            outgoing_edge_detected = true;
+        }
+    }
+
+    return false;
 }
 
 void DBGBitmap::call_incoming_kmers(node_index node,
@@ -132,10 +176,10 @@ void DBGBitmap::call_incoming_kmers(node_index node,
     const auto &kmer = node_to_kmer(node);
 
     for (char c : alphabet()) {
-        auto next_kmer = kmer;
-        next_kmer.to_prev(k_, seq_encoder_.encode(c));
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
 
-        auto next_index = to_node(next_kmer);
+        auto next_index = to_node(prev_kmer);
         if (next_index != npos)
             callback(next_index, c);
     }
@@ -145,18 +189,56 @@ size_t DBGBitmap::indegree(node_index node) const {
     assert(in_graph(node));
 
     size_t indegree = 0;
+
     const auto &kmer = node_to_kmer(node);
 
     for (char c : alphabet()) {
-        auto next_kmer = kmer;
-        next_kmer.to_prev(k_, seq_encoder_.encode(c));
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
 
-        auto next_index = to_node(next_kmer);
-        if (next_index != npos)
+        if (to_node(prev_kmer) != npos)
             indegree++;
     }
 
     return indegree;
+}
+
+bool DBGBitmap::has_no_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet()) {
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        if (to_node(prev_kmer) != npos)
+            return false;
+    }
+
+    return true;
+}
+
+bool DBGBitmap::has_single_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    bool incoming_edge_detected = false;
+
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet()) {
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        if (to_node(prev_kmer) != npos) {
+            if (incoming_edge_detected)
+                return false;
+
+            incoming_edge_detected = true;
+        }
+    }
+
+    return incoming_edge_detected;
 }
 
 void DBGBitmap::adjacent_outgoing_nodes(node_index node,

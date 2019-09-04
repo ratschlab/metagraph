@@ -273,7 +273,7 @@ namespace utils {
         std::hash<std::bitset<sizeof(T) * 8>> hasher;
     };
 
-    // new_indexes - marks positions of inserted values in the final vector
+    // Bitmap |new_indexes| marks positions of inserted values in the final vector
     template <class Vector>
     void insert(Vector *vector,
                 const bitmap &new_indexes,
@@ -327,7 +327,7 @@ namespace utils {
 
         for (auto it = new_indexes.rbegin(); it != new_indexes.rend(); ++it) {
             while (i > *it) {
-                assert(i - shift >= 0 && "Invalid indexes for insertion");
+                assert(i >= shift && "Invalid indexes for insertion");
                 (*vector)[i] = std::move((*vector)[i - shift]);
                 i--;
             }

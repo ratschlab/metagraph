@@ -125,14 +125,14 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
             targets.clear();
             graph.call_outgoing_kmers(node,
-                [&](const auto &next, char c) { targets.emplace_back(next, c); }
+                [&](auto next, char c) { targets.emplace_back(next, c); }
             );
 
             if (targets.empty())
                 break;
 
             if (targets.size() == 1
-                    && (!call_unitigs || graph.indegree(targets.front().first) == 1)) {
+                    && (!call_unitigs || graph.has_single_incoming(targets.front().first))) {
                 std::tie(node, next_char) = targets[0];
                 (*discovered)[node] = true;
                 continue;
@@ -176,10 +176,13 @@ void call_sequences(const DeBruijnGraph &graph,
                     const std::function<void(const std::string&)> &callback,
                     bool call_unitigs,
                     uint64_t min_tip_size = 0) {
-    sdsl::bit_vector discovered(graph.num_nodes() + 1, false);
-    sdsl::bit_vector visited(graph.num_nodes() + 1, false);
+    sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
+    graph.call_nodes([&](auto node) { discovered[node] = false; });
+    sdsl::bit_vector visited = discovered;
 
-    ProgressBar progress_bar(graph.num_nodes(), "Traverse graph", std::cerr, !utils::get_verbose());
+    ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(discovered),
+                             "Traverse graph",
+                             std::cerr, !utils::get_verbose());
 
     auto call_paths_from = [&](const auto &node) {
         call_sequences_from(graph,
@@ -196,9 +199,9 @@ void call_sequences(const DeBruijnGraph &graph,
     //  .____  or  .____
     //              \___
     //
-    graph.call_source_nodes([&](const auto &node) {
+    graph.call_source_nodes([&](auto node) {
         assert(!visited[node]);
-        assert(!graph.indegree(node));
+        assert(graph.has_no_incoming(node));
 
         call_paths_from(node);
     });
@@ -207,20 +210,17 @@ void call_sequences(const DeBruijnGraph &graph,
     //  ____.____
     //       \___
     //
-    graph.call_nodes([&](const auto &node) {
-        if (!visited[node] && graph.outdegree(node) > 1) {
-            graph.call_outgoing_kmers(node, [&](const auto &next, char) {
-                if (!visited[next] && graph.outdegree(next) == 1)
+    call_zeros(visited, [&](auto node) {
+        if (graph.has_multiple_outgoing(node)) {
+            graph.adjacent_outgoing_nodes(node, [&](auto next) {
+                if (!visited[next] && graph.has_single_outgoing(next))
                     call_paths_from(next);
             });
         }
     });
 
     // then the rest (loops)
-    graph.call_nodes([&](const auto &node) {
-        if (!visited[node])
-            call_paths_from(node);
-    });
+    call_zeros(visited, [&](auto node) { call_paths_from(node); });
 }
 
 void DeBruijnGraph
@@ -303,7 +303,7 @@ void DeBruijnGraph::print(std::ostream &out) const {
 void DeBruijnGraph
 ::call_source_nodes(const std::function<void(node_index)> &callback) const {
     call_nodes([&](node_index i) {
-        if (!indegree(i))
+        if (has_no_incoming(i))
             callback(i);
     });
 }

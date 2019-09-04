@@ -78,7 +78,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const override;
 
-    virtual size_t outdegree(node_index node) const override;
+    virtual size_t outdegree(node_index) const override;
     virtual size_t indegree(node_index) const override;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,

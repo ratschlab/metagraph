@@ -7,13 +7,12 @@
 #include <vector>
 #include <memory>
 
-#include "sequence_graph.hpp"
 #include "dbg_succinct.hpp"
-#include "boss.hpp"
 #include "dbg_hash_string.hpp"
 #include "dbg_hash_ordered.hpp"
 #include "dbg_bitmap.hpp"
 #include "aligner_helper.hpp"
+
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
