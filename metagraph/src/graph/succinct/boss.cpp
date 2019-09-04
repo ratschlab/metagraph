@@ -1775,11 +1775,15 @@ bool masked_is_single_incoming(const BOSS &boss,
         return boss.is_single_incoming(i);
 
     auto d = boss.get_W(i) % boss.alph_size;
-    auto begin = boss.pred_W(i, d, d);
-    auto end = i + 1 <= boss.num_edges() ? boss.succ_W(i + 1, d) : i + 1;
+    i = boss.pred_W(i, d, d);
 
-    bool found = false;
-    for (i = begin; i < end; i = i + 1 < end ? boss.succ_W(i + 1, d + boss.alph_size) : end) {
+    TAlphabet d_next;
+    bool found = (*subgraph_mask)[i];
+    while (++i <= boss.num_edges()) {
+        std::tie(i, d_next) = boss.succ_W(i, d, d + boss.alph_size);
+        if (d_next != d + boss.alph_size)
+            break;
+
         if ((*subgraph_mask)[i]) {
             if (found)
                 return false;
@@ -1999,7 +2003,8 @@ bool masked_sink_dead_end(const BOSS &boss,
         return !boss.get_W(i);
 
     do {
-        if (s != BOSS::kSentinelCode && (*subgraph_mask)[i])
+        assert(s != BOSS::kSentinelCode);
+        if ((*subgraph_mask)[i])
             return false;
     } while (--i > 0 && !boss.get_last(i));
 
