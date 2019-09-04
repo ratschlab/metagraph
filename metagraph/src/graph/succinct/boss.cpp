@@ -1784,12 +1784,13 @@ bool masked_is_single_incoming(const BOSS &boss,
         if (d_next != d + boss.alph_size)
             break;
 
-        if ((*subgraph_mask)[i]) {
-            if (found)
-                return false;
+        if (!(*subgraph_mask)[i])
+            continue;
 
-            found = true;
-        }
+        if (found)
+            return false;
+
+        found = true;
     }
 
     return true;
@@ -1845,9 +1846,26 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             auto d = get_W(i) % alph_size;
             auto j = pred_W(i, d, d);
 
-            if (masked_indegree_zero(*this, bwd(j), *subgraph_mask))
+            if (!masked_indegree_zero(*this, bwd(j), *subgraph_mask))
+                return;
+
+            ::call_paths(*this, i, callback, split_to_unitigs,
+                         &discovered, &visited, progress_bar, subgraph_mask);
+
+            TAlphabet d_next;
+            while (++i < W_->size()) {
+                std::tie(i, d_next) = succ_W(i, d, d + alph_size);
+                if (d_next != d + alph_size)
+                    break;
+
+                assert(pred_W(i, d, d) == j);
+
+                if (!(*subgraph_mask)[i])
+                    continue;
+
                 ::call_paths(*this, i, callback, split_to_unitigs,
                              &discovered, &visited, progress_bar, subgraph_mask);
+            }
         });
 
     // then all forks
@@ -1991,19 +2009,14 @@ void BOSS::call_sequences(Call<const std::string&> callback,
 
 bool masked_sink_dead_end(const BOSS &boss,
                           uint64_t i,
-                          TAlphabet s,
                           const bitmap *subgraph_mask) {
     assert(i);
     assert(boss.get_last(i));
-
-    if (s == BOSS::kSentinelCode)
-        return true;
 
     if (!subgraph_mask)
         return !boss.get_W(i);
 
     do {
-        assert(s != BOSS::kSentinelCode);
         if ((*subgraph_mask)[i])
             return false;
     } while (--i > 0 && !boss.get_last(i));
@@ -2013,18 +2026,11 @@ bool masked_sink_dead_end(const BOSS &boss,
 
 bool masked_source_dead_end(const BOSS &boss,
                             uint64_t i,
-                            TAlphabet s,
                             const bitmap *subgraph_mask) {
     assert(i);
-    assert(s < boss.alph_size);
 
-    if (s == BOSS::kSentinelCode)
-        return true;
-
-    if (!subgraph_mask || !masked_indegree_zero(boss, i, *subgraph_mask))
-        return !boss.get_minus_k_value(i, boss.get_k() - 1).first;
-
-    return true;
+    return (subgraph_mask && masked_indegree_zero(boss, i, *subgraph_mask))
+        || !boss.get_minus_k_value(i, boss.get_k() - 1).first;
 }
 
 void BOSS::call_unitigs(Call<const std::string&> callback,
@@ -2105,12 +2111,14 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
 
         // skip all sink dead ends, as they are also sink
         // tips (because there is only one edge incoming to the first node)
-        if (!last_fwd || masked_sink_dead_end(*this, last_fwd, path.back(), subgraph_mask))
+        if (path.back() == kSentinelCode
+                || (last_fwd && masked_sink_dead_end(*this, last_fwd, subgraph_mask)))
             return;
 
         // skip all source dead ends, as they are also source
         // tips (because there is only one edge outgoing from the last node)
-        if (!first_bwd || masked_source_dead_end(*this, first_bwd, path.front(), subgraph_mask))
+        if (path.front() == kSentinelCode
+                || masked_source_dead_end(*this, first_bwd, subgraph_mask))
             return;
 
         // this is not a tip
