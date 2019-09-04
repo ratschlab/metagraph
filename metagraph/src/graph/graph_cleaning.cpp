@@ -41,11 +41,11 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
                                  double *alpha_est_ptr, double *beta_est_ptr,
                                  double *false_pos_ptr, double *false_neg_ptr);
 
-uint64_t estimate_min_kmer_abundance(const bitmap &node_mask,
+uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const IWeighted<DeBruijnGraph::node_index> &node_weights,
                                      uint64_t fallback_cutoff) {
     std::vector<uint64_t> hist;
-    node_mask.call_ones([&](auto i) {
+    graph.call_nodes([&](auto i) {
         uint64_t kmer_count = node_weights.get_weight(i);
         assert(kmer_count && "All k-mers in graph must have non-zero counts");
         while (kmer_count >= hist.size()) {
