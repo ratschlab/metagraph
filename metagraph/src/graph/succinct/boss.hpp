@@ -3,8 +3,6 @@
 
 #include <type_traits>
 
-#include <progress_bar.hpp>
-
 #include "sequence_graph.hpp"
 #include "config.hpp"
 #include "wavelet_tree.hpp"
@@ -62,19 +60,6 @@ class BOSS {
     bool load(std::ifstream &instream);
     void serialize(std::ofstream &outstream) const;
 
-    // Traverse graph mapping k-mers from sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    // Call npos if a k-mer can't be mapped to the graph nodes
-    void map_to_nodes(const std::string &sequence,
-                      const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate = [](){ return false; }) const;
-
-    /**
-     * Breaks the sequence into k-mers and searches for the index of each
-     * k-mer in the graph. Returns these indices.
-     */
-    std::vector<node_index> map_to_nodes(const std::string &sequence) const;
-
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
     // Call npos if a k-mer can't be mapped to the graph edges
@@ -95,8 +80,11 @@ class BOSS {
     template <class... T>
     using Call = typename std::function<void(T...)>;
 
-    // traverse all nodes in graph except for the dummy source of sink ones
-    void call_kmers(Call<node_index, const std::string&> callback) const;
+    /**
+     * Traverse boss graph and call all its edges
+     * except for the dummy source of sink ones
+     */
+    void call_kmers(Call<edge_index, const std::string&> callback) const;
 
     // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;
@@ -117,11 +105,9 @@ class BOSS {
                       size_t max_pruned_dead_end_size = 0,
                       bitmap *subgraph_mask = NULL) const;
 
-    node_index traverse(node_index node, char edge_label) const;
-    node_index traverse_back(node_index node, char edge_label) const;
-
-    void call_adjacent_incoming_edges(edge_index edge,
-                                      std::function<void(edge_index)> callback) const;
+    // |edge| must be the first incoming edge
+    void call_incoming_to_target(edge_index edge,
+                                 std::function<void(edge_index)> callback) const;
 
     /**
      * Add a full sequence to the graph.
@@ -225,22 +211,16 @@ class BOSS {
 
 
     /**
-     * Given a node index i, this function returns the number of outgoing
-     * edges from the node i.
-     */
-    size_t outdegree(node_index i) const;
-
-    /**
      * Given an edge index i, this function returns true if that is
      * the only outgoing edge from its source node.
      */
     bool is_single_outgoing(edge_index i) const;
 
     /**
-     * Given a node index i, this function returns the number of incoming
-     * edges to node i.
+     * Given an edge index i (first incoming), this function returns
+     * the number of edges incoming to its target node.
      */
-    size_t indegree(node_index i) const;
+    size_t num_incoming_to_target(edge_index i) const;
 
     /**
      * Given an edge index i, this function returns true if that is
@@ -249,28 +229,16 @@ class BOSS {
     bool is_single_incoming(edge_index i) const;
 
     /**
-     * Given a node index i and an edge label c, this function returns the
-     * index of the node the edge is pointing to.
+     * Given an edge index |i| and a character |c|, get the index of an adjacent
+     * incoming edge with the first character c if such exists and npos otherwise.
      */
-    node_index outgoing(node_index i, TAlphabet c) const;
+    edge_index pick_incoming_edge(edge_index i, TAlphabet c) const;
 
     /**
-     * Given a node index i and an edge label c, this function returns the
-     * index of the node the incoming edge belongs to.
-     */
-    node_index incoming(node_index i, TAlphabet c) const;
-
-    /**
-     * Given a node index i and an edge label c, this function returns the
-     * index of the outgoing edge with label c if it exists and npos otherwise.
-     */
-    edge_index outgoing_edge_idx(node_index i, TAlphabet c) const;
-
-    /**
-     * Given an edge index i and a character c, get the index of the edge with
+     * Given an edge index |i| and a character |c|, get the index of the edge with
      * label c outgoing from the same source node if such exists and npos otherwise.
      */
-    edge_index pick_edge(edge_index edge, node_index node, TAlphabet c) const;
+    edge_index pick_edge(edge_index i, TAlphabet c) const;
 
     /**
      * Given a node label kmer, this function returns the index
@@ -283,7 +251,6 @@ class BOSS {
      * Return value of last at position i.
      */
     bool get_last(uint64_t i) const { return (*last_)[i]; }
-
     const bit_vector& get_last() const { return *last_; }
 
     /**
@@ -330,16 +297,21 @@ class BOSS {
     uint64_t select_W(uint64_t i, TAlphabet c) const;
 
     /**
-     * This is a convenience function that returns for array W, a position i and
-     * a character c the last index of a character c preceding in W[1..i].
+     * For characters |first| and |second|, return the last occurrence
+     * of them in W[1..i], i.e. max(pred_W(i, first), pred_W(i, second)).
      */
-    uint64_t pred_W(uint64_t i, TAlphabet c) const;
+    uint64_t pred_W(uint64_t i, TAlphabet first, TAlphabet second) const;
 
     /**
-     * This is a convenience function that returns for array W, a position i and
-     * a character c the first index of a character c in W[i..N].
+     * Return position of the first occurrence of |c| in W[i..N].
      */
     uint64_t succ_W(uint64_t i, TAlphabet c) const;
+
+    /**
+     * For characters |first| and |second|, return the first occurrence
+     * of them in W[i..N], i.e. min(succ_W(i, first), succ_W(i, second)).
+     */
+    std::pair<uint64_t, TAlphabet> succ_W(uint64_t i, TAlphabet first, TAlphabet second) const;
 
     /**
      * Return value of F vector at index k.
@@ -359,8 +331,6 @@ class BOSS {
      * position in W that corresponds to the i-th node's last character.
      */
     uint64_t bwd(uint64_t i) const;
-
-    node_index get_source_node(edge_index i) const;
 
     // Given the alphabet index return the corresponding symbol
     char decode(TAlphabet s) const;
@@ -481,46 +451,28 @@ class BOSS {
      */
     uint64_t erase_edges(const sdsl::bit_vector &edges_to_remove_mask);
 
-    // traverse graph from the specified (k+1)-mer/edge and call
-    // all paths reachable from it
-    void call_paths(edge_index starting_kmer,
-                    Call<std::vector<edge_index>&&,
-                         std::vector<TAlphabet>&&> callback,
-                    bool split_to_contigs,
-                    sdsl::bit_vector *discovered_ptr,
-                    sdsl::bit_vector *visited_ptr,
-                    bitmap *mask,
-                    ProgressBar &progress_bar) const;
-
     /**
      * This function gets two edge indices and returns if their source
      * node labels share a k-1 suffix.
      */
     bool compare_node_suffix(edge_index first, edge_index second) const;
-    bool compare_node_suffix(edge_index first, const TAlphabet *second) const;
-
     /**
-     * Given a k-mer, this function returns the index
-     * of the corresponding node, if such exists and 0 otherwise.
+     * This function gets an edge indix and checks if its source
+     * node has the same k-1 suffix as k-mer |second|.
      */
-    template <typename RandomAccessIt>
-    node_index map_to_node(RandomAccessIt begin, RandomAccessIt end) const {
-        uint64_t edge = index(begin, end);
-        return edge ? get_source_node(edge) : npos;
-    }
+    bool compare_node_suffix(edge_index first, const TAlphabet *second) const;
 
     /**
      * Given a (k+1)-mer, this function returns the index
      * of the corresponding edge, if such exists and 0 otherwise.
      */
     template <typename RandomAccessIt>
-    node_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
+    edge_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
         assert(begin + k_ + 1 == end);
 
         uint64_t edge = index(begin, end - 1);
 
-        return edge ? pick_edge(edge, get_source_node(edge), *(end - 1))
-                    : npos;
+        return edge ? pick_edge(edge, *(end - 1)) : npos;
     }
 
     /**

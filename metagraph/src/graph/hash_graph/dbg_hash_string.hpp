@@ -55,8 +55,13 @@ class DBGHashString : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  const std::function<void(node_index)> &callback) const;
 
-    size_t outdegree(node_index node) const;
-    size_t indegree(node_index node) const;
+    size_t outdegree(node_index) const;
+    bool has_single_outgoing(node_index) const;
+    bool has_multiple_outgoing(node_index) const;
+
+    size_t indegree(node_index) const;
+    bool has_no_incoming(node_index) const;
+    bool has_single_incoming(node_index) const;
 
     void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
 

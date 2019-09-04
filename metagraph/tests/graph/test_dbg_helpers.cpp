@@ -1,9 +1,9 @@
 #include "test_dbg_helpers.hpp"
 
 #include "gtest/gtest.h"
-#include "dbg_succinct.hpp"
 #include "boss.hpp"
 #include "boss_construct.hpp"
+#include "dbg_succinct.hpp"
 #include "dbg_hash_string.hpp"
 #include "dbg_hash_ordered.hpp"
 #include "dbg_bitmap.hpp"

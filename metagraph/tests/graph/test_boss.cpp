@@ -1,18 +1,11 @@
-#include <stdio.h>
-#include <string>
-#include <sstream>
-#include <mutex>
-#include <unordered_set>
-
 #include <zlib.h>
 #include <htslib/kseq.h>
+#include <unordered_set>
 #include "gtest/gtest.h"
 
-#include "dbg_succinct.hpp"
 #include "boss.hpp"
 #include "boss_construct.hpp"
 #include "utils.hpp"
-#include "reverse_complement.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -41,7 +34,7 @@ void test_graph(BOSS *graph, const std::string &last,
         EXPECT_EQ((graph->get_W())[i], graph->get_W(i));
 
         auto last_outgoing = graph->succ_last(i);
-        graph->call_adjacent_incoming_edges(i, [&](auto incoming) {
+        graph->call_incoming_to_target(graph->bwd(i), [&](auto incoming) {
             EXPECT_EQ(last_outgoing, graph->fwd(incoming));
         });
     }
@@ -168,29 +161,30 @@ TEST(BOSS, SmallGraphTraversal) {
                                            8, 0, 10, 21, 11, 11, 13, 0, 22, 16, 17 };
     ASSERT_EQ(outgoing_edges.size(), graph->num_edges() + 1);
 
-    EXPECT_EQ(1u, graph->outgoing(1, BOSS::kSentinelCode));
+    uint64_t dummy_edge = graph->select_last(1);
+    EXPECT_EQ(1u, graph->pick_edge(dummy_edge, BOSS::kSentinelCode));
+    EXPECT_EQ(dummy_edge, graph->fwd(1));
 
     for (size_t i = 1; i <= graph->num_edges(); ++i) {
         //test forward traversal given an output edge label
         if (graph->get_W(i) != BOSS::kSentinelCode) {
-            uint64_t node_idx = graph->rank_last(i - 1) + 1;
-
             EXPECT_EQ(outgoing_edges[i],
-                graph->select_last(graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size))
+                graph->fwd(graph->pick_edge(graph->succ_last(i),
+                                            graph->get_W(i) % graph->alph_size))
             ) << "Edge index: " << i << "\n"
-              << "Outgoing: " << graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size) << "\n"
               << *graph;
 
-            EXPECT_EQ(node_idx,
-                graph->incoming(graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size),
-                                graph->get_minus_k_value(i, graph->get_k() - 1).first)
+            EXPECT_EQ(i,
+                graph->pick_incoming_edge(
+                    graph->bwd(graph->fwd(i)),
+                    graph->get_minus_k_value(i, graph->get_k() - 1).first
+                )
             );
             for (int c = 0; c < graph->alph_size; ++c) {
-                uint64_t prev_node = graph->incoming(node_idx, c);
-                if (prev_node) {
-                    EXPECT_EQ(node_idx,
-                        graph->outgoing(prev_node, graph->get_node_last_value(i))
-                    );
+                uint64_t prev_edge = graph->pick_incoming_edge(graph->bwd(i), c);
+                if (prev_edge) {
+                    EXPECT_EQ(i, graph->pick_edge(graph->fwd(prev_edge),
+                                                  graph->get_W(i) % graph->alph_size));
                 }
             }
 
@@ -1636,7 +1630,7 @@ TEST(BOSS, CallKmersTwoLoops) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto &sequence) {
-            EXPECT_EQ(std::string(k, 'A'), sequence) << sequence;
+            EXPECT_EQ(std::string(k + 1, 'A'), sequence) << sequence;
             num_kmers++;
         });
         EXPECT_EQ(1u, num_kmers);
@@ -1655,9 +1649,9 @@ TEST(BOSS, CallKmersFourLoops) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto &sequence) {
-            EXPECT_TRUE(std::string(k, 'A') == sequence
-                        || std::string(k, 'G') == sequence
-                        || std::string(k, 'C') == sequence) << sequence;
+            EXPECT_TRUE(std::string(k + 1, 'A') == sequence
+                        || std::string(k + 1, 'G') == sequence
+                        || std::string(k + 1, 'C') == sequence) << sequence;
             num_kmers++;
         });
         EXPECT_EQ(3u, num_kmers);
@@ -1673,12 +1667,12 @@ TEST(BOSS, CallKmersFourLoopsDynamic) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto &sequence) {
-            EXPECT_TRUE(std::string(k, 'A') == sequence
-                        || std::string(k, 'G') == sequence
-                        || std::string(k, 'C') == sequence) << sequence;
+            EXPECT_TRUE(std::string(k + 1, 'A') == sequence
+                        || std::string(k + 1, 'G') == sequence
+                        || std::string(k + 1, 'C') == sequence) << sequence;
             num_kmers++;
         });
-        EXPECT_EQ(3u, num_kmers);
+        EXPECT_EQ(3u, num_kmers) << graph;
     }
 }
 
@@ -1689,7 +1683,7 @@ TEST(BOSS, CallKmersTestPath) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
-        EXPECT_EQ(k + 1, num_kmers);
+        EXPECT_EQ(k + 1, num_kmers) << graph;
     }
 }
 
@@ -1702,7 +1696,7 @@ TEST(BOSS, CallKmersTestPathACA) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
-        EXPECT_EQ(2 * k, num_kmers);
+        EXPECT_EQ(k + 1 + k, num_kmers) << graph;
     }
 }
 
@@ -1732,7 +1726,7 @@ TEST(BOSS, CallKmersTestPathDisconnected2) {
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
-        EXPECT_EQ(3u, num_kmers) << graph;
+        EXPECT_EQ(2u, num_kmers) << graph;
     }
 }
 
@@ -1888,16 +1882,6 @@ TEST(BOSS, FindSequence) {
         graph->add_sequence(std::string(100, 'A'));
 
         uint64_t index = 777;
-        graph->map_to_nodes(std::string(k - 1, 'A'), [&](uint64_t i) { index = i; });
-        EXPECT_EQ(777u, index) << *graph;
-        graph->map_to_nodes(std::string(k, 'A'), [&](uint64_t i) { index = i; });
-        EXPECT_EQ(k + 1, index) << *graph;
-
-        index = 777;
-        graph->map_to_nodes(std::string(2 * k, 'A'), [&](uint64_t i) { index = i; });
-        EXPECT_EQ(k + 1, index) << *graph;
-
-        index = 777;
         graph->map_to_edges(std::string(k - 1, 'A'), [&](uint64_t i) { index = i; });
         EXPECT_EQ(777u, index);
         graph->map_to_edges(std::string(k, 'A'), [&](uint64_t i) { index = i; });
@@ -1989,90 +1973,6 @@ TEST(BOSS, FindSequence) {
     }
 }
 
-TEST(BOSS, FindSequenceDBG) {
-    for (size_t k = 1; k < 10; ++k) {
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k)) };
-
-        graph->add_sequence(std::string(100, 'A'));
-
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'A')));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 1));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.75));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.5));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.25));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0));
-        EXPECT_FALSE(graph->find(std::string(k, 'A')));
-        EXPECT_FALSE(graph->find(std::string(k, 'A'), 1));
-        EXPECT_FALSE(graph->find(std::string(k, 'A'), 0.75));
-        EXPECT_FALSE(graph->find(std::string(k, 'A'), 0.5));
-        EXPECT_FALSE(graph->find(std::string(k, 'A'), 0.25));
-        EXPECT_FALSE(graph->find(std::string(k, 'A'), 0));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'A')));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 1));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.75));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.5));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.25));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0));
-        EXPECT_TRUE(graph->find(std::string(k + 2, 'A')));
-        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 1));
-        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 0.75));
-        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 0.5));
-        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 0.25));
-        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 0));
-
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'B')));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 1));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.75));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.5));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.25));
-        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0));
-        EXPECT_FALSE(graph->find(std::string(k, 'B')));
-        EXPECT_FALSE(graph->find(std::string(k, 'B'), 1));
-        EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.75));
-        EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.5));
-        EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.25));
-        EXPECT_FALSE(graph->find(std::string(k, 'B'), 0));
-        EXPECT_FALSE(graph->find(std::string(k + 1, 'B')));
-        EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 1));
-        EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.75));
-        EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.5));
-        EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.25));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'B'), 0));
-        EXPECT_FALSE(graph->find(std::string(k + 2, 'B')));
-        EXPECT_FALSE(graph->find(std::string(k + 2, 'B'), 1));
-        EXPECT_FALSE(graph->find(std::string(k + 2, 'B'), 0.75));
-        EXPECT_FALSE(graph->find(std::string(k + 2, 'B'), 0.5));
-        EXPECT_FALSE(graph->find(std::string(k + 2, 'B'), 0.25));
-        EXPECT_TRUE(graph->find(std::string(k + 2, 'B'), 0));
-
-        std::string pattern = std::string(k, 'A') + std::string(k, 'B');
-        EXPECT_FALSE(graph->find(pattern));
-        EXPECT_FALSE(graph->find(pattern, 1));
-        EXPECT_FALSE(graph->find(pattern, 1.0 / (k + 3)));
-        EXPECT_FALSE(graph->find(pattern, 0.0 / k + kEps));
-        EXPECT_TRUE(graph->find(pattern, 0.0 / k - kEps));
-        EXPECT_TRUE(graph->find(pattern, 0));
-
-        pattern = std::string(k + 1, 'A') + std::string(k + 1, 'B');
-        EXPECT_FALSE(graph->find(pattern));
-        EXPECT_FALSE(graph->find(pattern, 1));
-        EXPECT_FALSE(graph->find(pattern, 2.0 / (k + 2)));
-        EXPECT_FALSE(graph->find(pattern, 1.0 / (k + 2) + kEps));
-        // we map (k+1)-mers to the graph edges
-        // just 1 out of k+2 (k+1)-mers can be mapped here
-        EXPECT_TRUE(graph->find(pattern, 1.0 / (k + 2)));
-        EXPECT_TRUE(graph->find(pattern, 0));
-
-        pattern = std::string(k + 2, 'A') + std::string(k + 2, 'B');
-        EXPECT_FALSE(graph->find(pattern));
-        EXPECT_FALSE(graph->find(pattern, 1));
-        EXPECT_FALSE(graph->find(pattern, 3.0 / (k + 4)));
-        EXPECT_FALSE(graph->find(pattern, 2.0 / (k + 4) + kEps));
-        EXPECT_TRUE(graph->find(pattern, 2.0 / (k + 4)));
-        EXPECT_TRUE(graph->find(pattern, 0));
-    }
-}
-
 TEST(BOSS, KmerMappingMode) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
@@ -2114,52 +2014,6 @@ TEST(BOSS, KmerMappingMode) {
     }
 }
 
-TEST(BOSS, Traversals) {
-    for (size_t k = 1; k < 10; ++k) {
-        auto graph = std::make_unique<BOSS>(k);
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-
-        uint64_t it = 0;
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        ASSERT_EQ(k + 1, it);
-        EXPECT_EQ(it, graph->traverse(it, 'A'));
-        EXPECT_EQ(it + 1, graph->traverse(it, 'C'));
-        EXPECT_EQ(it, graph->traverse_back(it + 1, 'A'));
-        EXPECT_EQ(BOSS::npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(BOSS::npos, graph->traverse_back(it + 1, 'G'));
-    }
-}
-
-TEST(BOSS, map_to_nodes) {
-    for (size_t k = 1; k < 10; ++k) {
-        std::unique_ptr<BOSS> graph { new BOSS(k) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-
-        std::vector<BOSS::node_index> expected_result {
-            SequenceGraph::npos, SequenceGraph::npos,
-            k + 1, k + 1, k + 1, k + 1
-        };
-        for (size_t i = 1; i <= k; ++i) {
-            expected_result.push_back(k + 1 + i);
-        }
-        for (size_t i = 0; i < k; ++i) {
-            expected_result.push_back(k + 1 + k);
-        }
-
-        std::string sequence_to_map = std::string(2, 'T')
-                                        + std::string(k + 3, 'A')
-                                        + std::string(2 * k, 'C');
-
-        EXPECT_EQ(expected_result, graph->map_to_nodes(sequence_to_map));
-
-        size_t pos = 0;
-        graph->map_to_nodes(sequence_to_map,
-                            [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
-    }
-}
-
 TEST(BOSS, map_to_edges) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> graph { new BOSS(k) };
@@ -2187,493 +2041,6 @@ TEST(BOSS, map_to_edges) {
         graph->map_to_edges(sequence_to_map,
                             [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
     }
-}
-
-TEST(BOSS, map_to_nodes_BOSS_vs_DBG) {
-    for (size_t k = 1; k < 10; ++k) {
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k)) };
-        std::unique_ptr<BOSS> boss { new BOSS(k) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        boss->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-
-        std::string sequence_to_map = std::string(2, 'T')
-                                        + std::string(k + 3, 'A')
-                                        + std::string(2 * k, 'C');
-
-        std::vector<BOSS::edge_index> boss_indexes;
-
-        boss->map_to_edges(
-            sequence_to_map,
-            [&boss_indexes](auto i) { boss_indexes.push_back(i); }
-        );
-        std::vector<BOSS::edge_index> dbg_indexes;
-
-        graph->map_to_nodes(
-            sequence_to_map,
-            [&dbg_indexes](auto i) { dbg_indexes.push_back(i); }
-        );
-
-        EXPECT_EQ(boss_indexes, dbg_indexes);
-    }
-}
-
-TEST(BOSS, get_degree_with_source_dummy) {
-    for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGSuccinct>(k);
-
-        graph->add_sequence(std::string(k, 'A')
-                                + std::string(k - 1, 'C')
-                                + std::string(k - 1, 'G')
-                                + std::string(k, 'T'));
-
-        // dummy source k-mer: '$$$$$'
-        EXPECT_EQ(std::string(k, '$'), graph->get_node_sequence(1));
-        EXPECT_EQ(1ull, graph->outdegree(1));
-        EXPECT_EQ(1ull, graph->indegree(1));
-
-        // 'AAAAA'
-        auto node_A = graph->kmer_to_node(std::string(k, 'A'));
-        ASSERT_NE(DBGSuccinct::npos, node_A);
-        EXPECT_EQ(2ull, graph->outdegree(node_A));
-        EXPECT_EQ(2ull, graph->indegree(node_A));
-
-        auto node_T = graph->kmer_to_node(std::string(k, 'T'));
-        ASSERT_NE(DBGSuccinct::npos, node_T);
-        EXPECT_EQ(1ull, graph->outdegree(node_T));
-        EXPECT_EQ(2ull, graph->indegree(node_T));
-
-
-        // Now mask out all dummy k-mers
-
-        graph->mask_dummy_kmers(1, false);
-        // dummy source k-mer: '$$$$$'
-        EXPECT_NE(std::string(k, '$'), graph->get_node_sequence(1));
-
-        // 'AAAAA'
-        node_A = graph->kmer_to_node(std::string(k, 'A'));
-        ASSERT_NE(DBGSuccinct::npos, node_A);
-        EXPECT_EQ(2ull, graph->outdegree(node_A));
-        EXPECT_EQ(1ull, graph->indegree(node_A));
-
-        node_T = graph->kmer_to_node(std::string(k, 'T'));
-        ASSERT_NE(DBGSuccinct::npos, node_T);
-        EXPECT_EQ(1ull, graph->outdegree(node_T));
-        EXPECT_EQ(2ull, graph->indegree(node_T));
-    }
-}
-
-TEST(BOSS, get_degree_with_source_and_sink_dummy) {
-    for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGSuccinct>(k);
-
-        graph->add_sequence(std::string(k, 'A')
-                                + std::string(k - 1, 'C')
-                                + std::string(k - 1, 'G')
-                                + std::string(k - 1, 'T'));
-
-        // dummy source k-mer: '$$$$$'
-        EXPECT_EQ(std::string(k, '$'), graph->get_node_sequence(1));
-        EXPECT_EQ(1ull, graph->outdegree(1));
-        EXPECT_EQ(1ull, graph->indegree(1));
-
-        // 'AAAAA'
-        auto node_A = graph->kmer_to_node(std::string(k, 'A'));
-        ASSERT_NE(DBGSuccinct::npos, node_A);
-        EXPECT_EQ(2ull, graph->outdegree(node_A));
-        EXPECT_EQ(2ull, graph->indegree(node_A));
-
-        auto node_T = graph->kmer_to_node('G' + std::string(k - 1, 'T'));
-        ASSERT_NE(DBGSuccinct::npos, node_T);
-        EXPECT_EQ(0ull, graph->outdegree(node_T));
-        EXPECT_EQ(1ull, graph->indegree(node_T));
-
-
-        // Now mask out all dummy k-mers
-
-        graph->mask_dummy_kmers(1, false);
-        // dummy source k-mer: '$$$$$'
-        EXPECT_NE(std::string(k, '$'), graph->get_node_sequence(1));
-
-        // 'AAAAA'
-        node_A = graph->kmer_to_node(std::string(k, 'A'));
-        ASSERT_NE(DBGSuccinct::npos, node_A);
-        EXPECT_EQ(2ull, graph->outdegree(node_A));
-        EXPECT_EQ(1ull, graph->indegree(node_A));
-
-        node_T = graph->kmer_to_node('G' + std::string(k - 1, 'T'));
-        ASSERT_NE(DBGSuccinct::npos, node_T);
-        EXPECT_EQ(0ull, graph->outdegree(node_T));
-        EXPECT_EQ(1ull, graph->indegree(node_T));
-    }
-}
-
-TEST(BOSS, get_node_sequence) {
-    size_t k = 4;
-    std::string reference = "AGCTTCGAGGCCAA";
-    std::string query = "AGCT";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-
-    std::string mapped_query = "";
-    graph->map_to_nodes(query, [&](DBGSuccinct::node_index node) {
-        mapped_query += graph->get_node_sequence(node);
-    });
-
-    EXPECT_EQ(query, mapped_query);
-}
-
-TEST(BOSS, is_single_outgoing_simple) {
-    size_t k = 4;
-    std::string reference = "CATC";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-
-    uint64_t single_outgoing_counter = 0;
-    for (DBGSuccinct::node_index i = 1; i <= graph->num_nodes(); ++i) {
-        if (graph->outdegree(i) == 1)
-            single_outgoing_counter++;
-    }
-
-    // All nodes except the last dummy node should be single outgoing.
-    EXPECT_EQ(reference.size(), single_outgoing_counter);
-}
-
-TEST(BOSS, is_single_outgoing_for_multiple_valid_edges) {
-    size_t k = 4;
-    std::string reference = "AGGGGTC";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-
-    uint64_t single_outgoing_counter = 0;
-    for (DBGSuccinct::node_index i = 1; i <= graph->num_nodes(); ++i) {
-        if (graph->outdegree(i) == 1)
-            single_outgoing_counter++;
-    }
-
-    // All nodes except the source dummy, the sink dummy, 'AGGG',
-    // and 'GGGG' have a single outgoing edge.
-    EXPECT_EQ(reference.size() - 2, single_outgoing_counter);
-}
-
-TEST(BOSS, call_outgoing_kmers_source) {
-    size_t k = 4;
-    std::vector<std::string> sequences {
-        "AATGG", "CCGAA"
-    };
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(sequences[0]);
-    graph->add_sequence(sequences[1]);
-
-    std::multiset<std::pair<DBGSuccinct::node_index, char>> ref {
-        { 2, 'A' }, { 3, 'C' }
-    };
-
-    std::multiset<std::pair<DBGSuccinct::node_index, char>> obs;
-
-    graph->call_outgoing_kmers(
-        1,
-        [&](auto node, char c) { obs.emplace(node, c); }
-    );
-
-    EXPECT_EQ(ref, obs);
-}
-
-TEST(BOSS, CallNodesWithSuffix) {
-    size_t k = 4;
-    std::string reference = "GGCCCAGGGGTC";
-
-    std::string query = "GG";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
-        [&](auto node, auto length) {
-            EXPECT_EQ(query.size(), length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
-        }
-    );
-
-    std::multiset<DBGSuccinct::node_index> ref_nodes {
-        graph->kmer_to_node("AGGG"),
-        graph->kmer_to_node("CAGG"),
-        graph->kmer_to_node("GGGG")
-    };
-
-    std::multiset<std::string> ref_node_str {
-        "AGGG",
-        "CAGG",
-        "GGGG"
-    };
-
-    EXPECT_EQ(ref_nodes, nodes) << *graph;
-    EXPECT_EQ(ref_node_str, node_str);
-}
-
-TEST(BOSS, CallNodesWithSuffixMinLength) {
-    size_t k = 4;
-    std::string reference = "GGCCCAGGGGTC";
-
-    std::string query = "CAGC";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
-        query.begin(), std::min(query.end(), query.begin() + 4),
-        [&](auto node, auto length) {
-            EXPECT_EQ(query.size(), length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
-        },
-        4
-    );
-
-    EXPECT_TRUE(nodes.empty());
-    EXPECT_TRUE(node_str.empty());
-}
-
-TEST(BOSS, CallNodesWithSuffixK) {
-    size_t k = 4;
-    std::string reference = "GGCCCAGGGGTC";
-
-    std::string query = "GGCC";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
-        [&](auto node, auto length) {
-            EXPECT_EQ(query.size(), length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
-        }
-    );
-
-    std::multiset<DBGSuccinct::node_index> ref_nodes {
-        graph->kmer_to_node("GGCC")
-    };
-
-    std::multiset<std::string> ref_node_str {
-        "GGCC"
-    };
-
-    EXPECT_EQ(ref_nodes, nodes) << *graph;
-    EXPECT_EQ(ref_node_str, node_str);
-}
-
-TEST(BOSS, CallNodesWithSuffixKEarlyCutoff) {
-    size_t k = 4;
-    std::string reference = "GGCCCAGGGGTC";
-
-    std::string query = "GGCC";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
-        query.begin(), std::min(query.end(), query.begin() + 2),
-        [&](auto node, auto length) {
-            EXPECT_EQ(2u, length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query.substr(0, 2), ins->substr(ins->size() - 2));
-        }
-    );
-
-    std::multiset<DBGSuccinct::node_index> ref_nodes {
-        graph->kmer_to_node("AGGG"),
-        graph->kmer_to_node("CAGG"),
-        graph->kmer_to_node("GGGG")
-    };
-
-    std::multiset<std::string> ref_node_str {
-        "AGGG",
-        "CAGG",
-        "GGGG"
-    };
-
-    EXPECT_EQ(ref_nodes, nodes) << *graph;
-    EXPECT_EQ(ref_node_str, node_str);
-}
-
-TEST(BOSS, CallNodesWithSuffixEarlyCutoffKMinusOne) {
-    size_t k = 4;
-    std::string reference = "GGCCCAGGGGTC";
-
-    std::string query = "GGGG";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
-        query.begin(), std::min(query.end(), query.begin() + 3),
-        [&](auto node, auto length) {
-            EXPECT_EQ(3u, length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query.substr(0, 3), ins->substr(ins->size() - 3));
-        }
-    );
-
-    std::multiset<DBGSuccinct::node_index> ref_nodes {
-        graph->kmer_to_node("AGGG"),
-        graph->kmer_to_node("GGGG")
-    };
-
-    std::multiset<std::string> ref_node_str {
-        "AGGG",
-        "GGGG"
-    };
-
-    EXPECT_EQ(ref_nodes, nodes) << *graph;
-    EXPECT_EQ(ref_node_str, node_str);
-}
-
-TEST(BOSS, CallNodesWithSuffixKMinusOne) {
-    size_t k = 4;
-    std::string reference = "GGCCCAGGGGTC";
-
-    std::string query = "GCC";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
-        [&](auto node, auto length) {
-            EXPECT_EQ(query.size(), length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
-        }
-    );
-
-    std::multiset<DBGSuccinct::node_index> ref_nodes {
-        graph->kmer_to_node("GGCC")
-    };
-
-    std::multiset<std::string> ref_node_str {
-        "GGCC"
-    };
-
-    EXPECT_EQ(ref_nodes, nodes) << *graph;
-    EXPECT_EQ(ref_node_str, node_str);
-}
-
-TEST(BOSS, CallNodesWithSuffixKMinusOneBeginning) {
-    size_t k = 4;
-    std::string reference = "GGCCCAGGGGTC";
-
-    std::string query = "GGC";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
-        [&](auto node, auto length) {
-            EXPECT_EQ(query.size(), length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
-        }
-    );
-
-    EXPECT_TRUE(nodes.empty());
-    EXPECT_TRUE(node_str.empty());
-}
-
-TEST(BOSS, CallNodesWithSuffixMinusTwoBeginning) {
-    size_t k = 4;
-    std::string reference = "TGCCCAGGGGTC";
-
-    std::string query = "TG";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
-        [&](auto node, auto length) {
-            EXPECT_EQ(query.size(), length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query, ins->substr(ins->size() - query.size()));
-        }
-    );
-
-    EXPECT_TRUE(nodes.empty());
-    EXPECT_TRUE(node_str.empty());
-}
-
-TEST(BOSS, CallNodesWithSuffixMultipleOut) {
-    size_t k = 3;
-    std::vector<std::string> sequences {
-        "GGGGGGATGTAG",
-        "GGGGGGATGCCTAATTAA"
-    };
-
-    std::string query = "TGC";
-
-    auto graph = std::make_unique<DBGSuccinct>(k);
-    graph->add_sequence(sequences[0]);
-    graph->add_sequence(sequences[1]);
-    graph->mask_dummy_kmers(1, false);
-
-    std::multiset<DBGSuccinct::node_index> ref_nodes { graph->kmer_to_node("TGC") };
-    std::multiset<std::string> ref_node_str { "TGC" };
-
-    std::multiset<DBGSuccinct::node_index> nodes;
-    std::multiset<std::string> node_str;
-
-    graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
-        [&](auto node, auto length) {
-            EXPECT_EQ(query.size(), length);
-            nodes.insert(node);
-            auto ins = node_str.insert(graph->get_node_sequence(node));
-            EXPECT_EQ(query, ins->substr(0, length));
-        }
-    );
-
-    EXPECT_EQ(ref_nodes, nodes) << *graph;
-    EXPECT_EQ(ref_node_str, node_str) << *graph;
 }
 
 TEST(BOSS, CallUnitigsMasked) {

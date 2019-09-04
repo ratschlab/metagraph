@@ -1,18 +1,11 @@
 #include <stdio.h>
 
+#include <set>
 #include "gtest/gtest.h"
 
-#define protected public
-#define private public
-
-#include <set>
-
-#include "dbg_succinct.hpp"
-#include "annotated_dbg.hpp"
-#include "annotate_column_compressed.hpp"
-#include "annotation_converters.hpp"
-#include "static_annotators_def.hpp"
 #include "test_annotated_dbg_helpers.hpp"
+
+#include "annotation_converters.hpp"
 
 
 void check_labels(const AnnotatedDBG &anno_graph,

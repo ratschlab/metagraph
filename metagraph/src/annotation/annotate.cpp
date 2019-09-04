@@ -65,11 +65,20 @@ template <typename IndexType, typename LabelType>
 void MultiLabelEncoded<IndexType, LabelType>
 ::rename_labels(const std::unordered_map<Label, Label> &dict) {
     std::vector<Label> index_to_label(label_encoder_.size());
+    // old labels
     for (size_t i = 0; i < index_to_label.size(); ++i) {
         index_to_label[i] = label_encoder_.decode(i);
     }
+    // new labels
     for (const auto &pair : dict) {
-        index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+        try {
+            index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+        } catch (const std::runtime_error&) {
+            std::cerr << "Warning: label '" << pair.first << "' not"
+                      << " found in annotation. Skipping instruction"
+                      << " '" << pair.first << " -> " << pair.second << "'."
+                      << std::endl;
+        }
     }
 
     label_encoder_.clear();

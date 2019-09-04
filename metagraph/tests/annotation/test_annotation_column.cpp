@@ -4,7 +4,6 @@
 
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
-#include "utils.hpp"
 #include "threading.hpp"
 
 const std::string test_data_dir = "../tests/data";

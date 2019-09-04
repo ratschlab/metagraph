@@ -106,7 +106,12 @@ class DeBruijnGraph : public SequenceGraph {
                             const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual size_t outdegree(node_index) const = 0;
+    virtual bool has_single_outgoing(node_index node) const { return outdegree(node) == 1; }
+    virtual bool has_multiple_outgoing(node_index node) const { return outdegree(node) > 1; }
+
     virtual size_t indegree(node_index) const = 0;
+    virtual bool has_no_incoming(node_index node) const { return indegree(node) == 0; }
+    virtual bool has_single_incoming(node_index node) const { return indegree(node) == 1; }
 
     virtual node_index kmer_to_node(const char *begin) const;
     virtual node_index kmer_to_node(const std::string &kmer) const;

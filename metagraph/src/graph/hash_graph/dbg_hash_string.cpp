@@ -135,7 +135,52 @@ size_t DBGHashString::outdegree(node_index node) const {
         if (kmer_to_node(next) != npos)
             outdegree++;
     }
+
     return outdegree;
+}
+
+bool DBGHashString::has_single_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    bool outgoing_edge_detected = false;
+
+    auto next = node_to_kmer(node).substr(1);
+    next.push_back('\0');
+
+    for (char c : alphabet_) {
+        next.back() = c;
+
+        if (kmer_to_node(next) != npos) {
+            if (outgoing_edge_detected)
+                return false;
+
+            outgoing_edge_detected = true;
+        }
+    }
+
+    return outgoing_edge_detected;
+}
+
+bool DBGHashString::has_multiple_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    bool outgoing_edge_detected = false;
+
+    auto next = node_to_kmer(node).substr(1);
+    next.push_back('\0');
+
+    for (char c : alphabet_) {
+        next.back() = c;
+
+        if (kmer_to_node(next) != npos) {
+            if (outgoing_edge_detected)
+                return true;
+
+            outgoing_edge_detected = true;
+        }
+    }
+
+    return false;
 }
 
 size_t DBGHashString::indegree(node_index node) const {
@@ -143,17 +188,58 @@ size_t DBGHashString::indegree(node_index node) const {
 
     size_t indegree = 0;
 
-    auto next = node_to_kmer(node);
-    next.pop_back();
-    next.insert(0, 1, '\0');
+    auto prev = node_to_kmer(node);
+    prev.pop_back();
+    prev.insert(0, 1, '\0');
 
     for (char c : alphabet_) {
-        next.front() = c;
+        prev.front() = c;
 
-        if (kmer_to_node(next) != npos)
+        if (kmer_to_node(prev) != npos)
             indegree++;
     }
+
     return indegree;
+}
+
+bool DBGHashString::has_no_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    auto prev = node_to_kmer(node);
+    prev.pop_back();
+    prev.insert(0, 1, '\0');
+
+    for (char c : alphabet_) {
+        prev.front() = c;
+
+        if (kmer_to_node(prev) != npos)
+            return false;
+    }
+
+    return true;
+}
+
+bool DBGHashString::has_single_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    bool incoming_edge_detected = false;
+
+    auto prev = node_to_kmer(node);
+    prev.pop_back();
+    prev.insert(0, 1, '\0');
+
+    for (char c : alphabet_) {
+        prev.front() = c;
+
+        if (kmer_to_node(prev) != npos) {
+            if (incoming_edge_detected)
+                return false;
+
+            incoming_edge_detected = true;
+        }
+    }
+
+    return incoming_edge_detected;
 }
 
 void DBGHashString

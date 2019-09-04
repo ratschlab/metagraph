@@ -2045,7 +2045,7 @@ int main(int argc, const char *argv[]) {
                     config->min_tip_size
                 );
 
-            } else if (config->unitigs) {
+            } else if (config->unitigs || config->min_tip_size > 1) {
                 // subgraph->call_unitigs(dump_sequence);
                 graph_with_unitigs->call_unitigs(dump_sequence, config->min_tip_size);
 
@@ -2215,11 +2215,32 @@ int main(int argc, const char *argv[]) {
             /********************************************************/
 
             if (config->rename_instructions_file.size()) {
+                std::unordered_map<std::string, std::string> dict;
+                std::ifstream instream(config->rename_instructions_file);
+                if (!instream.is_open()) {
+                    std::cerr << "ERROR: Can't open file "
+                              << config->rename_instructions_file << std::endl;
+                    exit(1);
+                }
+                std::string old_name;
+                std::string new_name;
+                while (instream.good() && !(instream >> old_name).eof()) {
+                    instream >> new_name;
+                    if (instream.fail() || instream.eof()) {
+                        std::cerr << "ERROR: wrong format of the rules for"
+                                  << " renaming annotation columns passed in file "
+                                  << config->rename_instructions_file << std::endl;
+                        exit(1);
+                    }
+                    dict[old_name] = new_name;
+                }
+
                 auto annotation = initialize_annotation(files.at(0), *config);
 
                 if (config->verbose)
                     std::cout << "Loading annotation..." << std::endl;
 
+                // TODO: rename columns without loading the full annotation
                 if (config->anno_type == Config::ColumnCompressed) {
                     if (!annotation->merge_load(files)) {
                         std::cerr << "ERROR: can't load annotations" << std::endl;
@@ -2244,25 +2265,6 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose)
                     std::cout << "Renaming...\t" << std::flush;
 
-                std::unordered_map<std::string, std::string> dict;
-                std::ifstream instream(config->rename_instructions_file);
-                if (!instream.is_open()) {
-                    std::cerr << "ERROR: Can't open file "
-                              << config->rename_instructions_file << std::endl;
-                    exit(1);
-                }
-                std::string old_name;
-                std::string new_name;
-                while (instream.good() && !(instream >> old_name).eof()) {
-                    instream >> new_name;
-                    if (instream.fail() || instream.eof()) {
-                        std::cerr << "ERROR: wrong format of the rules for"
-                                  << " renaming annotation columns passed in file "
-                                  << config->rename_instructions_file << std::endl;
-                        exit(1);
-                    }
-                    dict[old_name] = new_name;
-                }
                 //TODO: could be made to work with streaming
                 annotation->rename_labels(dict);
 
