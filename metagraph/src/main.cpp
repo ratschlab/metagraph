@@ -1997,30 +1997,8 @@ int main(int argc, const char *argv[]) {
 
             timer.reset();
 
-            auto out_filename
-                = utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz";
-
-            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
-
-            if (out_fasta_gz == Z_NULL) {
-                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
-                exit(1);
-            }
-
-            uint64_t counter = 0;
-            const auto &dump_sequence = [&](const auto &sequence) {
-                if (!write_fasta(out_fasta_gz,
-                                 utils::join_strings({ config->header,
-                                                        std::to_string(counter) },
-                                                     ".",
-                                                     true),
-                                 sequence)) {
-                    std::cerr << "ERROR: Can't write extracted sequences to "
-                              << out_filename << std::endl;
-                    exit(1);
-                }
-                counter++;
-            };
+            FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
+                               config->header, true);
 
             // TODO: if DBGSuccinct is used, make sure it doesn't contain
             // any redundant dummy k-mers. Otherwise, it will split
@@ -2037,22 +2015,21 @@ int main(int argc, const char *argv[]) {
                               << config->min_unitig_median_kmer_abundance << std::endl;
 
                 graph->call_unitigs(
-                    [&](const auto &sequence) {
-                        if (!is_unreliable_unitig(sequence, *graph, *node_weights,
+                    [&](const auto &unitig) {
+                        if (!is_unreliable_unitig(unitig, *graph, *node_weights,
                                                   config->min_unitig_median_kmer_abundance))
-                            dump_sequence(sequence);
+                            writer.write(unitig);
                     },
                     config->min_tip_size
                 );
 
             } else if (config->unitigs || config->min_tip_size > 1) {
-                graph->call_unitigs(dump_sequence, config->min_tip_size);
+                graph->call_unitigs([&](const auto &unitig) { writer.write(unitig); },
+                                    config->min_tip_size);
 
             } else {
-                graph->call_sequences(dump_sequence);
+                graph->call_sequences([&](const auto &contig) { writer.write(contig); });
             }
-
-            gzclose(out_fasta_gz);
 
             if (config->verbose)
                 std::cout << "Graph cleaning finished in "
@@ -2566,39 +2543,15 @@ int main(int argc, const char *argv[]) {
 
             timer.reset();
 
-            auto out_filename
-                = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
-                    + ".fasta.gz";
-
-            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
-
-            if (out_fasta_gz == Z_NULL) {
-                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
-                exit(1);
-            }
-
-            uint64_t counter = 0;
-            const auto &dump_sequence = [&](const auto &sequence) {
-                if (!write_fasta(out_fasta_gz,
-                                 utils::join_strings({ config->header,
-                                                        std::to_string(counter) },
-                                                     ".",
-                                                     true),
-                                 sequence)) {
-                    std::cerr << "ERROR: Can't write extracted sequences to "
-                              << out_filename << std::endl;
-                    exit(1);
-                }
-                counter++;
-            };
+            FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
+                               config->header, true);
 
             if (config->unitigs || config->min_tip_size > 1) {
-                graph->call_unitigs(dump_sequence, config->min_tip_size);
+                graph->call_unitigs([&](const auto &unitig) { writer.write(unitig); },
+                                    config->min_tip_size);
             } else {
-                graph->call_sequences(dump_sequence);
+                graph->call_sequences([&](const auto &contig) { writer.write(contig); });
             }
-
-            gzclose(out_fasta_gz);
 
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
