@@ -101,7 +101,8 @@ void initialize_chunk(uint64_t alph_size,
         }
 
         if constexpr(utils::is_pair<T>::value) {
-            if (weights)
+            // set weights for non-dummy k-mers
+            if (weights && it->second && kmer[0] && kmer[1])
                 (*weights)[curpos] = std::min(static_cast<uint64_t>(it->second), max_count);
         }
 
