@@ -36,6 +36,7 @@ typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
+const uint64_t kMaxCount = ~uint64_t(0) >> (64 - kBitsPerCount);
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -807,9 +808,12 @@ void print_stats(const DeBruijnGraph &graph) {
     if (dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(&graph)) {
         const auto &weighted = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>&>(graph);
         double sum_weights = 0;
+        uint64_t num_non_zero_weights = 0;
         for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
             sum_weights += weighted.get_weight(i);
+            num_non_zero_weights += weighted.get_weight(i) > 0;
         }
+        std::cout << "nnz weights: " << num_non_zero_weights << std::endl;
         std::cout << "sum weights: " << sum_weights << std::endl;
 
         if (utils::get_verbose()) {
@@ -1340,7 +1344,8 @@ int main(int argc, const char *argv[]) {
                             graph->map_to_nodes(seq, [&](uint64_t i) {
                                 if (i > 0) {
                                     assert(i <= graph->num_nodes());
-                                    kmer_counts[i]++;
+                                    if (kmer_counts[i] < kMaxCount)
+                                        kmer_counts[i]++;
                                 }
                             });
                         },
@@ -1348,7 +1353,11 @@ int main(int argc, const char *argv[]) {
                             graph->map_to_nodes(kmer, [&](uint64_t i) {
                                 if (i > 0) {
                                     assert(i <= graph->num_nodes());
-                                    kmer_counts[i] += count;
+                                    if (count < kMaxCount - kmer_counts[i]) {
+                                        kmer_counts[i] += count;
+                                    } else {
+                                        kmer_counts[i] = kMaxCount;
+                                    }
                                 }
                             });
                         },
@@ -1357,7 +1366,8 @@ int main(int argc, const char *argv[]) {
                                 graph->map_to_nodes(seq, [&](uint64_t i) {
                                     if (i > 0) {
                                         assert(i <= graph->num_nodes());
-                                        kmer_counts[i]++;
+                                        if (kmer_counts[i] < kMaxCount)
+                                            kmer_counts[i]++;
                                     }
                                 });
                             });
@@ -1948,6 +1958,8 @@ int main(int argc, const char *argv[]) {
         case Config::CLEAN: {
             assert(files.size() == 1);
             assert(config->outfbase.size());
+
+            config->min_count = std::max(1u, config->min_count);
 
             Timer timer;
             if (config->verbose)
