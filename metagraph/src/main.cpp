@@ -1961,6 +1961,12 @@ int main(int argc, const char *argv[]) {
 
             config->min_count = std::max(1u, config->min_count);
 
+            if (!config->to_fasta) {
+                std::cerr << "Error: Clean graph can be serialized only in"
+                          << " form of contigs/unitigs, add flag --to-fasta" << std::endl;
+                exit(1);
+            }
+
             Timer timer;
             if (config->verbose)
                 std::cout << "Graph loading...\t" << std::flush;
