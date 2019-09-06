@@ -1836,19 +1836,19 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             ::call_paths(*this, i, callback, split_to_unitigs,
                          &discovered, &visited, progress_bar, subgraph_mask);
 
-            auto d = get_W(i) % alph_size;
-            TAlphabet d_next;
-            while (++i < W_->size()) {
-                std::tie(i, d_next) = succ_W(i, d, d + alph_size);
-                if (d_next != d + alph_size)
-                    break;
+            // auto d = get_W(i) % alph_size;
+            // TAlphabet d_next;
+            // while (++i < W_->size()) {
+            //     std::tie(i, d_next) = succ_W(i, d, d + alph_size);
+            //     if (d_next != d + alph_size)
+            //         break;
 
-                if (!(*subgraph_mask)[i])
-                    continue;
+            //     if (!(*subgraph_mask)[i])
+            //         continue;
 
-                ::call_paths(*this, i, callback, split_to_unitigs,
-                             &discovered, &visited, progress_bar, subgraph_mask);
-            }
+            //     ::call_paths(*this, i, callback, split_to_unitigs,
+            //                  &discovered, &visited, progress_bar, subgraph_mask);
+            // }
         });
 
     // then all forks
