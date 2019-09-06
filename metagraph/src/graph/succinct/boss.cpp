@@ -1832,25 +1832,21 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 return;
 
             auto j = bwd(i);
+            i = j;
             if (masked_pick_single_incoming(*this, &j, subgraph_mask) || j)
                 return;
 
-            ::call_paths(*this, i, callback, split_to_unitigs,
-                         &discovered, &visited, progress_bar, subgraph_mask);
+            i = succ_last(i);
 
-            // auto d = get_W(i) % alph_size;
-            // TAlphabet d_next;
-            // while (++i < W_->size()) {
-            //     std::tie(i, d_next) = succ_W(i, d, d + alph_size);
-            //     if (d_next != d + alph_size)
-            //         break;
+            do {
+                j = fwd(i);
 
-            //     if (visited[i] || !(*subgraph_mask)[i])
-            //         continue;
+                if (visited[j] || (subgraph_mask && !(*subgraph_mask)[j]))
+                    continue;
 
-            //     ::call_paths(*this, i, callback, split_to_unitigs,
-            //                  &discovered, &visited, progress_bar, subgraph_mask);
-            // }
+                ::call_paths(*this, j, callback, split_to_unitigs,
+                             &discovered, &visited, progress_bar, subgraph_mask);
+            } while (--i > 0 && !get_last(i));
         });
 
     // then all forks
