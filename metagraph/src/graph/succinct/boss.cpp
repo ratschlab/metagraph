@@ -1716,6 +1716,7 @@ bool masked_pick_single_outgoing(const BOSS &boss,
                                  uint64_t *i,
                                  const bitmap *subgraph_mask) {
     assert(i && *i);
+    assert(boss.get_last(*i));
 
     // in boss, at least one outgoing edge always exists
     if (!subgraph_mask)
@@ -1750,13 +1751,14 @@ bool masked_pick_single_incoming(const BOSS &boss,
                                  uint64_t *i,
                                  const bitmap *subgraph_mask) {
     assert(i && *i);
+    assert(boss.get_W(*i) < boss.alph_size);
 
     // in boss, at least one incoming edge always exists
     if (!subgraph_mask)
         return boss.is_single_incoming(*i);
 
-    auto d = boss.get_W(*i) % boss.alph_size;
-    auto j = boss.pred_W(*i, d, d);
+    auto d = boss.get_W(*i);
+    auto j = *i;
 
     TAlphabet d_next;
     bool found = (*subgraph_mask)[j];
@@ -1843,7 +1845,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             //     if (d_next != d + alph_size)
             //         break;
 
-            //     if (!(*subgraph_mask)[i])
+            //     if (visited[i] || !(*subgraph_mask)[i])
             //         continue;
 
             //     ::call_paths(*this, i, callback, split_to_unitigs,
@@ -1856,10 +1858,20 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     call_zeros(visited, [&](uint64_t i) {
-        if (!masked_pick_single_outgoing(*this, &i, subgraph_mask) && i) {
+        if (subgraph_mask && !(*subgraph_mask)[i])
+            return;
+
+        i = succ_last(i);
+        if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
+            return;
+
+        do {
+            if (visited[i] || (subgraph_mask && !(*subgraph_mask)[i]))
+                continue;
+
             ::call_paths(*this, i, callback, split_to_unitigs,
                          &discovered, &visited, progress_bar, subgraph_mask);
-        }
+        } while (--i > 0 && !get_last(i));
     });
 
     // process all the cycles left that have not been traversed
@@ -1918,11 +1930,13 @@ void call_paths(const BOSS &boss,
 
             // stop traversing if we call unitigs and this
             // is not the only incoming edge
+            auto d = boss.get_W(edge) % boss.alph_size;
+            auto j = boss.pred_W(edge, d, d);
             bool continue_traversal = !split_to_unitigs
-                || masked_pick_single_incoming(boss, &edge, subgraph_mask);
+                || masked_pick_single_incoming(boss, &j, subgraph_mask);
+            assert(j);
 
             // make one traversal step
-            assert(edge);
             assert(boss.get_W(edge));
             edge = boss.fwd(edge);
 
