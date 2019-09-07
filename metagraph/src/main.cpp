@@ -36,6 +36,7 @@ typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
+const uint64_t kMaxCount = ~uint64_t(0) >> (64 - kBitsPerCount);
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -783,13 +784,20 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (auto weighted = graph.get_extension<DBGWeights<>>()) {
+    if (auto weights = graph.get_extension<DBGWeights<>>()) {
         double sum_weights = 0;
-        graph.call_nodes([&](auto i) { sum_weights += weighted->get_weight(i); });
+        uint64_t num_non_zero_weights = 0;
+        graph.call_nodes([&](auto i) {
+            sum_weights += weights->get_weight(i);
+            num_non_zero_weights += weights->get_weight(i) > 0;
+        });
+        for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
+        }
+        std::cout << "nnz weights: " << num_non_zero_weights << std::endl;
         std::cout << "sum weights: " << sum_weights << std::endl;
 
         if (utils::get_verbose()) {
-            graph.call_nodes([&](auto i) { std::cout << weighted->get_weight(i) << " "; });
+            graph.call_nodes([&](auto i) { std::cout << weights->get_weight(i) << " "; });
             std::cout << std::endl;
         }
     }
@@ -1285,7 +1293,6 @@ int main(int argc, const char *argv[]) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
                 );
-
             }
 
             if (config->verbose)
@@ -1870,6 +1877,14 @@ int main(int argc, const char *argv[]) {
         case Config::CLEAN: {
             assert(files.size() == 1);
             assert(config->outfbase.size());
+
+            config->min_count = std::max(1u, config->min_count);
+
+            if (!config->to_fasta) {
+                std::cerr << "Error: Clean graph can be serialized only in"
+                          << " form of contigs/unitigs, add flag --to-fasta" << std::endl;
+                exit(1);
+            }
 
             Timer timer;
             if (config->verbose)

@@ -279,20 +279,15 @@ void call_breakpoints(const DeBruijnGraph &graph,
                 }
             );
 
+            MaskedDeBruijnGraph background_masked(
+                dbg_succ,
+                [&](const auto &i) { return i == first || !graph.in_graph(i); }
+            );
+
             // if outgoing is empty, we don't have to check for it to be excluded
             // from the mask
-            std::function<bool(const DeBruijnGraph::node_index&)> in_background;
-
-            if (outgoing.size()) {
-                in_background = [&](const auto &i) {
-                    return i != DeBruijnGraph::npos
-                        && (i == first || !graph.in_graph(i));
-                };
-            } else {
-                in_background = [](const auto &i) { return i != DeBruijnGraph::npos; };
-            }
-
-            MaskedDeBruijnGraph background(dbg_succ, std::move(in_background));
+            const DeBruijnGraph& background = outgoing.size()
+                ? background_masked : *dbg_succ;
 
             background.call_outgoing_kmers(
                 first,

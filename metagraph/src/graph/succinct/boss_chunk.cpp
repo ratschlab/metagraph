@@ -52,6 +52,7 @@ void initialize_chunk(uint64_t alph_size,
     if (weights) {
         assert(utils::is_pair<T>::value);
         weights->resize(end - begin + 1);
+        sdsl::util::set_to_value(*weights, 0);
         max_count = ~uint64_t(0) >> (64 - weights->width());
     }
 
@@ -101,7 +102,8 @@ void initialize_chunk(uint64_t alph_size,
         }
 
         if constexpr(utils::is_pair<T>::value) {
-            if (weights)
+            // set weights for non-dummy k-mers
+            if (weights && it->second && kmer[0] && kmer[1])
                 (*weights)[curpos] = std::min(static_cast<uint64_t>(it->second), max_count);
         }
 
