@@ -36,7 +36,6 @@ typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
-const uint64_t kMaxCount = ~uint64_t(0) >> (64 - kBitsPerCount);
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
