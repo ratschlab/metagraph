@@ -65,7 +65,7 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
 
     virtual void set_weights(Weights&& weights) { weights_ = std::move(weights); };
 
-    virtual weight get_weight(node_index i) const {
+    virtual weight operator[](node_index i) const {
         assert(i < weights_.size());
         return weights_[i];
     }

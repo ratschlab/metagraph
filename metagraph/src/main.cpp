@@ -787,8 +787,8 @@ void print_stats(const DeBruijnGraph &graph) {
         double sum_weights = 0;
         uint64_t num_non_zero_weights = 0;
         graph.call_nodes([&](auto i) {
-            sum_weights += weights->get_weight(i);
-            num_non_zero_weights += weights->get_weight(i) > 0;
+            sum_weights += (*weights)[i];
+            num_non_zero_weights += (*weights)[i] > 0;
         });
         for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
         }
@@ -796,7 +796,7 @@ void print_stats(const DeBruijnGraph &graph) {
         std::cout << "sum weights: " << sum_weights << std::endl;
 
         if (utils::get_verbose()) {
-            graph.call_nodes([&](auto i) { std::cout << weights->get_weight(i) << " "; });
+            graph.call_nodes([&](auto i) { std::cout << (*weights)[i] << " "; });
             std::cout << std::endl;
         }
     }
@@ -1907,8 +1907,8 @@ int main(int argc, const char *argv[]) {
                 assert(node_weights.get());
 
                 graph = std::make_shared<MaskedDeBruijnGraph>(graph,
-                    [&](auto i) { return node_weights->get_weight(i) >= config->min_count
-                                        && node_weights->get_weight(i) <= config->max_count; });
+                    [&](auto i) { return (*node_weights)[i] >= config->min_count
+                                        && (*node_weights)[i] <= config->max_count; });
             }
 
             if (config->min_unitig_median_kmer_abundance == 0) {

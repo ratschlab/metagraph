@@ -106,13 +106,13 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         EXPECT_NE(weights, nullptr);
 
         auto node_idx = graph->kmer_to_node(std::string(k, 'A'));
-        EXPECT_EQ(100u - k + 1, weights->get_weight(node_idx));
+        EXPECT_EQ(100u - k + 1, (*weights)[node_idx]);
 
         node_idx = graph->kmer_to_node(std::string(k, 'C'));
-        EXPECT_EQ(50u - k + 1, weights->get_weight(node_idx));
+        EXPECT_EQ(50u - k + 1, (*weights)[node_idx]);
 
         node_idx = graph->kmer_to_node(std::string(k, 'G'));
-        EXPECT_EQ(1u, weights->get_weight(node_idx));
+        EXPECT_EQ(1u, (*weights)[node_idx]);
 
         if constexpr (!std::is_base_of<TypeParam, DBGBitmap>::value) {
             bit_vector_dyn nodes_inserted(graph->num_nodes() + 1, 0);
