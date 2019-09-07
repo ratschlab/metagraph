@@ -8,8 +8,6 @@
 
 #include <sdsl/int_vector.hpp>
 
-#include "utils.hpp"
-
 class bit_vector_dyn;
 
 
@@ -60,19 +58,60 @@ class SequenceGraph {
 
     // Check if the node index is a valid node in the graph
     virtual bool in_graph(node_index node) const = 0;
+
+    /********************************************************/
+    /******************* graph extensions *******************/
+    /********************************************************/
+
+    class GraphExtension {
+      public:
+        virtual ~GraphExtension() {}
+        virtual bool load(const std::string &filename_base) = 0;
+        virtual void serialize(const std::string &filename_base) const = 0;
+        virtual bool is_compatible(const SequenceGraph &graph, bool verbose = true) const = 0;
+    };
+
+    // TODO: improve interface: either prohibit or support
+    //       properly multiple extensions of the same type.
+    void add_extension(std::shared_ptr<GraphExtension> extension);
+
+    template <class ExtensionSubtype>
+    std::shared_ptr<ExtensionSubtype> get_extension() const {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        for (auto extension : extensions_) {
+            if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
+                return match;
+        }
+        return nullptr;
+    }
+
+    template <class ExtensionSubtype>
+    void for_each(std::function<void(ExtensionSubtype &extension)> callback) {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        for (auto extension : extensions_) {
+            if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
+                callback(*match);
+        }
+    };
+
+    template <class ExtensionSubtype>
+    bool load_extension(const std::string &filename_base) {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        if (!get_extension<ExtensionSubtype>())
+            add_extension(std::make_shared<ExtensionSubtype>());
+
+        return get_extension<ExtensionSubtype>()->load(filename_base
+                                                        + file_extension())
+                  && get_extension<ExtensionSubtype>()->is_compatible(*this);
+    }
+
+    void serialize_extensions(const std::string &filename_base) const;
+
+  private:
+    std::vector<std::shared_ptr<GraphExtension>> extensions_;
 };
 
-template <class DBG>
-class DBGExtension : public utils::Extension<DBG> {
-  public:
-    virtual bool load(const DBG&, const std::string &filename_base) = 0;
-    virtual void serialize(const DBG&, const std::string &filename_base) const = 0;
-
-    static bool has_file(const DBG&, const std::string &filename_base);
-};
-
-class DeBruijnGraph : public SequenceGraph,
-                      public utils::Extensions<DBGExtension<DeBruijnGraph>> {
+class DeBruijnGraph : public SequenceGraph {
   public:
     virtual ~DeBruijnGraph() {}
 
@@ -154,9 +193,6 @@ class DeBruijnGraph : public SequenceGraph,
 
     // Check if the node index is a valid node in the graph
     virtual bool in_graph(node_index node) const = 0;
-
-    virtual bool load_extensions(const std::string &filename_base);
-    virtual void serialize_extensions(const std::string &filename_base) const;
 };
 
 

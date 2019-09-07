@@ -1323,6 +1323,7 @@ int main(int argc, const char *argv[]) {
 
             // load graph
             auto graph = load_critical_dbg(config->infbase);
+            graph->load_extension<DBGWeights<>>(config->infbase);
 
             config->k = graph->get_k();
 
@@ -1360,7 +1361,7 @@ int main(int argc, const char *argv[]) {
                 [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
                 },
-                [&graph, &inserted_edges](std::string&& kmer, uint32_t count) {
+                [&graph,&inserted_edges](std::string&& kmer, uint32_t count) {
                     graph->add_sequence(kmer, inserted_edges.get());
                     if (auto weighted = graph->get_extension<DBGWeights<>>())
                         weighted->add_kmer(*graph, std::move(kmer), count);
@@ -1385,6 +1386,7 @@ int main(int argc, const char *argv[]) {
             timer.reset();
 
             graph->serialize(config->outfbase);
+            graph->serialize_extensions(config->outfbase);
             graph.reset();
 
             if (config->verbose)
@@ -1891,16 +1893,18 @@ int main(int argc, const char *argv[]) {
 
             auto graph = load_critical_dbg(files.at(0));
 
-            auto node_weights = graph->get_extension<DBGWeights<>>();
 
-            if (!node_weights.get()
-                    && (config->min_count > 1
-                        || config->max_count < std::numeric_limits<unsigned int>::max()
-                        || config->min_unitig_median_kmer_abundance != 1)) {
-                std::cerr << "ERROR: Cannot load weighted graph from "
-                          << files.at(0) << std::endl;
-                exit(1);
+            if (config->min_count > 1
+                    || config->max_count < std::numeric_limits<unsigned int>::max()
+                    || config->min_unitig_median_kmer_abundance != 1) {
+                if (!graph->load_extension<DBGWeights<>>(files.at(0))) {
+                    std::cerr << "ERROR: Cannot load weighted graph from "
+                              << files.at(0) << std::endl;
+                    exit(1);
+                }
             }
+
+            auto node_weights = graph->get_extension<DBGWeights<>>();
 
             if (config->min_count > 1
                     || config->max_count < std::numeric_limits<unsigned int>::max()) {
@@ -1977,6 +1981,7 @@ int main(int argc, const char *argv[]) {
                 std::shared_ptr<DeBruijnGraph> graph;
 
                 graph = load_critical_dbg(file);
+                graph->load_extension<DBGWeights<>>(config->infbase);
 
                 std::cout << "Statistics for graph " << file << std::endl;
 

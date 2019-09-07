@@ -288,7 +288,6 @@ void DBGHashString::serialize(const std::string &filename) const {
     std::ofstream out(utils::remove_suffix(filename, kExtension) + kExtension,
                       std::ios::binary);
     serialize(out);
-    serialize_extensions(filename);
 }
 
 bool DBGHashString::load(std::istream &in) {
@@ -313,7 +312,7 @@ bool DBGHashString::load(std::istream &in) {
 bool DBGHashString::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
-    return load(in) && load_extensions(filename);
+    return load(in);
 }
 
 bool DBGHashString::operator==(const DeBruijnGraph &other) const {

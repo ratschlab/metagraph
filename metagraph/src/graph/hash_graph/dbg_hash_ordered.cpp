@@ -469,7 +469,6 @@ void DBGHashOrderedImpl<KMER>::serialize(const std::string &filename) const {
     std::ofstream out(utils::remove_suffix(filename, kExtension) + kExtension,
                       std::ios::binary);
     serialize(out);
-    serialize_extensions(filename);
 }
 
 template <typename KMER>
@@ -516,7 +515,7 @@ template <typename KMER>
 bool DBGHashOrderedImpl<KMER>::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
-    return load(in) && load_extensions(filename);
+    return load(in);
 }
 
 template <typename KMER>
@@ -613,12 +612,4 @@ bool DBGHashOrdered::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
     return hash_dbg_->load(filename);
-}
-
-bool DBGHashOrdered::load_extensions(const std::string &filename_base) {
-    return hash_dbg_->load_extensions(filename_base);
-}
-
-void DBGHashOrdered::serialize_extensions(const std::string &filename_base) const {
-    hash_dbg_->serialize_extensions(filename_base);
 }

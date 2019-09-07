@@ -9,6 +9,21 @@
 typedef DeBruijnGraph::node_index node_index;
 
 
+/*************** SequenceGraph ***************/
+
+void SequenceGraph::add_extension(std::shared_ptr<GraphExtension> extension) {
+    assert(extension.get());
+    extensions_.push_back(extension);
+};
+
+void SequenceGraph::serialize_extensions(const std::string &filename_base) const {
+    for (auto extension : extensions_) {
+        extension->serialize(filename_base + file_extension());
+    }
+}
+
+/*************** DeBruijnGraph ***************/
+
 node_index DeBruijnGraph::kmer_to_node(const char *begin) const {
     return kmer_to_node(std::string(begin, get_k()));
 }
@@ -306,24 +321,6 @@ void DeBruijnGraph
         if (has_no_incoming(i))
             callback(i);
     });
-}
-
-bool DeBruijnGraph::load_extensions(const std::string &filename_base) {
-    // any new graph extension types should be added explicitly here
-    if (DBGWeights<>::has_file(*this, filename_base) && !this->template get_extension<DBGWeights<>>())
-        this->add_extension(std::make_shared<DBGWeights<>>());
-
-    for (auto extension : this->extensions_) {
-        if (!extension->load(*this, filename_base))
-            return false;
-    }
-    return true;
-}
-
-void DeBruijnGraph::serialize_extensions(const std::string &filename_base) const {
-    for (auto extension : this->extensions_) {
-        extension->serialize(*this, filename_base);
-    }
 }
 
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {

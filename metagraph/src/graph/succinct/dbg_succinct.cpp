@@ -599,11 +599,6 @@ bool DBGSuccinct::load(const std::string &filename) {
         return false;
     }
 
-    if (!load_extensions(filename)) {
-        std::cerr << "ERROR: can't load graph extensions for " << filename << std::endl;
-        return false;
-    }
-
     return true;
 }
 
@@ -636,8 +631,6 @@ void DBGSuccinct::serialize(const std::string &filename) const {
         throw std::ios_base::failure("Can't write to file " + out_filename);
 
     valid_edges_->serialize(outstream);
-
-    serialize_extensions(filename);
 }
 
 void DBGSuccinct::switch_state(Config::StateType new_state) {

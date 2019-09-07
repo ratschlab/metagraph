@@ -142,12 +142,6 @@ class DBGHashOrdered : public DeBruijnGraph {
         const std::string& alphabet() const = 0;
     };
 
-  protected:
-    std::vector<std::shared_ptr<DBGExtension<DeBruijnGraph>>>&
-    get_extensions() { return hash_dbg_->get_extensions(); };
-    const std::vector<std::shared_ptr<DBGExtension<DeBruijnGraph>>>&
-    get_extensions() const { return hash_dbg_->get_extensions(); };
-
   private:
     static std::unique_ptr<DBGHashOrderedInterface>
     initialize_graph(size_t k, bool canonical_mode, bool packed_serialization);

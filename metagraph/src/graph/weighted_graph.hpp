@@ -11,7 +11,7 @@
 
 
 template <typename Weights = sdsl::int_vector<>>
-class DBGWeights : public DBGExtension<DeBruijnGraph> {
+class DBGWeights : public SequenceGraph::GraphExtension {
   public:
     using node_index = typename DeBruijnGraph::node_index;
     using weight = typename Weights::value_type;
@@ -63,20 +63,19 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
         weights_.resize(curpos);
     }
 
-    virtual void set_weights(Weights&& weights) { weights_ = std::move(weights); };
+    virtual void set_weights(Weights&& weights) {
+        weights_ = std::move(weights);
+        max_weight_ = ~uint64_t(0) >> (64 - weights_.width());
+    }
 
     virtual weight operator[](node_index i) const {
         assert(i < weights_.size());
         return weights_[i];
     }
 
-    virtual bool load(const DeBruijnGraph &graph,
-                      const std::string &filename_base);
-    virtual void serialize(const DeBruijnGraph &graph,
-                           const std::string &filename_base) const;
-
-    static bool has_file(const DeBruijnGraph &graph,
-                         const std::string &filename_base);
+    virtual bool load(const std::string &filename_base);
+    virtual void serialize(const std::string &filename_base) const;
+    virtual bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
 
   private:
     Weights weights_;
@@ -98,22 +97,15 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
 };
 
 template <typename Weights>
-bool DBGWeights<Weights>::load(const DeBruijnGraph &graph, const std::string &filename_base) {
+bool DBGWeights<Weights>::load(const std::string &filename_base) {
 
-    const auto weights_filename = utils::remove_suffix(filename_base, graph.file_extension())
-                                        + graph.file_extension()
+    const auto weights_filename
+        = utils::remove_suffix(filename_base, kWeightsExtension)
                                         + kWeightsExtension;
     try {
         std::ifstream instream(weights_filename, std::ios::binary);
         weights_.load(instream);
         max_weight_ = (~uint64_t(0) >> (64 - weights_.width()));
-
-        if (graph.num_nodes() + 1 != weights_.size()) {
-            std::cerr << "ERROR: weights file does not match number of nodes in graph "
-                      << weights_filename << std::endl;
-            return false;
-        }
-
         return true;
     } catch (...) {
         std::cerr << "ERROR: Cannot load graph weights from file "
@@ -123,10 +115,10 @@ bool DBGWeights<Weights>::load(const DeBruijnGraph &graph, const std::string &fi
 }
 
 template <typename Weights>
-void DBGWeights<Weights>::serialize(const DeBruijnGraph &graph, const std::string &filename_base) const {
+void DBGWeights<Weights>::serialize(const std::string &filename_base) const {
 
-    const auto weights_filename = utils::remove_suffix(filename_base, graph.file_extension())
-                                        + graph.file_extension()
+    const auto weights_filename
+        = utils::remove_suffix(filename_base, kWeightsExtension)
                                         + kWeightsExtension;
 
     std::ofstream outstream(weights_filename, std::ios::binary);
@@ -134,12 +126,15 @@ void DBGWeights<Weights>::serialize(const DeBruijnGraph &graph, const std::strin
 }
 
 template <typename Weights>
-bool DBGWeights<Weights>::has_file(const DeBruijnGraph &graph, const std::string &filename_base) {
-    const auto weights_filename = utils::remove_suffix(filename_base, graph.file_extension())
-                                        + graph.file_extension()
-                                        + kWeightsExtension;
-    std::ifstream instream(weights_filename, std::ios::binary);
-    return instream.good();
+bool DBGWeights<Weights>::is_compatible(const SequenceGraph &graph,
+                                        bool verbose) const {
+    if (graph.num_nodes() + 1 == weights_.size())
+        return true;
+
+    if (verbose)
+        std::cerr << "ERROR: weights file does not match number of nodes in graph"
+                  << std::endl;
+    return false;
 }
 
 #endif // __WEIGHTED_GRAPH_HPP__
