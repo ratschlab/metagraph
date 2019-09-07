@@ -511,6 +511,7 @@ namespace utils {
 
     template<class T> struct dependent_false : std::false_type {};
 
+
     // class for managing a collection of generic extensions to some object
     template <class T>
     class Extension {
@@ -538,7 +539,8 @@ namespace utils {
         };
 
         template <class ExtensionSubtype>
-        void each_extension(std::function<void(ExtensionSubtype &extension)> callback) {
+        void for_each(std::function<void(ExtensionSubtype &extension)> callback) {
+            static_assert(std::is_base_of<ExtensionType, ExtensionSubtype>::value);
             for (auto extension : get_extensions()) {
                 if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
                     callback(*match);
@@ -554,6 +556,7 @@ namespace utils {
         virtual const std::vector<std::shared_ptr<ExtensionType>>&
         get_extensions() const { return extensions_; };
     };
+
 
     template <typename T>
     T get_quantile(const std::vector<std::pair<T, uint64_t>> &count_hist, double q) {
