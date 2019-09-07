@@ -1354,7 +1354,7 @@ int main(int argc, const char *argv[]) {
                 [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
                 },
-                [&graph,&inserted_edges](std::string&& kmer, uint32_t count) {
+                [&graph, &inserted_edges](std::string&& kmer, uint32_t count) {
                     graph->add_sequence(kmer, inserted_edges.get());
                     if (auto weighted = graph->get_extension<DBGWeights<>>())
                         weighted->add_kmer(*graph, std::move(kmer), count);
