@@ -1284,7 +1284,7 @@ int main(int argc, const char *argv[]) {
 
                 parse_sequences(files, *config, timer,
                     [&graph](std::string&& seq) { graph->add_sequence(seq); },
-                    [&graph, &node_weights](std::string&& kmer, uint32_t count) {
+                    [&graph,&node_weights](std::string&& kmer, uint32_t count) {
                         graph->add_sequence(kmer);
                         if (node_weights)
                             node_weights->add_kmer(*graph, std::move(kmer), count);
