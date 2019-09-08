@@ -1904,9 +1904,9 @@ void call_paths(const BOSS &boss,
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
         std::vector<uint64_t> path;
-        uint64_t edge = edges.front().id;
-        auto sequence = std::move(edges.front().source_kmer);
-        edges.pop_front();
+        uint64_t edge = edges.back().id;
+        auto sequence = std::move(edges.back().source_kmer);
+        edges.pop_back();
 
         // traverse simple path until we reach its tail or
         // the first edge that has been already visited
