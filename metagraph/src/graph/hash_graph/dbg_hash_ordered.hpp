@@ -6,7 +6,6 @@
 
 #include "sequence_graph.hpp"
 #include "kmer_extractor.hpp"
-#include "utils.hpp"
 
 
 class DBGHashOrdered : public DeBruijnGraph {
