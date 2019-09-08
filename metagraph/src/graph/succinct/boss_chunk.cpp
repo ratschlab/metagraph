@@ -52,6 +52,7 @@ void initialize_chunk(uint64_t alph_size,
     if (weights) {
         assert(utils::is_pair<T>::value);
         weights->resize(end - begin + 1);
+        sdsl::util::set_to_value(*weights, 0);
         max_count = ~uint64_t(0) >> (64 - weights->width());
     }
 
