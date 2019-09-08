@@ -134,11 +134,15 @@ void call_sequences_from(const DeBruijnGraph &graph,
             if (targets.empty())
                 break;
 
+            // in call_unitigs mode, all nodes with multiple incoming
+            // edges are marked as discovered
+            assert(!call_unitigs || graph.has_single_incoming(targets.front().first)
+                                 || (*discovered)[targets.front().first]);
             if (targets.size() == 1) {
                 if ((*visited)[targets.front().first])
                     break;
 
-                if (!call_unitigs || graph.has_single_incoming(targets.front().first)) {
+                if (!call_unitigs || !(*discovered)[targets.front().first]) {
                     sequence.push_back('\0');
                     std::tie(node, sequence.back()) = targets[0];
                     (*discovered)[node] = true;
@@ -205,15 +209,34 @@ void call_sequences(const DeBruijnGraph &graph,
                             min_tip_size);
     };
 
-    // start with the source nodes (those with indegree == 0)
-    //  .____  or  .____
-    //              \___
-    //
-    call_zeros(visited, [&](auto node) {
-        if (graph.has_no_incoming(node)) {
+    if (call_unitigs) {
+        // mark all source and merge nodes (those with indegree 0 or >1)
+        //  .____  or  .____  or  ____.___
+        //              \___      ___/
+        //
+        call_zeros(discovered, [&](auto i) {
+            discovered[i] = !graph.has_single_incoming(i);
+        });
+
+        // now traverse graph starting at these nodes
+        call_zeros(visited, [&](auto node) {
+            assert(discovered[node] == !graph.has_single_incoming(node));
+            if (discovered[node])
+                call_paths_from(node);
+        });
+
+    } else {
+        // start at the source nodes (those with indegree == 0)
+        //  .____  or  .____
+        //              \___
+        //
+        graph.call_source_nodes([&](auto node) {
+            assert(!visited[node]);
+            assert(graph.has_no_incoming(node));
+
             call_paths_from(node);
-        }
-    });
+        });
+    }
 
     // then forks
     //  ____.____
