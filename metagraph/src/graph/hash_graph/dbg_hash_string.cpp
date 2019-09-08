@@ -5,7 +5,7 @@
 #include "serialization.hpp"
 #include "bit_vector.hpp"
 #include "utils.hpp"
-#include "weighted_graph.hpp"
+#include "node_weights.hpp"
 #include "alphabets.hpp"
 
 

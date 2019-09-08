@@ -3,7 +3,7 @@
 #include <progress_bar.hpp>
 
 #include "kmer_collector.hpp"
-#include "weighted_graph.hpp"
+#include "node_weights.hpp"
 #include "utils.hpp"
 
 

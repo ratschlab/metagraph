@@ -1,5 +1,5 @@
-#ifndef __WEIGHTED_GRAPH_HPP__
-#define __WEIGHTED_GRAPH_HPP__
+#ifndef __NODE_WEIGHTS_HPP__
+#define __NODE_WEIGHTS_HPP__
 
 #include <string>
 #include <memory>
@@ -83,9 +83,8 @@ class DBGWeights : public SequenceGraph::GraphExtension {
 
     virtual void add_weight(node_index i, weight w) {
         assert(i < weights_.size());
-        assert(old_weight <= max_weight_);
-
         uint64_t old_weight = weights_[i];
+        assert(old_weight <= max_weight_);
 
         if (old_weight < max_weight_)
             weights_[i] = old_weight + w < max_weight_
@@ -137,4 +136,4 @@ bool DBGWeights<Weights>::is_compatible(const SequenceGraph &graph,
     return false;
 }
 
-#endif // __WEIGHTED_GRAPH_HPP__
+#endif // __NODE_WEIGHTS_HPP__

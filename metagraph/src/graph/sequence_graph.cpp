@@ -1,5 +1,4 @@
 #include "sequence_graph.hpp"
-#include "weighted_graph.hpp"
 
 #include <cassert>
 #include <progress_bar.hpp>

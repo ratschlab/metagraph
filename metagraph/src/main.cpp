@@ -26,7 +26,7 @@
 #include "dbg_aligner.hpp"
 #include "aligner_methods.hpp"
 #include "server.hpp"
-#include "weighted_graph.hpp"
+#include "node_weights.hpp"
 #include "masked_graph.hpp"
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
@@ -1893,21 +1893,18 @@ int main(int argc, const char *argv[]) {
 
             auto graph = load_critical_dbg(files.at(0));
 
-
-            if (config->min_count > 1
-                    || config->max_count < std::numeric_limits<unsigned int>::max()
-                    || config->min_unitig_median_kmer_abundance != 1) {
-                if (!graph->load_extension<DBGWeights<>>(files.at(0))) {
-                    std::cerr << "ERROR: Cannot load weighted graph from "
-                              << files.at(0) << std::endl;
-                    exit(1);
-                }
+            if ((config->min_count > 1
+                        || config->max_count < std::numeric_limits<unsigned int>::max()
+                        || config->min_unitig_median_kmer_abundance != 1)
+                    && !graph->load_extension<DBGWeights<>>(files.at(0))) {
+                std::cerr << "ERROR: Cannot load weighted graph from "
+                          << files.at(0) << std::endl;
+                exit(1);
             }
-
-            auto node_weights = graph->get_extension<DBGWeights<>>();
 
             if (config->min_count > 1
                     || config->max_count < std::numeric_limits<unsigned int>::max()) {
+                auto node_weights = graph->get_extension<DBGWeights<>>();
                 assert(node_weights.get());
 
                 graph = std::make_shared<MaskedDeBruijnGraph>(graph,
@@ -1916,6 +1913,7 @@ int main(int argc, const char *argv[]) {
             }
 
             if (config->min_unitig_median_kmer_abundance == 0) {
+                auto node_weights = graph->get_extension<DBGWeights<>>();
                 assert(node_weights.get());
 
                 config->min_unitig_median_kmer_abundance
@@ -1946,7 +1944,7 @@ int main(int argc, const char *argv[]) {
             // and make it call proper unitigs even if it contains redundant dummy k-mers.
 
             if (config->min_unitig_median_kmer_abundance != 1) {
-
+                auto node_weights = graph->get_extension<DBGWeights<>>();
                 assert(node_weights.get());
 
                 if (config->verbose)

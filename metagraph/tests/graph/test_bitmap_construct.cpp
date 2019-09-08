@@ -18,7 +18,7 @@
 #include "utils.hpp"
 #include "reverse_complement.hpp"
 #include "sorted_set.hpp"
-#include "weighted_graph.hpp"
+#include "node_weights.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 

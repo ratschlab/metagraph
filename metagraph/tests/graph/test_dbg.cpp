@@ -4,7 +4,7 @@
 #define protected public
 
 #include "test_dbg_helpers.hpp"
-#include "weighted_graph.hpp"
+#include "node_weights.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";

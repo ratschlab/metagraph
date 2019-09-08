@@ -2,8 +2,7 @@
 #define __GRAPH_CLEANING_HPP__
 
 #include "sequence_graph.hpp"
-#include "weighted_graph.hpp"
-#include "dbg_bitmap.hpp"
+#include "node_weights.hpp"
 
 
 bool is_unreliable_unitig(const std::string &sequence,
