@@ -26,6 +26,9 @@ template <typename Kmer>
 class BOSSConstruct : public ::testing::Test { };
 
 template <typename Kmer>
+class WeightedBOSSConstruct : public ::testing::Test { };
+
+template <typename Kmer>
 class CollectKmers : public ::testing::Test { };
 
 template <typename Kmer>
@@ -47,7 +50,12 @@ typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, false>
                          BOSSConfigurationType<KmerExtractorBOSS::Kmer128, true>,
                          BOSSConfigurationType<KmerExtractorBOSS::Kmer256, true>> KmerAndWeightedTypes;
 
+typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, true>,
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer128, true>,
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, true>> KmerWeightedTypes;
+
 TYPED_TEST_CASE(BOSSConstruct, KmerAndWeightedTypes);
+TYPED_TEST_CASE(WeightedBOSSConstruct, KmerWeightedTypes);
 
 typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
                          KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
@@ -141,6 +149,86 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
         }
 
         EXPECT_EQ(constructed, appended);
+    }
+}
+
+TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
+    ASSERT_TRUE(TypeParam::kWeighted);
+
+    for (size_t k = 1; k < kMaxK; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
+
+        BOSSConstructor constructor(k, false, TypeParam::kWeighted);
+        constructor.add_sequences(input_data);
+
+        BOSS constructed;
+        sdsl::int_vector<> weights;
+        constructor.build_graph(&constructed, &weights);
+
+        ASSERT_EQ(constructed.num_edges() + 1, weights.size());
+
+        auto mask = constructed.mark_all_dummy_edges(1);
+        ASSERT_EQ(weights.size(), mask.size());
+
+        for (size_t i = 1; i < weights.size(); ++i) {
+            auto node_str = constructed.get_node_str(i)
+                + constructed.decode(constructed.get_W(i) % constructed.alph_size);
+
+            ASSERT_EQ(k + 1, node_str.size());
+            ASSERT_EQ(node_str[0] == '$' || node_str[k] == '$', mask[i]);
+
+            EXPECT_EQ(mask[i], weights[i] == 0) << i << " " << node_str;
+        }
+    }
+}
+
+TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
+    ASSERT_TRUE(TypeParam::kWeighted);
+
+    for (size_t k = 1; k < kMaxK; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
+
+        BOSS constructed(k);
+
+        auto constructor = IBOSSChunkConstructor::initialize(
+            k,
+            false,
+            TypeParam::kWeighted
+        );
+
+        for (auto&& sequence : input_data) {
+            constructor->add_sequence(std::move(sequence));
+        }
+
+        std::unique_ptr<BOSS::Chunk> chunk { constructor->build_chunk() };
+
+        sdsl::int_vector<> weights;
+        chunk->initialize_boss(&constructed, &weights);
+
+        ASSERT_EQ(constructed.num_edges() + 1, weights.size());
+
+        auto mask = constructed.mark_all_dummy_edges(1);
+        ASSERT_EQ(weights.size(), mask.size());
+
+        for (size_t i = 1; i < weights.size(); ++i) {
+            auto node_str = constructed.get_node_str(i)
+                + constructed.decode(constructed.get_W(i) % constructed.alph_size);
+
+            ASSERT_EQ(k + 1, node_str.size());
+            ASSERT_EQ(node_str[0] == '$' || node_str[k] == '$', mask[i]);
+
+            EXPECT_EQ(mask[i], weights[i] == 0) << i << " " << node_str;
+        }
     }
 }
 
