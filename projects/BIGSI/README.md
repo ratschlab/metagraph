@@ -178,14 +178,14 @@ done
 ```bash
 bsub -J "bigsi_bloom[1-15000]%300" \
      -o ~/metagenome/data/BIGSI/subsets/bigsi/build_bloom.lsf \
-     -W 20:00 \
+     -W 8:00 \
      -n 1 -R "rusage[mem=3000] span[hosts=1]" \
      "file=\"\$(sed -n \${LSB_JOBINDEX}p subsets/files_15000.txt)\"; \
         x=\"\$(echo \$file | xargs -n 1 basename)\"; \
         sra_id=\"\${x%.unitigs.fasta.gz}\"; \
         ctx_file=\"/cluster/work/grlab/projects/metagenome/raw_data/BIGSI/ctx_subsets/\${sra_id}.ctx\"; \
         /usr/bin/time -v bigsi bloom \
-            --config=/cluster/home/mikhaika/stuff/BIGSI/berkleydb.yaml \
+            -c ~/projects/projects2014-metagenome/projects/BIGSI/bigsi_config.yaml \
             \$ctx_file \
             /cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/bigsi/bloom/\${sra_id}.bloom \
             2>&1"
