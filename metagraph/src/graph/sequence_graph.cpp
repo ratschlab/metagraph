@@ -2,8 +2,13 @@
 
 #include <cassert>
 #include <progress_bar.hpp>
+#include <sdsl/int_vector.hpp>
 
-#include "utils.hpp"
+#include <bitmap.hpp>
+
+namespace utils {
+    bool get_verbose();
+}
 
 typedef DeBruijnGraph::node_index node_index;
 

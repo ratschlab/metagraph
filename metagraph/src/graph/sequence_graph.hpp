@@ -6,8 +6,6 @@
 #include <functional>
 #include <iostream>
 
-#include <sdsl/int_vector.hpp>
-
 class bit_vector_dyn;
 
 

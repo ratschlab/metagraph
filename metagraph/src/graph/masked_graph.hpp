@@ -1,7 +1,6 @@
 #ifndef __MASKED_GRAPH_HPP__
 #define __MASKED_GRAPH_HPP__
 
-
 #include <functional>
 #include <vector>
 
