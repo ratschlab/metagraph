@@ -217,7 +217,7 @@ void call_sequences(const DeBruijnGraph &graph,
     call_zeros(visited, [&](auto node) {
         if (graph.has_multiple_outgoing(node)) {
             graph.adjacent_outgoing_nodes(node, [&](auto next) {
-                if (!visited[next] && graph.has_single_outgoing(next))
+                if (!visited[next])
                     call_paths_from(next);
             });
         }
