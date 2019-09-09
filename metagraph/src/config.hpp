@@ -42,6 +42,7 @@ class Config {
     bool call_bubbles = false;
     bool call_breakpoints = false;
     bool map_sequences = false;
+    bool taxonomy_label_sequences = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
@@ -112,6 +113,7 @@ class Config {
     std::string taxonomy_nodes;
     std::string taxonomy_map;
     std::string catalog;
+    std::string taxonomy_ancestor_rank;
 
     enum IdentityType {
         NO_IDENTITY = -1,

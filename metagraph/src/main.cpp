@@ -2940,6 +2940,125 @@ int main(int argc, const char *argv[]) {
         }
         case Config::TAXONOMY: {
             TaxIDMapper taxid_mapper;
+
+            if (config->taxonomy_label_sequences) {
+                assert(config->taxonomy_map.length());
+                assert(config->outfbase.length());
+
+                Timer timer;
+                std::ifstream taxid_mapper_in(config->taxonomy_map, std::ios::binary);
+
+                if (config->verbose) {
+                    std::cout << "Loading taxonomy map" << std::endl;
+                }
+
+                if (!taxid_mapper.load(taxid_mapper_in)) {
+                    std::cerr << "ERROR: failed to read accession2taxid map" << std::endl;
+                    exit(1);
+                }
+
+                if (config->verbose) {
+                    std::cout << "Loading done in " << timer.elapsed() << " sec" << std::endl;
+                }
+
+                ThreadPool thread_pool(config->parallel);
+
+                for (const auto &file : config->fname) {
+                    thread_pool.enqueue([&](const auto &file) {
+                        const auto &dump_sequence = [&](gzFile &out_fasta_gz,
+                                                        const auto &sequence,
+                                                        const auto &name,
+                                                        auto taxid) {
+                            return write_fasta(out_fasta_gz,
+                                               std::to_string(taxid) + " " + name,
+                                               sequence);
+                        };
+
+                        if (config->separately) {
+                            if (config->outfbase.empty()) {
+                                std::cerr << "ERROR: output folder not provided" << std::endl;
+                                exit(1);
+                            }
+
+                            read_fasta_file_critical(
+                                file,
+                                [&](kseq_t *read_stream) {
+                                    auto taxid = config->taxonomy_ancestor_rank.size()
+                                        ? taxid_mapper.get_ancestor_with_rank_label(
+                                              taxid_mapper.gb_to_taxid(read_stream->name.s),
+                                              config->taxonomy_ancestor_rank
+                                          )
+                                        : taxid_mapper.gb_to_taxid(read_stream->name.s);
+
+                                    auto out_filename = utils::remove_suffix(
+                                        config->outfbase + "/" + std::to_string(taxid) + "."
+                                            + utils::split_string(file, "/").back(),
+                                        ".gz", ".fasta") + ".tax.fasta.gz";
+
+                                    gzFile out_fasta_gz = gzopen(out_filename.c_str(), "a");
+
+                                    if (out_fasta_gz == Z_NULL) {
+                                        std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                                        return;
+                                    }
+
+                                    if (!dump_sequence(out_fasta_gz,
+                                                       std::string(read_stream->seq.s),
+                                                       std::string(read_stream->name.s),
+                                                       taxid)) {
+                                        std::cerr << "ERROR: Can't write extracted sequences to "
+                                                  << out_filename << std::endl;
+                                        exit(1);
+                                    }
+
+                                    gzclose(out_fasta_gz);
+                                }
+                            );
+                        } else {
+                            auto out_filename = utils::remove_suffix(
+                                (config->outfbase.size()
+                                    ? config->outfbase + "/" + utils::split_string(file, "/").back()
+                                    : file),
+                                ".gz", ".fasta") + ".tax.fasta.gz";
+
+                            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+
+                            if (out_fasta_gz == Z_NULL) {
+                                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                                return;
+                            }
+
+                            read_fasta_file_critical(
+                                file,
+                                [&](kseq_t *read_stream) {
+                                    auto taxid = config->taxonomy_ancestor_rank.size()
+                                        ? taxid_mapper.get_ancestor_with_rank_label(
+                                              taxid_mapper.gb_to_taxid(read_stream->name.s),
+                                              config->taxonomy_ancestor_rank
+                                          )
+                                        : taxid_mapper.gb_to_taxid(read_stream->name.s);
+
+                                    if (!dump_sequence(out_fasta_gz,
+                                                       std::string(read_stream->seq.s),
+                                                       std::string(read_stream->name.s),
+                                                       taxid)) {
+                                        std::cerr << "ERROR: Can't write extracted sequences to "
+                                                  << out_filename << std::endl;
+                                        exit(1);
+                                    }
+                                }
+                            );
+
+                            gzclose(out_fasta_gz);
+                        }
+                    }, file);
+                }
+
+                thread_pool.join();
+
+                return 0;
+            }
+
             if (config->accession2taxid.length()
                 && !taxid_mapper.parse_accession2taxid(config->accession2taxid)) {
                 std::cerr << "ERROR: failed to read accession2taxid file" << std::endl;

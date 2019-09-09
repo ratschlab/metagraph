@@ -286,6 +286,10 @@ Config::Config(int argc, const char *argv[]) {
             taxonomy_nodes = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy-map")) {
             taxonomy_map = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--taxonomy-ancestor-rank")) {
+            taxonomy_ancestor_rank = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--label-sequences")) {
+            taxonomy_label_sequences = true;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -410,6 +414,15 @@ Config::Config(int argc, const char *argv[]) {
 
     if (identity == TAXONOMY && outfbase == "") {
         std::cerr << "Error: provide an output file" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (identity == TAXONOMY
+            && !taxonomy_label_sequences
+            && accession2taxid == ""
+            && taxonomy_nodes == ""
+            && catalog == "") {
+        std::cerr << "Error: provide the paths for at least one of accession2taxid.gz, nodes.dmp, or catalog.gz" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -887,6 +900,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --accession [STR] \t\tfilename of the accession2taxid.gz file []\n");
             fprintf(stderr, "\t   --taxonomy [STR] \t\tfilename of the nodes.dmp file []\n");
             fprintf(stderr, "\t   --catalog [STR] \t\tfilename of the RefSeq catalog file []\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --label-sequences \tmap the sequence headers in FILE1, FILE2, etc. to their Taxonomy IDs [off]\n");
+            fprintf(stderr, "\t   --taxonomy-map [STR] filename of taxonomy map file []\n");
+            fprintf(stderr, "\t   --taxonomy-ancestor-rank [STR] map the Taxonomy ID to its ancestor of a given rank []\n");
+            fprintf(stderr, "\t   --separately \tdump sequences to separate files for each rank [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
     }
 
