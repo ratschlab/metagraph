@@ -280,6 +280,8 @@ Config::Config(int argc, const char *argv[]) {
             call_breakpoints = true;
         } else if (!strcmp(argv[i], "--accession")) {
             accession2taxid = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--catalog")) {
+            catalog = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy")) {
             taxonomy_nodes = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy-map")) {
@@ -884,6 +886,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --accession [STR] \tfilename of the accession2taxid.gz file []\n");
             fprintf(stderr, "\t   --taxonomy [STR] \tfilename of the nodes.dmp file []\n");
+            fprintf(stderr, "\t   --catalog [STR] \t\tfilename of the RefSeq catalog file []\n");
         } break;
     }
 

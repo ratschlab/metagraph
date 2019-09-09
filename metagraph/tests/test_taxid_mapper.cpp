@@ -8,6 +8,7 @@
 const std::string test_data_dir = "../tests/data";
 const std::string test_accession2taxid = test_data_dir + "/nucl_gb_accession2taxid.head.gz";
 const std::string test_nodes = test_data_dir + "/nodes.dmp.head";
+const std::string test_catalog = test_data_dir + "/RefSeq-release.catalog.head.gz";
 const std::string test_dump_basename = test_data_dir + "/dump_test_taxid";
 
 
@@ -44,6 +45,29 @@ void test_gb_to_taxid(const TaxIDMapper &mapper) {
     }
 
     EXPECT_EQ(0u, mapper.gb_to_taxid("FAKE"));
+}
+
+void test_rs_to_taxid(const TaxIDMapper &mapper) {
+    std::vector<std::tuple<std::string, std::string, TaxIDMapper::taxid_t>> data{
+        { "WP_000002010", "WP_000002010.1",   2 },
+        { "WP_000002109", "WP_000002109.1",   2 },
+        { "WP_000003344", "WP_000003344.1",   2 },
+        { "WP_000003402", "WP_000003402.1",   2 },
+        { "WP_000003820", "WP_000003820.1",   2 },
+        { "WP_000004049", "WP_000004049.1",   2 },
+        { "WP_000004086", "WP_000004086.1",   2 },
+        { "WP_000004159", "WP_000004159.1",   2 },
+        { "WP_000004368", "WP_000004368.1",   2 },
+        { "WP_000005042", "WP_000005042.1",   2 },
+        { "NC_006134"   , "NC_006134.1"   , 195 }
+    };
+
+    for (const auto &triple : data) {
+        EXPECT_EQ(std::get<2>(triple), mapper.gb_to_taxid(std::get<0>(triple)));
+        EXPECT_EQ(std::get<2>(triple), mapper.gb_to_taxid(std::get<1>(triple)));
+        EXPECT_EQ(std::get<2>(triple), mapper.gb_to_taxid("gb|" + std::get<0>(triple) + "|"));
+        EXPECT_EQ(std::get<2>(triple), mapper.gb_to_taxid("gb|" + std::get<1>(triple) + "|"));
+    }
 }
 
 void test_id_to_parent_and_label(const TaxIDMapper &mapper) {
@@ -168,6 +192,12 @@ TEST(TaxIDMapper, GBToTaxID) {
     TaxIDMapper mapper;
     ASSERT_TRUE(mapper.parse_accession2taxid(test_accession2taxid));
     test_gb_to_taxid(mapper);
+}
+
+TEST(TaxIDMapper, RSToTaxID) {
+    TaxIDMapper mapper;
+    ASSERT_TRUE(mapper.parse_catalog(test_catalog));
+    test_rs_to_taxid(mapper);
 }
 
 TEST(TaxIDMapper, IDtoParentAndLabel) {

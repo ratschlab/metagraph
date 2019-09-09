@@ -95,6 +95,33 @@ bool TaxIDMapper::parse_nodes(const std::string &nodes) {
     return true;
 }
 
+bool TaxIDMapper::parse_catalog(const std::string &catalog) {
+    gzFile input_p = gzopen(catalog.c_str(), "rb");
+    if (input_p == Z_NULL)
+        return false;
+
+    char buf[1024];
+    char *line;
+
+    std::string taxid, accession, ignore;
+
+    while ((line = gzgets(input_p, buf, sizeof(buf))) != NULL) {
+        std::istringstream sin(line);
+
+        if (!getline(sin, taxid, '\t')
+                || !getline(sin, ignore, '\t')
+                || !getline(sin, accession, '\t'))
+            return false;
+
+        auto insert = gb_to_taxid_.emplace(parse_label(accession), std::stol(taxid));
+        if (!insert.second)
+            std::cerr << "Warning: duplicate accession " << accession << std::endl;
+    }
+
+    gzclose(input_p);
+    return true;
+}
+
 TaxIDMapper::taxid_t TaxIDMapper::gb_to_taxid(const std::string &gb) const {
     auto find = gb_to_taxid_.find(parse_label(gb));
     if (find == gb_to_taxid_.end())

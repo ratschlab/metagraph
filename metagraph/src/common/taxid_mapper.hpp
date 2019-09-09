@@ -13,6 +13,7 @@ class TaxIDMapper {
 
     bool parse_accession2taxid(const std::string &accession2taxid);
     bool parse_nodes(const std::string &nodes);
+    bool parse_catalog(const std::string &catalog);
     static std::string parse_label(const std::string &gb);
 
     taxid_t gb_to_taxid(const std::string &gb) const;

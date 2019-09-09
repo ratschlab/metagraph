@@ -2952,6 +2952,12 @@ int main(int argc, const char *argv[]) {
                 exit(1);
             }
 
+            if (config->catalog.length()
+                && !taxid_mapper.parse_catalog(config->catalog)) {
+                std::cerr << "ERROR: failed to read catalog.gz file" << std::endl;
+                exit(1);
+            }
+
             std::ofstream out(config->outfbase + ".taxonomy.map", std::ios::binary);
             taxid_mapper.serialize(out);
             return 0;
