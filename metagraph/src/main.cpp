@@ -2938,7 +2938,7 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
-        case Config::PARSE_TAXONOMY: {
+        case Config::TAXONOMY: {
             TaxIDMapper taxid_mapper;
             if (config->accession2taxid.length()
                 && !taxid_mapper.parse_accession2taxid(config->accession2taxid)) {

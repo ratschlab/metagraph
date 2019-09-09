@@ -134,7 +134,7 @@ class Config {
         QUERY,
         SERVER_QUERY,
         CALL_VARIANTS,
-        PARSE_TAXONOMY
+        TAXONOMY
     };
     IdentityType identity = NO_IDENTITY;
 

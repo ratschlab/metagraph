@@ -55,8 +55,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = RELAX_BRWT;
     } else if (!strcmp(argv[1], "call_variants")) {
         identity = CALL_VARIANTS;
-    } else if (!strcmp(argv[1], "parse_taxonomy")) {
-        identity = PARSE_TAXONOMY;
+    } else if (!strcmp(argv[1], "taxonomy")) {
+        identity = TAXONOMY;
     } else {
         print_usage(argv[0]);
         exit(-1);
@@ -314,7 +314,6 @@ Config::Config(int argc, const char *argv[]) {
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
                       && !(identity == CALL_VARIANTS)
-                      && !(identity == PARSE_TAXONOMY)
                       && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
@@ -330,7 +329,7 @@ Config::Config(int argc, const char *argv[]) {
             && identity != SERVER_QUERY
             && !(identity == BUILD && complete)
             && !(identity == CALL_VARIANTS)
-            && !(identity == PARSE_TAXONOMY)
+            && !(identity == TAXONOMY)
             && !fname.size())
         print_usage_and_exit = true;
 
@@ -409,9 +408,10 @@ Config::Config(int argc, const char *argv[]) {
                     && outfbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == PARSE_TAXONOMY &&
-            ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
+    if (identity == TAXONOMY && outfbase == "") {
+        std::cerr << "Error: provide an output file" << std::endl;
         print_usage_and_exit = true;
+    }
 
     if (identity == MERGE && fname.size() < 2)
         print_usage_and_exit = true;
@@ -434,8 +434,8 @@ Config::Config(int argc, const char *argv[]) {
 
     if (outfbase.size()
             && !(utils::check_if_writable(outfbase)
-                    || (separately
-                        && std::filesystem::is_directory(std::filesystem::status(outfbase))))) {
+                    || ((separately
+                        && std::filesystem::is_directory(std::filesystem::status(outfbase)))))) {
         std::cerr << "Error: Can't write to " << outfbase << std::endl
                   << "Check if the path is correct" << std::endl;
         exit(1);
@@ -597,7 +597,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tcall_variants\tgenerate a masked annotated graph and call variants\n");
             fprintf(stderr, "\t\t\trelative to unmasked graph\n\n");
 
-            fprintf(stderr, "\tparse_taxonomy\tgenerate NCBI Accession ID to Taxonomy ID mapper\n\n");
+            fprintf(stderr, "\ttaxonomy\tgenerate NCBI Accession ID to Taxonomy ID mapper\n\n");
 
             return;
         }
@@ -879,13 +879,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --taxonomy-map [STR] \tfilename of taxonomy map file []\n");
             fprintf(stderr, "\t   --cache-size [INT] \t\tnumber of uncompressed rows to store in the cache [1,000,000]\n");
         } break;
-        case PARSE_TAXONOMY: {
-            fprintf(stderr, "Usage: %s parse_taxonomy -o <OUTBASE> [options]\n", prog_name.c_str());
+        case TAXONOMY: {
+            fprintf(stderr, "Usage: %s taxonomy -o <OUTBASE> [options] [FILE1] [FILE2] ...\n", prog_name.c_str());
 
-            fprintf(stderr, "Available options for parse_taxonomy:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --accession [STR] \tfilename of the accession2taxid.gz file []\n");
-            fprintf(stderr, "\t   --taxonomy [STR] \tfilename of the nodes.dmp file []\n");
+            fprintf(stderr, "Available options for taxonomy:\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t   --accession [STR] \t\tfilename of the accession2taxid.gz file []\n");
+            fprintf(stderr, "\t   --taxonomy [STR] \t\tfilename of the nodes.dmp file []\n");
             fprintf(stderr, "\t   --catalog [STR] \t\tfilename of the RefSeq catalog file []\n");
         } break;
     }
