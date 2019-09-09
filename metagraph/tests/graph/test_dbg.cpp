@@ -341,6 +341,16 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestTwoLoops) {
     }
 }
 
+TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmers) {
+    std::string sequence = "GCAAATAAC";
+    auto graph = build_graph<TypeParam>(3, { sequence });
+
+    size_t num_kmers = 0;
+    graph->call_sequences([&](const auto &contig) { num_kmers += contig.size() - 2; });
+
+    EXPECT_EQ(sequence.size() - 2, num_kmers);
+}
+
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A'),
