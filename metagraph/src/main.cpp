@@ -2542,8 +2542,9 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
 
+            std::unique_ptr<AnnotatedDBG> anno_graph;
             if (config->infbase_annotators.size()) {
-                auto anno_graph = initialize_annotated_dbg(graph, *config);
+                anno_graph = initialize_annotated_dbg(graph, *config);
 
                 if (config->verbose) {
                     std::cout << "Masking graph...\t" << std::flush;
