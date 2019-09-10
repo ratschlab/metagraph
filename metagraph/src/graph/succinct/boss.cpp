@@ -1808,51 +1808,43 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     // keep track of reached edges
     sdsl::bit_vector discovered(W_->size(), false);
-    // keep track of edges that are already included in covering paths
-    sdsl::bit_vector visited(W_->size(), false);
-    visited[0] = discovered[0] = true;
-
     if (subgraph_mask) {
-        // TODO: call_zeros if the density is too high
-        sdsl::util::set_to_value(discovered, true);
-        sdsl::util::set_to_value(visited, true);
-        subgraph_mask->call_ones([&](auto i) { visited[i] = discovered[i] = false; });
+        subgraph_mask->add_to(&discovered);
+        discovered.flip();
     }
+    discovered[0] = true;
+    // keep track of edges that are already included in covering paths
+    sdsl::bit_vector visited = discovered;
 
-
-    ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS",
+    ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
+                             "Traverse BOSS",
                              std::cerr, !utils::get_verbose());
 
     // process source dummy edges first
     //
     //  .____
     //
-    auto last_source = succ_last(1);
-    for (uint64_t i = 1; i <= last_source; ++i) {
-        if (!visited[i])
-            ::call_paths(*this, i, callback, split_to_unitigs,
-                         &discovered, &visited, progress_bar, subgraph_mask);
-    }
-
-    if (subgraph_mask)
+    if (!subgraph_mask) {
+        auto last_source = succ_last(1);
+        for (uint64_t i = 1; i <= last_source; ++i) {
+            if (!visited[i])
+                ::call_paths(*this, i, callback, split_to_unitigs,
+                             &discovered, &visited, progress_bar, subgraph_mask);
+        }
+    } else {
         call_zeros(visited, [&](uint64_t i) {
+            // check if |i| has a single incoming edge
             auto j = bwd(i);
-            i = j;
             if (masked_pick_single_incoming(*this, &j, subgraph_mask) || j)
                 return;
 
-            i = succ_last(i);
-
             do {
-                j = fwd(i);
-
-                if (visited[j])
-                    continue;
-
-                ::call_paths(*this, j, callback, split_to_unitigs,
-                             &discovered, &visited, progress_bar, subgraph_mask);
-            } while (--i > 0 && !get_last(i));
+                if (!visited[i])
+                    ::call_paths(*this, i, callback, split_to_unitigs,
+                                 &discovered, &visited, progress_bar, subgraph_mask);
+            } while (!get_last(i++));
         });
+    }
 
     // then all forks
     //  ____.____
@@ -1864,11 +1856,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             return;
 
         do {
-            if (visited[i])
-                continue;
-
-            ::call_paths(*this, i, callback, split_to_unitigs,
-                         &discovered, &visited, progress_bar, subgraph_mask);
+            if (!visited[i])
+                ::call_paths(*this, i, callback, split_to_unitigs,
+                             &discovered, &visited, progress_bar, subgraph_mask);
         } while (--i > 0 && !get_last(i));
     });
 
