@@ -109,10 +109,10 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string annotation_label = "";
     std::string header = "";
-    std::string accession2taxid;
+    std::string taxonomy_accession2taxid;
     std::string taxonomy_nodes;
     std::string taxonomy_map;
-    std::string catalog;
+    std::string taxonomy_catalog;
     std::string taxonomy_ancestor_rank;
 
     enum IdentityType {

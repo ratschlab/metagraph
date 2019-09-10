@@ -279,10 +279,10 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--call-breakpoints")) {
             call_breakpoints = true;
         } else if (!strcmp(argv[i], "--accession")) {
-            accession2taxid = std::string(get_value(i++));
+            taxonomy_accession2taxid = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--catalog")) {
-            catalog = std::string(get_value(i++));
-        } else if (!strcmp(argv[i], "--taxonomy")) {
+            taxonomy_catalog = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--nodes")) {
             taxonomy_nodes = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy-map")) {
             taxonomy_map = std::string(get_value(i++));
@@ -419,9 +419,9 @@ Config::Config(int argc, const char *argv[]) {
 
     if (identity == TAXONOMY
             && !taxonomy_label_sequences
-            && accession2taxid == ""
+            && taxonomy_accession2taxid == ""
             && taxonomy_nodes == ""
-            && catalog == "") {
+            && taxonomy_catalog == "") {
         std::cerr << "Error: provide the paths for at least one of accession2taxid.gz, nodes.dmp, or catalog.gz" << std::endl;
         print_usage_and_exit = true;
     }
@@ -898,14 +898,14 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for taxonomy:\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --accession [STR] \t\tfilename of the accession2taxid.gz file []\n");
-            fprintf(stderr, "\t   --taxonomy [STR] \t\tfilename of the nodes.dmp file []\n");
+            fprintf(stderr, "\t   --nodes [STR] \t\tfilename of the nodes.dmp file []\n");
             fprintf(stderr, "\t   --catalog [STR] \t\tfilename of the RefSeq catalog file []\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --label-sequences \tmap the sequence headers in FILE1, FILE2, etc. to their Taxonomy IDs [off]\n");
-            fprintf(stderr, "\t   --taxonomy-map [STR] filename of taxonomy map file []\n");
-            fprintf(stderr, "\t   --taxonomy-ancestor-rank [STR] map the Taxonomy ID to its ancestor of a given rank []\n");
-            fprintf(stderr, "\t   --separately \tdump sequences to separate files for each rank [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --label-sequences \t\t\tmap the sequence headers in FILE1, FILE2, etc. to their Taxonomy IDs [off]\n");
+            fprintf(stderr, "\t   --taxonomy-map [STR] \t\tfilename of taxonomy map file []\n");
+            fprintf(stderr, "\t   --taxonomy-ancestor-rank [STR] \tmap the Taxonomy ID to its ancestor of a given rank []\n");
+            fprintf(stderr, "\t   --separately \t\t\tdump sequences to separate files for each rank [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
         } break;
     }
 

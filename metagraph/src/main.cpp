@@ -3059,20 +3059,20 @@ int main(int argc, const char *argv[]) {
                 return 0;
             }
 
-            if (config->accession2taxid.length()
-                && !taxid_mapper.parse_accession2taxid(config->accession2taxid)) {
+            if (config->taxonomy_accession2taxid.length()
+                    && !taxid_mapper.parse_accession2taxid(config->taxonomy_accession2taxid)) {
                 std::cerr << "ERROR: failed to read accession2taxid file" << std::endl;
                 exit(1);
             }
 
             if (config->taxonomy_nodes.length()
-                && !taxid_mapper.parse_nodes(config->taxonomy_nodes)) {
+                    && !taxid_mapper.parse_nodes(config->taxonomy_nodes)) {
                 std::cerr << "ERROR: failed to read nodes.dmp file" << std::endl;
                 exit(1);
             }
 
-            if (config->catalog.length()
-                && !taxid_mapper.parse_catalog(config->catalog)) {
+            if (config->taxonomy_catalog.length()
+                    && !taxid_mapper.parse_catalog(config->taxonomy_catalog)) {
                 std::cerr << "ERROR: failed to read catalog.gz file" << std::endl;
                 exit(1);
             }
