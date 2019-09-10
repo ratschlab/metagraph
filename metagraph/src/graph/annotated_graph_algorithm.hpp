@@ -18,14 +18,16 @@ std::unique_ptr<bitmap>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
-                    const std::function<bool(uint64_t, uint64_t)> &keep_node);
+                    std::function<bool(uint64_t, uint64_t)> keep_node,
+                    double lazy_evaluation_density_cutoff = 0.05);
 
 // Allows for lazy evaluation of the counts passed to keep_node
 std::unique_ptr<bitmap>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
-                    const std::function<bool(const UInt64Callback&, const UInt64Callback&)> &keep_node);
+                    std::function<bool(UInt64Callback, UInt64Callback)> keep_node,
+                    double lazy_evaluation_density_cutoff = 0.05);
 
 template <class Index, typename... Args>
 using VariantCallback = std::function<void(Alignment<Index>&&,

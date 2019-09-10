@@ -558,13 +558,15 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
             anno_graph,
             config->label_mask_in,
             config->label_mask_out,
-            [&](const UInt64Callback &counter_in, const UInt64Callback &counter_out) {
+            [in_size = config->label_mask_in.size(),
+             fraction = config->label_mask_out_fraction](UInt64Callback counter_in,
+                                                         UInt64Callback counter_out) {
                 auto count_in = counter_in();
-                if (count_in != config->label_mask_in.size())
+                if (count_in != in_size)
                     return false;
 
                 auto count_out = counter_out();
-                return count_out <= config->label_mask_out_fraction * (count_in + count_out);
+                return count_out <= fraction * (count_in + count_out);
             }
         )
     );

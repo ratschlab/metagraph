@@ -50,40 +50,46 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annotate
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 
 
-const double cutoff = 0.0;
-
 MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        const std::vector<std::string> &ingroup,
-                                       const std::vector<std::string> &outgroup) {
+                                       const std::vector<std::string> &outgroup,
+                                       double outlabel_mixture,
+                                       double lazy_evaluation_density_cutoff) {
     return MaskedDeBruijnGraph(
         std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
         annotated_graph_algorithm::mask_nodes_by_label(
             anno_graph,
             ingroup, outgroup,
-            [&](size_t incount, size_t outcount) {
-                return incount == ingroup.size()
-                    && outcount <= cutoff * (incount + outcount);
-            }
+            [outlabel_mixture, in_size = ingroup.size()](size_t incount,
+                                                         size_t outcount) {
+                return incount == in_size
+                    && outcount <= outlabel_mixture * (incount + outcount);
+            },
+            lazy_evaluation_density_cutoff
         )
     );
 }
 
 MaskedDeBruijnGraph build_masked_graph_lazy(const AnnotatedDBG &anno_graph,
                                             const std::vector<std::string> &ingroup,
-                                            const std::vector<std::string> &outgroup) {
+                                            const std::vector<std::string> &outgroup,
+                                            double outlabel_mixture,
+                                            double lazy_evaluation_density_cutoff) {
     return MaskedDeBruijnGraph(
         std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
         annotated_graph_algorithm::mask_nodes_by_label(
             anno_graph,
             ingroup, outgroup,
-            [&](UInt64Callback incounter, UInt64Callback outcounter) {
+            [outlabel_mixture, in_size = ingroup.size()](UInt64Callback incounter,
+                                                         UInt64Callback outcounter) {
                 uint64_t incount = incounter();
-                if (incount != ingroup.size())
+                if (incount != in_size)
                     return false;
 
                 uint64_t outcount = outcounter();
-                return outcount <= cutoff * (incount + outcount);
-            }
+                return outcount <= outlabel_mixture * (incount + outcount);
+            },
+            lazy_evaluation_density_cutoff
         )
     );
 }

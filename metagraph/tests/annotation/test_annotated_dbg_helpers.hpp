@@ -26,11 +26,15 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
 MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        const std::vector<std::string> &ingroup,
-                                       const std::vector<std::string> &outgroup);
+                                       const std::vector<std::string> &outgroup,
+                                       double outlabel_mixture = 0.0,
+                                       double lazy_evaluation_density_cutoff = 0.05);
 
 MaskedDeBruijnGraph build_masked_graph_lazy(const AnnotatedDBG &anno_graph,
                                             const std::vector<std::string> &ingroup,
-                                            const std::vector<std::string> &outgroup);
+                                            const std::vector<std::string> &outgroup,
+                                            double outlabel_mixture = 0.0,
+                                            double lazy_evaluation_density_cutoff = 0.05);
 
 typedef ::testing::Types<std::pair<DBGBitmap, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashString, annotate::ColumnCompressed<>>,
