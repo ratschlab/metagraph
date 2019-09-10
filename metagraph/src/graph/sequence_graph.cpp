@@ -184,11 +184,11 @@ void call_sequences(const DeBruijnGraph &graph,
     graph.call_nodes([&](auto node) { discovered[node] = false; });
     sdsl::bit_vector visited = discovered;
 
-    ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(discovered),
+    ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse graph",
                              std::cerr, !utils::get_verbose());
 
-    auto call_paths_from = [&](const auto &node) {
+    auto call_paths_from = [&](node_index node) {
         call_sequences_from(graph,
                             node,
                             callback,
@@ -203,11 +203,10 @@ void call_sequences(const DeBruijnGraph &graph,
     //  .____  or  .____
     //              \___
     //
-    graph.call_source_nodes([&](auto node) {
-        assert(!visited[node]);
-        assert(graph.has_no_incoming(node));
-
-        call_paths_from(node);
+    call_zeros(visited, [&](auto node) {
+        if (graph.has_no_incoming(node)) {
+            call_paths_from(node);
+        }
     });
 
     // then forks
@@ -224,7 +223,7 @@ void call_sequences(const DeBruijnGraph &graph,
     });
 
     // then the rest (loops)
-    call_zeros(visited, [&](auto node) { call_paths_from(node); });
+    call_zeros(visited, call_paths_from);
 }
 
 void DeBruijnGraph
