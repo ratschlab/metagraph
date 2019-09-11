@@ -2768,7 +2768,7 @@ int main(int argc, const char *argv[]) {
                                 if (paths.empty()) {
                                     json_writer->write(
                                         DBGAligner<>::DBGAlignment().to_json(
-                                            "",
+                                            query,
                                             *graph,
                                             secondary,
                                             header
