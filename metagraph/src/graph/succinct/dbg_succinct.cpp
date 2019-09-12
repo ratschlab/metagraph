@@ -8,7 +8,6 @@
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
 #include "utils.hpp"
-#include "node_weights.hpp"
 
 using utils::remove_suffix;
 
@@ -153,9 +152,7 @@ void DBGSuccinct::add_seq(const std::string &sequence,
                           bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
-    auto weights = this->get_extension<DBGWeights<>>();
-
-    if (nodes_inserted || weights) {
+    if (nodes_inserted) {
         std::vector<uint64_t> inserted_indexes;
         inserted_indexes.reserve(sequence.size());
 
@@ -166,12 +163,8 @@ void DBGSuccinct::add_seq(const std::string &sequence,
                 valid_edges_->insert_bit(i, true);
             if (nodes_inserted)
                 nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
-            if (weights && !nodes_inserted)
-                weights->insert_node(boss_to_kmer_index(i));
         }
 
-        if (weights)
-            weights->add_sequence(*this, std::move(sequence), nodes_inserted);
     } else {
         boss_graph_->add_sequence(sequence, true);
     }
@@ -717,9 +710,6 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     assert(valid_edges_.get());
     assert(valid_edges_->size() == boss_graph_->num_edges() + 1);
     assert(!(*valid_edges_)[0]);
-
-    if (auto weights = this->get_extension<DBGWeights<>>())
-        weights->remove_masked_weights(*valid_edges_);
 }
 
 void DBGSuccinct::reset_mask() {

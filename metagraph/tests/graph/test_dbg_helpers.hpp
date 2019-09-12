@@ -18,8 +18,7 @@ template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
             const std::vector<std::string> &sequences = {},
-            bool canonical = false,
-            bool count_kmers = false);
+            bool canonical = false);
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>

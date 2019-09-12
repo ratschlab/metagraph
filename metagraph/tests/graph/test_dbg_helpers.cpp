@@ -15,12 +15,8 @@ template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
             const std::vector<std::string> &sequences,
-            bool canonical,
-            bool count_kmers) {
+            bool canonical) {
     std::shared_ptr<DeBruijnGraph> graph { new Graph(k, canonical) };
-
-    if (count_kmers)
-        graph->add_extension(std::make_shared<DBGWeights<>>());
 
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);
@@ -29,16 +25,16 @@ build_graph(uint64_t k,
     return graph;
 }
 
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGHashString>(uint64_t k,
             const std::vector<std::string> &sequences,
-            bool,
-            bool count_kmers) {
+            bool) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGHashString(k) };
-
-    if (count_kmers)
-        graph->add_extension(std::make_shared<DBGWeights<>>());
 
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);
@@ -51,9 +47,8 @@ template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGBitmap>(uint64_t k,
                        const std::vector<std::string> &sequences,
-                       bool canonical,
-                       bool count_kmers) {
-    DBGBitmapConstructor constructor(k, canonical, count_kmers);
+                       bool canonical) {
+    DBGBitmapConstructor constructor(k, canonical);
     for (const auto &sequence : sequences) {
         constructor.add_sequence(std::string(sequence));
     }
@@ -64,15 +59,8 @@ template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinct>(uint64_t k,
                          const std::vector<std::string> &sequences,
-                         bool canonical,
-                         bool count_kmers) {
+                         bool canonical) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(k, canonical) };
-
-    if (count_kmers) {
-        auto weights = std::make_shared<DBGWeights<>>();
-        graph->add_extension(weights);
-        weights->insert_node(1);
-    }
 
     for (const auto &sequence : sequences) {
         graph->add_sequence(std::string(sequence));

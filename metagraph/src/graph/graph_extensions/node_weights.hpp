@@ -16,24 +16,30 @@ class DBGWeights : public SequenceGraph::GraphExtension {
     using node_index = typename DeBruijnGraph::node_index;
     using weight = typename Weights::value_type;
 
-    DBGWeights(Weights&& weights = {})
-          : weights_(std::move(weights)),
+    DBGWeights(const SequenceGraph &graph)
+          : graph_(graph) {}
+
+    DBGWeights(const SequenceGraph &graph, size_t bits_per_count)
+          : graph_(graph),
+            weights_(Weights(graph.num_nodes(), 0, bits_per_count)) {}
+
+    DBGWeights(const SequenceGraph &graph, Weights&& weights)
+          : graph_(graph),
+            weights_(std::move(weights)),
             max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
-    virtual void add_kmer(const DeBruijnGraph &graph,
-                          const std::string&& kmer,
+    virtual void add_kmer(const std::string&& kmer,
                           uint32_t count) {
-        auto node = graph.kmer_to_node(kmer);
+        auto node = graph_.kmer_to_node(kmer);
         add_weight(node, count);
     }
 
-    virtual void add_sequence(const DeBruijnGraph &graph,
-                              const std::string&& sequence,
+    virtual void add_sequence(const std::string&& sequence,
                               bit_vector_dyn *nodes_inserted = nullptr) {
         if (nodes_inserted)
             utils::insert(&weights_, *nodes_inserted, 0);
 
-        graph.map_to_nodes(sequence, [&](auto node) { add_weight(node, 1); });
+        graph_.map_to_nodes(sequence, [&](auto node) { add_weight(node, 1); });
     }
 
     virtual void insert_node(node_index i) {
@@ -75,9 +81,10 @@ class DBGWeights : public SequenceGraph::GraphExtension {
 
     virtual bool load(const std::string &filename_base);
     virtual void serialize(const std::string &filename_base) const;
-    virtual bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
+    virtual bool is_compatible(bool verbose = true) const;
 
   private:
+    const SequenceGraph &graph_;
     Weights weights_;
     uint64_t max_weight_;
 
@@ -127,9 +134,8 @@ void DBGWeights<Weights>::serialize(const std::string &filename_base) const {
 }
 
 template <typename Weights>
-bool DBGWeights<Weights>::is_compatible(const SequenceGraph &graph,
-                                        bool verbose) const {
-    if (graph.num_nodes() + 1 == weights_.size())
+bool DBGWeights<Weights>::is_compatible(bool verbose) const {
+    if (graph_.num_nodes() + 1 == weights_.size())
         return true;
 
     if (verbose)

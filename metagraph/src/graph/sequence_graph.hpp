@@ -31,6 +31,9 @@ class SequenceGraph {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
+    virtual node_index kmer_to_node(const char *begin) const = 0;
+    virtual node_index kmer_to_node(const std::string &kmer) const = 0;
+
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence
@@ -68,7 +71,7 @@ class SequenceGraph {
         virtual ~GraphExtension() {}
         virtual bool load(const std::string &filename_base) = 0;
         virtual void serialize(const std::string &filename_base) const = 0;
-        virtual bool is_compatible(const SequenceGraph &graph, bool verbose = true) const = 0;
+        virtual bool is_compatible(bool verbose = true) const = 0;
     };
 
     // TODO: improve interface: either prohibit or support
@@ -99,10 +102,10 @@ class SequenceGraph {
         static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
         auto extension = get_extension<ExtensionSubtype>();
         if (!extension)
-            extension = std::make_shared<ExtensionSubtype>();
+            extension = std::make_shared<ExtensionSubtype>(*this);
 
         if (extension->load(filename_base + file_extension())
-                  && extension->is_compatible(*this)) {
+                  && extension->is_compatible()) {
             add_extension(extension);
             return true;
         }

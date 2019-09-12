@@ -1146,7 +1146,7 @@ int main(int argc, const char *argv[]) {
                     sdsl::int_vector<> kmer_counts(0, 0, kBitsPerCount);
                     graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
                     graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
-                    graph->add_extension(std::make_shared<DBGWeights<>>(std::move(kmer_counts)));
+                    graph->add_extension(std::make_shared<DBGWeights<>>(*graph, std::move(kmer_counts)));
                 } else {
                     graph_data.initialize_boss(boss_graph.get());
                     graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
@@ -1277,21 +1277,30 @@ int main(int argc, const char *argv[]) {
                 }
                 assert(graph.get());
 
-                if (config->count_kmers)
-                    graph->add_extension(std::make_shared<DBGWeights<>>(sdsl::int_vector<>(0, 0, kBitsPerCount)));
-                auto node_weights = graph->get_extension<DBGWeights<>>();
-
                 parse_sequences(files, *config, timer,
                     [&graph](std::string&& seq) { graph->add_sequence(seq); },
-                    [&graph,&node_weights](std::string&& kmer, uint32_t count) {
+                    [&graph](std::string&& kmer, uint32_t count __attribute__((unused))) {
                         graph->add_sequence(kmer);
-                        if (node_weights)
-                            node_weights->add_kmer(*graph, std::move(kmer), count);
                     },
                     [&graph](const auto &loop) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
                 );
+
+                if (config->count_kmers) {
+                    graph->add_extension(std::make_shared<DBGWeights<>>(*graph, kBitsPerCount));
+                    auto node_weights = graph->get_extension<DBGWeights<>>();
+
+                    parse_sequences(files, *config, timer,
+                        [&node_weights](std::string&& seq) { node_weights->add_sequence(std::move(seq)); },
+                        [&node_weights](std::string&& kmer, uint32_t count) {
+                            node_weights->add_kmer(std::move(kmer), count);
+                        },
+                        [&node_weights](const auto &loop) {
+                            loop([&node_weights](const auto &seq) { node_weights->add_sequence(std::move(seq)); });
+                        }
+                    );
+                }
             }
 
             if (config->verbose)
@@ -1364,7 +1373,7 @@ int main(int argc, const char *argv[]) {
                 [&graph,&inserted_edges](std::string&& kmer, uint32_t count) {
                     graph->add_sequence(kmer, inserted_edges.get());
                     if (auto weighted = graph->get_extension<DBGWeights<>>())
-                        weighted->add_kmer(*graph, std::move(kmer), count);
+                        weighted->add_kmer(std::move(kmer), count);
                 },
                 [&graph,&inserted_edges](const auto &loop) {
                     loop([&graph,&inserted_edges](const auto &seq) {

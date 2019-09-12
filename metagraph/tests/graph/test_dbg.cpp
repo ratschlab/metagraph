@@ -9,6 +9,7 @@
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
+const size_t kBitsPerCount = 8;
 
 TYPED_TEST_CASE(DeBruijnGraphTest, GraphTypes);
 TYPED_TEST_CASE(StableDeBruijnGraphTest, StableGraphTypes);
@@ -94,16 +95,22 @@ TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
     EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
 }
 
+//TODO test failing intermittently
 TYPED_TEST(DeBruijnGraphTest, Weighted) {
     for (size_t k = 2; k < 10; ++k) {
-        auto graph = build_graph<TypeParam>(k, {
+        auto sequences = {
             std::string(100, 'A'),
             std::string(k, 'G'),
             std::string(50, 'C')
-        }, false, true);
+        };
+        auto graph = build_graph<TypeParam>(k, sequences, false);
 
-        auto weights = dynamic_pointer_cast<TypeParam>(graph)->template get_extension<DBGWeights<>>();
-        EXPECT_NE(weights, nullptr);
+        auto weights = std::make_shared<DBGWeights<>>(*graph, kBitsPerCount);
+        graph->add_extension(weights);
+
+        for (const auto &sequence : sequences) {
+            weights->add_sequence(std::move(sequence));
+        }
 
         auto node_idx = graph->kmer_to_node(std::string(k, 'A'));
         EXPECT_EQ(100u - k + 1, (*weights)[node_idx]);
@@ -114,10 +121,9 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         node_idx = graph->kmer_to_node(std::string(k, 'G'));
         EXPECT_EQ(1u, (*weights)[node_idx]);
 
-        if constexpr (!std::is_base_of<TypeParam, DBGBitmap>::value) {
-            bit_vector_dyn nodes_inserted(graph->num_nodes() + 1, 0);
-            graph->add_sequence(std::string(25, 'T'), &nodes_inserted);
-        }
+        //TODO should fail while weights extension is present? or warn?
+        //bit_vector_dyn nodes_inserted(graph->num_nodes() + 1, 0);
+        //graph->add_sequence(std::string(25, 'T'), &nodes_inserted);
     }
 }
 
