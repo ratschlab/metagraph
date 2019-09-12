@@ -103,6 +103,8 @@ bool DBGWeights<Weights>::load(const std::string &filename_base) {
                                         + kWeightsExtension;
     try {
         std::ifstream instream(weights_filename, std::ios::binary);
+        if (!instream.good())
+            return false;
         weights_.load(instream);
         max_weight_ = (~uint64_t(0) >> (64 - weights_.width()));
         return true;

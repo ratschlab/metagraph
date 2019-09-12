@@ -97,12 +97,16 @@ class SequenceGraph {
     template <class ExtensionSubtype>
     bool load_extension(const std::string &filename_base) {
         static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
-        if (!get_extension<ExtensionSubtype>())
-            add_extension(std::make_shared<ExtensionSubtype>());
+        auto extension = get_extension<ExtensionSubtype>();
+        if (!extension)
+            extension = std::make_shared<ExtensionSubtype>();
 
-        return get_extension<ExtensionSubtype>()->load(filename_base
-                                                        + file_extension())
-                  && get_extension<ExtensionSubtype>()->is_compatible(*this);
+        if (extension->load(filename_base + file_extension())
+                  && extension->is_compatible(*this)) {
+            add_extension(extension);
+            return true;
+        }
+        return false;
     }
 
     void serialize_extensions(const std::string &filename_base) const;
