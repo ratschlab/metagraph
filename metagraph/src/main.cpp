@@ -592,23 +592,20 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
         std::cout << timer.elapsed() << "sec" << std::endl;
 }
 
-std::vector<DBGAligner<>::DBGAlignment>
+DBGAligner<>::DBGQueryAlignment
 align_sequences(const DeBruijnGraph &graph,
                 const Config &config,
-                const std::string &query,
-                const std::string &reverse_complement_query = "") {
+                const std::string &query) {
     if (config.forward_and_reverse) {
         DBGAligner<> aligner(graph, DBGAlignerConfig(config, graph));
 
         return config.alignment_seed_unimems
             ? aligner.extend_mapping_forward_and_reverse_complement(
                   query,
-                  reverse_complement_query,
                   config.alignment_min_path_score
               )
             : aligner.align_forward_and_reverse_complement(
                   query,
-                  reverse_complement_query,
                   config.alignment_min_path_score
               );
     }
@@ -2715,23 +2712,19 @@ int main(int argc, const char *argv[]) {
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     thread_pool.enqueue([&](std::string query,
                                             std::string header) {
-                            std::string rc_query;
-
-                            if (config->forward_and_reverse) {
-                                rc_query = query;
-                                reverse_complement(rc_query.begin(), rc_query.end());
-                            }
-
                             auto paths = align_sequences(*graph,
                                                          *config,
-                                                         query,
-                                                         rc_query);
+                                                         query);
 
                             auto lock = std::lock_guard<std::mutex>(print_mutex);
                             if (!json_writer.get()) {
                                 for (const auto &path : paths) {
+                                    const auto& path_query = path.get_orientation()
+                                        ? paths.get_query_reverse_complement()
+                                        : paths.get_query();
+
                                     *outstream << header << "\t"
-                                               << query << "\t"
+                                               << path_query << "\t"
                                                << path
                                                << std::endl;
                                 }
@@ -2746,11 +2739,8 @@ int main(int argc, const char *argv[]) {
                                 bool secondary = false;
                                 for (const auto &path : paths) {
                                     const auto& path_query = path.get_orientation()
-                                        ? rc_query
-                                        : query;
-
-                                    assert(path.get_query_begin() >= &*path_query.begin());
-                                    assert(path.get_query_end() <= &*path_query.end());
+                                        ? paths.get_query_reverse_complement()
+                                        : paths.get_query();
 
                                     json_writer->write(
                                         path.to_json(path_query,
@@ -2862,7 +2852,7 @@ int main(int argc, const char *argv[]) {
             auto mask_in_labels = utils::join_strings(config->label_mask_in, ",");
 
             auto print_variant =
-                [&](auto&& alignment, std::string&& query, auto&& vlabels) {
+                [&](auto&& alignment, const std::string &query, auto&& vlabels) {
                     // filter out labels
                     std::sort(vlabels.begin(), vlabels.end());
 

@@ -13,6 +13,7 @@
 
 #include "config.hpp"
 #include "sequence_graph.hpp"
+#include "reverse_complement.hpp"
 
 
 class Cigar {
@@ -227,6 +228,13 @@ class Alignment {
     const char* get_query_end() const { return query_end_; }
     const char* get_query_begin() const { return query_begin_; }
 
+    template <class StringIt>
+    void set_query_begin(const StringIt *begin) {
+        assert((query_end_ - query_begin_) + begin >= begin);
+        query_end_ = (query_end_ - query_begin_) + begin;
+        query_begin_ = begin;
+    }
+
     const std::string& get_sequence() const { return sequence_; }
 
     const Cigar& get_cigar() const { return cigar_; }
@@ -321,6 +329,81 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
 
     return out;
 }
+
+
+template <typename NodeType>
+class QueryAlignment {
+  public:
+    QueryAlignment(const std::string &query)
+          : query_(query),
+            query_rc_(query) {
+        reverse_complement(const_cast<char*>(&*query_rc_.begin()),
+                           const_cast<char*>(&*query_rc_.end()));
+    }
+
+    template <typename... Args>
+    QueryAlignment(std::string&& query, Args&&... args) noexcept
+          : query_(std::move(query)),
+            query_rc_(query_),
+            alignments_(std::forward<Args>(args)...) {
+        reverse_complement(const_cast<char*>(&*query_rc_.begin()),
+                           const_cast<char*>(&*query_rc_.end()));
+    }
+
+    size_t size() const { return alignments_.size(); }
+    bool empty() const { return alignments_.empty(); }
+
+    template <typename... Args>
+    void emplace_back(Args&&... args) {
+        alignments_.emplace_back(std::forward<Args>(args)...);
+
+        assert(alignments_.back().get_orientation()
+            || alignments_.back().get_query_begin() >= &*query_.begin());
+        assert(alignments_.back().get_orientation()
+            || alignments_.back().get_query_end() <= &*query_.end());
+        assert(!alignments_.back().get_orientation()
+            || alignments_.back().get_query_begin() >= &*query_rc_.begin());
+        assert(!alignments_.back().get_orientation()
+            || alignments_.back().get_query_end() <= &*query_rc_.end());
+    }
+
+    void pop_back() { alignments_.pop_back(); }
+    void clear() { alignments_.clear(); }
+
+    const std::string& get_query() const { return query_; }
+    const std::string& get_query_reverse_complement() const { return query_rc_; }
+    const Alignment<NodeType>& front() const { return alignments_.front(); }
+    const Alignment<NodeType>& back() const { return alignments_.back(); }
+    const Alignment<NodeType>& operator[](size_t i) const { return alignments_[i]; }
+
+    typedef typename std::vector<Alignment<NodeType>>::iterator iterator;
+    typedef typename std::vector<Alignment<NodeType>>::const_iterator const_iterator;
+
+    iterator begin() { return alignments_.begin(); }
+    iterator end() { return alignments_.end(); }
+
+    const_iterator begin() const { return alignments_.cbegin(); }
+    const_iterator end() const { return alignments_.cend(); }
+
+    const_iterator cbegin() const { return alignments_.cbegin(); }
+    const_iterator cend() const { return alignments_.cend(); }
+
+    template <class Iterator>
+    void erase(Iterator begin, Iterator end) { alignments_.erase(begin, end); }
+
+    bool operator==(const QueryAlignment &other) const {
+        return query_ == other.query_
+            && std::equal(alignments_.begin(), alignments_.end(),
+                          other.alignments_.begin(), other.alignments_.end());
+    }
+
+    bool operator!=(const QueryAlignment &other) const { return !(*this == other); }
+
+  private:
+    const std::string query_;
+    const std::string query_rc_;
+    std::vector<Alignment<NodeType>> alignments_;
+};
 
 
 #endif  // __ALIGNER_HELPER_HPP__

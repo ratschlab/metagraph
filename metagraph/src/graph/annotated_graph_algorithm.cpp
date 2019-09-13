@@ -314,16 +314,16 @@ void call_breakpoints(const DeBruijnGraph &graph,
                             + difference * variant_config.gap_extension_penalty;
                     }
 
-                    auto breakpoint = MaskedAlignment(ref.c_str(),
-                                                      &*ref.end(),
-                                                      { first, next_index },
-                                                      std::move(var),
-                                                      score);
+                    DBGAlignment breakpoint(ref.c_str(),
+                                            &*ref.end(),
+                                            { first, next_index },
+                                            std::move(var),
+                                            score);
 
                     assert(breakpoint.is_valid(background));
 
                     callback(std::move(breakpoint),
-                             std::move(ref),
+                             ref,
                              anno_graph.get_labels(next_index));
                 }
             );
@@ -385,15 +385,14 @@ void call_bubbles_from_path(const DeBruijnGraph &foreground,
                                                             ref.end(),
                                                             var.begin());
 
-                auto ref_copy = ref;
-                auto bubble = MaskedAlignment(ref_copy.c_str(),
-                                              &*ref_copy.end(),
-                                              std::move(nodes),
-                                              std::move(var),
-                                              score);
+                DBGAlignment bubble(ref.c_str(),
+                                    &*ref.end(),
+                                    std::move(nodes),
+                                    std::move(var),
+                                    score);
                 assert(bubble.is_valid(background));
 
-                callback(std::move(bubble), std::move(ref_copy), std::move(labels));
+                callback(std::move(bubble), ref, std::move(labels));
             }
         }
     );

@@ -134,7 +134,7 @@ void test_find_breakpoints(size_t pool_size = 0) {
         annotated_graph_algorithm::call_breakpoints(
             masked_dbg,
             *anno_graph,
-            [&](auto&& path, std::string&& ref, auto&& vlabels) {
+            [&](auto&& path, const std::string &ref, auto&& vlabels) {
                 check_json_dump_load(masked_dbg.get_graph(), path, ref);
 
                 auto index = path.front();
@@ -202,7 +202,7 @@ void test_find_bubbles(size_t pool_size = 0) {
         annotated_graph_algorithm::call_bubbles(
             masked_dbg,
             *anno_graph,
-            [&](auto&& path, std::string&& ref, auto&& vlabels) {
+            [&](auto&& path, const std::string &ref, auto&& vlabels) {
                 check_json_dump_load(masked_dbg.get_graph(), path, ref);
 
                 auto index = path.front();
@@ -271,7 +271,7 @@ void test_find_bubbles_incomplete(size_t pool_size = 0) {
         annotated_graph_algorithm::call_bubbles(
             masked_dbg,
             *anno_graph,
-            [&](auto&& path, std::string&& ref, auto&& vlabels) {
+            [&](auto&& path, const std::string &ref, auto&& vlabels) {
                 check_json_dump_load(masked_dbg.get_graph(), path, ref);
 
                 auto index = path.front();
@@ -337,7 +337,7 @@ void test_find_bubbles_inner_loop(size_t pool_size = 0) {
         annotated_graph_algorithm::call_bubbles(
             masked_dbg,
             *anno_graph,
-            [&](auto&& path, std::string&& ref, auto&& vlabels) {
+            [&](auto&& path, const std::string &ref, auto&& vlabels) {
                 check_json_dump_load(masked_dbg.get_graph(), path, ref);
 
                 auto index = path.front();

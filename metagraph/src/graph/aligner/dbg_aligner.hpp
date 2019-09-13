@@ -17,6 +17,7 @@ class DBGAligner {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef Alignment<node_index> DBGAlignment;
+    typedef QueryAlignment<node_index> DBGQueryAlignment;
     typedef typename DBGAlignment::score_t score_t;
 
     explicit DBGAligner(const DeBruijnGraph &graph,
@@ -35,16 +36,26 @@ class DBGAligner {
           : DBGAligner(graph,
                        DBGAlignerConfig(config, graph),
                        seed,
-                       extend) { }
+                       extend) {}
 
     // A convenience function
-    std::vector<DBGAlignment>
+    DBGQueryAlignment
     align(const std::string &query,
           bool orientation = false,
           score_t min_path_score = std::numeric_limits<score_t>::min()) const {
-        std::vector<DBGAlignment> paths;
-        align(query.begin(),
-              query.end(),
+        DBGQueryAlignment paths(query);
+
+        if (orientation)
+            std::swap(const_cast<std::string&>(paths.get_query()),
+                      const_cast<std::string&>(paths.get_query_reverse_complement()));
+
+        const auto& query_alignment = orientation ? paths.get_query_reverse_complement()
+                                                  : paths.get_query();
+
+        assert(query_alignment == query);
+
+        align(query_alignment.begin(),
+              query_alignment.end(),
               [&](auto&& path) { paths.emplace_back(std::move(path)); },
               orientation,
               min_path_score);
@@ -52,18 +63,15 @@ class DBGAligner {
         return paths;
     }
 
-    std::vector<DBGAlignment>
+    DBGQueryAlignment
     align_forward_and_reverse_complement(const std::string &query,
-                                         const std::string &reverse_complement_query,
                                          score_t min_path_score
                                              = std::numeric_limits<score_t>::min()) const {
-        assert(query.size() == reverse_complement_query.size());
-
         auto paths = align(query, false, min_path_score);
         auto size = paths.size();
 
-        align(reverse_complement_query.begin(),
-              reverse_complement_query.end(),
+        align(paths.get_query_reverse_complement().begin(),
+              paths.get_query_reverse_complement().end(),
               [&](DBGAlignment&& alignment) { paths.emplace_back(std::move(alignment)); },
               true,
               size >= config_.num_alternative_paths
@@ -81,15 +89,12 @@ class DBGAligner {
         return paths;
     }
 
-    std::vector<DBGAlignment>
+    DBGQueryAlignment
     extend_mapping_forward_and_reverse_complement(const std::string &query,
-                                                  const std::string &reverse_complement_query,
                                                   score_t min_path_score
                                                       = std::numeric_limits<score_t>::min(),
                                                   const MapExtendSeederBuilder<node_index> &seeder_builder
                                                       = build_unimem_seeder<node_index>) const {
-        assert(query.size() == reverse_complement_query.size());
-
         std::vector<node_index> nodes;
         nodes.reserve(query.size() - graph_.get_k() + 1);
         graph_.map_to_nodes_sequentially(query.begin(),
@@ -99,24 +104,24 @@ class DBGAligner {
 
         auto seeder = seeder_builder(nodes, graph_);
 
-        std::vector<node_index> rc_nodes;
-        rc_nodes.reserve(nodes.size());
-        graph_.map_to_nodes_sequentially(reverse_complement_query.begin(),
-                                         reverse_complement_query.end(),
-                                         [&](auto node) { rc_nodes.emplace_back(node); });
-        assert(rc_nodes.size() == nodes.size());
-
-        auto rc_seeder = seeder_builder(rc_nodes, graph_);
-
         auto paths = DBGAligner(graph_, config_, seeder, extend_).align(
             query, false, min_path_score
         );
 
         auto size = paths.size();
 
+        std::vector<node_index> rc_nodes;
+        rc_nodes.reserve(nodes.size());
+        graph_.map_to_nodes_sequentially(paths.get_query_reverse_complement().begin(),
+                                         paths.get_query_reverse_complement().end(),
+                                         [&](auto node) { rc_nodes.emplace_back(node); });
+        assert(rc_nodes.size() == nodes.size());
+
+        auto rc_seeder = seeder_builder(rc_nodes, graph_);
+
         DBGAligner(graph_, config_, rc_seeder, extend_).align(
-            reverse_complement_query.begin(),
-            reverse_complement_query.end(),
+            paths.get_query_reverse_complement().begin(),
+            paths.get_query_reverse_complement().end(),
             [&](DBGAlignment&& alignment) { paths.emplace_back(std::move(alignment)); },
             true,
             size >= config_.num_alternative_paths
