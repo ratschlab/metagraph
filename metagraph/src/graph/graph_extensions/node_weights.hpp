@@ -11,19 +11,19 @@
 
 
 template <typename Weights = sdsl::int_vector<>>
-class DBGWeights : public SequenceGraph::GraphExtension {
+class DBGWeights : public DeBruijnGraph::GraphExtension {
   public:
     using node_index = typename DeBruijnGraph::node_index;
     using weight = typename Weights::value_type;
 
-    DBGWeights(const SequenceGraph &graph)
+    DBGWeights(const DeBruijnGraph &graph)
           : graph_(graph) {}
 
-    DBGWeights(const SequenceGraph &graph, size_t bits_per_count)
+    DBGWeights(const DeBruijnGraph &graph, size_t bits_per_count)
           : graph_(graph),
             weights_(Weights(graph.num_nodes(), 0, bits_per_count)) {}
 
-    DBGWeights(const SequenceGraph &graph, Weights&& weights)
+    DBGWeights(const DeBruijnGraph &graph, Weights&& weights)
           : graph_(graph),
             weights_(std::move(weights)),
             max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
@@ -84,7 +84,7 @@ class DBGWeights : public SequenceGraph::GraphExtension {
     virtual bool is_compatible(bool verbose = true) const;
 
   private:
-    const SequenceGraph &graph_;
+    const DeBruijnGraph &graph_;
     Weights weights_;
     uint64_t max_weight_;
 

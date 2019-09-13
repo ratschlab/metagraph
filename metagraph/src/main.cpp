@@ -1332,7 +1332,7 @@ int main(int argc, const char *argv[]) {
 
             // load graph
             auto graph = load_critical_dbg(config->infbase);
-            graph->load_extension<DBGWeights<>>(config->infbase);
+            graph->load_extension<DBGWeights<>>(*graph, config->infbase);
 
             config->k = graph->get_k();
 
@@ -1905,7 +1905,7 @@ int main(int argc, const char *argv[]) {
             if ((config->min_count > 1
                         || config->max_count < std::numeric_limits<unsigned int>::max()
                         || config->min_unitig_median_kmer_abundance != 1)
-                    && !graph->load_extension<DBGWeights<>>(files.at(0))) {
+                    && !graph->load_extension<DBGWeights<>>(*graph, files.at(0))) {
                 std::cerr << "ERROR: Cannot load weighted graph from "
                           << files.at(0) << std::endl;
                 exit(1);
@@ -1988,7 +1988,7 @@ int main(int argc, const char *argv[]) {
                 std::shared_ptr<DeBruijnGraph> graph;
 
                 graph = load_critical_dbg(file);
-                graph->load_extension<DBGWeights<>>(config->infbase);
+                graph->load_extension<DBGWeights<>>(*graph, config->infbase);
 
                 std::cout << "Statistics for graph " << file << std::endl;
 
