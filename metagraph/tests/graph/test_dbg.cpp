@@ -95,7 +95,6 @@ TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
     EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
 }
 
-//TODO test failing intermittently
 TYPED_TEST(DeBruijnGraphTest, Weighted) {
     for (size_t k = 2; k < 10; ++k) {
         auto sequences = {

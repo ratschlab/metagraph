@@ -21,7 +21,8 @@ class DBGWeights : public DeBruijnGraph::GraphExtension {
 
     DBGWeights(const DeBruijnGraph &graph, size_t bits_per_count)
           : graph_(graph),
-            weights_(Weights(graph.num_nodes(), 0, bits_per_count)) {}
+            weights_(Weights(graph.num_nodes(), 0, bits_per_count)),
+            max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
     DBGWeights(const DeBruijnGraph &graph, Weights&& weights)
           : graph_(graph),
