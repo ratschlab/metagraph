@@ -101,6 +101,7 @@ DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
 
 DBGAlignerConfig::DBGAlignerConfig(const Config &config, const DeBruijnGraph &graph)
       : queue_size(config.alignment_queue_size),
+        bandwidth(config.alignment_vertical_bandwidth),
         num_alternative_paths(config.alignment_num_alternative_paths),
         min_seed_length(config.alignment_min_seed_length),
         max_seed_length(config.alignment_max_seed_length),

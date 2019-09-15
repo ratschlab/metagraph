@@ -573,6 +573,45 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
 }
 
+TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
+    size_t k = 4;
+    std::string reference = "AAAG" "C" "GGACCCTTT" "C" "CGTTAT";
+    std::string query =     "AAAG" "G" "GGACCCTTT" "T" "CGTTAT";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    Cigar::initialize_opt_table(graph->alphabet());
+
+    for (uint64_t bandwidth : std::vector<uint64_t>{ 2, 5, 10, std::numeric_limits<uint64_t>::max()}) {
+        auto config_bandwidth = config;
+        config_bandwidth.bandwidth = bandwidth;
+
+        DBGAligner<> aligner(*graph, config_bandwidth);
+        auto paths = aligner.align(query);
+        ASSERT_FALSE(paths.empty());
+
+        EXPECT_EQ(1ull, paths.size());
+        auto path = paths.front();
+
+        EXPECT_EQ(query.size() - k + 1, path.size());
+        EXPECT_EQ(reference, path.get_sequence());
+        EXPECT_EQ(config.score_sequences(query.begin(), query.end(),
+                                         reference.begin()),
+                  path.get_score());
+        EXPECT_EQ("4=1X9=1X6=", path.get_cigar().to_string());
+        EXPECT_EQ(19u, path.get_num_matches());
+        EXPECT_FALSE(path.is_exact_match());
+        EXPECT_EQ(0u, path.get_clipping());
+        EXPECT_EQ(0u, path.get_offset());
+        EXPECT_TRUE(path.is_valid(*graph));
+        check_json_dump_load(*graph,
+                             path,
+                             paths.get_query(),
+                             paths.get_query_reverse_complement());
+
+        EXPECT_TRUE(check_extend(graph, aligner.get_config(), paths, query));
+    }
+}
+
 TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     size_t k = 4;
     std::string reference = "TTTCC"     "TTGTT";

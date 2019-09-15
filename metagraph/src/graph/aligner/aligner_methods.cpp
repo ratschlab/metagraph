@@ -183,15 +183,16 @@ void default_extender(const DeBruijnGraph &graph,
         return;
 
     // used for branch and bound checks below
-    std::vector<score_t> partial_sum(size - 1);
-    std::string_view extension(align_start, sequence_end - align_start);
+    std::vector<score_t> partial_sum(size);
+    std::string_view extension(align_start - 1, sequence_end - align_start + 1);
     auto jt = extension.rbegin();
     partial_sum.back() = config.get_row(*jt)[*jt++];
     for (auto it = partial_sum.rbegin() + 1; it != partial_sum.rend(); ++it) {
+        assert(jt != extension.rend());
         *it = *(it - 1) + config.get_row(*jt)[*jt++];
     }
 
-    assert(partial_sum.front() == config.match_score(align_start, sequence_end));
+    assert(partial_sum.front() == config.match_score(align_start - 1, sequence_end));
     assert(partial_sum.back() == config.get_row(extension.back())[extension.back()]);
 
     // keep track of which columns to use next
@@ -392,6 +393,7 @@ void default_extender(const DeBruijnGraph &graph,
                 // store max pos
                 auto& cur_best_pos = std::get<3>(next_column);
                 cur_best_pos = max_pos - next.begin();
+                assert(cur_best_pos < size);
 
                 auto best_score = std::get<0>(start_node->second).at(
                     std::get<3>(start_node->second)
@@ -411,18 +413,30 @@ void default_extender(const DeBruijnGraph &graph,
                     return a + b < best_score;
                 };
 
-                auto check_first_half = std::equal(
-                    std::make_reverse_iterator(partial_sum.begin() + cur_best_pos + 1),
-                    partial_sum.rbegin(),
-                    std::make_reverse_iterator(std::get<0>(next_column).begin()
-                                                   + cur_best_pos + 1),
-                    is_not_extendable
-                );
+                auto start_it = partial_sum.begin() + cur_best_pos + 1;
+                auto next_column_start_it = std::get<0>(next_column).begin()
+                    + cur_best_pos + 1;
 
-                if (!check_first_half
-                        || !std::equal(partial_sum.begin() + cur_best_pos + 1,
-                                       partial_sum.end(),
-                                       std::get<0>(next_column).begin() + cur_best_pos + 1,
+                // the first value of partial_sum includes the last character
+                // of the seed, so it should be excluded from this check
+                auto first_half_end_it = cur_best_pos >= config.bandwidth
+                    ? std::make_reverse_iterator(start_it - config.bandwidth)
+                    : partial_sum.rend() - 1;
+
+                assert(first_half_end_it != partial_sum.rend());
+
+                auto second_half_end_it = size - cur_best_pos > config.bandwidth
+                    ? start_it + config.bandwidth
+                    : partial_sum.end();
+
+
+                if (!std::equal(std::make_reverse_iterator(start_it),
+                                first_half_end_it,
+                                std::make_reverse_iterator(next_column_start_it),
+                                is_not_extendable)
+                        || !std::equal(start_it,
+                                       second_half_end_it,
+                                       next_column_start_it,
                                        is_not_extendable))
                     columns_to_update.emplace(&*iter);
             }

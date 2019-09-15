@@ -169,6 +169,8 @@ Config::Config(int argc, const char *argv[]) {
             alignment_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-queue-size")) {
             alignment_queue_size = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-vertical-bandwidth")) {
+            alignment_vertical_bandwidth = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-match-score")) {
             alignment_match_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-mm-transition-penalty")) {
