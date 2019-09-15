@@ -1,6 +1,7 @@
 #include "aligner_methods.hpp"
 
 #include <unordered_set>
+#include <string_view>
 
 #include "dbg_succinct.hpp"
 #include "bounded_priority_queue.hpp"
@@ -183,10 +184,15 @@ void default_extender(const DeBruijnGraph &graph,
 
     // used for branch and bound checks below
     std::vector<score_t> partial_sum(size - 1);
-    std::partial_sum(std::make_reverse_iterator(sequence_end),
-                     std::make_reverse_iterator(align_start),
-                     partial_sum.rbegin(),
-                     [&](score_t sum, char c) { return sum + config.get_row(c)[c]; });
+    std::string_view extension(align_start, sequence_end - align_start);
+    auto jt = extension.rbegin();
+    partial_sum.back() = config.get_row(*jt)[*jt++];
+    for (auto it = partial_sum.rbegin() + 1; it != partial_sum.rend(); ++it) {
+        *it = *(it - 1) + config.get_row(*jt)[*jt++];
+    }
+
+    assert(partial_sum.front() == config.match_score(align_start, sequence_end));
+    assert(partial_sum.back() == config.get_row(extension.back())[extension.back()]);
 
     // keep track of which columns to use next
     struct PriorityFunction {
@@ -384,10 +390,11 @@ void default_extender(const DeBruijnGraph &graph,
 
             if (updated) {
                 // store max pos
-                std::get<3>(next_column) = max_pos - next.begin();
-                auto best_score = std::max(
-                    min_path_score,
-                    std::get<0>(start_node->second).at(std::get<3>(start_node->second))
+                auto& cur_best_pos = std::get<3>(next_column);
+                cur_best_pos = max_pos - next.begin();
+
+                auto best_score = std::get<0>(start_node->second).at(
+                    std::get<3>(start_node->second)
                 );
 
                 if (*max_pos > best_score) {
@@ -395,14 +402,28 @@ void default_extender(const DeBruijnGraph &graph,
                     best_score = *max_pos;
                 }
 
-                // branch and bound if we're only interested in the top path
-                if (config.num_alternative_paths > 1
-                        || !std::equal(partial_sum.begin(),
+                // branch and bound
+
+                // starting from the position of the best score, check if each
+                // position can be extended to a better alignment than the best
+                // alignment
+                auto is_not_extendable = [best_score](auto a, auto b) {
+                    return a + b < best_score;
+                };
+
+                auto check_first_half = std::equal(
+                    std::make_reverse_iterator(partial_sum.begin() + cur_best_pos + 1),
+                    partial_sum.rbegin(),
+                    std::make_reverse_iterator(std::get<0>(next_column).begin()
+                                                   + cur_best_pos + 1),
+                    is_not_extendable
+                );
+
+                if (!check_first_half
+                        || !std::equal(partial_sum.begin() + cur_best_pos + 1,
                                        partial_sum.end(),
-                                       std::get<0>(start_node->second).begin(),
-                                       [best_score](auto a, auto b) {
-                                           return a + b < best_score;
-                                       }))
+                                       std::get<0>(next_column).begin() + cur_best_pos + 1,
+                                       is_not_extendable))
                     columns_to_update.emplace(&*iter);
             }
         }
