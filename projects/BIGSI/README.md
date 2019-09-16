@@ -190,3 +190,33 @@ bsub -J "bigsi_bloom[1-15000]%300" \
             /cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/bigsi/bloom/\${sra_id}.bloom \
             2>&1"
 ```
+
+```bash
+mkdir bigsi_subsets
+
+for i in {1..20}; do
+    N=$((750 * i));
+    file="bigsi_subsets/files_${N}.txt";
+    rm -f $file;
+    for f in $(cat subsets/files_${N}.txt); do
+        sra_id="$(basename $f)";
+        sra_id="${sra_id%.unitigs.fasta.gz}";
+        echo -e "/cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/bigsi/bloom/${sra_id}.bloom\t$sra_id" >> $file;
+    done
+done
+
+
+for i in {1..20}; do
+    N=$((750 * i));
+    mkdir ~/metagenome/data/BIGSI/subsets/bigsi/subsets/index_${N};
+    cd ~/metagenome/data/BIGSI/subsets/bigsi/subsets/index_${N};
+    bsub -J "bigsi_to_db_${N}" \
+         -oo merge_blooms_${N}.lsf \
+         -W $((N / 100)):00 \
+         -n 5 -R "rusage[mem=$((N * 11))] span[hosts=1]" \
+        "/usr/bin/time -v bigsi build \
+                -f ~/projects/projects2014-metagenome/projects/BIGSI/bigsi_subsets/files_${N}.txt \
+                -c ~/projects/projects2014-metagenome/projects/BIGSI/bigsi_config.yaml \
+                2>&1"; \
+done
+```
