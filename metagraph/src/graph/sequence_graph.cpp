@@ -4,8 +4,8 @@
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
 
-#include <threading.hpp>
-#include <kmer_extractor.hpp>
+#include "threading.hpp"
+#include "bitmap.hpp"
 
 namespace utils {
     bool get_verbose();
@@ -90,7 +90,6 @@ void DeBruijnGraph::call_nodes(const std::function<void(node_index)> &callback,
     }
 }
 
-template <typename KMER>
 void call_sequences_from(const DeBruijnGraph &graph,
                          node_index start,
                          const std::function<void(const std::string&)> &callback,
@@ -106,23 +105,16 @@ void call_sequences_from(const DeBruijnGraph &graph,
     assert(discovered);
     assert(!(*visited)[start]);
 
-    static_assert(sizeof(std::pair<node_index, KMER>)
-                    == sizeof(node_index) + sizeof(KMER));
-    std::vector<std::pair<node_index, KMER>> paths;
-    std::vector<std::pair<node_index, char>> targets;
-    KmerExtractor2Bit kmer_extractor;
-
+    std::vector<node_index> queue = { start };
     (*discovered)[start] = true;
-    paths.emplace_back(
-        start,
-        KMER(kmer_extractor.encode(graph.get_node_sequence(start)))
-    );
+
+    std::vector<std::pair<node_index, char>> targets;
 
     // keep traversing until we have worked off all branches from the queue
-    while (paths.size()) {
-        auto [node, kmer] = std::move(paths.back());
-        std::string sequence = kmer_extractor.kmer_to_sequence(kmer, graph.get_k());
-        paths.pop_back();
+    while (queue.size()) {
+        node_index node = queue.back();
+        std::string sequence = graph.get_node_sequence(node);
+        queue.pop_back();
         start = node;
         assert(!call_unitigs || !(*visited)[node]);
         if ((*visited)[node])
@@ -161,7 +153,6 @@ void call_sequences_from(const DeBruijnGraph &graph,
                 }
             }
 
-            KMER kmer(kmer_extractor.encode(sequence.substr(sequence.length() - graph.get_k())));
             node_index next_node = DeBruijnGraph::npos;
             //  _____.___
             //      \.___
@@ -174,9 +165,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                     sequence.push_back(c);
                 } else if (!(*discovered)[next]) {
                     (*discovered)[next] = true;
-                    KMER next_kmer = kmer;
-                    next_kmer.to_next(graph.get_k(), kmer_extractor.encode(c));
-                    paths.emplace_back(next, next_kmer);
+                    queue.push_back(next);
                 }
             }
 
@@ -211,36 +200,14 @@ void call_sequences(const DeBruijnGraph &graph,
                              std::cerr, !utils::get_verbose());
 
     auto call_paths_from = [&](node_index node) {
-        if (graph.get_k() * KmerExtractor2Bit::bits_per_char <= 64) {
-            call_sequences_from<KmerExtractor2Bit::Kmer64>(graph,
-                                                            node,
-                                                            callback,
-                                                            &visited,
-                                                            &discovered,
-                                                            progress_bar,
-                                                            call_unitigs,
-                                                            min_tip_size);
-
-        } else if (graph.get_k() * KmerExtractor2Bit::bits_per_char <= 128) {
-            call_sequences_from<KmerExtractor2Bit::Kmer128>(graph,
-                                                            node,
-                                                            callback,
-                                                            &visited,
-                                                            &discovered,
-                                                            progress_bar,
-                                                            call_unitigs,
-                                                            min_tip_size);
-
-        } else {
-            call_sequences_from<KmerExtractor2Bit::Kmer256>(graph,
-                                                            node,
-                                                            callback,
-                                                            &visited,
-                                                            &discovered,
-                                                            progress_bar,
-                                                            call_unitigs,
-                                                            min_tip_size);
-        }
+        call_sequences_from(graph,
+                            node,
+                            callback,
+                            &visited,
+                            &discovered,
+                            progress_bar,
+                            call_unitigs,
+                            min_tip_size);
     };
 
     if (call_unitigs) {
