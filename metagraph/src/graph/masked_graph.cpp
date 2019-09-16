@@ -4,6 +4,7 @@
 
 #include "sequence_graph.hpp"
 #include "serialization.hpp"
+#include "dbg_succinct.hpp"
 
 
 MaskedDeBruijnGraph
@@ -105,6 +106,49 @@ void MaskedDeBruijnGraph
                 callback(index, c);
         }
     );
+}
+
+void MaskedDeBruijnGraph
+::call_sequences(const std::function<void(const std::string&)> &callback) const {
+    if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
+        sdsl::bit_vector mask_bv(dbg_succ->get_boss().num_edges() + 1, false);
+        kmers_in_graph_->call_ones(
+            [&](auto i) {
+                assert(graph_->in_graph(i));
+                assert(dbg_succ->kmer_to_boss_index(i));
+                mask_bv[dbg_succ->kmer_to_boss_index(i)] = true;
+            }
+        );
+
+        bit_vector_stat mask(std::move(mask_bv));
+
+        dbg_succ->get_boss().call_sequences(callback, &mask);
+
+    } else {
+        DeBruijnGraph::call_sequences(callback);
+    }
+}
+
+void MaskedDeBruijnGraph
+::call_unitigs(const std::function<void(const std::string&)> &callback,
+               size_t min_tip_size) const {
+    if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
+        sdsl::bit_vector mask_bv(dbg_succ->get_boss().num_edges() + 1, false);
+        kmers_in_graph_->call_ones(
+            [&](auto i) {
+                assert(graph_->in_graph(i));
+                assert(dbg_succ->kmer_to_boss_index(i));
+                mask_bv[dbg_succ->kmer_to_boss_index(i)] = true;
+            }
+        );
+
+        bit_vector_stat mask(std::move(mask_bv));
+
+        dbg_succ->get_boss().call_unitigs(callback, min_tip_size, &mask);
+
+    } else {
+        DeBruijnGraph::call_unitigs(callback, min_tip_size);
+    }
 }
 
 void MaskedDeBruijnGraph
