@@ -4,13 +4,17 @@
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
 
-#include <bitmap.hpp>
+#include <threading.hpp>
+#include <kmer_extractor.hpp>
 
 namespace utils {
     bool get_verbose();
 }
 
 typedef DeBruijnGraph::node_index node_index;
+
+static const uint64_t kBlockSize = 9'999'872;
+static_assert(!(kBlockSize & 0xFF));
 
 
 node_index DeBruijnGraph::kmer_to_node(const char *begin) const {
@@ -214,9 +218,14 @@ void call_sequences(const DeBruijnGraph &graph,
         //  .____  or  .____  or  ____.___
         //              \___      ___/
         //
-        call_zeros(discovered, [&](auto i) {
-            discovered[i] = !graph.has_single_incoming(i);
-        });
+        #pragma omp parallel for num_threads(get_num_threads())
+        for (uint64_t begin = 0; begin < discovered.size(); begin += kBlockSize) {
+            call_zeros(discovered,
+                begin,
+                std::min(begin + kBlockSize, discovered.size()),
+                [&](auto i) { discovered[i] = !graph.has_single_incoming(i); }
+            );
+        }
 
         // now traverse graph starting at these nodes
         call_zeros(visited, [&](auto node) {
