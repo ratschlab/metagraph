@@ -123,6 +123,7 @@ void MaskedDeBruijnGraph
         bit_vector_stat mask(std::move(mask_bv));
 
         dbg_succ->get_boss().call_sequences(callback, &mask);
+
     } else {
         DeBruijnGraph::call_sequences(callback);
     }

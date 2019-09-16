@@ -1710,13 +1710,15 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
 
 // Methods for inferring node degrees with a mask
 
-// Return true if a single outgoing edge is found
-// If no outgoing edges are found, set *i to 0
+// If a single outgoing edge is found, write it to |*i| and return true.
+// If no outgoing edges are found, set |*i| to 0 and return false.
+// If multiple outgoing edges are found, set |*i| to the first and return false.
 bool masked_pick_single_outgoing(const BOSS &boss,
                                  uint64_t *i,
                                  const bitmap *subgraph_mask) {
     assert(i && *i);
     assert(boss.get_last(*i));
+    assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
     // in boss, at least one outgoing edge always exists
     if (!subgraph_mask)
@@ -1726,32 +1728,34 @@ bool masked_pick_single_outgoing(const BOSS &boss,
     uint64_t j = *i;
     do {
         if ((*subgraph_mask)[j]) {
+            // there are multiple outgoing edges
             if (edge_detected)
                 return false;
 
+            // this is the first outgoing edge
             edge_detected = true;
             *i = j;
-
         }
     } while (--j > 0 && !boss.get_last(j));
 
-    if (edge_detected) {
-        // single outgoing
+    // return true of there is exactly one outgoing edge
+    if (edge_detected)
         return true;
-    } else {
-        // no outgoing
-        *i = 0;
-        return false;
-    }
+
+    // no outgoing
+    *i = 0;
+    return false;
 }
 
-// Return true if a single incoming edge is found
-// If no incoming edges are found, set *i to 0
+// If a single incoming edge is found, write it to |*i| and return true.
+// If no incoming edges are found, set |*i| to 0 and return false.
+// If multiple incoming edges are found, set |*i| to the first and return false.
 bool masked_pick_single_incoming(const BOSS &boss,
                                  uint64_t *i,
                                  const bitmap *subgraph_mask) {
     assert(i && *i);
     assert(boss.get_W(*i) < boss.alph_size);
+    assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
     // in boss, at least one incoming edge always exists
     if (!subgraph_mask)
@@ -1761,27 +1765,32 @@ bool masked_pick_single_incoming(const BOSS &boss,
     auto j = *i;
 
     TAlphabet d_next;
-    bool found = (*subgraph_mask)[j];
-    while (++j <= boss.num_edges()) {
-        std::tie(j, d_next) = boss.succ_W(j, d, d + boss.alph_size);
-        if (d_next != d + boss.alph_size)
+    bool edge_detected = false;
+    do {
+        if ((*subgraph_mask)[j]) {
+            // there are multiple incoming edges
+            if (edge_detected)
+                return false;
+
+            // this is the first incoming edge
+            edge_detected = true;
+            *i = j;
+        }
+
+        if (++j > boss.num_edges())
             break;
 
-        if (!(*subgraph_mask)[j])
-            continue;
+        std::tie(j, d_next) = boss.succ_W(j, d, d + boss.alph_size);
 
-        if (found)
-            return false;
+    } while (d_next == d + boss.alph_size);
 
-        found = true;
-    }
+    // return true of there is exactly one incoming edge
+    if (edge_detected)
+        return true;
 
-    if (!found) {
-        *i = 0;
-        return false;
-    }
-
-    return true;
+    // no incoming edges
+    *i = 0;
+    return false;
 }
 
 // traverse graph from the specified (k+1)-mer/edge and call
@@ -1825,16 +1834,20 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //  .____
     //
     if (!subgraph_mask) {
-        auto last_source = succ_last(1);
-        for (uint64_t i = 1; i <= last_source; ++i) {
+        for (uint64_t i = succ_last(1); i >= 1; --i) {
             if (!visited[i])
                 ::call_paths(*this, i, callback, split_to_unitigs,
-                             &discovered, &visited, progress_bar, subgraph_mask);
+                             &discovered, &visited, progress_bar, nullptr);
         }
+
     } else {
         call_zeros(visited, [&](uint64_t i) {
-            // check if |i| has a single incoming edge
+            if (!get_last(i))
+                return;
+
+            // check if |i| has incoming edges
             auto j = bwd(i);
+            // check if =1 or >1
             if (masked_pick_single_incoming(*this, &j, subgraph_mask) || j)
                 return;
 
@@ -1842,7 +1855,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 if (!visited[i])
                     ::call_paths(*this, i, callback, split_to_unitigs,
                                  &discovered, &visited, progress_bar, subgraph_mask);
-            } while (!get_last(i++));
+            } while (--i > 0 && !get_last(i));
         });
     }
 
@@ -1851,7 +1864,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     call_zeros(visited, [&](uint64_t i) {
-        i = succ_last(i);
+        if (!get_last(i))
+            return;
+
         if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
             return;
 
