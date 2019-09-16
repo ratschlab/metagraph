@@ -1332,7 +1332,7 @@ int main(int argc, const char *argv[]) {
 
             // load graph
             auto graph = load_critical_dbg(config->infbase);
-            graph->load_extension<DBGWeights<>>(*graph, config->infbase);
+            bool weighted = graph->load_extension<DBGWeights<>>(*graph, config->infbase);
 
             config->k = graph->get_k();
 
@@ -1358,7 +1358,7 @@ int main(int argc, const char *argv[]) {
             }
 
             std::unique_ptr<bit_vector_dyn> inserted_edges;
-            if (config->infbase_annotators.size())
+            if (config->infbase_annotators.size() || weighted)
                 inserted_edges.reset(new bit_vector_dyn(graph->num_nodes() + 1, 0));
 
             timer.reset();
@@ -1367,20 +1367,34 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Start graph extension" << std::endl;
 
             parse_sequences(files, *config, timer,
-                [&graph,&inserted_edges](std::string&& seq) {
+                [&graph, &inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
                 },
-                [&graph,&inserted_edges](std::string&& kmer, uint32_t count) {
+                [&graph, &inserted_edges](std::string&& kmer, uint32_t count __attribute__((unused))) {
                     graph->add_sequence(kmer, inserted_edges.get());
-                    if (auto weighted = graph->get_extension<DBGWeights<>>())
-                        weighted->add_kmer(std::move(kmer), count);
                 },
-                [&graph,&inserted_edges](const auto &loop) {
-                    loop([&graph,&inserted_edges](const auto &seq) {
+                [&graph, &inserted_edges](const auto &loop) {
+                    loop([&graph, &inserted_edges](const auto &seq) {
                         graph->add_sequence(seq, inserted_edges.get());
                     });
                 }
             );
+
+            if (weighted) {
+                auto node_weights = graph->get_extension<DBGWeights<>>();
+                node_weights->insert_nodes(inserted_edges.get());
+
+                parse_sequences(files, *config, timer,
+                    [&node_weights](std::string&& seq) { node_weights->add_sequence(std::move(seq)); },
+                    [&node_weights](std::string&& kmer, uint32_t count) {
+                        node_weights->add_kmer(std::move(kmer), count);
+                    },
+                    [&node_weights](const auto &loop) {
+                        loop([&node_weights](const auto &seq) { node_weights->add_sequence(std::move(seq)); });
+                    }
+                );
+            }
+
             // if (config->verbose) {
             //     std::cout << "Number of k-mers in graph: " << graph->num_nodes() << std::endl;
             // }

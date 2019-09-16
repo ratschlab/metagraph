@@ -21,7 +21,7 @@ class DBGWeights : public DeBruijnGraph::GraphExtension {
 
     DBGWeights(const DeBruijnGraph &graph, size_t bits_per_count)
           : graph_(graph),
-            weights_(Weights(graph.num_nodes(), 0, bits_per_count)),
+            weights_(Weights(graph.num_nodes() + 1, 0, bits_per_count)),
             max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
     DBGWeights(const DeBruijnGraph &graph, Weights&& weights)
@@ -38,7 +38,7 @@ class DBGWeights : public DeBruijnGraph::GraphExtension {
     virtual void add_sequence(const std::string&& sequence,
                               bit_vector_dyn *nodes_inserted = nullptr) {
         if (nodes_inserted)
-            utils::insert(&weights_, *nodes_inserted, 0);
+            insert_nodes(nodes_inserted);
 
         graph_.map_to_nodes(sequence, [&](auto node) { add_weight(node, 1); });
     }
@@ -56,6 +56,10 @@ class DBGWeights : public DeBruijnGraph::GraphExtension {
         std::copy_backward(weights_.begin() + i, weights_.begin() + j, weights_.end());
 
         weights_[i] = 0;
+    }
+
+    virtual void insert_nodes(bit_vector_dyn *nodes_inserted) {
+        utils::insert(&weights_, *nodes_inserted, 0);
     }
 
     template <class Bitmap>

@@ -8,6 +8,8 @@
 
 #include <sdsl/int_vector.hpp>
 
+#include "utils.hpp"
+
 class bit_vector_dyn;
 
 
@@ -98,17 +100,19 @@ class SequenceGraph {
     };
 
     template <class ExtensionSubtype, class Derived>
-    bool load_extension(const Derived &graph, const std::string &filename_base) {
+    bool load_extension(const Derived &graph, const std::string &filename) {
         static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
         auto extension = get_extension<ExtensionSubtype>();
         if (!extension)
             extension = std::make_shared<ExtensionSubtype>(graph);
 
+        auto filename_base = utils::remove_suffix(filename, file_extension());
         if (extension->load(filename_base + file_extension())
                   && extension->is_compatible()) {
             add_extension(extension);
             return true;
         }
+
         return false;
     }
 
