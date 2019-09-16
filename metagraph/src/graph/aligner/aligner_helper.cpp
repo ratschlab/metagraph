@@ -288,29 +288,30 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         orientation_(orientation) {
     assert(column != &*dp_table.end());
 
-    auto [cigar_op, prev_node] = std::get<1>(column->second).at(start_pos);
-    assert(cigar_op == Cigar::Operator::MATCH);
-
     auto i = start_pos;
-    if (!i && prev_node == DeBruijnGraph::npos)
+    const auto* step = &column->second.steps.at(i);
+    assert(step->cigar_op == Cigar::Operator::MATCH);
+
+    if (!i && step->prev_node == DeBruijnGraph::npos)
         return;
 
     std::vector<const typename DPTable::value_type*> out_columns;
-    while (prev_node != DeBruijnGraph::npos) {
-        cigar_.append(cigar_op);
+    while (step->prev_node != DeBruijnGraph::npos) {
+        cigar_.append(step->cigar_op);
 
-        if (cigar_op != Cigar::Operator::INSERTION)
+        if (step->cigar_op != Cigar::Operator::INSERTION)
             out_columns.emplace_back(column);
 
-        if (cigar_op != Cigar::Operator::DELETION)
+        if (step->cigar_op != Cigar::Operator::DELETION)
             --i;
 
-        if (cigar_op == Cigar::Operator::MATCH)
+        if (step->cigar_op == Cigar::Operator::MATCH)
             num_matches_++;
 
-        column = &*dp_table.find(prev_node);
+        column = &*dp_table.find(step->prev_node);
         assert(column != &*dp_table.end());
-        std::tie(cigar_op, prev_node) = std::get<1>(column->second).at(i);
+
+        step = &column->second.steps.at(i);
     }
 
     if (UNLIKELY(i > std::numeric_limits<Cigar::LengthType>::max())) {
@@ -336,7 +337,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     std::transform(out_columns.rbegin(),
                    out_columns.rend(),
                    sequence_.begin(),
-                   [](const auto &iter) { return std::get<2>(iter->second); });
+                   [](const auto &iter) { return iter->second.last_char; });
 }
 
 template <typename NodeType>

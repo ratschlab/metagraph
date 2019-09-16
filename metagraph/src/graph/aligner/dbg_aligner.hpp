@@ -12,7 +12,7 @@
 
 
 template <class AlignmentCompare = std::less<Alignment<DeBruijnGraph::node_index>>,
-          class ColumnCompare = typename Alignment<DeBruijnGraph::node_index>::ColumnCompare>
+          class ColumnCompare = std::less<typename Alignment<DeBruijnGraph::node_index>::Column>>
 class DBGAligner {
   public:
     typedef DeBruijnGraph::node_index node_index;

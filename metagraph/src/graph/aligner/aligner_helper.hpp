@@ -156,20 +156,24 @@ class Alignment {
   public:
     typedef NodeType node_index;
     typedef ::score_t score_t;
+
     // dynamic programming table stores score columns and steps needed to reconstruct paths
-    // operation, previous node
-    typedef std::pair<Cigar::Operator, NodeType> Step;
+    struct Step {
+        Cigar::Operator cigar_op;
+        NodeType prev_node;
+    };
 
-    // score column, traversal column, last char of node, position of best score
-    typedef std::tuple<std::vector<score_t>,
-                       std::vector<Step>,
-                       char,
-                       size_t>
-            Column;
+    struct Column {
+        std::vector<score_t> scores;
+        std::vector<Step> steps;
+        char last_char;
+        size_t best_pos;
 
-    struct ColumnCompare {
-        bool operator()(const Column &a, const Column &b) const {
-            return std::get<0>(a).at(std::get<3>(a)) < std::get<0>(b).at(std::get<3>(b));
+        const score_t& best_score() const { return scores.at(best_pos); }
+        const Step& best_step() const { return steps.at(best_pos); }
+
+        bool operator<(const Column &other) const {
+            return best_score() < other.best_score();
         }
     };
 
