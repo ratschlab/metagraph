@@ -176,7 +176,7 @@ void default_extender(const DeBruijnGraph &graph,
     const auto align_start = &*path.get_query_end();
     size_t size = sequence_end - align_start + 1;
 
-    // branch and bound
+    // stop path early if it can't be better than the min_path_score
     if (path.get_score() + config.match_score(align_start,
                                               sequence_end) < min_path_score)
         return;
@@ -395,7 +395,8 @@ void default_extender(const DeBruijnGraph &graph,
                 // position can be extended to a better alignment than the best
                 // alignment
                 auto is_not_extendable =
-                    [best_score = start_node->second.best_score()](auto a, auto b) {
+                    [best_score = std::max(start_node->second.best_score(),
+                                           min_path_score)](auto a, auto b) {
                         return a + b < best_score;
                     };
 
