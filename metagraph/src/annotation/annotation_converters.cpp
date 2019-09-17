@@ -118,13 +118,13 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     uint64_t num_relations;
     RowCompressed<Label>::stream_counts(filename, &num_rows, &num_relations);
 
-    constexpr size_t num_passes = std::is_same<MatrixType, Rainbowfish>::value ? 2u : 1u;
+    constexpr size_t num_passes = std::is_same_v<MatrixType, Rainbowfish> ? 2u : 1u;
     ProgressBar progress_bar(num_rows * num_passes, "Processing rows", std::cerr, !utils::get_verbose());
 
-    auto callback = [&](auto callback) {
-        auto annotator = std::make_unique<typename RowCompressed<Label>::StreamRows>(filename);
+    auto call_rows = [&](auto callback) {
+        typename RowCompressed<Label>::StreamRows row_streamer(filename);
         for (uint64_t r = 0; r < num_rows; ++r) {
-            auto row = annotator->next_row();
+            auto row = row_streamer.next_row();
             // TODO: remove sort?
             std::sort(row->begin(), row->end());
             callback(*row);
@@ -133,14 +133,19 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     };
 
     std::unique_ptr<MatrixType> matrix;
-    if constexpr (std::is_same<MatrixType, RowConcatenated<> >::value) {
-        matrix = std::make_unique<MatrixType>(callback, label_encoder->size(), num_rows, num_relations);
-    } else if constexpr (std::is_same<MatrixType, Rainbowfish>::value) {
-        matrix = std::make_unique<MatrixType>(callback, label_encoder->size());
-    } else if constexpr (std::is_same<MatrixType, BinRelWT>::value) {
-        matrix = std::make_unique<MatrixType>(callback, num_relations, label_encoder->size());
-    } else if constexpr (std::is_same<MatrixType, BinRelWT_sdsl>::value) {
-        matrix = std::make_unique<MatrixType>(callback, num_relations, label_encoder->size());
+
+    if constexpr(std::is_same_v<MatrixType, RowConcatenated<>>) {
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size(), num_rows, num_relations);
+
+    } else if constexpr(std::is_same_v<MatrixType, Rainbowfish>) {
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size());
+
+    } else if constexpr(std::is_same_v<MatrixType, BinRelWT>) {
+        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder->size());
+
+    } else if constexpr(std::is_same_v<MatrixType, BinRelWT_sdsl>) {
+        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder->size());
+
     } else {
         static_assert(utils::dependent_false<StaticAnnotation>::value);
     }
@@ -317,7 +322,7 @@ template <class ToAnnotation, typename Label>
 void merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators,
            const std::vector<std::string> &filenames,
            const std::string &outfile) {
-    static_assert(std::is_same<typename ToAnnotation::Label, Label>::value);
+    static_assert(std::is_same_v<typename ToAnnotation::Label, Label>);
 
     assert((annotators.size() || filenames.size()) && "nothing to merge");
 
@@ -371,7 +376,7 @@ void merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotat
         outfile
     );
 
-    if constexpr (!std::is_same<RowCompressed<Label>, ToAnnotation>::value) {
+    if constexpr(!std::is_same_v<RowCompressed<Label>, ToAnnotation>) {
         auto out_annotator = convert<ToAnnotation>(outfile);
         out_annotator->serialize(outfile);
     }
