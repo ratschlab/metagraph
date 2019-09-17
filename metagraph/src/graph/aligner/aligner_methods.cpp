@@ -1,6 +1,7 @@
 #include "aligner_methods.hpp"
 
 #include <unordered_set>
+#include <string_view>
 
 #include "dbg_succinct.hpp"
 #include "bounded_priority_queue.hpp"
@@ -19,34 +20,33 @@ initialize_dp_table(NodeType start_node,
     typename Alignment<NodeType>::DPTable dp_table;
 
     // Initialize first column
-    auto& table_init = dp_table[start_node];
-    std::get<0>(table_init).resize(size, min_score);
-    std::get<1>(table_init).resize(size);
-    std::get<2>(table_init) = start_char;
-    std::get<3>(table_init) = 0;
+    auto& table_init = dp_table.emplace(
+        start_node,
+        typename Alignment<NodeType>::Column {
+            std::vector<typename Alignment<NodeType>::score_t>(size, min_score),
+            std::vector<typename Alignment<NodeType>::Step>(size),
+            start_char,
+            0
+        }
+    ).first->second;
 
-    std::get<0>(table_init).front() = initial_score;
-    std::get<1>(table_init).front() = std::make_pair(Cigar::Operator::MATCH,
-                                                     DeBruijnGraph::npos);
+    table_init.scores.front() = initial_score;
+    table_init.steps.front().cigar_op = Cigar::Operator::MATCH;
+    table_init.steps.front().prev_node = DeBruijnGraph::npos;
 
-    if (size > 1 && std::get<0>(table_init).front()
-                        + gap_opening_penalty > min_score) {
-        std::get<0>(table_init)[1] = std::get<0>(table_init).front()
-            + gap_opening_penalty;
-
-        std::get<1>(table_init)[1] = std::make_pair(Cigar::Operator::INSERTION,
-                                                    start_node);
+    if (size > 1 && table_init.scores.front() + gap_opening_penalty > min_score) {
+        table_init.scores[1] = table_init.scores.front() + gap_opening_penalty;
+        table_init.steps[1].cigar_op = Cigar::Operator::INSERTION;
+        table_init.steps[1].prev_node = start_node;
     }
 
     for (size_t i = 2; i < size; ++i) {
-        if (std::get<0>(table_init)[i - 1] + gap_extension_penalty <= min_score)
+        if (table_init.scores[i - 1] + gap_extension_penalty <= min_score)
             break;
 
-        std::get<0>(table_init)[i] = std::get<0>(table_init)[i - 1]
-            + gap_extension_penalty;
-
-        std::get<1>(table_init)[i] = std::make_pair(Cigar::Operator::INSERTION,
-                                                    start_node);
+        table_init.scores[i] = table_init.scores[i - 1] + gap_extension_penalty;
+        table_init.steps[i].cigar_op = Cigar::Operator::INSERTION;
+        table_init.steps[i].prev_node = start_node;
     }
 
     return dp_table;
@@ -176,17 +176,23 @@ void default_extender(const DeBruijnGraph &graph,
     const auto align_start = &*path.get_query_end();
     size_t size = sequence_end - align_start + 1;
 
-    // branch and bound
+    // stop path early if it can't be better than the min_path_score
     if (path.get_score() + config.match_score(align_start,
                                               sequence_end) < min_path_score)
         return;
 
     // used for branch and bound checks below
-    std::vector<score_t> partial_sum(size - 1);
-    std::partial_sum(std::make_reverse_iterator(sequence_end),
-                     std::make_reverse_iterator(align_start),
-                     partial_sum.rbegin(),
-                     [&](score_t sum, char c) { return sum + config.get_row(c)[c]; });
+    std::vector<score_t> partial_sum(size);
+    std::string_view extension(align_start - 1, sequence_end - align_start + 1);
+    auto jt = extension.rbegin();
+    partial_sum.back() = config.get_row(*jt)[*jt++];
+    for (auto it = partial_sum.rbegin() + 1; it != partial_sum.rend(); ++it) {
+        assert(jt != extension.rend());
+        *it = *(it - 1) + config.get_row(*jt)[*jt++];
+    }
+
+    assert(partial_sum.front() == config.match_score(align_start - 1, sequence_end));
+    assert(partial_sum.back() == config.get_row(extension.back())[extension.back()]);
 
     // keep track of which columns to use next
     struct PriorityFunction {
@@ -227,11 +233,8 @@ void default_extender(const DeBruijnGraph &graph,
 
     // dynamic programming
     assert(dp_table.find(path.back()) != dp_table.end());
-    //columns_to_update.emplace(std::get<0>(dp_table[path.back()]).front(),
-    //                          path.back());
     columns_to_update.emplace(&*dp_table.begin());
     while (columns_to_update.size()) {
-        //auto cur_node = std::get<1>(columns_to_update.pop_top());
         auto cur_node = columns_to_update.pop_top()->first;
         // get next columns
         out_columns.clear();
@@ -248,7 +251,7 @@ void default_extender(const DeBruijnGraph &graph,
 
                 // if the emplace didn't happen, correct the stored character
                 if (!emplace.second)
-                    std::get<2>(emplace.first->second) = c;
+                    emplace.first->second.last_char = c;
 
                 out_columns.emplace_back(&*emplace.first);
             }
@@ -258,16 +261,13 @@ void default_extender(const DeBruijnGraph &graph,
         for (auto &iter : out_columns) {
             auto next_node = iter->first;
             auto& next_column = iter->second;
-            auto& next = std::get<0>(next_column);
-            auto& next_step = std::get<1>(next_column);
-            auto next_char = std::get<2>(next_column);
 
             // for now, vertical banding is not done
-            assert(next.size() == size);
+            assert(next_column.scores.size() == size);
             assert(updates.size() == size);
-            std::transform(next_step.begin(),
-                           next_step.end(),
-                           next.begin(),
+            std::transform(next_column.steps.begin(),
+                           next_column.steps.end(),
+                           next_column.scores.begin(),
                            updates.begin(),
                            [](const Step &step, score_t score) {
                                return std::make_pair(step, score);
@@ -278,81 +278,81 @@ void default_extender(const DeBruijnGraph &graph,
                 in_nodes.assign(1, cur_node);
             } else {
                 in_nodes.clear();
-                graph.adjacent_incoming_nodes(next_node, [&](auto i) { in_nodes.push_back(i); });
+                graph.adjacent_incoming_nodes(next_node,
+                                              [&](auto i) { in_nodes.push_back(i); });
             }
 
             // match and deletion scores
             for (const auto &prev_node : in_nodes) {
                 // the value of the node last character stored here is a
                 // placeholder which is later corrected by call_outgoing_kmers above
-                auto incoming = dp_table.emplace(
+                auto& incoming = dp_table.emplace(
                     prev_node,
                     Column { std::vector<score_t>(size, config.min_cell_score),
                              std::vector<Step>(size),
                              '\0',
                              0 }
-                ).first;
-
-                const auto& current = std::get<0>(incoming->second);
-                const auto& current_step = std::get<1>(incoming->second);
+                ).first->second;
 
                 // match
                 std::transform(align_start,
                                align_start + size - 1,
                                std::next(char_scores.begin()),
-                               [row = config.get_row(next_char)](char c) {
+                               [row = config.get_row(next_column.last_char)](char c) {
                                    return row[c];
                                });
 
                 std::transform(align_start,
                                align_start + size - 1,
                                std::next(match_ops.begin()),
-                               [op_row = Cigar::get_op_row(next_char)](char c) {
+                               [op_row = Cigar::get_op_row(next_column.last_char)](char c) {
                                    return op_row[c];
                                });
 
                 for (size_t i = 1; i < size; ++i) {
                     // prevent underflow if min_cell_score == MIN_INT
                     if (char_scores[i] < 0
-                            && current[i - 1] == config.min_cell_score)
+                            && incoming.scores[i - 1] == config.min_cell_score)
                         continue;
 
-                    if (current[i - 1] + char_scores[i] > std::get<1>(updates[i]))
-                        updates[i] = std::make_pair(Step(match_ops[i], prev_node),
-                                                    current[i - 1] + char_scores[i]);
+                    if (incoming.scores[i - 1] + char_scores[i] > std::get<1>(updates[i]))
+                        updates[i] = std::make_pair(
+                            Step { match_ops[i], prev_node },
+                            incoming.scores[i - 1] + char_scores[i]
+                        );
                 }
 
 
                 // delete
                 std::transform(
-                    current_step.begin(),
-                    current_step.end(),
+                    incoming.steps.begin(),
+                    incoming.steps.end(),
                     gap_scores.begin(),
                     [open = config.gap_opening_penalty,
                      ext = config.gap_extension_penalty](const auto &cigar_tuple) {
-                        return std::get<0>(cigar_tuple) == Cigar::Operator::DELETION
+                        return cigar_tuple.cigar_op == Cigar::Operator::DELETION
                             ? ext : open;
                     }
                 );
 
                 for (size_t i = 0; i < size; ++i) {
                     // disabled check for deletion after insertion
-                    // if (std::get<0>(current_step[i]) == Cigar::Operator::INSERTION)
+                    // if (incoming.steps[i].cigar_op == Cigar::Operator::INSERTION)
                     //     continue;
-                    if (current[i] == config.min_cell_score)
+                    if (incoming.scores[i] == config.min_cell_score)
                         continue;
 
-                    if (current[i] + gap_scores[i] > std::get<1>(updates[i]))
+                    if (incoming.scores[i] + gap_scores[i] > std::get<1>(updates[i]))
                         updates[i] = std::make_pair(
-                            Step(Cigar::Operator::DELETION, prev_node),
-                            current[i] + gap_scores[i]
+                            Step { Cigar::Operator::DELETION, prev_node },
+                            incoming.scores[i] + gap_scores[i]
                         );
                 }
             }
 
             // compute insert scores
             for (size_t i = 1; i < size; ++i) {
-                auto prev_op = std::get<0>(std::get<0>(updates[i - 1]));
+                auto prev_op = std::get<0>(updates[i - 1]).cigar_op;
                 // disabled check for insertion after deletion
                 // if (prev_op == Cigar::Operator::DELETION)
                 //     continue;
@@ -364,89 +364,104 @@ void default_extender(const DeBruijnGraph &graph,
 
                 if (insert_score > std::get<1>(updates[i]))
                     updates[i] = std::make_pair(
-                        Step(Cigar::Operator::INSERTION, next_node),
+                        Step { Cigar::Operator::INSERTION, next_node },
                         insert_score
                     );
             }
 
             // update scores
             bool updated = false;
-            auto max_pos = next.begin() + std::get<3>(next_column);
+            auto max_pos = next_column.scores.begin() + next_column.best_pos;
             for (size_t i = 0; i < size; ++i) {
-                if (std::get<1>(updates[i]) <= next[i])
+                if (std::get<1>(updates[i]) <= next_column.scores[i])
                     continue;
 
-                std::tie(next_step[i], next[i]) = updates[i];
+                std::tie(next_column.steps[i], next_column.scores[i]) = updates[i];
                 updated = true;
-                if (next[i] > *max_pos)
-                    max_pos = next.begin() + i;
+                if (next_column.scores[i] > *max_pos)
+                    max_pos = next_column.scores.begin() + i;
             }
 
             if (updated) {
                 // store max pos
-                std::get<3>(next_column) = max_pos - next.begin();
-                auto best_score = std::max(
-                    min_path_score,
-                    std::get<0>(start_node->second).at(std::get<3>(start_node->second))
-                );
+                next_column.best_pos = max_pos - next_column.scores.begin();
 
-                if (*max_pos > best_score) {
+                if (*max_pos > start_node->second.best_score())
                     start_node = &*iter;
-                    best_score = *max_pos;
-                }
 
-                // branch and bound if we're only interested in the top path
-                if (config.num_alternative_paths > 1
-                        || !std::equal(partial_sum.begin(),
-                                       partial_sum.end(),
-                                       std::get<0>(start_node->second).begin(),
-                                       [best_score](auto a, auto b) {
-                                           return a + b < best_score;
-                                       }))
+                // branch and bound
+
+                // starting from the position of the best score, check if each
+                // position can be extended to a better alignment than the best
+                // alignment
+                auto is_not_extendable =
+                    [best_score = std::max(start_node->second.best_score(),
+                                           min_path_score)](auto a, auto b) {
+                        return a + b < best_score;
+                    };
+
+                auto start_it = partial_sum.begin() + next_column.best_pos + 1;
+                auto next_column_start_it = next_column.scores.begin()
+                    + next_column.best_pos + 1;
+
+                // the first value of partial_sum includes the last character
+                // of the seed, so it should be excluded from this check
+                auto first_half_end_it = next_column.best_pos >= config.bandwidth
+                    ? std::make_reverse_iterator(start_it - config.bandwidth)
+                    : partial_sum.rend() - 1;
+
+                assert(first_half_end_it != partial_sum.rend());
+
+                auto second_half_end_it = size - next_column.best_pos > config.bandwidth
+                    ? start_it + config.bandwidth
+                    : partial_sum.end();
+
+
+                if (!std::equal(std::make_reverse_iterator(start_it),
+                                first_half_end_it,
+                                std::make_reverse_iterator(next_column_start_it),
+                                is_not_extendable)
+                        || !std::equal(start_it,
+                                       second_half_end_it,
+                                       next_column_start_it,
+                                       is_not_extendable))
                     columns_to_update.emplace(&*iter);
             }
         }
     }
 
-    auto best_pos = std::get<3>(start_node->second);
-    auto best_score = std::get<0>(start_node->second).at(best_pos);
-    assert(best_score > config.min_cell_score);
+    assert(start_node->second.best_score() > config.min_cell_score);
 
     //no good path found
     if (UNLIKELY(start_node->first == DeBruijnGraph::npos
-            || (start_node->first == path.back() && !best_pos)
-            || best_score < min_path_score))
+            || (start_node->first == path.back() && !start_node->second.best_pos)
+            || start_node->second.best_score() < min_path_score))
         return;
 
-#ifndef NDEBUG
-    // make sure that start_node points to the best column
-    auto max_element = std::max_element(
-        dp_table.begin(), dp_table.end(),
-        [](const auto &a, const auto &b) {
-            return std::get<0>(a.second).at(std::get<3>(a.second))
-                 < std::get<0>(b.second).at(std::get<3>(b.second));
-        }
-    );
-    assert(best_score
-        == std::get<0>(max_element->second).at(std::get<3>(max_element->second)));
-#endif
+    // check to make sure that start_node stores the best starting point
+    assert(start_node->second.best_score()
+        == std::max_element(dp_table.begin(),
+                            dp_table.end(),
+                            [](const auto &a, const auto &b) {
+                                return a.second < b.second;
+                            })->second.best_score());
 
-    assert(std::get<0>(std::get<1>(start_node->second).at(best_pos))
-        == Cigar::Operator::MATCH);
+    assert(start_node->second.best_step().cigar_op == Cigar::Operator::MATCH);
 
     // avoid sorting column iterators if we're only interested in the top path
     if (config.num_alternative_paths == 1) {
         next_paths->emplace_back(dp_table,
                                  start_node,
-                                 best_pos,
-                                 best_score - path.get_score(),
+                                 start_node->second.best_pos,
+                                 start_node->second.best_score() - path.get_score(),
                                  align_start,
                                  orientation);
 
         if (next_paths->back().empty() && !next_paths->back().get_query_begin()) {
             next_paths->pop_back();
         } else {
-            assert(next_paths->back().get_score() + path.get_score() == best_score);
+            assert(next_paths->back().get_score() + path.get_score()
+                == start_node->second.best_score());
         }
 
         return;
@@ -457,46 +472,35 @@ void default_extender(const DeBruijnGraph &graph,
     // store visited nodes in paths to avoid returning subalignments
     std::unordered_set<node_index> visited_nodes;
 
-    // store the best score with each iterator in a pair to avoid std::get<3>
-    // computations while sorting
-    std::vector<std::pair<score_t, const typename DPTable::value_type*>> starts;
+    std::vector<const typename DPTable::value_type*> starts;
     starts.reserve(dp_table.size());
     for (auto it = dp_table.cbegin(); it != dp_table.cend(); ++it) {
-        auto max_pos = std::get<3>(it->second);
-        auto score = std::get<0>(it->second).at(max_pos);
-        auto last_op = std::get<0>(std::get<1>(it->second).at(max_pos));
-
-        if (score > min_path_score && last_op == Cigar::Operator::MATCH)
-            starts.emplace_back(score, &*it);
+        if (it->second.best_score() > min_path_score
+                && it->second.best_step().cigar_op == Cigar::Operator::MATCH)
+            starts.emplace_back(&*it);
     }
 
     if (starts.empty())
         return;
 
     std::sort(starts.begin(), starts.end(),
-              [](const auto &a, const auto &b) { return a.first > b.first; });
+              [](const auto &a, const auto &b) {
+                  return a->second.best_score() > b->second.best_score();
+              });
 
-    assert(best_score == starts.front().first);
-    assert(start_node == starts.front().second);
-    for (const auto &pair : starts) {
+    assert(start_node == starts.front());
+    for (const auto &column_it : starts) {
         if (next_paths->size() >= config.num_alternative_paths)
             break;
-
-        auto column_it = pair.second;
 
         // ignore if the current point is a subalignment of one already visited
         if (visited_nodes.find(column_it->first) != visited_nodes.end())
             continue;
 
-        auto best_pos = std::get<3>(column_it->second);
-        auto best_score = std::get<0>(column_it->second).at(best_pos);
-        assert(best_score > config.min_cell_score);
-        assert(best_score > min_path_score);
-
         next_paths->emplace_back(dp_table,
                                  column_it,
-                                 best_pos,
-                                 best_score - path.get_score(),
+                                 column_it->second.best_pos,
+                                 column_it->second.best_score() - path.get_score(),
                                  align_start,
                                  orientation);
 

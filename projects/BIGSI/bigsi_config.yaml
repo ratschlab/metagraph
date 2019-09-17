@@ -1,0 +1,9 @@
+h: 3
+m: 25000000
+nproc: 4
+k: 31
+storage-engine: berkeleydb
+storage-config:
+  filename: combined-index # cat * > combined-index
+  flag: "r" ## "c", Change to 'r' for read-only access
+

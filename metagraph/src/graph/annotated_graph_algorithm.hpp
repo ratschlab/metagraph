@@ -29,10 +29,10 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
 template <class Index, typename... Args>
 using VariantCallback = std::function<void(Alignment<Index>&&,
-                                           std::string&&, // query sequence
+                                           const std::string&, // query sequence
                                            Args&&...)>;
 
-typedef Alignment<DeBruijnGraph::node_index> MaskedAlignment;
+typedef Alignment<DeBruijnGraph::node_index> DBGAlignment;
 typedef VariantCallback<DeBruijnGraph::node_index,
                         std::vector<AnnotatedDBG::Annotator::Label>&&> VariantLabelCallback;
 

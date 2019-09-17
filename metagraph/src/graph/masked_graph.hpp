@@ -1,7 +1,6 @@
 #ifndef __MASKED_GRAPH_HPP__
 #define __MASKED_GRAPH_HPP__
 
-
 #include <functional>
 #include <vector>
 
@@ -52,6 +51,10 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override;
+
+    virtual void call_sequences(const std::function<void(const std::string&)> &callback) const override;
+    virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
+                              size_t min_tip_size = 1) const override;
 
     virtual uint64_t num_nodes() const override;
 

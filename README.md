@@ -211,3 +211,7 @@ Stats for both
 ```bash
 ./metagraph stats -a annotation.column.annodbg graph.dbg
 ```
+
+## License
+Metagraph is distributed under the GPLv3 License (see LICENSE). 
+Please find further information in the AUTHORS and COPYRIGHTS files.

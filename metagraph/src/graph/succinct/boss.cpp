@@ -1707,6 +1707,92 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
     } while (!get_last(root++));
 }
 
+
+// Methods for inferring node degrees with a mask
+
+// If a single outgoing edge is found, write it to |*i| and return true.
+// If no outgoing edges are found, set |*i| to 0 and return false.
+// If multiple outgoing edges are found, set |*i| to the first and return false.
+bool masked_pick_single_outgoing(const BOSS &boss,
+                                 uint64_t *i,
+                                 const bitmap *subgraph_mask) {
+    assert(i && *i);
+    assert(boss.get_last(*i));
+    assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
+
+    // in boss, at least one outgoing edge always exists
+    if (!subgraph_mask)
+        return boss.is_single_outgoing(*i);
+
+    bool edge_detected = false;
+    uint64_t j = *i;
+    do {
+        if ((*subgraph_mask)[j]) {
+            // there are multiple outgoing edges
+            if (edge_detected)
+                return false;
+
+            // this is the first outgoing edge
+            edge_detected = true;
+            *i = j;
+        }
+    } while (--j > 0 && !boss.get_last(j));
+
+    // return true of there is exactly one outgoing edge
+    if (edge_detected)
+        return true;
+
+    // no outgoing
+    *i = 0;
+    return false;
+}
+
+// If a single incoming edge is found, write it to |*i| and return true.
+// If no incoming edges are found, set |*i| to 0 and return false.
+// If multiple incoming edges are found, set |*i| to the first and return false.
+bool masked_pick_single_incoming(const BOSS &boss,
+                                 uint64_t *i,
+                                 const bitmap *subgraph_mask) {
+    assert(i && *i);
+    assert(boss.get_W(*i) < boss.alph_size);
+    assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
+
+    // in boss, at least one incoming edge always exists
+    if (!subgraph_mask)
+        return boss.is_single_incoming(*i);
+
+    auto d = boss.get_W(*i);
+    auto j = *i;
+
+    TAlphabet d_next;
+    bool edge_detected = false;
+    do {
+        if ((*subgraph_mask)[j]) {
+            // there are multiple incoming edges
+            if (edge_detected)
+                return false;
+
+            // this is the first incoming edge
+            edge_detected = true;
+            *i = j;
+        }
+
+        if (++j > boss.num_edges())
+            break;
+
+        std::tie(j, d_next) = boss.succ_W(j, d, d + boss.alph_size);
+
+    } while (d_next == d + boss.alph_size);
+
+    // return true of there is exactly one incoming edge
+    if (edge_detected)
+        return true;
+
+    // no incoming edges
+    *i = 0;
+    return false;
+}
+
 // traverse graph from the specified (k+1)-mer/edge and call
 // all paths reachable from it
 void call_paths(const BOSS &boss,
@@ -1716,7 +1802,8 @@ void call_paths(const BOSS &boss,
                 bool split_to_unitigs,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
-                ProgressBar &progress_bar);
+                ProgressBar &progress_bar,
+                bitmap *subgraph_mask);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -1724,24 +1811,52 @@ void call_paths(const BOSS &boss,
  */
 void BOSS::call_paths(Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
-                      bool split_to_unitigs) const {
+                      bool split_to_unitigs,
+                      bitmap *subgraph_mask) const {
+    assert(!subgraph_mask || subgraph_mask->size() == W_->size());
+
     // keep track of reached edges
     sdsl::bit_vector discovered(W_->size(), false);
+    if (subgraph_mask) {
+        subgraph_mask->add_to(&discovered);
+        discovered.flip();
+    }
+    discovered[0] = true;
     // keep track of edges that are already included in covering paths
-    sdsl::bit_vector visited(W_->size(), false);
-    visited[0] = discovered[0] = true;
+    sdsl::bit_vector visited = discovered;
 
-    ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS",
+    ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
+                             "Traverse BOSS",
                              std::cerr, !utils::get_verbose());
 
     // process source dummy edges first
     //
     //  .____
     //
-    auto last_source = succ_last(1);
-    for (uint64_t i = 1; i <= last_source; ++i) {
-        ::call_paths(*this, i, callback, split_to_unitigs,
-                     &discovered, &visited, progress_bar);
+    if (!subgraph_mask) {
+        for (uint64_t i = succ_last(1); i >= 1; --i) {
+            if (!visited[i])
+                ::call_paths(*this, i, callback, split_to_unitigs,
+                             &discovered, &visited, progress_bar, nullptr);
+        }
+
+    } else {
+        call_zeros(visited, [&](uint64_t i) {
+            if (!get_last(i))
+                return;
+
+            // check if |i| has incoming edges
+            auto j = bwd(i);
+            // check if =1 or >1
+            if (masked_pick_single_incoming(*this, &j, subgraph_mask) || j)
+                return;
+
+            do {
+                if (!visited[i])
+                    ::call_paths(*this, i, callback, split_to_unitigs,
+                                 &discovered, &visited, progress_bar, subgraph_mask);
+            } while (--i > 0 && !get_last(i));
+        });
     }
 
     // then all forks
@@ -1749,15 +1864,23 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     call_zeros(visited, [&](uint64_t i) {
-        if (!is_single_outgoing(i))
-            ::call_paths(*this, i, callback, split_to_unitigs,
-                         &discovered, &visited, progress_bar);
+        if (!get_last(i))
+            return;
+
+        if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
+            return;
+
+        do {
+            if (!visited[i])
+                ::call_paths(*this, i, callback, split_to_unitigs,
+                             &discovered, &visited, progress_bar, subgraph_mask);
+        } while (--i > 0 && !get_last(i));
     });
 
     // process all the cycles left that have not been traversed
     call_zeros(visited, [&](uint64_t i) {
         ::call_paths(*this, i, callback, split_to_unitigs,
-                     &discovered, &visited, progress_bar);
+                     &discovered, &visited, progress_bar, subgraph_mask);
     });
 }
 
@@ -1773,7 +1896,8 @@ void call_paths(const BOSS &boss,
                 bool split_to_unitigs,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
-                ProgressBar &progress_bar) {
+                ProgressBar &progress_bar,
+                bitmap *subgraph_mask) {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
@@ -1786,14 +1910,15 @@ void call_paths(const BOSS &boss,
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
         std::vector<uint64_t> path;
-        uint64_t edge = edges.front().id;
-        auto sequence = std::move(edges.front().source_kmer);
-        edges.pop_front();
+        uint64_t edge = edges.back().id;
+        auto sequence = std::move(edges.back().source_kmer);
+        edges.pop_back();
 
         // traverse simple path until we reach its tail or
         // the first edge that has been already visited
         while (!visited[edge]) {
             assert(edge > 0 && discovered[edge]);
+            assert(!subgraph_mask || (*subgraph_mask)[edge]);
 
             // visit the edge
             sequence.push_back(boss.get_W(edge) % boss.alph_size);
@@ -1807,15 +1932,24 @@ void call_paths(const BOSS &boss,
 
             // stop traversing if we call unitigs and this
             // is not the only incoming edge
-            bool continue_traversal = !split_to_unitigs || boss.is_single_incoming(edge);
+            auto d = boss.get_W(edge) % boss.alph_size;
+            auto j = boss.pred_W(edge, d, d);
+            bool continue_traversal = !split_to_unitigs
+                || masked_pick_single_incoming(boss, &j, subgraph_mask);
+            assert(j);
 
             // make one traversal step
+            assert(boss.get_W(edge));
             edge = boss.fwd(edge);
 
             // traverse if there is only one outgoing edge
-            if (continue_traversal && boss.is_single_outgoing(edge)) {
+            auto is_single = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
+
+            if (continue_traversal && is_single) {
                 discovered[edge] = true;
                 continue;
+            } else if (!edge) {
+                break;
             }
 
             kmer.assign(sequence.end() - boss.get_k(), sequence.end());
@@ -1848,7 +1982,8 @@ void call_paths(const BOSS &boss,
     }
 }
 
-void BOSS::call_sequences(Call<const std::string&> callback) const {
+void BOSS::call_sequences(Call<const std::string&> callback,
+                          bitmap *subgraph_mask) const {
     std::string sequence;
 
     call_paths([&](auto&&, auto&& path) {
@@ -1862,11 +1997,12 @@ void BOSS::call_sequences(Call<const std::string&> callback) const {
 
         if (sequence.size())
             callback(sequence);
-    }, false);
+    }, false, subgraph_mask);
 }
 
 void BOSS::call_unitigs(Call<const std::string&> callback,
-                        size_t min_tip_size) const {
+                        size_t min_tip_size,
+                        bitmap *subgraph_mask) const {
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
 
@@ -1915,7 +2051,10 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
         // if the last node has multiple outgoing edges,
         // it is clearly neither a sink tip nor a source tip.
         if (path.back() != kSentinelCode
-                && !is_single_outgoing(last_fwd = fwd(edges.back()))) {
+                && !masked_pick_single_outgoing(*this,
+                                                &(last_fwd = fwd(edges.back())),
+                                                subgraph_mask)
+                && last_fwd) {
             callback(sequence);
             return;
         }
@@ -1928,7 +2067,10 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
         //       Make sure there are no redundant dummy edges when this
         //       function is called.
         if (path.front() != kSentinelCode
-                && !is_single_incoming(first_bwd = bwd(edges.front()))) {
+                && !masked_pick_single_incoming(*this,
+                                                &(first_bwd = bwd(edges.front())),
+                                                subgraph_mask)
+                && first_bwd) {
             callback(sequence);
             return;
         }
@@ -1939,19 +2081,21 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
         // skip all sink dead ends, as they are also sink
         // tips (because there is only one edge incoming to the first node)
         if (path.back() == kSentinelCode
+                || !last_fwd
                 || !get_W(last_fwd))
             return;
 
         // skip all source dead ends, as they are also source
         // tips (because there is only one edge outgoing from the last node)
         if (path.front() == kSentinelCode
+                || !first_bwd
                 || !get_minus_k_value(first_bwd, k_ - 1).first)
             return;
 
         // this is not a tip
         callback(sequence);
 
-    }, true);
+    }, true, subgraph_mask);
 }
 
 void BOSS::call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const {

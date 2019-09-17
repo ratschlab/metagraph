@@ -1,5 +1,6 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
+#include <unordered_set>
 #include "gtest/gtest.h"
 
 #include "boss.hpp"
@@ -2040,4 +2041,28 @@ TEST(BOSS, map_to_edges) {
         graph->map_to_edges(sequence_to_map,
                             [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
     }
+}
+
+TEST(BOSS, CallUnitigsMasked) {
+    size_t k = 3;
+    // TTGC      GCACGGGTC
+    //      TGCA
+    // ATGC      GCAGTGGTC
+    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
+    BOSSConstructor constructor(k);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+
+    bit_vector_stat mask(graph.num_edges() + 1, false);
+    graph.map_to_edges(
+        sequences[0],
+        [&](auto edge) { mask.set(edge, true); }
+    );
+
+    std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
+    std::unordered_multiset<std::string> obs;
+
+    graph.call_unitigs([&](auto unitig) { obs.insert(unitig); }, 0, &mask);
+
+    EXPECT_EQ(obs, ref);
 }

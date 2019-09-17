@@ -25,7 +25,13 @@ TEST(KmerExtractor2Bit, encode_decode) {
     EXPECT_EQ('C', encoder.decode(encoder.encode('C')));
     EXPECT_EQ('G', encoder.decode(encoder.encode('G')));
     EXPECT_EQ('T', encoder.decode(encoder.encode('T')));
+    EXPECT_EQ('A', encoder.decode(encoder.encode('a')));
+    EXPECT_EQ('C', encoder.decode(encoder.encode('c')));
+    EXPECT_EQ('G', encoder.decode(encoder.encode('g')));
+    EXPECT_EQ('T', encoder.decode(encoder.encode('t')));
     ASSERT_THROW(encoder.decode(encoder.encode('N')), std::exception);
+    ASSERT_THROW(encoder.decode(encoder.encode('n')), std::exception);
+    ASSERT_THROW(encoder.decode(encoder.encode('y')), std::exception);
 }
 
 KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
@@ -37,16 +43,28 @@ KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
 
 TEST(KmerExtractor2Bit, encode_decode_kmer) {
     KmerExtractor2Bit encoder;
-    std::string kmer;
+    std::string kmer, kmer_lower, kmer_mixed;
 
     kmer = "ACGT";
+    kmer_lower = "acgt";
+    kmer_mixed = "AcGT";
     EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer_lower), kmer_lower.length())) << kmer_lower;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer_mixed), kmer_mixed.length())) << kmer_mixed;
 
     kmer = "AAAAAAAAA";
+    kmer_lower = "aaaaaaaaa";
+    kmer_mixed = "AaAAAaAAa";
     EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer_lower), kmer_lower.length())) << kmer_lower;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer_mixed), kmer_mixed.length())) << kmer_mixed;
 
     kmer = "TTTTTTTTT";
+    kmer_lower = "ttttttttt";
+    kmer_mixed = "TTtTTTTTt";
     EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer_lower), kmer_lower.length())) << kmer_lower;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer_mixed), kmer_mixed.length())) << kmer_mixed;
 
     kmer = "ANANANANANA";
     ASSERT_THROW(encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length()), std::exception);

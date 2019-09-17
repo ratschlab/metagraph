@@ -286,7 +286,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsEmptyGraph) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, CallPathsTwoLoops) {
+TYPED_TEST(DeBruijnGraphTest, CallPathsOneSelfLoop) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A') };
         auto graph = build_graph<TypeParam>(k, sequences);
@@ -305,7 +305,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsTwoLoops) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, CallUnitigsTwoLoops) {
+TYPED_TEST(DeBruijnGraphTest, CallUnitigsOneSelfLoop) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A') };
         auto graph = build_graph<TypeParam>(k, sequences);
@@ -324,7 +324,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsTwoLoops) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, CallPathsFourLoops) {
+TYPED_TEST(DeBruijnGraphTest, CallPathsThreeSelfLoops) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A'),
                                              std::string(100, 'G'),
@@ -372,6 +372,48 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestTwoLoops) {
 
         EXPECT_EQ(3u, contigs.size());
     }
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmers) {
+    std::string sequence = "GCAAATAAC";
+    auto graph = build_graph<TypeParam>(3, { sequence });
+
+    size_t num_kmers = 0;
+    graph->call_sequences([&](const auto &contig) { num_kmers += contig.size() - 2; });
+
+    EXPECT_EQ(sequence.size() - 2, num_kmers);
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallUnitigsUniqueKmersCycle) {
+    size_t k = 4;
+    std::string sequence = "AAACCCGGGTTTAA";
+    auto graph = build_graph<TypeParam>(k, { sequence });
+
+    size_t num_unitigs = 0;
+    size_t num_kmers = 0;
+    graph->call_unitigs([&](const auto &contig) {
+        num_unitigs++;
+        num_kmers += contig.size() - k + 1;
+    });
+
+    EXPECT_EQ(1u, num_unitigs);
+    EXPECT_EQ(sequence.size() - k + 1, num_kmers);
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmersCycle) {
+    size_t k = 4;
+    std::string sequence = "AAACCCGGGTTTAAA";
+    auto graph = build_graph<TypeParam>(k, { sequence });
+
+    size_t num_contigs = 0;
+    size_t num_kmers = 0;
+    graph->call_sequences([&](const auto &contig) {
+        num_contigs++;
+        num_kmers += contig.size() - k + 1;
+    });
+
+    EXPECT_EQ(1u, num_contigs);
+    EXPECT_EQ(sequence.size() - k + 1, num_kmers);
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
@@ -731,6 +773,53 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
     graph->call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
 
     EXPECT_EQ(unitigs, obs_unitigs);
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallUnitigsCross) {
+    // AATTT - ATTTT           TTTAA - TTAAA
+    //               > TTTTA <
+    // GGTTT - GTTTT           TTTAG - TTAGG
+
+    // build graph from k-mers added in different order
+    for (const auto &sequences : {
+        std::vector<std::string>({ "AATTTTAAA",
+                                   "GGTTTTAGG", }),
+        std::vector<std::string>({ "GGTTTTAGG",
+                                   "AATTTTAAA", }),
+        std::vector<std::string>({ "TTTTAAA",
+                                   "TTTTAGG",
+                                   "AATTTTA",
+                                   "GGTTTTA", }),
+        std::vector<std::string>({ "AATTTTA",
+                                   "GGTTTTA",
+                                   "TTTTAAA",
+                                   "TTTTAGG", }) }) {
+        auto graph = build_graph_batch<TypeParam>(5, sequences);
+
+        std::multiset<std::string> unitigs {
+            "AATTTT",
+            "GGTTTT",
+            "TTTTA",
+            "TTTAAA",
+            "TTTAGG",
+        };
+
+        for (size_t t = 0; t <= 2; ++t) {
+            std::multiset<std::string> obs_unitigs;
+            graph->call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, t);
+            EXPECT_EQ(unitigs, obs_unitigs) << t;
+        }
+
+        std::multiset<std::string> long_unitigs {
+            "TTTTA",
+        };
+
+        for (size_t t = 3; t <= 10; ++t) {
+            std::multiset<std::string> obs_long_unitigs;
+            graph->call_unitigs([&](const auto &unitig) { obs_long_unitigs.insert(unitig); }, 3);
+            EXPECT_EQ(long_unitigs, obs_long_unitigs);
+        }
+    }
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoops) {

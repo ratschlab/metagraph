@@ -65,7 +65,8 @@ suffix_seeder(const DeBruijnGraph &graph,
                size_t clipping = 0,
                bool orientation = false);
 
-template <typename NodeType, class Compare = typename Alignment<NodeType>::ColumnCompare>
+template <typename NodeType,
+          class Compare = std::less<typename Alignment<NodeType>::Column>>
 void default_extender(const DeBruijnGraph &graph,
                       const Alignment<NodeType> &path,
                       std::vector<Alignment<NodeType>> *next_paths, // output vector
