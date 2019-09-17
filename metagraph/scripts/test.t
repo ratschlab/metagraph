@@ -1,4 +1,3 @@
-
   $ #!/usr/bin/env bash
   $ file="$TESTDIR/../tests/data/transcripts_1000.fa"
   $ file_small="$TESTDIR/../tests/data/transcripts_100.fa"
@@ -322,7 +321,7 @@
   ========================================================
 
   $ $exe transform_anno --anno-type column -o test_annotation test_annotation.column.annodbg
-  TODO
+  Skipping conversion: same input and target type: column
   $ $exe stats -a test_annotation.column.annodbg
   Statistics for annotation test_annotation.column.annodbg
   =================== ANNOTATION STATS ===================
@@ -444,7 +443,7 @@
   ========================================================
 
   $ $exe transform_anno --anno-type row --sparse -o test_annotation test_annotation.row.annodbg
-  TODO
+  Skipping conversion: same input and target type: row
   $ $exe stats -a test_annotation.row.annodbg
   Statistics for annotation test_annotation.row.annodbg
   =================== ANNOTATION STATS ===================
