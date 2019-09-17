@@ -26,4 +26,5 @@ metagraph/build*
 *.pyc
 *.un~
 tags
+*.t.err
 
