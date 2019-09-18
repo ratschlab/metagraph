@@ -2,16 +2,12 @@
 #include "utils.hpp"
 
 
-DBGWeights::DBGWeights(const DeBruijnGraph &graph) : graph_(graph) {}
-
-DBGWeights::DBGWeights(const DeBruijnGraph &graph, size_t bits_per_count)
-      : graph_(graph),
-        weights_(sdsl::int_vector<>(graph.num_nodes() + 1, 0, bits_per_count)),
+DBGWeights::DBGWeights(uint64_t num_nodes, size_t bits_per_count)
+      : weights_(sdsl::int_vector<>(num_nodes, 0, bits_per_count)),
         max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
-DBGWeights::DBGWeights(const DeBruijnGraph &graph, sdsl::int_vector<>&& weights)
-      : graph_(graph),
-        weights_(std::move(weights)),
+DBGWeights::DBGWeights(sdsl::int_vector<>&& weights)
+      : weights_(std::move(weights)),
         max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
 void DBGWeights::insert_node(node_index i) {
@@ -31,6 +27,17 @@ void DBGWeights::insert_node(node_index i) {
 
 void DBGWeights::insert_nodes(bitmap *nodes_inserted) {
     utils::insert(&weights_, *nodes_inserted, 0);
+}
+
+void DBGWeights::remove_unmasked_weights(const bitmap &mask) {
+    assert(mask.size() == weights_.size());
+
+    node_index curpos = 1;
+    for (node_index i = 1; i < mask.size(); ++i) {
+        if (mask[i])
+            weights_[curpos++] = weights_[i];
+    }
+    weights_.resize(curpos);
 }
 
 void DBGWeights::set_weights(sdsl::int_vector<>&& weights) {
@@ -65,8 +72,13 @@ void DBGWeights::serialize(const std::string &filename_base) const {
     weights_.serialize(outstream);
 }
 
-bool DBGWeights::is_compatible(bool verbose) const {
-    if (graph_.num_nodes() + 1 == weights_.size())
+bool DBGWeights::is_compatible(const SequenceGraph &graph, bool verbose) const {
+    if (!dynamic_cast<const DeBruijnGraph*>(&graph)) {
+        std::cerr << "ERROR: DBGWeights can be used only with de Bruijn graph"
+                  << std::endl;
+    }
+
+    if (graph.num_nodes() + 1 == weights_.size())
         return true;
 
     if (verbose)

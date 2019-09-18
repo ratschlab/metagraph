@@ -74,11 +74,12 @@ class SequenceGraph {
         virtual ~GraphExtension() {}
         virtual bool load(const std::string &filename_base) = 0;
         virtual void serialize(const std::string &filename_base) const = 0;
-        virtual bool is_compatible(bool verbose = true) const = 0;
+        virtual bool is_compatible(const SequenceGraph &graph, bool verbose = true) const = 0;
     };
 
     // TODO: improve interface: either prohibit or support
     //       properly multiple extensions of the same type.
+    //       Use GraphExtension::file_extension() or enum.
     void add_extension(std::shared_ptr<GraphExtension> extension);
 
     template <class ExtensionSubtype>
@@ -92,6 +93,17 @@ class SequenceGraph {
     }
 
     template <class ExtensionSubtype>
+    void remove_extension() {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        for (auto it = extensions_.begin(); it != extensions_.end(); ++it) {
+            if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(*it)) {
+                extensions_.erase(it);
+                return;
+            }
+        }
+    }
+
+    template <class ExtensionSubtype>
     void for_each(std::function<void(ExtensionSubtype &extension)> callback) {
         static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
         for (auto extension : extensions_) {
@@ -100,16 +112,16 @@ class SequenceGraph {
         }
     };
 
-    template <class ExtensionSubtype, class Derived>
-    bool load_extension(const Derived &graph, const std::string &filename) {
+    template <class ExtensionSubtype>
+    bool load_extension(const std::string &filename) {
         static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
-        auto extension = get_extension<ExtensionSubtype>();
-        if (!extension)
-            extension = std::make_shared<ExtensionSubtype>(graph);
+        remove_extension<ExtensionSubtype>();
+        auto extension = std::make_shared<ExtensionSubtype>();
 
         auto filename_base = utils::remove_suffix(filename, file_extension());
+
         if (extension->load(filename_base + file_extension())
-                  && extension->is_compatible()) {
+                && extension->is_compatible(*this)) {
             add_extension(extension);
             return true;
         }

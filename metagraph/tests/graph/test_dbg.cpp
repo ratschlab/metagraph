@@ -150,7 +150,7 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         };
         auto graph = build_graph<TypeParam>(k, sequences, false);
 
-        auto weights = std::make_shared<DBGWeights>(*graph, kBitsPerCount);
+        auto weights = std::make_shared<DBGWeights>(graph->num_nodes() + 1, kBitsPerCount);
         graph->add_extension(weights);
 
         for (const auto &sequence : sequences) {
