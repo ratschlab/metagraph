@@ -8,7 +8,6 @@
 #include "dbg_hash_ordered.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
-#include "node_weights.hpp"
 
 
 template <class Graph>

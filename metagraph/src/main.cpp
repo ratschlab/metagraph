@@ -1289,12 +1289,16 @@ int main(int argc, const char *argv[]) {
                     auto node_weights = graph->get_extension<DBGWeights>();
 
                     parse_sequences(files, *config, timer,
-                        [&node_weights](std::string&& seq) { node_weights->add_sequence(std::move(seq)); },
-                        [&node_weights](std::string&& kmer, uint32_t count) {
-                            node_weights->add_kmer(std::move(kmer), count);
+                        [&node_weights,&graph](std::string&& seq) {
+                            graph->map_to_nodes(seq, [&](auto node) { node_weights->add_weight(node, 1); });
                         },
-                        [&node_weights](const auto &loop) {
-                            loop([&node_weights](const auto &seq) { node_weights->add_sequence(std::move(seq)); });
+                        [&node_weights,&graph](std::string&& kmer, uint32_t count) {
+                            node_weights->add_weight(graph->kmer_to_node(kmer), count);
+                        },
+                        [&node_weights,&graph](const auto &loop) {
+                            loop([&node_weights,&graph](const auto &seq) {
+                                graph->map_to_nodes(seq, [&](auto node) { node_weights->add_weight(node, 1); });
+                            });
                         }
                     );
                 }
@@ -1382,12 +1386,16 @@ int main(int argc, const char *argv[]) {
                 node_weights->insert_nodes(inserted_edges.get());
 
                 parse_sequences(files, *config, timer,
-                    [&node_weights](std::string&& seq) { node_weights->add_sequence(std::move(seq)); },
-                    [&node_weights](std::string&& kmer, uint32_t count) {
-                        node_weights->add_kmer(std::move(kmer), count);
+                    [&node_weights,&graph](std::string&& seq) {
+                        graph->map_to_nodes(seq, [&](auto node) { node_weights->add_weight(node, 1); });
                     },
-                    [&node_weights](const auto &loop) {
-                        loop([&node_weights](const auto &seq) { node_weights->add_sequence(std::move(seq)); });
+                    [&node_weights,&graph](std::string&& kmer, uint32_t count) {
+                        node_weights->add_weight(graph->kmer_to_node(kmer), count);
+                    },
+                    [&node_weights,&graph](const auto &loop) {
+                        loop([&node_weights,&graph](const auto &seq) {
+                            graph->map_to_nodes(seq, [&](auto node) { node_weights->add_weight(node, 1); });
+                        });
                     }
                 );
             }

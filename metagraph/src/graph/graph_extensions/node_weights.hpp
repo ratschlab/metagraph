@@ -3,7 +3,6 @@
 
 #include <string>
 #include <memory>
-#include <vector>
 
 #include <sdsl/int_vector.hpp>
 
@@ -20,11 +19,7 @@ class DBGWeights : public DeBruijnGraph::GraphExtension {
     DBGWeights(const DeBruijnGraph &graph, size_t bits_per_count);
     DBGWeights(const DeBruijnGraph &graph, sdsl::int_vector<>&& weights);
 
-    void add_kmer(const std::string&& kmer, uint32_t count);
     void add_weight(node_index i, weight w);
-
-    void add_sequence(const std::string&& sequence,
-                      bitmap *nodes_inserted = nullptr);
 
     void insert_node(node_index i);
     void insert_nodes(bitmap *nodes_inserted);

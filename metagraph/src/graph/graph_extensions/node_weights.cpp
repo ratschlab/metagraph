@@ -14,18 +14,6 @@ DBGWeights::DBGWeights(const DeBruijnGraph &graph, sdsl::int_vector<>&& weights)
         weights_(std::move(weights)),
         max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
-void DBGWeights::add_kmer(const std::string&& kmer, uint32_t count) {
-    auto node = graph_.kmer_to_node(kmer);
-    add_weight(node, count);
-}
-
-void DBGWeights::add_sequence(const std::string&& sequence, bitmap *nodes_inserted) {
-    if (nodes_inserted)
-        insert_nodes(nodes_inserted);
-
-    graph_.map_to_nodes(sequence, [&](auto node) { add_weight(node, 1); });
-}
-
 void DBGWeights::insert_node(node_index i) {
     if (weights_.empty()) {
         weights_.resize(1);

@@ -154,7 +154,7 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         graph->add_extension(weights);
 
         for (const auto &sequence : sequences) {
-            weights->add_sequence(std::move(sequence));
+            graph->map_to_nodes(sequence, [&](auto node) { weights->add_weight(node, 1); });
         }
 
         auto node_idx = graph->kmer_to_node(std::string(k, 'A'));
