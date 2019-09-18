@@ -482,23 +482,6 @@ build_masked_graph_extender(const AnnotatedDBG &anno_graph,
 }
 
 
-MapExtendSeederBuilder<DeBruijnGraph::node_index>
-build_breakpoint_seeder_builder(const DeBruijnGraph &background) {
-    return [&](const std::vector<node_index> &nodes,
-               const DeBruijnGraph &foreground) {
-        return build_mem_seeder<node_index>(
-            nodes,
-            [&background](node_index node, const DeBruijnGraph &foreground) {
-                assert(node != DeBruijnGraph::npos);
-                assert(foreground.in_graph(node));
-                assert(background.in_graph(node));
-                return background.outdegree(node) > foreground.outdegree(node);
-            },
-            foreground
-        );
-    };
-}
-
 Extender<DeBruijnGraph::node_index>
 build_background_graph_extender(const DeBruijnGraph &background,
                                 Extender<DeBruijnGraph::node_index>&& extender) {

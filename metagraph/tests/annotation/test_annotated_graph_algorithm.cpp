@@ -391,11 +391,8 @@ void test_align_to_masked_graph(size_t pool_size = 0) {
     Cigar::initialize_opt_table(graph->alphabet());
 
     std::vector<DBGAligner<>> aligners {
-        DBGAligner<>(*graph, config),
-        DBGAligner<>(*graph,
-                     config,
-                     suffix_seeder<DeBruijnGraph::node_index>,
-                     annotated_graph_algorithm::build_masked_graph_extender(*anno_graph))
+        DBGAligner<>{ *graph, config },
+        DBGAligner<>{ *graph, config, annotated_graph_algorithm::build_masked_graph_extender(*anno_graph) }
     };
 
     size_t j = 0;
@@ -496,7 +493,7 @@ void test_find_variants(size_t pool_size = 0) {
                 obs_labels.insert(vlabels.begin(), vlabels.end());
             },
             DBGAlignerConfig(score_matrix),
-            default_extender<DeBruijnGraph::node_index>,
+            default_extender<>,
             &thread_pool
         );
 
@@ -529,7 +526,6 @@ void test_breakpoint_seeder() {
         const std::vector<std::string> labels { "A", "B", "C" };
 
         auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
-        auto& background = dynamic_cast<const DeBruijnGraph&>(anno_graph->get_graph());
         auto foreground = build_masked_graph(*anno_graph, ingroup, outgroup);
 
         Cigar::initialize_opt_table(foreground.get_graph().alphabet());
@@ -541,18 +537,12 @@ void test_breakpoint_seeder() {
         foreground.call_unitigs([&](auto unitig) {
             EXPECT_EQ(sequences[0], unitig);
 
-            std::vector<DeBruijnGraph::node_index> nodes;
-            foreground.map_to_nodes(unitig, [&](auto i) { nodes.push_back(i); });
-            auto seeds = annotated_graph_algorithm::build_breakpoint_seeder_builder(background)(
-                nodes, foreground
-            )(
-                foreground,
-                config,
-                &*unitig.begin(),
-                &*unitig.end(),
-                0,
-                false
-            );
+            annotated_graph_algorithm::BreakpointSeeder<> seeder(foreground, config);
+            seeder.initialize(unitig, false);
+            auto seeds = seeder(&*unitig.begin(),
+                                &*unitig.end(),
+                                0,
+                                false);
 
             EXPECT_EQ(1u, seeds.size());
             EXPECT_EQ("TCATTGC", seeds.front().get_sequence());
@@ -629,7 +619,7 @@ void test_find_variants_indel(size_t pool_size = 0) {
                 obs_labels.insert(vlabels.begin(), vlabels.end());
             },
             DBGAlignerConfig(score_matrix),
-            default_extender<DeBruijnGraph::node_index>,
+            default_extender<>,
             &thread_pool
         );
 

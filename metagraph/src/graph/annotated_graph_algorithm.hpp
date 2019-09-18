@@ -69,19 +69,33 @@ void call_breakpoints(const DeBruijnGraph &graph,
 Extender<DeBruijnGraph::node_index>
 build_masked_graph_extender(const AnnotatedDBG &anno_graph,
                             double seed_label_discovery_fraction = 1.0,
-                            Extender<DeBruijnGraph::node_index>&& extender
-                                = default_extender<DeBruijnGraph::node_index>);
+                            Extender<DeBruijnGraph::node_index>&& extender = default_extender<>);
 
 // Seed until the first breakpoint, relative to the given foreground graph
-MapExtendSeederBuilder<DeBruijnGraph::node_index>
-build_breakpoint_seeder_builder(const DeBruijnGraph &foreground);
+template <typename NodeType = typename DeBruijnGraph::node_index>
+class BreakpointSeeder : public MEMSeeder<NodeType> {
+  public:
+    BreakpointSeeder(const DeBruijnGraph &foreground, const DBGAlignerConfig &config)
+          : MEMSeeder<NodeType>(
+                foreground,
+                config,
+                std::make_unique<bitmap_lazy>(
+                    [&, background = dynamic_cast<const MaskedDeBruijnGraph*>(&foreground)](auto i) {
+                        assert(background);
+                        assert(i != DeBruijnGraph::npos);
+                        return background->get_graph().outdegree(i)
+                            > foreground.outdegree(i);
+                    },
+                    foreground.num_nodes() + 1
+                )
+            ) {}
+};
 
 // Given a seed, only extend on the background graph, relative to the
 // given foreground graph
 Extender<DeBruijnGraph::node_index>
 build_background_graph_extender(const DeBruijnGraph &foreground,
-                                Extender<DeBruijnGraph::node_index>&& extender
-                                    = default_extender<DeBruijnGraph::node_index>);
+                                Extender<DeBruijnGraph::node_index>&& extender = default_extender<>);
 
 template <class AlignmentCompare = std::less<Alignment<DeBruijnGraph::node_index>>,
           class ColumnCompare = std::less<typename Alignment<DeBruijnGraph::node_index>::Column>>
@@ -89,36 +103,26 @@ void call_variants(const DeBruijnGraph &foreground,
                    const AnnotatedDBG &anno_graph,
                    const VariantLabelCallback &callback,
                    const DBGAlignerConfig &config,
-                   const Extender<DeBruijnGraph::node_index> &extender
-                       = default_extender<DeBruijnGraph::node_index>,
+                   const Extender<DeBruijnGraph::node_index> &extender = default_extender<>,
                    ThreadPool *thread_pool = nullptr,
                    const std::function<bool()> &terminate = []() { return false; }) {
     assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
+    assert(dynamic_cast<const MaskedDeBruijnGraph*>(&foreground));
 
     const auto &background = dynamic_cast<const DeBruijnGraph&>(anno_graph.get_graph());
-
-    if (&foreground == &background)
-        return;
 
     auto process_path = [&](std::string sequence) {
         if (terminate())
             return;
 
-        DBGAligner<AlignmentCompare, ColumnCompare> variant_aligner(
+        DBGAligner<BreakpointSeeder<>, AlignmentCompare, ColumnCompare> variant_aligner(
             foreground,
             config,
-            suffix_seeder<DeBruijnGraph::node_index>, // extend_mapping ignores this anyway
             build_background_graph_extender(background,
                                             Extender<DeBruijnGraph::node_index>(extender))
         );
 
-        auto paths = variant_aligner.extend_mapping_forward_and_reverse_complement(
-            sequence,
-            0,
-            build_breakpoint_seeder_builder(background)
-        );
-
-        assert(paths.get_query() == sequence);
+        auto paths = variant_aligner.align(sequence, 0);
 
         for (auto&& path : paths) {
             if (path.is_exact_match())
