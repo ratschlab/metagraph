@@ -2288,7 +2288,7 @@ int main(int argc, const char *argv[]) {
 
             if (config->anno_type == input_anno_type) {
                 std::cerr << "Skipping conversion: same input and target type: "
-                          << Config::annotype_to_string(Config::RowCompressed)
+                          << Config::annotype_to_string(config->anno_type)
                           << std::endl;
                 exit(1);
             }
