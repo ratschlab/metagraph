@@ -159,6 +159,20 @@ for i in {20..1}; do
 done
 
 
+for i in {20..1}; do
+    N=$((750 * i));
+    bsub -J "to_rbfish_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/rows_to_rbfish_subset_${N}.lsf \
+         -W 20:00 \
+         -n 1 -R "rusage[mem=$((N * 17))] span[hosts=1]" \
+        "/usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA transform_anno -v \
+                --anno-type rbfish \
+                -o ~/metagenome/data/BIGSI/subsets/annotation_subset_${N} \
+                ~/metagenome/data/BIGSI/subsets/annotation_subset_${N}.row.annodbg \
+                2>&1"; \
+done
+
+
 for i in {1..20}; do
     N=$((750 * i));
     bsub -J "to_brwt_${N}" \
@@ -217,6 +231,32 @@ for i in {1..20}; do
         "/usr/bin/time -v bigsi build \
                 -f ~/projects/projects2014-metagenome/projects/BIGSI/bigsi_subsets/files_${N}.txt \
                 -c ~/projects/projects2014-metagenome/projects/BIGSI/bigsi_config.yaml \
+                2>&1"; \
+done
+```
+
+## Generate COBS index
+```bash
+for i in {1..20}; do
+    N=$((750 * i));
+    mkdir -r "/cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/data/subset_${N}"
+    for f in $(cat subsets/files_${N}.txt); do
+        filename="$(basename $f)";
+        ln -s "$f" "/cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/data/subset_${N}/${filename}";
+    done
+done
+
+
+for i in {1..20}; do
+    N=$((750 * i));
+    bsub -J "cobs_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/cobs/build_cobs_compact_h7_fpr1_${N}.lsf \
+         -W 24:00 \
+         -n 10 -R "rusage[mem=11000] span[hosts=1]" \
+        "/usr/bin/time -v ~/stuff/cobs/build/src/cobs compact-construct \
+                -k 31 -c -f 0.01 -T 10 --num-hashes 7 \
+                /cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/data/subset_${N}/ \
+                /cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/cobs_index_h7_fpr1_${N}.cobs_compact \
                 2>&1"; \
 done
 ```
