@@ -2,19 +2,19 @@
 #include "utils.hpp"
 
 
-DBGWeights::DBGWeights(uint64_t num_nodes, size_t bits_per_count)
+NodeWeights::NodeWeights(uint64_t num_nodes, size_t bits_per_count)
       : weights_(sdsl::int_vector<>(num_nodes, 0, bits_per_count)),
         max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
-DBGWeights::DBGWeights(sdsl::int_vector<>&& weights)
+NodeWeights::NodeWeights(sdsl::int_vector<>&& weights)
       : weights_(std::move(weights)),
         max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
-void DBGWeights::insert_nodes(const bitmap &nodes_inserted) {
+void NodeWeights::insert_nodes(const bitmap &nodes_inserted) {
     utils::insert(&weights_, nodes_inserted, 0);
 }
 
-void DBGWeights::remove_nodes(const bitmap &nodes_removed) {
+void NodeWeights::remove_nodes(const bitmap &nodes_removed) {
     assert(nodes_removed.size() == weights_.size());
 
     node_index curpos = 1;
@@ -25,7 +25,7 @@ void DBGWeights::remove_nodes(const bitmap &nodes_removed) {
     weights_.resize(curpos);
 }
 
-bool DBGWeights::DBGWeights::load(const std::string &filename_base) {
+bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
     const auto weights_filename
         = utils::remove_suffix(filename_base, kWeightsExtension)
                                         + kWeightsExtension;
@@ -45,7 +45,7 @@ bool DBGWeights::DBGWeights::load(const std::string &filename_base) {
     }
 }
 
-void DBGWeights::serialize(const std::string &filename_base) const {
+void NodeWeights::serialize(const std::string &filename_base) const {
     const auto weights_filename
         = utils::remove_suffix(filename_base, kWeightsExtension)
                                         + kWeightsExtension;
@@ -54,12 +54,9 @@ void DBGWeights::serialize(const std::string &filename_base) const {
     weights_.serialize(outstream);
 }
 
-bool DBGWeights::is_compatible(const SequenceGraph &graph, bool verbose) const {
-    if (!dynamic_cast<const DeBruijnGraph*>(&graph)) {
-        std::cerr << "ERROR: DBGWeights can be used only with de Bruijn graph"
-                  << std::endl;
-    }
-
+bool NodeWeights::is_compatible(const SequenceGraph &graph, bool verbose) const {
+    // nodes plus dummy npos
+    // TODO: fix this by implementing SequenceGraph::max_index()
     if (graph.num_nodes() + 1 == weights_.size())
         return true;
 
@@ -69,7 +66,7 @@ bool DBGWeights::is_compatible(const SequenceGraph &graph, bool verbose) const {
     return false;
 }
 
-void DBGWeights::add_weight(node_index i, weight w) {
+void NodeWeights::add_weight(node_index i, weight w) {
     assert(i < weights_.size());
     uint64_t old_weight = weights_[i];
     assert(old_weight <= max_weight_);

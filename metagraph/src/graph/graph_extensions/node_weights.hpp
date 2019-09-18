@@ -10,16 +10,16 @@
 #include "bitmap.hpp"
 
 
-class DBGWeights : public DeBruijnGraph::GraphExtension {
+class NodeWeights : public SequenceGraph::GraphExtension {
   public:
-    using node_index = typename DeBruijnGraph::node_index;
+    using node_index = typename SequenceGraph::node_index;
     using weight = typename sdsl::int_vector<>::value_type;
 
-    DBGWeights() {}
+    NodeWeights() {}
     // initialize zero weights
-    DBGWeights(uint64_t num_nodes, size_t bits_per_count);
+    NodeWeights(uint64_t num_nodes, size_t bits_per_count);
     // initialize weights from existing vector
-    DBGWeights(sdsl::int_vector<>&& weights);
+    NodeWeights(sdsl::int_vector<>&& weights);
 
     inline weight operator[](node_index i) const {
         assert(i < weights_.size());
