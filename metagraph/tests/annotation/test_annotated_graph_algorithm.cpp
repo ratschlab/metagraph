@@ -8,8 +8,7 @@
 
 
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
-void test_call_significant_indices(double density_cutoff,
-                                   double outlabel_mixture) {
+void test_call_significant_indices(double density_cutoff, double outlabel_mixture) {
     const std::vector<std::string> ingroup { "B", "C" };
     const std::vector<std::string> outgroup { "A" };
 
@@ -47,46 +46,6 @@ void test_call_significant_indices(double density_cutoff,
     }
 }
 
-template <class Graph, class Annotation = annotate::ColumnCompressed<>>
-void test_call_significant_indices_lazy(double density_cutoff,
-                                        double outlabel_mixture) {
-    const std::vector<std::string> ingroup { "B", "C" };
-    const std::vector<std::string> outgroup { "A" };
-
-    for (size_t k = 3; k < 15; ++k) {
-        const std::vector<std::string> sequences {
-            std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "G"
-        };
-        const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
-
-        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
-
-        std::unordered_set<std::string> obs_labels;
-        const std::unordered_set<std::string> ref { "B", "C", "D" };
-
-        auto masked_dbg = build_masked_graph_lazy(*anno_graph,
-                                                  ingroup,
-                                                  outgroup,
-                                                  density_cutoff,
-                                                  outlabel_mixture);
-        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
-
-        masked_dbg.call_nodes(
-            [&](const auto &index) {
-                auto cur_labels = anno_graph->get_labels(index);
-
-                obs_labels.insert(cur_labels.begin(), cur_labels.end());
-            }
-        );
-
-        EXPECT_EQ(ref, obs_labels) << k << " " << density_cutoff << " " << outlabel_mixture;
-    }
-}
-
 
 
 template <typename GraphAnnotationPair>
@@ -98,13 +57,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, CallSignificantIndices) {
     for (double d = 0.0; d <= 1.0; d += 0.05) {
         test_call_significant_indices<typename TypeParam::first_type,
                                       typename TypeParam::second_type>(0.0, d);
-    }
-}
-
-TYPED_TEST(MaskedDeBruijnGraphAlgorithm, CallSignificantIndicesLazy) {
-    for (double d = 0.0; d <= 1.0; d += 0.05) {
-        test_call_significant_indices_lazy<typename TypeParam::first_type,
-                                           typename TypeParam::second_type>(0.0, d);
     }
 }
 

@@ -55,33 +55,14 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        const std::vector<std::string> &outgroup,
                                        double outlabel_mixture,
                                        double lazy_evaluation_density_cutoff) {
-    return MaskedDeBruijnGraph(
-        std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-        annotated_graph_algorithm::mask_nodes_by_label(
-            anno_graph,
-            ingroup, outgroup,
-            [outlabel_mixture, in_size = ingroup.size()](size_t incount,
-                                                         size_t outcount) {
-                return incount == in_size
-                    && outcount <= outlabel_mixture * (incount + outcount);
-            },
-            lazy_evaluation_density_cutoff
-        )
-    );
-}
+    auto in_size = ingroup.size();
 
-MaskedDeBruijnGraph build_masked_graph_lazy(const AnnotatedDBG &anno_graph,
-                                            const std::vector<std::string> &ingroup,
-                                            const std::vector<std::string> &outgroup,
-                                            double outlabel_mixture,
-                                            double lazy_evaluation_density_cutoff) {
     return MaskedDeBruijnGraph(
         std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
         annotated_graph_algorithm::mask_nodes_by_label(
             anno_graph,
             ingroup, outgroup,
-            [outlabel_mixture, in_size = ingroup.size()](UInt64Callback incounter,
-                                                         UInt64Callback outcounter) {
+            [=](LabelCountCallback incounter, LabelCountCallback outcounter) {
                 uint64_t incount = incounter();
                 if (incount != in_size)
                     return false;
