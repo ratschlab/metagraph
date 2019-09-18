@@ -593,41 +593,25 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
         std::cout << timer.elapsed() << "sec" << std::endl;
 }
 
-DBGAligner<>::DBGQueryAlignment
-align_sequences(const DeBruijnGraph &graph,
-                const Config &config,
-                const std::string &query,
-                const AnnotatedDBG *anno_graph = nullptr) {
-    Seeder<DeBruijnGraph::node_index> seeder = suffix_seeder<DeBruijnGraph::node_index>;
-
+std::unique_ptr<IDBGAligner>
+build_aligner(const DeBruijnGraph &graph,
+              const Config &config,
+              const AnnotatedDBG *anno_graph = nullptr) {
     auto extender = anno_graph
         ? annotated_graph_algorithm::build_masked_graph_extender(*anno_graph)
-        : default_extender<DeBruijnGraph::node_index>;
+        : default_extender<>;
+
+    std::unique_ptr<IDBGAligner> aligner;
 
     if (config.alignment_seed_unimems) {
-        if (config.forward_and_reverse)
-            return DBGAligner<>(graph,
-                                DBGAlignerConfig(config, graph),
-                                seeder,
-                                extender).extend_mapping_forward_and_reverse_complement(
-                query,
-                config.alignment_min_path_score
-            );
-
-        std::vector<DeBruijnGraph::node_index> nodes;
-        graph.map_to_nodes_sequentially(
-            query.begin(),
-            query.end(),
-            [&](auto node) { nodes.emplace_back(node); }
-        );
-
-        seeder = build_unimem_seeder<DeBruijnGraph::node_index>(nodes, graph);
+        aligner.reset(new DBGAligner<UniMEMSeeder<>>(graph,
+                                                     DBGAlignerConfig(config, graph),
+                                                     extender));
+    } else {
+        aligner.reset(new DBGAligner<>(graph, DBGAlignerConfig(config, graph), extender));
     }
 
-    return DBGAligner<>(graph,
-                        DBGAlignerConfig(config, graph),
-                        seeder,
-                        extender).align(query, config.alignment_min_path_score);
+    return aligner;
 }
 
 void map_sequences_in_file(const std::string &file,
@@ -2716,13 +2700,12 @@ int main(int argc, const char *argv[]) {
                     json_writer.reset(builder.newStreamWriter());
                 }
 
+                auto aligner = build_aligner(*graph, *config, anno_graph.get());
+
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     thread_pool.enqueue([&](std::string query,
                                             std::string header) {
-                            auto paths = align_sequences(*graph,
-                                                         *config,
-                                                         query,
-                                                         anno_graph.get());
+                            auto paths = aligner->align(query);
 
                             std::vector<std::string> labels;
                             if (anno_graph.get()) {

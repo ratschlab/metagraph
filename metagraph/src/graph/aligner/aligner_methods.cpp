@@ -68,33 +68,32 @@ bool early_cutoff(const DeBruijnGraph &graph,
 
 
 template <typename NodeType>
-std::vector<Alignment<NodeType>> exact_seeder(const DeBruijnGraph &graph,
-                                              const DBGAlignerConfig &config,
-                                              const char *seed_begin,
-                                              const char *seed_end,
-                                              size_t clipping,
-                                              bool orientation) {
+std::vector<Alignment<NodeType>> ExactSeeder<NodeType>
+::operator()(const char *seed_begin,
+             const char *seed_end,
+             size_t clipping,
+             bool orientation) const {
     assert(seed_end >= seed_begin);
 
-    if (early_cutoff(graph, config, seed_begin, seed_end)
-            || config.max_seed_length < graph.get_k()
-            || static_cast<size_t>(seed_end - seed_begin) < graph.get_k())
+    if (early_cutoff(graph_, config_, seed_begin, seed_end)
+            || config_.max_seed_length < graph_.get_k()
+            || static_cast<size_t>(seed_end - seed_begin) < graph_.get_k())
         return {};
 
-    auto exact = graph.kmer_to_node(std::string(seed_begin,
-                                                seed_begin + graph.get_k()));
+    auto exact = graph_.kmer_to_node(std::string(seed_begin,
+                                                 seed_begin + graph_.get_k()));
 
     if (exact == DeBruijnGraph::npos)
         return {};
 
-    auto match_score = config.match_score(seed_begin,
-                                          seed_begin + graph.get_k());
+    auto match_score = config_.match_score(seed_begin,
+                                           seed_begin + graph_.get_k());
 
-    if (match_score <= config.min_cell_score)
+    if (match_score <= config_.min_cell_score)
         return {};
 
     return { Alignment<NodeType>(seed_begin,
-                                 seed_begin + graph.get_k(),
+                                 seed_begin + graph_.get_k(),
                                  { exact },
                                  match_score,
                                  clipping,
@@ -102,34 +101,32 @@ std::vector<Alignment<NodeType>> exact_seeder(const DeBruijnGraph &graph,
 }
 
 template <typename NodeType>
-std::vector<Alignment<NodeType>> suffix_seeder(const DeBruijnGraph &graph,
-                                               const DBGAlignerConfig &config,
-                                               const char *seed_begin,
-                                               const char *seed_end,
-                                               size_t clipping,
-                                               bool orientation) {
+std::vector<Alignment<NodeType>> SuffixSeeder<NodeType>
+::operator()(const char *seed_begin,
+             const char *seed_end,
+             size_t clipping,
+             bool orientation) const {
+    if (!dynamic_cast<const DBGSuccinct*>(&get_graph()))
+        throw std::runtime_error("Only implemented for DBGSuccinct");
+
+    const auto &graph = get_graph();
+    const auto &config = get_config();
+
     assert(seed_end >= seed_begin);
 
     if (early_cutoff(graph, config, seed_begin, seed_end))
         return {};
 
-    auto seeds = exact_seeder<NodeType>(graph,
-                                        config,
-                                        seed_begin,
-                                        seed_end,
-                                        clipping,
-                                        orientation);
+    auto seeds = exact_seeder_(seed_begin, seed_end, clipping, orientation);
 
     if (seeds.size())
         return seeds;
 
-    const auto* dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
-    if (!dbg_succ)
-        return {};
-
     auto max_seed_length = std::min(static_cast<size_t>(seed_end - seed_begin),
                                     std::min(config.max_seed_length, graph.get_k()));
-    dbg_succ->call_nodes_with_suffix(
+
+    const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(graph);
+    dbg_succ.call_nodes_with_suffix(
         seed_begin,
         seed_begin + max_seed_length,
         [&](auto node, uint64_t seed_length) {
@@ -138,7 +135,7 @@ std::vector<Alignment<NodeType>> suffix_seeder(const DeBruijnGraph &graph,
             auto match_score = config.match_score(seed_begin,
                                                   seed_begin + seed_length);
 
-            if (match_score > config.min_cell_score)
+            if (match_score > get_config().min_cell_score)
                 seeds.emplace_back(seed_begin,
                                    seed_begin + seed_length,
                                    std::vector<NodeType>{ node },
@@ -150,6 +147,8 @@ std::vector<Alignment<NodeType>> suffix_seeder(const DeBruijnGraph &graph,
         config.min_seed_length,
         config.max_num_seeds_per_locus
     );
+
+    assert(seeds.size() <= config.max_num_seeds_per_locus);
 
     return seeds;
 }
@@ -512,107 +511,6 @@ void default_extender(const DeBruijnGraph &graph,
     }
 }
 
-template <typename NodeType>
-Seeder<NodeType>
-build_mem_seeder(const std::vector<NodeType> &nodes,
-                 std::function<bool(NodeType,
-                                    const DeBruijnGraph &)> stop_matching,
-                 const DeBruijnGraph &graph) {
-    typedef Alignment<NodeType> DBGAlignment;
-
-    auto stop_matching_mapped = [stop_matching, &graph](auto node) {
-        return node == DeBruijnGraph::npos || stop_matching(node, graph);
-    };
-
-    return [nodes,
-            stop_matching_mapped](const DeBruijnGraph &graph,
-                                  const DBGAlignerConfig &config,
-                                  const char* seed_begin,
-                                  const char* seed_end,
-                                  size_t clipping,
-                                  bool orientation) -> std::vector<DBGAlignment> {
-        assert(seed_end >= seed_begin);
-
-        if (seed_begin == seed_end)
-            return {};
-
-        assert(nodes.begin() + clipping < nodes.end());
-        assert(static_cast<size_t>(seed_end - seed_begin) + clipping
-                   == nodes.size() + graph.get_k() - 1);
-
-        auto start = std::find_if(
-            nodes.begin() + clipping,
-            nodes.end(),
-            [](auto node) { return node != DeBruijnGraph::npos; }
-        );
-
-        if (start != nodes.begin() + clipping)
-            return {};
-
-        assert(*start != DeBruijnGraph::npos);
-        auto next = std::find_if(start, nodes.end(), stop_matching_mapped);
-
-        if (UNLIKELY(next != nodes.end() && *next != DeBruijnGraph::npos))
-            next++;
-
-        assert(next != start);
-
-        auto end_it = next == nodes.end()
-            ? seed_end
-            : seed_begin + (next - nodes.begin() - clipping) + graph.get_k() - 1;
-
-        assert(end_it >= seed_begin);
-        assert(end_it <= seed_end);
-        assert(static_cast<size_t>(end_it - seed_begin) >= graph.get_k());
-
-        auto match_score = config.match_score(seed_begin, end_it);
-
-        if (match_score <= config.min_cell_score)
-            return {};
-
-        return { DBGAlignment(seed_begin,
-                              end_it,
-                              std::vector<NodeType>(start, next),
-                              config.match_score(seed_begin, end_it),
-                              clipping,
-                              orientation) };
-    };
-}
-
-
-template <typename NodeType>
-Seeder<NodeType> build_unimem_seeder(const std::vector<NodeType> &nodes,
-                                     const DeBruijnGraph &graph) {
-    return build_mem_seeder<NodeType>(
-        nodes,
-        [](auto node, const DeBruijnGraph &graph) {
-            return graph.outdegree(node) > 1 || graph.indegree(node) > 1;
-        },
-        graph
-    );
-}
-
-
-template std::vector<Alignment<DeBruijnGraph::node_index>>
-exact_seeder<DeBruijnGraph::node_index>(
-    const DeBruijnGraph&,
-    const DBGAlignerConfig&,
-    const char*,
-    const char*,
-    size_t,
-    bool
-);
-
-template std::vector<Alignment<DeBruijnGraph::node_index>>
-suffix_seeder<DeBruijnGraph::node_index>(
-    const DeBruijnGraph&,
-    const DBGAlignerConfig&,
-    const char*,
-    const char*,
-    size_t,
-    bool
-);
-
 template void
 default_extender<DeBruijnGraph::node_index>(
     const DeBruijnGraph&,
@@ -624,16 +522,68 @@ default_extender<DeBruijnGraph::node_index>(
     typename Alignment<DeBruijnGraph::node_index>::score_t
 );
 
-template Seeder<DeBruijnGraph::node_index>
-build_mem_seeder(
-    const std::vector<DeBruijnGraph::node_index> &,
-    std::function<bool(DeBruijnGraph::node_index,
-                       const DeBruijnGraph &)>,
-    const DeBruijnGraph &
-);
+template <typename NodeType>
+std::vector<Alignment<NodeType>> MEMSeeder<NodeType>
+::operator()(const char *seed_begin,
+             const char *seed_end,
+             size_t clipping,
+             bool orientation) const {
+    if (query_nodes_.empty())
+        throw std::runtime_error("MEMSeeder uninitialized");
 
-template Seeder<DeBruijnGraph::node_index>
-build_unimem_seeder(
-    const std::vector<DeBruijnGraph::node_index> &,
-    const DeBruijnGraph &
-);
+    if (orientation != orientation_)
+        throw std::runtime_error("wrong orientation passed");
+
+    assert(seed_end >= seed_begin);
+
+    if (seed_begin == seed_end)
+        return {};
+
+    assert(static_cast<size_t>(seed_end - seed_begin) + clipping
+               == query_nodes_.size() + graph_.get_k() - 1);
+
+    auto start = std::find_if(
+        query_nodes_.begin() + clipping,
+        query_nodes_.end(),
+        [](auto node) { return node != DeBruijnGraph::npos; }
+    );
+
+    if (start != query_nodes_.begin() + clipping)
+        return {};
+
+    assert(*start != DeBruijnGraph::npos);
+    auto next = std::find_if(start,
+                             query_nodes_.end(),
+                             [&](auto i) { return i == DeBruijnGraph::npos
+                                               || (*is_mem_terminus_)[i]; });
+
+    if (UNLIKELY(next != query_nodes_.end() && *next != DeBruijnGraph::npos))
+        next++;
+
+    assert(next != start);
+
+    auto end_it = next == query_nodes_.end()
+        ? seed_end
+        : seed_begin + (next - query_nodes_.begin() - clipping) + graph_.get_k() - 1;
+
+    assert(end_it >= seed_begin);
+    assert(end_it <= seed_end);
+    assert(static_cast<size_t>(end_it - seed_begin) >= graph_.get_k());
+
+    auto match_score = config_.match_score(seed_begin, end_it);
+
+    if (match_score <= config_.min_cell_score)
+        return {};
+
+    return { Alignment<NodeType>(seed_begin,
+                                 end_it,
+                                 std::vector<NodeType>(start, next),
+                                 config_.match_score(seed_begin, end_it),
+                                 clipping,
+                                 orientation) };
+}
+
+template class ExactSeeder<DeBruijnGraph::node_index>;
+template class SuffixSeeder<DeBruijnGraph::node_index>;
+template class MEMSeeder<DeBruijnGraph::node_index>;
+template class UniMEMSeeder<DeBruijnGraph::node_index>;
