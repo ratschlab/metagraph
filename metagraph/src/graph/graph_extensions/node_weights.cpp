@@ -10,16 +10,16 @@ DBGWeights::DBGWeights(sdsl::int_vector<>&& weights)
       : weights_(std::move(weights)),
         max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
-void DBGWeights::insert_nodes(bitmap *nodes_inserted) {
-    utils::insert(&weights_, *nodes_inserted, 0);
+void DBGWeights::insert_nodes(const bitmap &nodes_inserted) {
+    utils::insert(&weights_, nodes_inserted, 0);
 }
 
-void DBGWeights::remove_unmasked_weights(const bitmap &mask) {
-    assert(mask.size() == weights_.size());
+void DBGWeights::remove_nodes(const bitmap &nodes_removed) {
+    assert(nodes_removed.size() == weights_.size());
 
     node_index curpos = 1;
-    for (node_index i = 1; i < mask.size(); ++i) {
-        if (mask[i])
+    for (node_index i = 1; i < nodes_removed.size(); ++i) {
+        if (!nodes_removed[i])
             weights_[curpos++] = weights_[i];
     }
     weights_.resize(curpos);
@@ -33,9 +33,11 @@ bool DBGWeights::DBGWeights::load(const std::string &filename_base) {
         std::ifstream instream(weights_filename, std::ios::binary);
         if (!instream.good())
             return false;
+
         weights_.load(instream);
         max_weight_ = (~uint64_t(0) >> (64 - weights_.width()));
         return true;
+
     } catch (...) {
         std::cerr << "ERROR: Cannot load graph weights from file "
                   << weights_filename << std::endl;

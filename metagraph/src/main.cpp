@@ -1383,7 +1383,7 @@ int main(int argc, const char *argv[]) {
 
             if (weighted) {
                 auto node_weights = graph->get_extension<DBGWeights>();
-                node_weights->insert_nodes(inserted_edges.get());
+                node_weights->insert_nodes(*inserted_edges);
 
                 parse_sequences(files, *config, timer,
                     [&node_weights,&graph](std::string&& seq) {

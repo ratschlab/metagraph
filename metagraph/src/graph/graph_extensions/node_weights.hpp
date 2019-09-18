@@ -28,9 +28,8 @@ class DBGWeights : public DeBruijnGraph::GraphExtension {
 
     void add_weight(node_index i, weight w);
 
-    void insert_nodes(bitmap *nodes_inserted);
-    // remove all weight elements except those marked with 1 in |mask|
-    void remove_unmasked_weights(const bitmap &mask);
+    void insert_nodes(const bitmap &nodes_inserted);
+    void remove_nodes(const bitmap &nodes_removed);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
