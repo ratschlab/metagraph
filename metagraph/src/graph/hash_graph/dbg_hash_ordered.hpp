@@ -128,7 +128,6 @@ class DBGHashOrdered : public DeBruijnGraph {
     static constexpr auto kExtension = ".orhashdbg";
 
     class DBGHashOrderedInterface : public DeBruijnGraph {
-        friend class DBGHashOrdered;
       public:
         virtual ~DBGHashOrderedInterface() {}
         virtual void serialize(std::ostream &out) const = 0;

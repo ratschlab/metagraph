@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <progress_bar.hpp>
-#include <sdsl/int_vector.hpp>
 
 #include "threading.hpp"
 #include "bitmap.hpp"
@@ -24,9 +23,9 @@ void SequenceGraph::add_extension(std::shared_ptr<GraphExtension> extension) {
     extensions_.push_back(extension);
 };
 
-void SequenceGraph::serialize_extensions(const std::string &filename_base) const {
+void SequenceGraph::serialize_extensions(const std::string &filename) const {
     for (auto extension : extensions_) {
-        extension->serialize(filename_base + file_extension());
+        extension->serialize(utils::remove_suffix(filename, file_extension()) + file_extension());
     }
 }
 
@@ -360,6 +359,7 @@ void DeBruijnGraph
             callback(i);
     });
 }
+
 
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);

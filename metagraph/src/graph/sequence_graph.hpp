@@ -5,8 +5,7 @@
 #include <string>
 #include <functional>
 #include <iostream>
-
-#include <sdsl/int_vector.hpp>
+#include <memory>
 
 class bit_vector_dyn;
 
