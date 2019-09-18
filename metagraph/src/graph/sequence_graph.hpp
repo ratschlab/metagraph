@@ -34,9 +34,6 @@ class SequenceGraph {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
-    virtual node_index kmer_to_node(const char *begin) const = 0;
-    virtual node_index kmer_to_node(const std::string &kmer) const = 0;
-
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence
