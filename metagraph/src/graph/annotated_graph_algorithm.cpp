@@ -69,46 +69,46 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     );
 
     if (columns) {
-        size_t dense_column_label_min_count = (anno_graph.get_graph().num_nodes() + 1)
+        size_t frequent_column_label_min_count = (anno_graph.get_graph().num_nodes() + 1)
                                                 * lazy_evaluation_label_frequency_cutoff;
 
-        // Partition labels into sparse and dense sets
-        std::vector<Label> labels_in_sparse,
-                           labels_in_dense,
-                           labels_out_sparse,
-                           labels_out_dense;
+        // Partition labels into frequent and infrequent sets
+        std::vector<Label> labels_in_infrequent,
+                           labels_in_frequent,
+                           labels_out_infrequent,
+                           labels_out_frequent;
 
         for (const auto &label_in : labels_in) {
             if (columns->get_column(label_in).num_set_bits()
-                    >= dense_column_label_min_count) {
-                labels_in_dense.push_back(label_in);
+                    >= frequent_column_label_min_count) {
+                labels_in_frequent.push_back(label_in);
             } else {
-                labels_in_sparse.push_back(label_in);
+                labels_in_infrequent.push_back(label_in);
             }
         }
 
         for (const auto &label_out : labels_out) {
             if (columns->get_column(label_out).num_set_bits()
-                    >= dense_column_label_min_count) {
-                labels_out_dense.push_back(label_out);
+                    >= frequent_column_label_min_count) {
+                labels_out_frequent.push_back(label_out);
             } else {
-                labels_out_sparse.push_back(label_out);
+                labels_out_infrequent.push_back(label_out);
             }
         }
 
-        // If at least one sparse label exists, construct a count vector to
+        // If at least one infrequent label exists, construct a count vector to
         // reduce calls to the annotator
-        if (labels_in_sparse.size() || labels_out_sparse.size()) {
+        if (labels_in_infrequent.size() || labels_out_infrequent.size()) {
             auto counts = fill_count_vector(anno_graph,
-                                            labels_in_sparse,
-                                            labels_out_sparse);
+                                            labels_in_infrequent,
+                                            labels_out_infrequent);
 
             // the width of counts is double, since it's both in and out counts interleaved
             auto width = counts.width() >> 1;
             size_t int_mask = (size_t(1) << width) - 1;
 
-            // Flatten count vector to bitmap if all labels were sparse
-            if (labels_in_dense.empty() && labels_out_dense.empty()) {
+            // Flatten count vector to bitmap if all labels were infrequent
+            if (labels_in_frequent.empty() && labels_out_frequent.empty()) {
                 auto mask_vector = std::make_unique<bitmap_vector>(
                     anno_graph.get_graph().num_nodes() + 1, false
                 );
@@ -124,27 +124,29 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                 return mask_vector;
             }
 
-            // If at least one of the labels was sparse, construct a lazy bitmap
+            // If at least one of the labels was frequent, construct a lazy bitmap
             // which references both the Annotator and the count vector
-            auto count_dense_in_labels = build_label_counter(anno_graph, labels_in_dense);
-            auto count_dense_out_labels = build_label_counter(anno_graph, labels_out_dense);
+            auto count_frequent_in_labels = build_label_counter(anno_graph,
+                                                                labels_in_frequent);
+            auto count_frequent_out_labels = build_label_counter(anno_graph,
+                                                                 labels_out_frequent);
             return std::make_unique<bitmap_lazy>([=](auto i) {
                 auto count = counts[i];
                 return is_node_in_mask(
-                    [&]() { return (count & int_mask) + count_dense_in_labels(i); },
-                    [&]() { return (count >> width) + count_dense_out_labels(i); }
+                    [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
+                    [&]() { return (count >> width) + count_frequent_out_labels(i); }
                 );
             }, counts.size());
         }
     }
 
-    // If none of the labels were sparse, or if the Annotator is not ColumnCompressed,
+    // If all of the labels were frequent, or if the Annotator is not ColumnCompressed,
     // construct a lazy bitmap
-    auto count_dense_in_labels = build_label_counter(anno_graph, labels_in);
-    auto count_dense_out_labels = build_label_counter(anno_graph, labels_out);
+    auto count_frequent_in_labels = build_label_counter(anno_graph, labels_in);
+    auto count_frequent_out_labels = build_label_counter(anno_graph, labels_out);
     return std::make_unique<bitmap_lazy>([=](auto i) {
-        return is_node_in_mask([&]() { return count_dense_in_labels(i); },
-                               [&]() { return count_dense_out_labels(i); });
+        return is_node_in_mask([&]() { return count_frequent_in_labels(i); },
+                               [&]() { return count_frequent_out_labels(i); });
     }, anno_graph.get_graph().num_nodes() + 1);
 }
 
