@@ -8,9 +8,11 @@
 
 #include <sdsl/int_vector.hpp>
 
-#include "utils.hpp"
-
 class bit_vector_dyn;
+
+namespace utils {
+    std::string remove_suffix(const std::string &str, const std::string &suffix);
+}
 
 
 class SequenceGraph {

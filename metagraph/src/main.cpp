@@ -780,7 +780,7 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (auto weights = graph.get_extension<DBGWeights<>>()) {
+    if (auto weights = graph.get_extension<DBGWeights>()) {
         double sum_weights = 0;
         uint64_t num_non_zero_weights = 0;
         graph.call_nodes([&](auto i) {
@@ -1143,7 +1143,7 @@ int main(int argc, const char *argv[]) {
                     sdsl::int_vector<> kmer_counts(0, 0, kBitsPerCount);
                     graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
                     graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
-                    graph->add_extension(std::make_shared<DBGWeights<>>(*graph, std::move(kmer_counts)));
+                    graph->add_extension(std::make_shared<DBGWeights>(*graph, std::move(kmer_counts)));
                 } else {
                     graph_data.initialize_boss(boss_graph.get());
                     graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
@@ -1285,8 +1285,8 @@ int main(int argc, const char *argv[]) {
                 );
 
                 if (config->count_kmers) {
-                    graph->add_extension(std::make_shared<DBGWeights<>>(*graph, kBitsPerCount));
-                    auto node_weights = graph->get_extension<DBGWeights<>>();
+                    graph->add_extension(std::make_shared<DBGWeights>(*graph, kBitsPerCount));
+                    auto node_weights = graph->get_extension<DBGWeights>();
 
                     parse_sequences(files, *config, timer,
                         [&node_weights](std::string&& seq) { node_weights->add_sequence(std::move(seq)); },
@@ -1329,7 +1329,7 @@ int main(int argc, const char *argv[]) {
 
             // load graph
             auto graph = load_critical_dbg(config->infbase);
-            bool weighted = graph->load_extension<DBGWeights<>>(*graph, config->infbase);
+            bool weighted = graph->load_extension<DBGWeights>(*graph, config->infbase);
 
             config->k = graph->get_k();
 
@@ -1378,7 +1378,7 @@ int main(int argc, const char *argv[]) {
             );
 
             if (weighted) {
-                auto node_weights = graph->get_extension<DBGWeights<>>();
+                auto node_weights = graph->get_extension<DBGWeights>();
                 node_weights->insert_nodes(inserted_edges.get());
 
                 parse_sequences(files, *config, timer,
@@ -1916,7 +1916,7 @@ int main(int argc, const char *argv[]) {
             if ((config->min_count > 1
                         || config->max_count < std::numeric_limits<unsigned int>::max()
                         || config->min_unitig_median_kmer_abundance != 1)
-                    && !graph->load_extension<DBGWeights<>>(*graph, files.at(0))) {
+                    && !graph->load_extension<DBGWeights>(*graph, files.at(0))) {
                 std::cerr << "ERROR: Cannot load weighted graph from "
                           << files.at(0) << std::endl;
                 exit(1);
@@ -1924,7 +1924,7 @@ int main(int argc, const char *argv[]) {
 
             if (config->min_count > 1
                     || config->max_count < std::numeric_limits<unsigned int>::max()) {
-                auto node_weights = graph->get_extension<DBGWeights<>>();
+                auto node_weights = graph->get_extension<DBGWeights>();
                 assert(node_weights.get());
 
                 graph = std::make_shared<MaskedDeBruijnGraph>(graph,
@@ -1933,7 +1933,7 @@ int main(int argc, const char *argv[]) {
             }
 
             if (config->min_unitig_median_kmer_abundance == 0) {
-                auto node_weights = graph->get_extension<DBGWeights<>>();
+                auto node_weights = graph->get_extension<DBGWeights>();
                 assert(node_weights.get());
 
                 config->min_unitig_median_kmer_abundance
@@ -1964,7 +1964,7 @@ int main(int argc, const char *argv[]) {
             // and make it call proper unitigs even if it contains redundant dummy k-mers.
 
             if (config->min_unitig_median_kmer_abundance != 1) {
-                auto node_weights = graph->get_extension<DBGWeights<>>();
+                auto node_weights = graph->get_extension<DBGWeights>();
                 assert(node_weights.get());
 
                 if (config->verbose)
@@ -1999,7 +1999,7 @@ int main(int argc, const char *argv[]) {
                 std::shared_ptr<DeBruijnGraph> graph;
 
                 graph = load_critical_dbg(file);
-                graph->load_extension<DBGWeights<>>(*graph, config->infbase);
+                graph->load_extension<DBGWeights>(*graph, config->infbase);
 
                 std::cout << "Statistics for graph " << file << std::endl;
 

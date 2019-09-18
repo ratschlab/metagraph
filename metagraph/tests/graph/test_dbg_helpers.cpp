@@ -17,11 +17,9 @@ build_graph(uint64_t k,
             const std::vector<std::string> &sequences,
             bool canonical) {
     std::shared_ptr<DeBruijnGraph> graph { new Graph(k, canonical) };
-
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);
     }
-
     return graph;
 }
 
@@ -35,11 +33,9 @@ build_graph<DBGHashString>(uint64_t k,
             const std::vector<std::string> &sequences,
             bool) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGHashString(k) };
-
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);
     }
-
     return graph;
 }
 
@@ -61,13 +57,10 @@ build_graph<DBGSuccinct>(uint64_t k,
                          const std::vector<std::string> &sequences,
                          bool canonical) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(k, canonical) };
-
     for (const auto &sequence : sequences) {
         graph->add_sequence(std::string(sequence));
     }
-
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
-
     return graph;
 }
 
