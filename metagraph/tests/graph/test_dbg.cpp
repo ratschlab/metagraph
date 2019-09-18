@@ -84,6 +84,52 @@ TYPED_TEST(DeBruijnGraphTest, Serialize) {
     EXPECT_FALSE(graph.find("GCTAAAAATATATATATTAAAAAAACATG"));
 }
 
+template <class Graph>
+void test_graph_serialization(size_t k_max) {
+    for (size_t k = 2; k <= k_max; ++k) {
+        std::vector<std::string> data = { std::string(k, 'A'),
+                                          std::string(k, 'C') + 'G', };
+        {
+            auto graph = build_graph<Graph>(k, data);
+
+            EXPECT_TRUE(graph->find(std::string(k, 'A')));
+            EXPECT_TRUE(graph->find(std::string(k, 'C')));
+            EXPECT_TRUE(graph->find(std::string(k - 1, 'C') + 'G'));
+            EXPECT_FALSE(graph->find(std::string(k, 'G')));
+
+            graph->serialize(test_dump_basename);
+        }
+        {
+            Graph graph(2);
+
+            ASSERT_TRUE(graph.load(test_dump_basename));
+
+            EXPECT_EQ(k, graph.get_k());
+
+            EXPECT_TRUE(graph.find(std::string(k, 'A')));
+            EXPECT_TRUE(graph.find(std::string(k, 'C')));
+            EXPECT_TRUE(graph.find(std::string(k - 1, 'C') + 'G'));
+            EXPECT_FALSE(graph.find(std::string(k, 'G')));
+        }
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, SerializeAnyK) {
+    test_graph_serialization<TypeParam>(31);
+}
+
+TEST(DBGHashString, SerializeAnyK) {
+    test_graph_serialization<DBGHashString>(200);
+}
+
+TEST(DBGHashOrdered, SerializeAnyK) {
+    test_graph_serialization<DBGHashOrdered>(256 / KmerExtractor2Bit::bits_per_char);
+}
+
+TEST(DBGSuccinct, SerializeAnyK) {
+    test_graph_serialization<DBGSuccinct>(256 / (KmerExtractor2Bit::bits_per_char + 1));
+}
+
 TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
     auto graph = build_graph<TypeParam>(20, {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
