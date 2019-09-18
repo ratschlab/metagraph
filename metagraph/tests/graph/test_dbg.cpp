@@ -150,23 +150,23 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         };
         auto graph = build_graph<TypeParam>(k, sequences, false);
 
-        auto weights = std::make_shared<NodeWeights>(graph->num_nodes() + 1, kBitsPerCount);
-        graph->add_extension(weights);
+        graph->add_extension(std::make_shared<NodeWeights>(graph->num_nodes() + 1, kBitsPerCount));
+        auto &weights = *graph->template get_extension<NodeWeights>();
 
         for (const auto &sequence : sequences) {
-            graph->map_to_nodes(sequence, [&](auto node) { weights->add_weight(node, 1); });
+            graph->map_to_nodes(sequence, [&](auto node) { weights.add_weight(node, 1); });
         }
 
         auto node_idx = graph->kmer_to_node(std::string(k, 'A'));
-        EXPECT_EQ(100u - k + 1, (*weights)[node_idx]);
+        EXPECT_EQ(100u - k + 1, weights[node_idx]);
 
         node_idx = graph->kmer_to_node(std::string(k, 'C'));
-        EXPECT_EQ(50u - k + 1, (*weights)[node_idx]);
+        EXPECT_EQ(50u - k + 1, weights[node_idx]);
 
         node_idx = graph->kmer_to_node(std::string(k, 'G'));
-        EXPECT_EQ(1u, (*weights)[node_idx]);
+        EXPECT_EQ(1u, weights[node_idx]);
 
-        //TODO should fail while weights extension is present? or warn?
+        //TODO should throw if weights extension is present
         //bit_vector_dyn nodes_inserted(graph->num_nodes() + 1, 0);
         //graph->add_sequence(std::string(25, 'T'), &nodes_inserted);
     }
