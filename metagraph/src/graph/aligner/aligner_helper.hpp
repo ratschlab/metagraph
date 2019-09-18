@@ -132,6 +132,8 @@ class DBGAlignerConfig {
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
 
+    bool forward_and_reverse_complement = false;
+
     static ScoreMatrix scoring_matrix(const Config &config,
                                       const DeBruijnGraph &graph);
 

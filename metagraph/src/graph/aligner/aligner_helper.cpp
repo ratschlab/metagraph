@@ -109,6 +109,7 @@ DBGAlignerConfig::DBGAlignerConfig(const Config &config, const DeBruijnGraph &gr
         min_cell_score(config.alignment_min_cell_score),
         gap_opening_penalty(-config.alignment_gap_opening_penalty),
         gap_extension_penalty(-config.alignment_gap_extension_penalty),
+        forward_and_reverse_complement(config.forward_and_reverse),
         score_matrix_(config.alignment_edit_distance
                           ? unit_scoring_matrix(1, graph.alphabet())
                           : scoring_matrix(config, graph)) { }

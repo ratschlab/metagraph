@@ -3,7 +3,6 @@
 #include "test_dbg_helpers.hpp"
 #include "../test_helpers.hpp"
 
-#define private public
 #include "dbg_aligner.hpp"
 #include "aligner_methods.hpp"
 
@@ -98,7 +97,6 @@ bool check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                                   config,
                                   build_unimem_seeder(nodes, *graph)).align(
         query,
-        false,
         min_path_score
     );
 
@@ -156,41 +154,6 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
 }
 
-TYPED_TEST(DBGAlignerTest, align_iterators_straight) {
-    size_t k = 4;
-    std::string reference = "AGCTTCGAGGCCAA";
-    std::string query = reference;
-
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
-    Cigar::initialize_opt_table(graph->alphabet());
-    DBGAligner<> aligner(*graph, config);
-    DBGAligner<>::DBGQueryAlignment alt_paths(query);
-    aligner.align(alt_paths.get_query().begin(),
-                  alt_paths.get_query().end(),
-                  [&](auto&& alignment) { alt_paths.emplace_back(std::move(alignment)); });
-    ASSERT_FALSE(alt_paths.empty());
-
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
-
-    EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(query, path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end()),
-              path.get_score());
-    EXPECT_EQ("14=", path.get_cigar().to_string());
-    EXPECT_EQ(14u, path.get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
-    EXPECT_EQ(0u, path.get_clipping());
-    EXPECT_EQ(0u, path.get_offset());
-    EXPECT_TRUE(path.is_valid(*graph));
-    check_json_dump_load(*graph,
-                         path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
-
-    EXPECT_TRUE(check_extend(graph, aligner.get_config(), alt_paths, query));
-}
-
 TYPED_TEST(DBGAlignerTest, align_straight) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
@@ -232,8 +195,11 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     Cigar::initialize_opt_table(graph->alphabet());
 
-    DBGAligner<> aligner(*graph, config);
-    auto paths = aligner.align_forward_and_reverse_complement(query);
+    auto config_fwd_and_rev = config;
+    config_fwd_and_rev.forward_and_reverse_complement = true;
+
+    DBGAligner<> aligner(*graph, config_fwd_and_rev);
+    auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
     EXPECT_EQ(1ull, paths.size());
@@ -809,7 +775,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     DBGAlignerConfig config = ::config;
     config.min_cell_score = std::numeric_limits<score_t>::min();
     DBGAligner<> aligner(*graph, config);
-    auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
+    auto paths = aligner.align(query, std::numeric_limits<score_t>::min());
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
 
@@ -846,7 +812,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min();
         DBGAligner<> aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
-        auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
+        auto paths = aligner.align(query, std::numeric_limits<score_t>::min());
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
 
@@ -873,7 +839,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min();
         DBGAligner<> aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
-        auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
+        auto paths = aligner.align(query, std::numeric_limits<score_t>::min());
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
 
@@ -911,7 +877,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min();
     DBGAligner<> aligner(*graph, config, suffix_seeder<DeBruijnGraph::node_index>);
-    auto paths = aligner.align(query, false, std::numeric_limits<score_t>::min());
+    auto paths = aligner.align(query, std::numeric_limits<score_t>::min());
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
 

@@ -38,55 +38,11 @@ class DBGAligner {
                        seed,
                        extend) {}
 
-    // A convenience function
-    DBGQueryAlignment
-    align(const std::string &query,
-          bool orientation = false,
-          score_t min_path_score = std::numeric_limits<score_t>::min()) const {
-        DBGQueryAlignment paths(query);
-
-        if (orientation)
-            std::swap(const_cast<std::string&>(paths.get_query()),
-                      const_cast<std::string&>(paths.get_query_reverse_complement()));
-
-        const auto& query_alignment = orientation ? paths.get_query_reverse_complement()
-                                                  : paths.get_query();
-
-        assert(query_alignment == query);
-
-        align(query_alignment.begin(),
-              query_alignment.end(),
-              [&](auto&& path) { paths.emplace_back(std::move(path)); },
-              orientation,
-              min_path_score);
-
-        return paths;
-    }
-
-    DBGQueryAlignment
-    align_forward_and_reverse_complement(const std::string &query,
-                                         score_t min_path_score
-                                             = std::numeric_limits<score_t>::min()) const {
-        auto paths = align(query, false, min_path_score);
-        auto size = paths.size();
-
-        align(paths.get_query_reverse_complement().begin(),
-              paths.get_query_reverse_complement().end(),
-              [&](DBGAlignment&& alignment) { paths.emplace_back(std::move(alignment)); },
-              true,
-              size >= config_.num_alternative_paths
-                  ? paths[config_.num_alternative_paths - 1].get_score() - 1
-                  : min_path_score);
-
-        std::inplace_merge(paths.begin(),
-                           paths.begin() + size,
-                           paths.end(),
-                           std::greater<DBGAlignment>());
-
-        paths.erase(paths.begin() + std::min(paths.size(), config_.num_alternative_paths),
-                    paths.end());
-
-        return paths;
+    DBGQueryAlignment align(const std::string &query,
+                            score_t min_path_score = std::numeric_limits<score_t>::min()) const {
+        return config_.forward_and_reverse_complement
+            ? align_forward_and_reverse_complement(query, min_path_score)
+            : align_one_direction(query, false, min_path_score);
     }
 
     DBGQueryAlignment
@@ -104,7 +60,7 @@ class DBGAligner {
 
         auto seeder = seeder_builder(nodes, graph_);
 
-        auto paths = DBGAligner(graph_, config_, seeder, extend_).align(
+        auto paths = DBGAligner(graph_, config_, seeder, extend_).align_one_direction(
             query, false, min_path_score
         );
 
@@ -144,6 +100,58 @@ class DBGAligner {
     const DBGAlignerConfig& get_config() const { return config_; }
     const Seeder<node_index>& get_seeder() const { return seed_; }
     const Extender<node_index>& get_extender() const { return extend_; }
+
+  private:
+    // A convenience function
+    DBGQueryAlignment
+    align_one_direction(const std::string &query,
+                        bool orientation = false,
+                        score_t min_path_score = std::numeric_limits<score_t>::min()) const {
+        DBGQueryAlignment paths(query);
+
+        if (orientation)
+            std::swap(const_cast<std::string&>(paths.get_query()),
+                      const_cast<std::string&>(paths.get_query_reverse_complement()));
+
+        const auto& query_alignment = orientation ? paths.get_query_reverse_complement()
+                                                  : paths.get_query();
+
+        assert(query_alignment == query);
+
+        align(query_alignment.begin(),
+              query_alignment.end(),
+              [&](auto&& path) { paths.emplace_back(std::move(path)); },
+              orientation,
+              min_path_score);
+
+        return paths;
+    }
+
+    DBGQueryAlignment
+    align_forward_and_reverse_complement(const std::string &query,
+                                         score_t min_path_score
+                                             = std::numeric_limits<score_t>::min()) const {
+        auto paths = align_one_direction(query, false, min_path_score);
+        auto size = paths.size();
+
+        align(paths.get_query_reverse_complement().begin(),
+              paths.get_query_reverse_complement().end(),
+              [&](DBGAlignment&& alignment) { paths.emplace_back(std::move(alignment)); },
+              true,
+              size >= config_.num_alternative_paths
+                  ? paths[config_.num_alternative_paths - 1].get_score() - 1
+                  : min_path_score);
+
+        std::inplace_merge(paths.begin(),
+                           paths.begin() + size,
+                           paths.end(),
+                           std::greater<DBGAlignment>());
+
+        paths.erase(paths.begin() + std::min(paths.size(), config_.num_alternative_paths),
+                    paths.end());
+
+        return paths;
+    }
 
     // Align a sequence to the graph
     template <class StringIt>
@@ -311,7 +319,6 @@ class DBGAligner {
         }
     }
 
-  private:
     const DeBruijnGraph& graph_;
     DBGAlignerConfig config_;
     const Seeder<node_index> seed_;

@@ -604,24 +604,16 @@ align_sequences(const DeBruijnGraph &graph,
         ? annotated_graph_algorithm::build_masked_graph_extender(*anno_graph)
         : default_extender<DeBruijnGraph::node_index>;
 
-    if (config.forward_and_reverse) {
-        DBGAligner<> aligner(graph,
-                             DBGAlignerConfig(config, graph),
-                             seeder,
-                             extender);
-
-        return config.alignment_seed_unimems
-            ? aligner.extend_mapping_forward_and_reverse_complement(
-                  query,
-                  config.alignment_min_path_score
-              )
-            : aligner.align_forward_and_reverse_complement(
-                  query,
-                  config.alignment_min_path_score
-              );
-    }
-
     if (config.alignment_seed_unimems) {
+        if (config.forward_and_reverse)
+            return DBGAligner<>(graph,
+                                DBGAlignerConfig(config, graph),
+                                seeder,
+                                extender).extend_mapping_forward_and_reverse_complement(
+                query,
+                config.alignment_min_path_score
+            );
+
         std::vector<DeBruijnGraph::node_index> nodes;
         graph.map_to_nodes_sequentially(
             query.begin(),
@@ -635,9 +627,7 @@ align_sequences(const DeBruijnGraph &graph,
     return DBGAligner<>(graph,
                         DBGAlignerConfig(config, graph),
                         seeder,
-                        extender).align(
-        query, false, config.alignment_min_path_score
-    );
+                        extender).align(query, config.alignment_min_path_score);
 }
 
 void map_sequences_in_file(const std::string &file,
