@@ -21,20 +21,16 @@ class DBGWeights : public DeBruijnGraph::GraphExtension {
     // initialize weights from existing vector
     DBGWeights(sdsl::int_vector<>&& weights);
 
-    void add_weight(node_index i, weight w);
-
-    void insert_node(node_index i);
-    void insert_nodes(bitmap *nodes_inserted);
-
-    // remove all weight elements except those marked with 1 in |mask|
-    void remove_unmasked_weights(const bitmap &mask);
-
-    void set_weights(sdsl::int_vector<>&& weights);
-
     inline weight operator[](node_index i) const {
         assert(i < weights_.size());
         return weights_[i];
     }
+
+    void add_weight(node_index i, weight w);
+
+    void insert_nodes(bitmap *nodes_inserted);
+    // remove all weight elements except those marked with 1 in |mask|
+    void remove_unmasked_weights(const bitmap &mask);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;

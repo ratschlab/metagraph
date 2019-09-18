@@ -103,7 +103,7 @@ void BitmapChunkConstructor<KmerStorage>
         }
 
         if (auto graph_weights = graph->get_extension<DBGWeights>()) {
-            graph_weights->set_weights(std::move(weights));
+            *graph_weights = DBGWeights(std::move(weights));
         } else {
             graph->add_extension(
                 std::make_shared<DBGWeights>(std::move(weights))

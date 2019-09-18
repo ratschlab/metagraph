@@ -10,21 +10,6 @@ DBGWeights::DBGWeights(sdsl::int_vector<>&& weights)
       : weights_(std::move(weights)),
         max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
-void DBGWeights::insert_node(node_index i) {
-    if (weights_.empty()) {
-        weights_.resize(1);
-        weights_[0] = 0;
-    }
-
-    assert(i <= weights_.size());
-    weights_.resize(weights_.size() + 1);
-    node_index j = weights_.size() - 1;
-
-    std::copy_backward(weights_.begin() + i, weights_.begin() + j, weights_.end());
-
-    weights_[i] = 0;
-}
-
 void DBGWeights::insert_nodes(bitmap *nodes_inserted) {
     utils::insert(&weights_, *nodes_inserted, 0);
 }
@@ -38,11 +23,6 @@ void DBGWeights::remove_unmasked_weights(const bitmap &mask) {
             weights_[curpos++] = weights_[i];
     }
     weights_.resize(curpos);
-}
-
-void DBGWeights::set_weights(sdsl::int_vector<>&& weights) {
-    weights_ = std::move(weights);
-    max_weight_ = ~uint64_t(0) >> (64 - weights_.width());
 }
 
 bool DBGWeights::DBGWeights::load(const std::string &filename_base) {
