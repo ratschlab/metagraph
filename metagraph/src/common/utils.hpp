@@ -381,15 +381,16 @@ namespace utils {
     };
 
     void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
-                   RowsFromColumnsTransformer&& transformer);
-    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    const BinaryMatrix &row_major_matrix);
+
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
+                   RowsFromColumnsTransformer *transformer);
 
     template <typename... Args>
     void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    Args&&... args) {
-        call_rows(callback,
-                  RowsFromColumnsTransformer(std::forward<Args>(args)...));
+        auto transformer = RowsFromColumnsTransformer(std::forward<Args>(args)...);
+        call_rows(callback, &transformer);
     }
 
     template <class BitVectorType = bit_vector_stat>
