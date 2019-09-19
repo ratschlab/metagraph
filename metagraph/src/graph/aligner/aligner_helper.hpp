@@ -332,7 +332,8 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
         << alignment.get_sequence() << "\t"
         << alignment.get_score() << "\t"
         << alignment.get_num_matches() << "\t"
-        << alignment.get_cigar().to_string();
+        << alignment.get_cigar().to_string() << "\t"
+        << alignment.get_offset();
 
     return out;
 }

@@ -734,8 +734,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
             std::cerr << "ERROR: end of query reached before end of CIGAR" << std::endl
                       << "Processed " << cigar_it - cigar_.begin()
                       << " of " << cigar_.size() << " operations" << std::endl
-                      << *this << std::endl
-                      << std::string(query_begin_, query_end_) << std::endl;
+                      << *this << std::endl;
             return false;
         }
 
@@ -743,8 +742,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
             std::cerr << "ERROR: end of nodes reached before end of CIGAR" << std::endl
                       << "Processed " << cigar_it - cigar_.begin()
                       << " of " << cigar_.size() << " operations" << std::endl
-                      << *this << std::endl
-                      << std::string(query_begin_, query_end_) << std::endl;
+                      << *this << std::endl;
             return false;
         }
 
@@ -790,8 +788,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                                           << *node_it << std::endl
                                           << "Processed " << cigar_it - cigar_.begin()
                                           << " of " << cigar_.size() << " operations" << std::endl
-                                          << *this << std::endl
-                                          << std::string(query_begin_, query_end_) << std::endl;
+                                          << *this << std::endl;
                                 return false;
                             }
                         }
@@ -805,9 +802,8 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                     std::cerr << "ERROR: mismatch found despite MATCH in CIGAR" << std::endl
                               << "Processed " << cigar_it - cigar_.begin()
                               << " of " << cigar_.size() << " operations" << std::endl
-                              << *this << std::endl
-                              << std::string(query_begin_, query_end_) << "\n\n"
-                              << std::string(cur_query_it, path_steps - cur_path_steps) << " "
+                              << *this << "\n\n"
+                              << std::string(cur_query_it, path_steps - cur_path_steps) << "\n"
                               << std::string(path.c_str() + cur_path_steps, path_steps - cur_path_steps) << std::endl;
                     return false;
                 } else if (cigar_it->first == Cigar::Operator::MISMATCH
@@ -818,9 +814,8 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                     std::cerr << "ERROR: match found despite MISMATCH in CIGAR" << std::endl
                               << "Processed " << cigar_it - cigar_.begin()
                               << " of " << cigar_.size() << " operations" << std::endl
-                              << *this << std::endl
-                              << std::string(query_begin_, query_end_) << std::endl
-                              << std::string(cur_query_it, path_steps - cur_path_steps) << " "
+                              << *this << "\n\n"
+                              << std::string(cur_query_it, path_steps - cur_path_steps) << "\n"
                               << std::string(path.c_str() + cur_path_steps, path_steps - cur_path_steps) << std::endl;
                     return false;
                 }
@@ -828,8 +823,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
             case Cigar::Operator::INSERTION: query_it += cigar_it->second; break;
             case Cigar::Operator::CLIPPED: {
                 std::cerr << "ERROR: internal clipping in CIGAR" << std::endl
-                          << *this << std::endl
-                          << std::string(query_begin_, query_end_) << std::endl;
+                          << *this << std::endl;
                 return false;
             }
         }
@@ -839,16 +833,14 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
 
     if (path_steps != sequence_.size()) {
         std::cerr << "ERROR: stored sequence is incorrect size" << std::endl
-                  << *this << std::endl
-                  << std::string(query_begin_, query_end_) << std::endl;
+                  << *this << std::endl;
         return false;
     }
 
     if (path.size() != sequence_.size()) {
         std::cerr << "ERROR: stored sequence is incorrect" << std::endl
                   << "Reconstructed sequence: " << path << std::endl
-                  << *this << std::endl
-                  << std::string(query_begin_, query_end_) << std::endl;
+                  << *this << std::endl;
         return false;
     }
 
@@ -856,8 +848,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
         std::cerr << "ERROR: end of CIGAR reached before end of query" << std::endl
                   << "Processed " << query_it - query_begin_
                   << " of " << query_end_ - query_begin_ << " characters" << std::endl
-                  << *this << std::endl
-                  << std::string(query_begin_, query_end_) << std::endl;
+                  << *this << std::endl;
         return false;
     }
 
@@ -865,8 +856,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
         std::cerr << "ERROR: end of CIGAR reached before end of path" << std::endl
                   << "Processed " << node_it - nodes_.begin()
                   << " of " << nodes_.size() << " nodes" << std::endl
-                  << *this << std::endl
-                  << std::string(query_begin_, query_end_) << std::endl;
+                  << *this << std::endl;
         return false;
     }
 
