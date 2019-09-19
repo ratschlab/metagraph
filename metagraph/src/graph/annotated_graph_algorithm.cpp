@@ -484,13 +484,13 @@ build_masked_graph_extender(const AnnotatedDBG &anno_graph,
 Extender<DeBruijnGraph::node_index>
 build_background_graph_extender(const DeBruijnGraph &background,
                                 Extender<DeBruijnGraph::node_index>&& extender) {
-    return [&, base_extender = std::move(extender)](const DeBruijnGraph &foreground,
-                                                    const auto &path,
-                                                    std::vector<auto>* next_paths,
-                                                    const char *sequence_end,
-                                                    const DBGAlignerConfig &config,
-                                                    bool orientation,
-                                                    auto min_path_score) {
+    return [&,base_extender{std::move(extender)}](const DeBruijnGraph &foreground,
+                                                  const auto &path,
+                                                  std::vector<auto>* next_paths,
+                                                  const char *sequence_end,
+                                                  const DBGAlignerConfig &config,
+                                                  bool orientation,
+                                                  auto min_path_score) {
         if (path.empty())
             return;
 
