@@ -264,7 +264,6 @@ class DBGAligner : public IDBGAligner {
         }
 
         while (path_queue.size()) {
-            //assert(path_queue.top().is_valid(graph_));
             callback(path_queue.pop_top());
         }
     }
