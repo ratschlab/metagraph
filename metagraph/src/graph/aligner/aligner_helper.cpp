@@ -281,12 +281,14 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
                                size_t start_pos,
                                score_t score,
                                const char* path_end,
-                               bool orientation)
+                               bool orientation,
+                               size_t offset)
       : query_begin_(NULL),
         query_end_(NULL),
         num_matches_(0),
         score_(score),
-        orientation_(orientation) {
+        orientation_(orientation),
+        offset_(offset) {
     assert(column != &*dp_table.end());
 
     auto i = start_pos;

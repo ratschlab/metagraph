@@ -454,13 +454,15 @@ void default_extender(const DeBruijnGraph &graph,
                                  start_node->second.best_pos,
                                  start_node->second.best_score() - path.get_score(),
                                  align_start,
-                                 orientation);
+                                 orientation,
+                                 graph.get_k() - 1);
 
         if (next_paths->back().empty() && !next_paths->back().get_query_begin()) {
             next_paths->pop_back();
         } else {
             assert(next_paths->back().get_score() + path.get_score()
                 == start_node->second.best_score());
+            assert(next_paths->back().is_valid(graph));
         }
 
         return;
@@ -501,12 +503,14 @@ void default_extender(const DeBruijnGraph &graph,
                                  column_it->second.best_pos,
                                  column_it->second.best_score() - path.get_score(),
                                  align_start,
-                                 orientation);
+                                 orientation,
+                                 graph.get_k() - 1);
 
         if (next_paths->back().empty() && !next_paths->back().get_query_begin()) {
             next_paths->pop_back();
         } else {
             visited_nodes.insert(next_paths->back().begin(), next_paths->back().end());
+            assert(next_paths->back().is_valid(graph));
         }
     }
 }

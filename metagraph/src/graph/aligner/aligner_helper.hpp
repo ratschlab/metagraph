@@ -218,7 +218,8 @@ class Alignment {
               size_t start_pos,
               score_t score,
               const char* path_end,
-              bool orientation);
+              bool orientation,
+              size_t offset);
 
     void append(Alignment&& other, size_t overlap = 0, int8_t match_score = 0);
 

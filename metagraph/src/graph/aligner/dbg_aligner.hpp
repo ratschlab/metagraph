@@ -183,6 +183,12 @@ class DBGAligner : public IDBGAligner {
                     assert(std::all_of(next_paths.begin(),
                                        next_paths.end(),
                                        [&](const auto &c) {
+                                           return c.get_offset() == graph_.get_k() - 1;
+                                       }));
+
+                    assert(std::all_of(next_paths.begin(),
+                                       next_paths.end(),
+                                       [&](const auto &c) {
                                            return partial_path.get_score() + c.get_score()
                                                >= min_path_score;
                                        }));
