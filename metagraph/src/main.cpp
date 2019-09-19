@@ -1185,7 +1185,7 @@ int main(int argc, const char *argv[]) {
                         new DBGBitmapConstructor(
                             bitmap_graph->get_k(),
                             config->canonical,
-                            config->count_kmers,
+                            config->count_kmers ? kBitsPerCount : 0,
                             suffix,
                             config->parallel,
                             static_cast<uint64_t>(config->memory_available) << 30,

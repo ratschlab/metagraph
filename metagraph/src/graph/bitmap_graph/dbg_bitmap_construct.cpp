@@ -33,7 +33,7 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
 
     DBGBitmap::Chunk* build_chunk();
 
-    void set_weights(DBGBitmap *graph, uint8_t bits_per_count = 8);
+    sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8);
 
     KmerStorage kmer_collector_;
 };
@@ -72,7 +72,7 @@ BitmapChunkConstructor<KmerStorage>
 
 DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
                                            bool canonical_mode,
-                                           bool count_kmers,
+                                           size_t bits_per_count,
                                            const std::string &filter_suffix,
                                            size_t num_threads,
                                            double memory_preallocated,
@@ -80,37 +80,33 @@ DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
       : constructor_(IBitmapChunkConstructor::initialize(
             k,
             canonical_mode,
-            count_kmers,
+            bits_per_count > 0,
             filter_suffix,
             num_threads,
             memory_preallocated,
             verbose)
-        ) {}
+        ),
+        bits_per_count_(bits_per_count) {}
 
 template <typename KmerStorage>
-void BitmapChunkConstructor<KmerStorage>
-::set_weights(DBGBitmap *graph, uint8_t bits_per_count) {
-    if constexpr (utils::is_pair<typename KmerStorage::Value>::value) {
-        sdsl::int_vector<> weights(0, 0, bits_per_count);
-        auto kmers = kmer_collector_.data();
+sdsl::int_vector<>
+BitmapChunkConstructor<KmerStorage>::get_weights(uint8_t bits_per_count) {
+    if constexpr(utils::is_pair<typename KmerStorage::Value>::value) {
+        const auto &kmers = kmer_collector_.data();
 
-        uint64_t max_count __attribute__((unused)) = 0;
-        weights.resize(kmers.size() + 1);
-        max_count = ~uint64_t(0) >> (64 - weights.width());
+        sdsl::int_vector<> weights(kmers.size() + 1, 0, bits_per_count);
+
+        const uint64_t max_count = ~uint64_t(0) >> (64 - weights.width());
 
         for (size_t i = 0; i < kmers.size(); ++i) {
             weights[i + 1] = std::min(static_cast<uint64_t>(kmers[i].second), max_count);
         }
 
-        if (auto graph_weights = graph->get_extension<NodeWeights>()) {
-            *graph_weights = NodeWeights(std::move(weights));
-        } else {
-            graph->add_extension(
-                std::make_shared<NodeWeights>(std::move(weights))
-            );
-        }
+        return weights;
+
     } else {
         std::ignore = bits_per_count;
+        throw std::runtime_error("Error: count k-mers to get weights");
     }
 };
 
@@ -296,6 +292,12 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
         chunk->size(), chunk->num_set_bits() + 1
     );
     delete chunk;
-    constructor_->set_weights(graph);
+
+    if (bits_per_count_) {
+        graph->add_extension(
+            std::make_shared<NodeWeights>(constructor_->get_weights(bits_per_count_))
+        );
+    }
+
     graph->complete_ = false;
 }
