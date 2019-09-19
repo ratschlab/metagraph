@@ -85,10 +85,9 @@ void check_rows(utils::RowsFromColumnsTransformer&& rct) {
             bv[j] = 1;
         }
         EXPECT_EQ(matrix[i++], bv) << i;
-    }, &rct);
+    }, std::move(rct));
 
     ASSERT_EQ(7u, i);
-    EXPECT_EQ(0u, rct.values_left());
 }
 
 void check_indices(utils::RowsFromColumnsTransformer&& rct) {

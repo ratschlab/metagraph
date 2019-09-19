@@ -304,19 +304,13 @@ std::vector<uint64_t> RowsFromColumnsIterator::next_row() {
     return indices;
 }
 
-template <>
 void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                RowsFromColumnsTransformer&& transformer) {
-    call_rows(callback, &transformer);
-}
-
-void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
-               RowsFromColumnsTransformer *transformer) {
     uint64_t cur_row = 0;
     std::vector<uint64_t> indices;
 
-    while (transformer->values_left()) {
-        transformer->call_next([&](uint64_t row, uint64_t column) {
+    while (transformer.values_left()) {
+        transformer.call_next([&](uint64_t row, uint64_t column) {
             while (cur_row < row) {
                 callback(indices);
                 indices.clear();
@@ -326,10 +320,12 @@ void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> 
         });
     }
 
-    while (cur_row++ < transformer->rows()) {
+    while (cur_row++ < transformer.rows()) {
         callback(indices);
         indices.clear();
     }
+
+    assert(!transformer.values_left());
 }
 
 void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
