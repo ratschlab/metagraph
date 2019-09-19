@@ -8,8 +8,8 @@
 #include <array>
 #include <ostream>
 #include <unordered_map>
-#include <json/json.h>
 #include <memory>
+#include <json/json.h>
 
 #include "config.hpp"
 #include "sequence_graph.hpp"
@@ -36,6 +36,11 @@ class Cigar {
 
     Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
+
+    // See section 1.4 in https://samtools.github.io/hts-specs/SAMv1.pdf for
+    // a specification of the CIGAR string format.
+    // e.g., 3=1X2I3D for 3 matches, 1 mismatch, 2 insertions, 3 deletions
+    explicit Cigar(const std::string &cigar_str);
 
     size_t size() const { return cigar_.size(); }
     bool empty() const { return cigar_.empty(); }
@@ -73,6 +78,11 @@ class Cigar {
             : 0;
     }
 
+    // Return true if the cigar is valid. reference_begin points to the first
+    // character of the reference sequence after clipping is trimmed
+    bool is_valid(const char *reference_begin, const char *reference_end,
+                  const char *query_begin, const char *query_end) const;
+
   private:
     std::vector<std::pair<Operator, LengthType>> cigar_;
 };
@@ -106,9 +116,7 @@ class DBGAlignerConfig {
             b_begin,
             score_t(0),
             std::plus<score_t>(),
-            [&](const char &a, const char &b) -> score_t {
-                return score_matrix_[a][b];
-            }
+            [&](char a, char b) -> score_t { return score_matrix_[a][b]; }
         );
     }
 
@@ -116,6 +124,10 @@ class DBGAlignerConfig {
     score_t match_score(StringIt begin, StringIt end) const {
         return score_sequences(begin, end, begin);
     }
+
+    score_t score_cigar(const char *reference_begin, const char *reference_end,
+                        const char *query_begin, const char *query_end,
+                        const Cigar &cigar) const;
 
     const ScoreMatrixRow& get_row(char char_in_query) const {
         return score_matrix_[char_in_query];
@@ -128,9 +140,12 @@ class DBGAlignerConfig {
     size_t max_seed_length = std::numeric_limits<size_t>::max();
     size_t max_num_seeds_per_locus = 1;
     score_t min_cell_score = 0;
+    score_t min_path_score = 0;
 
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
+
+    bool forward_and_reverse_complement = false;
 
     static ScoreMatrix scoring_matrix(const Config &config,
                                       const DeBruijnGraph &graph);
@@ -150,8 +165,10 @@ class DBGAlignerConfig {
 };
 
 
-
-template <typename NodeType>
+// Note: this object stores pointers to the query sequence, so it is the user's
+//       responsibility to ensure that the query sequence is not destroyed when
+//       calling this class' methods
+template <typename NodeType = DeBruijnGraph::node_index>
 class Alignment {
   public:
     typedef NodeType node_index;
@@ -216,7 +233,8 @@ class Alignment {
               size_t start_pos,
               score_t score,
               const char* path_end,
-              bool orientation);
+              bool orientation,
+              size_t offset);
 
     void append(Alignment&& other, size_t overlap = 0, int8_t match_score = 0);
 
@@ -229,12 +247,13 @@ class Alignment {
     score_t get_score() const { return score_; }
     uint64_t get_num_matches() const { return num_matches_; }
 
+    void recompute_score(const DBGAlignerConfig &config);
+
     size_t query_size() const { return query_end_ - query_begin_; }
     const char* get_query_end() const { return query_end_; }
     const char* get_query_begin() const { return query_begin_; }
 
-    template <class StringIt>
-    void set_query_begin(const StringIt *begin) {
+    void set_query_begin(const char *begin) {
         assert((query_end_ - query_begin_) + begin >= begin);
         query_end_ = (query_end_ - query_begin_) + begin;
         query_begin_ = begin;
@@ -288,7 +307,7 @@ class Alignment {
     load_from_json(const Json::Value &alignment,
                    const DeBruijnGraph &graph);
 
-    bool is_valid(const DeBruijnGraph &graph) const;
+    bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
   private:
     Alignment(const char* query_begin,
@@ -330,27 +349,37 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
         << alignment.get_sequence() << "\t"
         << alignment.get_score() << "\t"
         << alignment.get_num_matches() << "\t"
-        << alignment.get_cigar().to_string();
+        << alignment.get_cigar().to_string() << "\t"
+        << alignment.get_offset();
 
     return out;
 }
 
 
-template <typename NodeType>
+template <typename NodeType = DeBruijnGraph::node_index>
 class QueryAlignment {
   public:
-    QueryAlignment(const std::string &query)
-          : query_(query),
-            query_rc_(query) {
-        reverse_complement(const_cast<char*>(&*query_rc_.begin()),
-                           const_cast<char*>(&*query_rc_.end()));
+    typedef Alignment<NodeType> value_type;
+
+    QueryAlignment(const QueryAlignment &other)
+          : query_(other.query_),
+            query_rc_(other.query_rc_),
+            alignments_(other.alignments_) {
+        fix_pointers(other.get_query(),
+                     other.get_query_reverse_complement());
     }
 
-    template <typename... Args>
-    QueryAlignment(std::string&& query, Args&&... args) noexcept
-          : query_(std::move(query)),
-            query_rc_(query_),
-            alignments_(std::forward<Args>(args)...) {
+    QueryAlignment(QueryAlignment&& other) noexcept
+          : query_(other.query_),
+            query_rc_(other.query_rc_),
+            alignments_(std::move(other.alignments_)) {
+        fix_pointers(other.get_query(),
+                     other.get_query_reverse_complement());
+    }
+
+    explicit QueryAlignment(const std::string &query)
+          : query_(query),
+            query_rc_(query) {
         reverse_complement(const_cast<char*>(&*query_rc_.begin()),
                            const_cast<char*>(&*query_rc_.end()));
     }
@@ -372,24 +401,24 @@ class QueryAlignment {
             || alignments_.back().get_query_end() <= &*query_rc_.end());
     }
 
+    void push_back(const value_type &alignment) { emplace_back(alignment); }
+    void push_back(value_type&& alignment) {
+        emplace_back(std::move(alignment));
+    }
+
     void pop_back() { alignments_.pop_back(); }
     void clear() { alignments_.clear(); }
 
     const std::string& get_query() const { return query_; }
     const std::string& get_query_reverse_complement() const { return query_rc_; }
-    const Alignment<NodeType>& front() const { return alignments_.front(); }
-    const Alignment<NodeType>& back() const { return alignments_.back(); }
-    const Alignment<NodeType>& operator[](size_t i) const { return alignments_[i]; }
+    const value_type& front() const { return alignments_.front(); }
+    const value_type& back() const { return alignments_.back(); }
+    const value_type& operator[](size_t i) const { return alignments_[i]; }
 
-    typedef typename std::vector<Alignment<NodeType>>::iterator iterator;
-    typedef typename std::vector<Alignment<NodeType>>::const_iterator const_iterator;
-
-    iterator begin() { return alignments_.begin(); }
-    iterator end() { return alignments_.end(); }
+    typedef typename std::vector<value_type>::const_iterator const_iterator;
 
     const_iterator begin() const { return alignments_.cbegin(); }
     const_iterator end() const { return alignments_.cend(); }
-
     const_iterator cbegin() const { return alignments_.cbegin(); }
     const_iterator cend() const { return alignments_.cend(); }
 
@@ -405,9 +434,28 @@ class QueryAlignment {
     bool operator!=(const QueryAlignment &other) const { return !(*this == other); }
 
   private:
+    // When a QueryAlignment is copied or moved, the pointers in the alignment
+    // vector may be incorrect, so this corrects them
+    void fix_pointers(const std::string &query, const std::string &query_rc) {
+        for (auto &alignment : alignments_) {
+            const auto &other_query = alignment.get_orientation() ? query_rc : query;
+            const auto &this_query = alignment.get_orientation() ? query_rc_ : query_;
+
+            assert(alignment.get_query_begin() >= &*other_query.begin());
+            assert(alignment.get_query_end() <= &*other_query.end());
+
+            alignment.set_query_begin(
+                this_query.c_str() + (alignment.get_query_begin() - &*other_query.begin())
+            );
+
+            assert(alignment.get_query_begin() >= &*this_query.begin());
+            assert(alignment.get_query_end() <= &*this_query.end());
+        }
+    }
+
     const std::string query_;
     const std::string query_rc_;
-    std::vector<Alignment<NodeType>> alignments_;
+    std::vector<value_type> alignments_;
 };
 
 

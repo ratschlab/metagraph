@@ -11,38 +11,45 @@
 #include "reverse_complement.hpp"
 
 
-template <class AlignmentCompare = std::less<Alignment<DeBruijnGraph::node_index>>,
-          class ColumnCompare = std::less<typename Alignment<DeBruijnGraph::node_index>::Column>>
-class DBGAligner {
+class IDBGAligner {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef Alignment<node_index> DBGAlignment;
     typedef QueryAlignment<node_index> DBGQueryAlignment;
     typedef typename DBGAlignment::score_t score_t;
 
-    explicit DBGAligner(const DeBruijnGraph &graph,
-                        const DBGAlignerConfig &config,
-                        const Seeder<node_index> &seed = suffix_seeder<node_index>,
-                        const Extender<node_index> &extend = default_extender<node_index, ColumnCompare>)
-          : graph_(graph),
-            config_(config),
-            seed_(seed),
-            extend_(extend) {}
+    virtual ~IDBGAligner() {}
 
-    explicit DBGAligner(const DeBruijnGraph &graph,
-                        const Config &config,
-                        const Seeder<node_index> &seed = suffix_seeder<node_index>,
-                        const Extender<node_index> &extend = default_extender<node_index, ColumnCompare>)
-          : DBGAligner(graph,
-                       DBGAlignerConfig(config, graph),
-                       seed,
-                       extend) {}
+    virtual DBGQueryAlignment
+    align(const std::string &query) const = 0;
 
-    // A convenience function
-    DBGQueryAlignment
-    align(const std::string &query,
-          bool orientation = false,
-          score_t min_path_score = std::numeric_limits<score_t>::min()) const {
+    virtual const DeBruijnGraph& get_graph() const = 0;
+    virtual const DBGAlignerConfig& get_config() const = 0;
+};
+
+
+template <class Seeder = ExactSeeder<>,
+          class Extender = DefaultColumnExtender<>,
+          class AlignmentCompare = std::less<Alignment<>>>
+class DBGAligner : public IDBGAligner {
+  public:
+    DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+          : graph_(graph), config_(config) {}
+
+    DBGQueryAlignment align(const std::string &query) const {
+        Seeder seeder(graph_, config_);
+        return config_.forward_and_reverse_complement
+            ? align_forward_and_reverse_complement(query, seeder)
+            : align_one_direction(query, false, seeder);
+    }
+
+    const DeBruijnGraph& get_graph() const { return graph_; }
+    const DBGAlignerConfig& get_config() const { return config_; }
+
+  private:
+    DBGQueryAlignment align_one_direction(const std::string &query,
+                                          bool orientation,
+                                          Seeder &seeder) const {
         DBGQueryAlignment paths(query);
 
         if (orientation)
@@ -51,99 +58,76 @@ class DBGAligner {
 
         const auto& query_alignment = orientation ? paths.get_query_reverse_complement()
                                                   : paths.get_query();
-
         assert(query_alignment == query);
 
-        align(query_alignment.begin(),
-              query_alignment.end(),
-              [&](auto&& path) { paths.emplace_back(std::move(path)); },
+        seeder.initialize(query, orientation);
+
+        align(&*query_alignment.begin(), &*query_alignment.end(),
+              [&](DBGAlignment&& path) {
+                  paths.emplace_back(std::move(path));
+              },
               orientation,
-              min_path_score);
+              config_.min_path_score,
+              seeder
+        );
 
         return paths;
     }
 
-    DBGQueryAlignment
-    align_forward_and_reverse_complement(const std::string &query,
-                                         score_t min_path_score
-                                             = std::numeric_limits<score_t>::min()) const {
-        auto paths = align(query, false, min_path_score);
-        auto size = paths.size();
+    DBGQueryAlignment align_forward_and_reverse_complement(const std::string &query,
+                                                           Seeder &seeder) const {
+        DBGQueryAlignment final_paths(query);
+        const auto &forward = final_paths.get_query();
+        const auto &rev_comp = final_paths.get_query_reverse_complement();
 
-        align(paths.get_query_reverse_complement().begin(),
-              paths.get_query_reverse_complement().end(),
-              [&](DBGAlignment&& alignment) { paths.emplace_back(std::move(alignment)); },
+        std::vector<DBGAlignment> all_paths;
+
+        seeder.initialize(forward, false);
+
+        align(&*forward.begin(), &*forward.end(),
+              [&](DBGAlignment&& alignment) {
+                  all_paths.emplace_back(std::move(alignment));
+              },
+              false,
+              config_.min_path_score,
+              seeder);
+
+        auto size = all_paths.size();
+
+        seeder.initialize(rev_comp, true);
+
+        align(&*rev_comp.begin(), &*rev_comp.end(),
+              [&](DBGAlignment&& alignment) {
+                  all_paths.emplace_back(std::move(alignment));
+              },
               true,
               size >= config_.num_alternative_paths
-                  ? paths[config_.num_alternative_paths - 1].get_score() - 1
-                  : min_path_score);
+                  ? all_paths[config_.num_alternative_paths - 1].get_score() - 1
+                  : config_.min_path_score,
+              seeder);
 
-        std::inplace_merge(paths.begin(),
-                           paths.begin() + size,
-                           paths.end(),
-                           std::greater<DBGAlignment>());
+        std::merge(std::make_move_iterator(all_paths.begin()),
+                   std::make_move_iterator(all_paths.begin() + size),
+                   std::make_move_iterator(all_paths.begin() + size),
+                   std::make_move_iterator(all_paths.end()),
+                   std::back_inserter(final_paths),
+                   std::not_fn(AlignmentCompare()));
 
-        paths.erase(paths.begin() + std::min(paths.size(), config_.num_alternative_paths),
-                    paths.end());
+        final_paths.erase(final_paths.begin()
+                              + std::min(final_paths.size(), config_.num_alternative_paths),
+                          final_paths.end());
 
-        return paths;
+        return final_paths;
     }
-
-    DBGQueryAlignment
-    extend_mapping_forward_and_reverse_complement(const std::string &query,
-                                                  score_t min_path_score
-                                                      = std::numeric_limits<score_t>::min(),
-                                                  const MapExtendSeederBuilder<node_index> &seeder_builder
-                                                      = build_unimem_seeder<node_index>) const {
-        auto nodes = map_sequence_to_nodes(graph_, query);
-        assert(nodes.size() == query.size() - graph_.get_k() + 1);
-
-        auto seeder = seeder_builder(nodes, graph_);
-
-        auto paths = DBGAligner(graph_, config_, seeder, extend_).align(
-            query, false, min_path_score
-        );
-
-        auto size = paths.size();
-
-        auto rc_nodes = map_sequence_to_nodes(graph_, paths.get_query_reverse_complement());
-        assert(rc_nodes.size() == nodes.size());
-
-        auto rc_seeder = seeder_builder(rc_nodes, graph_);
-
-        DBGAligner(graph_, config_, rc_seeder, extend_).align(
-            paths.get_query_reverse_complement().begin(),
-            paths.get_query_reverse_complement().end(),
-            [&](DBGAlignment&& alignment) { paths.emplace_back(std::move(alignment)); },
-            true,
-            size >= config_.num_alternative_paths
-                ? paths[config_.num_alternative_paths - 1].get_score() - 1
-                : min_path_score
-        );
-
-        std::inplace_merge(paths.begin(),
-                           paths.begin() + size,
-                           paths.end(),
-                           std::greater<DBGAlignment>());
-
-        paths.erase(paths.begin() + std::min(paths.size(), config_.num_alternative_paths),
-                    paths.end());
-
-        return paths;
-    }
-
-    const DeBruijnGraph& get_graph() const { return graph_; }
-    const DBGAlignerConfig& get_config() const { return config_; }
-    const Seeder<node_index>& get_seeder() const { return seed_; }
-    const Extender<node_index>& get_extender() const { return extend_; }
 
     // Align a sequence to the graph
-    template <class StringIt>
-    void align(StringIt query_begin_it,
-               StringIt query_end_it,
+    void align(const char *query_begin_it,
+               const char *query_end_it,
                const std::function<void(DBGAlignment&&)> &callback,
-               bool orientation = false,
-               score_t min_path_score = std::numeric_limits<score_t>::min()) const {
+               bool orientation,
+               score_t min_path_score,
+               const Seeder &seeder) const {
+
         const char *query_begin = &*query_begin_it;
         const char *query_end = &*query_end_it;
 
@@ -151,26 +135,24 @@ class DBGAligner {
 
         BoundedPriorityQueue<DBGAlignment> path_queue(config_.num_alternative_paths);
 
+        // a different comparator may be used when picking the next seed to extend
         BoundedPriorityQueue<DBGAlignment,
                              std::vector<DBGAlignment>,
                              AlignmentCompare> partial_paths(config_.queue_size);
+
+        Extender extend(graph_, config_);
 
         std::vector<DBGAlignment> next_paths;
         for (auto it = query_begin; it + graph_.get_k() <= query_end; ++it) {
             bool full_seed = false;
 
-            auto seeds = seed_(graph_,
-                               config_,
-                               it,
-                               query_end,
-                               it - query_begin,
-                               orientation);
+            auto seeds = seeder(it, query_end, it - query_begin, orientation);
             assert(seeds.size() <= config_.max_num_seeds_per_locus);
 
             for (auto&& seed : seeds) {
                 assert(seed.size());
                 assert(seed.get_score() > config_.min_cell_score);
-                assert(seed.is_valid(graph_));
+                assert(seed.is_valid(graph_, &config_));
 
                 if (seed.get_num_matches() >= graph_.get_k())
                     full_seed = true;
@@ -187,6 +169,7 @@ class DBGAligner {
 
             // a seed has been found
             while (partial_paths.size()) {
+                next_paths.clear();
                 auto partial_path = partial_paths.top();
 
                 assert(partial_path.get_score() > config_.min_cell_score);
@@ -203,58 +186,61 @@ class DBGAligner {
                     continue;
                 }
 
+                extend.initialize(partial_path);
+
                 // continue extending until the path is depleted
-                do {
-                    next_paths.clear();
-                    extend_(graph_,
-                            partial_path,
-                            &next_paths,
-                            query_end,
-                            config_,
-                            orientation,
-                            min_path_score);
+                while (partial_path.get_query_end() < query_end) {
+                    auto cur_paths = extend(partial_path,
+                                            query_end,
+                                            orientation,
+                                            min_path_score);
 
-                    assert(std::all_of(next_paths.begin(),
-                                       next_paths.end(),
-                                       [&](const auto &c) {
-                                           return partial_path.get_score() + c.get_score()
-                                               >= min_path_score;
-                                       }));
+                    // The graph stored in extend may differ from the one stored
+                    // in the DBGAligner and Seeder
+                    assert(std::all_of(
+                        cur_paths.begin(), cur_paths.end(),
+                        [&](const auto &c) {
+                            return c.is_valid(extend.get_graph(), &extend.get_config());
+                        }
+                    ));
 
-                    assert(std::all_of(next_paths.begin(),
-                                       next_paths.end(),
-                                       [&](const auto &c) {
-                                           return partial_path.get_query_end()
-                                                   == c.get_query_begin();
-                                       }));
+                    assert(std::all_of(
+                        cur_paths.begin(), cur_paths.end(),
+                        [&](const auto &c) {
+                            return partial_path.get_score() + c.get_score()
+                                >= min_path_score;
+                        }
+                    ));
 
-                    assert(std::all_of(next_paths.begin(),
-                                       next_paths.end(),
-                                       [&](const auto &c) {
-                                           return (c.get_nodes().size() || c.get_query_end()
-                                                       > partial_path.get_query_end());
-                                       }));
+                    assert(std::all_of(
+                        cur_paths.begin(), cur_paths.end(),
+                        [&](const auto &c) {
+                            return partial_path.get_query_end() + c.get_clipping()
+                                    == c.get_query_begin();
+                        }
+                    ));
 
                     // only one extension. take it if good enough
-                    if (next_paths.size() == 1)
-                        partial_path.append(std::move(next_paths.front()));
-
-                } while (partial_path.get_query_end() < query_end && next_paths.size() == 1);
-
-                if (next_paths.size() <= 1) {
-                    assert(next_paths.empty() || partial_path.get_query_end() == query_end);
-                    if (partial_path.get_score() >= min_path_score) {
-                        if (full_seed)
-                            it = partial_path.get_query_end() - 1;
-
-                        path_queue.emplace(std::move(partial_path));
-
-                        if (path_queue.size() == config_.num_alternative_paths)
-                            min_path_score = std::max(min_path_score,
-                                                      path_queue.bottom().get_score());
+                    if (cur_paths.size() == 1) {
+                        partial_path.append(std::move(cur_paths.front()));
+                    } else {
+                        next_paths.assign(std::make_move_iterator(cur_paths.begin()),
+                                          std::make_move_iterator(cur_paths.end()));
+                        break;
                     }
+                }
 
-                    next_paths.clear();
+                assert(next_paths.size() != 1);
+
+                if (next_paths.empty() && partial_path.get_score() >= min_path_score) {
+                    if (full_seed)
+                        it = partial_path.get_query_end() - 1;
+
+                    path_queue.emplace(std::move(partial_path));
+
+                    if (path_queue.size() == config_.num_alternative_paths)
+                        min_path_score = std::max(min_path_score,
+                                                  path_queue.bottom().get_score());
                 }
 
                 bool picked = false;
@@ -292,22 +278,16 @@ class DBGAligner {
                     assert(partial_paths.size());
                     partial_paths.pop();
                 }
-
-                next_paths.clear();
             }
         }
 
         while (path_queue.size()) {
-            assert(path_queue.top().is_valid(graph_));
             callback(path_queue.pop_top());
         }
     }
 
-  private:
     const DeBruijnGraph& graph_;
     DBGAlignerConfig config_;
-    const Seeder<node_index> seed_;
-    const Extender<node_index> extend_;
 };
 
 
