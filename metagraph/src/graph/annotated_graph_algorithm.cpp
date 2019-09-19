@@ -444,15 +444,14 @@ build_masked_graph_extender(const AnnotatedDBG &anno_graph,
                             Extender<DeBruijnGraph::node_index>&& extender) {
     assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
 
-    return [&anno_graph,
-            seed_label_discovery_fraction,
-            extender = std::move(extender)](const DeBruijnGraph &graph,
-                                            const auto &path,
-                                            std::vector<auto>* next_paths,
-                                            const char* sequence_end,
-                                            const DBGAlignerConfig &config,
-                                            bool orientation,
-                                            auto min_path_score) {
+    return [=,&anno_graph,
+            extender{std::move(extender)}](const DeBruijnGraph &graph,
+                                           const auto &path,
+                                           std::vector<auto>* next_paths,
+                                           const char* sequence_end,
+                                           const DBGAlignerConfig &config,
+                                           bool orientation,
+                                           auto min_path_score) {
         auto labels = anno_graph.get_labels(path.get_sequence(),
                                             seed_label_discovery_fraction);
 
@@ -463,7 +462,7 @@ build_masked_graph_extender(const AnnotatedDBG &anno_graph,
                      std::dynamic_pointer_cast<const DeBruijnGraph>(
                          anno_graph.get_graph_ptr()
                      ),
-                     [&, labels](const auto &node) {
+                     [&, labels{std::move(labels)}](const auto &node) {
                          assert(node != DeBruijnGraph::npos);
                          return graph.in_graph(node)
                              && std::all_of(labels.begin(), labels.end(),
