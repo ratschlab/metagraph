@@ -52,7 +52,6 @@ class DBGAligner : public IDBGAligner {
     const Extender<node_index>& get_extender() const { return extend_; }
 
   private:
-    // A convenience function
     DBGQueryAlignment align_one_direction(const std::string &query,
                                           bool orientation,
                                           score_t min_path_score,
