@@ -34,7 +34,7 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
     // Don't count k-mers if |bits_per_count| is zero.
     DBGBitmapConstructor(size_t k,
                          bool canonical_mode = false,
-                         size_t bits_per_count = 0,
+                         uint8_t bits_per_count = 0,
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
                          double memory_preallocated = 0,
@@ -70,7 +70,7 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
 
   private:
     std::unique_ptr<IBitmapChunkConstructor> constructor_;
-    size_t bits_per_count_;
+    uint8_t bits_per_count_;
 };
 
 #endif // __DBG_BITMAP_CONSTRUCT_HPP__

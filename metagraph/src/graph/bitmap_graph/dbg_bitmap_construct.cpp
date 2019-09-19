@@ -72,7 +72,7 @@ BitmapChunkConstructor<KmerStorage>
 
 DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
                                            bool canonical_mode,
-                                           size_t bits_per_count,
+                                           uint8_t bits_per_count,
                                            const std::string &filter_suffix,
                                            size_t num_threads,
                                            double memory_preallocated,
@@ -292,12 +292,11 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
         chunk->size(), chunk->num_set_bits() + 1
     );
     delete chunk;
+    graph->complete_ = false;
 
     if (bits_per_count_) {
         graph->add_extension(
             std::make_shared<NodeWeights>(constructor_->get_weights(bits_per_count_))
         );
     }
-
-    graph->complete_ = false;
 }
