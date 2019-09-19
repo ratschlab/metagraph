@@ -125,6 +125,8 @@ void call_variants(const DeBruijnGraph &foreground,
         auto paths = variant_aligner.align(sequence, 0);
 
         for (auto&& path : paths) {
+            assert(path.is_valid(background));
+
             if (path.is_exact_match())
                 continue;
 
