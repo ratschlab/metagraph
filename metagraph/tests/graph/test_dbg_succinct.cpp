@@ -444,3 +444,51 @@ TEST(DBGSuccinct, CallNodesWithSuffixMultipleOut) {
     EXPECT_EQ(ref_nodes, nodes) << *graph;
     EXPECT_EQ(ref_node_str, node_str) << *graph;
 }
+
+TEST(DBGSuccinct, CallNodesWithSuffixMultipleInOut) {
+    size_t k = 4;
+    std::vector<std::string> sequences {
+        "AAAAAAAAATGC",
+        "GGGGGGGGATGG",
+        "GGGGGGGGTTGC",
+        "AAAAAAAATTGG"
+    };
+
+    std::string query = "TGA";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(sequences[0]);
+    graph->add_sequence(sequences[1]);
+    graph->add_sequence(sequences[2]);
+    graph->add_sequence(sequences[3]);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> ref_nodes {
+        graph->kmer_to_node("AATG"),
+        graph->kmer_to_node("GATG"),
+        graph->kmer_to_node("GTTG"),
+        graph->kmer_to_node("ATTG")
+    };
+    std::multiset<std::string> ref_node_str {
+        "AATG",
+        "GATG",
+        "GTTG",
+        "ATTG"
+    };
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+
+    graph->call_nodes_with_suffix(
+        query.begin(), query.end(),
+        [&](auto node, auto length) {
+            EXPECT_EQ(2u, length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query.substr(0, length), ins->substr(ins->size() - length, length));
+        }
+    );
+
+    EXPECT_EQ(ref_nodes, nodes) << *graph;
+    EXPECT_EQ(ref_node_str, node_str) << *graph;
+}
