@@ -11,7 +11,7 @@ void test_rainbowfish_buffer(const uint64_t num_rows) {
         { 0, 1, 1, 1, 1, 1, 0 }
     };
 
-    BitVectorPtrArray columns, copy;
+    BitVectorPtrArray columns, copy1, copy2;
     for (size_t j = 0; j < vectors.size(); ++j) {
         columns.emplace_back(new bit_vector_stat(num_rows, false));
         ASSERT_GE(vectors.at(j).size(), num_rows);
@@ -19,15 +19,16 @@ void test_rainbowfish_buffer(const uint64_t num_rows) {
             if (vectors.at(j)[i])
                 columns.back()->set(i, true);
         }
-        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+        copy1.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+        copy2.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
     }
 
     test_matrix(
-        build_matrix_from_columns<RainbowfishBuffer<BufferSize>>(std::move(copy), num_rows),
+        build_matrix_from_columns<RainbowfishBuffer<BufferSize>>(std::move(copy1), num_rows),
         columns
     );
     test_matrix(
-        build_matrix_from_rows<RainbowfishBuffer<BufferSize>>(std::move(copy), num_rows),
+        build_matrix_from_rows<RainbowfishBuffer<BufferSize>>(std::move(copy2), num_rows),
         columns
     );
 }
