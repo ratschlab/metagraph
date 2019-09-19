@@ -604,11 +604,15 @@ build_aligner(const DeBruijnGraph &graph,
     std::unique_ptr<IDBGAligner> aligner;
 
     if (config.alignment_seed_unimems) {
-        aligner.reset(new DBGAligner<UniMEMSeeder<>>(graph,
-                                                     DBGAlignerConfig(config, graph),
-                                                     extender));
+        aligner.reset(new DBGAligner<UniMEMSeeder<>>(graph, config, extender));
+    } else if (config.alignment_min_seed_length < graph.get_k()) {
+        if (!dynamic_cast<const DBGSuccinct*>(&graph))
+            throw std::runtime_error("SuffixSeeder only implemented for DBGSuccinct");
+
+        // Use the seeder that seeds to node suffixes
+        aligner.reset(new DBGAligner<SuffixSeeder<>>(graph, config, extender));
     } else {
-        aligner.reset(new DBGAligner<>(graph, DBGAlignerConfig(config, graph), extender));
+        aligner.reset(new DBGAligner<>(graph, config, extender));
     }
 
     return aligner;
