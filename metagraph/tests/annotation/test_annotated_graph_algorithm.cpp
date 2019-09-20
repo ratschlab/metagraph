@@ -55,14 +55,90 @@ void test_mask_indices(double density_cutoff) {
     }
 }
 
-
-
-
-
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     for (double d = 0.0; d <= 1.0; d += 0.05) {
         test_mask_indices<typename TypeParam::first_type,
                           typename TypeParam::second_type>(d);
+    }
+}
+
+
+template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+void
+test_mask_unitigs(double outlabel_mixture,
+                  double density_cutoff,
+                  const std::unordered_set<std::string> &ref_kmers) {
+    const std::vector<std::string> ingroup { "B", "C" };
+    const std::vector<std::string> outgroup { "A" };
+    size_t k = 3;
+
+    {
+        /*
+           CGA                 GCC-CCT
+              \               /
+               GAA-AAT-ATG-TGC
+              /               \
+           GGA                 GCA-CAC
+        */
+        const std::vector<std::string> sequences {
+            "TGCCT",
+            "CGAATGCCT",
+            "GGAATGCAC",
+            "TTTTTTTTTTTTTT"
+        };
+        const std::vector<std::string> labels { "A", "B", "C", "D" };
+
+        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+        std::unordered_set<std::string> obs_kmers;
+
+        MaskedDeBruijnGraph masked_dbg(
+            std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph->get_graph_ptr()),
+            annotated_graph_algorithm::mask_nodes_by_unitig_label(
+                *anno_graph,
+                ingroup,
+                outgroup,
+                outlabel_mixture,
+                density_cutoff
+            )
+        );
+
+        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+
+        masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
+
+        EXPECT_EQ(ref_kmers, obs_kmers)
+            << k << " " << density_cutoff << " " << outlabel_mixture;
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
+    for (double d = 0.0; d <= 1.0; d += 0.05) {
+        std::unordered_set<std::string> ref_kmers;
+
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(0.0, d, ref_kmers);
+
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(0.24, d, ref_kmers);
+
+        ref_kmers.insert("GAA");
+        ref_kmers.insert("AAT");
+        ref_kmers.insert("ATG");
+        ref_kmers.insert("TGC");
+
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(0.25, d, ref_kmers);
+
+
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(0.50, d, ref_kmers);
+
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(0.75, d, ref_kmers);
+
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, d, ref_kmers);
     }
 }
 

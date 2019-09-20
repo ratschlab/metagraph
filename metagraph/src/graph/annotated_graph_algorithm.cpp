@@ -150,6 +150,64 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     }, anno_graph.get_graph().num_nodes() + 1);
 }
 
+std::unique_ptr<bitmap>
+mask_nodes_by_unitig_label(const AnnotatedDBG &anno_graph,
+                           const std::vector<Label> &labels_in,
+                           const std::vector<Label> &labels_out,
+                           double unitig_labels_out_admixture,
+                           double lazy_evaluation_label_frequency_cutoff) {
+    assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
+    auto dbg = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
+    MaskedDeBruijnGraph masked_in_graph(
+        dbg,
+        mask_nodes_by_label(anno_graph,
+                            labels_in,
+                            std::vector<AnnotatedDBG::Annotator::Label>{},
+                            [&](auto get_in_count, auto) {
+                                return get_in_count() == labels_in.size();
+                            },
+                            lazy_evaluation_label_frequency_cutoff)
+    );
+
+    sdsl::bit_vector unitig_mask(anno_graph.get_graph().num_nodes() + 1, false);
+    masked_in_graph.call_unitigs([&](const auto &unitig) {
+        // TODO: implement bitmap::clear so that this can be outside the loop
+        bitmap_adaptive temp_mask(anno_graph.get_graph().num_nodes() + 1, false);
+        size_t min_label_count = std::floor(unitig_labels_out_admixture
+            * (unitig.length() - dbg->get_k() + 1)
+            * labels_out.size());
+
+        size_t label_count = 0;
+        anno_graph.get_graph().map_to_nodes(
+            unitig,
+            [&](auto i) {
+                assert(i != DeBruijnGraph::npos);
+                assert(std::all_of(labels_in.begin(),
+                                   labels_in.end(),
+                                   [&](const auto &label) {
+                                       return anno_graph.has_label(i, label);
+                                   }));
+
+                temp_mask.set(i, true);
+
+                label_count += std::count_if(labels_out.begin(),
+                                             labels_out.end(),
+                                             [&](const auto &label) {
+                                                 return anno_graph.has_label(i, label);
+                                             });
+            },
+            [&]() { return label_count > min_label_count; }
+        );
+
+        if (label_count <= min_label_count) {
+            assert(temp_mask.num_set_bits());
+            temp_mask.add_to(&unitig_mask);
+        }
+    });
+
+    return std::make_unique<bit_vector_stat>(std::move(unitig_mask));
+}
+
 void
 call_paths_from_branch(const DeBruijnGraph &graph,
                        const DeBruijnGraph &full_graph,

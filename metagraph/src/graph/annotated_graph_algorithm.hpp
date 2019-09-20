@@ -39,6 +39,13 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                        LabelCountCallback /* get_num_labels_out */)> is_node_in_mask,
                     double lazy_evaluation_label_frequency_cutoff = 0.05);
 
+std::unique_ptr<bitmap>
+mask_nodes_by_unitig_label(const AnnotatedDBG &anno_graph,
+                           const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
+                           const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
+                           double unitig_labels_out_admixture = 0.0,
+                           double lazy_evaluation_label_frequency_cutoff = 0.05);
+
 template <class Index, typename... Args>
 using VariantCallback = std::function<void(Alignment<Index>&&,
                                            const std::string&, // query sequence
