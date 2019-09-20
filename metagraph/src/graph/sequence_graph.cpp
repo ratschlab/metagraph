@@ -21,7 +21,7 @@ static_assert(!(kBlockSize & 0xFF));
 void SequenceGraph::add_extension(std::shared_ptr<GraphExtension> extension) {
     assert(extension.get());
     extensions_.push_back(extension);
-};
+}
 
 void SequenceGraph::serialize_extensions(const std::string &filename) const {
     for (auto extension : extensions_) {

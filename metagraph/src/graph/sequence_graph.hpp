@@ -110,20 +110,18 @@ class SequenceGraph {
     };
 
     template <class ExtensionSubtype>
-    bool load_extension(const std::string &filename) {
+    std::shared_ptr<ExtensionSubtype> load_extension(const std::string &filename) {
         static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
         remove_extension<ExtensionSubtype>();
         auto extension = std::make_shared<ExtensionSubtype>();
 
         auto filename_base = utils::remove_suffix(filename, file_extension());
 
-        if (extension->load(filename_base + file_extension())
-                && extension->is_compatible(*this)) {
-            add_extension(extension);
-            return true;
-        }
+        if (!extension->load(filename_base + file_extension()))
+            return nullptr;
 
-        return false;
+        add_extension(extension);
+        return extension;
     }
 
     void serialize_extensions(const std::string &filename_base) const;
@@ -131,6 +129,7 @@ class SequenceGraph {
   private:
     std::vector<std::shared_ptr<GraphExtension>> extensions_;
 };
+
 
 class DeBruijnGraph : public SequenceGraph {
   public:
