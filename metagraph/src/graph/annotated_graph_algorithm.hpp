@@ -43,6 +43,7 @@ std::unique_ptr<bitmap>
 mask_nodes_by_unitig_label(const AnnotatedDBG &anno_graph,
                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
+                           double unitig_labels_in_admixture = 1.0,
                            double unitig_labels_out_admixture = 0.0,
                            double lazy_evaluation_label_frequency_cutoff = 0.05);
 

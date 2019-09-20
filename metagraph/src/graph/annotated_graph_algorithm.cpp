@@ -154,8 +154,10 @@ std::unique_ptr<bitmap>
 mask_nodes_by_unitig_label(const AnnotatedDBG &anno_graph,
                            const std::vector<Label> &labels_in,
                            const std::vector<Label> &labels_out,
+                           double unitig_labels_in_admixture,
                            double unitig_labels_out_admixture,
                            double lazy_evaluation_label_frequency_cutoff) {
+    size_t min_in_labels = std::ceil(unitig_labels_in_admixture * labels_in.size());
     assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
     auto dbg = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
     MaskedDeBruijnGraph masked_in_graph(
@@ -164,7 +166,7 @@ mask_nodes_by_unitig_label(const AnnotatedDBG &anno_graph,
                             labels_in,
                             std::vector<AnnotatedDBG::Annotator::Label>{},
                             [&](auto get_in_count, auto) {
-                                return get_in_count() == labels_in.size();
+                                return get_in_count() >= min_in_labels;
                             },
                             lazy_evaluation_label_frequency_cutoff)
     );
@@ -178,6 +180,7 @@ mask_nodes_by_unitig_label(const AnnotatedDBG &anno_graph,
             * labels_out.size());
 
         size_t label_count = 0;
+        auto get_out_label_count = build_label_counter(anno_graph, labels_out);
         anno_graph.get_graph().map_to_nodes(
             unitig,
             [&](auto i) {
@@ -189,12 +192,7 @@ mask_nodes_by_unitig_label(const AnnotatedDBG &anno_graph,
                                    }));
 
                 temp_mask.set(i, true);
-
-                label_count += std::count_if(labels_out.begin(),
-                                             labels_out.end(),
-                                             [&](const auto &label) {
-                                                 return anno_graph.has_label(i, label);
-                                             });
+                label_count += get_out_label_count(i);
             },
             [&]() { return label_count > min_label_count; }
         );

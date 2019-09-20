@@ -558,6 +558,7 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
             anno_graph,
             config->label_mask_in,
             config->label_mask_out,
+            double(1.0) - config->label_mask_out_fraction,
             config->label_mask_out_fraction
         )
     );

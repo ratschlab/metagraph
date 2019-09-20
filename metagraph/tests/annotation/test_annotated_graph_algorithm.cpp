@@ -65,7 +65,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
 
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
 void
-test_mask_unitigs(double outlabel_mixture,
+test_mask_unitigs(double inlabel_mixture,
+                  double outlabel_mixture,
                   double density_cutoff,
                   const std::unordered_set<std::string> &ref_kmers) {
     const std::vector<std::string> ingroup { "B", "C" };
@@ -98,6 +99,7 @@ test_mask_unitigs(double outlabel_mixture,
                 *anno_graph,
                 ingroup,
                 outgroup,
+                inlabel_mixture,
                 outlabel_mixture,
                 density_cutoff
             )
@@ -117,10 +119,10 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
         std::unordered_set<std::string> ref_kmers;
 
         test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(0.0, d, ref_kmers);
+                          typename TypeParam::second_type>(1.0, 0.0, d, ref_kmers);
 
         test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(0.24, d, ref_kmers);
+                          typename TypeParam::second_type>(1.0, 0.24, d, ref_kmers);
 
         ref_kmers.insert("GAA");
         ref_kmers.insert("AAT");
@@ -128,17 +130,17 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
         ref_kmers.insert("TGC");
 
         test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(0.25, d, ref_kmers);
+                          typename TypeParam::second_type>(1.0, 0.25, d, ref_kmers);
 
 
         test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(0.50, d, ref_kmers);
+                          typename TypeParam::second_type>(1.0, 0.50, d, ref_kmers);
 
         test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(0.75, d, ref_kmers);
+                          typename TypeParam::second_type>(1.0, 0.75, d, ref_kmers);
 
         test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(1.0, d, ref_kmers);
+                          typename TypeParam::second_type>(1.0, 1.0, d, ref_kmers);
     }
 }
 
