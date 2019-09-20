@@ -3,7 +3,7 @@
 
 
 NodeWeights::NodeWeights(uint64_t num_nodes, size_t bits_per_count)
-      : weights_(sdsl::int_vector<>(num_nodes, 0, bits_per_count)),
+      : weights_(num_nodes, 0, bits_per_count),
         max_weight_(~uint64_t(0) >> (64 - weights_.width())) {}
 
 NodeWeights::NodeWeights(sdsl::int_vector<>&& weights)
