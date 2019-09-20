@@ -72,7 +72,7 @@ void NodeWeights::add_weight(node_index i, weight w) {
     assert(old_weight <= max_weight_);
 
     if (old_weight < max_weight_)
-        weights_[i] = old_weight + w < max_weight_
+        weights_[i] = w < max_weight_ - old_weight
                     ? old_weight + w
                     : max_weight_;
 }
