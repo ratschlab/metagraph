@@ -7,8 +7,13 @@
 #include "annotated_graph_algorithm.hpp"
 
 
+template <typename GraphAnnotationPair>
+class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
+
+TYPED_TEST_CASE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
+
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
-void test_call_significant_indices(double density_cutoff, double outlabel_mixture) {
+void test_mask_indices(double density_cutoff) {
     const std::vector<std::string> ingroup { "B", "C" };
     const std::vector<std::string> outgroup { "A" };
 
@@ -24,39 +29,40 @@ void test_call_significant_indices(double density_cutoff, double outlabel_mixtur
 
         auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
 
-        std::unordered_set<std::string> obs_labels;
-        const std::unordered_set<std::string> ref { "B", "C", "D" };
+        std::unordered_set<std::string> obs_labels, obs_kmers;
+        const std::unordered_set<std::string> ref_kmers {
+            std::string(k - 1, 'A') + "C"
+        };
+        const std::unordered_set<std::string> ref_labels {
+            "B", "C", "D"
+        };
 
         auto masked_dbg = build_masked_graph(*anno_graph,
                                              ingroup,
                                              outgroup,
-                                             density_cutoff,
-                                             outlabel_mixture);
+                                             0.0,
+                                             density_cutoff);
         EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
 
-        masked_dbg.call_nodes(
-            [&](const auto &index) {
-                auto cur_labels = anno_graph->get_labels(index);
+        masked_dbg.call_kmers([&](auto i, const auto &kmer) {
+            auto cur_labels = anno_graph->get_labels(i);
+            obs_labels.insert(cur_labels.begin(), cur_labels.end());
+            obs_kmers.insert(kmer);
+        });
 
-                obs_labels.insert(cur_labels.begin(), cur_labels.end());
-            }
-        );
-
-        EXPECT_EQ(ref, obs_labels) << k << " " << density_cutoff << " " << outlabel_mixture;
+        EXPECT_EQ(ref_labels, obs_labels) << k << " " << density_cutoff;
+        EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << density_cutoff;
     }
 }
 
 
 
-template <typename GraphAnnotationPair>
-class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 
-TYPED_TEST_CASE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 
-TYPED_TEST(MaskedDeBruijnGraphAlgorithm, CallSignificantIndices) {
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     for (double d = 0.0; d <= 1.0; d += 0.05) {
-        test_call_significant_indices<typename TypeParam::first_type,
-                                      typename TypeParam::second_type>(0.0, d);
+        test_mask_indices<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(d);
     }
 }
 
