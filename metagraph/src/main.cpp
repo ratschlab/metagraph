@@ -554,19 +554,11 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
 
     return std::make_unique<MaskedDeBruijnGraph>(
         graph,
-        annotated_graph_algorithm::mask_nodes_by_label(
+        annotated_graph_algorithm::mask_nodes_by_unitig_label(
             anno_graph,
             config->label_mask_in,
             config->label_mask_out,
-            [&](LabelCountCallback get_num_in_labels, LabelCountCallback get_num_out_labels) {
-                auto count_in = get_num_in_labels();
-                if (count_in != config->label_mask_in.size())
-                    return false;
-
-                auto count_out = get_num_out_labels();
-                return count_out <= config->label_mask_out_fraction
-                    * (count_in + count_out);
-            }
+            config->label_mask_out_fraction
         )
     );
 }
