@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 
+"""
+Jointly plot the scores, NG50, and NG90 for each input alignment JSON file.
+JSON files should be in the alignment format of metagraph, vg, etc.
+
+Usage:
+./plot_alignment_ng50.py FILE1.json [FILE2.json [...]]
+"""
+
 import sys
 import json
 import numpy as np
