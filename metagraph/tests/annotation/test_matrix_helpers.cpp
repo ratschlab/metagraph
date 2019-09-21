@@ -96,6 +96,25 @@ ColMajorCompressed build_matrix_from_columns<ColMajorCompressed>(BitVectorPtrArr
 
 
 template <typename BinMat>
+BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t) {
+    return BinMat(columns);
+}
+
+#define RBFBufferColConst(n) \
+template <> \
+RainbowfishBuffer<n> build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_rows) { \
+    return build_matrix_from_rows<RainbowfishBuffer<n>>(columns, num_rows); \
+}
+RBFBufferColConst(1)
+RBFBufferColConst(2)
+RBFBufferColConst(3)
+RBFBufferColConst(4)
+RBFBufferColConst(5)
+RBFBufferColConst(6)
+
+
+
+template <typename BinMat>
 BinMat
 build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
                        uint64_t num_columns,
@@ -213,6 +232,29 @@ template RainbowfishBuffer<3> build_matrix_from_rows<RainbowfishBuffer<3>>(BitVe
 template RainbowfishBuffer<4> build_matrix_from_rows<RainbowfishBuffer<4>>(BitVectorPtrArray&&, uint64_t);
 template RainbowfishBuffer<5> build_matrix_from_rows<RainbowfishBuffer<5>>(BitVectorPtrArray&&, uint64_t);
 template RainbowfishBuffer<6> build_matrix_from_rows<RainbowfishBuffer<6>>(BitVectorPtrArray&&, uint64_t);
+
+template <typename BinMat>
+BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_rows) {
+    auto num_columns = columns.size();
+    auto num_set_bits = 0;
+    for (const auto &column : columns) {
+        num_set_bits += column->num_set_bits();
+    }
+
+    return build_matrix_from_rows<BinMat>(
+        [&](auto row_callback) {
+            utils::call_rows(row_callback, columns);
+        },
+        num_columns, num_rows, num_set_bits
+    );
+}
+template Rainbowfish build_matrix_from_rows<Rainbowfish>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<1> build_matrix_from_rows<RainbowfishBuffer<1>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<2> build_matrix_from_rows<RainbowfishBuffer<2>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<3> build_matrix_from_rows<RainbowfishBuffer<3>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<4> build_matrix_from_rows<RainbowfishBuffer<4>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<5> build_matrix_from_rows<RainbowfishBuffer<5>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<6> build_matrix_from_rows<RainbowfishBuffer<6>>(const BitVectorPtrArray&, uint64_t);
 
 
 template <typename TypeParam>
