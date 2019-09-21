@@ -1355,6 +1355,11 @@ int main(int argc, const char *argv[]) {
 
             auto node_weights = graph->load_extension<NodeWeights>(config->infbase);
             // TODO: fix extension of DBGSuccinct with k-mer counts
+            //       DBGSuccinct with mask of dummy edges initialized uses
+            //       contiguous indexes that are not compatible with node weights,
+            //       which are indexed by the rows of the BOSS table.
+            //       This can be fixed by using the same indexes in all cases
+            //       (non-contiguous indexing)
             if (!node_weights->is_compatible(*graph)) {
                 std::cerr << "Error: node weights are not compatible with graph "
                           << config->infbase
