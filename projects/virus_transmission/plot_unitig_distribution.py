@@ -1,14 +1,15 @@
+#!/usr/bin/env python3
+
 import gzip
 import glob
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
 
-ks = [31]
+ks = [19, 27, 31, 41]
 
 for k in ks:
-    for f in sorted(glob.glob('k' + str(k) + "/*.diff*.fasta.gz")
-                    + glob.glob('k' + str(k) + "/*.unitigs.fasta.gz")):
+    for f in sorted(glob.glob('k' + str(k) + "/*.diff*.fasta.gz")):
         lines = [a.decode().strip() for a in gzip.open(f, "rb")]
         seqs = lines[slice(1, len(lines), 2)]
         lens = sorted([len(a) for a in seqs])

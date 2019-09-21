@@ -18,7 +18,6 @@ for a in /cluster/work/grlab/projects/metagenome/raw_data/huber_virology/$NAME\_
 done
 
 $METAGRAPH build -k $K k$K/$NAME\_*.contigs.fasta.gz -o k$K/$NAME $FLAGS
-$METAGRAPH assemble --unitigs $FLAGS k$K/$NAME.dbg -o k$K/$NAME.unitigs
 
 $METAGRAPH annotate -i k$K/$NAME.dbg k$K/$NAME\_*.contigs.fasta.gz -o k$K/$NAME --anno-filename $FLAGS
 
