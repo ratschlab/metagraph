@@ -7,7 +7,7 @@
 
 bool is_unreliable_unitig(const std::string &sequence,
                           const DeBruijnGraph &graph,
-                          const IWeighted<DeBruijnGraph::node_index> &node_weights,
+                          const NodeWeights &node_weights,
                           uint64_t min_median_abundance) {
     assert(sequence.size() >= graph.get_k());
 
@@ -20,7 +20,7 @@ bool is_unreliable_unitig(const std::string &sequence,
 
     graph.map_to_nodes(sequence,
         [&](auto node) {
-            if (node_weights.get_weight(node) < min_median_abundance) {
+            if (node_weights[node] < min_median_abundance) {
                 num_weak_kmers++;
             } else {
                 num_reliable_kmers++;
@@ -42,11 +42,11 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
                                  double *false_pos_ptr, double *false_neg_ptr);
 
 uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
-                                     const IWeighted<DeBruijnGraph::node_index> &node_weights,
+                                     const NodeWeights &node_weights,
                                      uint64_t fallback_cutoff) {
     std::vector<uint64_t> hist;
     graph.call_nodes([&](auto i) {
-        uint64_t kmer_count = node_weights.get_weight(i);
+        uint64_t kmer_count = node_weights[i];
         assert(kmer_count && "All k-mers in graph must have non-zero counts");
         while (kmer_count >= hist.size()) {
             hist.push_back(0);

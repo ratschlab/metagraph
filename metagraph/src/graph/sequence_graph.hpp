@@ -5,8 +5,13 @@
 #include <string>
 #include <functional>
 #include <iostream>
+#include <memory>
 
 class bit_vector_dyn;
+
+namespace utils {
+    std::string remove_suffix(const std::string &str, const std::string &suffix);
+}
 
 
 class SequenceGraph {
@@ -56,6 +61,73 @@ class SequenceGraph {
 
     // Check if the node index is a valid node in the graph
     virtual bool in_graph(node_index node) const = 0;
+
+    /********************************************************/
+    /******************* graph extensions *******************/
+    /********************************************************/
+
+    class GraphExtension {
+      public:
+        virtual ~GraphExtension() {}
+        virtual bool load(const std::string &filename_base) = 0;
+        virtual void serialize(const std::string &filename_base) const = 0;
+        virtual bool is_compatible(const SequenceGraph &graph, bool verbose = true) const = 0;
+    };
+
+    // TODO: improve interface: either prohibit or support
+    //       properly multiple extensions of the same type.
+    //       Use GraphExtension::file_extension() or enum.
+    void add_extension(std::shared_ptr<GraphExtension> extension);
+
+    template <class ExtensionSubtype>
+    std::shared_ptr<ExtensionSubtype> get_extension() const {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        for (auto extension : extensions_) {
+            if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
+                return match;
+        }
+        return nullptr;
+    }
+
+    template <class ExtensionSubtype>
+    void remove_extension() {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        for (auto it = extensions_.begin(); it != extensions_.end(); ++it) {
+            if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(*it)) {
+                extensions_.erase(it);
+                return;
+            }
+        }
+    }
+
+    template <class ExtensionSubtype>
+    void for_each(std::function<void(ExtensionSubtype &extension)> callback) {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        for (auto extension : extensions_) {
+            if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
+                callback(*match);
+        }
+    };
+
+    template <class ExtensionSubtype>
+    std::shared_ptr<ExtensionSubtype> load_extension(const std::string &filename) {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        remove_extension<ExtensionSubtype>();
+        auto extension = std::make_shared<ExtensionSubtype>();
+
+        auto filename_base = utils::remove_suffix(filename, file_extension());
+
+        if (!extension->load(filename_base + file_extension()))
+            return nullptr;
+
+        add_extension(extension);
+        return extension;
+    }
+
+    void serialize_extensions(const std::string &filename_base) const;
+
+  private:
+    std::vector<std::shared_ptr<GraphExtension>> extensions_;
 };
 
 

@@ -164,6 +164,7 @@ void DBGSuccinct::add_seq(const std::string &sequence,
             if (nodes_inserted)
                 nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
         }
+
     } else {
         boss_graph_->add_sequence(sequence, true);
     }

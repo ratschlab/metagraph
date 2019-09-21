@@ -25,7 +25,7 @@
 
 void DBGHashString::add_sequence(const std::string &sequence,
                                  bit_vector_dyn *nodes_inserted) {
-    assert(!nodes_inserted || nodes_inserted->size() == num_nodes());
+    assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
     for (const auto &seq_encoded : encode_sequence(sequence)) {
         assert(sequence.size() >= k_);

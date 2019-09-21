@@ -3,6 +3,8 @@
 #include <progress_bar.hpp>
 
 #include "kmer_collector.hpp"
+#include "node_weights.hpp"
+#include "utils.hpp"
 
 
 template <typename KmerStorage>
@@ -70,7 +72,7 @@ BitmapChunkConstructor<KmerStorage>
 
 DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
                                            bool canonical_mode,
-                                           bool count_kmers,
+                                           uint8_t bits_per_count,
                                            const std::string &filter_suffix,
                                            size_t num_threads,
                                            double memory_preallocated,
@@ -78,23 +80,23 @@ DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
       : constructor_(IBitmapChunkConstructor::initialize(
             k,
             canonical_mode,
-            count_kmers,
+            bits_per_count > 0,
             filter_suffix,
             num_threads,
             memory_preallocated,
             verbose)
-        ) {}
+        ),
+        bits_per_count_(bits_per_count) {}
 
 template <typename KmerStorage>
 sdsl::int_vector<>
-BitmapChunkConstructor<KmerStorage>
-::get_weights(uint8_t bits_per_count) {
+BitmapChunkConstructor<KmerStorage>::get_weights(uint8_t bits_per_count) {
     if constexpr(utils::is_pair<typename KmerStorage::Value>::value) {
         const auto &kmers = kmer_collector_.data();
 
         sdsl::int_vector<> weights(kmers.size() + 1, 0, bits_per_count);
 
-        const uint64_t max_count = ~uint64_t(0) >> (64 - weights.width());
+        const uint64_t max_count = utils::max_uint(weights.width());
 
         for (size_t i = 0; i < kmers.size(); ++i) {
             weights[i + 1] = std::min(static_cast<uint64_t>(kmers[i].second), max_count);
@@ -291,8 +293,10 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
     );
     delete chunk;
     graph->complete_ = false;
-}
 
-sdsl::int_vector<> DBGBitmapConstructor::get_weights(uint8_t bits_per_count) {
-    return constructor_->get_weights(bits_per_count);
+    if (bits_per_count_) {
+        graph->add_extension(
+            std::make_shared<NodeWeights>(constructor_->get_weights(bits_per_count_))
+        );
+    }
 }

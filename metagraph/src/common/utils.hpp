@@ -142,6 +142,8 @@ namespace utils {
 
     inline uint32_t code_length(uint64_t x) { return sdsl::bits::hi(x) + 1; }
 
+    inline uint64_t max_uint(uint8_t width) { return ~uint64_t(0) >> (64 - width); }
+
     template <class AIt, class BIt>
     uint64_t count_intersection(AIt first_begin, AIt first_end,
                                 BIt second_begin, BIt second_end) {
@@ -272,6 +274,40 @@ namespace utils {
 
         std::hash<std::bitset<sizeof(T) * 8>> hasher;
     };
+
+    // Bitmap |new_indexes| marks positions of inserted values in the final vector
+    template <class Vector>
+    void insert(Vector *vector,
+                const bitmap &new_indexes,
+                const typename Vector::value_type &value) {
+        assert(vector);
+        assert(new_indexes.size() == vector->size() + new_indexes.num_set_bits());
+
+        if (!new_indexes.num_set_bits())
+            return;
+
+        vector->resize(vector->size() + new_indexes.num_set_bits());
+
+        // need to move everything to the right as we call ones from left to right
+        std::move_backward(vector->begin(),
+                           vector->end() - new_indexes.num_set_bits(),
+                           vector->end());
+
+        size_t i = new_indexes.num_set_bits();
+        size_t curpos = 0;
+
+        // call ones from left to right
+        new_indexes.call_ones([&](auto new_index) {
+            assert(new_index >= curpos);
+
+            // move block
+            while (curpos < new_index) {
+                (*vector)[curpos++] = std::move((*vector)[i++]);
+            }
+            // insert new value
+            (*vector)[curpos++] = value;
+        });
+    }
 
     // new_indexes - positions of inserted values in the final vector
     template <class Vector>
