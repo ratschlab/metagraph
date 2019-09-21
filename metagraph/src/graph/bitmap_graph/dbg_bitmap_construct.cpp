@@ -96,7 +96,7 @@ BitmapChunkConstructor<KmerStorage>::get_weights(uint8_t bits_per_count) {
 
         sdsl::int_vector<> weights(kmers.size() + 1, 0, bits_per_count);
 
-        const uint64_t max_count = ~uint64_t(0) >> (64 - weights.width());
+        const uint64_t max_count = utils::max_uint(weights.width());
 
         for (size_t i = 0; i < kmers.size(); ++i) {
             weights[i + 1] = std::min(static_cast<uint64_t>(kmers[i].second), max_count);
