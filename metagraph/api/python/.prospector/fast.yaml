@@ -1,0 +1,15 @@
+inherits:
+  - strictness_verylow
+
+pylint:
+  run: false
+
+pep8:
+  disable:
+    - E305 # expected 2 blank lines after class or function definition
+    - E713 # test for membership should be 'not in'
+    - E714 # test for object identity should be 'is not'
+
+vulture:
+  run: true
+
