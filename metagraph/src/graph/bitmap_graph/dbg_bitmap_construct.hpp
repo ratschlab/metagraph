@@ -31,9 +31,10 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
 
 class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
   public:
+    // Don't count k-mers if |bits_per_count| is zero.
     DBGBitmapConstructor(size_t k,
                          bool canonical_mode = false,
-                         bool count_kmers = false,
+                         uint8_t bits_per_count = 0,
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
                          double memory_preallocated = 0,
@@ -67,10 +68,9 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
                                               const std::function<DBGBitmap::Chunk(void)> &next_chunk,
                                               bool canonical_mode = false);
 
-    sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8);
-
   private:
     std::unique_ptr<IBitmapChunkConstructor> constructor_;
+    uint8_t bits_per_count_;
 };
 
 #endif // __DBG_BITMAP_CONSTRUCT_HPP__

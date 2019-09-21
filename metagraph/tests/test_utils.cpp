@@ -88,7 +88,6 @@ void check_rows(utils::RowsFromColumnsTransformer&& rct) {
     }, std::move(rct));
 
     ASSERT_EQ(7u, i);
-    EXPECT_EQ(0u, rct.values_left());
 }
 
 void check_indices(utils::RowsFromColumnsTransformer&& rct) {
@@ -843,4 +842,86 @@ TEST(Misc, get_quantile) {
     EXPECT_EQ(3, utils::get_quantile<int>({ {1, 2}, {2, 3}, {3, 5}, {4, 5}, {5, 5} }, 0.5));
     EXPECT_EQ(2, utils::get_quantile<int>({ {1, 2}, {2, 3}, {3, 5}, {4, 5}, {5, 5} }, 0.25));
     EXPECT_EQ(4, utils::get_quantile<int>({ {1, 2}, {2, 3}, {3, 5}, {4, 5}, {5, 5} }, 0.75));
+}
+
+
+template <typename T>
+std::vector<T> insert_reference_impl(std::vector<T> vector,
+                                     const std::vector<uint64_t> &new_pos,
+                                     T value) {
+    assert(std::is_sorted(new_pos.begin(), new_pos.end()));
+    for (auto i : new_pos) {
+        vector.insert(vector.begin() + i, value);
+    }
+    return vector;
+}
+
+bitmap_vector to_bitmap(size_t size, const std::vector<uint64_t> &set_bits_pos) {
+    assert(std::is_sorted(set_bits_pos.begin(), set_bits_pos.end()));
+    sdsl::bit_vector mask(size, false);
+    for (auto i : set_bits_pos) {
+        mask[i] = true;
+    }
+    return bitmap_vector(std::move(mask));
+}
+
+TEST(Misc, insert_zeros_to_empty) {
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, 4, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, 4, 5, }) }) {
+        std::vector<int> first;
+        std::vector<int> second = first;
+        auto expected = insert_reference_impl(first, new_pos, 0);
+        utils::insert(&first, new_pos, 0);
+        utils::insert(&second, to_bitmap(second.size() + new_pos.size(), new_pos), 0);
+
+        EXPECT_EQ(expected, first);
+        EXPECT_EQ(expected, second);
+    }
+}
+
+TEST(Misc, insert_zeros_to_all_zeros) {
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 50, }),
+                                 std::vector<uint64_t>({ 50, 51, }),
+                                 std::vector<uint64_t>({ 50, 51, 52, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, 51, 52, 53, 54, 55, }) }) {
+        std::vector<int> first(50, 0);
+        std::vector<int> second = first;
+        auto expected = insert_reference_impl(first, new_pos, 0);
+        utils::insert(&first, new_pos, 0);
+        utils::insert(&second, to_bitmap(second.size() + new_pos.size(), new_pos), 0);
+
+        EXPECT_EQ(expected, first);
+        EXPECT_EQ(expected, second);
+    }
+}
+
+TEST(Misc, insert_zeros_to_all_ones) {
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 50, }),
+                                 std::vector<uint64_t>({ 50, 51, }),
+                                 std::vector<uint64_t>({ 50, 51, 52, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, 51, 52, 53, 54, 55, }) }) {
+        std::vector<int> first(50, 1);
+        std::vector<int> second = first;
+        auto expected = insert_reference_impl(first, new_pos, 0);
+        utils::insert(&first, new_pos, 0);
+        utils::insert(&second, to_bitmap(second.size() + new_pos.size(), new_pos), 0);
+
+        EXPECT_EQ(expected, first);
+        EXPECT_EQ(expected, second);
+    }
 }
