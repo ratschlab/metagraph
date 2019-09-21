@@ -2,7 +2,6 @@
 #include "utils.hpp"
 
 
-
 NodeWeights::NodeWeights(uint64_t num_nodes, size_t bits_per_count)
       : weights_(num_nodes, 0, bits_per_count),
         max_weight_(utils::max_uint(weights_.width())) {}
