@@ -10,6 +10,8 @@
 #include "annotate_column_compressed.hpp"
 #include "unix_tools.hpp"
 #include "utils.hpp"
+#include "alphabets.hpp"
+#include "aligner_helper.hpp"
 
 using namespace std::chrono_literals;
 
@@ -164,7 +166,8 @@ int main(int argc, char *argv[]) {
             "subsets",
             "to_rrr",
             "stats",
-            "query"
+            "query",
+            "alignment"
         };
 
         ValuesConstraint<std::string> regime_constraint(regimes);
@@ -653,6 +656,107 @@ int main(int argc, char *argv[]) {
                     query_file << test_column_time(*matrix, num_queries)
                                << std::endl;
                 }
+            }
+        } else if (regime == "alignment") {
+            std::vector<std::string> align_regimes {
+                "score_cigar",
+            };
+            ValuesConstraint<std::string> align_regime_constraint(align_regimes);
+            UnlabeledValueArg<std::string> align_regime_arg("align_regime", "Align regime", true, "", &align_regime_constraint, cmd);
+
+            cmd.parse(std::min(argc, 3), argv);
+            std::string align_regime = align_regime_arg.getValue();
+            cmd.reset();
+
+            std::vector<std::string> alphabet_types {
+                "dna",
+                "protein"
+            };
+            ValuesConstraint<std::string> alphabet_constraint(alphabet_types);
+            UnlabeledValueArg<std::string> alphabet_arg("alphabet", "Alphabet", true, "", &alphabet_constraint, cmd);
+            cmd.parse(std::min(argc, 4), argv);
+            std::string cur_alphabet = alphabet_arg.getValue();
+            std::string alphabet = cur_alphabet == "dna"
+                ? alphabets::kAlphabetDNA
+                : alphabets::kAlphabetProtein;
+            cmd.reset();
+
+            std::vector<std::string> modes {
+                "unit",
+                "non-unit"
+            };
+            ValuesConstraint<std::string> mode_constraint(modes);
+            UnlabeledValueArg<std::string> mode_arg("matrix_type", "Score matrix type", true, "", &mode_constraint, cmd);
+            cmd.parse(std::min(argc, 5), argv);
+            std::string mode = mode_arg.getValue();
+            cmd.reset();
+
+            UnlabeledValueArg<std::string> file_arg(
+                "input_file",
+                "Input file (one CIGAR, reference sequence, and alternative sequence per line)",
+                true,
+                "",
+                "string",
+                cmd
+            );
+            cmd.parse(std::min(argc, 6), argv);
+            std::string file = file_arg.getValue();
+            cmd.reset();
+
+            std::unique_ptr<DBGAlignerConfig> config;
+
+            if (mode != "unit" && alphabet_arg.getValue() == "protein") {
+                config.reset(new DBGAlignerConfig(
+                    DBGAlignerConfig::ScoreMatrix(DBGAlignerConfig::score_matrix_blosum62),
+                    -3,
+                    -1
+                ));
+            } else {
+                ValueArg<int> match_arg("",
+                                        "match",
+                                        "score for a single match",
+                                        false,
+                                        mode == "unit" ? 1 : 2,
+                                        "int",
+                                        cmd);
+
+                if (mode == "unit") {
+                    cmd.parse(argc, argv);
+                    config.reset(new DBGAlignerConfig(
+                        DBGAlignerConfig::unit_scoring_matrix(match_arg.getValue(), alphabet),
+                        -1,
+                        -1
+                    ));
+                } else {
+                    ValueArg<int> gap_open_arg("", "gap_open_penalty", "gap open penalty", false, 3, "int", cmd);
+                    ValueArg<int> gap_ext_arg("", "gap_ext_penalty", "gap extension penalty", false, 1, "int", cmd);
+
+                    if (cur_alphabet == "dna") {
+                        ValueArg<int> mm_transition_arg("", "transition_penalty", "transition penalty", false, 1, "int", cmd);
+                        ValueArg<int> mm_transversion_arg("", "transversion_penalty", "transversion penalty", false, 2, "int", cmd);
+                        cmd.parse(argc, argv);
+
+                        config.reset(new DBGAlignerConfig(
+                            DBGAlignerConfig::dna_scoring_matrix(match_arg.getValue(),
+                                                                 -mm_transition_arg.getValue(),
+                                                                 -mm_transversion_arg.getValue()),
+                            -gap_open_arg.getValue(),
+                            -gap_ext_arg.getValue()
+                        ));
+                    } else {
+                        throw std::runtime_error("Not implemented for " + cur_alphabet);
+                    }
+                }
+            }
+
+            std::string cigar, ref, alt;
+            std::ifstream fin(file);
+            while (fin >> cigar >> ref >> alt) {
+                std::cout << cigar << " "
+                          << config->score_cigar(ref.begin(), ref.end(),
+                                                 alt.begin(), alt.end(),
+                                                 Cigar(cigar)) << " "
+                          << ref << " " << alt << std::endl;
             }
         }
     } catch (const TCLAP::ArgException &e) {
