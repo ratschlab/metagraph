@@ -462,7 +462,7 @@ void default_extender(const DeBruijnGraph &graph,
         } else {
             assert(next_paths->back().get_score() + path.get_score()
                 == start_node->second.best_score());
-            assert(next_paths->back().is_valid(graph));
+            assert(next_paths->back().is_valid(graph, &config));
         }
 
         return;
@@ -510,7 +510,7 @@ void default_extender(const DeBruijnGraph &graph,
             next_paths->pop_back();
         } else {
             visited_nodes.insert(next_paths->back().begin(), next_paths->back().end());
-            assert(next_paths->back().is_valid(graph));
+            assert(next_paths->back().is_valid(graph, &config));
         }
     }
 }

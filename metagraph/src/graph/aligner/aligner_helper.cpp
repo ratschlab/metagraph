@@ -711,11 +711,20 @@ std::shared_ptr<const std::string> Alignment<NodeType>
 }
 
 template <typename NodeType>
-bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
-    // TODO: check score
-
+bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
+                                   const DBGAlignerConfig *config) const {
     if (query_begin_ > query_end_) {
         std::cerr << "ERROR: query begin after query end" << std::endl
+                  << *this << std::endl;
+        return false;
+    }
+
+    if (config && score_ != config->score_cigar(sequence_.begin(),
+                                                sequence_.end(),
+                                                query_begin_,
+                                                query_end_,
+                                                cigar_)) {
+        std::cerr << "ERROR: mismatch between CIGAR and score" << std::endl
                   << *this << std::endl;
         return false;
     }

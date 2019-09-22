@@ -106,15 +106,83 @@ class DBGAlignerConfig {
             b_begin,
             score_t(0),
             std::plus<score_t>(),
-            [&](const char &a, const char &b) -> score_t {
-                return score_matrix_[a][b];
-            }
+            [&](const char &a, const char &b) -> score_t { return score_matrix_[a][b]; }
         );
     }
 
     template <class StringIt>
     score_t match_score(StringIt begin, StringIt end) const {
         return score_sequences(begin, end, begin);
+    }
+
+    template <class StringItA, class StringItB>
+    score_t score_cigar(StringItA a_begin, StringItA a_end,
+                        StringItB b_begin, StringItB b_end,
+                        const Cigar &cigar) const {
+        score_t score = 0;
+        StringItA ref_it = a_begin;
+        StringItB alt_it = b_begin;
+
+        for (const auto &op : cigar) {
+            switch (op.first) {
+                case Cigar::Operator::CLIPPED: {
+                    if (ref_it != a_begin || alt_it != b_begin)
+                        throw std::runtime_error("Internal clipping found in CIGAR");
+
+                } break;
+                case Cigar::Operator::MATCH: {
+                    if (ref_it > a_end - op.second)
+                        throw std::runtime_error("Reference sequence out of bounds");
+
+                    if (alt_it > b_end - op.second)
+                        throw std::runtime_error("Alternative sequence out of bounds");
+
+                    if (strncmp(&*ref_it, &*alt_it, op.second))
+                        throw std::runtime_error("mismatch found despite MATCH in CIGAR");
+
+                    score += match_score(ref_it, ref_it + op.second);
+                    ref_it += op.second;
+                    alt_it += op.second;
+                } break;
+                case Cigar::Operator::MISMATCH: {
+                    if (ref_it > a_end - op.second)
+                        throw std::runtime_error("Reference sequence out of bounds");
+
+                    if (alt_it > b_end - op.second)
+                        throw std::runtime_error("Alternative sequence out of bounds");
+
+                    if (std::mismatch(ref_it, ref_it + op.second,
+                                      alt_it, alt_it + op.second).first != ref_it)
+                        throw std::runtime_error("match found despite MISMATCH in CIGAR");
+
+                    score += score_sequences(ref_it, ref_it + op.second, alt_it);
+                    ref_it += op.second;
+                    alt_it += op.second;
+                } break;
+                case Cigar::Operator::INSERTION: {
+                    if (alt_it > b_end - op.second)
+                        throw std::runtime_error("Alternative sequence out of bounds");
+
+                    score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+                    alt_it += op.second;
+                } break;
+                case Cigar::Operator::DELETION: {
+                    if (ref_it > a_end - op.second)
+                        throw std::runtime_error("Reference sequence out of bounds");
+
+                    score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+                    ref_it += op.second;
+                } break;
+            }
+        }
+
+        if (ref_it != a_end)
+            throw std::runtime_error("End of reference sequence not reached");
+
+        if (alt_it != b_end)
+            throw std::runtime_error("End of alternative sequence not reached");
+
+        return score;
     }
 
     const ScoreMatrixRow& get_row(char char_in_query) const {
@@ -291,7 +359,7 @@ class Alignment {
     load_from_json(const Json::Value &alignment,
                    const DeBruijnGraph &graph);
 
-    bool is_valid(const DeBruijnGraph &graph) const;
+    bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
   private:
     Alignment(const char* query_begin,
