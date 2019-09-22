@@ -22,6 +22,37 @@ get_alphabet_boundaries(const std::string &alphabet) {
     return range;
 }
 
+Cigar::Cigar(const std::string &cigar_str) {
+    std::string cur_num = "";
+    for (auto c : cigar_str) {
+        switch (c) {
+            case '=': {
+                cigar_.emplace_back(Cigar::Operator::MATCH, std::stol(cur_num));
+                cur_num.clear();
+            } break;
+            case 'X': {
+                cigar_.emplace_back(Cigar::Operator::MISMATCH, std::stol(cur_num));
+                cur_num.clear();
+            } break;
+            case 'I': {
+                cigar_.emplace_back(Cigar::Operator::INSERTION, std::stol(cur_num));
+                cur_num.clear();
+            } break;
+            case 'D': {
+                cigar_.emplace_back(Cigar::Operator::DELETION, std::stol(cur_num));
+                cur_num.clear();
+            } break;
+            case 'S': {
+                cigar_.emplace_back(Cigar::Operator::CLIPPED, std::stol(cur_num));
+                cur_num.clear();
+            } break;
+            default: {
+                cur_num += c;
+            }
+        }
+    }
+}
+
 Cigar::OperatorTable Cigar::char_to_op;
 
 void Cigar::initialize_opt_table(const std::string &alphabet) {
@@ -698,11 +729,16 @@ std::shared_ptr<const std::string> Alignment<NodeType>
         }
     }
 
+    if (alignment["annotation"]["cigar"]) {
+        assert(alignment["annotation"]["cigar"].asString() == cigar_.to_string());
+
+        if (cigar_ != Cigar(alignment["annotation"]["cigar"].asString()))
+            throw std::runtime_error("ERROR: CIGAR and mapping mismatch");
+    }
+
     sequence_ = sequence_.substr(0, path_steps);
     assert(!alignment["annotation"]["ref_sequence"]
-        || alignment["annotation"]["ref_sequence"] == sequence_);
-    assert(!alignment["annotation"]["cigar"]
-        || alignment["annotation"]["cigar"] == cigar_.to_string());
+        || alignment["annotation"]["ref_sequence"].asString() == sequence_);
 
     if (!is_valid(graph))
         throw std::runtime_error("ERROR: JSON reconstructs invalid alignment");

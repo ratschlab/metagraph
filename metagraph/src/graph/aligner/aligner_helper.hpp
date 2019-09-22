@@ -37,6 +37,8 @@ class Cigar {
     Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
 
+    Cigar(const std::string &cigar_str);
+
     size_t size() const { return cigar_.size(); }
     bool empty() const { return cigar_.empty(); }
 
