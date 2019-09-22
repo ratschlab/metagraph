@@ -12,6 +12,7 @@
 #include "utils.hpp"
 #include "alphabets.hpp"
 #include "aligner_helper.hpp"
+#include "reverse_complement.hpp"
 
 using namespace std::chrono_literals;
 
@@ -749,14 +750,15 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            std::string cigar, ref, alt;
+            std::string cigar, strand, ref, alt;
             std::ifstream fin(file);
-            while (fin >> cigar >> ref >> alt) {
-                std::cout << cigar << " "
-                          << config->score_cigar(ref.begin(), ref.end(),
+            while (fin >> strand >> cigar >> ref >> alt) {
+                if (strand == "-")
+                    reverse_complement(ref.begin(), ref.end());
+
+                std::cout << config->score_cigar(ref.begin(), ref.end(),
                                                  alt.begin(), alt.end(),
-                                                 Cigar(cigar)) << " "
-                          << ref << " " << alt << std::endl;
+                                                 Cigar(cigar)) << std::endl;
             }
         }
     } catch (const TCLAP::ArgException &e) {
