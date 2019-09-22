@@ -176,7 +176,7 @@ void dump_column_slice(const bit_vector &column,
 
 int main(int argc, char *argv[]) {
     try {
-        TCLAP::CmdLine cmd("Benchmarks for annotation schemes", ' ', "");
+        TCLAP::CmdLine cmd("Benchmarks and data generation for metagraph", ' ', "");
 
         std::vector<std::string> regimes {
             "vectors",
