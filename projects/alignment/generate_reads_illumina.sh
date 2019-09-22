@@ -31,7 +31,12 @@ paste -d'\n' <(cat $OUT_PREFIX\1.fq | paste - - - -) \
 
 #report
 echo "Extracting ground truth data"
-paste <(paste -d'\n' <(grep -v "^[#@]" $OUT_PREFIX\1.aln | paste - - -) \
-                     <(grep -v "^[#@]" $OUT_PREFIX\2.aln | paste - - -)) \
-      <(grep -v "^@" $OUT_PREFIX.sam) |
-    awk '{print $10,$4,$12,$5}' > $OUT_PREFIX.truth.txt
+TRUTH=$(paste <(paste -d'\n' <(grep -v "^[#@]" $OUT_PREFIX\1.aln | paste - - -) \
+                             <(grep -v "^[#@]" $OUT_PREFIX\2.aln | paste - - -)) \
+              <(grep -v "^@" $OUT_PREFIX.sam) |
+              awk '{gsub(/-/, "", $5); print $9,$10,$4,$12,$5,$16}')
+
+METAGRAPH_EXP=~/metagraph/projects2014-metagenome/metagraph/build/run_experiments
+paste <(echo "$TRUTH") \
+      <($METAGRAPH_EXP alignment score_cigar dna non-unit \
+          <(echo "$TRUTH" | cut -d" " -f3,4,5,6)) > $OUT_PREFIX.truth.txt
