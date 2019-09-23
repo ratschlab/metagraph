@@ -2591,7 +2591,9 @@ int main(int argc, const char *argv[]) {
             auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
             // This speeds up mapping, and allows for node suffix matching
-            if (dbg)
+            // TODO: remove check for annotator once non-contiguous node indices
+            //       are fully implemented
+            if (dbg && !anno_graph.get())
                 dbg->reset_mask();
 
             Timer timer;
