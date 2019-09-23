@@ -513,10 +513,10 @@ build_masked_graph_extender(const AnnotatedDBG &anno_graph,
                      std::dynamic_pointer_cast<const DeBruijnGraph>(
                          anno_graph.get_graph_ptr()
                      ),
-                     [&, labels{std::move(labels)}](const auto &node) {
-                         assert(node != DeBruijnGraph::npos);
+                     [&](const auto &node) {
                          return graph.in_graph(node)
-                             && std::all_of(labels.begin(), labels.end(),
+                             && std::any_of(labels.begin(),
+                                            labels.end(),
                                             [&](const auto &label) {
                                                 return anno_graph.has_label(node, label);
                                             });
