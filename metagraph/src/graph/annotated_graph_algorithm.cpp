@@ -548,10 +548,10 @@ build_background_graph_extender(const DeBruijnGraph &background,
         // TODO: fix this hax for generating a shared_ptr from a const reference
         base_extender(
             MaskedDeBruijnGraph({ std::shared_ptr<const DeBruijnGraph>{}, &background },
-                                [&, seed_node = path.back()](const auto &node) {
+                                [&](const auto &node) {
                                     // check if node is not in the foreground, or
                                     // if it's a breakpoint
-                                    return node == seed_node
+                                    return node == path.back()
                                         || !foreground.in_graph(node)
                                         || (!background.has_single_incoming(node)
                                                && foreground.has_single_incoming(node));
