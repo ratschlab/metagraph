@@ -547,10 +547,6 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
                                          bool is_secondary,
                                          const std::string &read_name,
                                          const std::string &label) const {
-    auto query_start = query.c_str();
-    assert(query_begin_ >= query_start);
-    assert(query_end_ >= query_start);
-    assert(query_start + cigar_.get_clipping() == query_begin_);
     assert(is_valid(graph));
 
     // encode alignment
@@ -564,6 +560,10 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
 
     if (query_end_ == query_begin_)
         return alignment;
+
+    auto query_start = query.c_str();
+    assert(query_start + cigar_.get_clipping() == query_begin_);
+    assert(query_end_ >= query_start);
 
     alignment["annotation"]["cigar"] = cigar_.to_string();
 
