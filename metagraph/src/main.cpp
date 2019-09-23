@@ -2718,9 +2718,7 @@ int main(int argc, const char *argv[]) {
 
                                     *outstream << header << "\t"
                                                << path_query << "\t"
-                                               << (anno_graph.get()
-                                                      ? labels.at(i) + "\t"
-                                                      : "")
+                                               << (anno_graph.get() ? labels.at(i) : "")
                                                << paths[i]
                                                << std::endl;
 
@@ -2748,9 +2746,7 @@ int main(int argc, const char *argv[]) {
                                                          *graph,
                                                          secondary,
                                                          header,
-                                                         anno_graph.get()
-                                                             ? labels.at(i) + "\t"
-                                                             : ""),
+                                                         anno_graph.get() ? labels.at(i) : ""),
                                         outstream
                                     );
 
