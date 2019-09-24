@@ -690,6 +690,13 @@ int main(int argc, char *argv[]) {
                                            1.0,
                                            "double",
                                            cmd);
+            ValueArg<std::string> out_prefix_arg("",
+                                                 "outprefix",
+                                                 "Prefix out of the output files",
+                                                 false,
+                                                 "",
+                                                 "string",
+                                                 cmd);
             UnlabeledMultiArg<std::string> files_arg("input_file",
                                                      "Input file",
                                                      true,
@@ -699,6 +706,7 @@ int main(int argc, char *argv[]) {
 
             double begin = slice_begin_arg.getValue();
             double end = slice_end_arg.getValue();
+            std::string out_prefix = out_prefix_arg.getValue();
 
             if (begin < 0 || end > 1.0)
                 throw std::runtime_error("Begin and end out of bounds");
@@ -706,13 +714,16 @@ int main(int argc, char *argv[]) {
             auto files = files_arg.getValue();
             annotate::ColumnCompressed<> annotator;
             for (const auto &file : files) {
+                std::string outbase = out_prefix.empty()
+                    ? file
+                    : out_prefix + "/" + utils::split_string(file, "/").back();
                 annotator.load(file);
                 for (size_t i = 0; i < annotator.data().size(); ++i) {
                     dump_column_slice(
                         *annotator.data()[i],
                         begin,
                         end,
-                        file + "."
+                        outbase + "."
                             + std::to_string(i) + "_"
                             + std::to_string(begin) + "_"
                             + std::to_string(end) + ".dump.txt");
