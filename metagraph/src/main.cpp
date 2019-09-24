@@ -1309,14 +1309,35 @@ int main(int argc, const char *argv[]) {
 
                     parse_sequences(files, *config, timer,
                         [&graph,&node_weights](std::string&& seq) {
-                            graph->map_to_nodes(seq, [&](auto node) { node_weights->add_weight(node, 1); });
+                            graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
+                                [&](auto node) { node_weights->add_weight(node, 1); }
+                            );
+                            if (graph->is_canonical_mode()) {
+                                reverse_complement(seq.begin(), seq.end());
+                                graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
+                                    [&](auto node) { node_weights->add_weight(node, 1); }
+                                );
+                            }
                         },
                         [&graph,&node_weights](std::string&& kmer, uint32_t count) {
                             node_weights->add_weight(graph->kmer_to_node(kmer), count);
+                            if (graph->is_canonical_mode()) {
+                                reverse_complement(kmer.begin(), kmer.end());
+                                node_weights->add_weight(graph->kmer_to_node(kmer), count);
+                            }
                         },
                         [&graph,&node_weights](const auto &loop) {
                             loop([&graph,&node_weights](const char *seq) {
-                                graph->map_to_nodes(seq, [&](auto node) { node_weights->add_weight(node, 1); });
+                                std::string seq_str(seq);
+                                graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
+                                    [&](auto node) { node_weights->add_weight(node, 1); }
+                                );
+                                if (graph->is_canonical_mode()) {
+                                    reverse_complement(seq_str.begin(), seq_str.end());
+                                    graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
+                                        [&](auto node) { node_weights->add_weight(node, 1); }
+                                    );
+                                }
                             });
                         }
                     );
@@ -1421,14 +1442,35 @@ int main(int argc, const char *argv[]) {
 
                 parse_sequences(files, *config, timer,
                     [&graph,&node_weights](std::string&& seq) {
-                        graph->map_to_nodes(seq, [&](auto node) { node_weights->add_weight(node, 1); });
+                        graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
+                            [&](auto node) { node_weights->add_weight(node, 1); }
+                        );
+                        if (graph->is_canonical_mode()) {
+                            reverse_complement(seq.begin(), seq.end());
+                            graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
+                                [&](auto node) { node_weights->add_weight(node, 1); }
+                            );
+                        }
                     },
                     [&graph,&node_weights](std::string&& kmer, uint32_t count) {
                         node_weights->add_weight(graph->kmer_to_node(kmer), count);
+                        if (graph->is_canonical_mode()) {
+                            reverse_complement(kmer.begin(), kmer.end());
+                            node_weights->add_weight(graph->kmer_to_node(kmer), count);
+                        }
                     },
                     [&graph,&node_weights](const auto &loop) {
-                        loop([&node_weights,&graph](const char *seq) {
-                            graph->map_to_nodes(seq, [&](auto node) { node_weights->add_weight(node, 1); });
+                        loop([&graph,&node_weights](const char *seq) {
+                            std::string seq_str(seq);
+                            graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
+                                [&](auto node) { node_weights->add_weight(node, 1); }
+                            );
+                            if (graph->is_canonical_mode()) {
+                                reverse_complement(seq_str.begin(), seq_str.end());
+                                graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
+                                    [&](auto node) { node_weights->add_weight(node, 1); }
+                                );
+                            }
                         });
                     }
                 );
