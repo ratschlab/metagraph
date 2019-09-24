@@ -36,6 +36,8 @@ class NodeWeights : public SequenceGraph::GraphExtension {
 
     bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
 
+    sdsl::int_vector<>& get_data() { return weights_; }
+
   private:
     sdsl::int_vector<> weights_;
     uint64_t max_weight_;

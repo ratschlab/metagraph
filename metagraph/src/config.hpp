@@ -90,6 +90,7 @@ class Config {
     double label_mask_out_fraction = 0.0;
     double min_count_quantile = 0.;
     double max_count_quantile = 1.;
+    std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;

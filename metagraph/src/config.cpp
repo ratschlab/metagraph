@@ -145,6 +145,10 @@ Config::Config(int argc, const char *argv[]) {
             min_count_quantile = std::max(std::stod(get_value(i++)), 0.);
         } else if (!strcmp(argv[i], "--max-count-q")) {
             max_count_quantile = std::min(std::stod(get_value(i++)), 1.);
+        } else if (!strcmp(argv[i], "--count-bins-q")) {
+            for (const auto &border : utils::split_string(get_value(i++), " ")) {
+                count_slice_quantiles.push_back(std::stod(border));
+            }
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
@@ -322,6 +326,29 @@ Config::Config(int argc, const char *argv[]) {
     }
 
     bool print_usage_and_exit = false;
+
+    if (!count_slice_quantiles.size()) {
+        count_slice_quantiles.push_back(0);
+        count_slice_quantiles.push_back(1);
+    }
+
+    for (size_t i = 1; i < count_slice_quantiles.size(); ++i) {
+        if (count_slice_quantiles[i - 1] >= count_slice_quantiles[i]) {
+            std::cerr << "Error: bin count quantiles must be provided in strictly increasing order"
+                      << std::endl;
+            print_usage_and_exit = true;
+        }
+    }
+    if (count_slice_quantiles.front() < 0 || count_slice_quantiles.back() > 1) {
+        std::cerr << "Error: bin count quantiles must be in range [0, 1]"
+                  << std::endl;
+        print_usage_and_exit = true;
+    }
+    if (count_slice_quantiles.size() == 1) {
+        std::cerr << "Error: provide at least two bin count borders"
+                  << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (identity != CONCATENATE
             && identity != STATS
@@ -634,9 +661,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
-            fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller than\n"
-                            "\t                         \t\tthis value (0: auto) [1]\n");
+            fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
+                            "\t                         \t\tthan this value (0: auto) [1]\n");
             fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be determined [1]\n");
+            fprintf(stderr, "\t   --count-bins-q [FLOAT ...] \tbinning quantiles for partitioning k-mers with\n"
+                            "\t                              \t\tdifferent abundance levels ['0 1']\n"
+                            "\t                              \t\tExample: --count-bins-q '0 0.33 0.66 1'\n");
             // fprintf(stderr, "\n");
             // fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --unitigs \t\t\textract unitigs instead of contigs [off]\n");
