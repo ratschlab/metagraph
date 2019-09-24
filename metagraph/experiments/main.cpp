@@ -165,7 +165,7 @@ void dump_column_slice(const bit_vector &column,
 
     std::ofstream out(outfile, std::ios::binary);
     out << column.size() << " "
-        << column.rank1(end_ind - 1) - column.rank1(!begin_ind ? 0 : begin_ind - 1)
+        << column.rank1(end_ind - 1) - (begin_ind ? column.rank1(begin_ind - 1) : 0)
         << "\n";
 
     column.call_ones_in_range(begin * column.size(),
