@@ -153,6 +153,26 @@ double test_column_time(const BinaryMatrix &matrix,
     return timer.elapsed() * 1000 / num_samples;
 }
 
+void dump_column_slice(const bit_vector &column,
+                       double begin,
+                       double end,
+                       const std::string &outfile) {
+    if (begin >= end)
+        throw std::runtime_error("Empty range");
+
+    size_t begin_ind = begin * column.size();
+    size_t end_ind = end * column.size();
+
+    std::ofstream out(outfile, std::ios::binary);
+    out << column.size() << " "
+        << column.rank1(end_ind - 1) - column.rank1(!begin_ind ? 0 : begin_ind - 1)
+        << "\n";
+
+    column.call_ones_in_range(begin * column.size(),
+                              end * column.size(),
+                              [&](auto i) { out << i << "\n"; });
+}
+
 
 int main(int argc, char *argv[]) {
     try {
@@ -164,7 +184,8 @@ int main(int argc, char *argv[]) {
             "subsets",
             "to_rrr",
             "stats",
-            "query"
+            "query",
+            "slice"
         };
 
         ValuesConstraint<std::string> regime_constraint(regimes);
@@ -652,6 +673,49 @@ int main(int argc, char *argv[]) {
                 } else if (query_type == "column") {
                     query_file << test_column_time(*matrix, num_queries)
                                << std::endl;
+                }
+            }
+        } else if (regime == "slice") {
+            ValueArg<double> slice_begin_arg("",
+                                             "begin",
+                                             "Lower bound percentage for slice",
+                                             false,
+                                             0.0,
+                                             "double",
+                                             cmd);
+            ValueArg<double> slice_end_arg("",
+                                           "end",
+                                           "Upper bound percentage for slice",
+                                           false,
+                                           1.0,
+                                           "double",
+                                           cmd);
+            UnlabeledMultiArg<std::string> files_arg("input_file",
+                                                     "Input file",
+                                                     true,
+                                                     "string",
+                                                     cmd);
+            cmd.parse(argc, argv);
+
+            double begin = slice_begin_arg.getValue();
+            double end = slice_end_arg.getValue();
+
+            if (begin < 0 || end > 1.0)
+                throw std::runtime_error("Begin and end out of bounds");
+
+            auto files = files_arg.getValue();
+            annotate::ColumnCompressed<> annotator;
+            for (const auto &file : files) {
+                annotator.load(file);
+                for (size_t i = 0; i < annotator.data().size(); ++i) {
+                    dump_column_slice(
+                        *annotator.data()[i],
+                        begin,
+                        end,
+                        file + "."
+                            + std::to_string(i) + "_"
+                            + std::to_string(begin) + "_"
+                            + std::to_string(end) + ".dump.txt");
                 }
             }
         }
