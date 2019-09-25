@@ -200,6 +200,7 @@ void annotate_data(const std::vector<std::string> &files,
                         std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
                 },
+                !dynamic_cast<const DeBruijnGraph&>(anno_graph->get_graph()).is_canonical_mode(),
                 min_count,
                 max_count
             );
@@ -882,6 +883,7 @@ void parse_sequences(const std::vector<std::string> &files,
                                        call_sequence(std::move(sequence));
                                    },
                                    config.forward_and_reverse);
+
         } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
 
@@ -892,9 +894,8 @@ void parse_sequences(const std::vector<std::string> &files,
                 std::unordered_map<uint64_t, uint64_t> count_hist;
                 kmc::read_kmers(
                     file,
-                    [&](std::string&&, uint32_t count) {
-                        count_hist[count]++;
-                    }
+                    [&](std::string&&, uint32_t count) { count_hist[count]++; },
+                    !config.canonical
                 );
 
                 if (count_hist.size()) {
@@ -931,9 +932,11 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                     call_kmer(std::move(sequence), count);
                 },
+                !config.canonical,
                 min_count,
                 max_count
             );
+
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
             if (files.size() >= config.parallel) {
@@ -1313,24 +1316,17 @@ int main(int argc, const char *argv[]) {
                     auto node_weights = graph->get_extension<NodeWeights>();
                     assert(node_weights->is_compatible(*graph));
 
+                    if (graph->is_canonical_mode())
+                        config->forward_and_reverse = true;
+
                     parse_sequences(files, *config, timer,
                         [&graph,&node_weights](std::string&& seq) {
                             graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
                                 [&](auto node) { node_weights->add_weight(node, 1); }
                             );
-                            if (graph->is_canonical_mode()) {
-                                reverse_complement(seq.begin(), seq.end());
-                                graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
-                                    [&](auto node) { node_weights->add_weight(node, 1); }
-                                );
-                            }
                         },
                         [&graph,&node_weights](std::string&& kmer, uint32_t count) {
                             node_weights->add_weight(graph->kmer_to_node(kmer), count);
-                            if (graph->is_canonical_mode()) {
-                                reverse_complement(kmer.begin(), kmer.end());
-                                node_weights->add_weight(graph->kmer_to_node(kmer), count);
-                            }
                         },
                         [&graph,&node_weights](const auto &loop) {
                             loop([&graph,&node_weights](const char *seq) {
@@ -1338,12 +1334,6 @@ int main(int argc, const char *argv[]) {
                                 graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
                                     [&](auto node) { node_weights->add_weight(node, 1); }
                                 );
-                                if (graph->is_canonical_mode()) {
-                                    reverse_complement(seq_str.begin(), seq_str.end());
-                                    graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
-                                        [&](auto node) { node_weights->add_weight(node, 1); }
-                                    );
-                                }
                             });
                         }
                     );
@@ -1424,6 +1414,11 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Start graph extension" << std::endl;
 
+            if (graph->is_canonical_mode())
+                config->forward_and_reverse = false;
+
+            config->canonical = graph->is_canonical_mode();
+
             parse_sequences(files, *config, timer,
                 [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
@@ -1448,24 +1443,17 @@ int main(int argc, const char *argv[]) {
 
                 assert(node_weights->is_compatible(*graph));
 
+                if (graph->is_canonical_mode())
+                    config->forward_and_reverse = true;
+
                 parse_sequences(files, *config, timer,
                     [&graph,&node_weights](std::string&& seq) {
                         graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
                             [&](auto node) { node_weights->add_weight(node, 1); }
                         );
-                        if (graph->is_canonical_mode()) {
-                            reverse_complement(seq.begin(), seq.end());
-                            graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
-                                [&](auto node) { node_weights->add_weight(node, 1); }
-                            );
-                        }
                     },
                     [&graph,&node_weights](std::string&& kmer, uint32_t count) {
                         node_weights->add_weight(graph->kmer_to_node(kmer), count);
-                        if (graph->is_canonical_mode()) {
-                            reverse_complement(kmer.begin(), kmer.end());
-                            node_weights->add_weight(graph->kmer_to_node(kmer), count);
-                        }
                     },
                     [&graph,&node_weights](const auto &loop) {
                         loop([&graph,&node_weights](const char *seq) {
@@ -1473,12 +1461,6 @@ int main(int argc, const char *argv[]) {
                             graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
                                 [&](auto node) { node_weights->add_weight(node, 1); }
                             );
-                            if (graph->is_canonical_mode()) {
-                                reverse_complement(seq_str.begin(), seq_str.end());
-                                graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
-                                    [&](auto node) { node_weights->add_weight(node, 1); }
-                                );
-                            }
                         });
                     }
                 );
@@ -1540,8 +1522,13 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE: {
             assert(config->infbase_annotators.size() <= 1);
 
+            const auto graph = load_critical_dbg(config->infbase);
+
+            if (graph->is_canonical_mode())
+                config->forward_and_reverse = false;
+
             if (!config->separately) {
-                auto anno_graph = initialize_annotated_dbg(*config);
+                auto anno_graph = initialize_annotated_dbg(graph, *config);
 
                 annotate_data(files,
                               config->refpath,
@@ -1559,8 +1546,6 @@ int main(int argc, const char *argv[]) {
                 anno_graph->get_annotation().serialize(config->outfbase);
 
             } else {
-                const auto graph = load_critical_dbg(config->infbase);
-
                 ThreadPool thread_pool(config->parallel);
 
                 // annotate multiple columns in parallel, each in a single thread
