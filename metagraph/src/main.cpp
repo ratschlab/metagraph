@@ -1446,6 +1446,8 @@ int main(int argc, const char *argv[]) {
             if (node_weights) {
                 node_weights->insert_nodes(*inserted_edges);
 
+                assert(node_weights->is_compatible(*graph));
+
                 parse_sequences(files, *config, timer,
                     [&graph,&node_weights](std::string&& seq) {
                         graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
@@ -2030,6 +2032,8 @@ int main(int argc, const char *argv[]) {
                         [&](auto i) { return weights[i] >= config->min_count
                                             && weights[i] <= config->max_count; });
                     graph->add_extension(node_weights);
+
+                    assert(node_weights->is_compatible(*graph));
                 }
 
                 if (config->min_unitig_median_kmer_abundance == 0) {
@@ -2061,6 +2065,10 @@ int main(int argc, const char *argv[]) {
                 if (config->min_unitig_median_kmer_abundance != 1) {
                     auto node_weights = graph->get_extension<NodeWeights>();
                     assert(node_weights);
+                    if (!node_weights->is_compatible(*graph)) {
+                        std::cerr << "Error: k-mer counts are not compatible with subgraph" << std::endl;
+                        exit(1);
+                    }
 
                     std::cout << "Threshold for median k-mer abundance in unitigs: "
                               << config->min_unitig_median_kmer_abundance << std::endl;
@@ -2167,6 +2175,8 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Used k-mer count thresholds:\n"
                               << "min (including): " << min_count << "\n"
                               << "max (excluding): " << max_count << std::endl;
+
+                    assert(node_weights->is_compatible(*graph));
 
                     MaskedDeBruijnGraph graph_slice(graph,
                         [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; });
