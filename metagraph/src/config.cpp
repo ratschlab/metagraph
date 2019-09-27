@@ -717,6 +717,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [3]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [1]\n");
             fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [50]\n");
+            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [10]\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
