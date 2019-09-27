@@ -10,22 +10,34 @@
 #include "aligner_helper.hpp"
 
 
-typedef std::function<uint64_t()> UInt64Callback;
+typedef std::function<size_t()> LabelCountCallback;
 
 namespace annotated_graph_algorithm {
 
-std::unique_ptr<bitmap>
-mask_nodes_by_label(const AnnotatedDBG &anno_graph,
-                    const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
-                    const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
-                    const std::function<bool(uint64_t, uint64_t)> &keep_node);
 
-// Allows for lazy evaluation of the counts passed to keep_node
+// Given an AnnotatedDBG and vectors of foreground (labels_in) and
+// background (labels_out) labels, construct a bitmap of length
+// anno_graph.get_graph().num_nodes() + 1. An index i is set to 1 if
+//
+// is_node_in_mask(i,
+//                 get # of labels of node i in labels_in,
+//                 get # of labels of node i in labels_out)
+//
+// where the getters for the numbers of overlapping labels are callbacks of
+// type LabelCountCallback.
+//
+// For labels which appear in more than
+// num_nodes() * lazy_evaluation_label_frequency_cutoff
+// nodes, precompute the numbers of overlapping labels.
 std::unique_ptr<bitmap>
-mask_nodes_by_label(const AnnotatedDBG &anno_graph,
-                    const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
-                    const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
-                    const std::function<bool(const UInt64Callback&, const UInt64Callback&)> &keep_node);
+mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
+                         const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
+                         const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
+                         std::function<bool(DeBruijnGraph::node_index,
+                                            LabelCountCallback, /* get_num_labels_in */
+                                            LabelCountCallback /* get_num_labels_out */)> is_node_in_mask,
+                         double lazy_evaluation_label_frequency_cutoff = 0.05);
+
 
 template <class Index, typename... Args>
 using VariantCallback = std::function<void(Alignment<Index>&&,
