@@ -1546,35 +1546,31 @@ int main(int argc, const char *argv[]) {
                 anno_graph->get_annotation().serialize(config->outfbase);
 
             } else {
-                ThreadPool thread_pool(config->parallel);
-
+                size_t num_threads = config->parallel;
                 // annotate multiple columns in parallel, each in a single thread
                 config->parallel = 1;
 
-                for (const auto &file : files) {
-                    thread_pool.enqueue([](auto graph, auto filename, auto outfilename, const Config *config) {
-                            auto anno_graph = initialize_annotated_dbg(graph, *config);
+                #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
+                for (size_t i = 0; i < files.size(); ++i) {
+                    auto anno_graph = initialize_annotated_dbg(graph, *config);
 
-                            annotate_data({ filename },
-                                          config->refpath,
-                                          anno_graph.get(),
-                                          config->forward_and_reverse,
-                                          config->min_count,
-                                          config->max_count,
-                                          config->filename_anno,
-                                          config->fasta_anno,
-                                          config->fasta_anno_comment_delim,
-                                          config->fasta_header_delimiter,
-                                          config->anno_labels,
-                                          config->verbose);
-                            anno_graph->get_annotation().serialize(outfilename);
-                        },
-                        graph,
-                        file,
+                    annotate_data({ files[i] },
+                                  config->refpath,
+                                  anno_graph.get(),
+                                  config->forward_and_reverse,
+                                  config->min_count,
+                                  config->max_count,
+                                  config->filename_anno,
+                                  config->fasta_anno,
+                                  config->fasta_anno_comment_delim,
+                                  config->fasta_header_delimiter,
+                                  config->anno_labels,
+                                  config->verbose);
+
+                    anno_graph->get_annotation().serialize(
                         config->outfbase.size()
-                            ? config->outfbase + "/" + utils::split_string(file, "/").back()
-                            : file,
-                        config.get()
+                            ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
+                            : files[i]
                     );
                 }
             }
