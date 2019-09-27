@@ -425,6 +425,12 @@ target_link_libraries(unit_tests gtest_main gtest
 
 target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
+add_custom_target(check
+  COMMAND python ../tests/integration/test_build.py
+  COMMAND env CTEST_OUTPUT_ON_FAILURE=1 GTEST_COLOR=1 ${CMAKE_CTEST_COMMAND} --verbose
+  DEPENDS unit_tests
+)
+add_test(NAME integration_tests COMMAND python ../tests/integration/test_build.py)
 add_test(NAME unit_tests COMMAND unit_tests)
 
 #-------------------
