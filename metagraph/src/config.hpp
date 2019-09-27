@@ -87,7 +87,9 @@ class Config {
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
     double discovery_fraction = 1.0;
+    double label_mask_in_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
+    double label_other_fraction = 1.0;
     double min_count_quantile = 0.;
     double max_count_quantile = 1.;
     std::vector<double> count_slice_quantiles;

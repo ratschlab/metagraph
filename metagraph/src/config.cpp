@@ -274,8 +274,12 @@ Config::Config(int argc, const char *argv[]) {
             label_mask_in.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--label-mask-out")) {
             label_mask_out.emplace_back(get_value(i++));
+        } else if (!strcmp(argv[i], "--label-mask-in-fraction")) {
+            label_mask_in_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
             label_mask_out_fraction = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--label-other-fraction")) {
+            label_other_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--label-filter")) {
             label_filter.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--call-bubbles")) {
@@ -777,8 +781,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
             fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
             fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
-            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
-            fprintf(stderr, "\t                                     \t\tall matching mask-in and mask-out labels [0.0]\n");
+            fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
+            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
+            fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -898,8 +903,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
             fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph []\n");
             fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph []\n");
-            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
-            fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
+            fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
+            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
+            fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles [off]\n");
             fprintf(stderr, "\t   --call-breakpoints \t\tcall labels from breakpoints [off]\n");

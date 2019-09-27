@@ -7,92 +7,63 @@
 #include "annotated_graph_algorithm.hpp"
 
 
-template <class Graph, class Annotation = annotate::ColumnCompressed<>>
-void test_call_significant_indices() {
-    const std::vector<std::string> ingroup { "B", "C" };
-    const std::vector<std::string> outgroup { "A" };
-
-    for (size_t k = 3; k < 15; ++k) {
-        const std::vector<std::string> sequences {
-            std::string("T") + std::string(k - 1, 'A') + "T",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "G"
-        };
-        const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
-
-        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
-
-        std::unordered_set<std::string> obs_labels;
-        const std::unordered_set<std::string> ref { "B", "C", "D" };
-
-        auto masked_dbg = build_masked_graph(*anno_graph, ingroup, outgroup);
-        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
-
-        masked_dbg.call_nodes(
-            [&](const auto &index) {
-                auto cur_labels = anno_graph->get_labels(index);
-
-                obs_labels.insert(cur_labels.begin(), cur_labels.end());
-            }
-        );
-
-        EXPECT_EQ(ref, obs_labels) << k;
-    }
-}
-
-template <class Graph, class Annotation = annotate::ColumnCompressed<>>
-void test_call_significant_indices_lazy() {
-    const std::vector<std::string> ingroup { "B", "C" };
-    const std::vector<std::string> outgroup { "A" };
-
-    for (size_t k = 3; k < 15; ++k) {
-        const std::vector<std::string> sequences {
-            std::string("T") + std::string(k - 1, 'A') + "T",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "G"
-        };
-        const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
-
-        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
-
-        std::unordered_set<std::string> obs_labels;
-        const std::unordered_set<std::string> ref { "B", "C", "D" };
-
-        auto masked_dbg = build_masked_graph_lazy(*anno_graph, ingroup, outgroup);
-        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
-
-        masked_dbg.call_nodes(
-            [&](const auto &index) {
-                auto cur_labels = anno_graph->get_labels(index);
-
-                obs_labels.insert(cur_labels.begin(), cur_labels.end());
-            }
-        );
-
-        EXPECT_EQ(ref, obs_labels) << k;
-    }
-}
-
-
-
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 
 TYPED_TEST_CASE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 
-TYPED_TEST(MaskedDeBruijnGraphAlgorithm, CallSignificantIndices) {
-    test_call_significant_indices<typename TypeParam::first_type,
-                                  typename TypeParam::second_type>();
+template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+void test_mask_indices(double density_cutoff) {
+    const std::vector<std::string> ingroup { "B", "C" };
+    const std::vector<std::string> outgroup { "A" };
+
+    for (size_t k = 3; k < 15; ++k) {
+        const std::vector<std::string> sequences {
+            std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
+            std::string("T") + std::string(k - 1, 'A') + "C",
+            std::string("T") + std::string(k - 1, 'A') + "C",
+            std::string("T") + std::string(k - 1, 'A') + "A",
+            std::string("T") + std::string(k - 1, 'A') + "G"
+        };
+        const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
+
+        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+        std::unordered_set<std::string> obs_labels, obs_kmers;
+        const std::unordered_set<std::string> ref_kmers {
+            std::string(k - 1, 'A') + "C"
+        };
+        const std::unordered_set<std::string> ref_labels {
+            "B", "C"
+        };
+
+        auto masked_dbg = build_masked_graph(*anno_graph,
+                                             ingroup,
+                                             outgroup,
+                                             1.0,
+                                             0.0,
+                                             0.0,
+                                             density_cutoff);
+        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+
+        masked_dbg.call_kmers([&](auto i, const auto &kmer) {
+            auto cur_labels = anno_graph->get_labels(i);
+            obs_labels.insert(cur_labels.begin(), cur_labels.end());
+            obs_kmers.insert(kmer);
+        });
+
+        EXPECT_EQ(ref_labels, obs_labels) << k << " " << density_cutoff;
+        EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << density_cutoff;
+    }
 }
 
-TYPED_TEST(MaskedDeBruijnGraphAlgorithm, CallSignificantIndicesLazy) {
-    test_call_significant_indices_lazy<typename TypeParam::first_type,
-                                       typename TypeParam::second_type>();
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
+    for (double d = 0.0; d <= 1.0; d += 0.05) {
+        test_mask_indices<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(d);
+    }
 }
+
 
 bool all_mapped_match_first(const SequenceGraph &graph,
                             const std::string &sequence,
