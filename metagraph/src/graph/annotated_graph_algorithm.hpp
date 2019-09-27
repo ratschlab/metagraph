@@ -2,6 +2,7 @@
 #define __ANNOTATED_GRAPH_ALGORITHM_HPP__
 
 #include <vector>
+#include <unordered_set>
 #include <functional>
 
 #include "annotated_dbg.hpp"
@@ -14,6 +15,27 @@ typedef std::function<size_t()> LabelCountCallback;
 
 namespace annotated_graph_algorithm {
 
+
+// Given a DeBruijnGraph and a bool-returning string callback, return a bitmap of
+// length graph.num_nodes() + 1. An index is set to 1 if it is contained in a
+// unitig satisfying keep_unitig(unitig).
+std::unique_ptr<bitmap_vector>
+mask_nodes_by_unitig(const DeBruijnGraph &graph,
+                     const std::function<bool(const std::string&)> &keep_unitig);
+
+// Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
+// return a bitmap of length anno_graph.get_graph().num_nodes() + 1. An index i
+// is set to 1 if there is a unitig containing i such that
+// at least (label_mask_in_fraction * 100)% of the total possible number of in labels is present,
+// at most (label_mask_out_fraction * 100)% of the total possible number of out labels is present,
+// and (label_other_fraction * 100)% of the labels are neither in or out masked.
+std::unique_ptr<bitmap_vector>
+mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
+                            const std::unordered_set<AnnotatedDBG::Annotator::Label> &labels_in,
+                            const std::unordered_set<AnnotatedDBG::Annotator::Label> &labels_out,
+                            double label_mask_in_fraction = 1.0,
+                            double label_mask_out_fraction = 0.0,
+                            double label_other_fraction = 1.0);
 
 // Given an AnnotatedDBG and vectors of foreground (labels_in) and
 // background (labels_out) labels, construct a bitmap of length

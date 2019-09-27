@@ -42,6 +42,7 @@ class Config {
     bool call_bubbles = false;
     bool call_breakpoints = false;
     bool map_sequences = false;
+    bool filter_by_kmer = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
