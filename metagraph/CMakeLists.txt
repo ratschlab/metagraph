@@ -186,6 +186,7 @@ add_library(progress_bar STATIC
 )
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules")
+set(BRWT_INCLUDE_TESTS FALSE)
 add_subdirectory(
   external-libraries/binrel_wt
 )
