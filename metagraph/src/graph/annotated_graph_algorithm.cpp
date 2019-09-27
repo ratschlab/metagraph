@@ -11,6 +11,68 @@ typedef DeBruijnGraph::node_index node_index;
 typedef AnnotatedDBG::Annotator::Label Label;
 
 
+std::unique_ptr<bitmap_vector>
+mask_nodes_by_unitig(const DeBruijnGraph &graph,
+                     const std::function<bool(const std::string&)> &keep_unitig) {
+    auto unitig_mask = std::make_unique<bitmap_vector>(
+        graph.num_nodes() + 1,
+        false
+    );
+
+    graph.call_unitigs([&](const auto &unitig) {
+        if (keep_unitig(unitig))
+            graph.map_to_nodes(unitig, [&](auto i) { unitig_mask->set(i, true); });
+    });
+
+    return unitig_mask;
+}
+
+std::unique_ptr<bitmap_vector>
+mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
+                            const std::unordered_set<Label> &labels_in,
+                            const std::unordered_set<Label> &labels_out,
+                            double label_mask_in_fraction,
+                            double label_mask_out_fraction,
+                            double label_other_fraction) {
+    assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
+    assert(labels_in.size() + labels_out.size()
+                <= anno_graph.get_annotation().num_labels());
+
+    const auto &dbg = dynamic_cast<const DeBruijnGraph&>(anno_graph.get_graph());
+
+    return annotated_graph_algorithm::mask_nodes_by_unitig(
+        dbg,
+        [&](const auto &unitig) {
+            assert(unitig.size() >= dbg.get_k());
+            auto label_counts = anno_graph.get_top_labels(
+                unitig,
+                anno_graph.get_annotation().num_labels()
+            );
+
+            size_t in_label_count = 0;
+            size_t out_label_count = 0;
+            size_t other_label_count = 0;
+            for (const auto &pair : label_counts) {
+                if (labels_in.find(pair.first) != labels_in.end()) {
+                    in_label_count += pair.second;
+                } else if (labels_out.find(pair.first) != labels_out.end()) {
+                    out_label_count += pair.second;
+                } else {
+                    other_label_count += pair.second;
+                }
+            }
+
+            return (in_label_count >= label_mask_in_fraction
+                    * (unitig.size() - dbg.get_k() + 1) * labels_in.size())
+                && (out_label_count <= label_mask_out_fraction
+                    * (unitig.size() - dbg.get_k() + 1) * labels_out.size())
+                && (other_label_count <= label_other_fraction
+                    * (in_label_count + out_label_count + other_label_count));
+        }
+    );
+}
+
+
 sdsl::int_vector<>
 fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<Label> &labels_in,

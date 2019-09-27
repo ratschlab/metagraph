@@ -65,6 +65,89 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
 }
 
 
+template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+void
+test_mask_unitigs(double inlabel_fraction,
+                  double outlabel_fraction,
+                  double other_label_fraction,
+                  const std::unordered_set<std::string> &ref_kmers) {
+    const std::unordered_set<std::string> ingroup { "B", "C" };
+    const std::unordered_set<std::string> outgroup { "A" };
+    size_t k = 3;
+
+    {
+        /*
+           CGA                 GCC-CCT
+              \               /
+               GAA-AAT-ATG-TGC
+              /               \
+           GGA                 GCA-CAC
+        */
+        const std::vector<std::string> sequences {
+            "TGCCT",
+            "CGAATGCCT",
+            "GGAATGCAC",
+            "TTTTTTTTTTTTTT"
+        };
+        const std::vector<std::string> labels { "A", "B", "C", "D" };
+
+        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+        std::unordered_set<std::string> obs_kmers;
+
+        MaskedDeBruijnGraph masked_dbg(
+            std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph->get_graph_ptr()),
+            annotated_graph_algorithm::mask_nodes_by_unitig_labels(
+                *anno_graph,
+                ingroup,
+                outgroup,
+                inlabel_fraction,
+                outlabel_fraction,
+                other_label_fraction
+            )
+        );
+
+        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+
+        masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
+
+        EXPECT_EQ(ref_kmers, obs_kmers)
+            << k << " "
+            << inlabel_fraction << " "
+            << outlabel_fraction << " "
+            << other_label_fraction;
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
+    std::unordered_set<std::string> ref_kmers;
+
+    test_mask_unitigs<typename TypeParam::first_type,
+                      typename TypeParam::second_type>(1.0, 0.0, 0.0, ref_kmers);
+
+    test_mask_unitigs<typename TypeParam::first_type,
+                      typename TypeParam::second_type>(1.0, 0.24, 0.0, ref_kmers);
+
+    ref_kmers.insert("GAA");
+    ref_kmers.insert("AAT");
+    ref_kmers.insert("ATG");
+    ref_kmers.insert("TGC");
+
+    test_mask_unitigs<typename TypeParam::first_type,
+                      typename TypeParam::second_type>(1.0, 0.25, 0.0, ref_kmers);
+
+
+    test_mask_unitigs<typename TypeParam::first_type,
+                      typename TypeParam::second_type>(1.0, 0.50, 0.0, ref_kmers);
+
+    test_mask_unitigs<typename TypeParam::first_type,
+                      typename TypeParam::second_type>(1.0, 0.75, 0.0, ref_kmers);
+
+    test_mask_unitigs<typename TypeParam::first_type,
+                      typename TypeParam::second_type>(1.0, 1.0, 0.0, ref_kmers);
+}
+
+
 bool all_mapped_match_first(const SequenceGraph &graph,
                             const std::string &sequence,
                             const DeBruijnGraph::node_index &index) {

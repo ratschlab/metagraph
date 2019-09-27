@@ -282,6 +282,8 @@ Config::Config(int argc, const char *argv[]) {
             label_other_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--label-filter")) {
             label_filter.emplace_back(get_value(i++));
+        } else if (!strcmp(argv[i], "--filter-by-kmer")) {
+            filter_by_kmer = true;
         } else if (!strcmp(argv[i], "--call-bubbles")) {
             call_bubbles = true;
         } else if (!strcmp(argv[i], "--call-breakpoints")) {
@@ -784,6 +786,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
             fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
             fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
+            fprintf(stderr, "\t   --filter-by-kmer \t\t\tmask out graph k-mers individually [off]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -906,6 +909,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
             fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
             fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
+            fprintf(stderr, "\t   --filter-by-kmer \t\t\tmask out graph k-mers individually [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles [off]\n");
             fprintf(stderr, "\t   --call-breakpoints \t\tcall labels from breakpoints [off]\n");
