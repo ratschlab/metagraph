@@ -27,14 +27,14 @@ class TestBuild(unittest.TestCase):
         """
 
         for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
-            args = ['./metagraph', 'build',
-                        '--graph', representation,
-                        '-k', '20',
-                        '-o', self.__temp_filename.name,
-                        TEST_DATA_DIR + '/transcripts_1000.fa']
-            command = ' '.join(args)
-            print(command)
-            res = subprocess.run([' '.join(args)], shell=True)
+
+            command = './metagraph build --graph {repr} -k 20 -o {outfile} {input}'.format(
+                repr=representation,
+                outfile=self.__temp_filename.name,
+                input=TEST_DATA_DIR + '/transcripts_1000.fa'
+            )
+
+            res = subprocess.run([command], shell=True)
             self.assertEqual(res.returncode, 0)
 
     def test_build_tiny_k(self):
@@ -48,7 +48,7 @@ class TestBuild(unittest.TestCase):
                     TEST_DATA_DIR + '/transcripts_1000.fa']
         command = ' '.join(args)
         print(command)
-        res = subprocess.run([' '.join(args)], shell=True)
+        res = subprocess.run([command], shell=True)
         self.assertEqual(res.returncode, 0)
 
 
