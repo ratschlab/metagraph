@@ -427,10 +427,15 @@ target_link_libraries(unit_tests gtest_main gtest
 target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
 add_custom_target(check
-  COMMAND python ../tests/integration/test.py
+  COMMAND python3 ${PROJECT_SOURCE_DIR}/integration_tests/test.py
+)
+add_custom_target(check_all
+  COMMAND python3 ${PROJECT_SOURCE_DIR}/integration_tests/test.py
   COMMAND unit_tests
 )
-add_test(NAME integration_tests COMMAND python ../tests/integration/test.py)
+add_test(NAME integration_tests
+  COMMAND python3 ${PROJECT_SOURCE_DIR}/integration_tests/test.py
+)
 add_test(NAME unit_tests COMMAND unit_tests)
 
 #-------------------
