@@ -28,10 +28,14 @@ class TimeLoggingTestResult(unittest.TextTestResult):
             "{} tests ran. ({:.2f} sec total)".format(self.testsRun, self.__total_time)
         ))
 
-        self.stream.write("\033[0;32;40m[  PASSED  ]\033[0m {}\n".format("{} tests.".format(self.__num_successes)))
+        self.stream.write("\033[0;32;40m[  PASSED  ]\033[0m {}\n".format(
+            "{} tests.".format(self.__num_successes)
+        ))
 
         if len(self.failures):
-            self.stream.write("\033[0;31;40m[  FAILED  ]\033[0m {} test(s), listed below:\n".format(len(self.failures)))
+            self.stream.write("\033[0;31;40m[  FAILED  ]\033[0m {} test(s), listed below:\n".format(
+                len(self.failures)
+            ))
 
         for failure in self.failures:
             self.stream.write("\033[0;31;40m[  FAILED  ]\033[0m {}\n".format(failure[0]))

@@ -54,9 +54,10 @@ class TestBuild(unittest.TestCase):
         """
 
         # TODO: add 'hashstr' once the canonical mode is implemented for it
-        for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
+        for representation in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
 
-            construct_command = '{exe} build --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
+            construct_command = '{exe} build \
+                    --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',
@@ -80,9 +81,9 @@ class TestBuild(unittest.TestCase):
     def test_build_tiny_k(self):
         for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
             args = [METAGRAPH, 'build', '--graph', representation,
-                        '-k', '2',
-                        '-o', self.tempdir.name + '/graph',
-                        TEST_DATA_DIR + '/transcripts_1000.fa']
+                    '-k', '2',
+                    '-o', self.tempdir.name + '/graph',
+                    TEST_DATA_DIR + '/transcripts_1000.fa']
             construct_command = ' '.join(args)
 
             res = subprocess.run([construct_command], shell=True)
@@ -101,11 +102,11 @@ class TestBuild(unittest.TestCase):
 
     def test_build_tiny_k_canonical(self):
         # TODO: add 'hashstr' once the canonical mode is implemented for it
-        for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
+        for representation in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
             args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
-                        '-k', '2',
-                        '-o', self.tempdir.name + '/graph',
-                        TEST_DATA_DIR + '/transcripts_1000.fa']
+                    '-k', '2',
+                    '-o', self.tempdir.name + '/graph',
+                    TEST_DATA_DIR + '/transcripts_1000.fa']
             construct_command = ' '.join(args)
 
             res = subprocess.run([construct_command], shell=True)
@@ -169,8 +170,9 @@ class TestBuild(unittest.TestCase):
             self.assertEqual('canonical mode: no', params_str[2])
 
     def test_build_from_kmc_canonical(self):
-        for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
-            construct_command = '{exe} build --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
+        for representation in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
+            construct_command = '{exe} build \
+                    --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',
@@ -192,8 +194,9 @@ class TestBuild(unittest.TestCase):
             self.assertEqual('canonical mode: yes', params_str[2])
 
     def test_build_from_kmc_both_canonical(self):
-        for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
-            construct_command = '{exe} build --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
+        for representation in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
+            construct_command = '{exe} build \
+                    --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',

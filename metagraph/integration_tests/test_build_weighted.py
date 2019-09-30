@@ -27,7 +27,8 @@ class TestBuildWeighted(unittest.TestCase):
 
         for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
 
-            construct_command = '{exe} build --graph {repr} -k 20 --count-kmers -o {outfile} {input}'.format(
+            construct_command = '{exe} build \
+                    --graph {repr} -k 20 --count-kmers -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',
@@ -56,9 +57,10 @@ class TestBuildWeighted(unittest.TestCase):
         """
 
         # TODO: add 'hashstr' once the canonical mode is implemented for it
-        for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
+        for representation in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
 
-            construct_command = '{exe} build --graph {repr} --canonical --count-kmers -k 20 -o {outfile} {input}'.format(
+            construct_command = '{exe} build \
+                    --graph {repr} --canonical --count-kmers -k 20 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',
@@ -84,10 +86,10 @@ class TestBuildWeighted(unittest.TestCase):
     def test_build_tiny_k(self):
         for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
             args = [METAGRAPH, 'build', '--graph', representation,
-                        '--count-kmers',
-                        '-k', '2',
-                        '-o', self.tempdir.name + '/graph',
-                        TEST_DATA_DIR + '/transcripts_1000.fa']
+                    '--count-kmers',
+                    '-k', '2',
+                    '-o', self.tempdir.name + '/graph',
+                    TEST_DATA_DIR + '/transcripts_1000.fa']
             construct_command = ' '.join(args)
 
             res = subprocess.run([construct_command], shell=True)
@@ -108,12 +110,12 @@ class TestBuildWeighted(unittest.TestCase):
 
     def test_build_tiny_k_canonical(self):
         # TODO: add 'hashstr' once the canonical mode is implemented for it
-        for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
+        for representation in ['succinct', 'bitmap', 'hash']:  # ,  'hashstr']:
             args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
-                        '--count-kmers',
-                        '-k', '2',
-                        '-o', self.tempdir.name + '/graph',
-                        TEST_DATA_DIR + '/transcripts_1000.fa']
+                    '--count-kmers',
+                    '-k', '2',
+                    '-o', self.tempdir.name + '/graph',
+                    TEST_DATA_DIR + '/transcripts_1000.fa']
             construct_command = ' '.join(args)
 
             res = subprocess.run([construct_command], shell=True)
@@ -134,7 +136,8 @@ class TestBuildWeighted(unittest.TestCase):
 
     def test_build_from_kmc(self):
         for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
-            construct_command = '{exe} build --graph {repr} --count-kmers -k 11 -o {outfile} {input}'.format(
+            construct_command = '{exe} build \
+                    --graph {repr} --count-kmers -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',
@@ -159,7 +162,8 @@ class TestBuildWeighted(unittest.TestCase):
 
     def test_build_from_kmc_both(self):
         for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
-            construct_command = '{exe} build --graph {repr} --count-kmers -k 11 -o {outfile} {input}'.format(
+            construct_command = '{exe} build \
+                    --graph {repr} --count-kmers -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',
@@ -183,8 +187,9 @@ class TestBuildWeighted(unittest.TestCase):
             self.assertEqual('avg weight: 3.68754', params_str[4])
 
     def test_build_from_kmc_canonical(self):
-        for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
-            construct_command = '{exe} build --graph {repr} --count-kmers --canonical -k 11 -o {outfile} {input}'.format(
+        for representation in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
+            construct_command = '{exe} build \
+                    --graph {repr} --count-kmers --canonical -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',
@@ -208,8 +213,9 @@ class TestBuildWeighted(unittest.TestCase):
             self.assertEqual('avg weight: 3.68754', params_str[4])
 
     def test_build_from_kmc_both_canonical(self):
-        for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
-            construct_command = '{exe} build --graph {repr} --count-kmers --canonical -k 11 -o {outfile} {input}'.format(
+        for representation in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
+            construct_command = '{exe} build \
+                    --graph {repr} --count-kmers --canonical -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',

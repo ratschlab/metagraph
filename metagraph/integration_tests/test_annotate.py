@@ -15,8 +15,8 @@ graph_file_extension = {'succinct': '.dbg',
                         'hash': '.orhashdbg',
                         'hashstr': '.hashstrdbg'}
 
-annotation_file_extension = {'column': '.column.annodbg',
-                             'row': '.row.annodbg'}
+anno_file_extension = {'column': '.column.annodbg',
+                       'row': '.row.annodbg'}
 
 NUM_THREADS = 4
 
@@ -32,7 +32,8 @@ class TestAnnotate(unittest.TestCase):
 
         for graph_repr in ['succinct', 'bitmap', 'hash', 'hashstr']:
 
-            construct_command = '{exe} build -p {num_threads} --graph {repr} -k 20 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} \
+                    --graph {repr} -k 20 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 num_threads=NUM_THREADS,
                 repr=graph_repr,
@@ -70,7 +71,7 @@ class TestAnnotate(unittest.TestCase):
                 # check annotation
                 anno_stats_command = '{exe} stats -a {annotation}'.format(
                     exe=METAGRAPH,
-                    annotation=self.tempdir.name + '/annotation' + annotation_file_extension[anno_repr],
+                    annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
                 )
                 res = subprocess.run(anno_stats_command.split(), capture_output=True)
                 self.assertEqual(res.returncode, 0)
@@ -86,9 +87,10 @@ class TestAnnotate(unittest.TestCase):
         """
 
         # TODO: add 'hashstr' once the canonical mode is implemented for it
-        for graph_repr in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
+        for graph_repr in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
 
-            construct_command = '{exe} build -p {num_threads} --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} \
+                    --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 num_threads=NUM_THREADS,
                 repr=graph_repr,
@@ -126,7 +128,7 @@ class TestAnnotate(unittest.TestCase):
                 # check annotation
                 anno_stats_command = '{exe} stats -a {annotation}'.format(
                     exe=METAGRAPH,
-                    annotation=self.tempdir.name + '/annotation' + annotation_file_extension[anno_repr],
+                    annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
                 )
                 res = subprocess.run(anno_stats_command.split(), capture_output=True)
                 self.assertEqual(res.returncode, 0)
@@ -143,7 +145,8 @@ class TestAnnotate(unittest.TestCase):
 
         for graph_repr in ['succinct', 'bitmap', 'hash', 'hashstr']:
 
-            construct_command = '{exe} build -p {num_threads} --graph {repr} -k 11 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} \
+                    --graph {repr} -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 num_threads=NUM_THREADS,
                 repr=graph_repr,
@@ -181,7 +184,7 @@ class TestAnnotate(unittest.TestCase):
                 # check annotation
                 anno_stats_command = '{exe} stats -a {annotation}'.format(
                     exe=METAGRAPH,
-                    annotation=self.tempdir.name + '/annotation' + annotation_file_extension[anno_repr],
+                    annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
                 )
                 res = subprocess.run(anno_stats_command.split(), capture_output=True)
                 self.assertEqual(res.returncode, 0)
@@ -198,7 +201,8 @@ class TestAnnotate(unittest.TestCase):
 
         for graph_repr in ['succinct', 'bitmap', 'hash', 'hashstr']:
 
-            construct_command = '{exe} build -p {num_threads} --graph {repr} -k 11 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} \
+                    --graph {repr} -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 num_threads=NUM_THREADS,
                 repr=graph_repr,
@@ -236,7 +240,7 @@ class TestAnnotate(unittest.TestCase):
                 # check annotation
                 anno_stats_command = '{exe} stats -a {annotation}'.format(
                     exe=METAGRAPH,
-                    annotation=self.tempdir.name + '/annotation_single' + annotation_file_extension[anno_repr],
+                    annotation=self.tempdir.name + '/annotation_single' + anno_file_extension[anno_repr],
                 )
                 res = subprocess.run(anno_stats_command.split(), capture_output=True)
                 self.assertEqual(res.returncode, 0)
@@ -261,7 +265,7 @@ class TestAnnotate(unittest.TestCase):
                 # check annotation
                 anno_stats_command = '{exe} stats -a {annotation}'.format(
                     exe=METAGRAPH,
-                    annotation=self.tempdir.name + '/annotation_both' + annotation_file_extension[anno_repr],
+                    annotation=self.tempdir.name + '/annotation_both' + anno_file_extension[anno_repr],
                 )
                 res = subprocess.run(anno_stats_command.split(), capture_output=True)
                 self.assertEqual(res.returncode, 0)
@@ -277,9 +281,10 @@ class TestAnnotate(unittest.TestCase):
         """
 
         # TODO: add 'hashstr' once the canonical mode is implemented for it
-        for graph_repr in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
+        for graph_repr in ['succinct', 'bitmap', 'hash']:  # , 'hashstr']:
 
-            construct_command = '{exe} build -p {num_threads} --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} \
+                    --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 num_threads=NUM_THREADS,
                 repr=graph_repr,
@@ -317,7 +322,7 @@ class TestAnnotate(unittest.TestCase):
                 # check annotation
                 anno_stats_command = '{exe} stats -a {annotation}'.format(
                     exe=METAGRAPH,
-                    annotation=self.tempdir.name + '/annotation_single' + annotation_file_extension[anno_repr],
+                    annotation=self.tempdir.name + '/annotation_single' + anno_file_extension[anno_repr],
                 )
                 res = subprocess.run(anno_stats_command.split(), capture_output=True)
                 self.assertEqual(res.returncode, 0)
@@ -342,7 +347,7 @@ class TestAnnotate(unittest.TestCase):
                 # check annotation
                 anno_stats_command = '{exe} stats -a {annotation}'.format(
                     exe=METAGRAPH,
-                    annotation=self.tempdir.name + '/annotation_both' + annotation_file_extension[anno_repr],
+                    annotation=self.tempdir.name + '/annotation_both' + anno_file_extension[anno_repr],
                 )
                 res = subprocess.run(anno_stats_command.split(), capture_output=True)
                 self.assertEqual(res.returncode, 0)
