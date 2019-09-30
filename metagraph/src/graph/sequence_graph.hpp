@@ -221,4 +221,7 @@ size_t incoming_edge_rank(const DeBruijnGraph &graph,
                           DeBruijnGraph::node_index source,
                           DeBruijnGraph::node_index target);
 
+std::vector<DeBruijnGraph::node_index>
+map_sequence_to_nodes(const DeBruijnGraph &graph, const std::string &sequence);
+
 #endif // __SEQUENCE_GRAPH_HPP__

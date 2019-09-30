@@ -95,11 +95,7 @@ class DBGAligner {
                                                       = std::numeric_limits<score_t>::min(),
                                                   const MapExtendSeederBuilder<node_index> &seeder_builder
                                                       = build_unimem_seeder<node_index>) const {
-        std::vector<node_index> nodes;
-        nodes.reserve(query.size() - graph_.get_k() + 1);
-        graph_.map_to_nodes_sequentially(query.begin(),
-                                         query.end(),
-                                         [&](auto node) { nodes.emplace_back(node); });
+        auto nodes = map_sequence_to_nodes(graph_, query);
         assert(nodes.size() == query.size() - graph_.get_k() + 1);
 
         auto seeder = seeder_builder(nodes, graph_);
@@ -110,11 +106,7 @@ class DBGAligner {
 
         auto size = paths.size();
 
-        std::vector<node_index> rc_nodes;
-        rc_nodes.reserve(nodes.size());
-        graph_.map_to_nodes_sequentially(paths.get_query_reverse_complement().begin(),
-                                         paths.get_query_reverse_complement().end(),
-                                         [&](auto node) { rc_nodes.emplace_back(node); });
+        auto rc_nodes = map_sequence_to_nodes(graph_, paths.get_query_reverse_complement());
         assert(rc_nodes.size() == nodes.size());
 
         auto rc_seeder = seeder_builder(rc_nodes, graph_);

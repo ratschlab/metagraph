@@ -391,3 +391,17 @@ size_t incoming_edge_rank(const DeBruijnGraph &graph,
 
     return edge_rank;
 }
+
+std::vector<DeBruijnGraph::node_index>
+map_sequence_to_nodes(const DeBruijnGraph &graph, const std::string &sequence) {
+    assert(sequence.size() >= graph.get_k());
+
+    std::vector<SequenceGraph::node_index> nodes;
+    nodes.reserve(sequence.size() - graph.get_k() + 1);
+
+    graph.map_to_nodes_sequentially(sequence.begin(), sequence.end(),
+        [&nodes](auto node) { nodes.push_back(node); }
+    );
+
+    return nodes;
+}
