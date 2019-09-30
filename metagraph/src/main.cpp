@@ -786,17 +786,21 @@ void print_stats(const DeBruijnGraph &graph) {
             // TODO: Fix this by using non-contiguous indexing in graph
             //       so that mask of dummy edges does not change indexes.
             for (uint64_t i = 1; i <= dbg_succ->get_boss().num_edges(); ++i) {
-                sum_weights += (*weights)[i];
-                num_non_zero_weights += (*weights)[i] > 0;
+                if (uint64_t weight = (*weights)[i]) {
+                    sum_weights += weight;
+                    num_non_zero_weights++;
+                }
             }
         } else {
             graph.call_nodes([&](auto i) {
-                sum_weights += (*weights)[i];
-                num_non_zero_weights += (*weights)[i] > 0;
+                if (uint64_t weight = (*weights)[i]) {
+                    sum_weights += weight;
+                    num_non_zero_weights++;
+                }
             });
         }
         std::cout << "nnz weights: " << num_non_zero_weights << std::endl;
-        std::cout << "sum weights: " << sum_weights << std::endl;
+        std::cout << "avg weight: " << static_cast<double>(sum_weights) / num_non_zero_weights << std::endl;
 
         if (utils::get_verbose()) {
             if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph)) {
@@ -1136,9 +1140,11 @@ int main(int argc, const char *argv[]) {
                     );
 
                     auto next_block = constructor->build_chunk();
-                    std::cout << "Graph chunk with " << next_block->size()
-                              << " k-mers was built in "
-                              << timer.elapsed() << "sec" << std::endl;
+                    if (config->verbose) {
+                        std::cout << "Graph chunk with " << next_block->size()
+                                  << " k-mers was built in "
+                                  << timer.elapsed() << "sec" << std::endl;
+                    }
 
                     if (config->outfbase.size() && config->suffix.size()) {
                         std::cout << "Serialize the graph chunk for suffix '"
