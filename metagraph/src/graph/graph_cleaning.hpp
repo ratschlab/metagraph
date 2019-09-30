@@ -5,8 +5,7 @@
 #include "node_weights.hpp"
 
 
-bool is_unreliable_unitig(const std::string &sequence,
-                          const DeBruijnGraph &graph,
+bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
                           const NodeWeights &node_weights,
                           uint64_t min_median_abundance);
 

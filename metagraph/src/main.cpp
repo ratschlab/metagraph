@@ -2054,21 +2054,18 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Threshold for median k-mer abundance in unitigs: "
                               << config->min_unitig_median_kmer_abundance << std::endl;
 
-                    graph->call_unitigs(
-                        [&](const auto &unitig) {
-                            if (!is_unreliable_unitig(unitig, *graph, *node_weights,
-                                                      config->min_unitig_median_kmer_abundance))
-                                callback(unitig);
-                        },
-                        config->min_tip_size
-                    );
+                    graph->call_unitigs([&](const std::string &unitig, const auto &path) {
+                        if (!is_unreliable_unitig(path,
+                                                  *node_weights,
+                                                  config->min_unitig_median_kmer_abundance))
+                            callback(unitig, path);
+                    }, config->min_tip_size);
 
                 } else if (config->unitigs || config->min_tip_size > 1) {
-                    graph->call_unitigs([&](const auto &unitig) { callback(unitig); },
-                                        config->min_tip_size);
+                    graph->call_unitigs(callback, config->min_tip_size);
 
                 } else {
-                    graph->call_sequences([&](const auto &contig) { callback(contig); });
+                    graph->call_sequences(callback);
                 }
             };
 
@@ -2079,7 +2076,9 @@ int main(int argc, const char *argv[]) {
                 FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
                                    config->header, true);
 
-                call_clean_contigs([&](const auto &contig) { writer.write(contig); });
+                call_clean_contigs([&](const std::string &contig, const auto &) {
+                    writer.write(contig);
+                });
 
             } else {
                 auto node_weights = graph->get_extension<NodeWeights>();
@@ -2088,7 +2087,10 @@ int main(int argc, const char *argv[]) {
                               << std::endl;
                     exit(1);
                 }
+                assert(node_weights->is_compatible(*graph));
+
                 auto &weights = node_weights->get_data();
+
                 assert(graph->num_nodes() + 1 == weights.size());
 
                 // compute clean count histogram
@@ -2097,13 +2099,15 @@ int main(int argc, const char *argv[]) {
                 if (config->min_unitig_median_kmer_abundance != 1 || config->min_tip_size > 1) {
                     // cleaning required
                     sdsl::bit_vector removed_nodes(weights.size(), 1);
-                    call_clean_contigs([&](const auto &contig) {
-                        graph->map_to_nodes_sequentially(contig.begin(), contig.end(), [&](auto i) {
+
+                    call_clean_contigs([&](const std::string&, const auto &path) {
+                        for (auto i : path) {
                             assert(weights[i]);
                             count_hist[weights[i]]++;
                             removed_nodes[i] = 0;
-                        });
+                        }
                     });
+
                     call_ones(removed_nodes, [&weights](auto i) { weights[i] = 0; });
 
                 } else if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph)) {

@@ -385,10 +385,35 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
     }
 }
 
+void DBGSuccinct::call_sequences(const CallPath &callback) const {
+    assert(boss_graph_.get());
+    boss_graph_->call_sequences(
+        [&](std::string&& seq, auto&& path) {
+            for (auto &node : path) {
+                node = boss_to_kmer_index(node);
+            }
+            callback(std::move(seq), std::move(path));
+        }
+    );
+}
+
 void DBGSuccinct
 ::call_sequences(const std::function<void(const std::string&)> &callback) const {
     assert(boss_graph_.get());
     boss_graph_->call_sequences(callback);
+}
+
+void DBGSuccinct::call_unitigs(const CallPath &callback, size_t min_tip_size) const {
+    assert(boss_graph_.get());
+    boss_graph_->call_unitigs(
+        [&](std::string&& seq, auto&& path) {
+            for (auto &node : path) {
+                node = boss_to_kmer_index(node);
+            }
+            callback(std::move(seq), std::move(path));
+        },
+        min_tip_size
+    );
 }
 
 void DBGSuccinct

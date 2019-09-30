@@ -897,26 +897,50 @@ TEST(BOSS, AppendSequenceAnyKmerSize) {
 TEST(BOSS, CallPathsEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
-        BOSS reconstructed(k);
 
-        empty.call_sequences([&](const auto &sequence) {
-            reconstructed.add_sequence(sequence);
-        });
+        {
+            BOSS reconstructed(k);
+            empty.call_sequences([&](const auto &sequence) {
+                reconstructed.add_sequence(sequence);
+            });
 
-        EXPECT_EQ(empty, reconstructed);
+            EXPECT_EQ(empty, reconstructed);
+        }
+
+        {
+            BOSS reconstructed(k);
+            empty.call_sequences([&](const auto &sequence, const auto &path) {
+                ASSERT_EQ(path, empty.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(empty, reconstructed);
+        }
     }
 }
 
 TEST(BOSS, CallUnitigsEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
-        BOSS reconstructed(k);
 
-        empty.call_unitigs([&](const auto &sequence) {
-            reconstructed.add_sequence(sequence);
-        });
+        {
+            BOSS reconstructed(k);
+            empty.call_unitigs([&](const auto &sequence) {
+                reconstructed.add_sequence(sequence);
+            });
 
-        EXPECT_EQ(empty, reconstructed);
+            EXPECT_EQ(empty, reconstructed);
+        }
+
+        {
+            BOSS reconstructed(k);
+            empty.call_unitigs([&](const auto &sequence, const auto &path) {
+                ASSERT_EQ(path, empty.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(empty, reconstructed);
+        }
     }
 }
 
@@ -934,6 +958,13 @@ TEST(BOSS, CallPathsOneLoop) {
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+
+        num_sequences = 0;
+        graph.call_sequences([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq));
+            num_sequences++;
+        });
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
@@ -950,6 +981,13 @@ TEST(BOSS, CallUnitigsOneLoop) {
         graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+
+        num_sequences = 0;
+        graph.call_unitigs([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq));
+            num_sequences++;
+        });
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
@@ -970,6 +1008,13 @@ TEST(BOSS, CallPathsTwoLoops) {
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+
+        num_sequences = 0;
+        graph.call_sequences([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq));
+            num_sequences++;
+        });
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
@@ -988,6 +1033,13 @@ TEST(BOSS, CallUnitigsTwoLoops) {
         graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+
+        num_sequences = 0;
+        graph.call_unitigs([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq));
+            num_sequences++;
+        });
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
@@ -1010,6 +1062,13 @@ TEST(BOSS, CallPathsFourLoops) {
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+
+        num_sequences = 0;
+        graph.call_sequences([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq));
+            num_sequences++;
+        });
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
@@ -1030,6 +1089,13 @@ TEST(BOSS, CallUnitigsFourLoops) {
         graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+
+        num_sequences = 0;
+        graph.call_unitigs([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq));
+            num_sequences++;
+        });
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
@@ -1111,6 +1177,88 @@ TEST(BOSS, CallPaths) {
     }
 }
 
+TEST(BOSS, CallPathsWithEdges) {
+    for (size_t k = 1; k < 10; ++k) {
+        {
+            BOSS graph(k);
+            graph.add_sequence("AAACACTAG", true);
+            graph.add_sequence("AACGACATG", true);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            BOSS graph(k);
+            graph.add_sequence("AGACACTGA", true);
+            graph.add_sequence("GACTACGTA", true);
+            graph.add_sequence("ACTAACGTA", true);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            BOSS graph(k);
+            graph.add_sequence("AGACACAGT", true);
+            graph.add_sequence("GACTTGCAG", true);
+            graph.add_sequence("ACTAGTCAG", true);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            BOSS graph(k);
+            graph.add_sequence("AAACTCGTAGC", true);
+            graph.add_sequence("AAATGCGTAGC", true);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            BOSS graph(k);
+            graph.add_sequence("AAACT", false);
+            graph.add_sequence("AAATG", false);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+    }
+}
+
 TEST(BOSS, CallUnitigs) {
     for (size_t k = 1; k < 10; ++k) {
         {
@@ -1180,6 +1328,88 @@ TEST(BOSS, CallUnitigs) {
             BOSS reconstructed(k);
 
             graph.call_unitigs([&](const auto &sequence) {
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+    }
+}
+
+TEST(BOSS, CallUnitigsWithEdges) {
+    for (size_t k = 1; k < 10; ++k) {
+        {
+            BOSS graph(k);
+            graph.add_sequence("AAACACTAG", true);
+            graph.add_sequence("AACGACATG", true);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            BOSS graph(k);
+            graph.add_sequence("AGACACTGA", true);
+            graph.add_sequence("GACTACGTA", true);
+            graph.add_sequence("ACTAACGTA", true);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            BOSS graph(k);
+            graph.add_sequence("AGACACAGT", true);
+            graph.add_sequence("GACTTGCAG", true);
+            graph.add_sequence("ACTAGTCAG", true);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            BOSS graph(k);
+            graph.add_sequence("AAACTCGTAGC", true);
+            graph.add_sequence("AAATGCGTAGC", true);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
+                reconstructed.add_sequence(sequence);
+            });
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            BOSS graph(k);
+            graph.add_sequence("AAACT", false);
+            graph.add_sequence("AAATG", false);
+            graph.switch_state(Config::STAT);
+
+            BOSS reconstructed(k);
+
+            graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(sequence));
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1407,6 +1637,114 @@ TEST(BOSS, CallUnitigsWithPruning) {
     }
 }
 
+TEST(BOSS, CallUnitigsWithEdgesWithPruning) {
+    BOSSConstructor constructor(4);
+    constructor.add_sequences({
+        "ACTATAGCTAGTCTATGCGA",
+        "ACTATAGCTAGTCTAA",
+        "ACTATAGCTA",
+        "ACTATAGCTT",
+        "ACTATC",
+    });
+    BOSS graph(&constructor);
+    ASSERT_EQ(4u, graph.get_k());
+
+    // BOSS constructs unitigs from its edges as k-mers
+    {
+        std::set<std::string> contigs {
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTT", "AGCTAGTCTA", "TCTAA", "TCTAT"
+        };
+        size_t num_contigs = 0;
+        graph.call_unitigs(
+            [&](const auto &str, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(str));
+                EXPECT_TRUE(contigs.count(str)) << str;
+                num_contigs++;
+            }
+        );
+        EXPECT_EQ(contigs.size(), num_contigs);
+        num_contigs = 0;
+        graph.call_unitigs(
+            [&](const auto &str, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(str));
+                EXPECT_TRUE(contigs.count(str)) << str;
+                num_contigs++;
+            }
+        , 1);
+        EXPECT_EQ(contigs.size(), num_contigs);
+    }
+    {
+        std::set<std::string> contigs {
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+        };
+        size_t num_contigs = 0;
+        graph.call_unitigs(
+            [&](const auto &str, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(str));
+                EXPECT_TRUE(contigs.count(str)) << str;
+                num_contigs++;
+            }
+        , 2);
+        EXPECT_EQ(contigs.size(), num_contigs);
+    }
+    {
+        std::set<std::string> contigs {
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+        };
+        size_t num_contigs = 0;
+        graph.call_unitigs(
+            [&](const auto &str, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(str));
+                EXPECT_TRUE(contigs.count(str)) << str;
+                num_contigs++;
+            }
+        , 3);
+        EXPECT_EQ(contigs.size(), num_contigs);
+    }
+    {
+        std::set<std::string> contigs {
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+        };
+        size_t num_contigs = 0;
+        graph.call_unitigs(
+            [&](const auto &str, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(str));
+                EXPECT_TRUE(contigs.count(str)) << str;
+                num_contigs++;
+            }
+        , 4);
+        EXPECT_EQ(contigs.size(), num_contigs);
+    }
+    {
+        std::set<std::string> contigs {
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+        };
+        size_t num_contigs = 0;
+        graph.call_unitigs(
+            [&](const auto &str, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(str));
+                EXPECT_TRUE(contigs.count(str)) << str;
+                num_contigs++;
+            }
+        , 5);
+        EXPECT_EQ(contigs.size(), num_contigs);
+    }
+    {
+        std::set<std::string> contigs {
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+        };
+        size_t num_contigs = 0;
+        graph.call_unitigs(
+            [&](const auto &str, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(str));
+                EXPECT_TRUE(contigs.count(str)) << str;
+                num_contigs++;
+            }
+        , 6);
+        EXPECT_EQ(contigs.size(), num_contigs);
+    }
+}
+
 TEST(BOSS, CallUnitigsCheckDegree) {
     std::vector<std::string> sequences {
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
@@ -1447,6 +1785,52 @@ TEST(BOSS, CallUnitigsCheckDegree) {
     EXPECT_EQ(unitigs, obs_unitigs);
 }
 
+TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
+    std::vector<std::string> sequences {
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
+        "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATAACTGGAAAA",
+        "CCGAACTAGTGAAACTGCAACAGACATACGCTGCTCTGAACTCTAAGGC",
+        "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
+        "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGC",
+        "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAATTGGCTGAAAAGC",
+        "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
+    };
+
+    BOSSConstructor constructor(8);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+    ASSERT_EQ(8u, graph.get_k());
+
+    std::multiset<std::string> unitigs {
+        "AGACAAATCGCTCCACCAA",
+        "AGACAAATTGGCTGAAAAGC",
+        "ATCGGAAGAGCACACGTCTGAACT",
+        "CAGACATAACTGGAAAA",
+        "CAGACATACGCTGCTCTGAACT",
+        "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATA",
+        "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAAT",
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCG",
+        "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
+        "CCGAACTAGTGAAACTGCAACAGACATA",
+        "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAAT",
+        "CTGAACTCCAGACACTAAGGCATCTCGTATGC",
+        "CTGAACTCTAAGGC",
+        "TCTGAACTC"
+    };
+
+    std::multiset<std::string> obs_unitigs;
+    graph.call_unitigs(
+        [&](const auto &unitig, const auto &path) {
+            EXPECT_EQ(path, graph.map_to_edges(unitig));
+            obs_unitigs.insert(unitig);
+        },
+        2
+    );
+
+    EXPECT_EQ(unitigs, obs_unitigs);
+}
+
 TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
     std::vector<std::string> sequences {
         "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
@@ -1469,6 +1853,91 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
     graph.call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
 
     EXPECT_EQ(unitigs, obs_unitigs);
+}
+
+TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
+    std::vector<std::string> sequences {
+        "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
+        "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
+        "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
+    };
+
+    BOSSConstructor constructor(30);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+    ASSERT_EQ(30u, graph.get_k());
+
+    std::multiset<std::string> unitigs {
+        "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
+        "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
+        "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
+    };
+
+    std::multiset<std::string> obs_unitigs;
+    graph.call_unitigs(
+        [&](const auto &unitig, const auto &path) {
+            EXPECT_EQ(path, graph.map_to_edges(unitig));
+            obs_unitigs.insert(unitig);
+        },
+        2
+    );
+
+    EXPECT_EQ(unitigs, obs_unitigs);
+}
+
+TEST(BOSS, CallUnitigsMasked) {
+    size_t k = 3;
+    // TTGC      GCACGGGTC
+    //      TGCA
+    // ATGC      GCAGTGGTC
+    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
+    BOSSConstructor constructor(k);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+
+    bit_vector_stat mask(graph.num_edges() + 1, false);
+    graph.map_to_edges(
+        sequences[0],
+        [&](auto edge) { mask.set(edge, true); }
+    );
+
+    std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
+    std::unordered_multiset<std::string> obs;
+
+    graph.call_unitigs([&](const auto &unitig) { obs.insert(unitig); }, 0, &mask);
+
+    EXPECT_EQ(obs, ref);
+}
+
+TEST(BOSS, CallUnitigsWithEdgesMasked) {
+    size_t k = 3;
+    // TTGC      GCACGGGTC
+    //      TGCA
+    // ATGC      GCAGTGGTC
+    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
+    BOSSConstructor constructor(k);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+
+    bit_vector_stat mask(graph.num_edges() + 1, false);
+    graph.map_to_edges(
+        sequences[0],
+        [&](auto edge) { mask.set(edge, true); }
+    );
+
+    std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
+    std::unordered_multiset<std::string> obs;
+
+    graph.call_unitigs(
+        [&](const auto &unitig, const auto &path) {
+            EXPECT_EQ(path, graph.map_to_edges(unitig));
+            obs.insert(unitig);
+        },
+        0,
+        &mask
+    );
+
+    EXPECT_EQ(obs, ref);
 }
 
 TEST(BOSS, CallEdgesEmptyGraph) {
@@ -2041,28 +2510,4 @@ TEST(BOSS, map_to_edges) {
         graph->map_to_edges(sequence_to_map,
                             [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
     }
-}
-
-TEST(BOSS, CallUnitigsMasked) {
-    size_t k = 3;
-    // TTGC      GCACGGGTC
-    //      TGCA
-    // ATGC      GCAGTGGTC
-    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
-    BOSSConstructor constructor(k);
-    constructor.add_sequences(sequences);
-    BOSS graph(&constructor);
-
-    bit_vector_stat mask(graph.num_edges() + 1, false);
-    graph.map_to_edges(
-        sequences[0],
-        [&](auto edge) { mask.set(edge, true); }
-    );
-
-    std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
-    std::unordered_multiset<std::string> obs;
-
-    graph.call_unitigs([&](auto unitig) { obs.insert(unitig); }, 0, &mask);
-
-    EXPECT_EQ(obs, ref);
 }

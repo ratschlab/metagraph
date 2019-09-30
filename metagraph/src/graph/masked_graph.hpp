@@ -52,7 +52,10 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override;
 
+    virtual void call_sequences(const CallPath &callback) const override;
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const override;
+
+    virtual void call_unitigs(const CallPath &callback, size_t min_tip_size = 1) const override;
     virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
                               size_t min_tip_size = 1) const override;
 

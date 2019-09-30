@@ -163,14 +163,21 @@ class DeBruijnGraph : public SequenceGraph {
                           const std::function<void(node_index)> &callback,
                           const std::function<bool()> &terminate = [](){ return false; }) const;
 
-    // TODO: move to graph_algorithm.hpp
+    typedef std::function<void(const std::string&, const std::vector<node_index>&)> CallPath;
+
+    /**
+     * Call contigs -- a set of sequences covering each node in graph exactly once.
+     */
+    virtual void call_sequences(const CallPath &callback) const;
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const;
     /**
-     * Call all unitigs except short tips.
-     * Def. Tips are the unitigs with InDegree(first) + OutDegree(last) < 2.
+     * Call all unitigs except short tips, where tips are
+     * the unitigs with InDegree(first) + OutDegree(last) < 2.
      */
+    virtual void call_unitigs(const CallPath &callback, size_t min_tip_size = 1) const;
     virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
                               size_t min_tip_size = 1) const;
+
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const;

@@ -108,19 +108,40 @@ void MaskedDeBruijnGraph
     );
 }
 
+bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
+                              const bitmap &kmers_in_graph) {
+    sdsl::bit_vector mask_bv(dbg_succ.get_boss().num_edges() + 1, false);
+    kmers_in_graph.call_ones(
+        [&](auto i) {
+            assert(dbg_succ.kmer_to_boss_index(i));
+            mask_bv[dbg_succ.kmer_to_boss_index(i)] = true;
+        }
+    );
+    return bit_vector_stat(std::move(mask_bv));
+}
+
+void MaskedDeBruijnGraph
+::call_sequences(const CallPath &callback) const {
+    if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
+        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
+
+        dbg_succ->get_boss().call_sequences([&](std::string&& sequence, auto&& path) {
+            for (auto &node : path) {
+                node = dbg_succ->boss_to_kmer_index(node);
+            }
+            callback(sequence, path);
+
+        }, &mask);
+
+    } else {
+        DeBruijnGraph::call_sequences(callback);
+    }
+}
+
 void MaskedDeBruijnGraph
 ::call_sequences(const std::function<void(const std::string&)> &callback) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-        sdsl::bit_vector mask_bv(dbg_succ->get_boss().num_edges() + 1, false);
-        kmers_in_graph_->call_ones(
-            [&](auto i) {
-                assert(graph_->in_graph(i));
-                assert(dbg_succ->kmer_to_boss_index(i));
-                mask_bv[dbg_succ->kmer_to_boss_index(i)] = true;
-            }
-        );
-
-        bit_vector_stat mask(std::move(mask_bv));
+        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
 
         dbg_succ->get_boss().call_sequences(callback, &mask);
 
@@ -130,19 +151,28 @@ void MaskedDeBruijnGraph
 }
 
 void MaskedDeBruijnGraph
+::call_unitigs(const CallPath &callback, size_t min_tip_size) const {
+    if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
+        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
+
+        dbg_succ->get_boss().call_unitigs([&](std::string&& sequence, auto&& path) {
+            for (auto &node : path) {
+                node = dbg_succ->boss_to_kmer_index(node);
+            }
+            callback(sequence, path);
+
+        }, min_tip_size, &mask);
+
+    } else {
+        DeBruijnGraph::call_unitigs(callback, min_tip_size);
+    }
+}
+
+void MaskedDeBruijnGraph
 ::call_unitigs(const std::function<void(const std::string&)> &callback,
                size_t min_tip_size) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-        sdsl::bit_vector mask_bv(dbg_succ->get_boss().num_edges() + 1, false);
-        kmers_in_graph_->call_ones(
-            [&](auto i) {
-                assert(graph_->in_graph(i));
-                assert(dbg_succ->kmer_to_boss_index(i));
-                mask_bv[dbg_succ->kmer_to_boss_index(i)] = true;
-            }
-        );
-
-        bit_vector_stat mask(std::move(mask_bv));
+        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
 
         dbg_succ->get_boss().call_unitigs(callback, min_tip_size, &mask);
 

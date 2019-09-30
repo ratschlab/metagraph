@@ -106,7 +106,7 @@ void DeBruijnGraph::call_nodes(const std::function<void(node_index)> &callback,
 
 void call_sequences_from(const DeBruijnGraph &graph,
                          node_index start,
-                         const std::function<void(const std::string&)> &callback,
+                         const DeBruijnGraph::CallPath &callback,
                          sdsl::bit_vector *visited,
                          sdsl::bit_vector *discovered,
                          ProgressBar &progress_bar,
@@ -122,12 +122,17 @@ void call_sequences_from(const DeBruijnGraph &graph,
     std::vector<node_index> queue = { start };
     (*discovered)[start] = true;
 
+    std::vector<node_index> path;
+    std::string sequence;
+
     std::vector<std::pair<node_index, char>> targets;
 
     // keep traversing until we have worked off all branches from the queue
     while (queue.size()) {
         node_index node = queue.back();
-        std::string sequence = graph.get_node_sequence(node);
+        path.resize(0);
+        path.push_back(node);
+        sequence = graph.get_node_sequence(node);
         queue.pop_back();
         start = node;
         assert(!call_unitigs || !(*visited)[node]);
@@ -162,6 +167,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                 if (!call_unitigs || !(*discovered)[targets.front().first]) {
                     sequence.push_back('\0');
                     std::tie(node, sequence.back()) = targets[0];
+                    path.push_back(node);
                     (*discovered)[node] = true;
                     continue;
                 }
@@ -177,6 +183,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                     (*discovered)[next] = true;
                     next_node = next;
                     sequence.push_back(c);
+                    path.push_back(next);
                 } else if (!(*discovered)[next]) {
                     (*discovered)[next] = true;
                     queue.push_back(next);
@@ -190,19 +197,20 @@ void call_sequences_from(const DeBruijnGraph &graph,
         }
 
         assert(sequence.size() >= graph.get_k());
+        assert(path.size());
 
         if (!call_unitigs
                   // check if long
                   || sequence.size() >= graph.get_k() + min_tip_size - 1
                   // check if not tip
                   || graph.indegree(start) + graph.outdegree(node) >= 2) {
-            callback(sequence);
+            callback(sequence, path);
         }
     }
 }
 
 void call_sequences(const DeBruijnGraph &graph,
-                    const std::function<void(const std::string&)> &callback,
+                    const DeBruijnGraph::CallPath &callback,
                     bool call_unitigs,
                     uint64_t min_tip_size = 0) {
     sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
@@ -275,15 +283,38 @@ void call_sequences(const DeBruijnGraph &graph,
     call_zeros(visited, call_paths_from);
 }
 
+void DeBruijnGraph::call_sequences(const CallPath &callback) const {
+    ::call_sequences(*this, callback, false);
+}
+
 void DeBruijnGraph
 ::call_sequences(const std::function<void(const std::string&)> &callback) const {
-    ::call_sequences(*this, callback, false);
+    call_sequences(
+        [&](const std::string &seq, const auto &path) {
+            assert(get_node_sequence(path.front()) == seq.substr(0, get_k()));
+            assert(get_node_sequence(path.back()) == seq.substr(seq.size() - get_k()));
+            std::ignore = path;
+            callback(seq);
+        }
+    );
+}
+
+void DeBruijnGraph::call_unitigs(const CallPath &callback, size_t min_tip_size) const {
+    ::call_sequences(*this, callback, true, min_tip_size);
 }
 
 void DeBruijnGraph
 ::call_unitigs(const std::function<void(const std::string&)> &callback,
                size_t min_tip_size) const {
-    ::call_sequences(*this, callback, true, min_tip_size);
+    call_unitigs(
+        [&](const std::string &seq, const auto &path) {
+            assert(get_node_sequence(path.front()) == seq.substr(0, get_k()));
+            assert(get_node_sequence(path.back()) == seq.substr(seq.size() - get_k()));
+            std::ignore = path;
+            callback(seq);
+        },
+        min_tip_size
+    );
 }
 
 /**

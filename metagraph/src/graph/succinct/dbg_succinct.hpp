@@ -58,14 +58,14 @@ class DBGSuccinct : public DeBruijnGraph {
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
-    // TODO: compare these to DeBruijnGraph implementations
+    virtual void call_sequences(const CallPath &callback) const override final;
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const override final;
 
+    virtual void call_unitigs(const CallPath &callback, size_t min_tip_size = 1) const override final;
     virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
                               size_t min_tip_size = 1) const override final;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
-
 
     // Find a maximal suffix of the string delimited by begin and end such that
     // a range of nodes matches it, and call all nodes. If more than max_num_allowed_matches
@@ -129,10 +129,11 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
-  private:
-    void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
+
+  private:
+    void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
 
     std::unique_ptr<BOSS> boss_graph_;
     // all edges in boss except dummy

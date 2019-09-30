@@ -61,6 +61,31 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsNoMask) {
     }
 }
 
+TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsWithNodesNoMask) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
+                graph->call_unitigs([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, seq));
+                    callback(seq);
+                });
+            });
+            EXPECT_EQ(*graph, *reconstructed)
+                << dynamic_cast<const TypeParam&>(*graph) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed);
+        }
+    }
+}
+
 TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
     for (size_t k = 3; k <= 10; ++k) {
         for (const std::vector<std::string> &sequences
@@ -78,6 +103,33 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
             auto reconstructed = build_graph_iterative<DBGSuccinct>(
                 k, [&](const auto &callback) { graph->call_sequences(callback); }
             );
+            EXPECT_EQ(*stable_graph, *reconstructed)
+                << dynamic_cast<const TypeParam&>(*graph) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed);
+        }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsWithNodesNoMask) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
+
+            auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
+                graph->call_sequences([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, seq));
+                    callback(seq);
+                });
+            });
             EXPECT_EQ(*stable_graph, *reconstructed)
                 << dynamic_cast<const TypeParam&>(*graph) << std::endl
                 << dynamic_cast<const TypeParam&>(*reconstructed);
@@ -109,6 +161,33 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
     }
 }
 
+TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsWithNodesNoMask) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
+
+            auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
+                graph->call_unitigs([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, seq));
+                    callback(seq);
+                });
+            });
+            EXPECT_EQ(*stable_graph, *reconstructed)
+                << dynamic_cast<const TypeParam&>(*graph) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed);
+        }
+    }
+}
+
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsMaskFirstKmer) {
     for (size_t k = 3; k <= 10; ++k) {
         for (const std::vector<std::string> &sequences
@@ -133,6 +212,65 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsMaskFirstKmer) {
             auto reconstructed = build_graph_iterative<TypeParam>(
                 k, [&](const auto &callback) { graph.call_sequences(callback); }
             );
+
+            auto ref = build_graph_iterative<TypeParam>(
+                k,
+                [&](const auto &callback) {
+                    graph.call_nodes([&](const auto &index) {
+                        callback(graph.get_node_sequence(index));
+                    });
+                }
+            );
+            EXPECT_EQ(*ref, *reconstructed)
+                << *full_graph << std::endl
+                << first_kmer << std::endl
+                << graph << std::endl
+                << *ref << std::endl
+                << *reconstructed;
+
+            std::set<std::string> ref_nodes;
+            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
+                ref_nodes.insert(full_graph->get_node_sequence(i));
+            }
+
+            std::set<std::string> rec_nodes;
+            reconstructed->call_nodes([&](const auto &index) {
+                rec_nodes.insert(reconstructed->get_node_sequence(index));
+            });
+            if (ref_nodes.size())
+                rec_nodes.insert(first_kmer);
+            EXPECT_EQ(ref_nodes, rec_nodes);
+        }
+    }
+}
+
+TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsWithNodesMaskFirstKmer) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
+            MaskedDeBruijnGraph graph(
+                full_graph,
+                [&](const auto &index) {
+                    return index != DeBruijnGraph::npos
+                        && full_graph->get_node_sequence(index) != first_kmer;
+                }
+            );
+
+            auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
+                graph.call_sequences([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                    callback(seq);
+                });
+            });
 
             auto ref = build_graph_iterative<TypeParam>(
                 k,
@@ -221,6 +359,65 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
     }
 }
 
+TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsWithNodesMaskFirstKmer) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
+            MaskedDeBruijnGraph graph(
+                full_graph,
+                [&](const auto &index) {
+                    return index != DeBruijnGraph::npos
+                        && full_graph->get_node_sequence(index) != first_kmer;
+                }
+            );
+
+            auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
+                graph.call_unitigs([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                    callback(seq);
+                });
+            });
+
+            auto ref = build_graph_iterative<TypeParam>(
+                k,
+                [&](const auto &callback) {
+                    graph.call_nodes([&](const auto &index) {
+                        callback(graph.get_node_sequence(index));
+                    });
+                }
+            );
+            EXPECT_EQ(*ref, *reconstructed)
+                << *full_graph << std::endl
+                << first_kmer << std::endl
+                << graph << std::endl
+                << *ref << std::endl
+                << *reconstructed;
+
+            std::set<std::string> ref_nodes;
+            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
+                ref_nodes.insert(full_graph->get_node_sequence(i));
+            }
+
+            std::set<std::string> rec_nodes;
+            reconstructed->call_nodes([&](const auto &index) {
+                rec_nodes.insert(reconstructed->get_node_sequence(index));
+            });
+            if (ref_nodes.size())
+                rec_nodes.insert(first_kmer);
+            EXPECT_EQ(ref_nodes, rec_nodes);
+        }
+    }
+}
+
 TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
     for (size_t k = 3; k <= 10; ++k) {
         for (const std::vector<std::string> &sequences
@@ -245,6 +442,65 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
             auto reconstructed = build_graph_iterative<DBGSuccinct>(
                 k, [&](const auto &callback) { graph.call_sequences(callback); }
             );
+
+            auto ref = build_graph_iterative<DBGSuccinct>(
+                k,
+                [&](const auto &callback) {
+                    graph.call_nodes([&](const auto &index) {
+                        callback(graph.get_node_sequence(index));
+                    });
+                }
+            );
+            EXPECT_EQ(*ref, *reconstructed)
+                << *full_graph << std::endl
+                << first_kmer << std::endl
+                << graph << std::endl
+                << *ref << std::endl
+                << *reconstructed;
+
+            std::set<std::string> ref_nodes;
+            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
+                ref_nodes.insert(full_graph->get_node_sequence(i));
+            }
+
+            std::set<std::string> rec_nodes;
+            reconstructed->call_nodes([&](const auto &index) {
+                rec_nodes.insert(reconstructed->get_node_sequence(index));
+            });
+            if (ref_nodes.size())
+                rec_nodes.insert(first_kmer);
+            EXPECT_EQ(ref_nodes, rec_nodes);
+        }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsWithNodesMaskFirstKmer) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
+            MaskedDeBruijnGraph graph(
+                full_graph,
+                [&](const auto &index) {
+                    return index != DeBruijnGraph::npos
+                        && full_graph->get_node_sequence(index) != first_kmer;
+                }
+            );
+
+            auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
+                graph.call_sequences([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                    callback(seq);
+                });
+            });
 
             auto ref = build_graph_iterative<DBGSuccinct>(
                 k,
@@ -333,6 +589,65 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
     }
 }
 
+TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsWithNodesMaskFirstKmer) {
+    for (size_t k = 3; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+            auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
+            MaskedDeBruijnGraph graph(
+                full_graph,
+                [&](const auto &index) {
+                    return index != DeBruijnGraph::npos
+                        && full_graph->get_node_sequence(index) != first_kmer;
+                }
+            );
+
+            auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
+                graph.call_unitigs([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                    callback(seq);
+                });
+            });
+
+            auto ref = build_graph_iterative<DBGSuccinct>(
+                k,
+                [&](const auto &callback) {
+                    graph.call_nodes([&](const auto &index) {
+                        callback(graph.get_node_sequence(index));
+                    });
+                }
+            );
+            EXPECT_EQ(*ref, *reconstructed)
+                << *full_graph << std::endl
+                << first_kmer << std::endl
+                << graph << std::endl
+                << *ref << std::endl
+                << *reconstructed;
+
+            std::set<std::string> ref_nodes;
+            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
+                ref_nodes.insert(full_graph->get_node_sequence(i));
+            }
+
+            std::set<std::string> rec_nodes;
+            reconstructed->call_nodes([&](const auto &index) {
+                rec_nodes.insert(reconstructed->get_node_sequence(index));
+            });
+            if (ref_nodes.size())
+                rec_nodes.insert(first_kmer);
+            EXPECT_EQ(ref_nodes, rec_nodes);
+        }
+    }
+}
+
 TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
     size_t k = 4;
     // TTGC      GCACGGGTC
@@ -350,6 +665,30 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
     std::unordered_multiset<std::string> obs;
 
     masked_dbg.call_unitigs([&](auto unitig) { obs.insert(unitig); });
+
+    EXPECT_EQ(obs, ref);
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsWithNodesMaskTangle) {
+    size_t k = 4;
+    // TTGC      GCACGGGTC
+    //      TGCA
+    // ATGC      GCAGTGGTC
+    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
+    const std::vector<std::string> labels { "A", "B" };
+    auto anno_graph = build_anno_graph<TypeParam,
+                                       annotate::ColumnCompressed<>>(
+        k, sequences, labels
+    );
+
+    auto masked_dbg = build_masked_graph(*anno_graph, { "A" }, {});
+    std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
+    std::unordered_multiset<std::string> obs;
+
+    masked_dbg.call_unitigs([&](const auto &unitig, const auto &path) {
+        ASSERT_EQ(path, map_sequence_to_nodes(masked_dbg, unitig));
+        obs.insert(unitig);
+    });
 
     EXPECT_EQ(obs, ref);
 }
@@ -389,6 +728,59 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
             auto reconstructed = build_graph_iterative<TypeParam>(
                 k, [&](const auto &callback) { graph.call_sequences(callback); }
             );
+
+            std::multiset<std::string> called_nodes;
+            graph.call_nodes([&](const auto &index) {
+                called_nodes.insert(graph.get_node_sequence(index));
+            });
+
+            std::multiset<std::string> rec_nodes;
+            reconstructed->call_nodes([&](const auto &index) {
+                rec_nodes.insert(reconstructed->get_node_sequence(index));
+            });
+            EXPECT_EQ(called_nodes, rec_nodes);
+        }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsWithNodesMaskPath) {
+    for (size_t k = 3; k <= 10; ++k) {
+        std::vector<std::string> sequences { "ATGCAGTACTCAG",
+                                             "ATGCAGTACTGAG",
+                                             "GGGGGGGGGGGGG" };
+        auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+        for (const auto &sequence : sequences) {
+            auto mask = std::make_unique<bit_vector_stat>(
+                full_graph->num_nodes() + 1, true
+            );
+            mask->set(DeBruijnGraph::npos, false);
+            full_graph->map_to_nodes(
+                sequence,
+                [&](const auto &index) { mask->set(index, false); }
+            );
+
+            MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+            EXPECT_EQ(*full_graph, graph.get_graph());
+
+            size_t counter = 0;
+            graph.map_to_nodes(
+                sequence,
+                [&](const auto &index) {
+                    EXPECT_EQ(DeBruijnGraph::npos, index);
+                    ++counter;
+                }
+            );
+
+            EXPECT_EQ(sequence.size() + 1 - graph.get_k(), counter);
+
+            // check if reconstructed graph matches
+            auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
+                graph.call_sequences([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                    callback(seq);
+                });
+            });
 
             std::multiset<std::string> called_nodes;
             graph.call_nodes([&](const auto &index) {
@@ -461,6 +853,79 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
         std::multiset<std::string> unitigs;
         graph.call_unitigs(
             [&](const auto &unitig) {
+                graph.map_to_nodes(
+                    unitig,
+                    [&](const auto &index) {
+                        EXPECT_TRUE(graph.in_graph(index));
+                        EXPECT_NE(DeBruijnGraph::npos, index);
+                    }
+                );
+                unitigs.insert(unitig);
+            },
+            min_tip_size
+        );
+        EXPECT_EQ(unitig_sets[min_tip_size - 1], unitigs) << min_tip_size;
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsWithNodesMaskPath) {
+    size_t k = 4;
+
+    /*
+    GCATGGT\     GTACT
+     ACCGGT\    /
+            GGTA
+      TAGGT/    \
+       GGGT/     GTATT (masked out)
+    */
+    std::vector<std::string> sequences { "GCATGGTACT",
+                                         "ACCGGTACT",
+                                         "TAGGTACT",
+                                         "GGGTACT",
+                                         "GGGGGGGGGGGG",
+                                         "GTATT" };
+    std::vector<std::string> masked_out { "GTATT", "GGGGGGGGGGGG" };
+    std::vector<std::multiset<std::string>> unitig_sets {
+        { "GGTACT", "GCATGGT", "ACCGGT", "TAGGT", "GGGT" },
+        { "GGTACT", "GCATGGT", "ACCGGT", "TAGGT" },
+        { "GGTACT", "GCATGGT", "ACCGGT" },
+        { "GGTACT", "GCATGGT" },
+    };
+
+    auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+    auto mask = std::make_unique<bit_vector_stat>(
+        full_graph->num_nodes() + 1, false
+    );
+
+    for (const auto &sequence : sequences) {
+        full_graph->map_to_nodes(
+            sequence,
+            [&](const auto &index) { mask->set(index, true); }
+        );
+    }
+
+    for (const auto &sequence_out : masked_out) {
+        full_graph->map_to_nodes(
+            sequence_out,
+            [&](const auto &index) { mask->set(index, false); }
+        );
+    }
+
+    MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+
+    for (const auto &sequence_out : masked_out) {
+        graph.map_to_nodes(
+            sequence_out,
+            [](const auto &index) { ASSERT_EQ(DeBruijnGraph::npos, index); }
+        );
+    }
+
+    for (size_t min_tip_size = 1; min_tip_size <= 4; ++min_tip_size) {
+        std::multiset<std::string> unitigs;
+        graph.call_unitigs(
+            [&](const auto &unitig, const auto &path) {
+                ASSERT_EQ(path, map_sequence_to_nodes(graph, unitig));
                 graph.map_to_nodes(
                     unitig,
                     [&](const auto &index) {

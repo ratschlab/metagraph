@@ -1982,12 +1982,11 @@ void call_paths(const BOSS &boss,
     }
 }
 
-void BOSS::call_sequences(Call<const std::string&> callback,
+void BOSS::call_sequences(Call<std::string&&> callback,
                           bitmap *subgraph_mask) const {
-    std::string sequence;
-
     call_paths([&](auto&&, auto&& path) {
-        sequence.clear();
+        std::string sequence;
+        sequence.reserve(path.size());
 
         for (TAlphabet c : path) {
             if (c != BOSS::kSentinelCode) {
@@ -1996,11 +1995,55 @@ void BOSS::call_sequences(Call<const std::string&> callback,
         }
 
         if (sequence.size())
-            callback(sequence);
+            callback(std::move(sequence));
+
     }, false, subgraph_mask);
 }
 
-void BOSS::call_unitigs(Call<const std::string&> callback,
+void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
+                          bitmap *subgraph_mask) const {
+
+    call_paths([&](auto&& edges, auto&& path) {
+        assert(path.size());
+
+        auto begin = std::find_if(path.begin(), path.end(),
+                                  [&](auto c) { return c != kSentinelCode; });
+        auto end = path.end() - (path.back() == kSentinelCode);
+
+        if (begin + k_ + 1 > end)
+            return;
+
+        assert(std::all_of(begin, end, [](auto c) { return c != kSentinelCode; }));
+
+        std::string sequence(end - begin, '\0');
+        std::transform(begin, end, sequence.begin(),
+                       [&](auto c) { return BOSS::decode(c % alph_size); });
+
+        std::copy(edges.begin() + (begin - path.begin()),
+                  edges.end() - (path.end() - end),
+                  edges.begin());
+        edges.resize(edges.size()
+                        - (begin - path.begin())
+                        - (path.end() - end));
+
+        assert(end - begin - k_ == edges.size());
+
+        callback(std::move(sequence), std::move(edges));
+
+    }, false, subgraph_mask);
+}
+
+void BOSS::call_unitigs(Call<std::string&&> callback,
+                        size_t max_pruned_dead_end_size,
+                        bitmap *subgraph_mask) const {
+    call_unitigs(
+        [&](std::string&& seq, auto&&) { callback(std::move(seq)); },
+        max_pruned_dead_end_size,
+        subgraph_mask
+    );
+}
+
+void BOSS::call_unitigs(Call<std::string&&, std::vector<uint64_t>&&> callback,
                         size_t min_tip_size,
                         bitmap *subgraph_mask) const {
     call_paths([&](auto&& edges, auto&& path) {
@@ -2019,9 +2062,21 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
         std::transform(begin, end, sequence.begin(),
                        [&](auto c) { return BOSS::decode(c % alph_size); });
 
+        auto first_edge = edges.front();
+        auto last_edge = edges.back();
+
+        std::copy(edges.begin() + (begin - path.begin()),
+                  edges.end() - (path.end() - end),
+                  edges.begin());
+        edges.resize(edges.size()
+                        - (begin - path.begin())
+                        - (path.end() - end));
+
+        assert(end - begin - k_ == edges.size());
+
         // always call long unitigs
         if (sequence.size() >= k_ + min_tip_size) {
-            callback(sequence);
+            callback(std::move(sequence), std::move(edges));
             return;
         }
 
@@ -2052,10 +2107,10 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
         // it is clearly neither a sink tip nor a source tip.
         if (path.back() != kSentinelCode
                 && !masked_pick_single_outgoing(*this,
-                                                &(last_fwd = fwd(edges.back())),
+                                                &(last_fwd = fwd(last_edge)),
                                                 subgraph_mask)
                 && last_fwd) {
-            callback(sequence);
+            callback(std::move(sequence), std::move(edges));
             return;
         }
 
@@ -2068,10 +2123,10 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
         //       function is called.
         if (path.front() != kSentinelCode
                 && !masked_pick_single_incoming(*this,
-                                                &(first_bwd = bwd(edges.front())),
+                                                &(first_bwd = bwd(first_edge)),
                                                 subgraph_mask)
                 && first_bwd) {
-            callback(sequence);
+            callback(std::move(sequence), std::move(edges));
             return;
         }
 
@@ -2093,7 +2148,7 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
             return;
 
         // this is not a tip
-        callback(sequence);
+        callback(std::move(sequence), std::move(edges));
 
     }, true, subgraph_mask);
 }
