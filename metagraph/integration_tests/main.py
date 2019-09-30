@@ -66,5 +66,8 @@ class TimeLoggingTestResult(unittest.TextTestResult):
 
 
 if __name__ == '__main__':
-    text_runner = unittest.TextTestRunner(resultclass=TimeLoggingTestResult).run(create_test_suite())
-    # unittest.main()
+    result = unittest.TextTestRunner(
+        resultclass=TimeLoggingTestResult
+    ).run(create_test_suite())
+
+    exit(0 if result.wasSuccessful() else 1)

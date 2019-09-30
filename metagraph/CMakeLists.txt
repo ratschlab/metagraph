@@ -430,10 +430,18 @@ target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TE
 #-------------------
 # Tests
 #-------------------
-add_custom_target(check COMMAND python3 ${PROJECT_SOURCE_DIR}/integration_tests/main.py)
+find_package (Python3 3.4 REQUIRED COMPONENTS Interpreter)
+
+# --- integration tests ---
+add_custom_target(check
+  COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/integration_tests/main.py
+  DEPENDS metagraph-bin
+)
+# --- integration tests + unit tests ---
 add_custom_target(check_all
   COMMAND make check
   COMMAND unit_tests
+  DEPENDS check unit_tests
 )
 add_test(NAME integration_tests COMMAND make check)
 add_test(NAME unit_tests COMMAND unit_tests)
