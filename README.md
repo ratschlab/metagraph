@@ -8,6 +8,7 @@
 - HTSlib
 - boost
 - folly (optional)
+- Python 3 (for running integration tests)
 
 All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh)
 
@@ -74,6 +75,7 @@ popd
 4. go to the **build** directory `mkdir -p metagraph/build && cd metagraph/build`
 5. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))`
 6. run unit tests `./unit_tests`
+6. run integration tests `make check`
 
 #### Typical issues
 * Linking against dynamic libraries in Anaconda when compiling libmaus2
