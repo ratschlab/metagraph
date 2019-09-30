@@ -158,7 +158,7 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
 
                 //one pass per suffix
                 for (const std::string &suffix : KmerExtractor2Bit().generate_suffixes(suffix_len)) {
-                    constructor.reset(new DBGBitmapConstructor(k, canonical, false, suffix));
+                    constructor.reset(new DBGBitmapConstructor(k, canonical, 0, suffix));
 
                     for (const auto &seq : input_data) {
                         constructor->add_sequence(std::string(seq));

@@ -376,16 +376,17 @@ class BOSS {
             return std::make_tuple(edge_index(0), edge_index(0), begin);
 
         auto it = begin + 1;
+        edge_index rl_h;
         // update range iteratively while scanning through s
         for (; it != end; ++it) {
             s = *it;
 
             // Include the head of the first node with the given suffix.
-            rl = pred_last(rl - 1) + 1;
+            rl_h = pred_last(rl - 1) + 1;
 
             // Tighten the range including all edges where
             // the source nodes have the given suffix.
-            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
+            uint64_t rk_rl = rank_W(rl_h - 1, s) + 1;
             uint64_t rk_ru = rank_W(ru, s);
             if (rk_rl > rk_ru)
                 return std::make_tuple(rl, ru, it);

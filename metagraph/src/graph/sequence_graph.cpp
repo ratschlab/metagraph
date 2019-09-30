@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <progress_bar.hpp>
-#include <sdsl/int_vector.hpp>
 
 #include "threading.hpp"
 #include "bitmap.hpp"
@@ -16,6 +15,21 @@ typedef DeBruijnGraph::node_index node_index;
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
 
+
+/*************** SequenceGraph ***************/
+
+void SequenceGraph::add_extension(std::shared_ptr<GraphExtension> extension) {
+    assert(extension.get());
+    extensions_.push_back(extension);
+}
+
+void SequenceGraph::serialize_extensions(const std::string &filename) const {
+    for (auto extension : extensions_) {
+        extension->serialize(utils::remove_suffix(filename, file_extension()) + file_extension());
+    }
+}
+
+/*************** DeBruijnGraph ***************/
 
 node_index DeBruijnGraph::kmer_to_node(const char *begin) const {
     return kmer_to_node(std::string(begin, get_k()));

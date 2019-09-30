@@ -303,8 +303,7 @@ void RowCompressed<Label>::stream_counts(const std::string &filename,
 }
 
 template <typename Label>
-RowCompressed<Label>
-::StreamRows::StreamRows(std::string filename) {
+RowCompressed<Label>::StreamRows::StreamRows(std::string filename) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ifstream instream(filename, std::ios::binary);
     // skip header

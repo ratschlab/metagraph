@@ -4,10 +4,12 @@
 #define protected public
 
 #include "test_dbg_helpers.hpp"
+#include "node_weights.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
+const size_t kBitsPerCount = 8;
 
 TYPED_TEST_CASE(DeBruijnGraphTest, GraphTypes);
 TYPED_TEST_CASE(StableDeBruijnGraphTest, StableGraphTypes);
@@ -82,6 +84,52 @@ TYPED_TEST(DeBruijnGraphTest, Serialize) {
     EXPECT_FALSE(graph.find("GCTAAAAATATATATATTAAAAAAACATG"));
 }
 
+template <class Graph>
+void test_graph_serialization(size_t k_max) {
+    for (size_t k = 2; k <= k_max; ++k) {
+        std::vector<std::string> data = { std::string(k, 'A'),
+                                          std::string(k, 'C') + 'G', };
+        {
+            auto graph = build_graph<Graph>(k, data);
+
+            EXPECT_TRUE(graph->find(std::string(k, 'A')));
+            EXPECT_TRUE(graph->find(std::string(k, 'C')));
+            EXPECT_TRUE(graph->find(std::string(k - 1, 'C') + 'G'));
+            EXPECT_FALSE(graph->find(std::string(k, 'G')));
+
+            graph->serialize(test_dump_basename);
+        }
+        {
+            Graph graph(2);
+
+            ASSERT_TRUE(graph.load(test_dump_basename));
+
+            EXPECT_EQ(k, graph.get_k());
+
+            EXPECT_TRUE(graph.find(std::string(k, 'A')));
+            EXPECT_TRUE(graph.find(std::string(k, 'C')));
+            EXPECT_TRUE(graph.find(std::string(k - 1, 'C') + 'G'));
+            EXPECT_FALSE(graph.find(std::string(k, 'G')));
+        }
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, SerializeAnyK) {
+    test_graph_serialization<TypeParam>(31);
+}
+
+TEST(DBGHashString, SerializeAnyK) {
+    test_graph_serialization<DBGHashString>(200);
+}
+
+TEST(DBGHashOrdered, SerializeAnyK) {
+    test_graph_serialization<DBGHashOrdered>(256 / KmerExtractor2Bit::bits_per_char);
+}
+
+TEST(DBGSuccinct, SerializeAnyK) {
+    test_graph_serialization<DBGSuccinct>(256 / (KmerExtractor2Bit::bits_per_char + 1));
+}
+
 TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
     auto graph = build_graph<TypeParam>(20, {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -91,6 +139,37 @@ TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
     EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_TRUE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
     EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
+}
+
+TYPED_TEST(DeBruijnGraphTest, Weighted) {
+    for (size_t k = 2; k < 10; ++k) {
+        auto sequences = {
+            std::string(100, 'A'),
+            std::string(k, 'G'),
+            std::string(50, 'C')
+        };
+        auto graph = build_graph<TypeParam>(k, sequences, false);
+
+        graph->add_extension(std::make_shared<NodeWeights>(graph->num_nodes() + 1, kBitsPerCount));
+        auto &weights = *graph->template get_extension<NodeWeights>();
+
+        for (const auto &sequence : sequences) {
+            graph->map_to_nodes(sequence, [&](auto node) { weights.add_weight(node, 1); });
+        }
+
+        auto node_idx = graph->kmer_to_node(std::string(k, 'A'));
+        EXPECT_EQ(100u - k + 1, weights[node_idx]);
+
+        node_idx = graph->kmer_to_node(std::string(k, 'C'));
+        EXPECT_EQ(50u - k + 1, weights[node_idx]);
+
+        node_idx = graph->kmer_to_node(std::string(k, 'G'));
+        EXPECT_EQ(1u, weights[node_idx]);
+
+        //TODO should throw if weights extension is present
+        //bit_vector_dyn nodes_inserted(graph->num_nodes() + 1, 0);
+        //graph->add_sequence(std::string(25, 'T'), &nodes_inserted);
+    }
 }
 
 TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {

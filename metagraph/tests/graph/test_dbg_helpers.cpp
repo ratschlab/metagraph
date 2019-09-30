@@ -19,7 +19,6 @@ build_graph(uint64_t k,
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);
     }
-
     return graph;
 }
 
@@ -36,7 +35,6 @@ build_graph<DBGHashString>(uint64_t k,
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);
     }
-
     return graph;
 }
 
@@ -49,7 +47,6 @@ build_graph<DBGBitmap>(uint64_t k,
     for (const auto &sequence : sequences) {
         constructor.add_sequence(std::string(sequence));
     }
-
     return std::shared_ptr<DeBruijnGraph>(new DBGBitmap(&constructor));
 }
 
@@ -62,9 +59,7 @@ build_graph<DBGSuccinct>(uint64_t k,
     for (const auto &sequence : sequences) {
         graph->add_sequence(std::string(sequence));
     }
-
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
-
     return graph;
 }
 

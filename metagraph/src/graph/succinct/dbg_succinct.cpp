@@ -164,6 +164,7 @@ void DBGSuccinct::add_seq(const std::string &sequence,
             if (nodes_inserted)
                 nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
         }
+
     } else {
         boss_graph_->add_sequence(sequence, true);
     }
@@ -235,7 +236,9 @@ void DBGSuccinct
         if (edge) {
             auto kmer_index = boss_to_kmer_index(edge);
             if (kmer_index != npos) {
-                callback(kmer_index, end - begin);
+                assert(begin + get_k() == end);
+                assert(get_node_sequence(kmer_index) == std::string(begin, end));
+                callback(kmer_index, get_k());
                 return;
             }
         }
@@ -255,8 +258,11 @@ void DBGSuccinct
                 boss_graph_->bwd(boss_graph_->select_last(i)),
                 [&](BOSS::edge_index incoming_edge_idx) {
                     auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
-                    if (kmer_index != npos)
+                    if (kmer_index != npos) {
+                        assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
+                            == std::string(begin, begin + match_size));
                         nodes.emplace_back(kmer_index);
+                    }
                 }
             );
         }
@@ -273,8 +279,11 @@ void DBGSuccinct
                 boss_graph_->bwd(boss_graph_->select_last(i)),
                 [&](BOSS::edge_index incoming_edge_idx) {
                     auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
-                    if (kmer_index != npos)
+                    if (kmer_index != npos) {
+                        assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
+                            == std::string(begin, begin + match_size));
                         callback(kmer_index, match_size);
+                    }
                 }
             );
         }

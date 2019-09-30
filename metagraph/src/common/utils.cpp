@@ -324,6 +324,8 @@ void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> 
         callback(indices);
         indices.clear();
     }
+
+    assert(!transformer.values_left());
 }
 
 void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,

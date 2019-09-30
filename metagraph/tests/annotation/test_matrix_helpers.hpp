@@ -41,6 +41,12 @@ BinMat build_matrix_from_columns(BitVectorPtrArray&& columns = {}, uint64_t num_
 template <typename BinMat>
 BinMat build_matrix_from_rows(BitVectorPtrArray&& columns = {}, uint64_t num_rows = 0);
 
+template <typename BinMat>
+BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_rows = 0);
+
+template <typename BinMat>
+BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_rows = 0);
+
 
 template <typename TypeParam>
 void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns);
