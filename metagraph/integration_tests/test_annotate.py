@@ -18,6 +18,8 @@ graph_file_extension = {'succinct': '.dbg',
 annotation_file_extension = {'column': '.column.annodbg',
                              'row': '.row.annodbg'}
 
+NUM_THREADS = 4
+
 
 class TestAnnotate(unittest.TestCase):
     def setUp(self):
@@ -30,8 +32,9 @@ class TestAnnotate(unittest.TestCase):
 
         for graph_repr in ['succinct', 'bitmap', 'hash', 'hashstr']:
 
-            construct_command = '{exe} build -p 4 --graph {repr} -k 20 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} --graph {repr} -k 20 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
+                num_threads=NUM_THREADS,
                 repr=graph_repr,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_100.fa'
@@ -82,10 +85,12 @@ class TestAnnotate(unittest.TestCase):
         Simple annotation test
         """
 
+        # TODO: add 'hashstr' once the canonical mode is implemented for it
         for graph_repr in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
 
-            construct_command = '{exe} build -p 4 --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
+                num_threads=NUM_THREADS,
                 repr=graph_repr,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_100.fa'
@@ -138,8 +143,9 @@ class TestAnnotate(unittest.TestCase):
 
         for graph_repr in ['succinct', 'bitmap', 'hash', 'hashstr']:
 
-            construct_command = '{exe} build -p 4 --graph {repr} -k 11 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} --graph {repr} -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
+                num_threads=NUM_THREADS,
                 repr=graph_repr,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
@@ -192,8 +198,9 @@ class TestAnnotate(unittest.TestCase):
 
         for graph_repr in ['succinct', 'bitmap', 'hash', 'hashstr']:
 
-            construct_command = '{exe} build -p 4 --graph {repr} -k 11 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} --graph {repr} -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
+                num_threads=NUM_THREADS,
                 repr=graph_repr,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
@@ -269,10 +276,12 @@ class TestAnnotate(unittest.TestCase):
         Annotate canonical graph with k-mers from KMC
         """
 
+        # TODO: add 'hashstr' once the canonical mode is implemented for it
         for graph_repr in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
 
-            construct_command = '{exe} build -p 4 --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
+            construct_command = '{exe} build -p {num_threads} --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
+                num_threads=NUM_THREADS,
                 repr=graph_repr,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'

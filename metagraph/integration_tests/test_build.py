@@ -53,6 +53,7 @@ class TestBuild(unittest.TestCase):
         Build simple canonical graphs
         """
 
+        # TODO: add 'hashstr' once the canonical mode is implemented for it
         for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
 
             construct_command = '{exe} build --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
@@ -99,6 +100,7 @@ class TestBuild(unittest.TestCase):
             self.assertEqual('canonical mode: no', params_str[2])
 
     def test_build_tiny_k_canonical(self):
+        # TODO: add 'hashstr' once the canonical mode is implemented for it
         for representation in ['succinct', 'bitmap', 'hash']: #, 'hashstr']:
             args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
                         '-k', '2',
