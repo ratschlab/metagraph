@@ -1,5 +1,8 @@
-cmake_minimum_required (VERSION 3.6.1)
+cmake_minimum_required(VERSION 3.6.1)
+cmake_policy(SET CMP0015 NEW)
+
 project(Metagraph)
+
 include(CheckFunctionExists)
 include(CheckLibraryExists)
 
@@ -7,6 +10,8 @@ enable_testing()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_VERBOSE_MAKEFILE 1)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
@@ -136,10 +141,6 @@ set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
-
-set(CMAKE_VERBOSE_MAKEFILE 1)
-cmake_policy(SET CMP0015 NEW)
-
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
   ${CMAKE_BINARY_DIR}/lib
@@ -185,7 +186,9 @@ add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
 )
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules")
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
+  "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
+)
 set(BRWT_INCLUDE_TESTS FALSE)
 add_subdirectory(
   external-libraries/binrel_wt
@@ -252,8 +255,8 @@ set(METALIBS ${METALIBS}
   -lhts -lz -lbz2
   -lmaus2
   -lsdsl
-  -lbrwt
-  -ljsoncpp
+  brwt
+  jsoncpp
   progress_bar
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
@@ -335,7 +338,6 @@ include_directories(
 link_directories(
   external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
-  external-libraries/binrel_wt/lib
 )
 add_executable(run_experiments ${experiment_files})
 
