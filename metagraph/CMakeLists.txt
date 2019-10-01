@@ -41,7 +41,6 @@ endif()
 
 string(APPEND CMAKE_CXX_FLAGS " \
   -Wall -Wextra -Werror \
-  -msse4.2 \
   -D_THREAD_SAFE -pthread \
 ") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 
@@ -64,6 +63,17 @@ set(WITH_AVX TRUE)
 endif()
 if(WITH_AVX)
 string(APPEND CMAKE_CXX_FLAGS " -mavx -mavx2 -mfma -mbmi -mbmi2")
+else()
+message(STATUS "Compiling without AVX instructions!")
+endif()
+
+if(NOT DEFINED WITH_MSSE42)
+set(WITH_MSSE42 TRUE)
+endif()
+if(WITH_MSSE42)
+string(APPEND CMAKE_CXX_FLAGS " -msse4.2")
+else()
+message(STATUS "Compiling without msse4.2 instructions!")
 endif()
 
 if(WITH_MMAP)
