@@ -748,6 +748,48 @@ void map_sequences_in_file(const std::string &file,
     }
 }
 
+typedef std::function<void(const std::string&)> SequenceCallback;
+
+std::unique_ptr<AnnotatedDBG>
+construct_query_graph(const AnnotatedDBG &anno_graph,
+                      std::function<void(SequenceCallback)> call_sequences) {
+    const auto *full_dbg = dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph());
+    if (!full_dbg)
+        throw std::runtime_error("Error: batch queries are supported only for de Bruijn graphs");
+
+    const auto &full_annotation = anno_graph.get_annotation();
+
+    // construct graph storing all distinct k-mers in query
+    auto graph = std::make_shared<DBGHashOrdered>(full_dbg->get_k());
+    call_sequences([&graph](const std::string &sequence) {
+        graph->add_sequence(sequence);
+    });
+
+    auto annotation = std::make_unique<annotate::RowCompressed<>>(graph->num_nodes());
+
+    // pull contigs from query graph and map them onto the full graph
+    graph->call_sequences([&](const std::string &contig, const auto &path) {
+        size_t i = 0;
+        // map contig onto the full graph
+        full_dbg->map_to_nodes(contig,
+            [&](auto node_in_full) {
+                // copy annotations from the full graph to the query graph
+                if (node_in_full) {
+                    annotation->add_labels(
+                        AnnotatedDBG::graph_to_anno_index(path[i]),
+                        full_annotation.get_labels(AnnotatedDBG::graph_to_anno_index(node_in_full))
+                    );
+                }
+                i++;
+            }
+        );
+        assert(i == path.size());
+    });
+
+    // build annotated graph from the query graph and copied annotations
+    return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
+}
+
 
 void print_boss_stats(const BOSS &boss_graph,
                       bool count_dummy = false,
@@ -1695,12 +1737,39 @@ int main(int argc, const char *argv[]) {
             // iterate over input files
             for (const auto &file : files) {
                 if (config->verbose) {
-                    std::cout << std::endl << "Parsing " << file << std::endl;
+                    std::cout << "\nParsing " << file << std::endl;
                 }
 
-                Timer data_reading_timer;
+                Timer curr_timer;
 
                 size_t seq_count = 0;
+
+                const auto *graph_to_query = anno_graph.get();
+
+                // Graph constructed from a batch of queried sequences
+                // Used only in fast mode
+                std::unique_ptr<AnnotatedDBG> query_graph;
+                if (config->fast) {
+                    query_graph = construct_query_graph(*anno_graph,
+                        [&](auto call_sequence) {
+                            read_fasta_file_critical(file,
+                                [&](kseq_t *seq) { call_sequence(seq->seq.s); },
+                                config->forward_and_reverse
+                            );
+                        }
+                    );
+
+                    graph_to_query = query_graph.get();
+
+                    if (config->verbose) {
+                        std::cout << "Query graph constructed in "
+                                  << curr_timer.elapsed() << " sec" << std::endl;
+                    }
+                }
+
+                if (config->verbose) {
+                    std::cout << "Querying sequences from file " << file << std::endl;
+                }
 
                 read_fasta_file_critical(file,
                     [&](kseq_t *read_stream) {
@@ -1713,27 +1782,24 @@ int main(int argc, const char *argv[]) {
                             config->num_top_labels,
                             config->discovery_fraction,
                             config->anno_labels_delimiter,
-                            std::ref(*anno_graph),
+                            std::ref(*graph_to_query),
                             std::ref(std::cout)
                         );
                     },
                     config->forward_and_reverse
                 );
-                if (config->verbose) {
-                    std::cout << "Finished extracting sequences from file " << file
-                              << " in " << timer.elapsed() << "sec" << std::endl;
-                }
+
+                // wait while all threads finish processing the current file
+                thread_pool.join();
+
                 if (config->verbose) {
                     std::cout << "File processed in "
-                              << data_reading_timer.elapsed()
+                              << curr_timer.elapsed()
                               << "sec, current mem usage: "
                               << (get_curr_RSS() >> 20) << " MiB"
                               << ", total time: " << timer.elapsed()
                               << "sec" << std::endl;
                 }
-
-                // wait while all threads finish processing the current file
-                thread_pool.join();
             }
 
             return 0;
