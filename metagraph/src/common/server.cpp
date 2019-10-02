@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <asio.hpp>
+#include <json/json.h>
 
 using asio::ip::tcp;
 using asio::detail::socket_ops::host_to_network_long;
@@ -71,10 +72,18 @@ class Connection : public std::enable_shared_from_this<Connection> {
                 try {
                     data_ = generate_response_(data_);
                     do_write();
-                } catch (...) {
+                } catch (const std::exception &ex) {
                     std::cerr << "Error: Exception thrown when trying to "
                               << "generate a response for client "
                               << address_ << ":" << port_ << std::endl;
+
+                    Json::Value message;
+                    message["error"] = ex.what();
+
+                    Json::StreamWriterBuilder builder;
+                    data_ = Json::writeString(builder, message);
+
+                    do_write();
                     return;
                 }
             }

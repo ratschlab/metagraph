@@ -376,16 +376,20 @@ void execute_query(std::string seq_name,
         if (!top_labels.size() && suppress_unlabeled)
             return;
 
-        oss << seq_name << "\t";
+        Json::Value response;
+        response["top_labels"] = Json::arrayValue;
 
-        if (top_labels.size()) {
-            oss << "<" << top_labels[0].first << ">:" << top_labels[0].second;
-        }
         for (size_t i = 1; i < top_labels.size(); ++i) {
-            oss << "\t<" << top_labels[i].first << ">:" << top_labels[i].second;
+            Json::Value match;
+            match["label"] = top_labels[i].first;
+            match["count"] = Json::Value::UInt64(top_labels[i].second);
+            response["top_labels"].append(match);
         }
-        oss << "\n";
+
+        Json::StreamWriterBuilder builder;
+        oss << Json::writeString(builder, response);
     } else {
+        //TODO json
         auto labels_discovered
                 = anno_graph.get_labels(sequence, discovery_fraction);
 
@@ -1002,62 +1006,63 @@ std::string form_client_reply(const std::string &received_message,
             }
         }
 
-        const auto &fasta = json["FASTA"];
-        const auto &seq = json["SEQ"];
+        if (json["procedure"] == "kmer_match") {
+            const auto &fasta = json["FASTA"];
+            const auto &seq = json["SEQ"];
 
-        // discovery_fraction a proxy of 1 - %similarity
-        auto discovery_fraction = json.get("discovery_fraction",
-                                           config.discovery_fraction).asDouble();
-        auto count_labels = json.get("count_labels", config.count_labels).asBool();
-        auto num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
+            // discovery_fraction a proxy of 1 - %similarity
+            auto discovery_fraction = json.get("discovery_fraction",
+                                               config.discovery_fraction).asDouble();
+            auto count_labels = json.get("count_labels", config.count_labels).asBool();
+            auto num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
 
-        std::ostringstream oss;
+            std::ostringstream oss;
 
-        // query callback shared by FASTA and sequence modes
-        auto execute_server_query = [&](const std::string &name,
-                                        const std::string &sequence) {
-            execute_query(name,
-                          sequence,
-                          count_labels,
-                          config.suppress_unlabeled,
-                          num_top_labels,
-                          discovery_fraction,
-                          config.anno_labels_delimiter,
-                          anno_graph,
-                          oss);
-        };
+            // query callback shared by FASTA and sequence modes
+            auto execute_server_query = [&](const std::string &name,
+                                            const std::string &sequence) {
+                execute_query(name,
+                              sequence,
+                              count_labels,
+                              config.suppress_unlabeled,
+                              num_top_labels,
+                              discovery_fraction,
+                              config.anno_labels_delimiter,
+                              anno_graph,
+                              oss);
+            };
 
-        if (!seq.isNull()) {
-            // input is plain sequence
-            execute_server_query(seq.asString(), seq.asString());
-        } else if (!fasta.isNull()) {
-            // input is a FASTA sequence
-            read_fasta_from_string(
-                fasta.asString(),
-                [&](kseq_t *read_stream) {
-                    execute_server_query(read_stream->name.s,
-                                         read_stream->seq.s);
-                }
-            );
+            if (!seq.isNull()) {
+                // input is plain sequence
+                execute_server_query(seq.asString(), seq.asString());
+            } else if (!fasta.isNull()) {
+                // input is a FASTA sequence
+                read_fasta_from_string(
+                    fasta.asString(),
+                    [&](kseq_t *read_stream) {
+                        execute_server_query(read_stream->name.s,
+                                             read_stream->seq.s);
+                    }
+                );
+            } else {
+                std::cerr << "Error: no input sequences received from client" << std::endl;
+                throw std::domain_error("No input sequences");
+            }
+
+            return oss.str();
         } else {
-            std::cerr << "Error: no input sequences received from client" << std::endl;
-            // TODO: no input sequences -> form an error message for the client
-            throw std::domain_error("No input sequences");
+            std::cerr << "Error: unrecognized procedure" << std::endl;
+            throw std::domain_error("Unrecognized procedure");
         }
-
-        return oss.str();
 
     } catch (const Json::LogicError &e) {
         std::cerr << "Error: bad json file: " << e.what() << std::endl;
-        //TODO: send errors in a json file
         throw;
     } catch (const std::exception &e) {
         std::cerr << "Error: processing request error: " << e.what() << std::endl;
-        //TODO: send errors in a json file
         throw;
     } catch (...) {
         std::cerr << "Error: processing request error" << std::endl;
-        //TODO: send errors in a json file
         throw;
     }
 }
