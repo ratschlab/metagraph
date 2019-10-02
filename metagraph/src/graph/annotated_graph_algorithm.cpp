@@ -11,20 +11,22 @@ typedef DeBruijnGraph::node_index node_index;
 typedef AnnotatedDBG::Annotator::Label Label;
 
 
+// TODO: Pass sequence of nodes (canonical nodes) to |keep_unitig| instead of
+// a string, so that there is no second mapping to graph happens inside the callback.
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
                      const std::function<bool(const std::string&)> &keep_unitig) {
-    auto unitig_mask = std::make_unique<bitmap_vector>(
-        graph.num_nodes() + 1,
-        false
-    );
+    sdsl::bit_vector unitig_mask(graph.num_nodes() + 1, false);
 
-    graph.call_unitigs([&](const auto &unitig) {
-        if (keep_unitig(unitig))
-            graph.map_to_nodes(unitig, [&](auto i) { unitig_mask->set(i, true); });
+    graph.call_unitigs([&](const std::string &unitig, const auto &path) {
+        if (keep_unitig(unitig)) {
+            for (auto node : path) {
+                unitig_mask[node] = true;
+            }
+        }
     });
 
-    return unitig_mask;
+    return std::make_unique<bitmap_vector>(std::move(unitig_mask));
 }
 
 std::unique_ptr<bitmap_vector>
@@ -44,6 +46,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
         dbg,
         [&](const auto &unitig) {
             assert(unitig.size() >= dbg.get_k());
+
             auto label_counts = anno_graph.get_top_labels(
                 unitig,
                 anno_graph.get_annotation().num_labels()
@@ -72,11 +75,9 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     );
 }
 
-
-sdsl::int_vector<>
-fill_count_vector(const AnnotatedDBG &anno_graph,
-                  const std::vector<Label> &labels_in,
-                  const std::vector<Label> &labels_out) {
+sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
+                                     const std::vector<Label> &labels_in,
+                                     const std::vector<Label> &labels_out) {
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
     // in the beginning, it's the correct size, but double width
@@ -85,7 +86,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
     for (const auto &label_in : labels_in) {
         anno_graph.call_annotated_nodes(label_in,
-                                        [&](const auto &i) { counts[i]++; });
+                                        [&](auto i) { counts[i]++; });
     }
 
     // correct the width of counts, making it single-width
@@ -93,7 +94,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
     for (const auto &label_out : labels_out) {
         anno_graph.call_annotated_nodes(label_out,
-                                        [&](const auto &i) { counts[(i << 1) + 1]++; });
+                                        [&](auto i) { counts[(i << 1) + 1]++; });
     }
 
     // set the width to be double again
@@ -121,7 +122,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          std::function<bool(DeBruijnGraph::node_index,
                                             LabelCountCallback, /* get_num_labels_in */
                                             LabelCountCallback /* get_num_labels_out */)> is_node_in_mask,
-                         double lazy_evaluation_label_frequency_cutoff) {
+                         double min_frequency_for_frequent_label) {
     if (!anno_graph.get_graph().num_nodes())
         return std::make_unique<bitmap_lazy>([](auto) { return false; },
                                              anno_graph.get_graph().num_nodes() + 1,
@@ -132,8 +133,9 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     );
 
     if (columns) {
-        size_t frequent_column_label_min_count = (anno_graph.get_graph().num_nodes() + 1)
-                                                * lazy_evaluation_label_frequency_cutoff;
+        size_t frequent_column_label_min_count
+            = (anno_graph.get_graph().num_nodes() + 1)
+                * min_frequency_for_frequent_label;
 
         // Partition labels into frequent and infrequent sets
         std::vector<Label> labels_in_infrequent,
@@ -172,23 +174,18 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
 
             // Flatten count vector to bitmap if all labels were infrequent
             if (labels_in_frequent.empty() && labels_out_frequent.empty()) {
-                auto mask_vector = std::make_unique<bitmap_vector>(
-                    anno_graph.get_graph().num_nodes() + 1, false
-                );
+                sdsl::bit_vector mask(anno_graph.get_graph().num_nodes() + 1, false);
 
                 call_nonzeros(counts,
                     [&](auto i, auto count) {
                         if (i != DeBruijnGraph::npos
-                                && is_node_in_mask(
-                                       i,
-                                       [&]() { return count & int_mask; },
-                                       [&]() { return count >> width; }
-                                   ))
-                            mask_vector->set(i, true);
+                                && is_node_in_mask(i, [&]() { return count & int_mask; },
+                                                      [&]() { return count >> width; }))
+                            mask[i] = true;
                     }
                 );
 
-                return mask_vector;
+                return std::make_unique<bitmap_vector>(std::move(mask));
             }
 
             // If at least one of the labels was frequent, construct a lazy bitmap
@@ -197,13 +194,13 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                                                 labels_in_frequent);
             auto count_frequent_out_labels = build_label_counter(anno_graph,
                                                                  labels_out_frequent);
-            return std::make_unique<bitmap_lazy>([=](auto i) {
-                auto count = counts[i];
-                return i != DeBruijnGraph::npos && is_node_in_mask(
-                    i,
-                    [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
-                    [&]() { return (count >> width) + count_frequent_out_labels(i); }
-                );
+            return std::make_unique<bitmap_lazy>(
+                [=](auto i) {
+                    auto count = counts[i];
+                    return i != DeBruijnGraph::npos
+                        && is_node_in_mask(i,
+                                [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
+                                [&]() { return (count >> width) + count_frequent_out_labels(i); });
             }, counts.size());
         }
     }
@@ -212,12 +209,13 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     // construct a lazy bitmap
     auto count_frequent_in_labels = build_label_counter(anno_graph, labels_in);
     auto count_frequent_out_labels = build_label_counter(anno_graph, labels_out);
-    return std::make_unique<bitmap_lazy>([=](auto i) {
-        return i != DeBruijnGraph::npos && is_node_in_mask(
-            i,
-            [&]() { return count_frequent_in_labels(i); },
-            [&]() { return count_frequent_out_labels(i); }
-        );
+
+    return std::make_unique<bitmap_lazy>(
+        [=](auto i) {
+            return i != DeBruijnGraph::npos
+                && is_node_in_mask(i,
+                        [&]() { return count_frequent_in_labels(i); },
+                        [&]() { return count_frequent_out_labels(i); });
     }, anno_graph.get_graph().num_nodes() + 1);
 }
 
@@ -507,6 +505,5 @@ void call_bubbles(const DeBruijnGraph &graph,
     if (thread_pool)
         thread_pool->join();
 }
-
 
 } // namespace annotated_graph_algorithm
