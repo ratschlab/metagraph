@@ -1,5 +1,6 @@
 import unittest
 import subprocess
+from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
@@ -42,7 +43,7 @@ class TestBuildWeighted(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
             )
-            res = subprocess.run(stats_command.split(), capture_output=True)
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 20', params_str[0])
@@ -74,7 +75,7 @@ class TestBuildWeighted(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
             )
-            res = subprocess.run(stats_command.split(), capture_output=True)
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 20', params_str[0])
@@ -99,7 +100,7 @@ class TestBuildWeighted(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
             )
-            res = subprocess.run(stats_command.split(), capture_output=True)
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 2', params_str[0])
@@ -125,7 +126,7 @@ class TestBuildWeighted(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension['succinct'],
             )
-            res = subprocess.run(stats_command.split(), capture_output=True)
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 2', params_str[0])
@@ -151,7 +152,7 @@ class TestBuildWeighted(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
             )
-            res = subprocess.run(stats_command.split(), capture_output=True)
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 11', params_str[0])
@@ -177,7 +178,7 @@ class TestBuildWeighted(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
             )
-            res = subprocess.run(stats_command.split(), capture_output=True)
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 11', params_str[0])
@@ -203,7 +204,7 @@ class TestBuildWeighted(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension['succinct'],
             )
-            res = subprocess.run(stats_command.split(), capture_output=True)
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 11', params_str[0])
@@ -229,7 +230,7 @@ class TestBuildWeighted(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension['succinct'],
             )
-            res = subprocess.run(stats_command.split(), capture_output=True)
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 11', params_str[0])
