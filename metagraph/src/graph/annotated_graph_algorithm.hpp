@@ -10,11 +10,10 @@
 #include "threading.hpp"
 #include "aligner_helper.hpp"
 
-
 typedef std::function<size_t()> LabelCountCallback;
 
-namespace annotated_graph_algorithm {
 
+namespace annotated_graph_algorithm {
 
 // Given a DeBruijnGraph and a bool-returning string callback, return a bitmap of
 // length graph.num_nodes() + 1. An index is set to 1 if it is contained in a
@@ -58,7 +57,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          std::function<bool(DeBruijnGraph::node_index,
                                             LabelCountCallback, /* get_num_labels_in */
                                             LabelCountCallback /* get_num_labels_out */)> is_node_in_mask,
-                         double lazy_evaluation_label_frequency_cutoff = 0.05);
+                         double min_frequency_for_frequent_label = 0.05);
 
 
 template <class Index, typename... Args>
@@ -85,7 +84,6 @@ void call_breakpoints(const DeBruijnGraph &graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool = nullptr,
                       const std::function<bool()> &terminate = []() { return false; });
-
 
 } // namespace annotated_graph_algorithm
 
