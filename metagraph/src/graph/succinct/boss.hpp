@@ -11,6 +11,7 @@
 
 class BOSSConstructor;
 
+auto ALWAYS_FALSE = []() { return false; };
 
 /**
  * This class implements the BOSS table, a succinct representation
@@ -65,7 +66,8 @@ class BOSS {
     // Call npos if a k-mer can't be mapped to the graph edges
     void map_to_edges(const std::string &sequence,
                       const std::function<void(edge_index)> &callback,
-                      const std::function<bool()> &terminate = [](){ return false; }) const;
+                      const std::function<bool()> &terminate = ALWAYS_FALSE,
+                      const std::function<bool()> &skip = ALWAYS_FALSE) const;
 
     std::vector<edge_index> map_to_edges(const std::string &sequence) const;
 

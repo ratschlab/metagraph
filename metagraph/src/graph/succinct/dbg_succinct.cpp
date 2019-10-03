@@ -358,22 +358,38 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
         return;
 
     if (canonical_mode_) {
-        auto forward = boss_graph_->map_to_edges(sequence);
+        auto boss_edges = boss_graph_->map_to_edges(sequence);
 
         std::string sequence_rev_compl = sequence;
         reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
 
-        auto rev_compl = boss_graph_->map_to_edges(sequence_rev_compl);
+        assert(boss_edges.size() == sequence.size() - get_k() + 1);
+        assert(boss_edges.size() == sequence_rev_compl.size() - get_k() + 1);
 
-        assert(forward.size() == sequence.size() - get_k() + 1);
-        assert(forward.size() == rev_compl.size());
+        auto it = boss_edges.rbegin();
+        boss_graph_->map_to_edges(sequence_rev_compl,
+            [&](auto rc_index) {
+                assert(it < boss_edges.rend());
+                *it = std::min(*it, rc_index);
+                ++it;
+            },
+            []() { return false; },
+            [&]() {
+                assert(it < boss_edges.rend());
+                // if a k-mer is missing, skip its reverse compliment, as it's missing too.
+                if (!*it) {
+                    ++it;
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+        );
 
-        for (size_t i = 0; i < forward.size() && !terminate(); ++i) {
+        for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
             // the definition of a canonical k-mer is redefined:
             //      use k-mer with smaller index in the BOSS table.
-            callback(boss_to_kmer_index(
-                std::min(forward[i], rev_compl[rev_compl.size() - 1 - i])
-            ));
+            callback(boss_to_kmer_index(boss_edges[i]));
         }
 
     } else {

@@ -813,24 +813,29 @@ std::string BOSS::get_node_str(edge_index k_node) const {
 
 void BOSS::map_to_edges(const std::string &sequence,
                         const std::function<void(edge_index)> &callback,
-                        const std::function<bool()> &terminate) const {
+                        const std::function<bool()> &terminate,
+                        const std::function<bool()> &skip) const {
     auto seq_encoded = encode(sequence);
 
     for (size_t i = 0; i + k_ + 1 <= seq_encoded.size() && !terminate(); ++i) {
+        if (skip())
+            continue;
+
         auto edge = map_to_edge(seq_encoded.data() + i,
                                 seq_encoded.data() + i + k_ + 1);
         callback(edge);
 
-        while (edge && i + k_ + 1 < seq_encoded.size()) {
-            edge = fwd(edge);
-            edge = pick_edge(edge, seq_encoded[i + k_ + 1]);
-
+        while (edge && ++i + k_ < seq_encoded.size()) {
             if (terminate())
                 return;
 
-            callback(edge);
+            if (skip())
+                break;
 
-            i++;
+            edge = fwd(edge);
+            edge = pick_edge(edge, seq_encoded[i + k_]);
+
+            callback(edge);
         }
     }
 }
