@@ -2849,12 +2849,9 @@ int main(int argc, const char *argv[]) {
                     ? new std::ofstream(config->outfbase)
                     : &std::cout;
 
-                std::unique_ptr<Json::StreamWriter> json_writer;
-                if (utils::ends_with(config->outfbase, ".json")) {
-                    Json::StreamWriterBuilder builder;
-                    builder["indentation"] = "";
-                    json_writer.reset(builder.newStreamWriter());
-                }
+                bool write_json = utils::ends_with(config->outfbase, ".json");
+                Json::StreamWriterBuilder builder;
+                builder["indentation"] = "";
 
                 auto aligner = build_aligner(*graph, *config);
 
@@ -2863,25 +2860,25 @@ int main(int argc, const char *argv[]) {
                                             std::string header) {
                             auto paths = aligner->align(query);
 
-                            auto lock = std::lock_guard<std::mutex>(print_mutex);
-                            if (!json_writer.get()) {
+                            std::ostringstream ostr;
+                            if (!write_json) {
                                 for (const auto &path : paths) {
                                     const auto& path_query = path.get_orientation()
                                         ? paths.get_query_reverse_complement()
                                         : paths.get_query();
 
-                                    *outstream << header << "\t"
-                                               << path_query << "\t"
-                                               << path
-                                               << std::endl;
+                                    ostr << header << "\t"
+                                         << path_query << "\t"
+                                         << path
+                                         << std::endl;
                                 }
 
                                 if (paths.empty())
-                                    *outstream << header << "\t"
-                                               << query << "\t"
-                                               << "*\t*\t"
-                                               << config->alignment_min_path_score << "\t*\t*"
-                                               << std::endl;
+                                    ostr << header << "\t"
+                                         << query << "\t"
+                                         << "*\t*\t"
+                                         << config->alignment_min_path_score << "\t*\t*"
+                                         << std::endl;
                             } else {
                                 bool secondary = false;
                                 for (const auto &path : paths) {
@@ -2889,33 +2886,33 @@ int main(int argc, const char *argv[]) {
                                         ? paths.get_query_reverse_complement()
                                         : paths.get_query();
 
-                                    json_writer->write(
-                                        path.to_json(path_query,
-                                                     *graph,
-                                                     secondary,
-                                                     header),
-                                        outstream
-                                    );
-
-                                    *outstream << std::endl;
+                                    ostr << Json::writeString(
+                                                builder,
+                                                path.to_json(path_query,
+                                                             *graph,
+                                                             secondary,
+                                                             header)
+                                            )
+                                         << std::endl;
 
                                     secondary = true;
                                 }
 
                                 if (paths.empty()) {
-                                    json_writer->write(
-                                        DBGAligner<>::DBGAlignment().to_json(
-                                            query,
-                                            *graph,
-                                            secondary,
-                                            header
-                                        ),
-                                        outstream
-                                    );
-
-                                    *outstream << std::endl;
+                                    ostr << Json::writeString(
+                                                builder,
+                                                DBGAligner<>::DBGAlignment().to_json(
+                                                    query,
+                                                    *graph,
+                                                    secondary,
+                                                    header)
+                                            )
+                                         << std::endl;
                                 }
                             }
+
+                            auto lock = std::lock_guard<std::mutex>(print_mutex);
+                            *outstream << ostr.str();
                         },
                         std::string(read_stream->seq.s),
                         config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
