@@ -793,6 +793,10 @@ void print_stats(const DeBruijnGraph &graph) {
                 }
             }
         } else {
+            if (!weights->is_compatible(graph)) {
+                std::cerr << "ERROR: node weights are not compatible with graph" << std::endl;
+                exit(1);
+            }
             graph.call_nodes([&](auto i) {
                 if (uint64_t weight = (*weights)[i]) {
                     sum_weights += weight;
