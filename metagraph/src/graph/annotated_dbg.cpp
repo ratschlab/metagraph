@@ -165,10 +165,14 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
         }
     });
 
-    return get_labels(index_counts,
-                      std::max(1.0, std::ceil(presence_ratio
+    size_t min_count = std::max(1.0, std::ceil(presence_ratio
                                                  * (num_present_kmers
-                                                     + num_missing_kmers))));
+                                                     + num_missing_kmers)));
+
+    if (num_present_kmers < min_count)
+        return {};
+
+    return get_labels(index_counts, min_count);
 }
 
 std::vector<std::string> AnnotatedDBG
@@ -237,11 +241,13 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
         }
     });
 
-    return get_top_labels(index_counts,
-                          num_top_labels,
-                          std::max(1.0, std::ceil(min_label_frequency
-                                                     * (num_present_kmers
-                                                         + num_missing_kmers))));
+    uint64_t min_count = std::max(1.0, std::ceil(min_label_frequency
+                                                    * (num_present_kmers
+                                                        + num_missing_kmers)));
+    if (num_present_kmers < min_count)
+        return {};
+
+    return get_top_labels(index_counts, num_top_labels, min_count);
 }
 
 std::vector<StringCountPair>

@@ -11,15 +11,13 @@ typedef DeBruijnGraph::node_index node_index;
 typedef AnnotatedDBG::Annotator::Label Label;
 
 
-// TODO: Pass sequence of nodes (canonical nodes) to |keep_unitig| instead of
-// a string, so that there is no second mapping to graph happens inside the callback.
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
-                     const std::function<bool(const std::string&)> &keep_unitig) {
+                     const KeepUnitigPath &keep_unitig) {
     sdsl::bit_vector unitig_mask(graph.num_nodes() + 1, false);
 
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
-        if (keep_unitig(unitig)) {
+        if (keep_unitig(unitig, path)) {
             for (auto node : path) {
                 unitig_mask[node] = true;
             }
@@ -44,11 +42,16 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
 
     return annotated_graph_algorithm::mask_nodes_by_unitig(
         dbg,
-        [&](const auto &unitig) {
+        [&](const auto &unitig, const auto &path) {
             assert(unitig.size() >= dbg.get_k());
 
+            std::unordered_map<node_index, size_t> index_counts;
+            for (auto i : path) {
+                index_counts[anno_graph.graph_to_anno_index(i)]++;
+            }
+
             auto label_counts = anno_graph.get_top_labels(
-                unitig,
+                index_counts,
                 anno_graph.get_annotation().num_labels()
             );
 
