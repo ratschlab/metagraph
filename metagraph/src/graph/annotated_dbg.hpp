@@ -51,12 +51,19 @@ class AnnotatedDBG {
     // return labels that occur at least in |presence_ratio| k-mers
     std::vector<std::string> get_labels(const std::string &sequence,
                                         double presence_ratio) const;
+    std::vector<std::string> get_labels(const std::unordered_map<row_index, size_t> &index_counts,
+                                        size_t min_count) const;
 
     // return top |num_top_labels| labels with their counts
     std::vector<std::pair<std::string, size_t>>
     get_top_labels(const std::string &sequence,
                    size_t num_top_labels,
                    double min_label_frequency = 0.0) const;
+
+    std::vector<std::pair<std::string, size_t>>
+    get_top_labels(const std::unordered_map<row_index, size_t> &index_counts,
+                   size_t num_top_labels,
+                   size_t min_count = 0) const;
 
   private:
     static row_index graph_to_anno_index(node_index kmer_index);

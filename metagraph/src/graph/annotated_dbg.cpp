@@ -165,16 +165,24 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
         }
     });
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio
-                                                    * (num_present_kmers
-                                                        + num_missing_kmers)));
-    if (num_present_kmers < min_count)
-        return {};
+    return get_labels(index_counts,
+                      std::max(1.0, std::ceil(presence_ratio
+                                                 * (num_present_kmers
+                                                     + num_missing_kmers))));
+}
+
+std::vector<std::string> AnnotatedDBG
+::get_labels(const std::unordered_map<row_index, size_t> &index_counts,
+             size_t min_count) const {
+    assert(check_compatibility());
 
     uint64_t total_sum_count = 0;
     for (const auto &pair : index_counts) {
         total_sum_count += pair.second;
     }
+
+    if (total_sum_count < min_count)
+        return {};
 
     std::vector<StringCountPair> label_counts
         = dynamic_cast<const annotate::ColumnCompressed<>*>(annotator_.get())
@@ -229,16 +237,26 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
         }
     });
 
-    uint64_t min_count = std::max(1.0, std::ceil(min_label_frequency
-                                                    * (num_present_kmers
-                                                        + num_missing_kmers)));
-    if (num_present_kmers < min_count)
-        return {};
+    return get_top_labels(index_counts,
+                          num_top_labels,
+                          std::max(1.0, std::ceil(min_label_frequency
+                                                     * (num_present_kmers
+                                                         + num_missing_kmers))));
+}
+
+std::vector<StringCountPair>
+AnnotatedDBG::get_top_labels(const std::unordered_map<node_index, size_t> &index_counts,
+                             size_t num_top_labels,
+                             size_t min_count) const {
+    assert(check_compatibility());
 
     uint64_t total_sum_count = 0;
     for (const auto &pair : index_counts) {
         total_sum_count += pair.second;
     }
+
+    if (total_sum_count < min_count)
+        return {};
 
     std::vector<StringCountPair> label_counts
         = dynamic_cast<const annotate::ColumnCompressed<>*>(annotator_.get())
