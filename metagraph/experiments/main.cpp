@@ -10,6 +10,7 @@
 #include "annotate_column_compressed.hpp"
 #include "unix_tools.hpp"
 #include "utils.hpp"
+#include "kmc_parser.hpp"
 
 using namespace std::chrono_literals;
 
@@ -173,6 +174,10 @@ void dump_column_slice(const bit_vector &column,
                               [&](auto i) { out << i << "\n"; });
 }
 
+int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
+                                 double *alpha_est_ptr, double *beta_est_ptr,
+                                 double *false_pos_ptr, double *false_neg_ptr);
+
 
 int main(int argc, char *argv[]) {
     try {
@@ -185,7 +190,8 @@ int main(int argc, char *argv[]) {
             "to_rrr",
             "stats",
             "query",
-            "slice"
+            "slice",
+            "estimate_abundance_threshold"
         };
 
         ValuesConstraint<std::string> regime_constraint(regimes);
@@ -727,6 +733,66 @@ int main(int argc, char *argv[]) {
                             + std::to_string(i) + "_"
                             + std::to_string(begin) + "_"
                             + std::to_string(end) + ".dump.txt");
+                }
+            }
+        } else if (regime == "estimate_abundance_threshold") {
+            UnlabeledMultiArg<std::string> files_arg("input_file",
+                                                     "Input KMC database",
+                                                     true,
+                                                     "string",
+                                                     cmd);
+            cmd.parse(argc, argv);
+
+            auto files = files_arg.getValue();
+
+            std::cout << "File\tMin\tMax\tAvg\tCutoff\n" << std::flush;
+
+            for (const auto &file : files) {
+                try {
+                    uint64_t num_kmers = 0;
+                    uint64_t sum_counts = 0;
+                    uint64_t min_count = -1;
+                    uint64_t max_count = 0;
+
+                    std::vector<uint64_t> hist;
+
+                    kmc::read_kmers(file, [&](std::string&&, uint64_t count) {
+                        min_count = std::min(min_count, count);
+                        max_count = std::max(max_count, count);
+                        sum_counts += count;
+                        num_kmers++;
+
+                        assert(count && "All k-mers in graph must have non-zero counts");
+
+                        while (count >= hist.size()) {
+                            hist.push_back(0);
+                        }
+                        hist[count]++;
+
+                    }, true);
+
+                    hist.resize(std::max(uint64_t(hist.size()), uint64_t(10)), 0);
+
+                    double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
+                    auto cutoff = cleaning_pick_kmer_threshold(hist.data(), hist.size(),
+                                                               &alpha_est_ptr, &beta_est_ptr,
+                                                               &false_pos_ptr, &false_neg_ptr);
+
+                    std::string result = file
+                            + "\t" + std::to_string(min_count)
+                            + "\t" + std::to_string(max_count)
+                            + "\t" + std::to_string(sum_counts / num_kmers);
+
+                    if (cutoff != -1) {
+                        result += "\t" + std::to_string(cutoff) + "\n";
+                    } else {
+                        result += "\tnan\n";
+                    }
+
+                    std::cout << result << std::flush;
+
+                } catch (...) {
+                    std::cerr << "Error: Can't parse file " << file << std::endl;
                 }
             }
         }
