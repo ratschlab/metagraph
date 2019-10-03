@@ -65,10 +65,10 @@ class AnnotatedDBG {
                    size_t num_top_labels,
                    size_t min_count = 0) const;
 
-  private:
     static row_index graph_to_anno_index(node_index kmer_index);
     static node_index anno_to_graph_index(row_index anno_index);
 
+  private:
     void annotate_sequence_thread_safe(const std::string &sequence,
                                        const std::vector<std::string> &labels);
 

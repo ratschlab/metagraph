@@ -15,12 +15,15 @@ typedef std::function<size_t()> LabelCountCallback;
 
 namespace annotated_graph_algorithm {
 
+typedef std::function<bool(const std::string&,
+                           const std::vector<DeBruijnGraph::node_index>&)> KeepUnitigPath;
+
 // Given a DeBruijnGraph and a bool-returning string callback, return a bitmap of
 // length graph.num_nodes() + 1. An index is set to 1 if it is contained in a
 // unitig satisfying keep_unitig(unitig).
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
-                     const std::function<bool(const std::string&)> &keep_unitig);
+                     const KeepUnitigPath &keep_unitig);
 
 // Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
 // return a bitmap of length anno_graph.get_graph().num_nodes() + 1. An index i
