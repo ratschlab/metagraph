@@ -752,7 +752,8 @@ typedef std::function<void(const std::string&)> SequenceCallback;
 
 std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
-                      std::function<void(SequenceCallback)> call_sequences) {
+                      std::function<void(SequenceCallback)> call_sequences,
+                      double discovery_fraction) {
     const auto *full_dbg = dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph());
     if (!full_dbg)
         throw std::runtime_error("Error: batch queries are supported only for de Bruijn graphs");
@@ -760,30 +761,75 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     const auto &full_annotation = anno_graph.get_annotation();
 
     // construct graph storing all distinct k-mers in query
-    auto graph = std::make_shared<DBGHashOrdered>(full_dbg->get_k());
+    std::shared_ptr<DeBruijnGraph> graph(new DBGHashOrdered(full_dbg->get_k()));
     call_sequences([&graph](const std::string &sequence) {
         graph->add_sequence(sequence);
     });
 
-    auto annotation = std::make_unique<annotate::RowCompressed<>>(graph->num_nodes());
-
     // pull contigs from query graph and map them onto the full graph
+    auto index_in_full_graph
+        = std::make_shared<std::vector<uint64_t>>(graph->num_nodes() + 1, 0);
+
     graph->call_sequences([&](const std::string &contig, const auto &path) {
         size_t i = 0;
         // map contig onto the full graph
         full_dbg->map_to_nodes(contig,
-            [&](auto node_in_full) {
-                // copy annotations from the full graph to the query graph
-                if (node_in_full) {
-                    annotation->add_labels(
-                        AnnotatedDBG::graph_to_anno_index(path[i]),
-                        full_annotation.get_labels(AnnotatedDBG::graph_to_anno_index(node_in_full))
-                    );
-                }
-                i++;
-            }
+            [&](auto node_in_full) { (*index_in_full_graph)[path[i++]] = node_in_full; }
         );
         assert(i == path.size());
+    });
+
+    graph = std::make_shared<MaskedDeBruijnGraph>(graph,
+        [=](auto i) -> bool { return (*index_in_full_graph)[i]; }
+    );
+
+    if (discovery_fraction > 0) {
+        sdsl::bit_vector mask(graph->num_nodes() + 1, false);
+
+        call_sequences([&](const std::string &sequence) {
+            const size_t num_kmers = sequence.length() - graph->get_k() + 1;
+            const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
+            const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
+            size_t num_kmers_discovered = 0;
+            size_t num_kmers_missing = 0;
+
+            std::vector<DeBruijnGraph::node_index> nodes;
+            nodes.reserve(num_kmers);
+
+            graph->map_to_nodes(sequence,
+                [&](auto node) {
+                    if (node) {
+                        num_kmers_discovered++;
+                        nodes.push_back(node);
+                    } else {
+                        num_kmers_missing++;
+                    }
+                },
+                [&]() { return num_kmers_missing > max_kmers_missing
+                                || num_kmers_discovered >= min_kmers_discovered; }
+            );
+
+            if (num_kmers_missing <= max_kmers_missing) {
+                for (auto node : nodes) { mask[node] = true; }
+            }
+        });
+
+        // correcting the mask
+        call_zeros(mask, [&](auto i) { (*index_in_full_graph)[i] = 0; });
+    }
+
+    // initialize fast query annotation
+    auto annotation = std::make_unique<annotate::RowCompressed<>>(graph->num_nodes());
+
+    // copy annotations from the full graph to the query graph
+    graph->call_nodes([&](auto node) {
+        assert((*index_in_full_graph)[node]
+                && "All masked k-mers in query graph are indexed in the full graph");
+
+        annotation->add_labels(
+            AnnotatedDBG::graph_to_anno_index(node),
+            full_annotation.get_labels(AnnotatedDBG::graph_to_anno_index((*index_in_full_graph)[node]))
+        );
     });
 
     // build annotated graph from the query graph and copied annotations
@@ -1756,7 +1802,8 @@ int main(int argc, const char *argv[]) {
                                 [&](kseq_t *seq) { call_sequence(seq->seq.s); },
                                 config->forward_and_reverse
                             );
-                        }
+                        },
+                        config->count_labels ? 0 : config->discovery_fraction
                     );
 
                     graph_to_query = query_graph.get();
