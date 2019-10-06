@@ -19,7 +19,8 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
-    StaticBinRelAnnotator(size_t row_cache_size = 0);
+    explicit StaticBinRelAnnotator(size_t row_cache_size = 0);
+
     StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
                           const LabelEncoder<Label> &label_encoder,
                           size_t row_cache_size = 0);
