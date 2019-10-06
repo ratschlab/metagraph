@@ -90,18 +90,21 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                               uint64_t *num_objects,
                               uint64_t *num_relations);
 
+    template <typename RowType = BinaryMatrix::SetBitPositions>
     class StreamRows {
       public:
         explicit StreamRows(std::string filename);
+
         // return null after all rows have been called
-        std::vector<VectorRowBinMat::Column>* next_row() { return sr_->next_row(); };
+        RowType* next_row() { return sr_->next_row(); }
+
       private:
-        std::unique_ptr<VectorRowBinMat::StreamRows> sr_;
+        std::unique_ptr<::StreamRows<RowType>> sr_;
     };
 
     static void write_rows(std::string filename,
                            const LabelEncoder<Label> &label_encoder,
-                           const std::function<void(BinaryMatrix::RowCallback&)> &call_rows);
+                           const std::function<void(BinaryMatrix::RowCallback)> &call_rows);
 
     std::vector<uint64_t> get_label_codes(Index i) const {
         return matrix_->get_row(i);

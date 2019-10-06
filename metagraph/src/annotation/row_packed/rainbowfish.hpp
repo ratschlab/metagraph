@@ -10,8 +10,6 @@
 
 class Rainbowfish : public BinaryMatrix {
   public:
-    using RowCallback = std::function<void(const std::vector<Column> &)>;
-
     Rainbowfish() {}
     Rainbowfish(const std::function<void(RowCallback)> &call_rows,
                 uint64_t num_columns,

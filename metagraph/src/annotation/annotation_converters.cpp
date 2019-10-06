@@ -121,8 +121,8 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     constexpr size_t num_passes = std::is_same_v<MatrixType, Rainbowfish> ? 2u : 1u;
     ProgressBar progress_bar(num_rows * num_passes, "Processing rows", std::cerr, !utils::get_verbose());
 
-    auto call_rows = [&](auto callback) {
-        typename RowCompressed<Label>::StreamRows row_streamer(filename);
+    auto call_rows = [&](BinaryMatrix::RowCallback callback) {
+        typename RowCompressed<Label>::template StreamRows<> row_streamer(filename);
         for (uint64_t r = 0; r < num_rows; ++r) {
             auto row = row_streamer.next_row();
             // TODO: remove sort?
@@ -347,7 +347,7 @@ void merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotat
     }
 
     std::vector<std::unique_ptr<const LEncoder> > loaded_label_encoders;
-    std::vector<std::unique_ptr<class RowCompressed<Label>::StreamRows> > streams;
+    std::vector<std::unique_ptr<typename RowCompressed<Label>::template StreamRows<>>> streams;
     for (auto filename : filenames) {
         if (utils::ends_with(filename, RowCompressed<Label>::kExtension)) {
 
@@ -355,7 +355,7 @@ void merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotat
             label_encoders.push_back(label_encoder.get());
             loaded_label_encoders.push_back(std::move(label_encoder));
 
-            auto annotator = std::make_unique<class RowCompressed<Label>::StreamRows>(filename);
+            auto annotator = std::make_unique<typename RowCompressed<Label>::template StreamRows<>>(filename);
             streams.push_back(std::move(annotator));
 
         } else {

@@ -12,7 +12,7 @@ class BinaryMatrix {
     typedef uint64_t Column;
 
     typedef std::vector<Column> SetBitPositions;
-    typedef const std::function<void(const SetBitPositions &)> RowCallback;
+    typedef std::function<void(const SetBitPositions &)> RowCallback;
     typedef std::function<void(Row, Column)> ValueCallback ;
 
     virtual ~BinaryMatrix() {}
@@ -38,9 +38,36 @@ class BinaryMatrixRowDynamic : public BinaryMatrix {
     virtual ~BinaryMatrixRowDynamic() {}
 
     virtual void set(Row row, Column column) = 0;
+    // fast set: do not check for existance before adding the label
+    virtual void force_set(Row row, Column column) { set(row, column); }
+
     virtual void clear_row(Row row) = 0;
     virtual void insert_rows(const std::vector<Row> &rows) = 0;
 };
 
+// Row streamer -- read rows from a serialized row major binary matrix
+template <typename RowType = BinaryMatrix::SetBitPositions>
+class StreamRows {
+  public:
+    StreamRows(const std::string &filename, size_t offset);
+
+    //TODO: implement constructor from stream once
+    //      it's implemented for sdsl::int_vector_buffer<>.
+    //      Then, use StreamRows to simplify load functions.
+    // StreamRows(std::istream &instream);
+
+    // return nullptr after all rows have been called
+    RowType* next_row();
+
+  private:
+    RowType row_;
+    sdsl::int_vector_buffer<> inbuf_;
+    uint64_t i_ = 0;
+};
+
+// Write matrix to the end
+void append_row_major(const std::string &filename,
+                      const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
+                      uint64_t num_cols);
 
 #endif // __SPARSE_MATRIX_HPP__

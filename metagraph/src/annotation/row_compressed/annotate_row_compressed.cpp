@@ -111,17 +111,9 @@ void RowCompressed<Label>::add_labels_fast(const std::vector<Index> &indices,
         unique_indices.end()
     );
 
-    if (dynamic_cast<VectorRowBinMat*>(matrix_.get())) {
-        for (Index i : unique_indices) {
-            for (auto j : col_ids) {
-                dynamic_cast<VectorRowBinMat&>(*matrix_).force_set(i, j);
-            }
-        }
-    } else {
-        for (Index i : unique_indices) {
-            for (auto j : col_ids) {
-                matrix_->set(i, j);
-            }
+    for (Index i : unique_indices) {
+        for (auto j : col_ids) {
+            matrix_->force_set(i, j);
         }
     }
 }
@@ -311,31 +303,31 @@ void RowCompressed<Label>::stream_counts(const std::string &filename,
     uint64_t &num_relations = *num_relations_;
     num_objects = 0;
     num_relations = 0;
-    const std::vector<VectorRowBinMat::Row> *row;
 
-    StreamRows sr(filename);
+    StreamRows<> sr(filename);
 
-    while ((row = sr.next_row())) {
+    while (auto *row = sr.next_row()) {
         num_objects++;
         num_relations += row->size();
     }
 }
 
 template <typename Label>
-RowCompressed<Label>::StreamRows::StreamRows(std::string filename) {
+template <typename RowType>
+RowCompressed<Label>::StreamRows<RowType>::StreamRows(std::string filename) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ifstream instream(filename, std::ios::binary);
     // skip header
     load_label_encoder(instream);
     // rows
-    sr_ = std::make_unique<VectorRowBinMat::StreamRows>(filename, instream.tellg());
+    sr_ = std::make_unique<::StreamRows<RowType>>(filename, instream.tellg());
 }
 
 template <typename Label>
 void RowCompressed<Label>
 ::write_rows(std::string filename,
              const LabelEncoder<Label> &label_encoder,
-             const std::function<void(BinaryMatrix::RowCallback&)> &call_rows) {
+             const std::function<void(BinaryMatrix::RowCallback)> &call_rows) {
     filename = remove_suffix(filename, kExtension) + kExtension;
 
     std::ofstream outstream(filename, std::ios::binary);
@@ -345,7 +337,7 @@ void RowCompressed<Label>
     label_encoder.serialize(outstream);
     outstream.close();
 
-    VectorRowBinMat::append_matrix(filename, call_rows, label_encoder.size());
+    append_row_major(filename, call_rows, label_encoder.size());
 }
 
 template class RowCompressed<std::string>;
