@@ -819,18 +819,23 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     }
 
     // initialize fast query annotation
-    auto annotation = std::make_unique<annotate::RowCompressed<>>(graph->num_nodes());
-
     // copy annotations from the full graph to the query graph
-    graph->call_nodes([&](auto node) {
-        assert((*index_in_full_graph)[node]
-                && "All masked k-mers in query graph are indexed in the full graph");
+    auto annotation = std::make_unique<annotate::RowCompressed<>>(
+        graph->num_nodes(),
+        full_annotation.get_label_encoder().get_labels(),
+        [&](annotate::RowCompressed<>::CallRow call_row) {
+            graph->call_nodes([&](auto node) {
+                assert((*index_in_full_graph)[node]
+                        && "All masked k-mers in query graph are indexed in the full graph");
 
-        annotation->add_labels(
-            AnnotatedDBG::graph_to_anno_index(node),
-            full_annotation.get_labels(AnnotatedDBG::graph_to_anno_index((*index_in_full_graph)[node]))
-        );
-    });
+                auto row_id = AnnotatedDBG::graph_to_anno_index((*index_in_full_graph)[node]);
+                assert(row_id < full_annotation.num_objects());
+
+                call_row(AnnotatedDBG::graph_to_anno_index(node),
+                         full_annotation.get_labels(row_id));
+            });
+        }
+    );
 
     // build annotated graph from the query graph and copied annotations
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));

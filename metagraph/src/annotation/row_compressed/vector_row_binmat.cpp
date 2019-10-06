@@ -6,6 +6,21 @@
 #include "threading.hpp"
 
 
+VectorRowBinMat::VectorRowBinMat(uint64_t num_rows,
+                                 uint64_t num_columns,
+                                 std::function<void(CallRow)> call_rows)
+      : num_columns_(num_columns), vector_(num_rows) {
+
+    call_rows([&](uint64_t i, SmallVector&& row) {
+        assert(i < num_rows);
+        assert(vector_[i].empty());
+        assert(std::all_of(row.begin(), row.end(),
+                           [num_columns](auto j) { return j < num_columns; }));
+
+        vector_[i] = std::move(row);
+    });
+}
+
 bool VectorRowBinMat::get(Row row, Column column) const {
     assert(row < vector_.size());
     return std::find(vector_[row].begin(), vector_[row].end(), column)
