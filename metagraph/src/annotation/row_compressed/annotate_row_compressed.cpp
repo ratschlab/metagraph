@@ -21,7 +21,7 @@ RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse)  {
     if (sparse) {
         matrix_.reset(new EigenSpMat(num_rows));
     } else {
-        matrix_.reset(new VectorRowBinMat(num_rows));
+        matrix_.reset(new VectorRowBinMat<>(num_rows));
     }
 }
 
@@ -33,9 +33,9 @@ RowCompressed<Label>::RowCompressed(uint64_t num_rows,
         label_encoder_.insert_and_encode(label);
     }
 
-    matrix_.reset(new VectorRowBinMat(num_rows, labels.size(), [&](auto call_row) {
+    matrix_.reset(new VectorRowBinMat<>(num_rows, labels.size(), [&](auto call_row) {
         call_rows([&](Index i, const VLabels &row_labels) {
-            SmallVector<uint32_t> row(row_labels.size());
+            VectorRowBinMat<>::row_type row(row_labels.size());
             for (size_t j = 0; j < row_labels.size(); ++j) {
                 row[j] = label_encoder_.encode(row_labels[j]);
             }
@@ -49,7 +49,7 @@ void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
     if (dynamic_cast<EigenSpMat*>(matrix_.get())) {
         matrix_.reset(new EigenSpMat(num_rows));
     } else {
-        matrix_.reset(new VectorRowBinMat(num_rows));
+        matrix_.reset(new VectorRowBinMat<>(num_rows));
     }
 
     label_encoder_.clear();
@@ -171,14 +171,14 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
 
         assert(filenames.size() > 1);
 
-        if (!dynamic_cast<VectorRowBinMat*>(matrix_.get())) {
+        if (!dynamic_cast<VectorRowBinMat<>*>(matrix_.get())) {
             std::cerr << "Error: loading from multiple row annotators is supported"
                       << " only for the VectorRowBinMat representation" << std::endl;
             exit(1);
         }
 
-        auto &matrix = dynamic_cast<VectorRowBinMat&>(*matrix_);
-        auto next_block = std::make_unique<VectorRowBinMat>(matrix_->num_rows());
+        auto &matrix = dynamic_cast<VectorRowBinMat<>&>(*matrix_);
+        auto next_block = std::make_unique<VectorRowBinMat<>>(matrix_->num_rows());
 
         for (auto filename : filenames) {
             if (filename == filenames[0])

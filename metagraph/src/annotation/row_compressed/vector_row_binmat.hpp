@@ -7,12 +7,15 @@
 #include "utils.hpp"
 
 
+template <typename RowType = SmallVector<uint32_t>>
 class VectorRowBinMat : public BinaryMatrixRowDynamic {
   public:
+    typedef RowType row_type;
+
     VectorRowBinMat(uint64_t num_rows = 0) : vector_(num_rows) {}
 
     typedef std::function<void(uint64_t /* index */,
-                               SmallVector<uint32_t>&& /* row */)> CallRow;
+                               RowType&& /* row */)> CallRow;
     VectorRowBinMat(uint64_t num_rows,
                     uint64_t num_columns,
                     std::function<void(CallRow)> call_rows);
@@ -50,7 +53,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 
   private:
     uint64_t num_columns_ = 0;
-    std::vector<SmallVector<uint32_t>> vector_;
+    std::vector<RowType> vector_;
 };
 
 #endif // __VECTOR_ROW_BINMAT_HPP__

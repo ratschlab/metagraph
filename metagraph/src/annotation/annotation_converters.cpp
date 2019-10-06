@@ -33,8 +33,8 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
 
     ProgressBar progress_bar(num_rows, "Processing rows", std::cerr, !utils::get_verbose());
 
-    if (dynamic_cast<VectorRowBinMat*>(annotator.matrix_.get()))
-        dynamic_cast<VectorRowBinMat&>(*annotator.matrix_).standardize_rows();
+    if (dynamic_cast<VectorRowBinMat<>*>(annotator.matrix_.get()))
+        dynamic_cast<VectorRowBinMat<>&>(*annotator.matrix_).standardize_rows();
 
     auto matrix = std::make_unique<RowConcatenated<>>(
         [&](auto callback) {

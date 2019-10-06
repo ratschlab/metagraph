@@ -6,12 +6,13 @@
 #include "threading.hpp"
 
 
-VectorRowBinMat::VectorRowBinMat(uint64_t num_rows,
-                                 uint64_t num_columns,
-                                 std::function<void(CallRow)> call_rows)
+template <typename RowType>
+VectorRowBinMat<RowType>::VectorRowBinMat(uint64_t num_rows,
+                                          uint64_t num_columns,
+                                          std::function<void(CallRow)> call_rows)
       : num_columns_(num_columns), vector_(num_rows) {
 
-    call_rows([&](uint64_t i, SmallVector<uint32_t>&& row) {
+    call_rows([&](uint64_t i, RowType&& row) {
         assert(i < num_rows);
         assert(vector_[i].empty());
         assert(std::all_of(row.begin(), row.end(),
@@ -21,13 +22,15 @@ VectorRowBinMat::VectorRowBinMat(uint64_t num_rows,
     });
 }
 
-bool VectorRowBinMat::get(Row row, Column column) const {
+template <typename RowType>
+bool VectorRowBinMat<RowType>::get(Row row, Column column) const {
     assert(row < vector_.size());
     return std::find(vector_[row].begin(), vector_[row].end(), column)
                 != vector_[row].end();
 }
 
-void VectorRowBinMat::set(Row row, Column column) {
+template <typename RowType>
+void VectorRowBinMat<RowType>::set(Row row, Column column) {
     assert(row < vector_.size());
 
     if (!get(row, column))
@@ -37,7 +40,8 @@ void VectorRowBinMat::set(Row row, Column column) {
         num_columns_ = column + 1;
 }
 
-void VectorRowBinMat::force_set(Row row, Column column) {
+template <typename RowType>
+void VectorRowBinMat<RowType>::force_set(Row row, Column column) {
     assert(row < vector_.size());
 
     vector_[row].push_back(column);
@@ -46,7 +50,8 @@ void VectorRowBinMat::force_set(Row row, Column column) {
         num_columns_ = column + 1;
 }
 
-void VectorRowBinMat::standardize_rows() {
+template <typename RowType>
+void VectorRowBinMat<RowType>::standardize_rows() {
     #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < vector_.size(); ++i) {
         std::sort(vector_[i].begin(), vector_[i].end());
@@ -55,20 +60,23 @@ void VectorRowBinMat::standardize_rows() {
     }
 }
 
-std::vector<VectorRowBinMat::Column>
-VectorRowBinMat::get_row(Row row) const {
+template <typename RowType>
+std::vector<typename VectorRowBinMat<RowType>::Column>
+VectorRowBinMat<RowType>::get_row(Row row) const {
     assert(row < vector_.size());
     const auto &v = vector_[row];
     return std::vector<Column>(v.begin(), v.end());
 }
 
-void VectorRowBinMat::clear_row(Row row) {
+template <typename RowType>
+void VectorRowBinMat<RowType>::clear_row(Row row) {
     assert(row < vector_.size());
     vector_[row].clear();
 }
 
-std::vector<VectorRowBinMat::Row>
-VectorRowBinMat::get_column(Column column) const {
+template <typename RowType>
+std::vector<typename VectorRowBinMat<RowType>::Row>
+VectorRowBinMat<RowType>::get_column(Column column) const {
     std::vector<Row> result;
     for (uint64_t i = 0; i < vector_.size(); ++i) {
         if (get(i, column))
@@ -77,12 +85,14 @@ VectorRowBinMat::get_column(Column column) const {
     return result;
 }
 
-void VectorRowBinMat::insert_rows(const std::vector<Row> &rows) {
+template <typename RowType>
+void VectorRowBinMat<RowType>::insert_rows(const std::vector<Row> &rows) {
     assert(std::is_sorted(rows.begin(), rows.end()));
     utils::insert(&vector_, rows, {});
 }
 
-bool VectorRowBinMat::load(std::istream &instream) {
+template <typename RowType>
+bool VectorRowBinMat<RowType>::load(std::istream &instream) {
     if (!instream.good())
         return false;
 
@@ -112,7 +122,8 @@ bool VectorRowBinMat::load(std::istream &instream) {
     }
 }
 
-void VectorRowBinMat::serialize(std::ostream &outstream) const {
+template <typename RowType>
+void VectorRowBinMat<RowType>::serialize(std::ostream &outstream) const {
     serialize_number(outstream, num_rows());
     serialize_number(outstream, num_columns());
 
@@ -131,7 +142,8 @@ void VectorRowBinMat::serialize(std::ostream &outstream) const {
 }
 
 // number of ones in the matrix
-uint64_t VectorRowBinMat::num_relations() const {
+template <typename RowType>
+uint64_t VectorRowBinMat<RowType>::num_relations() const {
     return std::accumulate(
         vector_.begin(), vector_.end(), uint64_t(0),
         [](uint64_t sum, const auto &v) { return sum + v.size(); }
@@ -139,6 +151,9 @@ uint64_t VectorRowBinMat::num_relations() const {
 }
 
 // matrix density
-double VectorRowBinMat::density() const {
+template <typename RowType>
+double VectorRowBinMat<RowType>::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
+
+template class VectorRowBinMat<SmallVector<uint32_t>>;
