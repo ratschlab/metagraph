@@ -10,17 +10,22 @@
 #include <queue>
 #include <utility>
 #include <bitset>
+#include <boost/functional/hash/hash.hpp>
 
 #if _USE_FOLLY
 #include <folly/FBVector.h>
 #include <folly/small_vector.h>
-template <typename T>
-using Vector = folly::fbvector<T>;
-typedef folly::small_vector<uint32_t, 2, uint32_t> SmallVector;
+    template <typename T>
+    using Vector = folly::fbvector<T>;
+
+    template <typename T, size_t NumReserved = 2, typename SizeType = uint32_t>
+    using SmallVector = folly::small_vector<T, NumReserved, SizeType>;
 #else
-template <typename T>
-using Vector = std::vector<T>;
-typedef std::vector<uint32_t> SmallVector;
+    template <typename T>
+    using Vector = std::vector<T>;
+
+    template <typename T, size_t NumReserved = 2, typename SizeType = uint32_t>
+    using SmallVector = std::vector<T>;
 #endif
 
 // Branch prediction helper macros
@@ -33,8 +38,11 @@ typedef std::vector<uint32_t> SmallVector;
 #include "binary_matrix.hpp"
 
 
-struct SmallVectorHash {
-    std::size_t operator()(const SmallVector &vector) const;
+struct VectorHash {
+    template <class Vector>
+    std::size_t operator()(const Vector &vector) const {
+        return boost::hash_range(vector.begin(), vector.end());
+    }
 };
 
 class BinaryMatrix;

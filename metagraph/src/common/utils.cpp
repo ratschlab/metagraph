@@ -6,14 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 
-#include <boost/functional/hash/hash.hpp>
-
 #include "binary_matrix.hpp"
-
-
-std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
-    return boost::hash_range(vector.begin(), vector.end());
-}
 
 
 namespace utils {

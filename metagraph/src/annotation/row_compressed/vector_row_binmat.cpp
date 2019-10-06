@@ -11,7 +11,7 @@ VectorRowBinMat::VectorRowBinMat(uint64_t num_rows,
                                  std::function<void(CallRow)> call_rows)
       : num_columns_(num_columns), vector_(num_rows) {
 
-    call_rows([&](uint64_t i, SmallVector&& row) {
+    call_rows([&](uint64_t i, SmallVector<uint32_t>&& row) {
         assert(i < num_rows);
         assert(vector_[i].empty());
         assert(std::all_of(row.begin(), row.end(),

@@ -21,7 +21,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     VectorRowBinMat(uint64_t num_rows = 0) : vector_(num_rows) {}
 
     typedef std::function<void(uint64_t /* index */,
-                               SmallVector&& /* row */)> CallRow;
+                               SmallVector<uint32_t>&& /* row */)> CallRow;
     VectorRowBinMat(uint64_t num_rows,
                     uint64_t num_columns,
                     std::function<void(CallRow)> call_rows);
@@ -59,7 +59,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 
   private:
     uint64_t num_columns_ = 0;
-    std::vector<SmallVector> vector_;
+    std::vector<SmallVector<uint32_t>> vector_;
 
     class StreamRows {
       public:

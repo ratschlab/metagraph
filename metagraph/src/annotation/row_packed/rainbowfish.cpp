@@ -16,9 +16,9 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
         buffer_size_(buffer_size) {
     assert(buffer_size_);
 
-    using IndexVectorMap = tsl::hopscotch_map<SmallVector,
+    using IndexVectorMap = tsl::hopscotch_map<SmallVector<uint32_t>,
                                               uint64_t,
-                                              SmallVectorHash>;
+                                              VectorHash>;
     IndexVectorMap vector_counter;
     IndexVectorMap vector_coder;
     uint64_t coded_rows_size = 0;
@@ -29,7 +29,7 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
         if (!vector_counter.size())
             return;
 
-        std::vector<SmallVector> vectors;
+        std::vector<SmallVector<uint32_t>> vectors;
         vectors.reserve(vector_counter.size());
 
         std::vector<std::pair<uint64_t, uint64_t>> index_counts;
@@ -68,7 +68,7 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
     };
 
     uint64_t rows = 0;
-    SmallVector row_indices_small;
+    SmallVector<uint32_t> row_indices_small;
     call_rows([&](const BinaryMatrix::SetBitPositions &row_indices) {
         ++rows;
         row_indices_small.assign(row_indices.begin(), row_indices.end());

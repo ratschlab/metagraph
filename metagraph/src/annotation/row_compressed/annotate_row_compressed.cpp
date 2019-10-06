@@ -35,7 +35,7 @@ RowCompressed<Label>::RowCompressed(uint64_t num_rows,
 
     matrix_.reset(new VectorRowBinMat(num_rows, labels.size(), [&](auto call_row) {
         call_rows([&](Index i, const VLabels &row_labels) {
-            SmallVector row(row_labels.size());
+            SmallVector<uint32_t> row(row_labels.size());
             for (size_t j = 0; j < row_labels.size(); ++j) {
                 row[j] = label_encoder_.encode(row_labels[j]);
             }
