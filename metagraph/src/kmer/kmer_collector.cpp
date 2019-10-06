@@ -258,13 +258,13 @@ INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, Vector, 
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, Vector, utils::NoCleanup)
 
 
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, utils::DequeStorage, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, utils::DequeStorage, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, utils::DequeStorage, utils::NoCleanup)
+// INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, utils::DequeStorage, utils::NoCleanup)
+// INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, utils::DequeStorage, utils::NoCleanup)
+// INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, utils::DequeStorage, utils::NoCleanup)
 
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, utils::DequeStorage, utils::DummyKmersCleaner)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, utils::DequeStorage, utils::DummyKmersCleaner)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, utils::DequeStorage, utils::DummyKmersCleaner)
+// INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, utils::DequeStorage, utils::DummyKmersCleaner)
+// INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, utils::DequeStorage, utils::DummyKmersCleaner)
+// INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, utils::DequeStorage, utils::DummyKmersCleaner)
 
 // INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, utils::DequeStorage, utils::NoCleanup)
 // INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, utils::DequeStorage, utils::NoCleanup)
