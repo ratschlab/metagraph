@@ -753,12 +753,15 @@ typedef std::function<void(const std::string&)> SequenceCallback;
 std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       std::function<void(SequenceCallback)> call_sequences,
-                      double discovery_fraction) {
+                      double discovery_fraction,
+                      size_t num_threads) {
     const auto *full_dbg = dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph());
     if (!full_dbg)
         throw std::runtime_error("Error: batch queries are supported only for de Bruijn graphs");
 
     const auto &full_annotation = anno_graph.get_annotation();
+
+    Timer timer;
 
     // construct graph storing all distinct k-mers in query
     std::shared_ptr<DeBruijnGraph> graph(new DBGHashOrdered(full_dbg->get_k()));
@@ -766,22 +769,51 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         graph->add_sequence(sequence);
     });
 
-    // pull contigs from query graph and map them onto the full graph
+    if (utils::get_verbose()) {
+        std::cout << "Query graph --- k-mers indexed: "
+                  << timer.elapsed() << " sec" << std::endl;
+        timer.reset();
+    }
+
+    // pull contigs from query graph
+    std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
+    graph->call_sequences([&](const std::string &contig, const auto &path) {
+        contigs.emplace_back(contig, path);
+    });
+
+    if (utils::get_verbose()) {
+        std::cout << "Query graph --- contigs extracted: "
+                  << timer.elapsed() << " sec" << std::endl;
+        timer.reset();
+    }
+
+    // map contigs onto the full graph
     auto index_in_full_graph
         = std::make_shared<std::vector<uint64_t>>(graph->num_nodes() + 1, 0);
 
-    graph->call_sequences([&](const std::string &contig, const auto &path) {
-        size_t i = 0;
-        // map contig onto the full graph
-        full_dbg->map_to_nodes(contig,
-            [&](auto node_in_full) { (*index_in_full_graph)[path[i++]] = node_in_full; }
-        );
-        assert(i == path.size());
-    });
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < contigs.size(); ++i) {
 
-    graph = std::make_shared<MaskedDeBruijnGraph>(graph,
-        [=](auto i) -> bool { return (*index_in_full_graph)[i]; }
-    );
+        auto contig = std::move(contigs[i].first);
+        auto path = std::move(contigs[i].second);
+
+        size_t j = 0;
+        full_dbg->map_to_nodes(contig,
+            [&](auto node_in_full) { (*index_in_full_graph)[path[j++]] = node_in_full; }
+        );
+
+        assert(j == path.size());
+    }
+
+    if (utils::get_verbose()) {
+        std::cout << "Query graph --- contigs mapped to graph: "
+                  << timer.elapsed() << " sec" << std::endl;
+        timer.reset();
+    }
+
+    contigs.clear();
+
+    assert(!(*index_in_full_graph)[0]);
 
     if (discovery_fraction > 0) {
         sdsl::bit_vector mask(graph->num_nodes() + 1, false);
@@ -798,7 +830,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
             graph->map_to_nodes(sequence,
                 [&](auto node) {
-                    if (node) {
+                    if ((*index_in_full_graph)[node]) {
                         num_kmers_discovered++;
                         nodes.push_back(node);
                     } else {
@@ -816,6 +848,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         // correcting the mask
         call_zeros(mask, [&](auto i) { (*index_in_full_graph)[i] = 0; });
+
+        if (utils::get_verbose()) {
+            std::cout << "Query graph --- reduced k-mer dictionary: "
+                      << timer.elapsed() << " sec" << std::endl;
+            timer.reset();
+        }
     }
 
     // initialize fast query annotation
@@ -824,17 +862,33 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         graph->num_nodes(),
         full_annotation.get_label_encoder().get_labels(),
         [&](annotate::RowCompressed<>::CallRow call_row) {
-            graph->call_nodes([&](auto node) {
-                assert((*index_in_full_graph)[node]
-                        && "All masked k-mers in query graph are indexed in the full graph");
+
+            #pragma omp parallel for num_threads(num_threads)
+            for (uint64_t node = 0; node < index_in_full_graph->size(); ++node) {
+
+                assert(index_in_full_graph.get());
+                assert(node < index_in_full_graph->size());
+
+                if (!(*index_in_full_graph)[node])
+                    continue;
 
                 auto row_id = AnnotatedDBG::graph_to_anno_index((*index_in_full_graph)[node]);
                 assert(row_id < full_annotation.num_objects());
 
                 call_row(AnnotatedDBG::graph_to_anno_index(node),
                          full_annotation.get_labels(row_id));
-            });
+            }
         }
+    );
+
+    if (utils::get_verbose()) {
+        std::cout << "Query graph --- constructed query annotation: "
+                  << timer.elapsed() << " sec" << std::endl;
+        timer.reset();
+    }
+
+    graph = std::make_shared<MaskedDeBruijnGraph>(graph,
+        [=](auto i) -> bool { return (*index_in_full_graph)[i]; }
     );
 
     // build annotated graph from the query graph and copied annotations
@@ -1808,7 +1862,8 @@ int main(int argc, const char *argv[]) {
                                 config->forward_and_reverse
                             );
                         },
-                        config->count_labels ? 0 : config->discovery_fraction
+                        config->count_labels ? 0 : config->discovery_fraction,
+                        config->parallel
                     );
 
                     graph_to_query = query_graph.get();
