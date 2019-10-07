@@ -57,6 +57,7 @@ string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
 
 if(${CMAKE_BUILD_TYPE} MATCHES RELEASE)
   message(STATUS "Compile in ${Green}Release${ColourReset} mode")
+  set(CMAKE_VERBOSE_MAKEFILE 0)
 elseif(${CMAKE_BUILD_TYPE} MATCHES DEBUG)
   message(STATUS "Compile in ${Red}Debug${ColourReset} mode")
 else()
@@ -83,10 +84,11 @@ else()
 endif()
 
 
-string(APPEND CMAKE_CXX_FLAGS " \
-  -Wall -Wextra -Werror \
-  -D_THREAD_SAFE -pthread \
-") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
+string(APPEND CMAKE_CXX_FLAGS
+  " -Wall -Wextra -Werror"
+  " -D_THREAD_SAFE -pthread"
+  # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
+)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   string(APPEND CMAKE_CXX_FLAGS " \
@@ -288,6 +290,11 @@ else()
   " Install folly to reduce memory taken up by the Row-Compressed annotator"
   " and enable other optimizations.")
 endif()
+
+message(STATUS "Compile flags used:"
+  "${CMAKE_CXX_FLAGS}"
+  " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
+)
 
 file(GLOB src_files
   "src/*.cpp"
