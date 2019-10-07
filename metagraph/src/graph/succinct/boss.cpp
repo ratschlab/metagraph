@@ -817,9 +817,24 @@ void BOSS::map_to_edges(const std::string &sequence,
                         const std::function<bool()> &skip) const {
     auto seq_encoded = encode(sequence);
 
+    if (seq_encoded.size() <= k_)
+        return;
+
+    // Mark where (k+1)-mers with invalid characters end
+    // Example for (k+1)=3: [X]***[X]****[X]***
+    //              ---->   [111]0[111]00[111]0
+    auto invalid = utils::drag_and_mark_segments(seq_encoded, alph_size, k_ + 1);
+
+    // slide through all (k+1)-mers
     for (size_t i = 0; i + k_ + 1 <= seq_encoded.size() && !terminate(); ++i) {
         if (skip())
             continue;
+
+        if (invalid[i + k_]) {
+            // this (k+1)-mer contains at least one invalid character
+            callback(npos);
+            continue;
+        }
 
         auto edge = map_to_edge(seq_encoded.data() + i,
                                 seq_encoded.data() + i + k_ + 1);
@@ -831,6 +846,12 @@ void BOSS::map_to_edges(const std::string &sequence,
 
             if (skip())
                 break;
+
+            if (invalid[i + k_]) {
+                // this (k+1)-mer contains at least one invalid character
+                callback(npos);
+                break;
+            }
 
             edge = fwd(edge);
             edge = pick_edge(edge, seq_encoded[i + k_]);
@@ -1136,9 +1157,10 @@ void BOSS::add_sequence(const std::string &seq,
 
     while (begin_segm + k_ < end) {
 
-        end_segm = std::find_if(begin_segm, end,
-            [&](auto c) { return c >= alph_size; }
-        );
+        assert(std::all_of(begin_segm, end,
+                           [&](auto c) { return c <= alph_size; }));
+
+        end_segm = std::find(begin_segm, end, alph_size);
 
         if (begin_segm + k_ < end_segm) {
 

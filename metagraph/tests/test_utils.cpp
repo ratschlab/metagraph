@@ -925,3 +925,82 @@ TEST(Misc, insert_zeros_to_all_ones) {
         EXPECT_EQ(expected, second);
     }
 }
+
+TEST(Misc, drag_and_mark_segments) {
+    EXPECT_EQ(std::vector<bool> {},
+              utils::drag_and_mark_segments(std::vector<uint64_t> {}, 1, 0));
+    EXPECT_EQ(std::vector<bool> {},
+              utils::drag_and_mark_segments(std::vector<uint64_t> {}, 1, 1));
+    EXPECT_EQ(std::vector<bool> {},
+              utils::drag_and_mark_segments(std::vector<uint64_t> {}, 1, 100));
+
+    EXPECT_EQ(std::vector<bool>({ 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 2, 0));
+    EXPECT_EQ(std::vector<bool>({ 1 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 2, 1));
+    EXPECT_EQ(std::vector<bool>({ 1 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 2, 100));
+
+    EXPECT_EQ(std::vector<bool>({ 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 1, 0));
+    EXPECT_EQ(std::vector<bool>({ 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 1, 1));
+    EXPECT_EQ(std::vector<bool>({ 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 1, 100));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 0));
+    EXPECT_EQ(std::vector<bool>({ 1, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 1));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 1, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 4));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 5));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 0, 1, 4, 6 }), 0, 0));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 0, 1, 4, 6 }), 0, 1));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 0, 1, 4, 6 }), 0, 2));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 5));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 10, 0));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 1, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 10, 1));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 1, 1, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 10, 2));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 1, 10, 4, 6 }), 10, 5));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 6, 0));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 6, 1));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 6, 2));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 1, 10, 4, 6 }), 6, 50));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 6, 0, 10, 6, 4 }), 6, 0));
+    EXPECT_EQ(std::vector<bool>({ 1, 0, 0, 1, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 6, 0, 10, 6, 4 }), 6, 1));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 0, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 6, 0, 10, 6, 4 }), 6, 2));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 6, 1, 10, 6, 4 }), 6, 50));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 0));
+    EXPECT_EQ(std::vector<bool>({ 0, 1, 0, 0, 1, 0, 0, 0, 1, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 1));
+    EXPECT_EQ(std::vector<bool>({ 0, 1, 1, 0, 1, 1, 0, 0, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 2));
+    EXPECT_EQ(std::vector<bool>({ 0, 1, 1, 1, 1, 1, 1, 0, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 3));
+    EXPECT_EQ(std::vector<bool>({ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 100));
+}

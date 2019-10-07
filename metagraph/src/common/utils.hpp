@@ -135,6 +135,30 @@ namespace utils {
         return ss1 > ss2;
     }
 
+    // For each occurrence of |label| in |array|, mark segment
+    // of length |segment_length| starting at that position.
+    // Example: [X]***[X]****[X]***
+    //    --->  [111]0[111]00[111]0
+    template <class Vector>
+    inline std::vector<bool> drag_and_mark_segments(const Vector &array,
+                                                    typename Vector::value_type label,
+                                                    size_t segment_length) {
+        std::vector<bool> mask(array.size(), false);
+        size_t last_occurrence
+            = std::find(array.data(), array.data() + array.size(), label)
+                - array.data();
+
+        for (size_t i = last_occurrence; i < array.size(); ++i) {
+            if (array[i] == label)
+                last_occurrence = i;
+
+            if (i - last_occurrence < segment_length)
+                mask[i] = true;
+        }
+
+        return mask;
+    }
+
     std::string get_filetype(const std::string &fname);
 
     std::deque<std::string> generate_strings(const std::string &alphabet,
