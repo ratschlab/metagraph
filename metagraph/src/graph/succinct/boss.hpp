@@ -98,14 +98,14 @@ class BOSS {
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
                     bool split_to_contigs = false,
-                    bitmap *subgraph_mask = NULL) const;
+                    const bitmap *subgraph_mask = NULL) const;
 
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
-                        bitmap *subgraph_mask = NULL) const;
+                        const bitmap *subgraph_mask = NULL) const;
 
     void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                       size_t max_pruned_dead_end_size = 0,
-                      bitmap *subgraph_mask = NULL) const;
+                      const bitmap *subgraph_mask = NULL) const;
 
     // |edge| must be the first incoming edge
     void call_incoming_to_target(edge_index edge,

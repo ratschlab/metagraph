@@ -1830,7 +1830,7 @@ void call_paths(const BOSS &boss,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 ProgressBar &progress_bar,
-                bitmap *subgraph_mask);
+                const bitmap *subgraph_mask);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -1839,7 +1839,7 @@ void call_paths(const BOSS &boss,
 void BOSS::call_paths(Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
                       bool split_to_unitigs,
-                      bitmap *subgraph_mask) const {
+                      const bitmap *subgraph_mask) const {
     assert(!subgraph_mask || subgraph_mask->size() == W_->size());
 
     // keep track of reached edges
@@ -1924,7 +1924,7 @@ void call_paths(const BOSS &boss,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 ProgressBar &progress_bar,
-                bitmap *subgraph_mask) {
+                const bitmap *subgraph_mask) {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
@@ -2010,7 +2010,7 @@ void call_paths(const BOSS &boss,
 }
 
 void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
-                          bitmap *subgraph_mask) const {
+                          const bitmap *subgraph_mask) const {
 
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
@@ -2044,7 +2044,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
 
 void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t min_tip_size,
-                        bitmap *subgraph_mask) const {
+                        const bitmap *subgraph_mask) const {
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
 
