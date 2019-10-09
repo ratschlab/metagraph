@@ -71,6 +71,9 @@ class KmerExtractorBOSS {
     static char decode(TAlphabet c);
     static std::string decode(const std::vector<TAlphabet> &sequence);
 
+    static std::vector<TAlphabet>
+    reverse_complement(const std::vector<TAlphabet> &sequence);
+
     /**
      * Generate all valid suffixes of the given length
      * ACGT, ACG$, ..., $$$$ -- valid
@@ -82,6 +85,7 @@ class KmerExtractorBOSS {
 
   private:
     static const TAlphabet *kCharToNucleotide;
+    static const std::vector<TAlphabet> kComplementCode;
 };
 
 
@@ -104,7 +108,7 @@ class KmerExtractor2BitT {
 
     KmerExtractor2BitT(const char Alphabet[] = alphabets::kAlphabetDNA,
                        const uint8_t CharToCode[128] = alphabets::kCharToDNA,
-                       const std::vector<uint8_t> &complement_code = alphabets::kCanonicalMapDNA);
+                       const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
 
     /**
      * Break the sequence into kmers and add them to the kmer storage.

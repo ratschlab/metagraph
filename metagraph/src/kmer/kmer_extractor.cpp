@@ -47,11 +47,11 @@ template <typename TAlphabet>
 std::vector<TAlphabet>
 inline reverse_complement(const TAlphabet *begin,
                           const TAlphabet *end,
-                          const std::vector<uint8_t> &canonical_map) {
+                          const std::vector<uint8_t> &complement_code) {
     assert(end >= begin);
     std::vector<TAlphabet> rev_comp(end - begin);
     std::transform(begin, end, rev_comp.rbegin(),
-                   [&](const auto c) -> TAlphabet { return canonical_map.at(c); });
+                   [&](const auto c) -> TAlphabet { return complement_code.at(c); });
     return rev_comp;
 }
 
@@ -193,7 +193,7 @@ inline void sequence_to_kmers(const TAlphabet *begin,
                               size_t k,
                               const std::vector<TAlphabet> &suffix,
                               Vector<KMER> *kmers,
-                              const std::vector<uint8_t> &canonical_map) {
+                              const std::vector<uint8_t> &complement_code) {
     assert(k);
     assert(kmers);
     assert(suffix.size() <= k);
@@ -203,7 +203,7 @@ inline void sequence_to_kmers(const TAlphabet *begin,
     if (k > static_cast<size_t>(end - begin))
         return;
 
-    if (canonical_map.empty()) {
+    if (complement_code.empty()) {
         // based on performance comparison
         // for KMer::pack_kmer and KMer::update_kmer
         if (suffix.size() > 1) {
@@ -212,7 +212,7 @@ inline void sequence_to_kmers(const TAlphabet *begin,
             __sequence_to_kmers_slide(begin, end, k, suffix, kmers);
         }
     } else {
-        auto rev_comp = reverse_complement(begin, end, canonical_map);
+        auto rev_comp = reverse_complement(begin, end, complement_code);
         assert(rev_comp.size() == static_cast<size_t>(end - begin));
 
         if (suffix.size() > 1) {
@@ -270,19 +270,19 @@ inline sdsl::bit_vector valid_kmers(const std::string &sequence,
 #if _PROTEIN_GRAPH
     const std::string KmerExtractorBOSS::alphabet = alphabets::kBOSSAlphabetProtein;
     const KmerExtractorBOSS::TAlphabet *KmerExtractorBOSS::kCharToNucleotide = alphabets::kBOSSCharToProtein;
-    const std::vector<uint8_t> canonical_map = alphabets::kBOSSCanonicalMapProtein;
+    const std::vector<uint8_t> KmerExtractorBOSS::kComplementCode = alphabets::kBOSSComplementMapProtein;
 #elif _DNA_CASE_SENSITIVE_GRAPH
     const std::string KmerExtractorBOSS::alphabet = alphabets::kBOSSAlphabetDNACaseSent;
     const KmerExtractorBOSS::TAlphabet *KmerExtractorBOSS::kCharToNucleotide = alphabets::kBOSSCharToDNACaseSent;
-    const std::vector<uint8_t> canonical_map = alphabets::kBOSSCanonicalMapDNACaseSent;
+    const std::vector<uint8_t> KmerExtractorBOSS::kComplementCode = alphabets::kBOSSComplementMapDNACaseSent;
 #elif _DNA5_GRAPH
     const std::string KmerExtractorBOSS::alphabet = alphabets::kBOSSAlphabetDNA5;
     const KmerExtractorBOSS::TAlphabet *KmerExtractorBOSS::kCharToNucleotide = alphabets::kBOSSCharToDNA;
-    const std::vector<uint8_t> canonical_map = alphabets::kBOSSCanonicalMapDNA;
+    const std::vector<uint8_t> KmerExtractorBOSS::kComplementCode = alphabets::kBOSSComplementMapDNA;
 #elif _DNA_GRAPH
     const std::string KmerExtractorBOSS::alphabet = alphabets::kBOSSAlphabetDNA;
     const KmerExtractorBOSS::TAlphabet *KmerExtractorBOSS::kCharToNucleotide = alphabets::kBOSSCharToDNA;
-    const std::vector<uint8_t> canonical_map = alphabets::kBOSSCanonicalMapDNA;
+    const std::vector<uint8_t> KmerExtractorBOSS::kComplementCode = alphabets::kBOSSComplementMapDNA;
 #else
     static_assert(false,
         "Define an alphabet: either "
@@ -313,6 +313,13 @@ KmerExtractorBOSS::encode(const std::string &sequence) {
 
 std::string KmerExtractorBOSS::decode(const std::vector<TAlphabet> &sequence) {
     return extractor::decode(sequence, alphabet);
+}
+
+std::vector<KmerExtractorBOSS::TAlphabet>
+KmerExtractorBOSS::reverse_complement(const std::vector<TAlphabet> &sequence) {
+    return extractor::reverse_complement(sequence.data(),
+                                         sequence.data() + sequence.size(),
+                                         kComplementCode);
 }
 
 sdsl::bit_vector KmerExtractorBOSS::valid_kmers(const std::string &sequence, size_t k) {
@@ -374,7 +381,7 @@ void KmerExtractorBOSS::sequence_to_kmers(const std::string &sequence,
             std::fill(begin_segm, begin_segm + dummy_prefix_size, 0);
             *(end_segm - 1) = 0;
             extractor::sequence_to_kmers(begin_segm, end_segm, k, suffix, kmers,
-                canonical_mode ? canonical_map : std::vector<uint8_t>()
+                canonical_mode ? kComplementCode : std::vector<uint8_t>()
             );
         }
         begin_segm = end_segm - dummy_prefix_size;
