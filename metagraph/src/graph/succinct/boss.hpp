@@ -71,6 +71,16 @@ class BOSS {
 
     std::vector<edge_index> map_to_edges(const std::string &sequence) const;
 
+    // |seq_encoded| must have no sentinels (zeros)
+    void map_to_edges(const std::vector<TAlphabet> &seq_encoded,
+                      const std::function<void(edge_index)> &callback,
+                      const std::function<bool()> &terminate = ALWAYS_FALSE,
+                      const std::function<bool()> &skip = ALWAYS_FALSE) const;
+
+    // |seq_encoded| must have no sentinels (zeros)
+    std::vector<edge_index>
+    map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
+
     // Check whether the graph contains a fraction of (k+1)-mers from the sequence
     bool find(const std::string &sequence,
               double kmer_discovery_fraction = 1) const;
@@ -334,7 +344,7 @@ class BOSS {
 
     // Given the alphabet index return the corresponding symbol
     char decode(TAlphabet s) const;
-    std::string decode(const std::vector<TAlphabet> &sequence) const;
+    std::string decode(const std::vector<TAlphabet> &seq_encoded) const;
     // Given the alphabet character return its corresponding number
     TAlphabet encode(char s) const;
     std::vector<TAlphabet> encode(const std::string &sequence) const;
@@ -349,7 +359,8 @@ class BOSS {
     template <typename RandomAccessIt>
     std::tuple<edge_index, edge_index, RandomAccessIt>
     index_range(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
+        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
+                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
                       "Only encoded sequences can be queried");
 
         assert(end >= begin);
@@ -482,7 +493,8 @@ class BOSS {
      */
     template <typename RandomAccessIt>
     uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
+        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
+                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
                       "Only encoded sequences can be queried");
         assert(begin + k_ == end);
 

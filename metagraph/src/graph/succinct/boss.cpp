@@ -815,7 +815,19 @@ void BOSS::map_to_edges(const std::string &sequence,
                         const std::function<void(edge_index)> &callback,
                         const std::function<bool()> &terminate,
                         const std::function<bool()> &skip) const {
-    auto seq_encoded = encode(sequence);
+    map_to_edges(encode(sequence), callback, terminate, skip);
+}
+
+std::vector<edge_index> BOSS::map_to_edges(const std::string &sequence) const {
+    return map_to_edges(encode(sequence));
+}
+
+void BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded,
+                        const std::function<void(edge_index)> &callback,
+                        const std::function<bool()> &terminate,
+                        const std::function<bool()> &skip) const {
+    assert(std::all_of(seq_encoded.begin(), seq_encoded.end(),
+                       [this](TAlphabet c) { return c <= alph_size; }));
 
     if (seq_encoded.size() <= k_)
         return;
@@ -861,10 +873,11 @@ void BOSS::map_to_edges(const std::string &sequence,
     }
 }
 
-std::vector<edge_index> BOSS::map_to_edges(const std::string &sequence) const {
+std::vector<edge_index>
+BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded) const {
     std::vector<edge_index> indices;
-    indices.reserve(sequence.size());
-    map_to_edges(sequence,
+    indices.reserve(seq_encoded.size());
+    map_to_edges(seq_encoded,
                  [&indices](edge_index i) { indices.push_back(i); });
     return indices;
 }
@@ -1034,9 +1047,9 @@ TAlphabet BOSS::encode(char s) const {
 }
 
 std::vector<TAlphabet> BOSS::encode(const std::string &sequence) const {
-    std::vector<TAlphabet> seq_encoded(sequence.size());
-    std::transform(sequence.begin(), sequence.end(),
-                   seq_encoded.begin(), [this](char c) { return this->encode(c); });
+    std::vector<TAlphabet> seq_encoded = kmer_extractor_.encode(sequence);
+    assert(std::all_of(seq_encoded.begin(), seq_encoded.end(),
+                       [this](TAlphabet c) { return c <= alph_size; }));
     return seq_encoded;
 }
 
@@ -1046,11 +1059,11 @@ char BOSS::decode(TAlphabet c) const {
     return kmer_extractor_.decode(c);
 }
 
-std::string BOSS::decode(const std::vector<TAlphabet> &sequence) const {
-    std::string str(sequence.size(), 0);
-    std::transform(sequence.begin(), sequence.end(),
-                   str.begin(), [this](TAlphabet x) { return this->decode(x); });
-    return str;
+std::string BOSS::decode(const std::vector<TAlphabet> &seq_encoded) const {
+    assert(kmer_extractor_.encode(kSentinel) != kSentinelCode);
+    assert(std::all_of(seq_encoded.begin(), seq_encoded.end(),
+                       [this](TAlphabet c) { return c < alph_size; }));
+    return kmer_extractor_.decode(seq_encoded);
 }
 
 template <class WaveletTree, class BitVector>
@@ -1158,7 +1171,7 @@ void BOSS::add_sequence(const std::string &seq,
     while (begin_segm + k_ < end) {
 
         assert(std::all_of(begin_segm, end,
-                           [&](auto c) { return c <= alph_size; }));
+                           [this](TAlphabet c) { return c <= alph_size; }));
 
         end_segm = std::find(begin_segm, end, alph_size);
 
@@ -2022,7 +2035,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
         if (begin + k_ + 1 > end)
             return;
 
-        assert(std::all_of(begin, end, [](auto c) { return c != kSentinelCode; }));
+        assert(std::all_of(begin, end, [](TAlphabet c) { return c != kSentinelCode; }));
 
         std::string sequence(end - begin, '\0');
         std::transform(begin, end, sequence.begin(),
@@ -2055,7 +2068,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
         if (begin + k_ + 1 > end)
             return;
 
-        assert(std::all_of(begin, end, [](auto c) { return c != kSentinelCode; }));
+        assert(std::all_of(begin, end, [](TAlphabet c) { return c != kSentinelCode; }));
 
         std::string sequence(end - begin, '\0');
         std::transform(begin, end, sequence.begin(),
