@@ -91,13 +91,11 @@ class BOSS {
     // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;
 
-    void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;
-
-    // call paths (or simple paths if |split_to_contigs| is true) that cover
-    // exactly all edges in graph (or subgraph, if |subgraph_mask| is specified)
+    // call contigs (or unitigs if |unitigs| is true) that cover
+    // exactly all edges in graph (or subgraph, if |subgraph_mask| is passed)
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
-                    bool split_to_contigs = false,
+                    bool unitigs = false,
                     const bitmap *subgraph_mask = NULL) const;
 
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,

@@ -2152,18 +2152,6 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
     }, true, subgraph_mask);
 }
 
-void BOSS::call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const {
-    call_paths([&](auto&& indices, auto&& path) {
-        assert(path.size() == indices.size() + k_);
-
-        for (size_t i = 0; i < indices.size(); ++i) {
-            callback(indices[i],
-                     std::vector<TAlphabet>(path.begin() + i,
-                                            path.begin() + i + k_ + 1));
-        }
-    });
-}
-
 /**
  * Traverse boss graph and call all its edges
  * except for the dummy source of sink ones

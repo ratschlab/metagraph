@@ -1627,12 +1627,25 @@ TEST(BOSS, CallUnitigsMasked) {
     EXPECT_EQ(obs, ref);
 }
 
+template <class Callback>
+void call_edges(const BOSS &boss, Callback callback) {
+    boss.call_paths([&](auto&& edges, auto&& path) {
+        assert(path.size() == edges.size() + boss.get_k());
+
+        for (size_t i = 0; i < edges.size(); ++i) {
+            callback(edges[i],
+                     std::vector<BOSS::TAlphabet>(path.begin() + i,
+                                                  path.begin() + i + boss.get_k() + 1));
+        }
+    });
+}
+
 TEST(BOSS, CallEdgesEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
 
         size_t num_edges = 0;
-        empty.call_edges([&](auto, const auto &edge) {
+        call_edges(empty, [&](auto, const auto &edge) {
             EXPECT_EQ(empty.get_k() + 1, edge.size()) << empty;
             num_edges++;
         });
@@ -1650,7 +1663,7 @@ TEST(BOSS, CallEdgesTwoLoops) {
         ASSERT_EQ(2u, graph.num_edges());
 
         size_t num_edges = 0;
-        graph.call_edges([&](auto, const auto &edge) {
+        call_edges(graph, [&](auto, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             num_edges++;
         });
@@ -1669,7 +1682,7 @@ TEST(BOSS, CallEdgesFourLoops) {
         ASSERT_EQ(4u, graph.num_edges());
 
         size_t num_edges = 0;
-        graph.call_edges([&](auto, const auto &edge) {
+        call_edges(graph, [&](auto, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             num_edges++;
         });
@@ -1685,7 +1698,7 @@ TEST(BOSS, CallEdgesFourLoopsDynamic) {
         graph.add_sequence(std::string(100, 'C'));
 
         size_t num_edges = 0;
-        graph.call_edges([&](auto, const auto &edge) {
+        call_edges(graph, [&](auto, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             num_edges++;
         });
@@ -1699,7 +1712,7 @@ TEST(BOSS, CallEdgesTestPath) {
         graph.add_sequence(std::string(100, 'A') + std::string(k, 'C'));
 
         size_t num_edges = 0;
-        graph.call_edges([&](auto, const auto &edge) {
+        call_edges(graph, [&](auto, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             num_edges++;
         });
@@ -1715,7 +1728,7 @@ TEST(BOSS, CallEdgesTestPathACA) {
                             + std::string(100, 'A'));
 
         size_t num_edges = 0;
-        graph.call_edges([&](auto, const auto &edge) {
+        call_edges(graph, [&](auto, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             num_edges++;
         });
@@ -1733,7 +1746,7 @@ TEST(BOSS, CallEdgesTestPathDisconnected) {
         graph.add_sequence(std::string(100, 'T'));
 
         size_t num_edges = 0;
-        graph.call_edges([&](auto, const auto &edge) {
+        call_edges(graph, [&](auto, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             num_edges++;
         });
@@ -1751,7 +1764,7 @@ TEST(BOSS, CallEdgesTestPathDisconnected2) {
         graph.add_sequence(std::string(k, 'A') + "T");
 
         size_t num_edges = 0;
-        graph.call_edges([&](auto edge_idx, const auto &edge) {
+        call_edges(graph, [&](auto edge_idx, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             EXPECT_EQ(graph.get_node_seq(edge_idx),
                       std::vector<BOSS::TAlphabet>(edge.begin(), edge.end() - 1))
