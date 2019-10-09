@@ -2706,6 +2706,29 @@ int main(int argc, const char *argv[]) {
 
             timer.reset();
 
+            if (config->to_gfa) {
+                if (!config->unitigs) {
+                    std::cerr << "'--unitigs' must be set for GFA output" << std::endl;
+                    exit(1);
+                }
+
+                if (config->verbose)
+                    std::cout << "Writing graph to GFA...\t" << std::flush;
+
+                std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa") + ".gfa");
+
+                gfa_file << "H\tVN:Z:1.0" << std::endl;
+                graph->call_unitigs(
+                    [&](const auto &unitig, const auto &path) {
+                        gfa_file << "S\t" << path.back() << "\t" << unitig << std::endl;
+                        graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
+                            gfa_file << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M" << std::endl;
+                        });
+                    },
+                    config->min_tip_size
+                );
+            }
+
             FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
                                config->header, true);
 

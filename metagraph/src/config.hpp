@@ -24,6 +24,7 @@ class Config {
     bool fasta_anno = false;
     bool to_adj_list = false;
     bool to_fasta = false;
+    bool to_gfa = false;
     bool unitigs = false;
     bool kmers_in_single_form = false;
     bool count_kmers = false;
