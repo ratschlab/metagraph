@@ -110,7 +110,7 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
     BOSSConstructor constructor(k - 1, canonical);
     EXPECT_EQ(k - 1, constructor.get_k());
     constructor.add_sequences(sequences);
-    std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor)) };
+    std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor), canonical) };
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
     EXPECT_EQ(k, graph->get_k());
     return graph;

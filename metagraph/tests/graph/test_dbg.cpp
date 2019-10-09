@@ -570,6 +570,56 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigs) {
     }
 }
 
+TYPED_TEST(StableDeBruijnGraphTest, CallPathsFromCanonical) {
+    for (size_t k = 2; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto graph = build_graph_batch<TypeParam>(k, sequences, true);
+
+            std::vector<std::string> reconst;
+
+            graph->call_sequences([&](const auto &sequence, const auto &path) {
+                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                reconst.push_back(sequence);
+            });
+            auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst, true);
+
+            EXPECT_EQ(*graph, *reconstructed_graph);
+        }
+    }
+}
+
+TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsFromCanonical) {
+    for (size_t k = 2; k <= 10; ++k) {
+        for (const std::vector<std::string> &sequences
+                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                    std::vector<std::string>({ "AAACT", "AAATG" }),
+                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+            auto graph = build_graph_batch<TypeParam>(k, sequences, true);
+
+            std::vector<std::string> reconst;
+
+            graph->call_unitigs([&](const auto &sequence, const auto &path) {
+                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                reconst.push_back(sequence);
+            });
+            auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst, true);
+
+            EXPECT_EQ(*graph, *reconstructed_graph);
+        }
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, CallPaths) {
     for (size_t k = 2; k <= 10; ++k) {
         for (const std::vector<std::string> &sequences
@@ -1869,188 +1919,188 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_for_multiple_valid_edges) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
-        {
-            std::vector<std::string> sequences = { "AAACACTAG",
-                                                   "AACGACATG" };
+    {
+        std::vector<std::string> sequences = { "AAACACTAG",
+                                               "AACGACATG" };
 
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(2, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>(), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(3, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>(), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(4, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AAAC" }), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(5, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AAACA", "AACGA" }), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(6, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AAACAC", "AACGAC" }), nodes);
-            }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(2, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>(), nodes);
         }
         {
-            std::vector<std::string> sequences = { "AGACACTGA",
-                                                   "GACTACGTA",
-                                                   "ACTAACGTA" };
-
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(2, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>(), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(3, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AGA" }), nodes) << *graph;
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(4, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AGAC" }), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(5, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AGACA", "GACTA" }), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(6, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AGACAC", "GACTAC", "ACTAAC" }), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(7, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AGACACT", "GACTACG", "ACTAACG" }), nodes);
-            }
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(3, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>(), nodes);
         }
         {
-            std::vector<std::string> sequences = { "AGACACAGT",
-                                                   "GACTTGCAG",
-                                                   "ACTAGTCAG" };
-
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(2, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>(), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(3, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>(), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(4, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AGAC" }), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(5, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AGACA", "GACTT", "ACTAG" }), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(6, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AGACAC", "GACTTG", "ACTAGT" }), nodes);
-            }
-
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(4, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AAAC" }), nodes);
         }
         {
-            std::vector<std::string> sequences = { "AAACTCGTAGC",
-                                                   "AAATGCGTAGC" };
-
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(2, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>(), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(3, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>(), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(4, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AAAC", "AAAT" }), nodes);
-            }
-            {
-                std::multiset<std::string> nodes;
-                auto graph = build_graph_batch<TypeParam>(5, sequences);
-                graph->call_source_nodes([&](const auto &node) {
-                    nodes.insert(graph->get_node_sequence(node));
-                });
-                EXPECT_EQ(std::multiset<std::string>({ "AAACT", "AAATG" }), nodes);
-            }
-
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(5, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AAACA", "AACGA" }), nodes);
         }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(6, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AAACAC", "AACGAC" }), nodes);
+        }
+    }
+    {
+        std::vector<std::string> sequences = { "AGACACTGA",
+                                               "GACTACGTA",
+                                               "ACTAACGTA" };
+
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(2, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>(), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(3, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AGA" }), nodes) << *graph;
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(4, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AGAC" }), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(5, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AGACA", "GACTA" }), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(6, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AGACAC", "GACTAC", "ACTAAC" }), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(7, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AGACACT", "GACTACG", "ACTAACG" }), nodes);
+        }
+    }
+    {
+        std::vector<std::string> sequences = { "AGACACAGT",
+                                               "GACTTGCAG",
+                                               "ACTAGTCAG" };
+
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(2, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>(), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(3, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>(), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(4, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AGAC" }), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(5, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AGACA", "GACTT", "ACTAG" }), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(6, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AGACAC", "GACTTG", "ACTAGT" }), nodes);
+        }
+
+    }
+    {
+        std::vector<std::string> sequences = { "AAACTCGTAGC",
+                                               "AAATGCGTAGC" };
+
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(2, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>(), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(3, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>(), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(4, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AAAC", "AAAT" }), nodes);
+        }
+        {
+            std::multiset<std::string> nodes;
+            auto graph = build_graph_batch<TypeParam>(5, sequences);
+            graph->call_source_nodes([&](const auto &node) {
+                nodes.insert(graph->get_node_sequence(node));
+            });
+            EXPECT_EQ(std::multiset<std::string>({ "AAACT", "AAATG" }), nodes);
+        }
+
+    }
 }
