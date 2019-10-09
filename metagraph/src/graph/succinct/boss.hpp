@@ -100,15 +100,8 @@ class BOSS {
                     bool split_to_contigs = false,
                     bitmap *subgraph_mask = NULL) const;
 
-    void call_sequences(Call<std::string&&> callback,
-                        bitmap *subgraph_mask = NULL) const;
-
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                         bitmap *subgraph_mask = NULL) const;
-
-    void call_unitigs(Call<std::string&&> callback,
-                      size_t max_pruned_dead_end_size = 0,
-                      bitmap *subgraph_mask = NULL) const;
 
     void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                       size_t max_pruned_dead_end_size = 0,

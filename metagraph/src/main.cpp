@@ -2188,7 +2188,7 @@ int main(int argc, const char *argv[]) {
                     MaskedDeBruijnGraph graph_slice(graph,
                         [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; });
 
-                    graph_slice.call_unitigs([&](const auto &contig) { writer.write(contig); });
+                    graph_slice.call_unitigs([&](const auto &contig, auto&&) { writer.write(contig); });
                 }
             }
 
@@ -2710,10 +2710,10 @@ int main(int argc, const char *argv[]) {
                                config->header, true);
 
             if (config->unitigs || config->min_tip_size > 1) {
-                graph->call_unitigs([&](const auto &unitig) { writer.write(unitig); },
+                graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); },
                                     config->min_tip_size);
             } else {
-                graph->call_sequences([&](const auto &contig) { writer.write(contig); });
+                graph->call_sequences([&](const auto &contig, auto&&) { writer.write(contig); });
             }
 
             if (config->verbose)

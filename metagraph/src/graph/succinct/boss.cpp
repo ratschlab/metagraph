@@ -1699,7 +1699,7 @@ sdsl::bit_vector BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
  * This function is well suited to merge small graphs into large ones.
  */
 void BOSS::merge(const BOSS &other) {
-    other.call_sequences([&](const std::string &sequence) {
+    other.call_sequences([&](const std::string &sequence, auto&&) {
         add_sequence(sequence, true);
     });
 }
@@ -2009,24 +2009,6 @@ void call_paths(const BOSS &boss,
     }
 }
 
-void BOSS::call_sequences(Call<std::string&&> callback,
-                          bitmap *subgraph_mask) const {
-    call_paths([&](auto&&, auto&& path) {
-        std::string sequence;
-        sequence.reserve(path.size());
-
-        for (TAlphabet c : path) {
-            if (c != BOSS::kSentinelCode) {
-                sequence.push_back(BOSS::decode(c));
-            }
-        }
-
-        if (sequence.size())
-            callback(std::move(sequence));
-
-    }, false, subgraph_mask);
-}
-
 void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
                           bitmap *subgraph_mask) const {
 
@@ -2060,17 +2042,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
     }, false, subgraph_mask);
 }
 
-void BOSS::call_unitigs(Call<std::string&&> callback,
-                        size_t max_pruned_dead_end_size,
-                        bitmap *subgraph_mask) const {
-    call_unitigs(
-        [&](std::string&& seq, auto&&) { callback(std::move(seq)); },
-        max_pruned_dead_end_size,
-        subgraph_mask
-    );
-}
-
-void BOSS::call_unitigs(Call<std::string&&, std::vector<uint64_t>&&> callback,
+void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t min_tip_size,
                         bitmap *subgraph_mask) const {
     call_paths([&](auto&& edges, auto&& path) {

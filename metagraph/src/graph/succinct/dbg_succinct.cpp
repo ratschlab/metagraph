@@ -413,12 +413,6 @@ void DBGSuccinct::call_sequences(const CallPath &callback) const {
     );
 }
 
-void DBGSuccinct
-::call_sequences(const std::function<void(const std::string&)> &callback) const {
-    assert(boss_graph_.get());
-    boss_graph_->call_sequences(callback);
-}
-
 void DBGSuccinct::call_unitigs(const CallPath &callback, size_t min_tip_size) const {
     assert(boss_graph_.get());
     boss_graph_->call_unitigs(
@@ -430,13 +424,6 @@ void DBGSuccinct::call_unitigs(const CallPath &callback, size_t min_tip_size) co
         },
         min_tip_size
     );
-}
-
-void DBGSuccinct
-::call_unitigs(const std::function<void(const std::string&)> &callback,
-               size_t min_tip_size) const {
-    assert(boss_graph_.get());
-    boss_graph_->call_unitigs(callback, min_tip_size);
 }
 
 void DBGSuccinct

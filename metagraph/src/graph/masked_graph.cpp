@@ -139,18 +139,6 @@ void MaskedDeBruijnGraph
 }
 
 void MaskedDeBruijnGraph
-::call_sequences(const std::function<void(const std::string&)> &callback) const {
-    if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
-
-        dbg_succ->get_boss().call_sequences(callback, &mask);
-
-    } else {
-        DeBruijnGraph::call_sequences(callback);
-    }
-}
-
-void MaskedDeBruijnGraph
 ::call_unitigs(const CallPath &callback, size_t min_tip_size) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
         bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
@@ -162,19 +150,6 @@ void MaskedDeBruijnGraph
             callback(sequence, path);
 
         }, min_tip_size, &mask);
-
-    } else {
-        DeBruijnGraph::call_unitigs(callback, min_tip_size);
-    }
-}
-
-void MaskedDeBruijnGraph
-::call_unitigs(const std::function<void(const std::string&)> &callback,
-               size_t min_tip_size) const {
-    if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
-
-        dbg_succ->get_boss().call_unitigs(callback, min_tip_size, &mask);
 
     } else {
         DeBruijnGraph::call_unitigs(callback, min_tip_size);

@@ -204,6 +204,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
                   || sequence.size() >= graph.get_k() + min_tip_size - 1
                   // check if not tip
                   || graph.indegree(start) + graph.outdegree(node) >= 2) {
+
+            assert(path == map_sequence_to_nodes(graph, sequence));
+
             callback(sequence, path);
         }
     }
@@ -287,34 +290,8 @@ void DeBruijnGraph::call_sequences(const CallPath &callback) const {
     ::call_sequences(*this, callback, false);
 }
 
-void DeBruijnGraph
-::call_sequences(const std::function<void(const std::string&)> &callback) const {
-    call_sequences(
-        [&](const std::string &seq, const auto &path) {
-            assert(get_node_sequence(path.front()) == seq.substr(0, get_k()));
-            assert(get_node_sequence(path.back()) == seq.substr(seq.size() - get_k()));
-            std::ignore = path;
-            callback(seq);
-        }
-    );
-}
-
 void DeBruijnGraph::call_unitigs(const CallPath &callback, size_t min_tip_size) const {
     ::call_sequences(*this, callback, true, min_tip_size);
-}
-
-void DeBruijnGraph
-::call_unitigs(const std::function<void(const std::string&)> &callback,
-               size_t min_tip_size) const {
-    call_unitigs(
-        [&](const std::string &seq, const auto &path) {
-            assert(get_node_sequence(path.front()) == seq.substr(0, get_k()));
-            assert(get_node_sequence(path.back()) == seq.substr(seq.size() - get_k()));
-            std::ignore = path;
-            callback(seq);
-        },
-        min_tip_size
-    );
 }
 
 /**

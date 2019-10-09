@@ -308,7 +308,8 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
     for (size_t k = 2; k <= 10; ++k) {
         auto empty = build_graph<TypeParam>(k);
         std::vector<std::string> sequences;
-        empty->call_sequences([&](const auto &sequence) {
+        empty->call_sequences([&](const auto &sequence, const auto &path) {
+            ASSERT_EQ(path, map_sequence_to_nodes(*empty, sequence));
             sequences.push_back(sequence);
         });
         ASSERT_EQ(0u, sequences.size());
@@ -319,20 +320,6 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsEmptyGraph) {
-    for (size_t k = 2; k <= 10; ++k) {
-        auto empty = build_graph<TypeParam>(k);
-        std::vector<std::string> sequences;
-        empty->call_unitigs([&](const auto &sequence) {
-            sequences.push_back(sequence);
-        });
-        ASSERT_EQ(0u, sequences.size());
-
-        EXPECT_EQ(*empty, *build_graph<TypeParam>(k, sequences));
-        EXPECT_EQ(*empty, *build_graph_batch<TypeParam>(k, sequences));
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodesEmptyGraph) {
     for (size_t k = 2; k <= 10; ++k) {
         auto empty = build_graph<TypeParam>(k);
         std::vector<std::string> sequences;
@@ -348,25 +335,6 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodesEmptyGraph) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsOneSelfLoop) {
-    for (size_t k = 2; k <= 20; ++k) {
-        std::vector<std::string> sequences { std::string(100, 'A') };
-        auto graph = build_graph<TypeParam>(k, sequences);
-        auto graph_batch = build_graph_batch<TypeParam>(k, sequences);
-        ASSERT_EQ(1u, graph->num_nodes());
-        ASSERT_EQ(1u, graph_batch->num_nodes());
-
-        size_t num_sequences = 0;
-        graph->call_sequences([&](auto&) { num_sequences++; });
-        size_t num_sequences_batch = 0;
-        graph_batch->call_sequences([&](auto&) { num_sequences_batch++; });
-
-        EXPECT_EQ(graph->num_nodes(), num_sequences);
-        EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
-        EXPECT_EQ(graph->num_nodes(), graph_batch->num_nodes());
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallPathsWithNodesOneSelfLoop) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A') };
         auto graph = build_graph<TypeParam>(k, sequences);
@@ -392,25 +360,6 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsWithNodesOneSelfLoop) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsOneSelfLoop) {
-    for (size_t k = 2; k <= 20; ++k) {
-        std::vector<std::string> sequences { std::string(100, 'A') };
-        auto graph = build_graph<TypeParam>(k, sequences);
-        auto graph_batch = build_graph_batch<TypeParam>(k, sequences);
-        ASSERT_EQ(1u, graph->num_nodes());
-        ASSERT_EQ(1u, graph_batch->num_nodes());
-
-        size_t num_sequences = 0;
-        graph->call_unitigs([&](auto&) { num_sequences++; });
-        size_t num_sequences_batch = 0;
-        graph_batch->call_unitigs([&](auto&) { num_sequences_batch++; });
-
-        EXPECT_EQ(graph->num_nodes(), num_sequences);
-        EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
-        EXPECT_EQ(graph->num_nodes(), graph_batch->num_nodes());
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodesOneSelfLoop) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A') };
         auto graph = build_graph<TypeParam>(k, sequences);
@@ -446,27 +395,6 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsThreeSelfLoops) {
         ASSERT_EQ(3u, graph_batch->num_nodes());
 
         size_t num_sequences = 0;
-        graph->call_sequences([&](auto&) { num_sequences++; });
-        size_t num_sequences_batch = 0;
-        graph_batch->call_sequences([&](auto&) { num_sequences_batch++; });
-
-        EXPECT_EQ(graph->num_nodes(), num_sequences);
-        EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
-        EXPECT_EQ(graph->num_nodes(), graph_batch->num_nodes());
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallPathsWithNodesThreeSelfLoops) {
-    for (size_t k = 2; k <= 20; ++k) {
-        std::vector<std::string> sequences { std::string(100, 'A'),
-                                             std::string(100, 'G'),
-                                             std::string(100, 'C') };
-        auto graph = build_graph<TypeParam>(k, sequences);
-        auto graph_batch = build_graph_batch<TypeParam>(k, sequences);
-        ASSERT_EQ(3u, graph->num_nodes());
-        ASSERT_EQ(3u, graph_batch->num_nodes());
-
-        size_t num_sequences = 0;
         graph->call_sequences([&](const auto &sequence, const auto &path) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
             num_sequences++;
@@ -484,21 +412,6 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsWithNodesThreeSelfLoops) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestOneLoop) {
-    for (size_t k = 4; k < 14; ++k) {
-        std::vector<std::string> sequences { "ATGCAGTACTCAG",
-                                             "GGGGGGGGGGGGG" };
-        auto graph = build_graph<TypeParam>(k, sequences);
-
-        std::vector<std::string> contigs;
-        graph->call_sequences([&](const auto &contig) { contigs.push_back(contig); });
-
-        EXPECT_EQ(2u, contigs.size());
-        EXPECT_EQ(convert_to_set({ "ATGCAGTACTCAG", std::string(k, 'G') }),
-                  convert_to_set(contigs)) << k;
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallPathsWithNodesExtractsLongestOneLoop) {
     for (size_t k = 4; k < 14; ++k) {
         std::vector<std::string> sequences { "ATGCAGTACTCAG",
                                              "GGGGGGGGGGGGG" };
@@ -524,20 +437,6 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestTwoLoops) {
         auto graph = build_graph<TypeParam>(k, sequences);
 
         std::vector<std::string> contigs;
-        graph->call_sequences([&](const auto &contig) { contigs.push_back(contig); });
-
-        EXPECT_EQ(3u, contigs.size());
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallPathsWithNodesExtractsLongestTwoLoops) {
-    for (size_t k = 4; k < 14; ++k) {
-        std::vector<std::string> sequences { "ATGCAGTACTCAG",
-                                             "ATGCAGTACTGAG",
-                                             "GGGGGGGGGGGGG" };
-        auto graph = build_graph<TypeParam>(k, sequences);
-
-        std::vector<std::string> contigs;
         graph->call_sequences([&](const auto &sequence, const auto &path) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
             contigs.push_back(sequence);
@@ -552,16 +451,6 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmers) {
     auto graph = build_graph<TypeParam>(3, { sequence });
 
     size_t num_kmers = 0;
-    graph->call_sequences([&](const auto &contig) { num_kmers += contig.size() - 2; });
-
-    EXPECT_EQ(sequence.size() - 2, num_kmers);
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallContigsWithNodesUniqueKmers) {
-    std::string sequence = "GCAAATAAC";
-    auto graph = build_graph<TypeParam>(3, { sequence });
-
-    size_t num_kmers = 0;
     graph->call_sequences([&](const auto &sequence, const auto &path) {
         ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
         num_kmers += sequence.size() - 2;
@@ -571,22 +460,6 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsWithNodesUniqueKmers) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsUniqueKmersCycle) {
-    size_t k = 4;
-    std::string sequence = "AAACCCGGGTTTAA";
-    auto graph = build_graph<TypeParam>(k, { sequence });
-
-    size_t num_unitigs = 0;
-    size_t num_kmers = 0;
-    graph->call_unitigs([&](const auto &contig) {
-        num_unitigs++;
-        num_kmers += contig.size() - k + 1;
-    });
-
-    EXPECT_EQ(1u, num_unitigs);
-    EXPECT_EQ(sequence.size() - k + 1, num_kmers);
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodesUniqueKmersCycle) {
     size_t k = 4;
     std::string sequence = "AAACCCGGGTTTAA";
     auto graph = build_graph<TypeParam>(k, { sequence });
@@ -610,22 +483,6 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmersCycle) {
 
     size_t num_contigs = 0;
     size_t num_kmers = 0;
-    graph->call_sequences([&](const auto &contig) {
-        num_contigs++;
-        num_kmers += contig.size() - k + 1;
-    });
-
-    EXPECT_EQ(1u, num_contigs);
-    EXPECT_EQ(sequence.size() - k + 1, num_kmers);
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallContigsWithNodesUniqueKmersCycle) {
-    size_t k = 4;
-    std::string sequence = "AAACCCGGGTTTAAA";
-    auto graph = build_graph<TypeParam>(k, { sequence });
-
-    size_t num_contigs = 0;
-    size_t num_kmers = 0;
     graph->call_sequences([&](const auto &sequence, const auto &path) {
         ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
         num_contigs++;
@@ -637,27 +494,6 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsWithNodesUniqueKmersCycle) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
-    for (size_t k = 2; k <= 20; ++k) {
-        std::vector<std::string> sequences { std::string(100, 'A'),
-                                             std::string(100, 'G'),
-                                             std::string(100, 'C') };
-        auto graph = build_graph<TypeParam>(k, sequences);
-        auto graph_batch = build_graph_batch<TypeParam>(k, sequences);
-        ASSERT_EQ(3u, graph->num_nodes());
-        ASSERT_EQ(3u, graph_batch->num_nodes());
-
-        size_t num_sequences = 0;
-        graph->call_unitigs([&](auto&) { num_sequences++; });
-        size_t num_sequences_batch = 0;
-        graph_batch->call_unitigs([&](auto&) { num_sequences_batch++; });
-
-        EXPECT_EQ(graph->num_nodes(), num_sequences);
-        EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
-        EXPECT_EQ(graph->num_nodes(), graph_batch->num_nodes());
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodesFourLoops) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A'),
                                              std::string(100, 'G'),
@@ -698,30 +534,6 @@ TYPED_TEST(StableDeBruijnGraphTest, CallPaths) {
 
             std::vector<std::string> reconst;
 
-            graph->call_sequences([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed_graph);
-        }
-    }
-}
-
-TYPED_TEST(StableDeBruijnGraphTest, CallPathsWithNodes) {
-    for (size_t k = 2; k <= 10; ++k) {
-        for (const std::vector<std::string> &sequences
-                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
-                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
-                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
-                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
-                    std::vector<std::string>({ "AAACT", "AAATG" }),
-                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
-
-            auto graph = build_graph_batch<TypeParam>(k, sequences);
-
-            std::vector<std::string> reconst;
-
             graph->call_sequences([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 reconst.push_back(sequence);
@@ -747,30 +559,6 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigs) {
 
             std::vector<std::string> reconst;
 
-            graph->call_unitigs([&](const auto &sequence) {
-                reconst.push_back(sequence);
-            });
-            auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst);
-
-            EXPECT_EQ(*graph, *reconstructed_graph);
-        }
-    }
-}
-
-TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsWithNodes) {
-    for (size_t k = 2; k <= 10; ++k) {
-        for (const std::vector<std::string> &sequences
-                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
-                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
-                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
-                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
-                    std::vector<std::string>({ "AAACT", "AAATG" }),
-                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
-
-            auto graph = build_graph_batch<TypeParam>(k, sequences);
-
-            std::vector<std::string> reconst;
-
             graph->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 reconst.push_back(sequence);
@@ -783,32 +571,6 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsWithNodes) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallPaths) {
-    for (size_t k = 2; k <= 10; ++k) {
-        for (const std::vector<std::string> &sequences
-                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
-                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
-                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
-                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
-                    std::vector<std::string>({ "AAACT", "AAATG" }),
-                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
-
-            auto graph = build_graph_batch<TypeParam>(k, sequences);
-
-            // in stable graphs the order of input sequences
-            // does not change the order of k-mers and their indexes
-            auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
-
-            auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
-                k,
-                [&](const auto &callback) { graph->call_sequences(callback); }
-            );
-
-            EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
-        }
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallPathsWithNodes) {
     for (size_t k = 2; k <= 10; ++k) {
         for (const std::vector<std::string> &sequences
                 : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -857,32 +619,6 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigs) {
 
             auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
                 k,
-                [&](const auto &callback) { graph->call_unitigs(callback); }
-            );
-
-            EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
-        }
-    }
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodes) {
-    for (size_t k = 2; k <= 10; ++k) {
-        for (const std::vector<std::string> &sequences
-                : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
-                    std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
-                    std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
-                    std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
-                    std::vector<std::string>({ "AAACT", "AAATG" }),
-                    std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
-
-            auto graph = build_graph_batch<TypeParam>(k, sequences);
-
-            // in stable graphs the order of input sequences
-            // does not change the order of k-mers and their indexes
-            auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
-
-            auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
-                k,
                 [&](const auto &callback) {
                     graph->call_unitigs([&](const auto &sequence, const auto &path) {
                         ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
@@ -897,133 +633,6 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodes) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
-    size_t k = 3;
-    auto graph = build_graph<TypeParam>(k, { "ACTAAGC",
-                                             "TCTAAGC" });
-    ASSERT_EQ(6u, graph->num_nodes());
-
-    std::set<std::string> unitigs;
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 0);
-    EXPECT_EQ(std::set<std::string>({ "ACT", "TCT", "CTAAGC" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 1);
-    EXPECT_EQ(std::set<std::string>({ "ACT", "TCT", "CTAAGC" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 2);
-    EXPECT_EQ(std::set<std::string>({ "CTAAGC" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 10);
-    EXPECT_EQ(std::set<std::string>({ "CTAAGC" }), unitigs);
-
-
-    graph = build_graph<TypeParam>(k, { "ACTAAGC",
-                                        "ACTAAGT" });
-    ASSERT_EQ(6u, graph->num_nodes());
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 0);
-    EXPECT_EQ(std::set<std::string>({ "ACTAAG", "AGC", "AGT" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 1);
-    EXPECT_EQ(std::set<std::string>({ "ACTAAG", "AGC", "AGT" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 2);
-    EXPECT_EQ(std::set<std::string>({ "ACTAAG" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 10);
-    EXPECT_EQ(std::set<std::string>({ "ACTAAG" }), unitigs);
-
-
-    graph = build_graph<TypeParam>(k, { "ACTAAGCCC",
-                                        "AAAGC",
-                                        "TAAGCA" });
-    ASSERT_EQ(9u, graph->num_nodes());
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 0);
-    // EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCA", "GCCC" }), unitigs);
-    EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCA", "GCC", "CCC" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 1);
-    // EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCA", "GCCC" }), unitigs);
-    EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCA", "GCC", "CCC" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 2);
-    // EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAGC", "GCC", "CCC" }), unitigs);
-    EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCC", "CCC" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 3);
-    // EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAGC" }), unitigs);
-    EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCC", "CCC" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 10);
-    // EXPECT_EQ(std::set<std::string>({ "AAGC" }), unitigs);
-    EXPECT_EQ(std::set<std::string>({ "AAGC", "AAA", "ACTAA", "GCC", "CCC" }), unitigs);
-
-
-    graph = build_graph<TypeParam>(k, { "ACGAAGCCT",
-                                        "AAGC",
-                                        "TAAGCA" });
-    ASSERT_EQ(9u, graph->num_nodes());
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 0);
-    EXPECT_EQ(std::set<std::string>({ "ACGAA", "TAA", "AAGC", "GCA", "GCCT" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 1);
-    EXPECT_EQ(std::set<std::string>({ "ACGAA", "TAA", "AAGC", "GCA", "GCCT" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 2);
-    EXPECT_EQ(std::set<std::string>({ "ACGAA", "AAGC", "GCCT" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 3);
-    EXPECT_EQ(std::set<std::string>({ "ACGAA", "AAGC" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 10);
-    EXPECT_EQ(std::set<std::string>({ "AAGC" }), unitigs);
-
-
-    graph = build_graph<TypeParam>(k, { "TCTAAGCCG",
-                                        "CATAAGCCG",
-                                        "CATAACCGA" });
-    ASSERT_EQ(12u, graph->num_nodes());
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 0);
-    EXPECT_EQ(std::set<std::string>({ "CATA", "TCTA", "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 1);
-    EXPECT_EQ(std::set<std::string>({ "CATA", "TCTA", "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 2);
-    EXPECT_EQ(std::set<std::string>({ "CATA", "TCTA", "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 3);
-    EXPECT_EQ(std::set<std::string>({ "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 10);
-    EXPECT_EQ(std::set<std::string>({ "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodesWithoutTips) {
     size_t k = 3;
     auto graph = build_graph<TypeParam>(k, { "ACTAAGC",
                                              "TCTAAGC" });
@@ -1228,31 +837,6 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips2) {
                                              "ACTATC", });
     ASSERT_EQ(19u, graph->num_nodes());
     std::set<std::string> unitigs;
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 0);
-    EXPECT_EQ(std::set<std::string>({ "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTT", "AGCTAGTCTA", "TCTAA", "TCTAT" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 1);
-    EXPECT_EQ(std::set<std::string>({ "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTT", "AGCTAGTCTA", "TCTAA", "TCTAT" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 2);
-    EXPECT_EQ(std::set<std::string>({ "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT" }), unitigs);
-
-    unitigs.clear();
-    graph->call_unitigs([&](const auto &unitig) { unitigs.insert(unitig); }, 10);
-    EXPECT_EQ(std::set<std::string>({ "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT" }), unitigs);
-}
-
-TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithNodesWithoutTips2) {
-    size_t k = 5;
-    auto graph = build_graph<TypeParam>(k, { "ACTATAGCTAGTCTATGCGA",
-                                             "ACTATAGCTAGTCTAA",
-                                             "ACTATAGCTA",
-                                             "ACTATAGCTT",
-                                             "ACTATC", });
-    ASSERT_EQ(19u, graph->num_nodes());
-    std::set<std::string> unitigs;
     graph->call_unitigs([&](const auto &unitig, const auto &path) {
         ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
         unitigs.insert(unitig);
@@ -1341,7 +925,10 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsCheckDegree) {
     };
 
     std::multiset<std::string> obs_unitigs;
-    graph->call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
+    graph->call_unitigs([&](const auto &sequence, const auto &path) {
+        ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+        obs_unitigs.insert(sequence);
+    }, 2);
 
     EXPECT_EQ(unitigs, obs_unitigs);
 }
@@ -1362,7 +949,10 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
     };
 
     std::multiset<std::string> obs_unitigs;
-    graph->call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
+    graph->call_unitigs([&](const auto &sequence, const auto &path) {
+        ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+        obs_unitigs.insert(sequence);
+    }, 2);
 
     EXPECT_EQ(unitigs, obs_unitigs);
 }
@@ -1398,7 +988,10 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsCross) {
 
         for (size_t t = 0; t <= 2; ++t) {
             std::multiset<std::string> obs_unitigs;
-            graph->call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, t);
+            graph->call_unitigs([&](const auto &sequence, const auto &path) {
+                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                obs_unitigs.insert(sequence);
+            }, t);
             EXPECT_EQ(unitigs, obs_unitigs) << t;
         }
 
@@ -1408,7 +1001,10 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsCross) {
 
         for (size_t t = 3; t <= 10; ++t) {
             std::multiset<std::string> obs_long_unitigs;
-            graph->call_unitigs([&](const auto &unitig) { obs_long_unitigs.insert(unitig); }, 3);
+            graph->call_unitigs([&](const auto &sequence, const auto &path) {
+                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                obs_long_unitigs.insert(sequence);
+            }, 3);
             EXPECT_EQ(long_unitigs, obs_long_unitigs);
         }
     }
