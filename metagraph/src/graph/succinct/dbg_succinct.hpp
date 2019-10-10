@@ -58,9 +58,12 @@ class DBGSuccinct : public DeBruijnGraph {
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
-    virtual void call_sequences(const CallPath &callback) const override final;
+    virtual void call_sequences(const CallPath &callback,
+                                bool kmers_in_single_form = false) const override final;
 
-    virtual void call_unitigs(const CallPath &callback, size_t min_tip_size = 1) const override final;
+    virtual void call_unitigs(const CallPath &callback,
+                              size_t min_tip_size = 1,
+                              bool kmers_in_single_form = false) const override final;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
 

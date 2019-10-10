@@ -25,6 +25,7 @@ class Config {
     bool to_adj_list = false;
     bool to_fasta = false;
     bool unitigs = false;
+    bool kmers_in_single_form = false;
     bool count_kmers = false;
     bool query_presence = false;
     bool filter_present = false;

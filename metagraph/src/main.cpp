@@ -2711,9 +2711,11 @@ int main(int argc, const char *argv[]) {
 
             if (config->unitigs || config->min_tip_size > 1) {
                 graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); },
-                                    config->min_tip_size);
+                                    config->min_tip_size,
+                                    config->kmers_in_single_form);
             } else {
-                graph->call_sequences([&](const auto &contig, auto&&) { writer.write(contig); });
+                graph->call_sequences([&](const auto &contig, auto&&) { writer.write(contig); },
+                                      config->kmers_in_single_form);
             }
 
             if (config->verbose)

@@ -167,13 +167,22 @@ class DeBruijnGraph : public SequenceGraph {
 
     /**
      * Call contigs, a set of sequences covering each node in graph exactly once.
+     * If |kmers_in_single_form| is true, output each k-mer only in one if its
+     * forms (canonical/non-canonical). That is, skip a k-mer if its
+     * reverse-complement has been extracted.
      */
-    virtual void call_sequences(const CallPath &callback) const;
+    virtual void call_sequences(const CallPath &callback,
+                                bool kmers_in_single_form = false) const;
     /**
      * Call all unitigs except short tips, where tips are
      * the unitigs with InDegree(first) + OutDegree(last) < 2.
+     * If |kmers_in_single_form| is true, output each k-mer only in one if its
+     * forms (canonical/non-canonical). That is, skip a k-mer if its
+     * reverse-complement has been extracted.
      */
-    virtual void call_unitigs(const CallPath &callback, size_t min_tip_size = 1) const;
+    virtual void call_unitigs(const CallPath &callback,
+                              size_t min_tip_size = 1,
+                              bool kmers_in_single_form = false) const;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
     virtual void call_nodes(const std::function<void(node_index)> &callback,

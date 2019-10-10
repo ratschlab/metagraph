@@ -36,6 +36,9 @@ class BOSS {
     explicit BOSS(BOSSConstructor *builder);
     ~BOSS();
 
+    explicit BOSS(const BOSS &other) = delete;
+    bool operator=(const BOSS &other) = delete;
+
     /**
      * Check whether BOSS tables store the same data.
      * FYI: this function reconstructs all the kmers, and
@@ -106,13 +109,16 @@ class BOSS {
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
                     bool unitigs = false,
+                    bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL) const;
 
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
+                        bool kmers_in_single_form = false,
                         const bitmap *subgraph_mask = NULL) const;
 
     void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                       size_t max_pruned_dead_end_size = 0,
+                      bool kmers_in_single_form = false,
                       const bitmap *subgraph_mask = NULL) const;
 
     // |edge| must be the first incoming edge

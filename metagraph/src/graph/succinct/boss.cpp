@@ -1840,6 +1840,7 @@ void call_paths(const BOSS &boss,
                 BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
                 bool split_to_unitigs,
+                bool kmers_in_single_form,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 ProgressBar &progress_bar,
@@ -1852,6 +1853,7 @@ void call_paths(const BOSS &boss,
 void BOSS::call_paths(Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
                       bool split_to_unitigs,
+                      bool kmers_in_single_form,
                       const bitmap *subgraph_mask) const {
     assert(!subgraph_mask || subgraph_mask->size() == W_->size());
 
@@ -1876,7 +1878,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     if (!subgraph_mask) {
         for (uint64_t i = succ_last(1); i >= 1; --i) {
             if (!visited[i])
-                ::call_paths(*this, i, callback, split_to_unitigs,
+                ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                              &discovered, &visited, progress_bar, nullptr);
         }
 
@@ -1893,7 +1895,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
             do {
                 if (!visited[i])
-                    ::call_paths(*this, i, callback, split_to_unitigs,
+                    ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                                  &discovered, &visited, progress_bar, subgraph_mask);
             } while (--i > 0 && !get_last(i));
         });
@@ -1912,14 +1914,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         do {
             if (!visited[i])
-                ::call_paths(*this, i, callback, split_to_unitigs,
+                ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                              &discovered, &visited, progress_bar, subgraph_mask);
         } while (--i > 0 && !get_last(i));
     });
 
     // process all the cycles left that have not been traversed
     call_zeros(visited, [&](uint64_t i) {
-        ::call_paths(*this, i, callback, split_to_unitigs,
+        ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                      &discovered, &visited, progress_bar, subgraph_mask);
     });
 }
@@ -1934,6 +1936,7 @@ void call_paths(const BOSS &boss,
                 BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
                 bool split_to_unitigs,
+                bool kmers_in_single_form,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 ProgressBar &progress_bar,
@@ -2017,12 +2020,84 @@ void call_paths(const BOSS &boss,
             edge = next_edge;
         }
 
-        if (path.size())
+        if (!path.size())
+            continue;
+
+        if (kmers_in_single_form) {
+            // trim trailing sentinels '$'
+            if (sequence.back() == boss.kSentinelCode) {
+                sequence.pop_back();
+                path.pop_back();
+            }
+
+            auto first_valid_it
+                = std::find_if(sequence.begin(), sequence.end(),
+                               [&boss](auto c) { return c != boss.kSentinelCode; });
+
+            sequence.erase(sequence.begin(), first_valid_it);
+
+            if (sequence.size() <= boss.get_k())
+                continue;
+
+            path.erase(path.begin(),
+                       path.begin() + (first_valid_it - sequence.begin()));
+
+
+            // get dual path (mapping of the reverse complement sequence)
+            auto rev_comp_seq = KmerExtractorBOSS::reverse_complement(sequence);
+
+            auto dual_path = boss.map_to_edges(rev_comp_seq);
+            std::reverse(dual_path.begin(), dual_path.end());
+            size_t begin = 0;
+
+            assert(std::all_of(path.begin(), path.end(),
+                               [&](auto i) { return visited[i]; }));
+
+            // Mark all nodes in path as unvisited and re-visit them while
+            // traversing the path (iterating through all nodes).
+            std::for_each(path.begin(), path.end(),
+                          [&](auto i) { visited[i] = false; });
+
+            // traverse the path with its dual and visit the nodes
+            for (size_t i = 0; i < path.size(); ++i) {
+                assert(path[i]);
+                visited[path[i]] = true;
+
+                // check if reverse-complement k-mer has been traversed
+                if (!dual_path[i])
+                    continue;
+
+                if (!visited[dual_path[i]] || dual_path[i] == path[i]) {
+                    visited[dual_path[i]] = discovered[dual_path[i]] = true;
+                    continue;
+                }
+
+                // The reverse-complement k-mer has been visited
+                // -> Skip this k-mer and call the traversed path segment.
+                if (begin < i)
+                    callback({ path.begin() + begin, path.begin() + i },
+                             { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
+
+                begin = i + 1;
+            }
+
+            // Call the path traversed
+            if (!begin) {
+                callback(std::move(path), std::move(sequence));
+
+            } else if (begin < path.size()) {
+                callback({ path.begin() + begin, path.end() },
+                         { sequence.begin() + begin, sequence.end() });
+            }
+
+        } else {
             callback(std::move(path), std::move(sequence));
+        }
     }
 }
 
 void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
+                          bool kmers_in_single_form,
                           const bitmap *subgraph_mask) const {
 
     call_paths([&](auto&& edges, auto&& path) {
@@ -2052,11 +2127,12 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
 
         callback(std::move(sequence), std::move(edges));
 
-    }, false, subgraph_mask);
+    }, false, kmers_in_single_form, subgraph_mask);
 }
 
 void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t min_tip_size,
+                        bool kmers_in_single_form,
                         const bitmap *subgraph_mask) const {
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
@@ -2162,7 +2238,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
         // this is not a tip
         callback(std::move(sequence), std::move(edges));
 
-    }, true, subgraph_mask);
+    }, true, kmers_in_single_form, subgraph_mask);
 }
 
 /**

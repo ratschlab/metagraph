@@ -401,7 +401,8 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
     }
 }
 
-void DBGSuccinct::call_sequences(const CallPath &callback) const {
+void DBGSuccinct::call_sequences(const CallPath &callback,
+                                 bool kmers_in_single_form) const {
     assert(boss_graph_.get());
     boss_graph_->call_sequences(
         [&](std::string&& seq, auto&& path) {
@@ -409,11 +410,14 @@ void DBGSuccinct::call_sequences(const CallPath &callback) const {
                 node = boss_to_kmer_index(node);
             }
             callback(std::move(seq), std::move(path));
-        }
+        },
+        kmers_in_single_form
     );
 }
 
-void DBGSuccinct::call_unitigs(const CallPath &callback, size_t min_tip_size) const {
+void DBGSuccinct::call_unitigs(const CallPath &callback,
+                               size_t min_tip_size,
+                               bool kmers_in_single_form) const {
     assert(boss_graph_.get());
     boss_graph_->call_unitigs(
         [&](std::string&& seq, auto&& path) {
@@ -422,7 +426,8 @@ void DBGSuccinct::call_unitigs(const CallPath &callback, size_t min_tip_size) co
             }
             callback(std::move(seq), std::move(path));
         },
-        min_tip_size
+        min_tip_size,
+        kmers_in_single_form
     );
 }
 

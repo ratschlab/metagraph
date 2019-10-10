@@ -1621,6 +1621,7 @@ TEST(BOSS, CallUnitigsMasked) {
             obs.insert(unitig);
         },
         0,
+        false,
         &mask
     );
 

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <progress_bar.hpp>
 
+#include "reverse_complement.hpp"
 #include "threading.hpp"
 #include "bitmap.hpp"
 
@@ -111,7 +112,8 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          sdsl::bit_vector *discovered,
                          ProgressBar &progress_bar,
                          bool call_unitigs = false,
-                         uint64_t min_tip_size = 0) {
+                         uint64_t min_tip_size = 0,
+                         bool kmers_in_single_form = false) {
     assert(graph.in_graph(start));
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
@@ -207,7 +209,58 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
             assert(path == map_sequence_to_nodes(graph, sequence));
 
-            callback(sequence, path);
+            if (kmers_in_single_form) {
+                // get dual path (mapping of the reverse complement sequence)
+                std::string rev_comp_seq = sequence;
+                reverse_complement(rev_comp_seq.begin(), rev_comp_seq.end());
+
+                auto dual_path = map_sequence_to_nodes(graph, rev_comp_seq);
+                std::reverse(dual_path.begin(), dual_path.end());
+                size_t begin = 0;
+
+                assert(std::all_of(path.begin(), path.end(),
+                                   [&](auto i) { return (*visited)[i]; }));
+
+                // Mark all nodes in path as unvisited and re-visit them while
+                // traversing the path (iterating through all nodes).
+                std::for_each(path.begin(), path.end(),
+                              [&](auto i) { (*visited)[i] = false; });
+
+                // traverse the path with its dual and visit the nodes
+                for (size_t i = 0; i < path.size(); ++i) {
+                    assert(path[i]);
+                    (*visited)[path[i]] = true;
+
+                    // check if reverse-complement k-mer has been traversed
+                    if (!dual_path[i])
+                        continue;
+
+                    if (!(*visited)[dual_path[i]] || dual_path[i] == path[i]) {
+                        (*visited)[dual_path[i]] = (*discovered)[dual_path[i]] = true;
+                        continue;
+                    }
+
+                    // The reverse-complement k-mer has been visited
+                    // -> Skip this k-mer and call the traversed path segment.
+                    if (begin < i)
+                        callback(sequence.substr(begin, i + graph.get_k() - 1 - begin),
+                                 { path.begin() + begin, path.begin() + i });
+
+                    begin = i + 1;
+                }
+
+                // Call the path traversed
+                if (!begin) {
+                    callback(std::move(sequence), std::move(path));
+
+                } else if (begin < path.size()) {
+                    callback(sequence.substr(begin),
+                             { path.begin() + begin, path.end() });
+                }
+
+            } else {
+                callback(std::move(sequence), std::move(path));
+            }
         }
     }
 }
@@ -215,7 +268,8 @@ void call_sequences_from(const DeBruijnGraph &graph,
 void call_sequences(const DeBruijnGraph &graph,
                     const DeBruijnGraph::CallPath &callback,
                     bool call_unitigs,
-                    uint64_t min_tip_size = 0) {
+                    uint64_t min_tip_size = 0,
+                    bool kmers_in_single_form = false) {
     sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
     sdsl::bit_vector visited = discovered;
@@ -232,7 +286,8 @@ void call_sequences(const DeBruijnGraph &graph,
                             &discovered,
                             progress_bar,
                             call_unitigs,
-                            min_tip_size);
+                            min_tip_size,
+                            kmers_in_single_form);
     };
 
     if (call_unitigs) {
@@ -262,10 +317,11 @@ void call_sequences(const DeBruijnGraph &graph,
         //              \___
         //
         graph.call_source_nodes([&](auto node) {
-            assert(!visited[node]);
             assert(graph.has_no_incoming(node));
+            assert(!visited[node] || kmers_in_single_form);
 
-            call_paths_from(node);
+            if (!kmers_in_single_form || !visited[node])
+                call_paths_from(node);
         });
     }
 
@@ -286,12 +342,15 @@ void call_sequences(const DeBruijnGraph &graph,
     call_zeros(visited, call_paths_from);
 }
 
-void DeBruijnGraph::call_sequences(const CallPath &callback) const {
-    ::call_sequences(*this, callback, false);
+void DeBruijnGraph::call_sequences(const CallPath &callback,
+                                   bool kmers_in_single_form) const {
+    ::call_sequences(*this, callback, false, 0, kmers_in_single_form);
 }
 
-void DeBruijnGraph::call_unitigs(const CallPath &callback, size_t min_tip_size) const {
-    ::call_sequences(*this, callback, true, min_tip_size);
+void DeBruijnGraph::call_unitigs(const CallPath &callback,
+                                 size_t min_tip_size,
+                                 bool kmers_in_single_form) const {
+    ::call_sequences(*this, callback, true, min_tip_size, kmers_in_single_form);
 }
 
 /**
