@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-05-20.
 //
 
-#ifndef METAGRAPH_DECODE_ENABLER_HPP
-#define METAGRAPH_DECODE_ENABLER_HPP
+#ifndef __DECODE_ENABLER_HPP__
+#define __DECODE_ENABLER_HPP__
 
 #include <iostream>
 #include <set>

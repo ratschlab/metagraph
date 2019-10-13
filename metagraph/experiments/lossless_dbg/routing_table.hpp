@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-04-26.
 //
 
-#ifndef METAGRAPH_ROUTING_TABLE_HPP
-#define METAGRAPH_ROUTING_TABLE_HPP
+#ifndef __ROUTING_TABLE_HPP__
+#define __ROUTING_TABLE_HPP__
 
 #include <iostream>
 #include <set>

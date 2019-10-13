@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-07-06.
 //
 
-#ifndef METAGRAPH_DUMP_ROUTING_TABLE_HPP
-#define METAGRAPH_DUMP_ROUTING_TABLE_HPP
+#ifndef __DUMP_ROUTING_TABLE_HPP__
+#define __DUMP_ROUTING_TABLE_HPP__
 #include <iostream>
 #include <sdsl/wt_rlmn.hpp>
 #include "utilities.hpp"

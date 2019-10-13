@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-04-26.
 //
 
-#ifndef METAGRAPH_GRAPH_PATCH_HPP
-#define METAGRAPH_GRAPH_PATCH_HPP
+#ifndef __GRAPH_PATCH_HPP__
+#define __GRAPH_PATCH_HPP__
 
 #include <iostream>
 #include <set>

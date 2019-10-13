@@ -4,8 +4,8 @@
 // Created by Jan Studený on 2019-04-26.
 //
 
-#ifndef METAGRAPH_DYNAMIC_ROUTING_TABLE_HPP
-#define METAGRAPH_DYNAMIC_ROUTING_TABLE_HPP
+#ifndef __DYNAMIC_ROUTING_TABLE_HPP__
+#define __DYNAMIC_ROUTING_TABLE_HPP__
 
 #include <iostream>
 #include <set>

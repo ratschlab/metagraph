@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-05-21.
 //
 
-#ifndef METAGRAPH_QUERY_ENABLER_HPP
-#define METAGRAPH_QUERY_ENABLER_HPP
+#ifndef __QUERY_ENABLER_HPP__
+#define __QUERY_ENABLER_HPP__
 
 #include <iostream>
 #include <set>

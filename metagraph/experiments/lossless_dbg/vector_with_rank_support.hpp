@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-06-02.
 //
 
-#ifndef METAGRAPH_VECTOR_WITH_RANK_SUPPORT_HPP
-#define METAGRAPH_VECTOR_WITH_RANK_SUPPORT_HPP
+#ifndef __VECTOR_WITH_RANK_SUPPORT_HPP__
+#define __VECTOR_WITH_RANK_SUPPORT_HPP__
 
 #include <vector>
 #include <iostream>

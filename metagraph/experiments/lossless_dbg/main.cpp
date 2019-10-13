@@ -12,23 +12,12 @@ using TCLAP::UnlabeledValueArg;
 using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Weverything"
-#pragma clang diagnostic ignored "-Wcomma"
-
-
 #include "playground/sampler/sampler.hpp"
 #include "playground/compressor/compressor.hpp"
 #include "playground/decompressor/decompressor.hpp"
 #include "playground/statistics/statistics.hpp"
 #include "playground/tester/tester.hpp"
 #include "playground/tidbits/dump_routing_table.hpp"
-
-#pragma clang diagnostic pop
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wconversion"
-
 
 int main(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Toolbox for experiments", ' ', "");

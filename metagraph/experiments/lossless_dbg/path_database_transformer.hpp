@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-05-20.
 //
 
-#ifndef METAGRAPH_PATH_DATABASE_TRANSFORMER_HPP
-#define METAGRAPH_PATH_DATABASE_TRANSFORMER_HPP
+#ifndef __PATH_DATABASE_TRANSFORMER_HPP__
+#define __PATH_DATABASE_TRANSFORMER_HPP__
 
 #include "path_database_dynamic.hpp"
 #include "path_database_wavelet.hpp"

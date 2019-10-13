@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-06-02.
 //
 
-#ifndef METAGRAPH_SOLID_DYNAMIC_ROUTING_TABLE_HPP
-#define METAGRAPH_SOLID_DYNAMIC_ROUTING_TABLE_HPP
+#ifndef __SOLID_DYNAMIC_ROUTING_TABLE_HPP__
+#define __SOLID_DYNAMIC_ROUTING_TABLE_HPP__
 
 #include <iostream>
 #include <set>

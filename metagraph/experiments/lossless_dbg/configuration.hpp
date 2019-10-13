@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-07-17.
 //
 
-#ifndef METAGRAPH_CONFIG_HPP
-#define METAGRAPH_CONFIG_HPP
+#ifndef __CONFIG_HPP__
+#define __CONFIG_HPP__
 
 #include <sdsl/rrr_vector.hpp>
 #include <sdsl/wt_rlmn.hpp>

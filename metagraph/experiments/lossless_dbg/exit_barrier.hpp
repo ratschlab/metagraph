@@ -4,12 +4,13 @@
 #include <vector>
 #include <iostream>
 #include <omp.h>
+#include <cassert>
 
 #include "dense_hashmap.hpp"
 using namespace std;
 
-#ifndef METAGRAPH_waiting_queue_HPP
-#define METAGRAPH_waiting_queue_HPP
+#ifndef __waiting_queue_HPP__
+#define __waiting_queue_HPP__
 
 //struct exit_barrier_element_t {
 //    int64_t relative_position;
@@ -81,6 +82,7 @@ public:
         auto& exit_barrier = exit_barriers[node];
         auto& stored_edge = exit_barrier.edges[tid];
         auto& stored_relative_position = exit_barrier.relative_positions[tid];
+        assert(node < 1ull<<(7*8));
         stored_edge = node | (((uint64_t)traversed_edge)<<(7*8));
         stored_relative_position = relative_position;
         update_others_before_sleep(exit_barrier,tid);
@@ -196,9 +198,9 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
                                        deque<waiting_thread_info_t> &waiting_queue,
                                        int64_t relative_position) {
         assert(previous_node);
-        bool first_it = 1;
-        bool me_first = 0;
-        bool was_me = 0;
+        bool first_it = true;
+        bool me_first = false;
+        bool was_me = false;
         int64_t past_offset = 0;
         // todo_wrap in define or better in macro
         int64_t debug_my_id = 0;
@@ -221,9 +223,9 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
                 debug_my_id = debug_idx;
                 assert(!was_me); // can appear only once
                 // present
-                was_me = 1;
+                was_me = true;
                 if (first_it) {
-                    me_first = 1;
+                    me_first = true;
                 }
                 other.thread_id = -tid;
             }  else {
@@ -235,7 +237,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
                     past_offset--;
                 }
             }
-            first_it = 0;
+            first_it = false;
             debug_idx++;
         }
         assert(was_me);

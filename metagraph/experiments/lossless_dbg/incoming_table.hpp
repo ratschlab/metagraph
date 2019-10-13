@@ -4,8 +4,8 @@
 // Created by Jan Studený on 2019-05-06.
 //
 
-#ifndef METAGRAPH_INCOMING_TABLE_HPP
-#define METAGRAPH_INCOMING_TABLE_HPP
+#ifndef __INCOMING_TABLE_HPP__
+#define __INCOMING_TABLE_HPP__
 
 #include <sdsl/enc_vector.hpp>
 

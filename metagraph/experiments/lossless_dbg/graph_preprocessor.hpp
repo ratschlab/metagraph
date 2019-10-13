@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-05-13.
 //
 
-#ifndef METAGRAPH_GRAPH_PREPROCESSOR_HPP
-#define METAGRAPH_GRAPH_PREPROCESSOR_HPP
+#ifndef __GRAPH_PREPROCESSOR_HPP__
+#define __GRAPH_PREPROCESSOR_HPP__
 
 #include <tsl/hopscotch_map.h>
 #include "sequence_graph.hpp"

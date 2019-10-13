@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-07-04.
 //
 
-#ifndef METAGRAPH_TESTER_HPP
-#define METAGRAPH_TESTER_HPP
+#ifndef __TESTER_HPP__
+#define __TESTER_HPP__
 
 //
 // Created by Jan Studený on 2019-03-11.

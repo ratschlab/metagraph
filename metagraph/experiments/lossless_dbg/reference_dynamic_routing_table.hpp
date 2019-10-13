@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-06-04.
 //
 
-#ifndef METAGRAPH_REFERENCE_DYNAMIC_ROUTING_TABLE_HPP
-#define METAGRAPH_REFERENCE_DYNAMIC_ROUTING_TABLE_HPP
+#ifndef __REFERENCE_DYNAMIC_ROUTING_TABLE_HPP__
+#define __REFERENCE_DYNAMIC_ROUTING_TABLE_HPP__
 
 #include "utilities.hpp"
 #include <variant>

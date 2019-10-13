@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-05-06.
 //
 
-#ifndef METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP
-#define METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP
+#ifndef __DYNAMIC_INCOMING_TABLE_HPP__
+#define __DYNAMIC_INCOMING_TABLE_HPP__
 
 #include <iostream>
 #include <set>

@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-06-01.
 //
 
-#ifndef METAGRAPH_DENSE_HASHMAP_HPP
-#define METAGRAPH_DENSE_HASHMAP_HPP
+#ifndef __DENSE_HASHMAP_HPP__
+#define __DENSE_HASHMAP_HPP__
 
 #include <vector>
 #include <sdsl/bit_vectors.hpp>
