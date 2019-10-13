@@ -123,4 +123,4 @@ public:
 template <typename Wavelet=DefaultWavelet>
 using RoutingTable = TransformationsEnabler<RoutingTableCore<Wavelet>>;
 
-#endif //METAGRAPH_ROUTING_TABLE_HPP
+#endif // __ROUTING_TABLE_HPP__

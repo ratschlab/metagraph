@@ -170,4 +170,4 @@ public:
     EntryT routing_table;
 };
 
-#endif //METAGRAPH_SOLID_DYNAMIC_ROUTING_TABLE_HPP
+#endif // __SOLID_DYNAMIC_ROUTING_TABLE_HPP__

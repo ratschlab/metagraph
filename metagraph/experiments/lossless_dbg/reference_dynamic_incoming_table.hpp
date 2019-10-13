@@ -89,4 +89,4 @@ public:
 
     DenseHashMap<array<int,6>> incoming_table;
 };
-#endif //METAGRAPH_REFERENCE_DYNAMIC_INCOMING_TABLE_HPP
+#endif // __REFERENCE_DYNAMIC_INCOMING_TABLE_HPP__

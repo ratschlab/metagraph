@@ -106,4 +106,4 @@ public:
     shared_ptr<const GraphT> graph;
 };
 
-#endif //METAGRAPH_INCOMING_TABLE_HPP
+#endif // __INCOMING_TABLE_HPP__

@@ -180,4 +180,4 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
     const int64_t kmer_length_;
 };
 
-#endif //METAGRAPH_PATH_DATABASE_LIST_OF_BIFURCATION_CHOICES_HPP
+#endif // __PATH_DATABASE_LIST_OF_BIFURCATION_CHOICES_HPP__

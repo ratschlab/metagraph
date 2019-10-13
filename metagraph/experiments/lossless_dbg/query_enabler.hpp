@@ -168,4 +168,4 @@ public:
 
 
 };
-#endif //METAGRAPH_QUERY_ENABLER_HPP
+#endif // __QUERY_ENABLER_HPP__

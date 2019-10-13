@@ -129,4 +129,4 @@ public:
     int64_t divisor = 0;
 };
 
-#endif //METAGRAPH_DENSE_HASHMAP_HPP
+#endif // __DENSE_HASHMAP_HPP__

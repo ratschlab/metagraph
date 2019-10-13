@@ -16,4 +16,4 @@ int main_dumprt(int argc, char *argv[]) {
     return 0;
 }
 
-#endif //METAGRAPH_DUMP_ROUTING_TABLE_HPP
+#endif // __DUMP_ROUTING_TABLE_HPP__

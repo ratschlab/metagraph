@@ -190,4 +190,4 @@ public:
 
 
 
-#endif //METAGRAPH_DECODE_ENABLER_HPP
+#endif // __DECODE_ENABLER_HPP__

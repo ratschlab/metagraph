@@ -82,4 +82,4 @@ int main_tester(int argc, char *argv[]) {
 }
 
 
-#endif //METAGRAPH_TESTER_HPP
+#endif // __TESTER_HPP__

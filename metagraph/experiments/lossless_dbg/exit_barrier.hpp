@@ -264,4 +264,4 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
     ChunkedDenseHashMap<omp_lock_t,BitVector,RankSupport,false> waiting_queue_locks;
 };
 
-#endif //METAGRAPH_waiting_queue_HPP
+#endif // __waiting_queue_HPP__

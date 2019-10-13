@@ -115,4 +115,4 @@ public:
     tsl::hopscotch_map<node_index, array<int32_t,6>> incoming_table;
 };
 
-#endif //METAGRAPH_SOLID_DYNAMIC_INCOMING_TABLE_HPP
+#endif // __SOLID_DYNAMIC_INCOMING_TABLE_HPP__

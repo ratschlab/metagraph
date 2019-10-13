@@ -106,4 +106,4 @@ public:
 template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
 using DynamicRoutingTable = TransformationsEnabler<DynamicRoutingTableCore<EntryT,BitVector,RankSupport>>;
 
-#endif //METAGRAPH_DYNAMIC_ROUTING_TABLE_HPP
+#endif // __DYNAMIC_ROUTING_TABLE_HPP__

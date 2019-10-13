@@ -70,4 +70,4 @@ public:
 #include "dense_hashmap.hpp"
 #include "solid_dynamic_routing_table.hpp"
 
-#endif //METAGRAPH_VECTOR_WITH_RANK_SUPPORT_HPP
+#endif // __VECTOR_WITH_RANK_SUPPORT_HPP__

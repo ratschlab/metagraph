@@ -78,4 +78,4 @@ public:
 
 };
 
-#endif //METAGRAPH_GRAPH_PREPROCESSOR_HPP
+#endif // __GRAPH_PREPROCESSOR_HPP__

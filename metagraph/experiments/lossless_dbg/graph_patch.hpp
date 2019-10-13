@@ -114,4 +114,4 @@ public:
 };
 #define DBGSuccinct BetterDBGSuccinct
 
-#endif //METAGRAPH_GRAPH_PATCH_HPP
+#endif // __GRAPH_PATCH_HPP__

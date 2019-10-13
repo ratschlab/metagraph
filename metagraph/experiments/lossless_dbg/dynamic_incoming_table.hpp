@@ -69,4 +69,4 @@ public:
 };
 
 
-#endif //METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP
+#endif // __DYNAMIC_INCOMING_TABLE_HPP__

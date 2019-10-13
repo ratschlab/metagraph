@@ -98,4 +98,4 @@ public:
     DenseHashMap<vector<char>> routing_table;
 };
 
-#endif //METAGRAPH_REFERENCE_DYNAMIC_ROUTING_TABLE_HPP
+#endif // __REFERENCE_DYNAMIC_ROUTING_TABLE_HPP__

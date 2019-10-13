@@ -51,4 +51,4 @@ json get_statistics(DBGSuccinct& graph,int64_t verbosity=~0) {
     return result;
 }
 
-#endif //METAGRAPH_GRAPH_STATISTICS_HPP
+#endif // __GRAPH_STATISTICS_HPP__

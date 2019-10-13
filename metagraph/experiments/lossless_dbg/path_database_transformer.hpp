@@ -23,4 +23,4 @@ PathDatabaseWavelet<> freeze(PathDatabaseDynamicCore<>& pd) {
 
 }
 
-#endif //METAGRAPH_PATH_DATABASE_TRANSFORMER_HPP
+#endif // __PATH_DATABASE_TRANSFORMER_HPP__
