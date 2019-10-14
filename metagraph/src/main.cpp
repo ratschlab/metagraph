@@ -764,7 +764,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     Timer timer;
 
     // construct graph storing all distinct k-mers in query
-    std::shared_ptr<DeBruijnGraph> graph(new DBGHashOrdered(full_dbg->get_k()));
+    std::shared_ptr<DeBruijnGraph> graph
+        = std::make_shared<DBGHashOrdered>(full_dbg->get_k(),
+                                           full_dbg->is_canonical_mode());
+
     call_sequences([&graph](const std::string &sequence) {
         graph->add_sequence(sequence);
     });
@@ -777,9 +780,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
-    graph->call_sequences([&](const std::string &contig, const auto &path) {
-        contigs.emplace_back(contig, path);
-    });
+    graph->call_sequences(
+        [&](const std::string &contig, const auto &path) { contigs.emplace_back(contig, path); },
+        graph->is_canonical_mode()
+    );
 
     if (utils::get_verbose()) {
         std::cout << "Query graph --- contigs extracted: "
@@ -797,7 +801,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         auto contig = std::move(contigs[i].first);
         auto path = std::move(contigs[i].second);
 
+        if (graph->is_canonical_mode()) {
+            size_t j = 0;
+            graph->map_to_nodes(contig, [&](auto node) { path[j++] = node; });
+            assert(j == path.size());
+        }
+
         size_t j = 0;
+
         full_dbg->map_to_nodes(contig,
             [&](auto node_in_full) { (*index_in_full_graph)[path[j++]] = node_in_full; }
         );
