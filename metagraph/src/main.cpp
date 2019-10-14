@@ -763,10 +763,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     Timer timer;
 
-    // construct graph storing all distinct k-mers in query
+    // construct graph storing all k-mers in query
     std::shared_ptr<DeBruijnGraph> graph
-        = std::make_shared<DBGHashOrdered>(full_dbg->get_k(),
-                                           full_dbg->is_canonical_mode());
+        = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), false);
 
     call_sequences([&graph](const std::string &sequence) {
         graph->add_sequence(sequence);
@@ -782,13 +781,28 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
     graph->call_sequences(
         [&](const std::string &contig, const auto &path) { contigs.emplace_back(contig, path); },
-        graph->is_canonical_mode()
+        full_dbg->is_canonical_mode()
     );
 
     if (utils::get_verbose()) {
         std::cout << "Query graph --- contigs extracted: "
                   << timer.elapsed() << " sec" << std::endl;
         timer.reset();
+    }
+
+    if (full_dbg->is_canonical_mode()) {
+        // construct graph storing all distinct k-mers in query
+        graph = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), true);
+
+        for (const auto &pair : contigs) {
+            graph->add_sequence(pair.first);
+        }
+
+        if (utils::get_verbose()) {
+            std::cout << "Query graph --- reindexed k-mers in canonical mode: "
+                      << timer.elapsed() << " sec" << std::endl;
+            timer.reset();
+        }
     }
 
     // map contigs onto the full graph
