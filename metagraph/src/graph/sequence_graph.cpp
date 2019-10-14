@@ -221,6 +221,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
                 assert(std::all_of(path.begin(), path.end(),
                                    [&](auto i) { return (*visited)[i]; }));
 
+                progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
+                                              [&](auto node) { return node && !(*visited)[node]; });
+
                 // Mark all nodes in path as unvisited and re-visit them while
                 // traversing the path (iterating through all nodes).
                 std::for_each(path.begin(), path.end(),
@@ -231,10 +234,10 @@ void call_sequences_from(const DeBruijnGraph &graph,
                     assert(path[i]);
                     (*visited)[path[i]] = true;
 
-                    // check if reverse-complement k-mer has been traversed
                     if (!dual_path[i])
                         continue;
 
+                    // check if reverse-complement k-mer has been traversed
                     if (!(*visited)[dual_path[i]] || dual_path[i] == path[i]) {
                         (*visited)[dual_path[i]] = (*discovered)[dual_path[i]] = true;
                         continue;
@@ -274,7 +277,7 @@ void call_sequences(const DeBruijnGraph &graph,
     graph.call_nodes([&](auto node) { discovered[node] = false; });
     sdsl::bit_vector visited = discovered;
 
-    ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(visited),
+    ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse graph",
                              std::cerr, !utils::get_verbose());
 
