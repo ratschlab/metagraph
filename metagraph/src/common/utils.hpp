@@ -705,6 +705,7 @@ namespace utils {
         static void cleanup(Array*) {}
     };
 
+    // removes redundant dummy BOSS k-mers from a sorted list
     class DummyKmersCleaner {
       public:
         template <class Array>
