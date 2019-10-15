@@ -60,7 +60,7 @@ class MEMSeeder : public Seeder<NodeType> {
   public:
     std::vector<Alignment<NodeType>> operator()(const char *begin, const char *end,
                                                 size_t clipping = 0,
-                                                bool orientation = false) const;
+                                                bool orientation = false) const override;
 
     virtual void initialize(const std::string &query, bool orientation) override final {
         orientation_ = orientation;

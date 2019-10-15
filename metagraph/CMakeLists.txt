@@ -100,7 +100,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   ")
 endif()
 
-find_package(OpenMP REQUIRED)
+if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
+  find_package(OPENMP REQUIRED)
+else()
+  find_package(OpenMP REQUIRED)
+endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
@@ -268,6 +272,7 @@ if(FOLLY_LIBRARIES)
     -lboost_filesystem
     -lboost_program_options
     -lcrypto
+    ${OpenMP_CXX_LIBRARIES}
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
@@ -333,7 +338,6 @@ endif()
 # check for std::filesystem::temp_directory_path
 include(CheckCXXSourceRuns)
 set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-set(CMAKE_REQUIRED_LIBRARIES "c++fs")
 check_cxx_source_runs("
     #include <iostream>
     #include <filesystem>
@@ -341,14 +345,10 @@ check_cxx_source_runs("
         std::cout << std::filesystem::temp_directory_path();
         return 0;
     }
-" CPPFS)
-unset(CMAKE_REQUIRED_FLAGS)
-unset(CMAKE_REQUIRED_LIBRARIES)
-if(CPPFS)
-  set(METALIBS ${METALIBS} -lc++fs)
-else()
+" CPPNOFS)
+if(NOT CPPNOFS)
   set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-  set(CMAKE_REQUIRED_LIBRARIES "stdc++fs")
+  set(CMAKE_REQUIRED_LIBRARIES "c++fs")
   check_cxx_source_runs("
       #include <iostream>
       #include <filesystem>
@@ -356,13 +356,29 @@ else()
           std::cout << std::filesystem::temp_directory_path();
           return 0;
       }
-  " STDCPPFS)
+  " CPPFS)
   unset(CMAKE_REQUIRED_FLAGS)
   unset(CMAKE_REQUIRED_LIBRARIES)
-  if(STDCPPFS)
-    set(METALIBS ${METALIBS} -lstdc++fs)
+  if(CPPFS)
+    set(METALIBS ${METALIBS} -lc++fs)
   else()
-    message(FATAL_ERROR "std::filesystem not found")
+    set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+    set(CMAKE_REQUIRED_LIBRARIES "stdc++fs")
+    check_cxx_source_runs("
+        #include <iostream>
+        #include <filesystem>
+        int main() {
+            std::cout << std::filesystem::temp_directory_path();
+            return 0;
+        }
+    " STDCPPFS)
+    unset(CMAKE_REQUIRED_FLAGS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if(STDCPPFS)
+      set(METALIBS ${METALIBS} -lstdc++fs)
+    else()
+      message(FATAL_ERROR "std::filesystem not found")
+    endif()
   endif()
 endif()
 

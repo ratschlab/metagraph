@@ -309,6 +309,8 @@ RowCompressed<Label>::StreamRows<RowType>::StreamRows(std::string filename) {
     sr_ = std::make_unique<::StreamRows<RowType>>(filename, instream.tellg());
 }
 
+template class RowCompressed<std::string>::StreamRows<BinaryMatrix::SetBitPositions>;
+
 template <typename Label>
 void RowCompressed<Label>
 ::write_rows(std::string filename,
