@@ -260,7 +260,7 @@ find_library(FOLLY_LIBRARIES
   HINTS
   ENV LD_LIBRARY_PATH
   PATHS
-    ~/.linuxbrew/lib
+    $ENV{HOME}/.linuxbrew/lib
 )
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
@@ -285,7 +285,7 @@ if(FOLLY_LIBRARIES)
     HINTS
     ENV LD_LIBRARY_PATH
     PATHS
-      ~/.linuxbrew/lib
+      $ENV{HOME}/.linuxbrew/lib
   )
   if(LIBERTY)
     set(METALIBS ${METALIBS} ${LIBERTY})
