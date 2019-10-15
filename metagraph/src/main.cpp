@@ -36,6 +36,7 @@ typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
+static const size_t kRowBatchSize = 100'000;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -881,6 +882,25 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         }
     }
 
+    assert(index_in_full_graph.get());
+
+    std::vector<std::pair<uint64_t, uint64_t>> from_full_to_query;
+    from_full_to_query.reserve(index_in_full_graph->size());
+
+    for (uint64_t node = 0; node < index_in_full_graph->size(); ++node) {
+        if ((*index_in_full_graph)[node]) {
+            from_full_to_query.emplace_back(
+                AnnotatedDBG::graph_to_anno_index((*index_in_full_graph)[node]),
+                AnnotatedDBG::graph_to_anno_index(node)
+            );
+        }
+    }
+
+    ips4o::parallel::sort(from_full_to_query.begin(), from_full_to_query.end(),
+        [](const auto &first, const auto &second) { return first.first < second.first; },
+        num_threads
+    );
+
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
     auto annotation = std::make_unique<annotate::RowCompressed<>>(
@@ -888,20 +908,32 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         full_annotation.get_label_encoder().get_labels(),
         [&](annotate::RowCompressed<>::CallRow call_row) {
 
-            #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 100)
-            for (uint64_t node = 0; node < index_in_full_graph->size(); ++node) {
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (uint64_t batch_begin = 0;
+                                batch_begin < from_full_to_query.size();
+                                                batch_begin += kRowBatchSize) {
 
-                assert(index_in_full_graph.get());
-                assert(node < index_in_full_graph->size());
+                const uint64_t batch_end
+                    = std::min(batch_begin + kRowBatchSize,
+                               static_cast<uint64_t>(from_full_to_query.size()));
 
-                if (!(*index_in_full_graph)[node])
-                    continue;
+                std::vector<uint64_t> row_indexes;
+                row_indexes.reserve(batch_end - batch_begin);
 
-                auto row_id = AnnotatedDBG::graph_to_anno_index((*index_in_full_graph)[node]);
-                assert(row_id < full_annotation.num_objects());
+                for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                    assert(from_full_to_query[i].first < full_annotation.num_objects());
 
-                call_row(AnnotatedDBG::graph_to_anno_index(node),
-                         full_annotation.get_label_codes(row_id));
+                    row_indexes.push_back(from_full_to_query[i].first);
+                }
+
+                auto rows = full_annotation.get_label_codes(row_indexes);
+
+                assert(rows.size() == batch_end - batch_begin);
+
+                for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                    call_row(from_full_to_query[i].second,
+                             std::move(rows[i - batch_begin]));
+                }
             }
         }
     );
