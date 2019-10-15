@@ -809,7 +809,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     auto index_in_full_graph
         = std::make_shared<std::vector<uint64_t>>(graph->num_nodes() + 1, 0);
 
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
 
         auto contig = std::move(contigs[i].first);
@@ -888,7 +888,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         full_annotation.get_label_encoder().get_labels(),
         [&](annotate::RowCompressed<>::CallRow call_row) {
 
-            #pragma omp parallel for num_threads(num_threads)
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 100)
             for (uint64_t node = 0; node < index_in_full_graph->size(); ++node) {
 
                 assert(index_in_full_graph.get());
