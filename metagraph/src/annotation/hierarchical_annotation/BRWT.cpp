@@ -54,11 +54,55 @@ std::vector<BRWT::Column> BRWT::get_row(Row row) const {
 
 std::vector<std::vector<BRWT::Column>>
 BRWT::get_rows(const std::vector<Row> &row_ids) const {
-    // TODO: improve by querying columns in BRWT
     std::vector<std::vector<Column>> rows(row_ids.size());
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        rows[i] = get_row(row_ids[i]);
+
+    // check whether it is a leaf
+    if (!child_nodes_.size()) {
+        assert(assignments_.size() == 1);
+
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            assert(row_ids[i] < num_rows());
+
+            if (nonzero_rows_[row_ids[i]])
+                rows[i] = utils::arange<Column>(0, assignments_.size());
+        }
+
+        return rows;
     }
+
+    // construct indexing for children and the inverse mapping
+    std::vector<Row> child_row_ids;
+    child_row_ids.reserve(row_ids.size());
+
+    std::vector<Row> from_child_to_parent;
+    from_child_to_parent.reserve(row_ids.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        assert(row_ids[i] < num_rows());
+
+        // check if the row is not empty
+        if (nonzero_rows_[row_ids[i]]) {
+            // map index from parent's to children's coordinate system
+            child_row_ids.push_back(nonzero_rows_.rank1(row_ids[i]) - 1);
+            from_child_to_parent.push_back(i);
+        }
+    }
+
+    // query all children subtrees
+    for (size_t j = 0; j < child_nodes_.size(); ++j) {
+        auto child_rows = child_nodes_[j]->get_rows(child_row_ids);
+
+        // push rows from children back to |rows|
+        for (size_t i = 0; i < child_rows.size(); ++i) {
+            auto &row = rows[from_child_to_parent[i]];
+            auto &child_row = child_rows[i];
+
+            for (auto child_col_id : child_row) {
+                row.push_back(assignments_.get(j, child_col_id));
+            }
+        }
+    }
+
     return rows;
 }
 
