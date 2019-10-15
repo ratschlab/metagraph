@@ -339,6 +339,35 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
+    // check get_rows, query first |n| rows
+    for (size_t n : { size_t(0),
+                      size_t(matrix.num_rows() / 2),
+                      size_t(matrix.num_rows()) }) {
+        std::vector<uint64_t> indices(n);
+        std::iota(indices.begin(), indices.end(), 0);
+
+        auto rows = matrix.get_rows(indices);
+
+        ASSERT_EQ(n, rows.size());
+
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const auto &row_set_bits = rows[i];
+
+            // make sure all returned indexes are unique
+            ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
+
+            for (auto j : row_set_bits) {
+                ASSERT_TRUE(j < matrix.num_columns());
+                EXPECT_TRUE((*columns[j])[i]);
+            }
+
+            auto set_bits = convert_to_set(row_set_bits);
+            for (size_t j = 0; j < columns.size(); ++j) {
+                EXPECT_EQ((*columns[j])[i], set_bits.count(j));
+            }
+        }
+    }
+
     // check get
     for (size_t i = 0; i < matrix.num_rows(); ++i) {
         for (size_t j = 0; j < matrix.num_columns(); ++j) {

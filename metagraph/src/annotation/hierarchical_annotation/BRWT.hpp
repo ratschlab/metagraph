@@ -35,6 +35,7 @@ class BRWT : public BinaryMatrix {
 
     bool get(Row row, Column column) const;
     std::vector<Column> get_row(Row row) const;
+    std::vector<std::vector<Column>> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);

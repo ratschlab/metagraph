@@ -73,6 +73,8 @@ class MultiLabelAnnotation
 
     virtual void set_labels(Index i, const VLabels &labels) = 0;
     virtual VLabels get_labels(Index i) const = 0;
+    virtual std::vector<VLabels>
+    get_labels(const std::vector<Index> &indices) const = 0;
 
     virtual void add_label(Index i, const Label &label) = 0;
     virtual void add_labels(Index i, const VLabels &labels) = 0;
@@ -167,9 +169,13 @@ class MultiLabelEncoded
     virtual ~MultiLabelEncoded() {}
 
     virtual VLabels get_labels(Index i) const override final;
+    virtual std::vector<VLabels>
+    get_labels(const std::vector<Index> &indices) const override final;
 
     virtual std::unique_ptr<IterateRows> iterator() const;
     virtual std::vector<uint64_t> get_label_codes(Index i) const = 0;
+    virtual std::vector<std::vector<uint64_t>>
+    get_label_codes(const std::vector<Index> &indices) const;
 
     virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
 

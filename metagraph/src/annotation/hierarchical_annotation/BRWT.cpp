@@ -52,6 +52,16 @@ std::vector<BRWT::Column> BRWT::get_row(Row row) const {
     return row_set_bits;
 }
 
+std::vector<std::vector<BRWT::Column>>
+BRWT::get_rows(const std::vector<Row> &row_ids) const {
+    // TODO: improve by querying columns in BRWT
+    std::vector<std::vector<Column>> rows(row_ids.size());
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = get_row(row_ids[i]);
+    }
+    return rows;
+}
+
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {
     assert(column < num_columns());
 

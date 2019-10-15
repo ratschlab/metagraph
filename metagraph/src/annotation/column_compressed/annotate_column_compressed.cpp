@@ -70,6 +70,23 @@ std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
 }
 
 template <typename Label>
+std::vector<std::vector<uint64_t>>
+ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) const {
+    std::vector<std::vector<uint64_t>> rows(indices.size());
+
+    for (size_t j = 0; j < num_labels(); ++j) {
+        for (size_t i = 0; i < indices.size(); ++i) {
+            assert(indices[i] < num_rows_);
+
+            if (is_set(indices[i], j))
+                rows[i].push_back(j);
+        }
+    }
+
+    return rows;
+}
+
+template <typename Label>
 void ColumnCompressed<Label>::add_label(Index i, const Label &label) {
     assert(i < num_rows_);
 

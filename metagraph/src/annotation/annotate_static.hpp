@@ -63,6 +63,8 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     };
 
     std::vector<uint64_t> get_label_codes(Index i) const override;
+    std::vector<std::vector<uint64_t>>
+    get_label_codes(const std::vector<Index> &indices) const override;
 
     typedef caches::fixed_sized_cache<Index,
                                       std::vector<uint64_t>,

@@ -102,6 +102,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     const bitmap& get_column(size_t j) const;
 
     std::vector<uint64_t> get_label_codes(Index i) const override;
+    std::vector<std::vector<uint64_t>>
+    get_label_codes(const std::vector<Index> &indices) const override;
 
     uint64_t num_rows_;
 

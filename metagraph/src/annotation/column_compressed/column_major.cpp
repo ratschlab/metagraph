@@ -45,6 +45,25 @@ ColMajorCompressed::get_row(Row row) const {
     return result;
 }
 
+std::vector<std::vector<ColMajorCompressed::Column>>
+ColMajorCompressed::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<std::vector<Column>> rows(row_ids.size());
+
+    for (size_t j = 0; j < columns_.size(); ++j) {
+        assert(columns_[j].get());
+        const auto &col = (*columns_[j]);
+
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            assert(row_ids[i] < num_rows());
+
+            if (col[row_ids[i]])
+                rows[i].push_back(j);
+        }
+    }
+
+    return rows;
+}
+
 std::vector<ColMajorCompressed::Row>
 ColMajorCompressed::get_column(Column column) const {
     assert(column < columns_.size());

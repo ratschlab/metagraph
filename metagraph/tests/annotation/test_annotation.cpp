@@ -40,6 +40,17 @@ TYPED_TEST(AnnotatorPresetTest, GetLabels) {
               convert_to_set(this->annotation->get_labels(4)));
 }
 
+TYPED_TEST(AnnotatorPresetTest, GetLabelsAll) {
+    auto rows = this->annotation->get_labels(std::vector<uint64_t> { 0, 1, 2, 3, 4 });
+    ASSERT_EQ(5u, rows.size());
+
+    EXPECT_EQ(convert_to_set({"Label0", "Label2", "Label8"}), convert_to_set(rows[0]));
+    EXPECT_EQ(std::vector<std::string>({}), rows[1]);
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}), convert_to_set(rows[2]));
+    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}), convert_to_set(rows[3]));
+    EXPECT_EQ(convert_to_set({"Label2"}), convert_to_set(rows[4]));
+}
+
 TYPED_TEST(AnnotatorTest, GetLabelsOneRow) {
     annotate::ColumnCompressed<> column_annotator(5);
     column_annotator.add_labels(0, {"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"});

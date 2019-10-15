@@ -146,6 +146,13 @@ std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
+std::vector<std::vector<uint64_t>>
+StaticBinRelAnnotator<BinaryMatrixType, Label>
+::get_label_codes(const std::vector<Index> &indices) const {
+    return matrix_->get_rows(indices);
+}
+
+template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::reset_row_cache(size_t size) {
     cached_rows_.reset(size ? new RowCacheType(size) : nullptr);

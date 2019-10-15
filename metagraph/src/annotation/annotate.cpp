@@ -152,6 +152,43 @@ MultiLabelEncoded<IndexType, LabelType>::get_labels(Index i) const {
     return labels;
 }
 
+// calls get_label_codes(indices)
+template <typename IndexType, typename LabelType>
+std::vector<typename MultiLabelEncoded<IndexType, LabelType>::VLabels>
+MultiLabelEncoded<IndexType, LabelType>
+::get_labels(const std::vector<Index> &indices) const {
+    auto rows = get_label_codes(indices);
+
+    std::vector<VLabels> annotation(rows.size());
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        auto row = std::move(rows[i]);
+
+        annotation[i].reserve(row.size());
+        for (auto label_code : row) {
+            annotation[i].push_back(label_encoder_.decode(label_code));
+        }
+    }
+
+    return annotation;
+}
+
+// calls get_label_codes(i)
+template <typename IndexType, typename LabelType>
+std::vector<std::vector<uint64_t>>
+MultiLabelEncoded<IndexType, LabelType>
+::get_label_codes(const std::vector<Index> &indices) const {
+    std::vector<std::vector<uint64_t>> rows(indices.size());
+
+    for (size_t i = 0; i < indices.size(); ++i) {
+        assert(indices[i] < this->num_objects());
+
+        rows[i] = get_label_codes(indices[i]);
+    }
+
+    return rows;
+}
+
 template class MultiLabelEncoded<uint64_t, std::string>;
 
 template class LabelEncoder<std::string>;

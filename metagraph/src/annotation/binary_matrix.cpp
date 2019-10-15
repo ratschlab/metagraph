@@ -3,6 +3,17 @@
 #include "utils.hpp"
 
 
+std::vector<std::vector<BinaryMatrix::Column>>
+BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<std::vector<Column>> rows(row_ids.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = get_row(row_ids[i]);
+    }
+
+    return rows;
+}
+
 template <typename RowType>
 StreamRows<RowType>::StreamRows(const std::string &filename, size_t offset) {
     std::ifstream instream(filename, std::ios::binary);
