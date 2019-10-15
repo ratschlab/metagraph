@@ -34,12 +34,8 @@ RowCompressed<Label>::RowCompressed(uint64_t num_rows,
     }
 
     matrix_.reset(new VectorRowBinMat<>(num_rows, labels.size(), [&](auto call_row) {
-        call_rows([&](Index i, const VLabels &row_labels) {
-            VectorRowBinMat<>::row_type row(row_labels.size());
-            for (size_t j = 0; j < row_labels.size(); ++j) {
-                row[j] = label_encoder_.encode(row_labels[j]);
-            }
-            call_row(i, std::move(row));
+        call_rows([&](Index i, const std::vector<uint64_t> &row) {
+            call_row(i, VectorRowBinMat<>::row_type(row.begin(), row.end()));
         });
     }));
 }

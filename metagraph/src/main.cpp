@@ -901,7 +901,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 assert(row_id < full_annotation.num_objects());
 
                 call_row(AnnotatedDBG::graph_to_anno_index(node),
-                         full_annotation.get_labels(row_id));
+                         full_annotation.get_label_codes(row_id));
             }
         }
     );
