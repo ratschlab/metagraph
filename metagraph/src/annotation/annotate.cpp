@@ -133,7 +133,24 @@ template <typename IndexType, typename LabelType>
 std::unique_ptr<IterateRows>
 MultiLabelEncoded<IndexType, LabelType>::iterator() const {
     return std::make_unique<IterateRowsByIndex<MultiLabelEncoded<IndexType, LabelType>>>(*this);
-};
+}
+
+// calls get_label_codes(i)
+template <typename IndexType, typename LabelType>
+typename MultiLabelEncoded<IndexType, LabelType>::VLabels
+MultiLabelEncoded<IndexType, LabelType>::get_labels(Index i) const {
+    assert(i < this->num_objects());
+
+    const auto &label_codes = get_label_codes(i);
+
+    VLabels labels(label_codes.size());
+
+    for (size_t j = 0; j < label_codes.size(); ++j) {
+        labels[j] = label_encoder_.decode(label_codes[j]);
+    }
+
+    return labels;
+}
 
 template class MultiLabelEncoded<uint64_t, std::string>;
 

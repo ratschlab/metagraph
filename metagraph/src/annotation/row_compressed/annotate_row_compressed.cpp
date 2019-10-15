@@ -64,16 +64,6 @@ void RowCompressed<Label>::set_labels(Index i, const VLabels &labels) {
 }
 
 template <typename Label>
-typename RowCompressed<Label>::VLabels
-RowCompressed<Label>::get_labels(Index i) const {
-    VLabels labels;
-    for (auto col : matrix_->get_row(i)) {
-        labels.push_back(label_encoder_.decode(col));
-    }
-    return labels;
-}
-
-template <typename Label>
 void RowCompressed<Label>::add_label(Index i, const Label &label) {
     matrix_->set(i, label_encoder_.insert_and_encode(label));
 }

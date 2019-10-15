@@ -166,6 +166,8 @@ class MultiLabelEncoded
 
     virtual ~MultiLabelEncoded() {}
 
+    virtual VLabels get_labels(Index i) const override final;
+
     virtual std::unique_ptr<IterateRows> iterator() const;
     virtual std::vector<uint64_t> get_label_codes(Index i) const = 0;
 

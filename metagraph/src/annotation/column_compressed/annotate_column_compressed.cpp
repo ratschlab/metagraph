@@ -58,18 +58,6 @@ void ColumnCompressed<Label>::set_labels(Index i, const VLabels &labels) {
 }
 
 template <typename Label>
-typename ColumnCompressed<Label>::VLabels
-ColumnCompressed<Label>::get_labels(Index i) const {
-    assert(i < num_rows_);
-
-    VLabels labels;
-    for (auto label_index : get_label_codes(i)) {
-        labels.push_back(label_encoder_.decode(label_index));
-    }
-    return labels;
-}
-
-template <typename Label>
 std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
     assert(i < num_rows_);
 

@@ -48,7 +48,6 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                   std::function<void(CallRow)> call_rows);
 
     void set_labels(Index i, const VLabels &labels);
-    VLabels get_labels(Index i) const;
 
     void add_label(Index i, const Label &label);
     void add_labels(Index i, const VLabels &labels);

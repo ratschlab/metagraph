@@ -59,18 +59,6 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
-auto StaticBinRelAnnotator<BinaryMatrixType, Label>::get_labels(Index i) const
--> VLabels {
-    assert(i < num_objects());
-
-    VLabels labels;
-    for (auto col : get_label_codes(i)) {
-        labels.push_back(label_encoder_.decode(col));
-    }
-    return labels;
-}
-
-template <class BinaryMatrixType, typename Label>
 void
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::serialize(const std::string &filename) const {

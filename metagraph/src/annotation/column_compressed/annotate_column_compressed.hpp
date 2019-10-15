@@ -41,7 +41,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     using MultiLabelEncoded<uint64_t, Label>::set;
     void set_labels(Index i, const VLabels &labels) override;
-    VLabels get_labels(Index i) const override;
 
     void add_label(Index i, const Label &label) override;
     void add_labels(Index i, const VLabels &labels) override;

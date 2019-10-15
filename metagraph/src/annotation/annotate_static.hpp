@@ -28,8 +28,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 
-    VLabels get_labels(Index i) const override;
-
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
     bool dump_columns(const std::string &prefix,
