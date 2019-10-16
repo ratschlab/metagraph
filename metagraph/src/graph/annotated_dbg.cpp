@@ -113,10 +113,7 @@ count_labels(const AnnotatedDBG::Annotator &annotation,
     std::transform(index_counts.begin(), index_counts.end(), indices.begin(),
                    [](const auto &pair) { return pair.first; });
 
-    std::vector<StringCountPair> label_counts;
-    label_counts.reserve(annotation.num_labels());
-
-    std::unordered_map<size_t, size_t> label_code_to_index;
+    std::vector<size_t> code_counts(annotation.num_labels(), 0);
 
     auto it = index_counts.begin();
     annotation.call_rows(
@@ -125,12 +122,9 @@ count_labels(const AnnotatedDBG::Annotator &annotation,
             assert(it != index_counts.end());
 
             for (size_t label_code : row) {
-                if (!label_code_to_index.count(label_code)) {
-                    label_counts.emplace_back(annotation.get_label_encoder().decode(label_code), it->second);
-                    label_code_to_index[label_code] = label_counts.size() - 1;
-                } else {
-                    label_counts[label_code_to_index[label_code]].second += it->second;
-                }
+                assert(label_code < code_counts.size());
+
+                code_counts[label_code] += it->second;
             }
 
             ++it;
@@ -142,6 +136,16 @@ count_labels(const AnnotatedDBG::Annotator &annotation,
         // and maintain a pointer to the smallest count with positive number of labels.
         // The order of pointers is a non decreasing sequence, so the complexity is O(\sum_i count_i)
     );
+
+    std::vector<StringCountPair> label_counts;
+    label_counts.reserve(annotation.num_labels());
+
+    for (size_t label_code = 0; label_code < code_counts.size(); ++label_code) {
+        if (code_counts[label_code]) {
+            label_counts.emplace_back(annotation.get_label_encoder().decode(label_code),
+                                      code_counts[label_code]);
+        }
+    }
 
     return label_counts;
 }
