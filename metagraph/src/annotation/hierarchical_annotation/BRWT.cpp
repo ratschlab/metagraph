@@ -80,11 +80,42 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     for (size_t i = 0; i < row_ids.size(); ++i) {
         assert(row_ids[i] < num_rows());
 
-        // check if the row is not empty
-        if (nonzero_rows_[row_ids[i]]) {
-            // map index from parent's to children's coordinate system
-            child_row_ids.push_back(nonzero_rows_.rank1(row_ids[i]) - 1);
-            from_child_to_parent.push_back(i);
+        uint64_t global_offset = row_ids[i];
+
+        // if next word containes three or more positions, query the whole word
+        if (i + 2 < row_ids.size()
+                && row_ids[i + 2] < global_offset + 64
+                && row_ids[i + 2] >= global_offset
+                && global_offset + 64 <= nonzero_rows_.size()) {
+            // get the word
+            uint64_t word = nonzero_rows_.get_int(global_offset, 64);
+            uint64_t rank = -1ULL;
+
+            do {
+                // check index
+                uint8_t offset = row_ids[i] - global_offset;
+                if (word & (1ULL << offset)) {
+                    if (rank == -1ULL)
+                        rank = global_offset > 0
+                                ? nonzero_rows_.rank1(global_offset - 1)
+                                : 0;
+
+                    // map index from parent's to children's coordinate system
+                    child_row_ids.push_back(rank + sdsl::bits::cnt(word & sdsl::bits::lo_set[offset + 1]) - 1);
+                    from_child_to_parent.push_back(i);
+                }
+            } while (++i < row_ids.size()
+                        && row_ids[i] < global_offset + 64
+                        && row_ids[i] >= global_offset);
+            --i;
+
+        } else {
+            // check index
+            if (nonzero_rows_[global_offset]) {
+                // map index from parent's to children's coordinate system
+                child_row_ids.push_back(nonzero_rows_.rank1(global_offset) - 1);
+                from_child_to_parent.push_back(i);
+            }
         }
     }
 
