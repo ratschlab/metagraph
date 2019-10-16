@@ -239,6 +239,7 @@ include_directories(
   external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
   external-libraries/nvbio/contrib/priority-deque
+  external-libraries/rollinghashcpp
   ${INCLUDE_DIRS}
 )
 
