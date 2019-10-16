@@ -3,6 +3,7 @@
 #include <chrono>
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
+#include <ips4o.hpp>
 
 #include "method_constructors.hpp"
 #include "data_generation.hpp"
@@ -14,6 +15,9 @@
 #include "alphabets.hpp"
 #include "aligner_helper.hpp"
 #include "reverse_complement.hpp"
+#include "annotate_row_compressed.hpp"
+#include "static_annotators_def.hpp"
+#include "config.hpp"
 
 using namespace std::chrono_literals;
 
@@ -182,6 +186,81 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
                                  double *false_pos_ptr, double *false_neg_ptr);
 
 
+Config::AnnotationType parse_annotation_type(const std::string &filename) {
+    if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
+        return Config::AnnotationType::ColumnCompressed;
+
+    } else if (utils::ends_with(filename, annotate::kRowAnnotatorExtension)) {
+        return Config::AnnotationType::RowCompressed;
+
+    } else if (utils::ends_with(filename, annotate::kBRWTExtension)) {
+        return Config::AnnotationType::BRWT;
+
+    } else if (utils::ends_with(filename, annotate::kBinRelWT_sdslExtension)) {
+        return Config::AnnotationType::BinRelWT_sdsl;
+
+    } else if (utils::ends_with(filename, annotate::kBinRelWTExtension)) {
+        return Config::AnnotationType::BinRelWT;
+
+    } else if (utils::ends_with(filename, annotate::kRowPackedExtension)) {
+        return Config::AnnotationType::RowFlat;
+
+    } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
+        return Config::AnnotationType::RBFish;
+
+    } else {
+        std::cerr << "Error: unknown annotation format in "
+                  << filename << std::endl;
+        exit(1);
+    }
+}
+
+typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
+                                                 size_t cache_size = 0) {
+    std::unique_ptr<Annotator> annotation;
+
+    switch (parse_annotation_type(filename)) {
+        case Config::ColumnCompressed: {
+            annotation.reset(new annotate::ColumnCompressed<>(1));
+            break;
+        }
+        case Config::RowCompressed: {
+            annotation.reset(new annotate::RowCompressed<>(1));
+            break;
+        }
+        case Config::BRWT: {
+            annotation.reset(new annotate::BRWTCompressed<>(cache_size));
+            break;
+        }
+        case Config::BinRelWT_sdsl: {
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator(cache_size));
+            break;
+        }
+        case Config::BinRelWT: {
+            annotation.reset(new annotate::BinRelWTAnnotator(cache_size));
+            break;
+        }
+        case Config::RowFlat: {
+            annotation.reset(new annotate::RowFlatAnnotator(cache_size));
+            break;
+        }
+        case Config::RBFish: {
+            annotation.reset(new annotate::RainbowfishAnnotator(cache_size));
+            break;
+        }
+    }
+
+    if (annotation->load(filename))
+        return annotation;
+
+    std::cerr << "ERROR: can't load annotation "
+              << filename << std::endl;
+    exit(1);
+}
+
+
 int main(int argc, char *argv[]) {
     try {
         TCLAP::CmdLine cmd("Benchmarks and data generation for metagraph", ' ', "");
@@ -195,7 +274,8 @@ int main(int argc, char *argv[]) {
             "query",
             "slice",
             "estimate_abundance_threshold",
-            "evaluate_alignment"
+            "evaluate_alignment",
+            "query_annotation_rows"
         };
 
         ValuesConstraint<std::string> regime_constraint(regimes);
@@ -912,6 +992,90 @@ int main(int argc, char *argv[]) {
                                                  &*alt.begin(), &*alt.end(),
                                                  cigar_ob) << std::endl;
             }
+        } else if (regime == "query_annotation_rows") {
+            UnlabeledValueArg<std::string> annotation_arg("input_file", "Annotation", true, "", "string", cmd);
+            ValueArg<int> num_rows_arg("", "num_rows", "Rows to query", true, 0, "int", cmd);
+            ValueArg<int> cache_size_arg("", "cache_size", "Number of rows cached", false, 0, "int", cmd);
+            ValueArg<int> batch_size_arg("", "batch_size", "Number of rows in batch (task)", false, 100'000, "int", cmd);
+            ValueArg<int> num_threads_arg("", "num_threads", "Number threads", false, 1, "int", cmd);
+            cmd.parse(argc, argv);
+
+            size_t num_threads = num_threads_arg.getValue() > 0
+                                    ? num_threads_arg.getValue()
+                                    : 1;
+            const size_t batch_size = batch_size_arg.getValue();
+
+            Timer timer;
+
+            auto annotation = initialize_annotation(annotation_arg.getValue(),
+                                                    cache_size_arg.getValue());
+
+            std::cout << "Annotation loaded in " << timer.elapsed() << " sec" << std::endl;
+            timer.reset();
+
+            std::mt19937 gen;
+            gen.seed(17);
+
+            auto row_indexes = utils::sample_indexes(annotation->num_objects(),
+                                                     num_rows_arg.getValue(),
+                                                     gen);
+
+            std::vector<std::pair<uint64_t, uint64_t>> from_full_to_query;
+
+            for (uint64_t i = 0; i < row_indexes.size(); ++i) {
+                from_full_to_query.emplace_back(row_indexes[i], i);
+            }
+
+            ips4o::parallel::sort(from_full_to_query.begin(), from_full_to_query.end(),
+                [](const auto &first, const auto &second) { return first.first < second.first; },
+                num_threads
+            );
+
+            std::cout << "Indexes sampled in " << timer.elapsed() << " sec" << std::endl;
+            timer.reset();
+
+            // initialize fast query annotation
+            // copy annotations from the full graph to the query graph
+            auto row_annotation = std::make_unique<annotate::RowCompressed<>>(
+                num_rows_arg.getValue(),
+                annotation->get_label_encoder().get_labels(),
+                [&](annotate::RowCompressed<>::CallRow call_row) {
+
+                    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+                    for (uint64_t batch_begin = 0;
+                                        batch_begin < from_full_to_query.size();
+                                                        batch_begin += batch_size) {
+
+                        const uint64_t batch_end
+                            = std::min(batch_begin + batch_size_arg.getValue(),
+                                       static_cast<uint64_t>(from_full_to_query.size()));
+
+                        std::vector<uint64_t> row_indexes;
+                        row_indexes.reserve(batch_end - batch_begin);
+
+                        for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                            assert(from_full_to_query[i].first < annotation->num_objects());
+
+                            row_indexes.push_back(from_full_to_query[i].first);
+                        }
+
+                        auto rows = annotation->get_label_codes(row_indexes);
+
+                        assert(rows.size() == batch_end - batch_begin);
+
+                        for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                            call_row(from_full_to_query[i].second,
+                                     std::move(rows[i - batch_begin]));
+                        }
+                    }
+                }
+            );
+
+            std::cout << "Submatrix constructed in " << timer.elapsed() << " sec" << std::endl;
+            timer.reset();
+
+            std::cout << "Num rows in target annotation: " << row_annotation->num_objects() << std::endl;
+            std::cout << "Num columns in target annotation: " << row_annotation->num_labels() << std::endl;
         }
     } catch (const TCLAP::ArgException &e) {
         std::cerr << "ERROR: " << e.error()
