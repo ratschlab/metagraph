@@ -13,6 +13,8 @@
 #include "dbg_bitmap.hpp"
 #include "aligner_helper.hpp"
 
+std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
+
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>

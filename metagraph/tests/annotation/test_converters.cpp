@@ -14,6 +14,8 @@ const std::string test_dump_basename_row_compressed_merge = test_dump_basename +
 const std::string test_dump_basename_rowflat_merge = test_dump_basename + "_rowflat_merge";
 const std::string test_dump_basename_row_compressed_to_rowflat = test_dump_basename + "_row_compressed_to_rowflat";
 
+std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
+
 
 class ConvertFromRowCompressed : public ::testing::Test {
   protected:

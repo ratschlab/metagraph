@@ -11,6 +11,8 @@ const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
 const std::string test_dump_basename_vec_good = test_dump_basename + "_column_compressed";
 
+std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
+
 
 TEST(ColumnCompressed, add_label_random_with_caching) {
     size_t graph_half_size = 1000;

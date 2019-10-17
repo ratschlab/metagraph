@@ -28,16 +28,13 @@ RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse)  {
 template <typename Label>
 RowCompressed<Label>::RowCompressed(uint64_t num_rows,
                                     const std::vector<Label> &labels,
-                                    std::function<void(CallRow)> call_rows) {
+                                    std::function<void(CallRow)> call_rows)
+      : matrix_(new VectorRowBinMat<std::vector<uint64_t>>(num_rows,
+                                                           labels.size(),
+                                                           call_rows)) {
     for (const auto &label : labels) {
         label_encoder_.insert_and_encode(label);
     }
-
-    matrix_.reset(new VectorRowBinMat<>(num_rows, labels.size(), [&](auto call_row) {
-        call_rows([&](Index i, const std::vector<uint64_t> &row) {
-            call_row(i, VectorRowBinMat<>::row_type(row.begin(), row.end()));
-        });
-    }));
 }
 
 template <typename Label>

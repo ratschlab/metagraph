@@ -64,8 +64,12 @@ template <typename RowType>
 std::vector<typename VectorRowBinMat<RowType>::Column>
 VectorRowBinMat<RowType>::get_row(Row row) const {
     assert(row < vector_.size());
-    const auto &v = vector_[row];
-    return std::vector<Column>(v.begin(), v.end());
+    if constexpr(std::is_same_v<RowType, std::vector<Column>>) {
+        return vector_[row];
+    } else {
+        const auto &v = vector_[row];
+        return std::vector<Column>(v.begin(), v.end());
+    }
 }
 
 template <typename RowType>
@@ -157,3 +161,4 @@ double VectorRowBinMat<RowType>::density() const {
 }
 
 template class VectorRowBinMat<SmallVector<uint32_t>>;
+template class VectorRowBinMat<std::vector<uint64_t>>;

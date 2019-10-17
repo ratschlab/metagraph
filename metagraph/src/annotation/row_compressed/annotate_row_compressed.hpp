@@ -7,7 +7,6 @@
 
 #include "annotate.hpp"
 #include "binary_matrix.hpp"
-#include "vector_row_binmat.hpp"
 
 
 namespace annotate {
@@ -42,7 +41,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
-    typedef std::function<void(Index, const std::vector<uint64_t>&)> CallRow;
+    typedef std::function<void(Index, std::vector<uint64_t>&&)> CallRow;
     RowCompressed(uint64_t num_rows,
                   const std::vector<Label> &labels,
                   std::function<void(CallRow)> call_rows);
