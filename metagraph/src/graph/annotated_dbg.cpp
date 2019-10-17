@@ -68,22 +68,38 @@ void AnnotatedDBG::annotate_sequence(const std::string &sequence,
     );
 }
 
-std::vector<StringCountPair>
+// return all labels for which counts are greater than |min_count|
+// stop counting if count is greater than |count_cap|
+std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 count_labels(const annotate::ColumnCompressed<> &annotation,
              const std::unordered_map<uint64_t, size_t> &index_counts,
-             std::function<bool(size_t /* checked */,
-                                size_t /* matched */)> stop_counting_for_label) {
+             size_t min_count,
+             size_t count_cap) {
+
+    min_count = std::max(min_count, size_t(1));
+
+    assert(count_cap >= min_count);
+
+    size_t total_sum_count = 0;
+    for (const auto &pair : index_counts) {
+        total_sum_count += pair.second;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
 
     std::vector<uint64_t> indices(index_counts.size());
     std::transform(index_counts.begin(), index_counts.end(), indices.begin(),
                    [](const auto &pair) { return pair.first; });
 
-    std::vector<StringCountPair> label_counts;
+    std::vector<std::pair<uint64_t, size_t>> label_counts;
     label_counts.reserve(annotation.num_labels());
 
+    const auto &label_encoder = annotation.get_label_encoder();
+
     for (const auto &label : annotation.get_all_labels()) {
-        uint64_t total_checked = 0;
-        uint64_t total_matched = 0;
+        size_t total_checked = 0;
+        size_t total_matched = 0;
         annotation.call_relations(
             indices,
             label,
@@ -92,28 +108,43 @@ count_labels(const annotate::ColumnCompressed<> &annotation,
                 total_checked += count;
                 total_matched += count * matched;
             },
-            [&]() { return stop_counting_for_label(total_checked, total_matched); }
+            [&]() { return total_matched >= count_cap
+                        || total_matched + (total_sum_count - total_checked) < min_count; }
         );
 
-        if (total_matched)
-            label_counts.emplace_back(label, total_matched);
+        if (total_matched >= min_count)
+            label_counts.emplace_back(label_encoder.encode(label),
+                                      std::min(total_matched, count_cap));
     }
 
     return label_counts;
 }
 
-std::vector<StringCountPair>
+std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 count_labels(const AnnotatedDBG::Annotator &annotation,
              const std::unordered_map<uint64_t, size_t> &index_counts,
-             std::function<bool(size_t /* checked */,
-                                size_t /* min_matched */,
-                                size_t /* max_matched */)> /* stop_counting_labels */) {
+             size_t min_count,
+             size_t count_cap) {
+
+    min_count = std::max(min_count, size_t(1));
+
+    assert(count_cap >= min_count);
+
+    size_t total_sum_count = 0;
+    for (const auto &pair : index_counts) {
+        total_sum_count += pair.second;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
 
     std::vector<uint64_t> indices(index_counts.size());
     std::transform(index_counts.begin(), index_counts.end(), indices.begin(),
                    [](const auto &pair) { return pair.first; });
 
     std::vector<size_t> code_counts(annotation.num_labels(), 0);
+    size_t max_matched = 0;
+    size_t total_checked = 0;
 
     auto it = index_counts.begin();
     annotation.call_rows(
@@ -125,25 +156,28 @@ count_labels(const AnnotatedDBG::Annotator &annotation,
                 assert(label_code < code_counts.size());
 
                 code_counts[label_code] += it->second;
+                max_matched = std::max(max_matched, code_counts[label_code]);
             }
 
+            total_checked += it->second;
+
             ++it;
+        },
+        [&]() {
+            return max_matched + (total_sum_count - total_checked) < min_count;
         }
-        //TODO: implement the support for calling the smallest and the largest label count
-        // [&]() { return stop_counting_labels(checked, min_matched, max_matched); }
-        //
-        // Use unordered map: count -> number of labels with that count (histogram)
-        // and maintain a pointer to the smallest count with positive number of labels.
-        // The order of pointers is a non decreasing sequence, so the complexity is O(\sum_i count_i)
     );
 
-    std::vector<StringCountPair> label_counts;
+    if (max_matched < min_count)
+        return {};
+
+    std::vector<std::pair<uint64_t, size_t>> label_counts;
     label_counts.reserve(annotation.num_labels());
 
     for (size_t label_code = 0; label_code < code_counts.size(); ++label_code) {
-        if (code_counts[label_code]) {
-            label_counts.emplace_back(annotation.get_label_encoder().decode(label_code),
-                                      code_counts[label_code]);
+        if (code_counts[label_code] >= min_count) {
+            label_counts.emplace_back(label_code,
+                                      std::min(code_counts[label_code], count_cap));
         }
     }
 
@@ -179,39 +213,27 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     return get_labels(index_counts, min_count);
 }
 
-std::vector<std::string> AnnotatedDBG
-::get_labels(const std::unordered_map<row_index, size_t> &index_counts,
-             size_t min_count) const {
+std::vector<std::string>
+AnnotatedDBG::get_labels(const std::unordered_map<row_index, size_t> &index_counts,
+                         size_t min_count) const {
     assert(check_compatibility());
 
-    uint64_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
-    }
-
-    if (total_sum_count < min_count)
-        return {};
-
-    std::vector<StringCountPair> label_counts
+    auto code_counts
         = dynamic_cast<const annotate::ColumnCompressed<>*>(annotator_.get())
             // Iterate by column instead of by row for column-major annotators
             ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(*annotator_),
-                           index_counts,
-                           [&](size_t checked, size_t matched) {
-                               return matched >= min_count
-                                        || matched + (total_sum_count - checked) < min_count;
-                           })
+                           index_counts, min_count, min_count)
             : count_labels(*annotator_,
-                           index_counts,
-                           [&](size_t checked, size_t min_matched, size_t max_matched) {
-                               return min_matched >= min_count
-                                        || max_matched + (total_sum_count - checked) < min_count;
-                           });
+                           index_counts, min_count, min_count);
 
     std::vector<std::string> labels;
-    for (auto&& pair : label_counts) {
-        if (pair.second >= min_count)
-            labels.emplace_back(std::move(pair.first));
+    labels.reserve(code_counts.size());
+
+    const auto &label_encoder = annotator_->get_label_encoder();
+
+    for (auto&& pair : code_counts) {
+        assert(pair.second >= min_count);
+        labels.push_back(label_encoder.decode(pair.first));
     }
 
     return labels;
@@ -227,9 +249,9 @@ std::vector<std::string> AnnotatedDBG::get_labels(node_index index) const {
 std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(const std::string &sequence,
                              size_t num_top_labels,
-                             double min_label_frequency) const {
-    assert(min_label_frequency >= 0.);
-    assert(min_label_frequency <= 1.);
+                             double presence_ratio) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
     assert(check_compatibility());
 
     std::unordered_map<uint64_t, size_t> index_counts;
@@ -245,7 +267,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
         }
     });
 
-    uint64_t min_count = std::max(1.0, std::ceil(min_label_frequency
+    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio
                                                     * (num_present_kmers
                                                         + num_missing_kmers)));
     if (num_present_kmers < min_count)
@@ -260,44 +282,38 @@ AnnotatedDBG::get_top_labels(const std::unordered_map<node_index, size_t> &index
                              size_t min_count) const {
     assert(check_compatibility());
 
-    uint64_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
-    }
-
-    if (total_sum_count < min_count)
-        return {};
-
-    std::vector<StringCountPair> label_counts
+    auto code_counts
         = dynamic_cast<const annotate::ColumnCompressed<>*>(annotator_.get())
             // Iterate by column instead of by row for column-major annotators
             ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(*annotator_),
-                           index_counts,
-                           [&](size_t checked, size_t matched) {
-                               return matched + (total_sum_count - checked) < min_count;
-                           })
+                           index_counts, min_count, std::numeric_limits<size_t>::max())
             : count_labels(*annotator_,
-                           index_counts,
-                           [&](size_t checked, size_t /* min_matched */, size_t max_matched) {
-                               return max_matched + (total_sum_count - checked) < min_count;
-                           });
+                           index_counts, min_count, std::numeric_limits<size_t>::max());
 
-    // remove labels which don't meet |min_label_frequency| criterion
-    label_counts.erase(
-        std::remove_if(label_counts.begin(), label_counts.end(),
-                       [&](const auto &pair) { return pair.second < min_count; }),
-        label_counts.end()
-    );
+    assert(std::all_of(
+        code_counts.begin(), code_counts.end(),
+        [&](const auto &code_count) { return code_count.second >= min_count; }
+    ));
 
-    std::sort(label_counts.begin(), label_counts.end(),
+    std::sort(code_counts.begin(), code_counts.end(),
               [](const auto &first, const auto &second) {
                   return first.second > second.second;
               });
 
     // leave only first |num_top_labels| top labels
-    if (label_counts.size() > num_top_labels)
-        label_counts.erase(label_counts.begin() + num_top_labels,
-                           label_counts.end());
+    if (code_counts.size() > num_top_labels)
+        code_counts.erase(code_counts.begin() + num_top_labels,
+                           code_counts.end());
+
+    const auto &label_encoder = annotator_->get_label_encoder();
+
+    std::vector<StringCountPair> label_counts(code_counts.size());
+
+    for (size_t i = 0; i < code_counts.size(); ++i) {
+        label_counts[i].first = label_encoder.decode(code_counts[i].first);
+        label_counts[i].second = code_counts[i].second;
+    }
+
     return label_counts;
 }
 
