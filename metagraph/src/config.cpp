@@ -236,6 +236,8 @@ Config::Config(int argc, const char *argv[]) {
             to_fasta = true;
         } else if (!strcmp(argv[i], "--to-gfa")) {
             to_gfa = true;
+        } else if (!strcmp(argv[i], "--json")) {
+            output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
             to_fasta = true;
             unitigs = true;
@@ -720,6 +722,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            fprintf(stderr, "\t   --json \t\t\t\toutput alignment in JSON format [off]\n");
             fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximum exact matches in unitigs as seeds [off]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");

@@ -3116,7 +3116,6 @@ int main(int argc, const char *argv[]) {
                     ? new std::ofstream(config->outfbase)
                     : &std::cout;
 
-                bool write_json = utils::ends_with(config->outfbase, ".json");
                 Json::StreamWriterBuilder builder;
                 builder["indentation"] = "";
 
@@ -3128,7 +3127,7 @@ int main(int argc, const char *argv[]) {
                             auto paths = aligner->align(query);
 
                             std::ostringstream ostr;
-                            if (!write_json) {
+                            if (!config->output_json) {
                                 for (const auto &path : paths) {
                                     const auto& path_query = path.get_orientation()
                                         ? paths.get_query_reverse_complement()
@@ -3238,7 +3237,7 @@ int main(int argc, const char *argv[]) {
                 : &std::cout;
 
             std::unique_ptr<Json::StreamWriter> json_writer;
-            if (utils::ends_with(config->outfbase, ".json")) {
+            if (config->output_json) {
                 Json::StreamWriterBuilder builder;
                 builder["indentation"] = "";
                 json_writer.reset(builder.newStreamWriter());
@@ -3298,7 +3297,7 @@ int main(int argc, const char *argv[]) {
 
                     // print labels
                     std::lock_guard<std::mutex> lock(print_label_mutex);
-                    if (utils::ends_with(config->outfbase, ".json")) {
+                    if (config->output_json) {
                         json_writer->write(
                             alignment.to_json(
                                 query,
