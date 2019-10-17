@@ -12,13 +12,21 @@ template <typename Graph>
 class DeBruijnGraphCanonicalTest : public DeBruijnGraphTest<Graph> { };
 typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered,
-                         DBGSuccinct> CanonicalGraphTypes;
+                         DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 100>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<100000, 1>,
+                         DBGSuccinctBloom<100000, 2>> CanonicalGraphTypes;
 TYPED_TEST_CASE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 template <typename Graph>
 class DeBruijnGraphWithNTest : public DeBruijnGraphTest<Graph> { };
 #ifndef _DNA_GRAPH
 typedef ::testing::Types<DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 100>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<100000, 1>,
+                         DBGSuccinctBloom<100000, 2>,
                          DBGHashString> WithNGraphTypes;
 #else
 typedef ::testing::Types<> WithNGraphTypes;
@@ -32,6 +40,10 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered> NoNGraphTypes;
 #else
 typedef ::testing::Types<DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 100>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<100000, 1>,
+                         DBGSuccinctBloom<100000, 2>,
                          DBGHashString,
                          DBGHashOrdered,
                          DBGBitmap> NoNGraphTypes;
@@ -53,6 +65,9 @@ TYPED_TEST(DeBruijnGraphNoNTest, CheckGraph) {
 
 TEST(DeBruijnGraphWithNTest, CheckGraphCanonical) {
     EXPECT_TRUE(check_graph<DBGSuccinct>("ACGTN", true));
+    // TODO: enable when Bloom filter supporting arbitrary alphabet is used
+    // EXPECT_TRUE(check_graph<DBGSuccinctBloom<1, 100>>("ACGTN", true));
+    // EXPECT_TRUE(check_graph<DBGSuccinctBloom<1, 10>>("ACGTN", true));
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CheckGraphSequence) {
@@ -71,8 +86,14 @@ TYPED_TEST(DeBruijnGraphNoNTest, CheckGraphSequence) {
 TEST(DeBruijnGraphWithNTest, CheckGraphSequenceCanonical) {
 #if _DNA_GRAPH
     EXPECT_FALSE(check_graph<DBGSuccinct>("ACGTN", true, true));
+    // TODO: enable when Bloom filter supporting arbitrary alphabet is used
+    // EXPECT_FALSE(check_graph<DBGSuccinctBloom<1, 100>>("ACGTN", true, true));
+    // EXPECT_FALSE(check_graph<DBGSuccinctBloom<1, 10>>("ACGTN", true, true));
 #else
     EXPECT_TRUE(check_graph<DBGSuccinct>("ACGTN", true, true));
+    // TODO: enable when Bloom filter supporting arbitrary alphabet is used
+    // EXPECT_TRUE(check_graph<DBGSuccinctBloom<1, 100>>("ACGTN", true, true));
+    // EXPECT_TRUE(check_graph<DBGSuccinctBloom<1, 10>>("ACGTN", true, true));
 #endif
 }
 

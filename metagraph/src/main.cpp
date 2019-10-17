@@ -2849,15 +2849,58 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Graph loading...\t" << std::flush;
 
-            auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(
-                load_critical_dbg(files.at(0))
-            );
+            auto graph = load_critical_dbg(files.at(0));
 
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
 
+            auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
+
             if (!dbg_succ.get())
                 throw std::runtime_error("Only implemented for DBGSuccinct");
+
+            if (config->initialize_bloom) {
+                assert(config->bloom_filter_size
+                           || (config->bloom_fpp > 0.0 && config->bloom_fpp <= 1.0)
+                           || (config->bloom_bpe > 0.0 && config->bloom_bpe <= 1.0));
+
+                if (config->verbose) {
+                    std::cout << "Construct Bloom filter for nodes..." << std::endl;
+                }
+
+                timer.reset();
+
+                if (config->bloom_filter_size) {
+                    dbg_succ->initialize_bloom_filter<>(
+                        size_t(config->bloom_filter_size),
+                        config->bloom_max_num_hash_functions,
+                        config->seed
+                    );
+                } else if (config->bloom_fpp > 0) {
+                    dbg_succ->initialize_bloom_filter<>(
+                        config->bloom_fpp,
+                        config->bloom_max_num_hash_functions,
+                        config->seed
+                    );
+                } else if (config->bloom_bpe > 0) {
+                    dbg_succ->initialize_bloom_filter<>(
+                        size_t(std::ceil(config->bloom_bpe * dbg_succ->num_nodes())),
+                        config->bloom_max_num_hash_functions,
+                        config->seed
+                    );
+                } else {
+                    std::cerr << "ERROR: invalid option for Bloom filter initialization" << std::endl;
+                    exit(1);
+                }
+
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                assert(dbg_succ->get_bloom_filter());
+                dbg_succ->get_bloom_filter()->serialize(config->outfbase);
+
+                return 0;
+            }
 
             if (config->clear_dummy) {
                 if (config->verbose) {

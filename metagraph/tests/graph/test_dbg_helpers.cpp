@@ -63,6 +63,46 @@ build_graph<DBGSuccinct>(uint64_t k,
     return graph;
 }
 
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctBloomFPR<1, 100>>(uint64_t k,
+                                         const std::vector<std::string> &sequences,
+                                         bool canonical) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(1.0 / 100);
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctBloomFPR<1, 10>>(uint64_t k,
+                                        const std::vector<std::string> &sequences,
+                                        bool canonical) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(1.0 / 10);
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctBloom<100000, 1>>(uint64_t k,
+                                         const std::vector<std::string> &sequences,
+                                         bool canonical) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(size_t(100000), 1);
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctBloom<100000, 2>>(uint64_t k,
+                                     const std::vector<std::string> &sequences,
+                                     bool canonical) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(size_t(100000), 2);
+    return graph;
+}
+
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
@@ -116,6 +156,46 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
     return graph;
 }
 
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctBloomFPR<1, 100>>(uint64_t k,
+                                               const std::vector<std::string> &sequences,
+                                               bool canonical) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(1.0 / 100);
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctBloomFPR<1, 10>>(uint64_t k,
+                                              const std::vector<std::string> &sequences,
+                                              bool canonical) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(1.0 / 10);
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctBloom<100000, 1>>(uint64_t k,
+                                               const std::vector<std::string> &sequences,
+                                               bool canonical) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(size_t(100000), 1);
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctBloom<100000, 2>>(uint64_t k,
+                                               const std::vector<std::string> &sequences,
+                                               bool canonical) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(size_t(100000), 2);
+    return graph;
+}
+
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative(uint64_t k,
@@ -141,6 +221,22 @@ build_graph_iterative<DBGBitmap>(uint64_t, std::function<void(std::function<void
 template
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative<DBGSuccinct>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGSuccinctBloomFPR<1, 100>>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGSuccinctBloomFPR<1, 10>>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGSuccinctBloom<100000, 1>>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGSuccinctBloom<100000, 2>>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
 
 
 
@@ -185,6 +281,10 @@ bool check_graph(const std::string &alphabet, bool canonical, bool check_sequenc
 }
 
 template bool check_graph<DBGSuccinct>(const std::string &, bool, bool);
+template bool check_graph<DBGSuccinctBloomFPR<1, 100>>(const std::string &, bool, bool);
+template bool check_graph<DBGSuccinctBloomFPR<1, 10>>(const std::string &, bool, bool);
+template bool check_graph<DBGSuccinctBloom<100000, 1>>(const std::string &, bool, bool);
+template bool check_graph<DBGSuccinctBloom<100000, 2>>(const std::string &, bool, bool);
 template bool check_graph<DBGBitmap>(const std::string &, bool, bool);
 template bool check_graph<DBGHashOrdered>(const std::string &, bool, bool);
 template bool check_graph<DBGHashString>(const std::string &, bool, bool);

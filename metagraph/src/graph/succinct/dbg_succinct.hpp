@@ -5,6 +5,7 @@
 #include "bit_vector.hpp"
 #include "config.hpp"
 #include "boss.hpp"
+#include "kmer_bloom_filter.hpp"
 
 class MaskedDeBruijnGraph;
 
@@ -132,6 +133,46 @@ class DBGSuccinct : public DeBruijnGraph {
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 
+    template <class KmerHasher = RollingKmerMultiHasher<2, BOSS::TAlphabet>>
+    void initialize_bloom_filter(double false_positive_rate,
+                                 size_t max_num_hash_functions = -1,
+                                 uint64_t seed = 0x100000000) {
+        bloom_filter_.reset(IKmerBloomFilter::initialize<KmerHasher>(
+            get_k(),
+            false_positive_rate,
+            num_nodes(),
+            max_num_hash_functions,
+            canonical_mode_,
+            seed
+        ).release());
+
+        assert(bloom_filter_.get());
+
+        auto &filter = *bloom_filter_;
+        call_sequences([&](const auto &sequence, auto&&) { filter.add_sequence(sequence); });
+    }
+
+    template <class KmerHasher = RollingKmerMultiHasher<2, BOSS::TAlphabet>>
+    void initialize_bloom_filter(size_t filter_size,
+                                 size_t max_num_hash_functions = -1,
+                                 uint64_t seed = 0x100000000) {
+        bloom_filter_.reset(IKmerBloomFilter::initialize<KmerHasher>(
+            get_k(),
+            filter_size,
+            num_nodes(),
+            max_num_hash_functions,
+            canonical_mode_,
+            seed
+        ).release());
+
+        assert(bloom_filter_.get());
+
+        auto &filter = *bloom_filter_;
+        call_sequences([&](const auto &sequence, auto&&) { filter.add_sequence(sequence); });
+    }
+
+    const IKmerBloomFilter* get_bloom_filter() const { return bloom_filter_.get(); }
+
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
 
@@ -140,6 +181,8 @@ class DBGSuccinct : public DeBruijnGraph {
     std::unique_ptr<bit_vector> valid_edges_;
 
     bool canonical_mode_;
+
+    std::unique_ptr<IKmerBloomFilter> bloom_filter_;
 
     static constexpr auto kExtension = ".dbg";
     static constexpr auto kDummyMaskExtension = ".edgemask";

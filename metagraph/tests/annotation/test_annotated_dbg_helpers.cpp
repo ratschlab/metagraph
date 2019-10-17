@@ -7,9 +7,10 @@
 
 
 template <class Graph, class Annotation>
-std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
-                                               const std::vector<std::string> &sequences,
-                                               const std::vector<std::string> &labels) {
+std::unique_ptr<AnnotatedDBG>
+build_anno_graph(uint64_t k,
+                 const std::vector<std::string> &sequences,
+                 const std::vector<std::string> &labels) {
     assert(sequences.size() == labels.size());
     auto graph = build_graph_batch<Graph>(k, sequences);
 
@@ -40,11 +41,19 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 }
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctBloomFPR<1, 100>, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctBloomFPR<1, 10>, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctBloom<100000, 1>, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctBloom<100000, 2>, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctBloomFPR<1, 100>, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctBloomFPR<1, 10>, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctBloom<100000, 1>, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctBloom<100000, 2>, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);

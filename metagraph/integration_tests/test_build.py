@@ -49,6 +49,52 @@ class TestBuild(unittest.TestCase):
             self.assertEqual('nodes (k): 591997', params_str[1])
             self.assertEqual('canonical mode: no', params_str[2])
 
+    def test_simple_bloom_graph(self):
+        """
+        Simple build test
+        """
+
+        for representation in ['succinct']:
+
+            construct_command = '{exe} build --graph {repr} -k 20 -o {outfile} {input}'.format(
+                exe=METAGRAPH,
+                repr=representation,
+                outfile=self.tempdir.name + '/graph',
+                input=TEST_DATA_DIR + '/transcripts_1000.fa'
+            )
+
+            res = subprocess.run([construct_command], shell=True)
+            self.assertEqual(res.returncode, 0)
+
+            stats_command = '{exe} stats {graph}'.format(
+                exe=METAGRAPH,
+                graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
+            )
+            res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0)
+            params_str = res.stdout.decode().split('\n')[2:]
+            self.assertEqual('k: 20', params_str[0])
+            self.assertEqual('nodes (k): 591997', params_str[1])
+            self.assertEqual('canonical mode: no', params_str[2])
+
+            convert_command = '{exe} transform -o {outfile} --initialize-bloom {bloom_param} {input}'.format(
+                exe=METAGRAPH,
+                outfile=self.tempdir.name + '/graph',
+                bloom_param='--bloom-fpp 0.1',
+                input=self.tempdir.name + '/graph.dbg'
+            )
+            res = subprocess.run([convert_command], shell=True)
+            self.assertEqual(res.returncode, 0)
+
+            convert_command = '{exe} transform -o {outfile} --initialize-bloom {bloom_param} {input}'.format(
+                exe=METAGRAPH,
+                outfile=self.tempdir.name + '/graph',
+                bloom_param='--bloom-filter-size 10000',
+                input=self.tempdir.name + '/graph.dbg'
+            )
+            res = subprocess.run([convert_command], shell=True)
+            self.assertEqual(res.returncode, 0)
+
     def test_simple_all_graphs_canonical(self):
         """
         Build simple canonical graphs

@@ -215,6 +215,18 @@ Config::Config(int argc, const char *argv[]) {
             port = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
+        } else if (!strcmp(argv[i], "--initialize-bloom")) {
+            initialize_bloom = true;
+        } else if (!strcmp(argv[i], "--bloom-fpp")) {
+            bloom_fpp = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--bloom-bpe")) {
+            bloom_bpe = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--bloom-max-num-hash-functions")) {
+            bloom_max_num_hash_functions = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--bloom-filter-size")) {
+            bloom_filter_size = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--seed")) {
+            seed = strtoull(get_value(i++), NULL, 10);
         } else if (!strcmp(argv[i], "--state")) {
             state = string_to_state(get_value(i++));
 
@@ -467,6 +479,24 @@ Config::Config(int argc, const char *argv[]) {
         std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
         print_usage_and_exit = true;
     }
+
+    if (bloom_fpp < 0.0 || bloom_fpp > 1.0) {
+        std::cerr << "Error: bloom-fpp must >= 0.0 and <= 1.0" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (bloom_bpe < 0.0 || bloom_bpe > 1.0) {
+        std::cerr << "Error: bloom-bpe must >= 0.0 and <= 1.0" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (initialize_bloom &&
+            bool(bloom_filter_size) + (bloom_fpp > 0.0) + (bloom_bpe > 0.0) != 1) {
+        std::cerr << "Error: exactly one of fpp > 0.0, bpe > 0.0, or filter_size > 0 must be true" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+
 
     if (outfbase.size()
             && !(utils::check_if_writable(outfbase)
@@ -772,11 +802,18 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --initialize-bloom \tconstruct a Bloom filter sketch of the graph [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --primary-kmers \toutput each k-mer only in one if its forms (canonical/non-canonical) [off]\n");
             fprintf(stderr, "\t   --to-gfa \t\tdump graph layout to GFA [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "Advanced options for --initialize-bloom. Exactly one of bloom-fpp, bloom-bpe, and bloom-filter-size should be non-zero\n");
+            fprintf(stderr, "\t   --bloom-fpp [FLOAT] \t\t\t\texpected false positive rate [0.0]\n");
+            fprintf(stderr, "\t   --bloom-bpe [FLOAT] \t\t\t\tnumber of bits per element [0.0]\n");
+            fprintf(stderr, "\t   --bloom-filter-size [INT] \t\t\tsize of the Bloom filter [0]\n");
+            fprintf(stderr, "\t   --bloom-max-num-hash-functions [INT] \tmaximum number of hash functions [10]\n");
         } break;
         case ASSEMBLE: {
             fprintf(stderr, "Usage: %s assemble -o <outfile-base> [options] GRAPH\n"
