@@ -145,6 +145,16 @@ constexpr uint8_t kSigmaDNA5 = sizeof(kAlphabetDNA5) - 1;
 constexpr uint8_t kBitsPerCharDNA5 = log2<kSigmaDNA5 - 1>::value + 1;
 static_assert(kSigmaDNA5 <= 1llu << kBitsPerCharDNA5);
 static_assert(kSigmaDNA5 > 1llu << (kBitsPerCharDNA5 - 1));
+constexpr uint8_t kCharToDNA5[128] = {
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 0, 5, 1,  5, 5, 5, 2,  5, 5, 5, 5,  5, 5, 4, 5,
+    5, 5, 5, 5,  3, 3, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 0, 5, 1,  5, 5, 5, 2,  5, 5, 5, 5,  5, 5, 4, 5,
+    5, 5, 5, 5,  3, 3, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
+};
 
 } // namespace alphabets
 
