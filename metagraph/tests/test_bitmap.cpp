@@ -729,3 +729,269 @@ TEST(BitmapAdaptiveTest, switch_type) {
     EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
         << bm.size() << " " << i << " " << bm.num_set_bits();
 }
+
+TEST(sdsl_bit_vector, call_ones_all_zeros) {
+    {
+        sdsl::bit_vector bv;
+        call_ones(bv, [](auto) { ASSERT_FALSE(true); });
+    }
+    for (size_t size : { 1, 10, 100, 1000, 10000 }) {
+        sdsl::bit_vector bv(size, false);
+        call_ones(bv, [](auto) { ASSERT_FALSE(true); });
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_all_ones) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, true);
+        uint64_t count = 0;
+        call_ones(bv, [&](auto i) { ASSERT_EQ(count, i); count++; });
+        ASSERT_EQ(size, count);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_all_even_ones) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        for (size_t i = 0; i < size; i += 2) {
+            bv[i] = true;
+        }
+        uint64_t count = 0;
+        call_ones(bv, [&](auto i) { ASSERT_EQ(count * 2, i); count++; });
+        ASSERT_EQ((size + 1) / 2, count);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_every_third_one) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        for (size_t i = 0; i < size; i += 3) {
+            bv[i] = true;
+        }
+        uint64_t count = 0;
+        call_ones(bv, [&](auto i) { ASSERT_EQ(count * 3, i); count++; });
+        ASSERT_EQ((size + 2) / 3, count);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_every_third_zero) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, true);
+        for (size_t i = 0; i < size; i += 3) {
+            bv[i] = false;
+        }
+        uint64_t count = 0;
+        call_ones(bv, [&](auto i) { ASSERT_TRUE(i % 3); count++; });
+        ASSERT_EQ(size - (size + 2) / 3, count);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_in_range_all_zeros) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+
+        call_ones(bv, 0, 0, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size / 2, size / 2, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size, size, [](auto) { ASSERT_FALSE(true); });
+
+        call_ones(bv, 0, size, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, 0, size / 2, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size / 2, size, [](auto) { ASSERT_FALSE(true); });
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_in_range_all_ones) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, true);
+
+        call_ones(bv, 0, 0, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size / 2, size / 2, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size, size, [](auto) { ASSERT_FALSE(true); });
+
+        uint64_t count = 0;
+        call_ones(bv, 0, size, [&](auto i) { ASSERT_EQ(count, i); count++; });
+        ASSERT_EQ(size, count);
+
+        count = 0;
+        call_ones(bv, 0, size / 2, [&](auto i) { ASSERT_EQ(count, i); count++; });
+        ASSERT_EQ(size / 2, count);
+
+        call_ones(bv, size / 2, size, [&](auto i) { ASSERT_EQ(count, i); count++; });
+        ASSERT_EQ(size, count);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_in_range_all_even_ones) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        for (size_t i = 0; i < size; i += 2) {
+            bv[i] = true;
+        }
+
+        call_ones(bv, 0, 0, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size / 2, size / 2, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size, size, [](auto) { ASSERT_FALSE(true); });
+
+        uint64_t count = 0;
+        call_ones(bv, 0, size, [&](auto i) { ASSERT_EQ(count * 2, i); count++; });
+        ASSERT_EQ((size + 1) / 2, count);
+
+        count = 0;
+        call_ones(bv, 0, size / 2, [&](auto i) { ASSERT_EQ(count * 2, i); count++; });
+        ASSERT_EQ((size / 2 + 1) / 2, count);
+
+        call_ones(bv, size / 2, size, [&](auto i) { ASSERT_EQ(count * 2, i); count++; });
+        ASSERT_EQ((size + 1) / 2, count);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_in_range_every_third_one) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        for (size_t i = 0; i < size; i += 3) {
+            bv[i] = true;
+        }
+
+        call_ones(bv, 0, 0, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size / 2, size / 2, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size, size, [](auto) { ASSERT_FALSE(true); });
+
+        uint64_t count = 0;
+        call_ones(bv, 0, size, [&](auto i) { ASSERT_EQ(count * 3, i); count++; });
+        ASSERT_EQ((size + 2) / 3, count);
+
+        count = 0;
+        call_ones(bv, 0, size / 2, [&](auto i) { ASSERT_EQ(count * 3, i); count++; });
+        ASSERT_EQ((size / 2 + 2) / 3, count);
+
+        call_ones(bv, size / 2, size, [&](auto i) { ASSERT_EQ(count * 3, i); count++; });
+        ASSERT_EQ((size + 2) / 3, count);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_in_range_every_third_zero) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, true);
+        for (size_t i = 0; i < size; i += 3) {
+            bv[i] = false;
+        }
+
+        call_ones(bv, 0, 0, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size / 2, size / 2, [](auto) { ASSERT_FALSE(true); });
+        call_ones(bv, size, size, [](auto) { ASSERT_FALSE(true); });
+
+        uint64_t count = 0;
+        call_ones(bv, 0, size, [&](auto i) { ASSERT_TRUE(i % 3); count++; });
+        ASSERT_EQ(size - (size + 2) / 3, count);
+
+        count = 0;
+        call_ones(bv, 0, size / 2, [&](auto i) { ASSERT_TRUE(i % 3); count++; });
+        ASSERT_EQ(size / 2 - (size / 2 + 2) / 3, count);
+
+        call_ones(bv, size / 2, size, [&](auto i) { ASSERT_TRUE(i % 3); count++; });
+        ASSERT_EQ(size - (size + 2) / 3, count);
+    }
+}
+
+void check_call_ones_call_zeros(const sdsl::bit_vector &bv) {
+    uint64_t size = bv.size();
+
+    auto flipped = bv;
+    flipped.flip();
+    ASSERT_EQ(bv.size() - sdsl::util::cnt_one_bits(bv),
+              sdsl::util::cnt_one_bits(flipped));
+
+    {
+        std::vector<uint64_t> called_ones;
+        call_ones(bv, [&](auto i) { called_ones.push_back(i); });
+        std::vector<uint64_t> called_zeros_inverse;
+        call_zeros(flipped, [&](auto i) { called_zeros_inverse.push_back(i); });
+        ASSERT_EQ(called_ones, called_zeros_inverse);
+    }
+    {
+        std::vector<uint64_t> called_ones;
+        call_ones(bv, 0, 0, [&](auto i) { called_ones.push_back(i); });
+        std::vector<uint64_t> called_zeros_inverse;
+        call_zeros(flipped, 0, 0, [&](auto i) { called_zeros_inverse.push_back(i); });
+        ASSERT_EQ(called_ones, called_zeros_inverse);
+    }
+    {
+        std::vector<uint64_t> called_ones;
+        call_ones(bv, size / 2, size / 2, [&](auto i) { called_ones.push_back(i); });
+        std::vector<uint64_t> called_zeros_inverse;
+        call_zeros(flipped, size / 2, size / 2, [&](auto i) { called_zeros_inverse.push_back(i); });
+        ASSERT_EQ(called_ones, called_zeros_inverse);
+    }
+    {
+        std::vector<uint64_t> called_ones;
+        call_ones(bv, size, size, [&](auto i) { called_ones.push_back(i); });
+        std::vector<uint64_t> called_zeros_inverse;
+        call_zeros(flipped, size, size, [&](auto i) { called_zeros_inverse.push_back(i); });
+        ASSERT_EQ(called_ones, called_zeros_inverse);
+    }
+    {
+        std::vector<uint64_t> called_ones;
+        call_ones(bv, 0, size, [&](auto i) { called_ones.push_back(i); });
+        std::vector<uint64_t> called_zeros_inverse;
+        call_zeros(flipped, 0, size, [&](auto i) { called_zeros_inverse.push_back(i); });
+        ASSERT_EQ(called_ones, called_zeros_inverse);
+    }
+    {
+        std::vector<uint64_t> called_ones;
+        call_ones(bv, 0, size / 2, [&](auto i) { called_ones.push_back(i); });
+        std::vector<uint64_t> called_zeros_inverse;
+        call_zeros(flipped, 0, size / 2, [&](auto i) { called_zeros_inverse.push_back(i); });
+        ASSERT_EQ(called_ones, called_zeros_inverse);
+    }
+    {
+        std::vector<uint64_t> called_ones;
+        call_ones(bv, size / 2, size, [&](auto i) { called_ones.push_back(i); });
+        std::vector<uint64_t> called_zeros_inverse;
+        call_zeros(flipped, size / 2, size, [&](auto i) { called_zeros_inverse.push_back(i); });
+        ASSERT_EQ(called_ones, called_zeros_inverse) << size;
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_call_zeros_all_zeros) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        check_call_ones_call_zeros(bv);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_call_zeros_all_ones) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, true);
+        check_call_ones_call_zeros(bv);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_call_zeros_all_even_ones) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        for (size_t i = 0; i < size; i += 2) {
+            bv[i] = true;
+        }
+        check_call_ones_call_zeros(bv);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_call_zeros_every_third_one) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        for (size_t i = 0; i < size; i += 3) {
+            bv[i] = true;
+        }
+        check_call_ones_call_zeros(bv);
+    }
+}
+
+TEST(sdsl_bit_vector, call_ones_call_zeros_every_third_zero) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, true);
+        for (size_t i = 0; i < size; i += 3) {
+            bv[i] = false;
+        }
+        check_call_ones_call_zeros(bv);
+    }
+}

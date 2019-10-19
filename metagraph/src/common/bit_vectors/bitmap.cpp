@@ -76,7 +76,7 @@ void call_zeros(const sdsl::bit_vector &vector,
 
     uint64_t i = begin;
     for (; i < end && i & 0x3F; ++i) {
-        if (vector[i])
+        if (!vector[i])
             callback(i);
     }
     uint64_t word;
