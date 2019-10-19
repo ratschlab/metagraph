@@ -20,6 +20,9 @@ void call_ones(const sdsl::bit_vector &vector,
                uint64_t begin, uint64_t end,
                const VoidCall<uint64_t> &callback);
 
+uint64_t count_ones(const sdsl::bit_vector &vector,
+                    uint64_t begin, uint64_t end);
+
 void call_zeros(const sdsl::bit_vector &vector,
                 const VoidCall<uint64_t> &callback);
 

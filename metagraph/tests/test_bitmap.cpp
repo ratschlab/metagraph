@@ -995,3 +995,92 @@ TEST(sdsl_bit_vector, call_ones_call_zeros_every_third_zero) {
         check_call_ones_call_zeros(bv);
     }
 }
+
+TEST(sdsl_bit_vector, count_ones_all_zeros) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+
+        ASSERT_EQ(sdsl::util::cnt_one_bits(bv), count_ones(bv, 0, size));
+
+        ASSERT_EQ(0u, count_ones(bv, 0, 0));
+        ASSERT_EQ(0u, count_ones(bv, size / 2, size / 2));
+        ASSERT_EQ(0u, count_ones(bv, size, size));
+
+        ASSERT_EQ(0u, count_ones(bv, 0, size));
+        ASSERT_EQ(0u, count_ones(bv, 0, size / 2));
+        ASSERT_EQ(0u, count_ones(bv, size / 2, size));
+    }
+}
+
+TEST(sdsl_bit_vector, count_ones_all_ones) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, true);
+
+        ASSERT_EQ(sdsl::util::cnt_one_bits(bv), count_ones(bv, 0, size));
+
+        ASSERT_EQ(0u, count_ones(bv, 0, 0));
+        ASSERT_EQ(0u, count_ones(bv, size / 2, size / 2));
+        ASSERT_EQ(0u, count_ones(bv, size, size));
+
+        ASSERT_EQ(size, count_ones(bv, 0, size));
+        ASSERT_EQ(size / 2, count_ones(bv, 0, size / 2));
+        ASSERT_EQ((size + 1) / 2, count_ones(bv, size / 2, size));
+    }
+}
+
+TEST(sdsl_bit_vector, count_ones_all_even_ones) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        for (size_t i = 0; i < size; i += 2) {
+            bv[i] = true;
+        }
+
+        ASSERT_EQ(sdsl::util::cnt_one_bits(bv), count_ones(bv, 0, size));
+
+        ASSERT_EQ(0u, count_ones(bv, 0, 0));
+        ASSERT_EQ(0u, count_ones(bv, size / 2, size / 2));
+        ASSERT_EQ(0u, count_ones(bv, size, size));
+
+        ASSERT_EQ((size + 1) / 2, count_ones(bv, 0, size));
+        ASSERT_EQ((size / 2 + 1) / 2, count_ones(bv, 0, size / 2));
+        ASSERT_EQ((size + 1) / 2 - ((size / 2 + 1) / 2), count_ones(bv, size / 2, size));
+    }
+}
+
+TEST(sdsl_bit_vector, count_ones_every_third_one) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, false);
+        for (size_t i = 0; i < size; i += 3) {
+            bv[i] = true;
+        }
+
+        ASSERT_EQ(sdsl::util::cnt_one_bits(bv), count_ones(bv, 0, size));
+
+        ASSERT_EQ(0u, count_ones(bv, 0, 0));
+        ASSERT_EQ(0u, count_ones(bv, size / 2, size / 2));
+        ASSERT_EQ(0u, count_ones(bv, size, size));
+
+        ASSERT_EQ((size + 2) / 3, count_ones(bv, 0, size));
+        ASSERT_EQ((size / 2 + 2) / 3, count_ones(bv, 0, size / 2));
+        ASSERT_EQ((size + 2) / 3 - ((size / 2 + 2) / 3), count_ones(bv, size / 2, size));
+    }
+}
+
+TEST(sdsl_bit_vector, count_ones_every_third_zero) {
+    for (size_t size : { 0, 1, 10, 11, 100, 1000, 10000, 10001 }) {
+        sdsl::bit_vector bv(size, true);
+        for (size_t i = 0; i < size; i += 3) {
+            bv[i] = false;
+        }
+
+        ASSERT_EQ(sdsl::util::cnt_one_bits(bv), count_ones(bv, 0, size));
+
+        ASSERT_EQ(0u, count_ones(bv, 0, 0));
+        ASSERT_EQ(0u, count_ones(bv, size / 2, size / 2));
+        ASSERT_EQ(0u, count_ones(bv, size, size));
+
+        ASSERT_EQ(size - (size + 2) / 3, count_ones(bv, 0, size));
+        ASSERT_EQ(size / 2 - (size / 2 + 2) / 3, count_ones(bv, 0, size / 2));
+        ASSERT_EQ(size - (size + 2) / 3 - (size / 2 - (size / 2 + 2) / 3), count_ones(bv, size / 2, size));
+    }
+}

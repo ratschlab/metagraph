@@ -71,12 +71,19 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 
     sdsl::bit_vector subindex(sdsl::util::cnt_one_bits(reference), false);
 
-    uint64_t j = 0;
-    call_ones(reference, [&](auto i) {
-        if (column[i])
-            subindex[j] = true;
+    uint64_t rank = 0;
+    uint64_t offset = 0;
 
-        j++;
+    column.call_ones([&](auto i) {
+        assert(i >= offset);
+        assert(reference[i]);
+
+        rank += count_ones(reference, offset, i);
+
+        assert(rank < subindex.size());
+
+        subindex[rank++] = true;
+        offset = i + 1;
     });
 
     return subindex;
