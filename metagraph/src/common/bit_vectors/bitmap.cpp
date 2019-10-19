@@ -27,15 +27,6 @@ void call_ones(const sdsl::bit_vector &vector,
     assert(begin <= end);
     assert(end <= vector.size());
 
-    if (sdsl::util::cnt_one_bits(vector) > vector.size() / 2) {
-        //TODO: benchmark to check if this actually makes it faster
-        for (uint64_t i = begin; i < end; ++i) {
-            if (vector[i])
-                callback(i);
-        }
-        return;
-    }
-
     uint64_t i = begin;
     for (; i < end && i & 0x3F; ++i) {
         if (vector[i])
@@ -102,7 +93,7 @@ void call_zeros(const sdsl::bit_vector &vector,
 }
 
 void call_zeros(const sdsl::bit_vector &vector,
-               const VoidCall<uint64_t> &callback) {
+                const VoidCall<uint64_t> &callback) {
     call_zeros(vector, 0, vector.size(), callback);
 }
 
@@ -418,7 +409,7 @@ void bitmap_adaptive::check_switch() {
 void bitmap_adaptive::to_bit_vector() {
     if (dynamic_cast<bitmap_set*>(bitmap_.get())) {
         sdsl::bit_vector vector(bitmap_->size(), false);
-        bitmap_->call_ones([&](auto i) { vector[i] = true; });
+        bitmap_->add_to(&vector);
         bitmap_.reset(new bitmap_vector(std::move(vector)));
     }
 }

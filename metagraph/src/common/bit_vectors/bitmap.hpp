@@ -47,7 +47,7 @@ class bitmap {
     virtual uint64_t num_set_bits() const = 0;
 
     virtual void add_to(sdsl::bit_vector *other) const;
-    virtual void call_ones(const VoidCall<uint64_t> &callback) const;
+    virtual void call_ones(const VoidCall<uint64_t> &callback) const final;
     virtual void call_ones_in_range(uint64_t begin, uint64_t end,
                                     const VoidCall<uint64_t> &callback) const = 0;
 };
