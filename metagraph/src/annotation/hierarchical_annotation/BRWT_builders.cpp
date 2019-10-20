@@ -69,7 +69,13 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
                                    const sdsl::bit_vector &reference) {
     assert(column.size() == reference.size());
 
-    sdsl::bit_vector subindex(sdsl::util::cnt_one_bits(reference), false);
+    uint64_t shrinked_size = sdsl::util::cnt_one_bits(reference);
+
+    // no shrinkage if vectors are the same
+    if (column.num_set_bits() == shrinked_size)
+        return sdsl::bit_vector(shrinked_size, true);
+
+    sdsl::bit_vector subindex(shrinked_size, false);
 
     uint64_t rank = 0;
     uint64_t offset = 0;
@@ -136,10 +142,10 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
         }, i));
     }
 
-    std::unique_ptr<bit_vector_small> parent_index_compressed;
+    std::unique_ptr<bit_vector_smart> parent_index_compressed;
 
     results.push_back(thread_pool.enqueue([&]() {
-        parent_index_compressed.reset(new bit_vector_small(parent_index));
+        parent_index_compressed.reset(new bit_vector_smart(parent_index));
     }));
 
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
