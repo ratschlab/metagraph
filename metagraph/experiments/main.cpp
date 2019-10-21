@@ -916,9 +916,12 @@ int main(int argc, char *argv[]) {
             cmd.parse(std::min(argc, 6), argv);
             std::string align_regime = align_regime_arg.getValue();
             std::string cur_alphabet = alphabet_arg.getValue();
-            std::string alphabet = cur_alphabet == "dna"
+            const char *alphabet = cur_alphabet == "dna"
                 ? alphabets::kAlphabetDNA
                 : alphabets::kAlphabetProtein;
+            const uint8_t *alphabet_encoding = cur_alphabet == "dna"
+                ? alphabets::kCharToDNA
+                : alphabets::kCharToProtein;
             std::string mode = mode_arg.getValue();
             std::string file = file_arg.getValue();
             cmd.reset();
@@ -943,7 +946,9 @@ int main(int argc, char *argv[]) {
                 if (mode == "unit") {
                     cmd.parse(argc, argv);
                     config.reset(new DBGAlignerConfig(
-                        DBGAlignerConfig::unit_scoring_matrix(match_arg.getValue(), alphabet),
+                        DBGAlignerConfig::unit_scoring_matrix(match_arg.getValue(),
+                                                              alphabet,
+                                                              alphabet_encoding),
                         -1,
                         -1
                     ));

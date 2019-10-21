@@ -72,7 +72,7 @@ class Config {
     unsigned int port = 5555;
 
     // Alignment options
-    bool alignment_seed_unimems = true;
+    bool alignment_seed_unimems = false;
     bool alignment_edit_distance = false;
 
     int8_t alignment_match_score = 2;

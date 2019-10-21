@@ -32,7 +32,7 @@ class Cigar {
 
     static OperatorTable char_to_op;
     static const OperatorTableRow& get_op_row(char a) { return char_to_op[a]; }
-    static void initialize_opt_table(const std::string &alphabet);
+    static void initialize_opt_table(const std::string &alphabet, const uint8_t *encoding);
 
     Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
@@ -99,7 +99,7 @@ class DBGAlignerConfig {
                      int8_t gap_opening = -3,
                      int8_t gap_extension = -1);
 
-    explicit DBGAlignerConfig(const Config &config, const DeBruijnGraph &graph);
+    explicit DBGAlignerConfig(const Config &config);
 
     DBGAlignerConfig(ScoreMatrix&& score_matrix,
                      int8_t gap_opening = -3,
@@ -147,8 +147,7 @@ class DBGAlignerConfig {
 
     bool forward_and_reverse_complement = false;
 
-    static ScoreMatrix scoring_matrix(const Config &config,
-                                      const DeBruijnGraph &graph);
+    static ScoreMatrix scoring_matrix(const Config &config);
 
     // Protein matrices
     static const ScoreMatrix score_matrix_blosum62;
@@ -158,7 +157,8 @@ class DBGAlignerConfig {
                                           int8_t mm_transversion);
 
     static ScoreMatrix unit_scoring_matrix(int8_t match_score,
-                                           const std::string &alphabet);
+                                           const std::string &alphabet,
+                                           const uint8_t *encoding);
 
   private:
     ScoreMatrix score_matrix_;

@@ -601,12 +601,65 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 }
 
 
-std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
-                                           const Config &config) {
-    auto dbg_config = DBGAlignerConfig(config, graph);
+void set_aligner_parameters(const DeBruijnGraph &graph, Config &config) {
+    // fix seed length bounds
+    if (!config.alignment_min_seed_length || config.alignment_seed_unimems)
+        config.alignment_min_seed_length = graph.get_k();
+
+    if (config.alignment_max_seed_length == std::numeric_limits<size_t>::max()
+            && !config.alignment_seed_unimems)
+        config.alignment_max_seed_length = graph.get_k();
+
+    if (config.verbose) {
+        std::cout << "Alignment settings:" << "\n"
+                  << "\t Seeding: " << (config.alignment_seed_unimems ? "unimems" : "nodes") << "\n"
+                  << "\t Alignments to report: " << config.alignment_num_alternative_paths << "\n"
+                  << "\t Priority queue size: " << config.alignment_queue_size << "\n"
+                  << "\t Min seed length: " << config.alignment_min_seed_length << "\n"
+                  << "\t Max seed length: " << config.alignment_max_seed_length << "\n"
+                  << "\t Max num seeds per locus: " << config.alignment_max_num_seeds_per_locus << "\n"
+                  << "\t Scoring matrix: " << (config.alignment_edit_distance ? "unit costs" : "matrix") << "\n"
+                  << "\t Gap opening penalty: " << int64_t(config.alignment_gap_opening_penalty) << "\n"
+                  << "\t Gap extension penalty: " << int64_t(config.alignment_gap_extension_penalty) << "\n"
+                  << "\t Min DP table cell score: " << int64_t(config.alignment_min_cell_score) << "\n"
+                  << "\t Min alignment score: " << config.alignment_min_path_score << std::endl;
+
+        if (!config.alignment_edit_distance)
+            std::cout << "\t Match score: " << int64_t(config.alignment_match_score) << "\n"
+                      << "\t (DNA) Transition score: " << int64_t(config.alignment_mm_transition) << "\n"
+                      << "\t (DNA) Transversion score: " << int64_t(config.alignment_mm_transversion) << "\n";
+
+        std::cout << std::endl;
+    }
+}
+
+std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &config) {
+    set_aligner_parameters(graph, config);
+
+    // TODO: fix this when alphabets are no longer set at compile time
+    #if _PROTEIN_GRAPH
+        const auto *alphabet = alphabets::kAlphabetProtein;
+        const auto *alphabet_encoding = alphabets::kCharToProtein;
+    #elif _DNA_CASE_SENSITIVE_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNACaseSent;
+        const auto *alphabet_encoding = alphabets::kCharToDNACaseSent;
+    #elif _DNA5_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA5;
+        const auto *alphabet_encoding = alphabets::kCharToDNA5;
+    #elif _DNA_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+    #endif
+
+    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
 
     if (config.alignment_seed_unimems) {
-        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, dbg_config);
+        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, DBGAlignerConfig(config));
 
     } else if (config.alignment_min_seed_length < graph.get_k()) {
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
@@ -616,10 +669,10 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
         }
 
         // Use the seeder that seeds to node suffixes
-        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, dbg_config);
+        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, DBGAlignerConfig(config));
 
     } else {
-        return std::make_unique<DBGAligner<>>(graph, dbg_config);
+        return std::make_unique<DBGAligner<>>(graph, DBGAlignerConfig(config));
     }
 }
 
@@ -3075,37 +3128,7 @@ int main(int argc, const char *argv[]) {
                 return 0;
             }
 
-            // fix seed length bounds
-            if (!config->alignment_min_seed_length || config->alignment_seed_unimems)
-                config->alignment_min_seed_length = graph->get_k();
-
-            if (config->alignment_max_seed_length == std::numeric_limits<size_t>::max()
-                    && !config->alignment_seed_unimems)
-                config->alignment_max_seed_length = graph->get_k();
-
-            if (config->verbose) {
-                std::cout << "Alignment settings:" << "\n"
-                          << "\t Seeding: " << (config->alignment_seed_unimems ? "unimems" : "nodes") << "\n"
-                          << "\t Alignments to report: " << config->alignment_num_alternative_paths << "\n"
-                          << "\t Priority queue size: " << config->alignment_queue_size << "\n"
-                          << "\t Min seed length: " << config->alignment_min_seed_length << "\n"
-                          << "\t Max seed length: " << config->alignment_max_seed_length << "\n"
-                          << "\t Max num seeds per locus: " << config->alignment_max_num_seeds_per_locus << "\n"
-                          << "\t Scoring matrix: " << (config->alignment_edit_distance ? "unit costs" : "matrix") << "\n"
-                          << "\t Gap opening penalty: " << int64_t(config->alignment_gap_opening_penalty) << "\n"
-                          << "\t Gap extension penalty: " << int64_t(config->alignment_gap_extension_penalty) << "\n"
-                          << "\t Min DP table cell score: " << int64_t(config->alignment_min_cell_score) << "\n"
-                          << "\t Min alignment score: " << config->alignment_min_path_score << std::endl;
-
-                if (!config->alignment_edit_distance)
-                    std::cout << "\t Match score: " << int64_t(config->alignment_match_score) << "\n"
-                              << "\t (DNA) Transition score: " << int64_t(config->alignment_mm_transition) << "\n"
-                              << "\t (DNA) Transversion score: " << int64_t(config->alignment_mm_transversion) << "\n";
-
-                std::cout << std::endl;
-            }
-
-            Cigar::initialize_opt_table(graph->alphabet());
+            auto aligner = build_aligner(*graph, *config);
 
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
@@ -3118,8 +3141,6 @@ int main(int argc, const char *argv[]) {
 
                 Json::StreamWriterBuilder builder;
                 builder["indentation"] = "";
-
-                auto aligner = build_aligner(*graph, *config);
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     thread_pool.enqueue([&](std::string query,

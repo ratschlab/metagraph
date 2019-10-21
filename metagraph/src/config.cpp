@@ -161,8 +161,8 @@ Config::Config(int argc, const char *argv[]) {
             count_labels = true;
         } else if (!strcmp(argv[i], "--map")) {
             map_sequences = true;
-        } else if (!strcmp(argv[i], "--align-no-seed-unimems")) {
-            alignment_seed_unimems = false;
+        } else if (!strcmp(argv[i], "--align-seed-unimems")) {
+            alignment_seed_unimems = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-length")) {
@@ -736,7 +736,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-no-seed-unimems \t\t\tuse k-mers instead of maximum exact matches in unitigs as seeds [off]\n");
+            fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximal exact matches along unitigs as seeds [off]\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");

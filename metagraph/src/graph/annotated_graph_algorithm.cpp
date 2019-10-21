@@ -1,5 +1,6 @@
 #include "annotated_graph_algorithm.hpp"
 
+#include "alphabets.hpp"
 #include "annotate_column_compressed.hpp"
 #include "utils.hpp"
 #include "int_vector.hpp"
@@ -315,8 +316,26 @@ void call_breakpoints(const DeBruijnGraph &graph,
 
     thread_pool = nullptr;
 
+    #if _PROTEIN_GRAPH
+        const auto *alphabet = alphabets::kAlphabetProtein;
+        const auto *alphabet_encoding = alphabets::kCharToProtein;
+    #elif _DNA_CASE_SENSITIVE_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNACaseSent;
+        const auto *alphabet_encoding = alphabets::kCharToDNACaseSent;
+    #elif _DNA5_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA5;
+        const auto *alphabet_encoding = alphabets::kCharToDNA5;
+    #elif _DNA_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+    #endif
     const DBGAlignerConfig variant_config(
-        DBGAlignerConfig::unit_scoring_matrix(1, graph.alphabet()),
+        DBGAlignerConfig::unit_scoring_matrix(1, alphabet, alphabet_encoding),
         -1, -1
     );
 
@@ -468,8 +487,27 @@ void call_bubbles(const DeBruijnGraph &graph,
     if (&graph == dbg_succ.get())
         return;
 
+    // TODO: REPLACE THIS
+    #if _PROTEIN_GRAPH
+        const auto *alphabet = alphabets::kAlphabetProtein;
+        const auto *alphabet_encoding = alphabets::kCharToProtein;
+    #elif _DNA_CASE_SENSITIVE_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNACaseSent;
+        const auto *alphabet_encoding = alphabets::kCharToDNACaseSent;
+    #elif _DNA5_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA5;
+        const auto *alphabet_encoding = alphabets::kCharToDNA5;
+    #elif _DNA_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+    #endif
     const DBGAlignerConfig variant_config(
-        DBGAlignerConfig::unit_scoring_matrix(1, graph.alphabet()),
+        DBGAlignerConfig::unit_scoring_matrix(1, alphabet, alphabet_encoding),
         -1, -1
     );
 
