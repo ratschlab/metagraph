@@ -99,6 +99,7 @@ void DeBruijnGraph::traverse(node_index start,
 
 void DeBruijnGraph::call_nodes(const std::function<void(node_index)> &callback,
                                const std::function<bool()> &stop_early) const {
+    std::cout << "old call_nodes" << std::endl;
     const auto nnodes = num_nodes();
     for (node_index i = 1; i <= nnodes && !stop_early(); ++i) {
         callback(i);

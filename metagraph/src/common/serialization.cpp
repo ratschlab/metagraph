@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include <tsl/hopscotch_map.h>
+#include <tsl/robin_map.h>
 #include <tsl/ordered_set.h>
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <libmaus2/util/StringSerialisation.hpp>
@@ -218,6 +219,12 @@ void serialize_string_number_map(std::ostream &out,
 template
 void serialize_string_number_map(std::ostream &out,
                                  const tsl::hopscotch_map<std::string, uint32_t> &map);
+template
+void serialize_string_number_map(std::ostream &out,
+                                 const tsl::robin_map<std::string, uint64_t> &map);
+template
+void serialize_string_number_map(std::ostream &out,
+                                 const tsl::robin_map<std::string, uint32_t> &map);
 
 template <class Map>
 bool load_string_number_map(std::istream &in, Map *map) {
@@ -285,6 +292,12 @@ bool load_string_number_map(std::istream &in,
 template
 bool load_string_number_map(std::istream &in,
                             tsl::hopscotch_map<std::string, uint32_t> *map);
+template
+bool load_string_number_map(std::istream &in,
+                            tsl::robin_map<std::string, uint64_t> *map);
+template
+bool load_string_number_map(std::istream &in,
+                            tsl::robin_map<std::string, uint32_t> *map);
 
 template <class Map>
 void serialize_number_string_map(std::ostream &out, const Map &map) {
@@ -313,6 +326,12 @@ void serialize_number_string_map(std::ostream &out,
 template
 void serialize_number_string_map(std::ostream &out,
                                  const tsl::hopscotch_map<uint32_t, std::string> &map);
+template
+void serialize_number_string_map(std::ostream &out,
+                                 const tsl::robin_map<uint64_t, std::string> &map);
+template
+void serialize_number_string_map(std::ostream &out,
+                                 const tsl::robin_map<uint32_t, std::string> &map);
 
 template <class Map>
 bool load_number_string_map(std::istream &in, Map *map) {
@@ -376,6 +395,12 @@ bool load_number_string_map(std::istream &in,
 template
 bool load_number_string_map(std::istream &in,
                             tsl::hopscotch_map<uint32_t, std::string> *map);
+template
+bool load_number_string_map(std::istream &in,
+                            tsl::robin_map<uint64_t, std::string> *map);
+template
+bool load_number_string_map(std::istream &in,
+                            tsl::robin_map<uint32_t, std::string> *map);
 
 
 template <class Set>
@@ -386,9 +411,6 @@ void serialize_set(std::ostream &out, const Set &set) {
         StringSerialisation::serialiseString(out, value);
     }
 }
-
-template void serialize_set(std::ostream &out,
-                            const OrderedSet<std::string> &set);
 
 template <class Set>
 bool load_set(std::istream &in, Set *set) {
@@ -409,8 +431,6 @@ bool load_set(std::istream &in, Set *set) {
 
     return true;
 }
-
-template bool load_set(std::istream &in, OrderedSet<std::string> *set);
 
 
 VectorFileStream::VectorFileStream(const std::string &file)

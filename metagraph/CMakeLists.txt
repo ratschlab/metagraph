@@ -233,6 +233,7 @@ include_directories(
   external-libraries/caches/include
   external-libraries/sparsepp
   external-libraries/hopscotch-map/include
+  external-libraries/robin-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
   external-libraries/jsoncpp/include
