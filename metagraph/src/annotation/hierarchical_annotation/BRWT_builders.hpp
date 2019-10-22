@@ -54,6 +54,7 @@ class BRWTBottomUpBuilder : public BRWTBuilder {
     static std::pair<NodeBRWT, std::unique_ptr<bit_vector>>
     merge(std::vector<NodeBRWT> &&nodes,
           std::vector<std::unique_ptr<bit_vector>> &&nonzero_rows,
+          sdsl::bit_vector *buffer,
           ThreadPool &thread_pool);
 };
 

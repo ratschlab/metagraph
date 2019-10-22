@@ -36,11 +36,15 @@ BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
     };
 }
 
-sdsl::bit_vector compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns,
-                            ThreadPool &thread_pool) {
+void compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns,
+                sdsl::bit_vector *buffer,
+                ThreadPool &thread_pool) {
     uint64_t size = columns.at(0)->size();
 
-    sdsl::bit_vector merged_result(size, 0);
+    assert(buffer);
+    assert(buffer->size() == size);
+
+    auto &merged_result = *buffer;
 
     // Each block is a multiple of 64 bits for thread safety
     assert(!(kBlockSize & 0x3F));
@@ -49,6 +53,10 @@ sdsl::bit_vector compute_or(const std::vector<std::unique_ptr<bit_vector>> &colu
 
     for (uint64_t i = 0; i < size; i += kBlockSize) {
         results.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
+            std::fill(merged_result.data() + (begin >> 6),
+                      merged_result.data() + ((end + 63) >> 6),
+                      0);
+
             for (const auto &col_ptr : columns) {
                 assert(col_ptr.get());
                 assert(col_ptr->size() == size);
@@ -57,12 +65,11 @@ sdsl::bit_vector compute_or(const std::vector<std::unique_ptr<bit_vector>> &colu
                     [&merged_result](uint64_t k) { merged_result[k] = true; }
                 );
             }
+
         }, i, std::min(i + kBlockSize, size)));
     }
 
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
-
-    return merged_result;
 }
 
 sdsl::bit_vector generate_subindex(const bit_vector &column,
@@ -98,6 +105,7 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 std::pair<BRWTBottomUpBuilder::NodeBRWT, std::unique_ptr<bit_vector>>
 BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
                            std::vector<std::unique_ptr<bit_vector>> &&index,
+                           sdsl::bit_vector *buffer,
                            ThreadPool &thread_pool) {
     assert(nodes.size());
     assert(nodes.size() == index.size());
@@ -108,7 +116,7 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
     NodeBRWT parent;
 
     // build the parent aggregated column
-    sdsl::bit_vector parent_index = compute_or(index, thread_pool);
+    compute_or(index, buffer, thread_pool);
 
     for (size_t i = 0; i < nodes.size(); ++i) {
         // define column assignments for parent
@@ -130,7 +138,7 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
 
             // shrink index column
             bit_vector_small shrinked_index(
-                generate_subindex(std::move(*index[i]), parent_index)
+                generate_subindex(std::move(*index[i]), *buffer)
             );
             index[i].reset();
 
@@ -145,7 +153,7 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
     std::unique_ptr<bit_vector_smart> parent_index_compressed;
 
     results.push_back(thread_pool.enqueue([&]() {
-        parent_index_compressed.reset(new bit_vector_smart(parent_index));
+        parent_index_compressed.reset(new bit_vector_smart(*buffer));
     }));
 
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
@@ -185,6 +193,12 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
         nodes[i].group_sizes = { 1 };
     }
 
+    // initialize buffer vectors for merging columns
+    std::stack<sdsl::bit_vector> buffers;
+    for (size_t i = 0; i < std::max(num_nodes_parallel, size_t(1)); ++i) {
+        buffers.emplace(columns.at(0)->size());
+    }
+
     size_t level = 0;
 
     while (nodes.size() > 1) {
@@ -207,9 +221,23 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
             const auto &group = groups[g];
             assert(group.size());
 
+            // get available buffer vector
+            sdsl::bit_vector buffer;
+            #pragma omp critical
+            {
+                assert(buffers.size());
+                buffer = std::move(buffers.top());
+                buffers.pop();
+            }
+
             auto parent = merge(subset(&nodes, group),
                                 subset(&columns, group),
+                                &buffer,
                                 thread_pool);
+
+            // insert buffer back to stack
+            #pragma omp critical
+            buffers.push(std::move(buffer));
 
             parent_nodes[g] = std::move(parent.first);
             parent_columns[g] = std::move(parent.second);
