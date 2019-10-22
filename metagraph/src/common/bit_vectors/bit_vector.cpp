@@ -345,6 +345,12 @@ bit_vector_stat::bit_vector_stat(uint64_t size, bool value)
         num_set_bits_ = size;
 }
 
+bit_vector_stat::bit_vector_stat(const sdsl::bit_vector &vector) noexcept
+      : bit_vector_stat(sdsl::bit_vector(vector)) {}
+
+bit_vector_stat::bit_vector_stat(const sdsl::bit_vector &vector, uint64_t num_set_bits)
+      : bit_vector_stat(sdsl::bit_vector(vector), num_set_bits) {}
+
 bit_vector_stat::bit_vector_stat(const bit_vector_stat &other) {
     *this = other;
 }
@@ -364,6 +370,12 @@ bit_vector_stat
 bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector) noexcept
       : vector_(std::move(vector)),
         num_set_bits_(sdsl::util::cnt_one_bits(vector_)) {}
+
+bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector, uint64_t num_set_bits)
+      : vector_(std::move(vector)),
+        num_set_bits_(num_set_bits) {
+    assert(num_set_bits_ == sdsl::util::cnt_one_bits(vector_));
+}
 
 bit_vector_stat::bit_vector_stat(bit_vector_stat&& other) noexcept {
     *this = std::move(other);
@@ -579,10 +591,13 @@ bit_vector_sd::bit_vector_sd(uint64_t size, bool value)
     slct0_ = decltype(slct0_)(&vector_);
 }
 
-bit_vector_sd::bit_vector_sd(const sdsl::bit_vector &vector) {
-    // check if it needs to be inverted
-    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
+bit_vector_sd::bit_vector_sd(const sdsl::bit_vector &vector)
+      : bit_vector_sd(vector, sdsl::util::cnt_one_bits(vector)) {}
 
+bit_vector_sd::bit_vector_sd(const sdsl::bit_vector &vector, uint64_t num_set_bits) {
+    assert(num_set_bits == sdsl::util::cnt_one_bits(vector));
+
+    // check if it needs to be inverted
     if (num_set_bits <= vector.size() / 2) {
         // vector is sparse, no need to invert
         vector_ = sdsl::sd_vector<>(vector);
@@ -1098,6 +1113,24 @@ bit_vector_adaptive_stat<optimal_representation>
             break;
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(vector.copy_to<bit_vector_stat>()));
+            break;
+    }
+}
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+bit_vector_adaptive_stat<optimal_representation>
+::bit_vector_adaptive_stat(const sdsl::bit_vector &vector) {
+    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
+
+    switch (optimal_representation(vector.size(), num_set_bits)) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(vector, num_set_bits));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(vector));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(vector, num_set_bits));
             break;
     }
 }

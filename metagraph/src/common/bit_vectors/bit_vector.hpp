@@ -110,12 +110,13 @@ class bit_vector_stat : public bit_vector {
 
   public:
     explicit bit_vector_stat(uint64_t size = 0, bool value = 0);
-    explicit bit_vector_stat(const sdsl::bit_vector &vector) noexcept
-          : bit_vector_stat(sdsl::bit_vector(vector)) {}
+    explicit bit_vector_stat(const sdsl::bit_vector &vector) noexcept;
+    bit_vector_stat(const sdsl::bit_vector &vector, uint64_t num_set_bits);
     explicit bit_vector_stat(const bit_vector_stat &other);
     bit_vector_stat(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
                     uint64_t size);
     bit_vector_stat(sdsl::bit_vector&& vector) noexcept;
+    bit_vector_stat(sdsl::bit_vector&& vector, uint64_t num_set_bits);
     bit_vector_stat(bit_vector_stat&& other) noexcept;
     bit_vector_stat(std::initializer_list<bool> init);
 
@@ -170,6 +171,7 @@ class bit_vector_sd : public bit_vector {
   public:
     explicit bit_vector_sd(uint64_t size = 0, bool value = false);
     explicit bit_vector_sd(const sdsl::bit_vector &vector);
+    explicit bit_vector_sd(const sdsl::bit_vector &vector, uint64_t num_set_bits);
     explicit bit_vector_sd(const bit_vector_sd &other);
 
     bit_vector_sd(bit_vector_sd&& other) noexcept;
@@ -346,9 +348,12 @@ class bit_vector_adaptive_stat : public bit_vector_adaptive {
   public:
     explicit bit_vector_adaptive_stat(uint64_t size = 0, bool value = false);
 
-    template <class BitVector>
-    explicit bit_vector_adaptive_stat(const BitVector &vector)
-      : bit_vector_adaptive_stat(static_cast<bit_vector&&>(bit_vector_stat(vector))) {}
+    explicit bit_vector_adaptive_stat(const bit_vector &vector);
+    explicit bit_vector_adaptive_stat(const sdsl::bit_vector &vector);
+
+    bit_vector_adaptive_stat(bit_vector&& vector);
+    bit_vector_adaptive_stat(sdsl::bit_vector&& vector)
+      : bit_vector_adaptive_stat(bit_vector_stat(std::move(vector))) {}
 
     bit_vector_adaptive_stat(const VoidCall<const VoidCall<uint64_t>&> &call_ones,
                              uint64_t size,
@@ -358,10 +363,6 @@ class bit_vector_adaptive_stat : public bit_vector_adaptive {
       : bit_vector_adaptive_stat(sdsl::bit_vector(init)) {}
 
     std::unique_ptr<bit_vector> copy() const override final;
-
-  private:
-    explicit bit_vector_adaptive_stat(const bit_vector &vector);
-    bit_vector_adaptive_stat(bit_vector&& vector);
 };
 
 /**
