@@ -116,7 +116,8 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
 
     auto insert_kmer(const Kmer &kmer) {
         auto index_insert = kmers_.insert(kmer);
-        max_node_index_ = std::max(max_node_index_, get_index(kmer));
+        auto index = (node_index)(&(*index_insert.first) - &(*kmers_.begin())) + 1;
+        max_node_index_ = std::max(max_node_index_, index);
         return index_insert;
     }
 
@@ -149,7 +150,7 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
         auto index_insert = insert_kmer(kmer);
 
         if (index_insert.second && nodes_inserted)
-            nodes_inserted->insert_bit(get_index(kmer), true);
+            nodes_inserted->insert_bit(get_index(kmer), true); //TODO
     }
 
     if (!canonical_mode_)
@@ -159,7 +160,7 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
         auto index_insert = insert_kmer(kmer);
 
         if (index_insert.second && nodes_inserted)
-            nodes_inserted->insert_bit(get_index(kmer), true);
+            nodes_inserted->insert_bit(get_index(kmer), true); //TODO
     }
 }
 
