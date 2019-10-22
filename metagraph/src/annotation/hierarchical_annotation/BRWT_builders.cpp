@@ -46,12 +46,14 @@ void compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns,
 
     auto &merged_result = *buffer;
 
+    const uint64_t block_size = std::max(kBlockSize, size / 100 / 64 * 64);
+
     // Each block is a multiple of 64 bits for thread safety
-    assert(!(kBlockSize & 0x3F));
+    assert(!(block_size & 0x3F));
 
     std::vector<std::future<void>> results;
 
-    for (uint64_t i = 0; i < size; i += kBlockSize) {
+    for (uint64_t i = 0; i < size; i += block_size) {
         results.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
             std::fill(merged_result.data() + (begin >> 6),
                       merged_result.data() + ((end + 63) >> 6),
@@ -66,7 +68,7 @@ void compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns,
                 );
             }
 
-        }, i, std::min(i + kBlockSize, size)));
+        }, i, std::min(i + block_size, size)));
     }
 
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
@@ -180,7 +182,7 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
                                 size_t num_threads) {
     num_threads = std::max(num_nodes_parallel, num_threads);
 
-    ThreadPool thread_pool(num_threads);
+    ThreadPool thread_pool(num_threads, 100'000 * num_threads);
 
     if (!columns.size())
         return BRWT();
