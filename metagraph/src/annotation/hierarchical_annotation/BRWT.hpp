@@ -51,6 +51,8 @@ class BRWT : public BinaryMatrix {
     uint64_t total_column_size() const;
     uint64_t total_num_set_bits() const;
 
+    void print_tree_structure(std::ostream &os) const;
+
   private:
     // breadth-first traversal
     void BFT(std::function<void(const BRWT &node)> callback) const;

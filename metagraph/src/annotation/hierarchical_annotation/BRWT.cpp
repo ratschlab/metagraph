@@ -255,6 +255,19 @@ uint64_t BRWT::total_num_set_bits() const {
     return total_num_set_bits;
 }
 
+void BRWT::print_tree_structure(std::ostream &os) const {
+    BFT([&os](const BRWT &node) {
+        // print node and its stats
+        os << &node << "," << node.nonzero_rows_.size()
+                    << "," << node.nonzero_rows_.num_set_bits();
+        // print all its children
+        for (const auto &child : node.child_nodes_) {
+            os << "," << child.get();
+        }
+        os << std::endl;
+    });
+}
+
 void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {
     std::queue<const BRWT*> nodes_queue;
     nodes_queue.push(this);

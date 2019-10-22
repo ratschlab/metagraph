@@ -1065,6 +1065,15 @@ void print_stats(const Annotator &annotation) {
 
     } else if (dynamic_cast<const annotate::BRWTCompressed<std::string> *>(&annotation)) {
         std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
+        const auto &brwt = dynamic_cast<const annotate::BRWTCompressed<std::string> &>(annotation).data();
+        std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
+        std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
+        std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
+        std::cout << "shrinkage: " << brwt.shrinking_rate() << std::endl;
+        if (utils::get_verbose()) {
+            std::cout << "==================== Multi-BRWT TREE ===================" << std::endl;
+            brwt.print_tree_structure(std::cout);
+        }
 
     } else if (dynamic_cast<const annotate::BinRelWT_sdslAnnotator *>(&annotation)) {
         std::cout << Config::annotype_to_string(Config::BinRelWT_sdsl) << std::endl;
