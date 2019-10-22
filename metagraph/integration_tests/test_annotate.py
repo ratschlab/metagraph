@@ -79,7 +79,7 @@ class TestAnnotate(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  100', params_str[0])
                 self.assertEqual('objects: 46960', params_str[1])
-                self.assertEqual('density: 1.850724e-02', params_str[2])
+                self.assertEqual('density: 0.0185072', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
     def test_simple_all_graphs_canonical(self):
@@ -136,7 +136,7 @@ class TestAnnotate(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  100', params_str[0])
                 self.assertEqual('objects: 91584', params_str[1])
-                self.assertEqual('density: 9.488885e-03', params_str[2])
+                self.assertEqual('density: 0.00948888', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
     def test_simple_all_graphs_from_kmc(self):
@@ -192,7 +192,7 @@ class TestAnnotate(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  1', params_str[0])
                 self.assertEqual('objects: 469983', params_str[1])
-                self.assertEqual('density: 1.000000e+00', params_str[2])
+                self.assertEqual('density: 1', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
     def test_simple_all_graphs_from_kmc_both(self):
@@ -248,7 +248,7 @@ class TestAnnotate(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  1', params_str[0])
                 self.assertEqual('objects: 802920', params_str[1])
-                self.assertEqual('density: 5.853423e-01', params_str[2])
+                self.assertEqual('density: 0.5853423', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
                 # both strands
@@ -273,7 +273,7 @@ class TestAnnotate(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  1', params_str[0])
                 self.assertEqual('objects: 802920', params_str[1])
-                self.assertEqual('density: 1.000000e+00', params_str[2])
+                self.assertEqual('density: 1', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
     def test_simple_all_graphs_from_kmc_both(self):
@@ -330,7 +330,7 @@ class TestAnnotate(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  1', params_str[0])
                 self.assertEqual('objects: 802920', params_str[1])
-                self.assertEqual('density: 5.000000e-01', params_str[2])
+                self.assertEqual('density: 0.5', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
                 # both strands
@@ -355,7 +355,7 @@ class TestAnnotate(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  1', params_str[0])
                 self.assertEqual('objects: 802920', params_str[1])
-                self.assertEqual('density: 5.000000e-01', params_str[2])
+                self.assertEqual('density: 0.5', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
 

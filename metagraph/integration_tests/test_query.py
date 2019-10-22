@@ -79,7 +79,6 @@ class TestQuery(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  100', params_str[0])
                 self.assertEqual('objects: 46960', params_str[1])
-                self.assertEqual('density: 1.850724e-02', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
                 # query graph
@@ -156,7 +155,6 @@ class TestQuery(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  100', params_str[0])
                 self.assertEqual('objects: 46960', params_str[1])
-                self.assertEqual('density: 1.850724e-02', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
                 # query graph
@@ -238,7 +236,6 @@ class TestQueryCanonical(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  100', params_str[0])
                 self.assertEqual('objects: 91584', params_str[1])
-                self.assertEqual('density: 9.488885e-03', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
                 # query graph
@@ -315,7 +312,6 @@ class TestQueryCanonical(unittest.TestCase):
                 params_str = res.stdout.decode().split('\n')[2:]
                 self.assertEqual('labels:  100', params_str[0])
                 self.assertEqual('objects: 91584', params_str[1])
-                self.assertEqual('density: 9.488885e-03', params_str[2])
                 self.assertEqual('representation: ' + anno_repr, params_str[3])
 
                 # query graph

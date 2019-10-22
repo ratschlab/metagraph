@@ -1052,8 +1052,7 @@ void print_stats(const Annotator &annotation) {
     std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
     std::cout << "labels:  " << annotation.num_labels() << std::endl;
     std::cout << "objects: " << annotation.num_objects() << std::endl;
-    std::cout << "density: " << std::scientific
-                              << static_cast<double>(annotation.num_relations())
+    std::cout << "density: " << static_cast<double>(annotation.num_relations())
                                     / annotation.num_objects()
                                     / annotation.num_labels() << std::endl;
     std::cout << "representation: ";
