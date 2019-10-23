@@ -15,14 +15,14 @@
 #if _USE_FOLLY
 #include <folly/FBVector.h>
 #include <folly/small_vector.h>
-    template <typename T>
-    using Vector = folly::fbvector<T>;
+    template <typename... Args>
+    using Vector = folly::fbvector<Args...>;
 
     template <typename T, size_t NumReserved = 2, typename SizeType = uint32_t>
     using SmallVector = folly::small_vector<T, NumReserved, SizeType>;
 #else
-    template <typename T>
-    using Vector = std::vector<T>;
+    template <typename... Args>
+    using Vector = std::vector<Args...>;
 
     template <typename T, size_t NumReserved = 2, typename SizeType = uint32_t>
     using SmallVector = std::vector<T>;
