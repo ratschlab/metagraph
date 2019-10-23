@@ -10,7 +10,7 @@ else
 fi
 
 $exe build -k 12 -o test_graph $file_small
-$exe stats test_graph --count-dummy
+$exe stats test_graph.dbg --count-dummy
 echo ""
 
 $exe annotate -i test_graph.dbg -o test_annotation --anno-header --header-delimiter '|' $file_small
@@ -59,7 +59,7 @@ echo ""
 
 $exe annotate -i test_graph.dbg -o test_annotation --anno-header --header-delimiter '|' $file_small
 $exe stats -a test_annotation.column.annodbg
-$exe query -i test_graph -a test_annotation.column.annodbg <(cat $file | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph.dbg -a test_annotation.column.annodbg <(cat $file | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -69,7 +69,7 @@ $exe extend -i test_graph.dbg -a test_annotation.column.annodbg -o test_graph $f
 $exe stats test_graph.dbg --count-dummy
 $exe annotate -i test_graph.dbg -a test_graph.column.annodbg -o test_annotation --anno-header --header-delimiter '|' $file
 $exe stats -a test_annotation.column.annodbg
-$exe query -i test_graph -a test_annotation.column.annodbg <(cat $file | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph.dbg -a test_annotation.column.annodbg <(cat $file | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -94,8 +94,8 @@ $exe query -i test_graph.orhashdbg -a test_annotation.column.annodbg <(cat $file
 echo ""
 
 $exe build -k 12 -o test_graph $file
-$exe stats test_graph --count-dummy
-$exe annotate -i test_graph -o test_annotation --anno-header --header-delimiter '|' $file
+$exe stats test_graph.dbg --count-dummy
+$exe annotate -i test_graph.dbg -o test_annotation --anno-header --header-delimiter '|' $file
 $exe stats -a test_annotation.column.annodbg
 echo ""
 
@@ -141,7 +141,7 @@ echo ""
 
 
 
-$exe annotate -i test_graph -o test_annotation --anno-type row --anno-header --header-delimiter '|' $file
+$exe annotate -i test_graph.dbg -o test_annotation --anno-type row --anno-header --header-delimiter '|' $file
 $exe stats -a test_annotation.row.annodbg
 echo ""
 
