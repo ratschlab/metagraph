@@ -16,25 +16,15 @@ class BOSS::Chunk {
     /**
      * Assumes that kmers are distinct and sorted
      */
-    template <typename KMER, typename COUNT>
+    template <typename Array>
     Chunk(uint64_t alph_size,
           size_t k,
           bool canonical,
-          const Vector<std::pair<KMER, COUNT>> &kmers,
-          uint8_t bits_per_count = 8);
+          const Array &kmers_with_counts,
+          uint8_t bits_per_count);
 
-    template <typename KMER, typename COUNT>
-    Chunk(uint64_t alph_size,
-          size_t k,
-          bool canonical,
-          const utils::DequeStorage<std::pair<KMER, COUNT>> &kmers,
-          uint8_t bits_per_count = 8);
-
-    template <typename KMER>
-    Chunk(uint64_t alph_size, size_t k, bool canonical, const Vector<KMER> &kmers);
-
-    template <typename KMER>
-    Chunk(uint64_t alph_size, size_t k, bool canonical, const utils::DequeStorage<KMER> &kmers);
+    template <typename Array>
+    Chunk(uint64_t alph_size, size_t k, bool canonical, const Array &kmers);
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
 

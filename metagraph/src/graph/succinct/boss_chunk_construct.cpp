@@ -7,6 +7,7 @@
 #include "kmer_collector.hpp"
 
 const static bool kUseDeque = false;
+const static uint8_t kBitsPerCount = 8;
 
 
 template <class Array>
@@ -193,11 +194,23 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
             kmers.shrink_to_fit();
         }
 
-        // kmer_collector stores (BOSS::k_ + 1)-mers
-        BOSS::Chunk *result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
-                                              kmer_storage_.get_k() - 1,
-                                              kmer_storage_.is_both_strands_mode(),
-                                              kmers);
+        BOSS::Chunk *result;
+
+        if constexpr(utils::is_pair<typename KmerStorage::Value>::value) {
+            // kmer_collector stores (BOSS::k_ + 1)-mers
+            result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
+                                     kmer_storage_.get_k() - 1,
+                                     kmer_storage_.is_both_strands_mode(),
+                                     kmers,
+                                     kBitsPerCount);
+        } else {
+            // kmer_collector stores (BOSS::k_ + 1)-mers
+            result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
+                                     kmer_storage_.get_k() - 1,
+                                     kmer_storage_.is_both_strands_mode(),
+                                     kmers);
+        }
+
         kmer_storage_.clear();
 
         return result;
