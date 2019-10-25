@@ -51,4 +51,4 @@
 	url = https://github.com/NVlabs/nvbio
 [submodule "metagraph/external-libraries/robin-map"]
 	path = metagraph/external-libraries/robin-map
-	url = https://github.com/Tessil/robin-map.git
+	url = https://github.com/chrisbarber/robin-map.git

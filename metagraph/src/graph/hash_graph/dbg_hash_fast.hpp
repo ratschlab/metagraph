@@ -12,7 +12,7 @@ class DBGHashFast : public DeBruijnGraph {
   public:
     explicit DBGHashFast(size_t k,
                             bool canonical_mode = false,
-                            bool packed_serialization = false);
+                            bool packed_serialization = true);
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal

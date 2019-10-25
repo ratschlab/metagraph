@@ -2,7 +2,7 @@
 
 #include <cassert>
 
-#include <tsl/hopscotch_set.h>
+#include <tsl/robin_set.h>
 #include <unordered_set>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
@@ -14,10 +14,11 @@
 template <typename KMER = KmerExtractor2Bit::Kmer64>
 class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     using Kmer = KMER;
-    using KmerIndex = tsl::hopscotch_set<Kmer,
-                                         utils::Hash<Kmer>,
-                                         std::equal_to<Kmer>,
-                                         std::allocator<Kmer>>;
+    using KmerIndex = tsl::robin_set<Kmer,
+                                     utils::Hash<Kmer>,
+                                     std::equal_to<Kmer>,
+                                     std::allocator<Kmer>>;
+    using KmerIterator = typename KmerIndex::const_iterator;
   public:
     explicit DBGHashFastImpl(size_t k,
                              bool canonical_mode,
@@ -80,17 +81,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     size_t get_k() const { return k_; }
     bool is_canonical_mode() const { return canonical_mode_; }
 
-    //uint64_t num_nodes() const { return kmers_.size(); }
-    uint64_t num_nodes() const { 
-        //std::for_each(kmers_.begin(), kmers_.end(), [&](auto &kmer) {
-        //    if (get_index(kmer) > get_index(*kmers_.end())) {
-        //        std::cout << get_index(kmer) << " <= " << get_index(*kmers_.end()) << std::endl;
-        //        //assert(false);
-        //    }
-        //});
-        //return get_index(*kmers_.end()) + 1;
-        return max_node_index_ + 1;
-    }
+    uint64_t num_nodes() const { return kmers_.capacity() + 1; }
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -111,19 +102,12 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
 
+    node_index get_index(const KmerIterator &iter) const;
     node_index get_index(const Kmer &kmer) const;
     const Kmer& get_kmer(node_index node) const;
 
-    auto insert_kmer(const Kmer &kmer) {
-        auto index_insert = kmers_.insert(kmer);
-        auto index = (node_index)(&(*index_insert.first) - &(*kmers_.begin())) + 1;
-        max_node_index_ = std::max(max_node_index_, index);
-        return index_insert;
-    }
-
     size_t k_;
     bool canonical_mode_;
-    node_index max_node_index_ = 0;
 
     KmerIndex kmers_;
     KmerExtractor2Bit seq_encoder_;
@@ -147,20 +131,20 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
     for (const auto &kmer : sequence_to_kmers(sequence)) {
-        auto index_insert = insert_kmer(kmer);
+        auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
-            nodes_inserted->insert_bit(get_index(kmer), true); //TODO
+            nodes_inserted->insert_bit(get_index(index_insert.first), true);
     }
 
     if (!canonical_mode_)
         return;
 
     for (const auto &kmer : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
-        auto index_insert = insert_kmer(kmer);
+        auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
-            nodes_inserted->insert_bit(get_index(kmer), true); //TODO
+            nodes_inserted->insert_bit(get_index(index_insert.first), true);
     }
 }
 
@@ -461,13 +445,14 @@ void DBGHashFastImpl<KMER>::serialize(std::ostream &out) const {
 
     Serializer serializer(out);
 
-    //if (packed_serialization_) {
+    if (packed_serialization_) {
         serialize_number(out, kmers_.size());
         std::for_each(kmers_.begin(), kmers_.end(), serializer);
-    //} else {
-    //    serialize_number(out, std::numeric_limits<uint64_t>::max());
-    //    kmers_.serialize(serializer);
-    //}
+    } else {
+        throw std::runtime_error("not implemented");
+        //serialize_number(out, std::numeric_limits<uint64_t>::max());
+        //kmers_.serialize(serializer);
+    }
 
     serialize_number(out, canonical_mode_);
 }
@@ -481,7 +466,6 @@ void DBGHashFastImpl<KMER>::serialize(const std::string &filename) const {
 
 template <typename KMER>
 bool DBGHashFastImpl<KMER>::load(std::istream &in) {
-    std::cout << "loading..." << std::endl;
     if (!in.good())
         return false;
 
@@ -496,24 +480,23 @@ bool DBGHashFastImpl<KMER>::load(std::istream &in) {
 
         uint64_t tag = load_number(in);
 
-        //if (tag < std::numeric_limits<uint64_t>::max()) {
+        if (tag < std::numeric_limits<uint64_t>::max()) {
             packed_serialization_ = true;
 
             const auto size = tag;
             kmers_.reserve(size + 1);
             for (uint64_t i = 0; i < size; ++i) {
-                insert_kmer(deserializer.operator()<Kmer>());
+                kmers_.insert(deserializer.operator()<Kmer>());
             }
 
-        //} else {
-        //    packed_serialization_ = false;
-
-        //    kmers_ = KmerIndex::deserialize(deserializer, true);
-        //}
+        } else {
+            throw std::runtime_error("not implemented");
+            //packed_serialization_ = false;
+            //kmers_ = KmerIndex::deserialize(deserializer, true);
+        }
 
         canonical_mode_ = load_number(in);
 
-        std::cout << "done." << std::endl;
         return in.good();
 
     } catch (...) {
@@ -552,40 +535,25 @@ bool DBGHashFastImpl<KMER>::operator==(const DeBruijnGraph &other) const {
 
 template <typename KMER>
 typename DBGHashFastImpl<KMER>::node_index
+DBGHashFastImpl<KMER>::get_index(const KmerIterator &kmer_iter) const {
+    return (node_index)(kmer_iter - kmers_.begin()) + 1;
+}
+
+template <typename KMER>
+typename DBGHashFastImpl<KMER>::node_index
 DBGHashFastImpl<KMER>::get_index(const Kmer &kmer) const {
     auto find = kmers_.find(kmer);
     if (find == kmers_.end())
         return npos;
 
-    //int count = 0;
-    //std::for_each(kmers_.begin(), kmers_.end(), [&](auto &kmer) {
-    //    std::cout << (node_index)(&kmer - &(*kmers_.begin())) + 1 << std::endl;
-    //    std::cout << kmer << " == " << get_kmer((node_index)(&kmer - &(*kmers_.begin())) + 1) << std::endl;
-    //    ++count;
-    //    //if (count > 100)
-    //    //    exit(1);
-    //    if (kmer != get_kmer((node_index)(&kmer - &(*kmers_.begin())) + 1))
-    //        exit(1);
-    //});
-    //exit(1);
-
-    //if (*find != get_kmer((node_index)(&(*find) - &(*kmers_.begin())) + 1)) {
-    //    std::cout << *find << std::endl;
-    //    std::cout << &(*find) << std::endl;
-    //    std::cout << &(*kmers_.begin()) << std::endl;
-    //    std::cout << (node_index)(&(*find) - &(*kmers_.begin())) + 1 << std::endl;
-    //    std::cout << get_kmer((node_index)(&(*find) - &(*kmers_.begin())) + 1) << std::endl;
-    //    exit(1);
-    //}
-
-    return (node_index)(&(*find) - &(*kmers_.begin())) + 1;
+    return get_index(find);
 }
 
 template <typename KMER>
 const KMER& DBGHashFastImpl<KMER>::get_kmer(node_index node) const {
     assert(in_graph(node));
 
-    return *(&(*kmers_.begin()) + (node - 1)); 
+    return *(kmers_.begin() + (node - 1));
 }
 
 template <typename KMER>
@@ -598,11 +566,9 @@ bool DBGHashFastImpl<KMER>::in_graph(node_index node) const {
 template <typename KMER>
 void DBGHashFastImpl<KMER>::call_nodes(const std::function<void(node_index)> &callback,
                                const std::function<bool()> &stop_early) const {
-    std::cout << "call_nodes" << std::endl;
-    std::ignore = stop_early; // TODO !!!
-    std::for_each(kmers_.begin(), kmers_.end(), [&](auto &kmer) {
-        callback(get_index(kmer));
-    });
+    for (auto iter = kmers_.begin(); iter != kmers_.end() && !stop_early(); ++iter) {
+        callback(get_index(iter));
+    }
 }
 
 std::unique_ptr<DBGHashFast::DBGHashFastInterface>

@@ -1,5 +1,6 @@
 #include <json/json.h>
 #include <ips4o.hpp>
+#include <chrono>
 
 #include "unix_tools.hpp"
 #include "config.hpp"
@@ -111,6 +112,7 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGSuccinct>(filename);
 
         case Config::GraphType::HASH:
+            //return load_critical_graph_from_file<DBGHashOrdered>(filename);
             return load_critical_graph_from_file<DBGHashFast>(filename);
 
         case Config::GraphType::HASH_PACKED:
@@ -1306,6 +1308,7 @@ int main(int argc, const char *argv[]) {
             break;
         }
         case Config::BUILD: {
+            auto start = std::chrono::high_resolution_clock::now();
             std::unique_ptr<DeBruijnGraph> graph;
 
             if (config->verbose)
@@ -1499,6 +1502,7 @@ int main(int argc, const char *argv[]) {
                         break;
 
                     case Config::GraphType::HASH:
+                        //graph.reset(new DBGHashOrdered(config->k, config->canonical));
                         graph.reset(new DBGHashFast(config->k, config->canonical));
                         break;
 
@@ -1571,6 +1575,9 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Graph construction finished in "
                           << timer.elapsed() << "sec" << std::endl;
 
+            auto finish = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = finish - start;
+            std::cout << "Elapsed time: " << elapsed.count() << " s\n";
             if (!config->outfbase.empty()) {
                 if (dynamic_cast<DBGSuccinct*>(graph.get()) && config->mark_dummy_kmers) {
                     if (config->verbose)
@@ -2936,6 +2943,7 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Extracting sequences from graph...\t" << std::flush;
 
             timer.reset();
+            auto start = std::chrono::high_resolution_clock::now();
 
             if (config->to_gfa) {
                 if (!config->unitigs) {
@@ -2974,6 +2982,9 @@ int main(int argc, const char *argv[]) {
 
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
+            auto finish = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = finish - start;
+            std::cout << "Elapsed time: " << elapsed.count() << " s\n";
 
             return 0;
         }
