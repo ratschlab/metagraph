@@ -51,7 +51,9 @@ inline reverse_complement(const TAlphabet *begin,
     assert(end >= begin);
     std::vector<TAlphabet> rev_comp(end - begin);
     std::transform(begin, end, rev_comp.rbegin(),
-                   [&](const auto c) -> TAlphabet { return complement_code.at(c); });
+                   [&](const auto c) -> TAlphabet {
+                       return c < complement_code.size() ? complement_code[c] : c;
+                   });
     return rev_comp;
 }
 
