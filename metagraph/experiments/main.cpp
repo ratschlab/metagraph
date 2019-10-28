@@ -4,6 +4,9 @@
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
 #include <ips4o.hpp>
+#include <libmaus2/util/NumberSerialisation.hpp>
+#include <boost/multiprecision/integer.hpp>
+#include <progress_bar.hpp>
 
 #include "method_constructors.hpp"
 #include "data_generation.hpp"
@@ -18,6 +21,8 @@
 #include "annotate_row_compressed.hpp"
 #include "static_annotators_def.hpp"
 #include "config.hpp"
+#include "serialization.hpp"
+#include "wavelet_tree.hpp"
 
 using namespace std::chrono_literals;
 
@@ -275,7 +280,8 @@ int main(int argc, char *argv[]) {
             "slice",
             "estimate_abundance_threshold",
             "evaluate_alignment",
-            "query_annotation_rows"
+            "query_annotation_rows",
+            "to_dna4"
         };
 
         ValuesConstraint<std::string> regime_constraint(regimes);
@@ -1076,7 +1082,145 @@ int main(int argc, char *argv[]) {
 
             std::cout << "Num rows in target annotation: " << row_annotation->num_objects() << std::endl;
             std::cout << "Num columns in target annotation: " << row_annotation->num_labels() << std::endl;
+
+        } else if (regime == "to_dna4") {
+            // This converts BOSS table constructed for alphabet DNA5 {A,C,G,T,N}
+            // to DNA4 {A,C,G,T}. Only tables without any characters N are supported.
+
+            // alphabet: {$,A,C,G,T}, without N
+            const size_t alph_size = 5;
+
+            UnlabeledValueArg<std::string> in_graph_arg("input_file", "Graph in", true, "", "string", cmd);
+            UnlabeledValueArg<std::string> out_graph_arg("output_file", "Graph out", true, "", "string", cmd);
+            cmd.parse(argc, argv);
+
+            std::ifstream instream(in_graph_arg.getValue(), std::ios::binary);
+            if (!instream.good()) {
+                std::cerr << "ERROR: can't read from file "
+                          << in_graph_arg.getValue() << std::endl;
+                return 1;
+            }
+
+            // load F, k, and state
+            auto F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
+            auto k_ = load_number(instream);
+            auto state = static_cast<Config::StateType>(load_number(instream));
+
+            // old alphabet: {$,A,C,G,T,N}
+            if (F_.size() != alph_size + 1) {
+                std::cerr << "ERROR: conversion to DNA4 alphabet is implemented"
+                             " only for graphs over the DNA5 alphabet" << std::endl;
+                return 1;
+            }
+
+            F_.pop_back();
+
+            size_t bits_per_char_W = boost::multiprecision::msb(alph_size - 1) + 2;
+
+            wavelet_tree *W_;
+            bit_vector *last_;
+
+            // load W and last arrays
+            switch (state) {
+                case Config::DYN:
+                    W_ = new wavelet_tree_dyn(bits_per_char_W);
+                    last_ = new bit_vector_dyn();
+                    break;
+                case Config::STAT:
+                    W_ = new wavelet_tree_stat(bits_per_char_W);
+                    last_ = new bit_vector_stat();
+                    break;
+                case Config::FAST:
+                    W_ = new wavelet_tree_fast(bits_per_char_W);
+                    last_ = new bit_vector_stat();
+                    break;
+                case Config::SMALL:
+                    W_ = new wavelet_tree_small(bits_per_char_W);
+                    last_ = new bit_vector_small();
+                    break;
+                default:
+                    std::cerr << "ERROR: unknown state" << std::endl;
+                    return 1;
+            }
+            if (!W_->load(instream)) {
+                std::cerr << "ERROR: failed to load W vector" << std::endl;
+                return 1;
+            }
+
+            if (!last_->load(instream)) {
+                std::cerr << "ERROR: failed to load L vector" << std::endl;
+                return 1;
+            }
+
+            bool canonical_mode_;
+
+            try {
+                canonical_mode_ = load_number(instream);
+            } catch (...) {
+                canonical_mode_ = false;
+            }
+
+            instream.close();
+
+            sdsl::int_vector<> W = W_->to_vector();
+            delete W_;
+
+            ProgressBar progress_bar(W.size(), "Converting W[]", std::cerr);
+            for (uint64_t i = 0; i < W.size(); ++i) {
+                auto value = W[i];
+
+                if (value == alph_size || value == 2 * alph_size + 1) {
+                    std::cerr << "ERROR: detected 'N' character in W[" << i << "]" << std::endl;
+                    return 1;
+                }
+
+                if (value > alph_size)
+                    W[i]--;
+
+                ++progress_bar;
+            }
+            W.width(bits_per_char_W);
+
+            switch (state) {
+                case Config::DYN:
+                    W_ = new wavelet_tree_dyn(bits_per_char_W, std::move(W));
+                    break;
+                case Config::STAT:
+                    W_ = new wavelet_tree_stat(bits_per_char_W, std::move(W));
+                    break;
+                case Config::FAST:
+                    W_ = new wavelet_tree_fast(bits_per_char_W, std::move(W));
+                    break;
+                case Config::SMALL:
+                    W_ = new wavelet_tree_small(bits_per_char_W, std::move(W));
+                    break;
+                default:
+                    std::cerr << "ERROR: unknown state" << std::endl;
+                    return 1;
+            }
+
+            std::ofstream outstream(out_graph_arg.getValue(), std::ios::binary);
+            if (!outstream.good()) {
+                std::cerr << "ERROR: can't write to file "
+                          << out_graph_arg.getValue() << std::endl;
+                return 1;
+            }
+
+            // write F values, k, and state
+            libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
+            serialize_number(outstream, k_);
+            serialize_number(outstream, state);
+            // write Wavelet Tree
+            W_->serialize(outstream);
+            // write last array
+            last_->serialize(outstream);
+
+            serialize_number(outstream, canonical_mode_);
+
+            std::cout << "Converted graph to DNA4 alphabet and serialized to "
+                      << out_graph_arg.getValue() << std::endl;
         }
+
     } catch (const TCLAP::ArgException &e) {
         std::cerr << "ERROR: " << e.error()
                   << " for arg " << e.argId() << std::endl;
