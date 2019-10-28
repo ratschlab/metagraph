@@ -27,6 +27,7 @@ Config::Config(int argc, const char *argv[]) {
         identity = EXTEND;
     } else if (!strcmp(argv[1], "concatenate")) {
         identity = CONCATENATE;
+        clear_dummy = true;
     } else if (!strcmp(argv[1], "compare")) {
         identity = COMPARE;
     } else if (!strcmp(argv[1], "align")) {
@@ -252,6 +253,8 @@ Config::Config(int argc, const char *argv[]) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
+        } else if (!strcmp(argv[i], "--no-postprocessing")) {
+            clear_dummy = false;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
             suffix_len = atoi(get_value(i++));
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
@@ -757,7 +760,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.<type>.chunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffixes of the length given [0]\n");
             fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
-            fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
+            fprintf(stderr, "\t   --no-postprocessing \tdo not erase redundant dummy edges after concatenation [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM: {
