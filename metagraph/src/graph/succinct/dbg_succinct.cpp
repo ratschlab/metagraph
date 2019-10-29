@@ -701,7 +701,7 @@ bool DBGSuccinct::load(const std::string &filename) {
 
     if (std::filesystem::exists(prefix + IKmerBloomFilter::file_extension())) {
         if (!bloom_filter_)
-            bloom_filter_.reset(IKmerBloomFilter::initialize<>(get_k()).release());
+            bloom_filter_.reset(IKmerBloomFilter::initialize(get_k()).release());
 
         if (!bloom_filter_->load(prefix)) {
             std::cerr << "Error: failed to load Bloom filter" << std::endl;
