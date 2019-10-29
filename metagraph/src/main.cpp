@@ -20,6 +20,7 @@
 #include "kmc_parser.hpp"
 #include "dbg_hash_ordered.hpp"
 #include "dbg_hash_fast.hpp"
+#include "dbg_hash_fast2.hpp"
 #include "dbg_hash_string.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
@@ -113,7 +114,7 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH:
             //return load_critical_graph_from_file<DBGHashOrdered>(filename);
-            return load_critical_graph_from_file<DBGHashFast>(filename);
+            return load_critical_graph_from_file<DBGHashFast2>(filename);
 
         case Config::GraphType::HASH_PACKED:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
@@ -1503,7 +1504,7 @@ int main(int argc, const char *argv[]) {
 
                     case Config::GraphType::HASH:
                         //graph.reset(new DBGHashOrdered(config->k, config->canonical));
-                        graph.reset(new DBGHashFast(config->k, config->canonical));
+                        graph.reset(new DBGHashFast2(config->k, config->canonical));
                         break;
 
                     case Config::GraphType::HASH_PACKED:
