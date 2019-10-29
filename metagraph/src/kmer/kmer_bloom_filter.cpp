@@ -48,10 +48,6 @@ class BloomFilterWrapper {
     virtual size_t num_hash_functions() const = 0;
 
   protected:
-    static size_t round_size(size_t filter_size) {
-        return size_t(1) << utils::code_length(filter_size);
-    }
-
     constexpr static size_t optim_size(double false_positive_prob, size_t expected_num_elements) {
         return -std::log2(false_positive_prob) * expected_num_elements / M_LN2 / M_LN2;
     }
@@ -60,8 +56,8 @@ class BloomFilterWrapper {
         return std::ceil(-std::log2(false_positive_prob));
     }
 
-    static size_t optim_h(size_t filter_size, size_t expected_num_elements) {
-        return std::ceil(M_LN2 * round_size(filter_size) / expected_num_elements);
+    constexpr static size_t optim_h(size_t filter_size, size_t expected_num_elements) {
+        return std::ceil(M_LN2 * filter_size / expected_num_elements);
     }
 };
 
@@ -69,9 +65,8 @@ class BloomFilter : public BloomFilterWrapper {
   public:
     // Base constructor
     BloomFilter(size_t filter_size, size_t num_hash_functions)
-          : filter_(round_size(filter_size)),
-            num_hash_functions_(num_hash_functions),
-            filter_mask_(filter_.size() - 1) {}
+          : filter_(filter_size),
+            num_hash_functions_(num_hash_functions) {}
 
     BloomFilter(size_t filter_size,
                 size_t expected_num_elements,
@@ -89,13 +84,18 @@ class BloomFilter : public BloomFilterWrapper {
 
     void insert(size_t hash1, size_t hash2) {
         assert(filter_.size());
+        const auto size = filter_.size();
+        if (!size)
+            return;
+
         // Kirsch, A., & Mitzenmacher, M. (2006, September).
         // Less hashing, same performance: building a better bloom filter.
         // In European Symposium on Algorithms (pp. 456-467). Springer, Berlin, Heidelberg.
         for (size_t i = 0; i < num_hash_functions_; ++i) {
             // This only works if the filter size is a power of 2
             // TODO: do some locking here to make this multithreaded
-            filter_[(hash1 + i * hash2) & filter_mask_] = true;
+            const auto hash = hash1 + i * hash2;
+            filter_[hash - hash / size * size] = true;
         }
 
         assert(check(hash1, hash2));
@@ -103,9 +103,14 @@ class BloomFilter : public BloomFilterWrapper {
 
     bool check(size_t hash1, size_t hash2) const {
         assert(filter_.size());
+        const auto size = filter_.size();
+        if (!size)
+            return true;
+
         for (size_t i = 0; i < num_hash_functions_; ++i) {
             // This only works if the filter size is a power of 2
-            if (!filter_[(hash1 + i * hash2) & filter_mask_])
+            const auto hash = hash1 + i * hash2;
+            if (!filter_[hash - hash / size * size])
                 return false;
         }
 
@@ -115,14 +120,12 @@ class BloomFilter : public BloomFilterWrapper {
     void serialize(ostream &out) const {
         filter_.serialize(out);
         serialize_number(out, num_hash_functions_);
-        serialize_number(out, filter_mask_);
     }
 
     bool load(istream &in) {
         try {
             filter_.load(in);
             num_hash_functions_ = load_number(in);
-            filter_mask_ = load_number(in);
             return true;
         } catch (...) {
             return false;
@@ -135,7 +138,6 @@ class BloomFilter : public BloomFilterWrapper {
   private:
     sdsl::bit_vector filter_;
     size_t num_hash_functions_;
-    size_t filter_mask_;
 };
 
 template <class KmerHasher = RollingKmerMultiHasher<2, KmerDef::TAlphabet>,
