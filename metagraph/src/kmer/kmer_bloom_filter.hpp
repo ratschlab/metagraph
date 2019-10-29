@@ -26,6 +26,8 @@ class RollingKmerHasher {
         reset_value_ = hash_.hashvalue;
     }
 
+    // After calling reset, the first k values of prev (next) in shift left (right)
+    // should be MAXVAL
     void reset() { hash_.hashvalue = reset_value_; }
 
     void shift_left(const TAlphabet *next, const TAlphabet *prev) {
@@ -81,6 +83,8 @@ class RollingKmerMultiHasher {
         assert(hashers_.size() == h);
     }
 
+    // After calling reset, the first k values of prev (next) in shift left (right)
+    // should be MAXVAL
     void reset() {
         assert(hashers_.size() == h);
         for (auto &hasher : hashers_) {
@@ -144,7 +148,6 @@ class IKmerBloomFilter {
   public:
     virtual ~IKmerBloomFilter() {}
 
-    template <class KmerHasher = RollingKmerMultiHasher<2>>
     static std::unique_ptr<IKmerBloomFilter>
     initialize(size_t k,
                double false_positive_prob,
@@ -153,7 +156,6 @@ class IKmerBloomFilter {
                bool canonical_mode = false,
                uint64_t seed = 0x100000000);
 
-    template <class KmerHasher = RollingKmerMultiHasher<2>>
     static std::unique_ptr<IKmerBloomFilter>
     initialize(size_t k,
                size_t filter_size,
@@ -161,7 +163,6 @@ class IKmerBloomFilter {
                bool canonical_mode = false,
                uint64_t seed = 0x100000000);
 
-    template <class KmerHasher = RollingKmerMultiHasher<2>>
     static std::unique_ptr<IKmerBloomFilter>
     initialize(size_t k,
                size_t filter_size = 0,
@@ -170,11 +171,13 @@ class IKmerBloomFilter {
                bool canonical_mode = false,
                uint64_t seed = 0x100000000);
 
+    // Add the k-mers of the sequence to the Bloom filter
     virtual void add_sequence(const char *begin, const char *end) = 0;
     void add_sequence(const std::string &sequence) {
         add_sequence(&*sequence.begin(), &*sequence.end());
     }
 
+    // Checks for k-mer presence in the Bloom filter
     virtual sdsl::bit_vector check_kmer_presence(const char *begin,
                                                  const char *end) const = 0;
     sdsl::bit_vector check_kmer_presence(const std::string &sequence) {
@@ -192,7 +195,11 @@ class IKmerBloomFilter {
     virtual bool load(const std::string &filename_base) = 0;
     virtual bool load(std::istream &in) = 0;
 
-    virtual void print_stats() const;
+    virtual void print_stats() const {
+        std::cout << "Bloom filter parameters" << std::endl
+                  << "Size:\t\t\t" << size() << " bits" << std::endl
+                  << "Num hash functions:\t" << num_hash_functions() << std::endl;
+    }
 
     static std::string file_extension() { return kExtension; }
 

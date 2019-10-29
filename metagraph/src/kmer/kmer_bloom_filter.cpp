@@ -34,65 +34,78 @@ std::string decode(const std::vector<TAlphabet> &encoded) {
 }
 
 
-template <class T>
 class BloomFilterWrapper {
   public:
     virtual ~BloomFilterWrapper() {}
 
-    virtual void insert(const T&) = 0;
-    virtual bool check(const T&) const = 0;
+    virtual void insert(size_t hash1, size_t hash2) = 0;
+    virtual bool check(size_t hash1, size_t hash2) const = 0;
 
     virtual void serialize(ostream &out) const = 0;
     virtual bool load(istream &in) = 0;
 
     virtual size_t size() const = 0;
     virtual size_t num_hash_functions() const = 0;
+
+  protected:
+    static size_t round_size(size_t filter_size) {
+        return size_t(1) << utils::code_length(filter_size);
+    }
+
+    constexpr static size_t optim_size(double false_positive_prob, size_t expected_num_elements) {
+        return -std::log2(false_positive_prob) * expected_num_elements / M_LN2 / M_LN2;
+    }
+
+    constexpr static size_t optim_h(double false_positive_prob) {
+        return std::ceil(-std::log2(false_positive_prob));
+    }
+
+    static size_t optim_h(size_t filter_size, size_t expected_num_elements) {
+        return std::ceil(M_LN2 * round_size(filter_size) / expected_num_elements);
+    }
 };
 
-template <class T>
-class BloomFilter : public BloomFilterWrapper<T> {
+class BloomFilter : public BloomFilterWrapper {
   public:
-    BloomFilter(double false_positive_prob,
-               size_t expected_num_elements,
-               size_t max_num_hash_functions)
-          : BloomFilter(optim_size(false_positive_prob, expected_num_elements),
-                        expected_num_elements,
-                        max_num_hash_functions) {}
-
+    // Base constructor
     BloomFilter(size_t filter_size, size_t num_hash_functions)
-          : filter_(size_t(1) << utils::code_length(filter_size)),
+          : filter_(round_size(filter_size)),
             num_hash_functions_(num_hash_functions),
             filter_mask_(filter_.size() - 1) {}
 
     BloomFilter(size_t filter_size,
                 size_t expected_num_elements,
                 size_t max_num_hash_functions)
-          : filter_(size_t(1) << utils::code_length(filter_size)),
-            num_hash_functions_(std::min(max_num_hash_functions,
-                                         optim_h(filter_.size(), expected_num_elements))),
-            filter_mask_(filter_.size() - 1) {}
+          : BloomFilter(filter_size,
+                        std::min(max_num_hash_functions,
+                                 optim_h(filter_size, expected_num_elements))) {}
 
-    void insert(const T &obj) {
+    BloomFilter(double false_positive_prob,
+                size_t expected_num_elements,
+                size_t max_num_hash_functions)
+          : BloomFilter(optim_size(false_positive_prob, expected_num_elements),
+                        expected_num_elements,
+                        max_num_hash_functions) {}
+
+    void insert(size_t hash1, size_t hash2) {
         assert(filter_.size());
-        size_t d = obj.template get_hash<1>();
         // Kirsch, A., & Mitzenmacher, M. (2006, September).
         // Less hashing, same performance: building a better bloom filter.
         // In European Symposium on Algorithms (pp. 456-467). Springer, Berlin, Heidelberg.
-        for (size_t i = 0, h = obj.template get_hash<0>(); i < num_hash_functions_; ++i, h += d) {
+        for (size_t i = 0; i < num_hash_functions_; ++i) {
             // This only works if the filter size is a power of 2
             // TODO: do some locking here to make this multithreaded
-            filter_[h & filter_mask_] = 1;
+            filter_[(hash1 + i * hash2) & filter_mask_] = true;
         }
 
-        assert(check(obj));
+        assert(check(hash1, hash2));
     }
 
-    bool check(const T &obj) const {
+    bool check(size_t hash1, size_t hash2) const {
         assert(filter_.size());
-        size_t d = obj.template get_hash<1>();
-        for (size_t i = 0, h = obj.template get_hash<0>(); i < num_hash_functions_; ++i, h += d) {
+        for (size_t i = 0; i < num_hash_functions_; ++i) {
             // This only works if the filter size is a power of 2
-            if (!filter_[h & filter_mask_])
+            if (!filter_[(hash1 + i * hash2) & filter_mask_])
                 return false;
         }
 
@@ -120,25 +133,13 @@ class BloomFilter : public BloomFilterWrapper<T> {
     size_t num_hash_functions() const { return num_hash_functions_; }
 
   private:
-    constexpr static size_t optim_size(double false_positive_prob, size_t expected_num_elements) {
-        return -std::log2(false_positive_prob) * expected_num_elements / M_LN2 / M_LN2;
-    }
-
-    constexpr static size_t optim_h(double false_positive_prob) {
-        return std::ceil(-std::log2(false_positive_prob));
-    }
-
-    constexpr static size_t optim_h(size_t filter_size, size_t expected_num_elements) {
-        return std::ceil(M_LN2 * filter_size / expected_num_elements);
-    }
-
     sdsl::bit_vector filter_;
     size_t num_hash_functions_;
     size_t filter_mask_;
 };
 
 template <class KmerHasher = RollingKmerMultiHasher<2, KmerDef::TAlphabet>,
-          class BloomFilter = BloomFilter<KmerHasher>>
+          class BloomFilter = ::BloomFilter>
 class KmerBloomFilter : public IKmerBloomFilter {
   public:
     typedef KmerHasher KmerHasherType;
@@ -186,9 +187,9 @@ class KmerBloomFilter : public IKmerBloomFilter {
         uint64_t counter = 0;
         #endif
 
-        call_kmers(begin, end, [&](auto, const auto &kmer) {
-            filter_.insert(kmer);
-            assert(filter_.check(kmer));
+        call_kmers(begin, end, [&](auto, auto hash1, auto hash2) {
+            filter_.insert(hash1, hash2);
+            assert(filter_.check(hash1, hash2));
             #ifndef NDEBUG
             counter++;
             #endif
@@ -205,15 +206,15 @@ class KmerBloomFilter : public IKmerBloomFilter {
         if (begin + k_ > end)
             return sdsl::bit_vector();
 
-        sdsl::bit_vector check(end - begin - k_ + 1);
-        call_kmers(begin, end, [&](auto i, const auto &kmer) {
-            assert(i < check.size());
+        sdsl::bit_vector check_vec(end - begin - k_ + 1);
+        call_kmers(begin, end, [&](auto i, auto hash1, auto hash2) {
+            assert(i < check_vec.size());
 
-            if (filter_.check(kmer))
-                check[i] = true;
+            if (filter_.check(hash1, hash2))
+                check_vec[i] = true;
         });
 
-        return check;
+        return check_vec;
     }
 
     bool is_canonical_mode() const { return canonical_mode_; }
@@ -265,8 +266,9 @@ class KmerBloomFilter : public IKmerBloomFilter {
 
   private:
     void call_kmers(const char *begin, const char *end,
-                    const std::function<void(size_t i /* position */,
-                                             const KmerHasherType&)> &callback) const {
+                    const std::function<void(size_t /* position */,
+                                             size_t /* hash1 */,
+                                             size_t /* hash2 */)> &callback) const {
         auto fwd = hasher_;
 
         if (is_canonical_mode()) {
@@ -294,8 +296,12 @@ class KmerBloomFilter : public IKmerBloomFilter {
                 fwd.shift_left(i, i - k_);
                 rev.shift_right(j, j + k_);
 
-                if (++chars >= k_)
-                    callback(i - coded.data() + 1 - (k_ << 1), std::min(fwd, rev));
+                if (++chars >= k_) {
+                    const auto &canonical = std::min(fwd, rev);
+                    callback(i - coded.data() + 1 - (k_ << 1),
+                             canonical.template get_hash<0>(),
+                             canonical.template get_hash<1>());
+                }
             }
 
         } else {
@@ -315,7 +321,9 @@ class KmerBloomFilter : public IKmerBloomFilter {
                 fwd.shift_left(i, i - k_);
 
                 if (++chars >= k_)
-                    callback(i - coded.data() + 1 - (k_ << 1), fwd);
+                    callback(i - coded.data() + 1 - (k_ << 1),
+                             fwd.template get_hash<0>(),
+                             fwd.template get_hash<1>());
             }
         }
     }
@@ -327,7 +335,6 @@ class KmerBloomFilter : public IKmerBloomFilter {
     KmerHasherType hasher_;
 };
 
-template <class KmerHasher>
 std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
 ::initialize(size_t k,
              double false_positive_prob,
@@ -335,7 +342,7 @@ std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
              size_t max_num_hash_functions,
              bool canonical_mode,
              uint64_t seed) {
-    auto bloom_filter = std::make_unique<KmerBloomFilter<KmerHasher>>(
+    auto bloom_filter = std::make_unique<KmerBloomFilter<>>(
         k,
         false_positive_prob,
         expected_num_elements,
@@ -350,17 +357,13 @@ std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
     return bloom_filter;
 }
 
-template std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
-::initialize<RollingKmerMultiHasher<2>>(size_t, double, size_t, size_t, bool, uint64_t);
-
-template <class KmerHasher>
-std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter::
-initialize(size_t k,
-           size_t filter_size,
-           size_t num_hash_functions,
-           bool canonical_mode,
-           uint64_t seed) {
-    auto bloom_filter = std::make_unique<KmerBloomFilter<KmerHasher>>(
+std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
+::initialize(size_t k,
+             size_t filter_size,
+             size_t num_hash_functions,
+             bool canonical_mode,
+             uint64_t seed) {
+    auto bloom_filter = std::make_unique<KmerBloomFilter<>>(
         k,
         filter_size,
         num_hash_functions,
@@ -374,18 +377,14 @@ initialize(size_t k,
     return bloom_filter;
 }
 
-template std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
-::initialize<RollingKmerMultiHasher<2>>(size_t, size_t, size_t, bool, uint64_t);
-
-template <class KmerHasher>
-std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter::
-initialize(size_t k,
-           size_t filter_size,
-           size_t expected_num_elements,
-           size_t max_num_hash_functions,
-           bool canonical_mode,
-           uint64_t seed) {
-    auto bloom_filter = std::make_unique<KmerBloomFilter<KmerHasher>>(
+std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
+::initialize(size_t k,
+             size_t filter_size,
+             size_t expected_num_elements,
+             size_t max_num_hash_functions,
+             bool canonical_mode,
+             uint64_t seed) {
+    auto bloom_filter = std::make_unique<KmerBloomFilter<>>(
         k,
         filter_size,
         expected_num_elements,
@@ -398,14 +397,4 @@ initialize(size_t k,
         bloom_filter->print_stats();
 
     return bloom_filter;
-}
-
-template std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
-::initialize<RollingKmerMultiHasher<2>>(size_t, size_t, size_t, size_t, bool, uint64_t);
-
-
-void IKmerBloomFilter::print_stats() const {
-    std::cout << "Bloom filter parameters" << std::endl
-              << "Size:\t\t\t" << size() << " bits" << std::endl
-              << "Num hash functions:\t" << num_hash_functions() << std::endl;
 }
