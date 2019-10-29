@@ -29,7 +29,8 @@ def render_tree(text):
     assert(text[14] == '==================== Multi-BRWT TREE ===================\n')
     assert(text[-1] == '========================================================\n')
 
-    print("Rendering Multi-BRWT structure for:", text[4].strip().split()[-1])
+    annotation_name = text[4].strip().split()[-1]
+    print("Rendering Multi-BRWT structure for:", annotation_name)
     d = Digraph(name=text[4].strip().split()[-1], graph_attr={'rankdir': 'LR'})
 
     text = text[15:-1]
@@ -48,7 +49,7 @@ def render_tree(text):
         for child in tokens[3:]:
             d.edge(node, child)
 
-    d.render()
+    d.render(annotation_name.split('/')[-1])
 
 
 if __name__ == '__main__':
