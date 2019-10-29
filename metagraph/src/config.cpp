@@ -485,11 +485,6 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (bloom_bpe < 0.0 || bloom_bpe > 1.0) {
-        std::cerr << "Error: bloom-bpe must >= 0.0 and <= 1.0" << std::endl;
-        print_usage_and_exit = true;
-    }
-
     if (initialize_bloom &&
             bool(bloom_filter_size) + (bloom_fpp > 0.0) + (bloom_bpe > 0.0) != 1) {
         std::cerr << "Error: exactly one of fpp > 0.0, bpe > 0.0, or filter_size > 0 must be true" << std::endl;

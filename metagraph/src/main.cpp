@@ -2862,7 +2862,7 @@ int main(int argc, const char *argv[]) {
             if (config->initialize_bloom) {
                 assert(config->bloom_filter_size
                            || (config->bloom_fpp > 0.0 && config->bloom_fpp <= 1.0)
-                           || (config->bloom_bpe > 0.0 && config->bloom_bpe <= 1.0));
+                           || (config->bloom_bpe > 0.0));
 
                 if (config->verbose) {
                     std::cout << "Construct Bloom filter for nodes..." << std::endl;
