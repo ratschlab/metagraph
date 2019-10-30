@@ -13,6 +13,8 @@
 template <typename KMER = KmerExtractor2Bit::Kmer64>
 class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
     using Kmer = KMER;
+    using TAlphabet = KmerExtractor2Bit::TAlphabet;
+    using KmerPrefix = typename KMER::WordType;
 
 #if _PROTEIN_GRAPH
     using Bits = uint32_t;
@@ -117,27 +119,23 @@ class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
 
-    auto find_kmer(const Kmer &kmer) {
-        typename KMER::WordType kmer_data = typename KMER::WordType(kmer.data());
-        const KMER key = KMER(kmer_data & kIgnoreLastCharMask);
-        return std::make_pair(kmers_.find(key), key);
+    auto find_kmer(const KmerPrefix &kmer_prefix) {
+        return kmers_.find(KMER(kmer_prefix));
     }
 
-    auto find_kmer(const Kmer &kmer) const {
-        typename KMER::WordType kmer_data = typename KMER::WordType(kmer.data());
-        const KMER key = KMER(kmer_data & kIgnoreLastCharMask);
-        return std::make_pair(kmers_.find(key), key);
+    auto find_kmer(const KmerPrefix &kmer_prefix) const {
+        return kmers_.find(KMER(kmer_prefix));
     }
 
-    bool has_edge(typename KmerIndex::const_iterator out_iter, const KmerExtractor2Bit::TAlphabet c) const {
+    bool has_edge(typename KmerIndex::const_iterator out_iter, const TAlphabet c) const {
         if (out_iter == kmers_.end())
             return false;
         
         return (*out_iter).second & (Bits(1) << c);
     }
 
-    bool has_edge(const Kmer &out_kmer, const KmerExtractor2Bit::TAlphabet c) const {
-        const auto out_find = find_kmer(out_kmer).first;
+    bool has_edge(const Kmer &out_kmer, const TAlphabet c) const {
+        const auto out_find = find_kmer(KmerPrefix(out_kmer.data()) & kIgnoreLastCharMask);
         return has_edge(out_find, c);
     }
 
@@ -165,7 +163,7 @@ class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
 
     bool packed_serialization_;
 
-    const typename KMER::WordType kIgnoreLastCharMask = ~(typename KMER::WordType(0))>>KMER::kBitsPerChar;
+    const KmerPrefix kIgnoreLastCharMask = ~(KmerPrefix(0)) >> KMER::kBitsPerChar;
     const Bits kHasNoIncomingFlag = Bits(1) << seq_encoder_.alphabet.size();
     static constexpr auto kExtension = DBGHashFast2::kExtension;
 };
@@ -187,7 +185,8 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
 
     for (const auto &kmer : sequence_to_kmers(sequence)) {
         Bits val = Bits(1) << kmer[0];
-        auto [iter, key] = find_kmer(kmer);
+        auto iter = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
+        auto key = iter.key();
 
         if (iter != kmers_.end()) {
             val |= iter.value();
@@ -211,7 +210,8 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
 
     for (const auto &kmer : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
         Bits val = Bits(1) << kmer[0];
-        auto [iter, key] = find_kmer(kmer);
+        auto iter = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
+        auto key = iter.key();
 
         if (iter != kmers_.end()) {
             val |= iter.value();
@@ -276,26 +276,37 @@ void DBGHashFast2Impl<KMER>::map_to_nodes(const std::string &sequence,
 
 template <typename KMER>
 void DBGHashFast2Impl<KMER>::call_outgoing_kmers(node_index node,
-                                                   const OutgoingEdgeCallback &callback) const {
+                                                 const OutgoingEdgeCallback &callback) const {
     assert(in_graph(node));
 
-    const auto &kmer = get_kmer(node);
-    const auto find = find_kmer(kmer).first;
-    const auto val = (*find).second;
+    KMER kmer = get_kmer(node);
+    assert((*find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask)).second
+                && "val is not 0, there at least one k-mer");
 
-    for (char c : seq_encoder_.alphabet) {
-        if ((val >> c) & 1) {
-            auto next_kmer = kmer;
-            next_kmer.to_next(k_, seq_encoder_.encode(c));
+    kmer.to_next(k_, 0);
 
-            callback(get_index(next_kmer), c);
+    const auto next_kmer_prefix_it
+        = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
+
+    if (next_kmer_prefix_it == kmers_.end())
+        return;
+
+    const Bits val = (*next_kmer_prefix_it).second;
+
+    for (size_t i = 0; i < seq_encoder_.alphabet.size(); ++i) {
+        if ((val >> i) & 1) {
+            auto next_kmer_index = get_index(next_kmer_prefix_it) + i;
+
+            assert(in_graph(next_kmer_index));
+
+            callback(next_kmer_index, i);
         }
     }
 }
 
 template <typename KMER>
 void DBGHashFast2Impl<KMER>::call_incoming_kmers(node_index node,
-                                                   const IncomingEdgeCallback &callback) const {
+                                                 const IncomingEdgeCallback &callback) const {
     assert(in_graph(node));
 
     const auto &kmer = get_kmer(node);
@@ -304,7 +315,7 @@ void DBGHashFast2Impl<KMER>::call_incoming_kmers(node_index node,
         auto prev_kmer = kmer;
         prev_kmer.to_prev(k_, seq_encoder_.encode(c));
 
-        auto prev_kmer_iter = find_kmer(prev_kmer).first;
+        auto prev_kmer_iter = find_kmer(KmerPrefix(prev_kmer.data()) & kIgnoreLastCharMask);
         if (has_edge(prev_kmer_iter, c))
             callback(get_index(prev_kmer_iter), c);
     }
@@ -355,7 +366,7 @@ size_t DBGHashFast2Impl<KMER>::outdegree(node_index node) const {
     assert(in_graph(node));
 
     const auto &kmer = get_kmer(node);
-    const auto find = find_kmer(kmer).first;
+    const auto find = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
     const auto val = (*find).second;
 
 #if _PROTEIN_GRAPH
@@ -591,13 +602,13 @@ bool DBGHashFast2Impl<KMER>::operator==(const DeBruijnGraph &other) const {
 template <typename KMER>
 typename DBGHashFast2Impl<KMER>::node_index
 DBGHashFast2Impl<KMER>::get_index(const KmerIterator &kmer_iter) const {
-    return ((node_index)(kmer_iter - kmers_.begin()) * KMER::kBitsPerChar) + 1;
+    return ((node_index)(kmer_iter - kmers_.begin()) << KMER::kBitsPerChar) + 1;
 }
 
 template <typename KMER>
 typename DBGHashFast2Impl<KMER>::node_index
 DBGHashFast2Impl<KMER>::get_index(const Kmer &kmer) const {
-    const auto find = find_kmer(kmer).first;
+    const auto find = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
     if (find == kmers_.end())
         return npos;
 
@@ -629,11 +640,15 @@ const KMER DBGHashFast2Impl<KMER>
 
     if (!kmer_iter)
         kmer_iter = get_iter(node);
-    auto prefix = kmer_iter->key();
-    auto c = typename KMER::WordType(node % KMER::kBitsPerChar);
+
+    KMER prefix = kmer_iter->key();
+
+    KmerPrefix c = node & ~kIgnoreLastCharMask;
+
     if (has_no_incoming)
         *has_no_incoming = ((kmer_iter->operator*()).second & kHasNoIncomingFlag) != 0u;
-    return KMER(typename KMER::WordType(prefix.data()) | c);    
+
+    return KMER(KmerPrefix(prefix.data()) | c);
 }
 
 template <typename KMER>
