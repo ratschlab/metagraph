@@ -73,8 +73,6 @@ class Config {
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int bloom_filter_size = 0;
 
-    uint64_t seed = 0x100000000;
-
     // Alignment options
     bool alignment_seed_unimems = false;
     bool alignment_edit_distance = false;

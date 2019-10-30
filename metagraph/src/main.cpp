@@ -2872,21 +2872,18 @@ int main(int argc, const char *argv[]) {
 
                 if (config->bloom_filter_size) {
                     dbg_succ->initialize_bloom_filter(
-                        size_t(config->bloom_filter_size),
-                        config->bloom_max_num_hash_functions,
-                        config->seed
+                        config->bloom_filter_size,
+                        config->bloom_max_num_hash_functions
                     );
                 } else if (config->bloom_fpp > 0) {
-                    dbg_succ->initialize_bloom_filter(
+                    dbg_succ->initialize_bloom_filter_from_fpr(
                         config->bloom_fpp,
-                        config->bloom_max_num_hash_functions,
-                        config->seed
+                        config->bloom_max_num_hash_functions
                     );
                 } else if (config->bloom_bpe > 0) {
                     dbg_succ->initialize_bloom_filter(
-                        size_t(std::ceil(config->bloom_bpe * dbg_succ->num_nodes())),
-                        config->bloom_max_num_hash_functions,
-                        config->seed
+                        std::ceil(config->bloom_bpe * dbg_succ->num_nodes()),
+                        config->bloom_max_num_hash_functions
                     );
                 } else {
                     std::cerr << "ERROR: invalid option for Bloom filter initialization" << std::endl;

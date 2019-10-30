@@ -225,8 +225,6 @@ Config::Config(int argc, const char *argv[]) {
             bloom_max_num_hash_functions = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--bloom-filter-size")) {
             bloom_filter_size = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--seed")) {
-            seed = strtoull(get_value(i++), NULL, 10);
         } else if (!strcmp(argv[i], "--state")) {
             state = string_to_state(get_value(i++));
 

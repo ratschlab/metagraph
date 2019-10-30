@@ -133,16 +133,14 @@ class DBGSuccinct : public DeBruijnGraph {
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 
-    void initialize_bloom_filter(double false_positive_rate,
-                                 size_t max_num_hash_functions = -1,
-                                 uint64_t seed = 0x100000000) {
-        bloom_filter_.reset(IKmerBloomFilter::initialize(
+    void initialize_bloom_filter_from_fpr(double false_positive_rate,
+                                          size_t max_num_hash_functions = -1) {
+        bloom_filter_.reset(IKmerBloomFilter::initialize_from_fpr(
             get_k(),
             false_positive_rate,
             num_nodes(),
             max_num_hash_functions,
-            canonical_mode_,
-            seed
+            canonical_mode_
         ).release());
 
         assert(bloom_filter_.get());
@@ -152,15 +150,13 @@ class DBGSuccinct : public DeBruijnGraph {
     }
 
     void initialize_bloom_filter(size_t filter_size,
-                                 size_t max_num_hash_functions = -1,
-                                 uint64_t seed = 0x100000000) {
+                                 size_t max_num_hash_functions = -1) {
         bloom_filter_.reset(IKmerBloomFilter::initialize(
             get_k(),
             filter_size,
             num_nodes(),
             max_num_hash_functions,
-            canonical_mode_,
-            seed
+            canonical_mode_
         ).release());
 
         assert(bloom_filter_.get());
