@@ -497,7 +497,6 @@ Config::Config(int argc, const char *argv[]) {
     }
 
 
-
     if (outfbase.size()
             && !(utils::check_if_writable(outfbase)
                     || (separately
