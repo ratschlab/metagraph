@@ -98,7 +98,7 @@ class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
     size_t get_k() const { return k_; }
     bool is_canonical_mode() const { return canonical_mode_; }
 
-    uint64_t num_nodes() const { return kmers_.capacity() * KMER::kBitsPerChar + 1; }
+    uint64_t num_nodes() const { return kmers_.capacity() << KMER::kBitsPerChar; }
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -119,6 +119,7 @@ class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
 
+    // TODO: sotre kmer_prefix as keys in kmers_
     auto find_kmer(const KmerPrefix &kmer_prefix) {
         return kmers_.find(KMER(kmer_prefix));
     }
@@ -185,18 +186,16 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
 
     for (const auto &kmer : sequence_to_kmers(sequence)) {
         Bits val = Bits(1) << kmer[0];
-        auto iter = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
-        auto key = iter.key();
+        // TODO: ">> kIgnoreLastCharMask" instead of "& kIgnoreLastCharMask"
+        auto key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
 
-        if (iter != kmers_.end()) {
-            val |= iter.value();
-            iter.value() = val;
-        } else {
-            iter = kmers_.insert({key, val}).first;
-        }
+        auto [iter, inserted] = kmers_.insert(std::make_pair(key, val));
+        if (!inserted)
+            iter.value() |= val;
 
         if (first_kmer)
             update_has_no_incoming_flag(get_index(iter));
+
         first_kmer = false;
 
         if (iter != kmers_.end() && nodes_inserted)
@@ -210,18 +209,15 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
 
     for (const auto &kmer : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
         Bits val = Bits(1) << kmer[0];
-        auto iter = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
-        auto key = iter.key();
+        auto key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
 
-        if (iter != kmers_.end()) {
-            val |= iter.value();
-            iter.value() = val;
-        } else {
-            iter = kmers_.insert({key, val}).first;
-        }
+        auto [iter, inserted] = kmers_.insert(std::make_pair(key, val));
+        if (!inserted)
+            iter.value() |= val;
 
         if (first_kmer)
             update_has_no_incoming_flag(get_index(iter));
+
         first_kmer = false;
 
         if (iter != kmers_.end() && nodes_inserted)
@@ -432,6 +428,7 @@ void DBGHashFast2Impl<KMER>::update_has_no_incoming_flag(node_index node) {
     auto kmer_iter = get_iter(node);
     const auto &kmer = get_kmer(node, kmer_iter);
 
+    // TODO: make this another function, which is called in add_sequence
     bool has_no_incoming = true;
 
     for (char c : seq_encoder_.alphabet) {
@@ -444,8 +441,10 @@ void DBGHashFast2Impl<KMER>::update_has_no_incoming_flag(node_index node) {
 
     auto val = kmer_iter.value();
     val &= ~kHasNoIncomingFlag;
+
     if (has_no_incoming)
         val |= kHasNoIncomingFlag;
+
     kmer_iter.value() = val;
 }
 
