@@ -15,8 +15,8 @@ class RollingKmerHasher {
 
     // Note: this constructor is expensive. Try to construct it once and
     // make copies of the object.
-    explicit RollingKmerHasher(size_t k, uint64_t seed = 0x1 | 0x200000000)
-          : hash_(k, seed & 0xFFFFFFFF, seed >> 32, 64) {
+    explicit RollingKmerHasher(size_t k, uint32_t seed1 = 0, uint32_t seed2 = 1)
+          : hash_(k, seed1, seed2, 64) {
         // initialize
         for (int i = 0; i < hash_.n; ++i) {
             hash_.eat(MAXVAL);
@@ -30,19 +30,9 @@ class RollingKmerHasher {
     // should be MAXVAL
     void reset() { hash_.hashvalue = reset_value_; }
 
-    void shift_left(const TAlphabet *next, const TAlphabet *prev) {
-        assert(next);
-        assert(prev);
+    void shift_left(TAlphabet next, TAlphabet prev) { hash_.update(prev, next); }
 
-        hash_.update(*prev, *next);
-    }
-
-    void shift_right(const TAlphabet *prev, const TAlphabet *next) {
-        assert(next);
-        assert(prev);
-
-        hash_.reverse_update(*prev, *next);
-    }
+    void shift_right(TAlphabet prev, TAlphabet next) { hash_.reverse_update(prev, next); }
 
     bool operator<(const RollingKmerHasher &other) const {
         return hash_.hashvalue < other.hash_.hashvalue;
@@ -72,12 +62,12 @@ class RollingKmerMultiHasher {
   public:
     static constexpr TAlphabet MAXVAL = RollingKmerHasher::MAXVAL;
 
-    explicit RollingKmerMultiHasher(size_t k, size_t seed = 0x100000000) {
+    explicit RollingKmerMultiHasher(size_t k) {
         static_assert(h);
 
         hashers_.reserve(h);
-        for (size_t i = 0; i < h; ++i, seed += 0x1 | 0x100000000) {
-            hashers_.emplace_back(k, seed);
+        for (size_t i = 0; i < h; ++i) {
+            hashers_.emplace_back(k, i * 2, i * 2 + 1);
         }
 
         assert(hashers_.size() == h);
@@ -92,14 +82,14 @@ class RollingKmerMultiHasher {
         }
     }
 
-    void shift_left(const TAlphabet *next, const TAlphabet *prev) {
+    void shift_left(TAlphabet next, TAlphabet prev) {
         assert(hashers_.size() == h);
         for (auto &hasher : hashers_) {
             hasher.shift_left(next, prev);
         }
     }
 
-    void shift_right(const TAlphabet *prev, const TAlphabet *next) {
+    void shift_right(TAlphabet prev, TAlphabet next) {
         assert(hashers_.size() == h);
         for (auto &hasher : hashers_) {
             hasher.shift_right(prev, next);
@@ -149,27 +139,24 @@ class IKmerBloomFilter {
     virtual ~IKmerBloomFilter() {}
 
     static std::unique_ptr<IKmerBloomFilter>
-    initialize(size_t k,
-               double false_positive_prob,
-               size_t expected_num_elements,
-               size_t max_num_hash_functions = -1,
-               bool canonical_mode = false,
-               uint64_t seed = 0x100000000);
+    initialize_from_fpr(size_t k,
+                        double false_positive_prob,
+                        size_t expected_num_elements,
+                        size_t max_num_hash_functions = -1,
+                        bool canonical_mode = false);
 
     static std::unique_ptr<IKmerBloomFilter>
     initialize(size_t k,
                size_t filter_size,
                size_t num_hash_functions,
-               bool canonical_mode = false,
-               uint64_t seed = 0x100000000);
+               bool canonical_mode = false);
 
     static std::unique_ptr<IKmerBloomFilter>
     initialize(size_t k,
                size_t filter_size = 0,
                size_t expected_num_elements = 0,
                size_t max_num_hash_functions = -1,
-               bool canonical_mode = false,
-               uint64_t seed = 0x100000000);
+               bool canonical_mode = false);
 
     // Add the k-mers of the sequence to the Bloom filter
     virtual void add_sequence(const char *begin, const char *end) = 0;

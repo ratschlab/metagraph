@@ -151,36 +151,30 @@ class KmerBloomFilter : public IKmerBloomFilter {
                              double false_positive_prob,
                              size_t expected_num_elements,
                              size_t max_num_hash_functions = -1,
-                             bool canonical_mode = false,
-                             uint64_t seed = 0x100000000)
+                             bool canonical_mode = false)
           : filter_(false_positive_prob, expected_num_elements, max_num_hash_functions),
             canonical_mode_(canonical_mode),
-            seed_(seed),
             k_(k),
-            hasher_(k_, seed_) {}
+            hasher_(k_) {}
 
     explicit KmerBloomFilter(size_t k,
                              size_t filter_size,
                              size_t num_hash_functions,
-                             bool canonical_mode = false,
-                             uint64_t seed = 0x100000000)
+                             bool canonical_mode = false)
           : filter_(filter_size, num_hash_functions),
             canonical_mode_(canonical_mode),
-            seed_(seed),
             k_(k),
-            hasher_(k_, seed_) {}
+            hasher_(k_) {}
 
     explicit KmerBloomFilter(size_t k,
                              size_t filter_size,
                              size_t expected_num_elements,
                              size_t max_num_hash_functions = -1,
-                             bool canonical_mode = false,
-                             uint64_t seed = 0x100000000)
+                             bool canonical_mode = false)
           : filter_(filter_size, expected_num_elements, max_num_hash_functions),
             canonical_mode_(canonical_mode),
-            seed_(seed),
             k_(k),
-            hasher_(k_, seed_) {}
+            hasher_(k_) {}
 
     void add_sequence(const char *begin, const char *end) {
         assert(begin + k_ > begin && begin + k_ <= end);
@@ -231,7 +225,6 @@ class KmerBloomFilter : public IKmerBloomFilter {
             throw std::ofstream::failure("Error: trying to dump graph to a bad stream");
 
         serialize_number(out, k_);
-        serialize_number(out, seed_);
         serialize_number(out, canonical_mode_);
         filter_.serialize(out);
     }
@@ -242,9 +235,8 @@ class KmerBloomFilter : public IKmerBloomFilter {
 
         try {
             k_ = load_number(in);
-            seed_ = load_number(in);
             canonical_mode_ = load_number(in);
-            hasher_ = KmerHasherType(k_, seed_);
+            hasher_ = KmerHasherType(k_);
 
             return filter_.load(in);
         } catch (...) {
@@ -284,23 +276,20 @@ class KmerBloomFilter : public IKmerBloomFilter {
             auto rc_coded = reverse_complement(coded);
 
             size_t chars = 0;
-            for (TAlphabet *i = coded.data(),
-                           *j = rc_coded.data() + rc_coded.size() - 1;
-                            i < &*coded.end();
-                            ++i, --j) {
-                assert(j >= rc_coded.data());
-                if (*i >= KmerDef::alphabet.size()) {
+            for (size_t i = 0, j = coded.size() - 1; i < coded.size(); ++i, --j) {
+                if (coded[i] >= KmerDef::alphabet.size()) {
                     chars = 0;
                     continue;
                 }
-                assert(*j < KmerDef::alphabet.size());
 
-                fwd.shift_left(i, i - k_);
-                rev.shift_right(j, j + k_);
+                assert(rc_coded[j] < KmerDef::alphabet.size());
+
+                fwd.shift_left(coded[i], coded[i - k_]);
+                rev.shift_right(rc_coded[j], rc_coded[j + k_]);
 
                 if (++chars >= k_) {
                     const auto &canonical = std::min(fwd, rev);
-                    callback(i - coded.data() + 1 - (k_ << 1),
+                    callback(i + 1 - (k_ << 1),
                              canonical.template get_hash<0>(),
                              canonical.template get_hash<1>());
                 }
@@ -314,16 +303,16 @@ class KmerBloomFilter : public IKmerBloomFilter {
             std::transform(begin, end, coded.begin() + k_, code);
 
             size_t chars = 0;
-            for (TAlphabet *i = coded.data(); i < &*coded.end(); ++i) {
-                if (*i >= KmerDef::alphabet.size()) {
+            for (size_t i = 0; i < coded.size(); ++i) {
+                if (coded[i] >= KmerDef::alphabet.size()) {
                     chars = 0;
                     continue;
                 }
 
-                fwd.shift_left(i, i - k_);
+                fwd.shift_left(coded[i], coded[i - k_]);
 
                 if (++chars >= k_)
-                    callback(i - coded.data() + 1 - (k_ << 1),
+                    callback(i + 1 - (k_ << 1),
                              fwd.template get_hash<0>(),
                              fwd.template get_hash<1>());
             }
@@ -332,25 +321,22 @@ class KmerBloomFilter : public IKmerBloomFilter {
 
     BloomFilter filter_;
     bool canonical_mode_;
-    size_t seed_;
     size_t k_;
     KmerHasherType hasher_;
 };
 
 std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
-::initialize(size_t k,
-             double false_positive_prob,
-             size_t expected_num_elements,
-             size_t max_num_hash_functions,
-             bool canonical_mode,
-             uint64_t seed) {
+::initialize_from_fpr(size_t k,
+                      double false_positive_prob,
+                      size_t expected_num_elements,
+                      size_t max_num_hash_functions,
+                      bool canonical_mode) {
     auto bloom_filter = std::make_unique<KmerBloomFilter<>>(
         k,
         false_positive_prob,
         expected_num_elements,
         max_num_hash_functions,
-        canonical_mode,
-        seed
+        canonical_mode
     );
 
     if (utils::get_verbose())
@@ -363,14 +349,12 @@ std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
 ::initialize(size_t k,
              size_t filter_size,
              size_t num_hash_functions,
-             bool canonical_mode,
-             uint64_t seed) {
+             bool canonical_mode) {
     auto bloom_filter = std::make_unique<KmerBloomFilter<>>(
         k,
         filter_size,
         num_hash_functions,
-        canonical_mode,
-        seed
+        canonical_mode
     );
 
     if (utils::get_verbose() && filter_size)
@@ -384,15 +368,13 @@ std::unique_ptr<IKmerBloomFilter> IKmerBloomFilter
              size_t filter_size,
              size_t expected_num_elements,
              size_t max_num_hash_functions,
-             bool canonical_mode,
-             uint64_t seed) {
+             bool canonical_mode) {
     auto bloom_filter = std::make_unique<KmerBloomFilter<>>(
         k,
         filter_size,
         expected_num_elements,
         max_num_hash_functions,
-        canonical_mode,
-        seed
+        canonical_mode
     );
 
     if (utils::get_verbose() && filter_size)
