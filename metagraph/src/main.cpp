@@ -1877,15 +1877,15 @@ int main(int argc, const char *argv[]) {
             }
 
             if (config->anno_type == Config::RowCompressed) {
-                annotate::merge<annotate::RowCompressed<>>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::RowCompressed<>>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::RowFlat) {
-                annotate::merge<annotate::RowFlatAnnotator>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::RowFlatAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::RBFish) {
-                annotate::merge<annotate::RainbowfishAnnotator>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::RainbowfishAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::BinRelWT_sdsl) {
-                annotate::merge<annotate::BinRelWT_sdslAnnotator>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::BinRelWT_sdslAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::BinRelWT) {
-                annotate::merge<annotate::BinRelWTAnnotator>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::BinRelWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else {
                 std::cerr << "ERROR: Merging of annotations to '"
                           << config->annotype_to_string(config->anno_type)
