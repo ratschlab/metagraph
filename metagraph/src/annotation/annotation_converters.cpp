@@ -402,4 +402,56 @@ INSTANTIATE_MERGE(BinRelWT_sdslAnnotator, std::string);
 INSTANTIATE_MERGE(RowCompressed<>, std::string);
 
 
+template<>
+void merge<BRWTCompressed<>, std::string>(
+        std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, std::string>>>&& annotators,
+        const std::vector<std::string> &filenames,
+        const std::string &outfile) {
+
+    assert((annotators.size() || filenames.size()) && "nothing to merge");
+
+    if (filenames.size()) {
+        throw std::runtime_error("streaming only supported for rowcompressed annotator");
+    }
+
+    uint64_t num_rows = annotators.at(0)->num_objects();
+
+    LEncoder label_encoder;
+
+    std::vector<BRWT> brwts;
+
+    for (auto&& annotator : annotators) {
+        if (!dynamic_cast<BRWTCompressed<>*>(annotator.get()))
+            throw std::runtime_error("merging of arbitrary annotations into BRWT is not implemented");
+
+        if (annotator->num_objects() != num_rows)
+            throw std::runtime_error("Annotators have different number of rows");
+
+        for (const auto &label : annotator->get_label_encoder().get_labels()) {
+            if (label_encoder.label_exists(label))
+                throw std::runtime_error("merging of BRWT with same labels is not implemented");
+
+            label_encoder.insert_and_encode(label);
+        }
+
+        brwts.push_back(std::move(const_cast<BRWT&>(
+            dynamic_cast<BRWTCompressed<>&>(*annotator).data()
+        )));
+
+        annotator.reset();
+    }
+
+    BRWTCompressed<> annotation(
+        std::make_unique<BRWT>(BRWTBottomUpBuilder::merge(
+            std::move(brwts),
+            BRWTBottomUpBuilder::get_basic_partitioner(-1),
+            1,
+            get_num_threads()
+        )),
+        label_encoder
+    );
+
+    annotation.serialize(outfile);
+}
+
 } // namespace annotate

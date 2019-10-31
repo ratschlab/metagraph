@@ -1886,6 +1886,8 @@ int main(int argc, const char *argv[]) {
                 annotate::merge<annotate::BinRelWT_sdslAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::BinRelWT) {
                 annotate::merge<annotate::BinRelWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
+            } else if (config->anno_type == Config::BRWT) {
+                annotate::merge<annotate::BRWTCompressed<>>(std::move(annotators), stream_files, config->outfbase);
             } else {
                 std::cerr << "ERROR: Merging of annotations to '"
                           << config->annotype_to_string(config->anno_type)
