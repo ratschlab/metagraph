@@ -132,6 +132,7 @@ class RollingKmerMultiHasher {
     std::vector<RollingKmerHasher> hashers_;
 };
 
+
 // Bloom filter for approximate membership queries on k-mers
 // Sizes are round up to the nearest power of 2 to allow for
 // faster querying and insertion
