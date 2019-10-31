@@ -55,6 +55,7 @@ class RollingKmerHasher {
     decltype(hash_.hashvalue) reset_value_;
 };
 
+
 template <int h,
           typename TAlphabet = uint8_t,
           class RollingKmerHasher = ::RollingKmerHasher<TAlphabet>>
