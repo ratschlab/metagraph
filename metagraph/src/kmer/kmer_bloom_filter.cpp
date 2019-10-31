@@ -140,6 +140,7 @@ class BloomFilter : public BloomFilterWrapper {
     size_t num_hash_functions_;
 };
 
+
 template <class KmerHasher = RollingKmerMultiHasher<2, KmerDef::TAlphabet>,
           class BloomFilter = ::BloomFilter>
 class KmerBloomFilter : public IKmerBloomFilter {
