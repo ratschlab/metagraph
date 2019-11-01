@@ -247,6 +247,10 @@ add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
 )
 
+add_library(mersenne_twister STATIC
+  external-libraries/rollinghashcpp/mersennetwister.cpp
+)
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
 )
@@ -326,6 +330,7 @@ set(METALIBS ${METALIBS}
   brwt
   jsoncpp
   progress_bar
+  mersenne_twister
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)
