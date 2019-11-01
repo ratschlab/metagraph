@@ -134,36 +134,12 @@ class DBGSuccinct : public DeBruijnGraph {
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
-                                          size_t max_num_hash_functions = -1) {
-        bloom_filter_ = IKmerBloomFilter::initialize_from_fpr(
-            get_k(),
-            false_positive_rate,
-            num_nodes(),
-            max_num_hash_functions,
-            canonical_mode_
-        );
-
-        assert(bloom_filter_.get());
-
-        call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); });
-    }
+                                          size_t max_num_hash_functions = -1);
 
     void initialize_bloom_filter(size_t filter_size,
-                                 size_t max_num_hash_functions = -1) {
-        bloom_filter_ = IKmerBloomFilter::initialize(
-            get_k(),
-            filter_size,
-            num_nodes(),
-            max_num_hash_functions,
-            canonical_mode_
-        );
+                                 size_t max_num_hash_functions = -1);
 
-        assert(bloom_filter_.get());
-
-        call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); });
-    }
-
-    const IKmerBloomFilter* get_bloom_filter() const { return bloom_filter_.get(); }
+    const KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
 
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
@@ -174,7 +150,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     bool canonical_mode_;
 
-    std::unique_ptr<IKmerBloomFilter> bloom_filter_;
+    std::unique_ptr<KmerBloomFilter<>> bloom_filter_;
 
     static constexpr auto kExtension = ".dbg";
     static constexpr auto kDummyMaskExtension = ".edgemask";

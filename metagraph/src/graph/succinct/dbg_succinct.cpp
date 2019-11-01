@@ -27,7 +27,7 @@ size_t DBGSuccinct::get_k() const {
     return boss_graph_->get_k() + 1;
 }
 
-std::function<bool()> is_kmer_missing(const IKmerBloomFilter *bloom_filter,
+std::function<bool()> is_kmer_missing(const KmerBloomFilter<> *bloom_filter,
                                       const char *begin,
                                       const char *end) {
     if (!bloom_filter)
@@ -699,9 +699,9 @@ bool DBGSuccinct::load(const std::string &filename) {
         return false;
     }
 
-    if (std::filesystem::exists(prefix + IKmerBloomFilter::file_extension())) {
+    if (std::filesystem::exists(prefix + KmerBloomFilter<>::file_extension())) {
         if (!bloom_filter_)
-            bloom_filter_ = IKmerBloomFilter::initialize(get_k());
+            bloom_filter_ = std::make_unique<KmerBloomFilter<>>(get_k(), canonical_mode_);
 
         if (!bloom_filter_->load(prefix)) {
             std::cerr << "Error: failed to load Bloom filter" << std::endl;
@@ -732,8 +732,8 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     auto prefix = remove_suffix(filename, kExtension);
 
     // Clear any existing Bloom filters
-    if (std::filesystem::exists(prefix + IKmerBloomFilter::file_extension()))
-        std::filesystem::remove(prefix + IKmerBloomFilter::file_extension());
+    if (std::filesystem::exists(prefix + KmerBloomFilter<>::file_extension()))
+        std::filesystem::remove(prefix + KmerBloomFilter<>::file_extension());
 
     {
         const auto out_filename = prefix + kExtension;
@@ -878,6 +878,33 @@ DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) con
         return npos;
 
     return valid_edges_->rank1(boss_index);
+}
+
+void DBGSuccinct
+::initialize_bloom_filter_from_fpr(double false_positive_rate,
+                                   size_t max_num_hash_functions) {
+    bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
+        get_k(),
+        BloomFilter::optim_size(false_positive_rate, num_nodes()),
+        num_nodes(),
+        std::min(max_num_hash_functions, BloomFilter::optim_h(false_positive_rate))
+    );
+
+    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); });
+}
+
+void DBGSuccinct
+::initialize_bloom_filter(size_t filter_size,
+                          size_t max_num_hash_functions) {
+    bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
+        get_k(),
+        canonical_mode_,
+        filter_size,
+        num_nodes(),
+        max_num_hash_functions
+    );
+
+    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); });
 }
 
 bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
