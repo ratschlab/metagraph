@@ -135,34 +135,32 @@ class DBGSuccinct : public DeBruijnGraph {
 
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
                                           size_t max_num_hash_functions = -1) {
-        bloom_filter_.reset(IKmerBloomFilter::initialize_from_fpr(
+        bloom_filter_ = IKmerBloomFilter::initialize_from_fpr(
             get_k(),
             false_positive_rate,
             num_nodes(),
             max_num_hash_functions,
             canonical_mode_
-        ).release());
+        );
 
         assert(bloom_filter_.get());
 
-        auto &filter = *bloom_filter_;
-        call_sequences([&](const auto &sequence, auto&&) { filter.add_sequence(sequence); });
+        call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); });
     }
 
     void initialize_bloom_filter(size_t filter_size,
                                  size_t max_num_hash_functions = -1) {
-        bloom_filter_.reset(IKmerBloomFilter::initialize(
+        bloom_filter_ = IKmerBloomFilter::initialize(
             get_k(),
             filter_size,
             num_nodes(),
             max_num_hash_functions,
             canonical_mode_
-        ).release());
+        );
 
         assert(bloom_filter_.get());
 
-        auto &filter = *bloom_filter_;
-        call_sequences([&](const auto &sequence, auto&&) { filter.add_sequence(sequence); });
+        call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); });
     }
 
     const IKmerBloomFilter* get_bloom_filter() const { return bloom_filter_.get(); }

@@ -57,8 +57,8 @@ bool DBGSuccinct::find(const std::string &sequence,
     return boss_graph_->find(sequence,
                              discovery_fraction,
                              is_kmer_missing(bloom_filter_.get(),
-                                             &*sequence.begin(),
-                                             &*sequence.end()));
+                                             sequence.data(),
+                                             sequence.data() + sequence.size()));
 }
 
 // Traverse the outgoing edge
@@ -399,8 +399,8 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
         return;
 
     auto is_missing = is_kmer_missing(bloom_filter_.get(),
-                                      &*sequence.begin(),
-                                      &*sequence.end());
+                                      sequence.data(),
+                                      sequence.data() + sequence.size());
 
     if (canonical_mode_) {
         std::string sequence_rev_compl = sequence;
@@ -731,6 +731,10 @@ bool DBGSuccinct::load(const std::string &filename) {
 void DBGSuccinct::serialize(const std::string &filename) const {
     auto prefix = remove_suffix(filename, kExtension);
 
+    // Clear any existing Bloom filters
+    if (std::filesystem::exists(prefix + IKmerBloomFilter::file_extension()))
+        std::filesystem::remove(prefix + IKmerBloomFilter::file_extension());
+
     {
         const auto out_filename = prefix + kExtension;
         std::ofstream outstream(out_filename, std::ios::binary);
@@ -760,11 +764,8 @@ void DBGSuccinct::serialize(const std::string &filename) const {
 
     valid_edges_->serialize(outstream);
 
-    if (bloom_filter_) {
+    if (bloom_filter_)
         bloom_filter_->serialize(prefix);
-    } else if (std::filesystem::exists(prefix + IKmerBloomFilter::file_extension())) {
-        std::filesystem::remove(prefix + IKmerBloomFilter::file_extension());
-    }
 }
 
 void DBGSuccinct::switch_state(Config::StateType new_state) {
