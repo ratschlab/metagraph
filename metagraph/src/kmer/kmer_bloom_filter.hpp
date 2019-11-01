@@ -136,8 +136,8 @@ class BloomFilter {
                 size_t expected_num_elements,
                 size_t max_num_hash_functions);
 
-    void insert(size_t hash1, size_t hash2);
-    bool check(size_t hash1, size_t hash2) const;
+    void insert(uint64_t hash1, uint64_t hash2);
+    bool check(uint64_t hash1, uint64_t hash2) const;
 
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
@@ -222,8 +222,8 @@ class KmerBloomFilter {
   private:
     void call_kmers(const char *begin, const char *end,
                     const std::function<void(size_t /* position */,
-                                             size_t /* hash1 */,
-                                             size_t /* hash2 */)> &callback) const;
+                                             uint64_t /* hash1 */,
+                                             uint64_t /* hash2 */)> &callback) const;
 
     BloomFilter filter_;
     bool canonical_mode_;

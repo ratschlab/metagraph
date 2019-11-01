@@ -48,7 +48,7 @@ BloomFilter::BloomFilter(size_t filter_size,
                     std::min(max_num_hash_functions,
                              optim_h(filter_size, expected_num_elements))) {}
 
-void BloomFilter::insert(size_t hash1, size_t hash2) {
+void BloomFilter::insert(uint64_t hash1, uint64_t hash2) {
     const auto size = filter_.size();
     if (!size)
         return;
@@ -66,7 +66,7 @@ void BloomFilter::insert(size_t hash1, size_t hash2) {
     assert(check(hash1, hash2));
 }
 
-bool BloomFilter::check(size_t hash1, size_t hash2) const {
+bool BloomFilter::check(uint64_t hash1, uint64_t hash2) const {
     const auto size = filter_.size();
     if (!size)
         return true;
@@ -188,8 +188,8 @@ template <class KmerHasher>
 void KmerBloomFilter<KmerHasher>
 ::call_kmers(const char *begin, const char *end,
              const std::function<void(size_t /* position */,
-                                      size_t /* hash1 */,
-                                      size_t /* hash2 */)> &callback) const {
+                                      uint64_t /* hash1 */,
+                                      uint64_t /* hash2 */)> &callback) const {
     auto fwd = hasher_;
 
     if (is_canonical_mode()) {
