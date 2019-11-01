@@ -58,15 +58,23 @@ class BloomFilterWrapper {
 
   protected:
     constexpr static size_t optim_size(double false_positive_prob, size_t expected_num_elements) {
+        if (false_positive_prob <= 0.0)
+            throw std::runtime_error("False positive probability must be > 0.0");
+
         return -std::log2(false_positive_prob) * expected_num_elements / M_LN2 / M_LN2;
     }
 
     constexpr static size_t optim_h(double false_positive_prob) {
+        if (false_positive_prob <= 0.0)
+            throw std::runtime_error("False positive probability must be > 0.0");
+
         return std::ceil(-std::log2(false_positive_prob));
     }
 
     constexpr static size_t optim_h(size_t filter_size, size_t expected_num_elements) {
-        return std::ceil(M_LN2 * filter_size / expected_num_elements);
+        return expected_num_elements
+            ? std::ceil(M_LN2 * filter_size / expected_num_elements)
+            : static_cast<size_t>(-1);
     }
 };
 
