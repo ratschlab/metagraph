@@ -99,21 +99,17 @@ class RollingKmerMultiHasher {
 
     bool operator<(const RollingKmerMultiHasher &other) const {
         assert(hashers_.size() == h);
-        for (size_t i = 0; i < h; ++i) {
-            if (hashers_.at(i) < other.hashers_.at(i))
-                return true;
+        return hashers_ < other.hashers_;
+    }
 
-            if (hashers_.at(i) > other.hashers_.at(i))
-                return false;
-        }
-
-        return false;
+    bool operator>(const RollingKmerMultiHasher &other) const {
+        assert(hashers_.size() == h);
+        return hashers_ > other.hashers_;
     }
 
     bool operator==(const RollingKmerMultiHasher &other) const {
         assert(hashers_.size() == h);
-        return std::equal(hashers_.begin(), hashers_.end(),
-                          other.hashers_.begin(), other.hashers_.end());
+        return hashers_ == other.hashers_;
     }
 
     size_t get_k() const {
@@ -131,7 +127,6 @@ class RollingKmerMultiHasher {
   private:
     std::vector<RollingKmerHasher> hashers_;
 };
-
 
 // Bloom filter for approximate membership queries on k-mers
 // Sizes are round up to the nearest power of 2 to allow for
