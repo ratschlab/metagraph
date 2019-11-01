@@ -100,7 +100,7 @@ class Config {
     double min_count_quantile = 0.;
     double max_count_quantile = 1.;
     double bloom_fpp = 0.0;
-    double bloom_bpe = 0.0;
+    double bloom_bpk = 4.0;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fname;

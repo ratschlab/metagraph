@@ -2860,19 +2860,15 @@ int main(int argc, const char *argv[]) {
                 throw std::runtime_error("Only implemented for DBGSuccinct");
 
             if (config->initialize_bloom) {
-                assert(config->bloom_filter_size
-                           || (config->bloom_fpp > 0.0 && config->bloom_fpp <= 1.0)
-                           || (config->bloom_bpe > 0.0));
-
                 if (config->verbose) {
                     std::cout << "Construct Bloom filter for nodes..." << std::endl;
                 }
 
                 timer.reset();
 
-                if (config->bloom_filter_size) {
+                if (config->bloom_bpk > 0) {
                     dbg_succ->initialize_bloom_filter(
-                        config->bloom_filter_size,
+                        std::ceil(config->bloom_bpk * dbg_succ->num_nodes()),
                         config->bloom_max_num_hash_functions
                     );
                 } else if (config->bloom_fpp > 0) {
@@ -2880,9 +2876,9 @@ int main(int argc, const char *argv[]) {
                         config->bloom_fpp,
                         config->bloom_max_num_hash_functions
                     );
-                } else if (config->bloom_bpe > 0) {
+                } else if (config->bloom_filter_size) {
                     dbg_succ->initialize_bloom_filter(
-                        std::ceil(config->bloom_bpe * dbg_succ->num_nodes()),
+                        config->bloom_filter_size,
                         config->bloom_max_num_hash_functions
                     );
                 } else {

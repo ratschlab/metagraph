@@ -219,8 +219,8 @@ Config::Config(int argc, const char *argv[]) {
             initialize_bloom = true;
         } else if (!strcmp(argv[i], "--bloom-fpp")) {
             bloom_fpp = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--bloom-bpe")) {
-            bloom_bpe = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--bloom-bpk")) {
+            bloom_bpk = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--bloom-max-num-hash-functions")) {
             bloom_max_num_hash_functions = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--bloom-filter-size")) {
@@ -483,14 +483,14 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (bloom_bpe < 0.0) {
-        std::cerr << "Error: bloom-bpe must >= 0.0" << std::endl;
+    if (bloom_bpk < 0.0) {
+        std::cerr << "Error: bloom-bpk must >= 0.0" << std::endl;
         print_usage_and_exit = true;
     }
 
     if (initialize_bloom &&
-            bool(bloom_filter_size) + (bloom_fpp > 0.0) + (bloom_bpe > 0.0) != 1) {
-        std::cerr << "Error: exactly one of fpp > 0.0, bpe > 0.0, or filter_size > 0 must be true" << std::endl;
+            bool(bloom_filter_size) + (bloom_fpp > 0.0) != 1) {
+        std::cerr << "Error: exactly one of fpp > 0.0 or filter_size > 0 must be true" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -806,9 +806,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for --initialize-bloom. Exactly one of bloom-fpp, bloom-bpe, and bloom-filter-size should be non-zero\n");
+            fprintf(stderr, "Advanced options for --initialize-bloom. bloom-fpp and bloom-filter-size override bloom-bpk. Exactly one of bloom-fpp, and bloom-filter-size should be non-zero\n");
             fprintf(stderr, "\t   --bloom-fpp [FLOAT] \t\t\t\texpected false positive rate [0.0]\n");
-            fprintf(stderr, "\t   --bloom-bpe [FLOAT] \t\t\t\tnumber of bits per element [0.0]\n");
+            fprintf(stderr, "\t   --bloom-bpk [FLOAT] \t\t\t\tnumber of bits per element [4.0]\n");
             fprintf(stderr, "\t   --bloom-filter-size [INT] \t\t\tsize of the Bloom filter [0]\n");
             fprintf(stderr, "\t   --bloom-max-num-hash-functions [INT] \tmaximum number of hash functions [10]\n");
         } break;
