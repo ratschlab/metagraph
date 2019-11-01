@@ -148,8 +148,7 @@ class BloomFilter : public BloomFilterWrapper {
 };
 
 
-template <class KmerHasher = RollingKmerMultiHasher<2, KmerDef::TAlphabet>,
-          class BloomFilter = ::BloomFilter>
+template <class KmerHasher = RollingKmerMultiHasher<2, KmerDef::TAlphabet>>
 class KmerBloomFilter : public IKmerBloomFilter {
   public:
     typedef KmerHasher KmerHasherType;
