@@ -1,12 +1,13 @@
 #ifndef __KMER_BLOOM_FILTER_HPP__
 #define __KMER_BLOOM_FILTER_HPP__
 
+#include <fstream>
+#include <cmath>
 #include <memory>
+
 #include <sdsl/int_vector.hpp>
+#include <cyclichash.h>
 
-
-template <typename WordType, typename CharType>
-class CyclicHash;
 
 template <typename TAlphabet = uint8_t>
 class RollingKmerHasher {
@@ -128,58 +129,89 @@ class RollingKmerMultiHasher {
     std::vector<RollingKmerHasher> hashers_;
 };
 
+class BloomFilter {
+  public:
+    BloomFilter(size_t filter_size = 0, size_t num_hash_functions = 0);
+    BloomFilter(size_t filter_size,
+                size_t expected_num_elements,
+                size_t max_num_hash_functions);
+
+    void insert(size_t hash1, size_t hash2);
+    bool check(size_t hash1, size_t hash2) const;
+
+    void serialize(std::ostream &out) const;
+    bool load(std::istream &in);
+
+    size_t size() const { return filter_.size(); }
+    size_t num_hash_functions() const { return num_hash_functions_; }
+
+    constexpr static size_t optim_size(double false_positive_prob,
+                                       size_t expected_num_elements) {
+        if (false_positive_prob <= 0.0)
+            throw std::runtime_error("False positive probability must be > 0.0");
+
+        return -std::log2(false_positive_prob) * expected_num_elements / M_LN2 / M_LN2;
+    }
+
+    constexpr static size_t optim_h(double false_positive_prob) {
+        if (false_positive_prob <= 0.0)
+            throw std::runtime_error("False positive probability must be > 0.0");
+
+        return std::ceil(-std::log2(false_positive_prob));
+    }
+
+    constexpr static size_t optim_h(size_t filter_size, size_t expected_num_elements) {
+        return expected_num_elements
+            ? std::ceil(M_LN2 * filter_size / expected_num_elements)
+            : static_cast<size_t>(-1);
+    }
+
+  private:
+    sdsl::bit_vector filter_;
+    size_t num_hash_functions_;
+};
+
 // Bloom filter for approximate membership queries on k-mers
 // Sizes are round up to the nearest power of 2 to allow for
 // faster querying and insertion
-class IKmerBloomFilter {
+
+template <class KmerHasher = RollingKmerMultiHasher<2>>
+class KmerBloomFilter {
   public:
-    virtual ~IKmerBloomFilter() {}
+    typedef KmerHasher KmerHasherType;
 
-    static std::unique_ptr<IKmerBloomFilter>
-    initialize_from_fpr(size_t k,
-                        double false_positive_prob,
-                        size_t expected_num_elements,
-                        size_t max_num_hash_functions = -1,
-                        bool canonical_mode = false);
-
-    static std::unique_ptr<IKmerBloomFilter>
-    initialize(size_t k,
-               size_t filter_size,
-               size_t num_hash_functions,
-               bool canonical_mode = false);
-
-    static std::unique_ptr<IKmerBloomFilter>
-    initialize(size_t k,
-               size_t filter_size = 0,
-               size_t expected_num_elements = 0,
-               size_t max_num_hash_functions = -1,
-               bool canonical_mode = false);
+    template <typename... Args>
+    KmerBloomFilter(size_t k, bool canonical_mode, Args&&... args)
+          : filter_(std::forward<Args>(args)...),
+            canonical_mode_(canonical_mode),
+            k_(k),
+            hasher_(k_) {}
 
     // Add the k-mers of the sequence to the Bloom filter
-    virtual void add_sequence(const char *begin, const char *end) = 0;
+    void add_sequence(const char *begin, const char *end);
     void add_sequence(const std::string &sequence) {
         add_sequence(&*sequence.begin(), &*sequence.end());
     }
 
     // Checks for k-mer presence in the Bloom filter
-    virtual sdsl::bit_vector check_kmer_presence(const char *begin,
-                                                 const char *end) const = 0;
+    sdsl::bit_vector check_kmer_presence(const char *begin,
+                                         const char *end) const;
     sdsl::bit_vector check_kmer_presence(const std::string &sequence) const {
         return check_kmer_presence(&*sequence.begin(), &*sequence.end());
     }
 
-    virtual bool is_canonical_mode() const = 0;
+    bool is_canonical_mode() const { return canonical_mode_; }
 
-    virtual size_t get_k() const = 0;
-    virtual size_t size() const = 0;
-    virtual size_t num_hash_functions() const = 0;
+    size_t get_k() const { return k_; }
+    size_t size() const { return filter_.size(); }
+    size_t num_hash_functions() const { return filter_.num_hash_functions(); }
 
-    virtual void serialize(const std::string &filename_base) const = 0;
-    virtual void serialize(std::ostream &out) const = 0;
-    virtual bool load(const std::string &filename_base) = 0;
-    virtual bool load(std::istream &in) = 0;
+    void serialize(const std::string &filename_base) const;
+    void serialize(std::ostream &out) const;
+    bool load(const std::string &filename_base);
+    bool load(std::istream &in);
 
-    virtual void print_stats() const {
+    void print_stats() const {
         std::cout << "Bloom filter parameters" << std::endl
                   << "Size:\t\t\t" << size() << " bits" << std::endl
                   << "Num hash functions:\t" << num_hash_functions() << std::endl;
@@ -188,6 +220,16 @@ class IKmerBloomFilter {
     static std::string file_extension() { return kExtension; }
 
   private:
+    void call_kmers(const char *begin, const char *end,
+                    const std::function<void(size_t /* position */,
+                                             size_t /* hash1 */,
+                                             size_t /* hash2 */)> &callback) const;
+
+    BloomFilter filter_;
+    bool canonical_mode_;
+    size_t k_;
+    KmerHasherType hasher_;
+
     static constexpr auto kExtension = ".bloom";
 };
 
