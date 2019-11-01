@@ -60,7 +60,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
                          DBGHashOrdered,
                          DBGSuccinct,
-                         DBGSuccinctBloomFPR<1, 100>,
+                         DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<100000, 1>,
                          DBGSuccinctBloom<100000, 2>> GraphTypes;
@@ -71,7 +71,7 @@ template <typename Graph>
 class StableDeBruijnGraphTest : public ::testing::Test { };
 typedef ::testing::Types<DBGBitmap,
                          DBGSuccinct,
-                         DBGSuccinctBloomFPR<1, 100>,
+                         DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<100000, 1>,
                          DBGSuccinctBloom<100000, 2>> StableGraphTypes;
