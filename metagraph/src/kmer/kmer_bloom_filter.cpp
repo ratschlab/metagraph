@@ -14,7 +14,16 @@ typedef KmerExtractorBOSS KmerDef;
 typedef KmerDef::TAlphabet TAlphabet;
 
 std::vector<TAlphabet> reverse_complement(const std::vector<TAlphabet> &seq) {
-    return KmerDef::reverse_complement(seq);
+    std::vector<TAlphabet> rc(seq.size());
+    std::transform(seq.begin(), seq.end(),
+                   rc.rbegin(),
+                   [&](auto c) {
+                       return c < KmerDef::alphabet.size()
+                           ? KmerDef::reverse_complement(c)
+                           : c;
+                   });
+
+    return rc;
 }
 
 TAlphabet code(char c) { return KmerDef::encode(c); }
@@ -83,7 +92,6 @@ class BloomFilter : public BloomFilterWrapper {
                         max_num_hash_functions) {}
 
     void insert(size_t hash1, size_t hash2) {
-        assert(filter_.size());
         const auto size = filter_.size();
         if (!size)
             return;
@@ -102,7 +110,6 @@ class BloomFilter : public BloomFilterWrapper {
     }
 
     bool check(size_t hash1, size_t hash2) const {
-        assert(filter_.size());
         const auto size = filter_.size();
         if (!size)
             return true;
