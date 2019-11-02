@@ -387,7 +387,7 @@ size_t DBGHashFast2Impl<KMER>::outdegree(node_index node) const {
     assert((*find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask)).second
                 && "val is not 0, there at least one k-mer");
 
-    kmer.to_next(k_, seq_encoder_.encode('C'));
+    kmer.to_next(k_, 0);
 
     const auto next_kmer_prefix_it
         = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);

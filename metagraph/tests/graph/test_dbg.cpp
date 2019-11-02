@@ -483,7 +483,6 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmersCycle) {
 
     size_t num_contigs = 0;
     size_t num_kmers = 0;
-
     graph->call_sequences([&](const auto &sequence, const auto &path) {
         ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
         num_contigs++;
