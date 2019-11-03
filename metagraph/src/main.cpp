@@ -357,9 +357,8 @@ void annotate_coordinates(const std::vector<std::string> &files,
     anno_graph->join();
 }
 
-
-void execute_query(std::string seq_name,
-                   std::string sequence,
+void execute_query(const std::string &seq_name,
+                   const std::string &sequence,
                    bool count_labels,
                    bool suppress_unlabeled,
                    size_t num_top_labels,
@@ -1962,7 +1961,7 @@ int main(int argc, const char *argv[]) {
             // iterate over input files
             for (const auto &file : files) {
                 if (config->verbose) {
-                    std::cout << "\nParsing " << file << std::endl;
+                    std::cout << "\nParsing sequences from " + file + '\n' << std::flush;
                 }
 
                 Timer curr_timer;
@@ -1989,13 +1988,11 @@ int main(int argc, const char *argv[]) {
                     graph_to_query = query_graph.get();
 
                     if (config->verbose) {
-                        std::cout << "Query graph constructed in "
-                                  << curr_timer.elapsed() << " sec" << std::endl;
+                        std::cout << "Query graph constructed for "
+                                        + file + " in "
+                                        + std::to_string(curr_timer.elapsed())
+                                        + " sec\n" << std::flush;
                     }
-                }
-
-                if (config->verbose) {
-                    std::cout << "Querying sequences from file " << file << std::endl;
                 }
 
                 read_fasta_file_critical(file,
@@ -2020,12 +2017,11 @@ int main(int argc, const char *argv[]) {
                 thread_pool.join();
 
                 if (config->verbose) {
-                    std::cout << "File processed in "
-                              << curr_timer.elapsed()
-                              << "sec, current mem usage: "
-                              << (get_curr_RSS() >> 20) << " MiB"
-                              << ", total time: " << timer.elapsed()
-                              << "sec" << std::endl;
+                    std::cout << "File " + file + " was processed in "
+                                    + std::to_string(curr_timer.elapsed())
+                                    + " sec, total time: "
+                                    + std::to_string(timer.elapsed())
+                                    + " sec\n" << std::flush;
                 }
             }
 
