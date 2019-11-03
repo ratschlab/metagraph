@@ -272,7 +272,6 @@ if(FOLLY_LIBRARIES)
     -lboost_filesystem
     -lboost_program_options
     -lcrypto
-    ${OpenMP_CXX_LIBRARIES}
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
@@ -325,6 +324,7 @@ set(METALIBS ${METALIBS}
   brwt
   jsoncpp
   progress_bar
+  ${OpenMP_CXX_LIBRARIES}
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)
