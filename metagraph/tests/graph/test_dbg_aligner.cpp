@@ -61,14 +61,6 @@ TEST(DBGAlignerTest, check_score_matrix_dna_unit) {
         alphabets::kAlphabetDNA5,
         alphabets::kSigmaDNA5
     );
-
-    check_score_matrix(
-        DBGAlignerConfig::unit_scoring_matrix(
-            1, alphabets::kAlphabetDNA5, alphabets::kCharToDNA5
-        ),
-        alphabets::kAlphabetDNA5,
-        alphabets::kSigmaDNA5
-    );
 }
 
 TEST(DBGAlignerTest, check_score_matrix_protein_unit) {
@@ -89,11 +81,11 @@ const DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     const auto *alphabet = alphabets::kAlphabetProtein;
     const auto *alphabet_encoding = alphabets::kCharToProtein;
 #elif _DNA_CASE_SENSITIVE_GRAPH
-    const auto *alphabet = alphabets::kAlphabetDNACaseSent;
-    const auto *alphabet_encoding = alphabets::kCharToDNACaseSent;
+    const auto *alphabet = alphabets::kAlphabetDNA;
+    const auto *alphabet_encoding = alphabets::kCharToDNA;
 #elif _DNA5_GRAPH
-    const auto *alphabet = alphabets::kAlphabetDNA5;
-    const auto *alphabet_encoding = alphabets::kCharToDNA5;
+    const auto *alphabet = alphabets::kAlphabetDNA;
+    const auto *alphabet_encoding = alphabets::kCharToDNA;
 #elif _DNA_GRAPH
     const auto *alphabet = alphabets::kAlphabetDNA;
     const auto *alphabet_encoding = alphabets::kCharToDNA;

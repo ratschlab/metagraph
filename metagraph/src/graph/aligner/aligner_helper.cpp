@@ -293,11 +293,11 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
             const auto *alphabet = alphabets::kAlphabetProtein;
             const auto *alphabet_encoding = alphabets::kCharToProtein;
         #elif _DNA_CASE_SENSITIVE_GRAPH
-            const auto *alphabet = alphabets::kAlphabetDNACaseSent;
-            const auto *alphabet_encoding = alphabets::kCharToDNACaseSent;
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
         #elif _DNA5_GRAPH
-            const auto *alphabet = alphabets::kAlphabetDNA5;
-            const auto *alphabet_encoding = alphabets::kCharToDNA5;
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
         #elif _DNA_GRAPH
             const auto *alphabet = alphabets::kAlphabetDNA;
             const auto *alphabet_encoding = alphabets::kCharToDNA;
