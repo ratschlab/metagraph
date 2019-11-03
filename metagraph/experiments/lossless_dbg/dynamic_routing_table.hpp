@@ -28,7 +28,6 @@
 
 using node_index = SequenceGraph::node_index;
 
-//template<typename EntryT=wavelet_tree_dyn>
 template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
 class DynamicRoutingTableCore {
 public:
@@ -102,7 +101,6 @@ public:
 
 
 
-//template <typename EntryT=wavelet_tree_dyn>
 template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
 using DynamicRoutingTable = TransformationsEnabler<DynamicRoutingTableCore<EntryT,BitVector,RankSupport>>;
 

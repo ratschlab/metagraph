@@ -19,10 +19,6 @@ public:
     using element_type = T;
     DenseHashMap() = default;
 
-//    void operator=(DenseHashMap<T>&& other) {
-//        this->is_element = other;
-//        this->
-//    }
     DenseHashMap(bit_vector *isElement,rank_support *rank,T default_element = T()) {
         int64_t total_num_elements = rank->rank(rank->size());
         this->is_element = isElement;
@@ -44,8 +40,6 @@ public:
     const T& at(int64_t n) const {
         return elements.at(underlying_position(n));
     }
-
-
 
     bool count(int64_t n) const {
         assert(n < is_element->size());

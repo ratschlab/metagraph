@@ -19,13 +19,7 @@
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
-#define USE_LOCKS
 
-// TODO: Never use 'using namespace std;' in .hpp files
-// todo find a tool that removes this relative namespacing issue
-using namespace std;
-
-// say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 using node_index = DeBruijnGraph::node_index;
 
 using path_id = pair<node_index,int64_t>;

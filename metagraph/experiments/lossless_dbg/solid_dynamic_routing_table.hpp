@@ -52,8 +52,6 @@ private:
     wavelet_tree_dyn wt_;
 };
 
-//template <typename EntryT=standardized_wavelet_tree>
-//template <typename EntryT=dyn::wtrle_str>
 //using EntryT = dyn::wtrle_str;
 using EntryT = standardized_wavelet_tree;
 template <typename Dummy=int>
@@ -65,15 +63,8 @@ public:
             this->print_content();
         }
         vector<uint8_t> initial_content(size+1, delimiter_encoded);
-//        for(ll i=0;i<=size;i++) {
-//            routing_table.insert(0,delimiter_encoded);
-//        }
         routing_table = decltype(routing_table)(7,initial_content);
     }
-
-//    int64_t select(ll block, int64_t occurrence, char symbol) const {
-//    }
-
 
     int64_t offset(node_index node) const {
         assert(node < total_size);
