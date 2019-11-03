@@ -1,5 +1,6 @@
 #include <json/json.h>
 #include <ips4o.hpp>
+#include <fmt/format.h>
 
 #include "unix_tools.hpp"
 #include "config.hpp"
@@ -302,7 +303,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
 
                     const std::string sequence(read_stream->seq.s);
                     for (size_t i = 0; i < sequence.size(); i += genome_bin_size) {
-                        labels.back() = std::to_string(i);
+                        labels.back() = fmt::format_int(i).c_str();
 
                         // forward: |0 =>  |6 =>  |12=>  |18=>  |24=>  |30=>|
                         // reverse: |<=30|  <=24|  <=18|  <=12|  <= 6|  <= 0|
@@ -366,7 +367,8 @@ void execute_query(const std::string &seq_name,
                    std::string anno_labels_delimiter,
                    const AnnotatedDBG &anno_graph,
                    std::ostream &output_stream) {
-    std::ostringstream oss;
+    std::string output;
+    output.reserve(1'000);
 
     if (count_labels) {
         auto top_labels = anno_graph.get_top_labels(sequence,
@@ -376,15 +378,17 @@ void execute_query(const std::string &seq_name,
         if (!top_labels.size() && suppress_unlabeled)
             return;
 
-        oss << seq_name << "\t";
+        output += seq_name;
 
-        if (top_labels.size()) {
-            oss << "<" << top_labels[0].first << ">:" << top_labels[0].second;
+        for (const auto &[label, count] : top_labels) {
+            output += "\t<";
+            output += label;
+            output += ">:";
+            output += fmt::format_int(count).c_str();
         }
-        for (size_t i = 1; i < top_labels.size(); ++i) {
-            oss << "\t<" << top_labels[i].first << ">:" << top_labels[i].second;
-        }
-        oss << "\n";
+
+        output += '\n';
+
     } else {
         auto labels_discovered
                 = anno_graph.get_labels(sequence, discovery_fraction);
@@ -392,12 +396,14 @@ void execute_query(const std::string &seq_name,
         if (!labels_discovered.size() && suppress_unlabeled)
             return;
 
-        oss << seq_name << "\t"
-            << utils::join_strings(labels_discovered,
-                                   anno_labels_delimiter) << "\n";
+        output += seq_name;
+        output += '\t';
+        output += utils::join_strings(labels_discovered,
+                                      anno_labels_delimiter);
+        output += '\n';
     }
 
-    output_stream << oss.str();
+    output_stream << output;
 }
 
 std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_type,
@@ -1998,7 +2004,7 @@ int main(int argc, const char *argv[]) {
                 read_fasta_file_critical(file,
                     [&](kseq_t *read_stream) {
                         thread_pool.enqueue(execute_query,
-                            std::to_string(seq_count++) + "\t"
+                            fmt::format_int(seq_count++).str() + "\t"
                                 + read_stream->name.s,
                             std::string(read_stream->seq.s),
                             config->count_labels,

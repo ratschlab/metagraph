@@ -242,6 +242,8 @@ include_directories(
   ${INCLUDE_DIRS}
 )
 
+add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
+
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
 )
@@ -325,6 +327,7 @@ set(METALIBS ${METALIBS}
   jsoncpp
   progress_bar
   ${OpenMP_CXX_LIBRARIES}
+  fmt::fmt-header-only
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)
