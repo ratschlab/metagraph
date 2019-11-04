@@ -478,8 +478,8 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (bloom_fpp < 0.0 || bloom_fpp > 1.0) {
-        std::cerr << "Error: bloom-fpp must >= 0.0 and <= 1.0" << std::endl;
+    if (bloom_fpp <= 0.0 || bloom_fpp > 1.0) {
+        std::cerr << "Error: bloom-fpp must > 0.0 and <= 1.0" << std::endl;
         print_usage_and_exit = true;
     }
 
