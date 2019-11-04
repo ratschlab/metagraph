@@ -10,11 +10,11 @@
 
 template <typename Graph>
 class MaskedDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
-TYPED_TEST_CASE(MaskedDeBruijnGraphTest, GraphTypes);
+TYPED_TEST_CASE(MaskedDeBruijnGraphTest, MaskedGraphTypes);
 
 template <typename Graph>
 class MaskedStableDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
-TYPED_TEST_CASE(MaskedStableDeBruijnGraphTest, StableGraphTypes);
+TYPED_TEST_CASE(MaskedStableDeBruijnGraphTest, MaskedStableGraphTypes);
 
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
