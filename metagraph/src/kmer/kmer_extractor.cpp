@@ -323,6 +323,7 @@ KmerExtractorBOSS::reverse_complement(const std::vector<TAlphabet> &sequence) {
 }
 
 KmerExtractorBOSS::TAlphabet KmerExtractorBOSS::reverse_complement(TAlphabet c) {
+    assert(c < kComplementCode.size());
     return kComplementCode[c];
 }
 
