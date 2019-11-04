@@ -21,20 +21,14 @@ std::vector<TAlphabet> reverse_complement(const std::vector<TAlphabet> &seq) {
     return rc;
 }
 
-TAlphabet code(char c) { return KmerDef::encode(c); }
-
 template <class StringIt>
-std::vector<TAlphabet> encode(StringIt begin, StringIt end) {
+std::vector<TAlphabet> encode(StringIt begin, StringIt end, TAlphabet default_value = 0) {
     assert(end >= begin);
 
-    std::vector<TAlphabet> encoded(end - begin, 0);
-    std::transform(begin, end, encoded.begin(), code);
+    std::vector<TAlphabet> encoded(end - begin, default_value);
+    std::transform(begin, end, encoded.begin(), [](char c) { return KmerDef::encode(c); });
 
     return encoded;
-}
-
-std::string decode(const std::vector<TAlphabet> &encoded) {
-    return KmerDef::decode(encoded);
 }
 
 BloomFilter::BloomFilter(size_t filter_size, size_t num_hash_functions)
@@ -117,7 +111,7 @@ void KmerBloomFilter<KmerHasher>
     assert(sdsl::util::cnt_one_bits(check_kmer_presence(begin, end)) == counter);
     assert(!canonical_mode_
             || sdsl::util::cnt_one_bits(check_kmer_presence(
-                   decode(reverse_complement(encode(begin, end)))
+                   KmerDef::decode(reverse_complement(encode(begin, end)))
                )) == counter);
 }
 
@@ -198,8 +192,7 @@ void KmerBloomFilter<KmerHasher>
         if (begin + k_ > end || begin + k_ < begin)
             return;
 
-        std::vector<TAlphabet> coded(end - begin + k_, KmerHasherType::MAXVAL);
-        std::transform(begin, end, coded.begin() + k_, code);
+        auto coded = encode(begin, end, KmerHasherType::MAXVAL);
         auto rc_coded = reverse_complement(coded);
 
         size_t chars = 0;
@@ -226,8 +219,7 @@ void KmerBloomFilter<KmerHasher>
         if (begin + k_ > end || begin + k_ < begin)
             return;
 
-        std::vector<TAlphabet> coded(end - begin + k_, KmerHasherType::MAXVAL);
-        std::transform(begin, end, coded.begin() + k_, code);
+        auto coded = encode(begin, end, KmerHasherType::MAXVAL);
 
         size_t chars = 0;
         for (size_t i = 0; i < coded.size(); ++i) {
