@@ -417,7 +417,7 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
                 if (!is_missing())
                     return false;
 
-                jt++;
+                ++jt;
                 return true;
             }
         );
