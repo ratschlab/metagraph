@@ -97,6 +97,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-old-style-cast \
     -Wno-atomic-alignment \
     -Wno-extra-semi-stmt \
+    -I/usr/include \
+    -I/usr/local/include \
   ")
 endif()
 
@@ -202,6 +204,8 @@ set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
+  /usr/lib
+  /usr/local/lib
   ${CMAKE_BINARY_DIR}/KMC
   ${CMAKE_BINARY_DIR}/lib
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
@@ -338,6 +342,7 @@ endif()
 # check for std::filesystem::temp_directory_path
 include(CheckCXXSourceRuns)
 set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+unset(CPPNOFS CACHE)
 check_cxx_source_runs("
     #include <iostream>
     #include <filesystem>
@@ -346,6 +351,8 @@ check_cxx_source_runs("
         return 0;
     }
 " CPPNOFS)
+
+message("Cpp no fs is" ${CPPNOFS} "Req flags is " ${CMAKE_REQUIRED_FLAGS})
 if(NOT CPPNOFS)
   set(CMAKE_REQUIRED_FLAGS " -std=c++17")
   set(CMAKE_REQUIRED_LIBRARIES "c++fs")
