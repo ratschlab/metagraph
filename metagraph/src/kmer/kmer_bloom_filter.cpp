@@ -144,15 +144,6 @@ void KmerBloomFilter<KmerHasher>
 }
 
 template <class KmerHasher>
-void KmerBloomFilter<KmerHasher>
-::serialize(const std::string &filename_base) const {
-    std::ofstream out(utils::remove_suffix(filename_base, file_extension())
-                          + file_extension(),
-                      std::ios::binary);
-    serialize(out);
-}
-
-template <class KmerHasher>
 bool KmerBloomFilter<KmerHasher>
 ::load(std::istream &in) {
     if (!in.good())
@@ -167,15 +158,6 @@ bool KmerBloomFilter<KmerHasher>
     } catch (...) {
         return false;
     }
-}
-
-template <class KmerHasher>
-bool KmerBloomFilter<KmerHasher>
-::load(const std::string &filename_base) {
-    std::ifstream in(utils::remove_suffix(filename_base, file_extension())
-                         + file_extension(),
-                     std::ios::binary);
-    return load(in);
 }
 
 template <class KmerHasher>

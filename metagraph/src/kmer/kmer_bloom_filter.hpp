@@ -206,9 +206,7 @@ class KmerBloomFilter {
     size_t size() const { return filter_.size(); }
     size_t num_hash_functions() const { return filter_.num_hash_functions(); }
 
-    void serialize(const std::string &filename_base) const;
     void serialize(std::ostream &out) const;
-    bool load(const std::string &filename_base);
     bool load(std::istream &in);
 
     void print_stats() const {
@@ -216,8 +214,6 @@ class KmerBloomFilter {
                   << "Size:\t\t\t" << size() << " bits" << std::endl
                   << "Num hash functions:\t" << num_hash_functions() << std::endl;
     }
-
-    static std::string file_extension() { return kExtension; }
 
   private:
     void call_kmers(const char *begin, const char *end,
@@ -229,7 +225,6 @@ class KmerBloomFilter {
     bool canonical_mode_;
     size_t k_;
     KmerHasherType hasher_;
-    static constexpr auto kExtension = ".bloom";
 };
 
 
