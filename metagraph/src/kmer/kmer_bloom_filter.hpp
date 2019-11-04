@@ -132,6 +132,7 @@ class RollingKmerMultiHasher {
 class BloomFilter {
   public:
     BloomFilter(size_t filter_size = 0, size_t num_hash_functions = 0);
+
     BloomFilter(size_t filter_size,
                 size_t expected_num_elements,
                 size_t max_num_hash_functions);
