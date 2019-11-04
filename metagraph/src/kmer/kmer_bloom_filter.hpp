@@ -20,7 +20,7 @@ class RollingKmerHasher {
     // Note: this constructor is expensive. Try to construct it once and
     // make copies of the object.
     explicit RollingKmerHasher(size_t k,
-                               TAlphabet default_val = std::numeric_limits<TAlphabet>::max(),
+                               TAlphabet default_val,
                                uint32_t seed1 = 0, uint32_t seed2 = 1)
           : hash_(k, seed1, seed2, 64),
             default_val_(default_val) {
@@ -34,7 +34,7 @@ class RollingKmerHasher {
     }
 
     // After calling reset, the first k values of prev (next) in shift left (right)
-    // should be MAXVAL
+    // should be default_val
     void reset() { hash_.hashvalue = reset_value_; }
 
     void shift_left(TAlphabet next, TAlphabet prev) { hash_.update(prev, next); }
@@ -71,8 +71,7 @@ template <int h,
           class RollingKmerHasher = ::RollingKmerHasher<TAlphabet>>
 class RollingKmerMultiHasher {
   public:
-    explicit RollingKmerMultiHasher(size_t k,
-                                    TAlphabet default_val = std::numeric_limits<TAlphabet>::max()) {
+    explicit RollingKmerMultiHasher(size_t k, TAlphabet default_val) {
         static_assert(h);
 
         hashers_.reserve(h);
@@ -84,7 +83,7 @@ class RollingKmerMultiHasher {
     }
 
     // After calling reset, the first k values of prev (next) in shift left (right)
-    // should be MAXVAL
+    // should be default_val
     void reset() {
         assert(hashers_.size() == h);
         for (auto &hasher : hashers_) {
@@ -186,8 +185,6 @@ class BloomFilter {
 };
 
 // Bloom filter for approximate membership queries on k-mers
-// Sizes are round up to the nearest power of 2 to allow for
-// faster querying and insertion
 template <class KmerHasher = RollingKmerMultiHasher<2>>
 class KmerBloomFilter {
   public:

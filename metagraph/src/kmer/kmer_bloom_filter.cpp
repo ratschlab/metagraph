@@ -140,7 +140,7 @@ bool KmerBloomFilter<KmerHasher>
     try {
         k_ = load_number(in);
         canonical_mode_ = load_number(in);
-        hasher_ = KmerHasherType(k_);
+        hasher_ = KmerHasherType(k_, KmerDef::alphabet.size());
 
         return filter_.load(in);
     } catch (...) {
@@ -162,6 +162,7 @@ void KmerBloomFilter<KmerHasher>
         if (begin + k_ > end || begin + k_ < begin)
             return;
 
+        assert(fwd.get_default_val() == KmerDef::alphabet.size());
         auto coded = encode_with_sentinel_prefix(begin, end, k_, fwd.get_default_val());
         auto rc_coded = KmerDef::reverse_complement(coded);
 
@@ -192,6 +193,7 @@ void KmerBloomFilter<KmerHasher>
         if (begin + k_ > end || begin + k_ < begin)
             return;
 
+        assert(fwd.get_default_val() == KmerDef::alphabet.size());
         auto coded = encode_with_sentinel_prefix(begin, end, k_, fwd.get_default_val());
 
         size_t chars = 0;
