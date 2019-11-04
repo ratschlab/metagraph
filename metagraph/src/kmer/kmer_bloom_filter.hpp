@@ -229,7 +229,6 @@ class KmerBloomFilter {
     bool canonical_mode_;
     size_t k_;
     KmerHasherType hasher_;
-
     static constexpr auto kExtension = ".bloom";
 };
 
