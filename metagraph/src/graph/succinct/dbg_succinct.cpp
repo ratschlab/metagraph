@@ -700,12 +700,13 @@ bool DBGSuccinct::load(const std::string &filename) {
         return false;
     }
 
-    if (std::filesystem::exists(prefix + KmerBloomFilter<>::file_extension())) {
+    if (std::filesystem::exists(prefix + kBloomFilterExtension)) {
+        std::ifstream bloom_instream(prefix + kBloomFilterExtension, std::ios::binary);
         if (!bloom_filter_)
             bloom_filter_ = std::make_unique<KmerBloomFilter<>>(get_k(), canonical_mode_);
 
-        if (!bloom_filter_->load(prefix)) {
-            std::cerr << "Error: failed to load Bloom filter" << std::endl;
+        if (!bloom_filter_->load(bloom_instream)) {
+            std::cerr << "Error: failed to load Bloom filter from " + prefix + kBloomFilterExtension << std::endl;
             return false;
         }
 
@@ -713,17 +714,17 @@ bool DBGSuccinct::load(const std::string &filename) {
 
         if (bloom_filter_->is_canonical_mode() != is_canonical_mode()) {
             std::cerr << "Error: Bloom filter and graph in opposite canonical modes" << std::endl
-                      << bloom_filter_->is_canonical_mode() << " " << is_canonical_mode() << std::endl;
+                      << "Bloom filter: " << (bloom_filter_->is_canonical_mode() ? "not " : "") << "canonical" << std::endl
+                      << "Graph: " << (is_canonical_mode() ? "not " : "") << "canonical" << std::endl;
             return false;
         }
 
         if (bloom_filter_->get_k() != get_k()) {
             std::cerr << "Error: mismatched k between Bloom filter and graph" << std::endl
-                      << bloom_filter_->get_k() << " " << get_k() << std::endl;
+                      << "Bloom filter: " << bloom_filter_->get_k() << std::endl
+                      << "Graph: " << get_k() << std::endl;
             return false;
         }
-
-        return true;
     }
 
     return true;
@@ -733,8 +734,7 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     auto prefix = remove_suffix(filename, kExtension);
 
     // Clear any existing Bloom filters
-    if (std::filesystem::exists(prefix + KmerBloomFilter<>::file_extension()))
-        std::filesystem::remove(prefix + KmerBloomFilter<>::file_extension());
+    std::filesystem::remove(prefix + kBloomFilterExtension);
 
     {
         const auto out_filename = prefix + kExtension;
@@ -765,8 +765,13 @@ void DBGSuccinct::serialize(const std::string &filename) const {
 
     valid_edges_->serialize(outstream);
 
-    if (bloom_filter_)
-        bloom_filter_->serialize(prefix);
+    if (bloom_filter_) {
+        std::ofstream bloom_outstream(prefix + kBloomFilterExtension, std::ios::binary);
+        if (!bloom_outstream.good())
+            throw std::ios_base::failure("Can't write to file " + prefix + kBloomFilterExtension);
+
+        bloom_filter_->serialize(bloom_outstream);
+    }
 }
 
 void DBGSuccinct::switch_state(Config::StateType new_state) {
@@ -886,26 +891,29 @@ void DBGSuccinct
                                    size_t max_num_hash_functions) {
     bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
         get_k(),
+        canonical_mode_,
         BloomFilter::optim_size(false_positive_rate, num_nodes()),
         num_nodes(),
         std::min(max_num_hash_functions, BloomFilter::optim_h(false_positive_rate))
     );
 
-    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); });
+    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); },
+                   canonical_mode_);
 }
 
 void DBGSuccinct
-::initialize_bloom_filter(size_t filter_size,
+::initialize_bloom_filter(double bits_per_kmer,
                           size_t max_num_hash_functions) {
     bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
         get_k(),
         canonical_mode_,
-        filter_size,
+        bits_per_kmer * num_nodes(),
         num_nodes(),
         max_num_hash_functions
     );
 
-    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); });
+    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); },
+                   canonical_mode_);
 }
 
 bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {

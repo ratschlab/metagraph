@@ -15,8 +15,8 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinct,
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
-                         DBGSuccinctBloom<100000, 1>,
-                         DBGSuccinctBloom<100000, 50>> CanonicalGraphTypes;
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>> CanonicalGraphTypes;
 TYPED_TEST_CASE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 template <typename Graph>
@@ -24,8 +24,8 @@ class DeBruijnGraphWithNTest : public DeBruijnGraphTest<Graph> { };
 typedef ::testing::Types<DBGSuccinct,
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
-                         DBGSuccinctBloom<100000, 1>,
-                         DBGSuccinctBloom<100000, 50>,
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>,
                          DBGHashString> WithNGraphTypes;
 TYPED_TEST_CASE(DeBruijnGraphWithNTest, WithNGraphTypes);
 
@@ -38,8 +38,8 @@ typedef ::testing::Types<DBGBitmap,
 typedef ::testing::Types<DBGSuccinct,
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
-                         DBGSuccinctBloom<100000, 1>,
-                         DBGSuccinctBloom<100000, 50>,
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>,
                          DBGHashString,
                          DBGHashOrdered,
                          DBGBitmap> NoNGraphTypes;

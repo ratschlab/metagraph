@@ -109,6 +109,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool load(const std::string &filename_base) override;
     virtual void serialize(const std::string &filename_base) const override;
     virtual std::string file_extension() const override final { return kExtension; }
+    std::string bloom_filter_file_extension() const { return kBloomFilterExtension; }
 
     virtual void switch_state(Config::StateType new_state) final;
     virtual Config::StateType get_state() const final;
@@ -136,7 +137,7 @@ class DBGSuccinct : public DeBruijnGraph {
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
                                           size_t max_num_hash_functions = -1);
 
-    void initialize_bloom_filter(size_t filter_size,
+    void initialize_bloom_filter(double bits_per_kmer,
                                  size_t max_num_hash_functions = -1);
 
     const KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
@@ -154,6 +155,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     static constexpr auto kExtension = ".dbg";
     static constexpr auto kDummyMaskExtension = ".edgemask";
+    static constexpr auto kBloomFilterExtension = ".bloom";
 };
 
 

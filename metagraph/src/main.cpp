@@ -2860,37 +2860,41 @@ int main(int argc, const char *argv[]) {
                 throw std::runtime_error("Only implemented for DBGSuccinct");
 
             if (config->initialize_bloom) {
+                assert(config->bloom_fpp >= 0.0);
+                assert(config->bloom_bpk > 0.0);
+
                 if (config->verbose) {
                     std::cout << "Construct Bloom filter for nodes..." << std::endl;
                 }
 
                 timer.reset();
 
-                if (config->bloom_bpk > 0) {
-                    dbg_succ->initialize_bloom_filter(
-                        std::ceil(config->bloom_bpk * dbg_succ->num_nodes()),
-                        config->bloom_max_num_hash_functions
-                    );
-                } else if (config->bloom_fpp > 0) {
+                if (config->bloom_fpp > 0) {
                     dbg_succ->initialize_bloom_filter_from_fpr(
                         config->bloom_fpp,
                         config->bloom_max_num_hash_functions
                     );
-                } else if (config->bloom_filter_size) {
+                } else {
                     dbg_succ->initialize_bloom_filter(
-                        config->bloom_filter_size,
+                        config->bloom_bpk,
                         config->bloom_max_num_hash_functions
                     );
-                } else {
-                    std::cerr << "ERROR: invalid option for Bloom filter initialization" << std::endl;
-                    exit(1);
                 }
 
                 if (config->verbose)
                     std::cout << timer.elapsed() << "sec" << std::endl;
 
                 assert(dbg_succ->get_bloom_filter());
-                dbg_succ->get_bloom_filter()->serialize(config->outfbase);
+
+                auto prefix = utils::remove_suffix(config->outfbase, dbg_succ->file_extension());
+                std::ofstream bloom_outstream(
+                    prefix + dbg_succ->bloom_filter_file_extension(), std::ios::binary
+                );
+
+                if (!bloom_outstream.good())
+                    throw std::ios_base::failure("Can't write to file " + prefix + dbg_succ->bloom_filter_file_extension());
+
+                dbg_succ->get_bloom_filter()->serialize(bloom_outstream);
 
                 return 0;
             }

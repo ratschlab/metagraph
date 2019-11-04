@@ -71,7 +71,6 @@ class Config {
     unsigned int fallback_abundance_cutoff = 1;
     unsigned int port = 5555;
     unsigned int bloom_max_num_hash_functions = 10;
-    unsigned int bloom_filter_size = 0;
 
     // Alignment options
     bool alignment_seed_unimems = false;
