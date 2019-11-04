@@ -174,7 +174,6 @@ class BloomFilter {
 // Bloom filter for approximate membership queries on k-mers
 // Sizes are round up to the nearest power of 2 to allow for
 // faster querying and insertion
-
 template <class KmerHasher = RollingKmerMultiHasher<2>>
 class KmerBloomFilter {
   public:
