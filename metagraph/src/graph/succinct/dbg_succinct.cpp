@@ -41,6 +41,9 @@ std::function<bool()> is_kmer_missing(const KmerBloomFilter<> *bloom_filter,
     auto bloom_check = std::make_shared<sdsl::bit_vector>(
         bloom_filter->check_kmer_presence(begin, end)
     );
+
+    assert(begin + bloom_check->size() == end - bloom_filter->get_k() + 1);
+
     auto it = bloom_check->begin();
 
     // these need to be specified explicitly to ensure that they're copied
@@ -48,7 +51,7 @@ std::function<bool()> is_kmer_missing(const KmerBloomFilter<> *bloom_filter,
         assert(it < bloom_check->end());
         bool in_bloom = *it;
         ++it;
-        return in_bloom;
+        return !in_bloom;
     };
 }
 
