@@ -369,6 +369,14 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
+    #if _PROTEIN_GRAPH
+    if (canonical || forward_and_reverse) {
+        std::cerr << "Error: reverse complement not defined for protein alphabets"
+                  << std::endl;
+        print_usage_and_exit = true;
+    }
+    #endif
+
     if (identity != CONCATENATE
             && identity != STATS
             && identity != SERVER_QUERY
