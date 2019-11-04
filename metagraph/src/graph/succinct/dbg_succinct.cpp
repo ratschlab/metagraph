@@ -42,12 +42,13 @@ std::function<bool()> is_kmer_missing(const KmerBloomFilter<> *bloom_filter,
         bloom_filter->check_kmer_presence(begin, end)
     );
     auto it = bloom_check->begin();
-    auto end_it = bloom_check->end();
 
     // these need to be specified explicitly to ensure that they're copied
-    return [it, end_it, bloom_check]() mutable {
-        assert(it < end_it);
-        return !*(it++);
+    return [it,bloom_check]() mutable {
+        assert(it < bloom_check->end());
+        bool in_bloom = *it;
+        ++it;
+        return in_bloom;
     };
 }
 
@@ -411,7 +412,7 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
 
         auto jt = boss_edges.begin();
         boss_graph_->map_to_edges(sequence,
-            [&](auto index) { *(jt++) = index; },
+            [&](auto index) { *jt = index; ++jt; },
             []() { return false; },
             [&]() {
                 if (!is_missing())
