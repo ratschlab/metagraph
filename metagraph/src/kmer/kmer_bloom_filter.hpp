@@ -8,19 +8,25 @@
 #include <sdsl/int_vector.hpp>
 #include <cyclichash.h>
 
+#include "kmer_extractor.hpp"
 
-template <typename TAlphabet = uint8_t>
+
+typedef KmerExtractorBOSS KmerDef;
+typedef KmerDef::TAlphabet TAlphabet;
+
+template <typename TAlphabet = KmerDef::TAlphabet>
 class RollingKmerHasher {
   public:
-    static constexpr TAlphabet MAXVAL = std::numeric_limits<TAlphabet>::max();
-
     // Note: this constructor is expensive. Try to construct it once and
     // make copies of the object.
-    explicit RollingKmerHasher(size_t k, uint32_t seed1 = 0, uint32_t seed2 = 1)
-          : hash_(k, seed1, seed2, 64) {
+    explicit RollingKmerHasher(size_t k,
+                               TAlphabet default_val = std::numeric_limits<TAlphabet>::max(),
+                               uint32_t seed1 = 0, uint32_t seed2 = 1)
+          : hash_(k, seed1, seed2, 64),
+            default_val_(default_val) {
         // initialize
         for (int i = 0; i < hash_.n; ++i) {
-            hash_.eat(MAXVAL);
+            hash_.eat(default_val_);
         }
 
         // store initialized value for faster reset
@@ -51,25 +57,27 @@ class RollingKmerHasher {
 
     uint64_t get_hash() const { return hash_.hashvalue; }
 
+    TAlphabet get_default_val() const { return default_val_; }
+
   private:
     CyclicHash<uint64_t, TAlphabet> hash_;
+    const TAlphabet default_val_;
     decltype(hash_.hashvalue) reset_value_;
 };
 
 
 template <int h,
-          typename TAlphabet = uint8_t,
+          typename TAlphabet = KmerDef::TAlphabet,
           class RollingKmerHasher = ::RollingKmerHasher<TAlphabet>>
 class RollingKmerMultiHasher {
   public:
-    static constexpr TAlphabet MAXVAL = RollingKmerHasher::MAXVAL;
-
-    explicit RollingKmerMultiHasher(size_t k) {
+    explicit RollingKmerMultiHasher(size_t k,
+                                    TAlphabet default_val = std::numeric_limits<TAlphabet>::max()) {
         static_assert(h);
 
         hashers_.reserve(h);
         for (size_t i = 0; i < h; ++i) {
-            hashers_.emplace_back(k, i * 2, i * 2 + 1);
+            hashers_.emplace_back(k, default_val, i * 2, i * 2 + 1);
         }
 
         assert(hashers_.size() == h);
@@ -123,6 +131,11 @@ class RollingKmerMultiHasher {
         static_assert(j < h);
         assert(hashers_.size() == h);
         return hashers_.at(j).get_hash();
+    }
+
+    TAlphabet get_default_val() const {
+        assert(hashers_.size() == h);
+        return hashers_.front().get_default_val();
     }
 
   private:
@@ -185,7 +198,7 @@ class KmerBloomFilter {
           : filter_(std::forward<Args>(args)...),
             canonical_mode_(canonical_mode),
             k_(k),
-            hasher_(k_) {}
+            hasher_(k_, KmerDef::alphabet.size()) {}
 
     // Add the k-mers of the sequence to the Bloom filter
     void add_sequence(const char *begin, const char *end);

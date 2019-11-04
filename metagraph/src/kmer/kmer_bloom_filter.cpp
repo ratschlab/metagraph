@@ -1,12 +1,8 @@
 #include "kmer_bloom_filter.hpp"
 
-#include "kmer_extractor.hpp"
+
 #include "serialization.hpp"
 #include "utils.hpp"
-
-
-typedef KmerExtractorBOSS KmerDef;
-typedef KmerDef::TAlphabet TAlphabet;
 
 
 template <class StringIt>
@@ -103,7 +99,7 @@ void KmerBloomFilter<KmerHasher>
     assert(sdsl::util::cnt_one_bits(check_kmer_presence(begin, end)) == counter);
     assert(!canonical_mode_
             || sdsl::util::cnt_one_bits(check_kmer_presence(
-                   KmerDef::decode(reverse_complement(KmerDef::encode(std::string(begin, end))))
+                   KmerDef::decode(KmerDef::reverse_complement(KmerDef::encode(std::string(begin, end))))
                )) == counter);
 }
 
@@ -166,7 +162,7 @@ void KmerBloomFilter<KmerHasher>
         if (begin + k_ > end || begin + k_ < begin)
             return;
 
-        auto coded = encode_with_sentinel_prefix(begin, end, k_, KmerHasherType::MAXVAL);
+        auto coded = encode_with_sentinel_prefix(begin, end, k_, fwd.get_default_val());
         auto rc_coded = KmerDef::reverse_complement(coded);
 
         size_t chars = 0;
@@ -196,7 +192,7 @@ void KmerBloomFilter<KmerHasher>
         if (begin + k_ > end || begin + k_ < begin)
             return;
 
-        auto coded = encode_with_sentinel_prefix(begin, end, k_, KmerHasherType::MAXVAL);
+        auto coded = encode_with_sentinel_prefix(begin, end, k_, fwd.get_default_val());
 
         size_t chars = 0;
         for (size_t i = 0; i < coded.size(); ++i) {
