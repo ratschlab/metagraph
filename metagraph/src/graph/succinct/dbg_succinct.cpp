@@ -224,7 +224,7 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
     if (begin + get_k() > end)
         return;
 
-    auto is_missing = is_kmer_missing(bloom_filter_.get(), &*begin, &*end);
+    auto is_missing = is_kmer_missing(bloom_filter_.get(), &*begin, &*begin + (end - begin));
 
     boss_graph_->map_to_edges(
         std::string(begin, end),
