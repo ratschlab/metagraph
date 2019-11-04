@@ -32,7 +32,9 @@ class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
                                      Bits,
                                      utils::Hash<KmerPrefix>,
                                      std::equal_to<KmerPrefix>,
-                                     std::allocator<KmerPrefix>>;
+                                     std::allocator<KmerPrefix>,
+                                     true,
+                                     tsl::rh::power_of_two_growth_policy<8>>;
 
     using KmerIterator = typename KmerIndex::iterator;
     using KmerConstIterator = typename KmerIndex::const_iterator;
@@ -183,7 +185,7 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
 
     for (const auto &kmer : sequence_to_kmers(sequence)) {
         Bits val = Bits(1) << kmer[k_ - 1];
-        // TODO: ">> kIgnoreLastCharMask" instead of "& kIgnoreLastCharMask"
+
         auto key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
 
         auto [iter, inserted] = kmers_.insert(std::make_pair(key, val));
@@ -195,7 +197,7 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
 
         iter.value() &= ~kHasNoIncomingFlag;
 
-        if (first_kmer || !kmers_overlap(prev_kmer, kmer))
+        if (first_kmer || !kmers_overlap(prev_kmer, kmer)) //TODO should be something faster but this doesn't take a lot of time
             iter.value() |= (indegree(get_index(iter)) == 0) ? kHasNoIncomingFlag : 0;
 
         first_kmer = false;
