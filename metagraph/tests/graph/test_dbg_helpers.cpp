@@ -66,7 +66,7 @@ build_graph<DBGSuccinct>(uint64_t k,
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctBloomFPR<1, 1>>(uint64_t k,
-                                         const std::vector<std::string> &sequences,
+                                       const std::vector<std::string> &sequences,
                                        bool canonical) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, canonical);
     dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(1.0);
