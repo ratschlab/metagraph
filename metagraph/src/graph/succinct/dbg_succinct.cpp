@@ -728,6 +728,12 @@ bool DBGSuccinct::load(const std::string &filename) {
                       << "Graph: " << get_k() << std::endl;
             return false;
         }
+
+        if (utils::get_verbose()) {
+            std::cout << "Bloom filter loaded from "
+                      << prefix + kBloomFilterExtension
+                      << " successfully" << std::endl;
+        }
     }
 
     return true;
