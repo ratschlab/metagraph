@@ -17,7 +17,9 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     using KmerIndex = tsl::robin_set<Kmer,
                                      utils::Hash<Kmer>,
                                      std::equal_to<Kmer>,
-                                     std::allocator<Kmer>>;
+                                     std::allocator<Kmer>,
+                                     true,
+                                     tsl::rh::power_of_two_growth_policy<8>>;
     using KmerIterator = typename KmerIndex::const_iterator;
   public:
     explicit DBGHashFastImpl(size_t k,
