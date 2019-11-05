@@ -20,17 +20,22 @@ class RollingKmerHasher {
     explicit RollingKmerHasher(size_t k, uint32_t seed1 = 0, uint32_t seed2 = 1)
           : hash_(k, seed1, seed2, 64) {}
 
-    void reset(TAlphabet c) {
-        hash_.reset();
-        for (int i = 0; i < hash_.n; ++i) {
-            hash_.eat(c);
-        }
-    }
-
     void reset(const TAlphabet *it) {
         hash_.reset();
         for (int i = 0; i < hash_.n; ++i) {
             hash_.eat(*it);
+            ++it;
+        }
+    }
+
+    void reverse_reset(const TAlphabet *it) {
+        hash_.reset();
+        for (int i = 0; i < hash_.n; ++i) {
+            hash_.eat(0);
+        }
+
+        for (int i = 0; i < hash_.n; ++i) {
+            shift_right(*it, 0);
             ++it;
         }
     }
@@ -77,34 +82,32 @@ class RollingKmerMultiHasher {
     }
 
     // After calling reset, the first k values of prev (next) in shift left (right)
-    // should be c
-    void reset(TAlphabet c) {
-        assert(hashers_.size() == h);
-        for (auto &hasher : hashers_) {
-            hasher.reset(c);
-        }
-    }
-
-    // After calling reset, the first k values of prev (next) in shift left (right)
     // should be those referenced by it
     void reset(const TAlphabet *it) {
         assert(hashers_.size() == h);
-        for (auto &hasher : hashers_) {
-            hasher.reset(it);
+        for (size_t i = 0; i < h; ++i) {
+            hashers_[i].reset(it);
+        }
+    }
+
+    void reverse_reset(const TAlphabet *it) {
+        assert(hashers_.size() == h);
+        for (size_t i = 0; i < h; ++i) {
+            hashers_[i].reverse_reset(it);
         }
     }
 
     void shift_left(TAlphabet next, TAlphabet prev) {
         assert(hashers_.size() == h);
-        for (auto &hasher : hashers_) {
-            hasher.shift_left(next, prev);
+        for (size_t i = 0; i < h; ++i) {
+            hashers_[i].shift_left(next, prev);
         }
     }
 
     void shift_right(TAlphabet prev, TAlphabet next) {
         assert(hashers_.size() == h);
-        for (auto &hasher : hashers_) {
-            hasher.shift_right(prev, next);
+        for (size_t i = 0; i < h; ++i) {
+            hashers_[i].shift_right(prev, next);
         }
     }
 
@@ -193,9 +196,7 @@ class KmerBloomFilter {
           : filter_(std::forward<Args>(args)...),
             canonical_mode_(canonical_mode),
             k_(k),
-            hasher_(k_) {
-        hasher_.reset(KmerDef::alphabet.size());
-    }
+            hasher_(k_) {}
 
     // Add the k-mers of the sequence to the Bloom filter
     void add_sequence(const char *begin, const char *end);

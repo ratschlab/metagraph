@@ -5,19 +5,6 @@
 
 typedef KmerDef::TAlphabet TAlphabet;
 
-template <class StringIt>
-std::vector<TAlphabet>
-encode_with_sentinel_prefix(StringIt begin, StringIt end,
-                            size_t k,
-                            TAlphabet default_value = 0) {
-    assert(end >= begin);
-
-    std::vector<TAlphabet> encoded(end - begin + k, default_value);
-    std::transform(begin, end, encoded.begin() + k,
-                   [](char c) { return KmerDef::encode(c); });
-
-    return encoded;
-}
 
 BloomFilter::BloomFilter(size_t filter_size, size_t num_hash_functions)
       : filter_(filter_size),
@@ -141,7 +128,6 @@ bool KmerBloomFilter<KmerHasher>
         k_ = load_number(in);
         canonical_mode_ = load_number(in);
         hasher_ = KmerHasherType(k_);
-        hasher_.reset(KmerDef::alphabet.size());
 
         return filter_.load(in);
     } catch (...) {
@@ -158,16 +144,37 @@ void KmerBloomFilter<KmerHasher>
     if (begin >= end || static_cast<size_t>(end - begin) < k_)
         return;
 
+    std::vector<TAlphabet> coded(end - begin);
+    std::transform(begin, end,
+                   coded.begin(),
+                   [](char c) { return KmerDef::encode(c); });
+
+    // determine the number of invalid characters in the first k-mer
+    size_t chars = std::find_if(coded.rend() - k_, coded.rend(),
+                                [](TAlphabet c) { return c >= KmerDef::alphabet.size(); })
+                       - (coded.rend() - k_);
+    assert(chars <= k_);
+
     auto fwd = hasher_;
+    fwd.reset(coded.data());
 
     if (is_canonical_mode()) {
+        std::vector<TAlphabet> rc_coded(end - begin);
+        std::transform(coded.begin(), coded.end(),
+                       rc_coded.begin(),
+                       [](TAlphabet c) { return KmerDef::complement(c); });
+
         auto rev = hasher_;
+        rev.reverse_reset(rc_coded.data());
 
-        auto coded = encode_with_sentinel_prefix(begin, end, k_, KmerDef::alphabet.size());
-        auto rc_coded = KmerDef::reverse_complement(coded);
+        if (chars == k_) {
+            const auto &canonical = std::min(fwd, rev);
+            callback(0,
+                     canonical.template get_hash<0>(),
+                     canonical.template get_hash<1>());
+        }
 
-        size_t chars = 0;
-        for (size_t i = 0, j = coded.size() - 1; i < coded.size(); ++i, --j) {
+        for (size_t i = k_, j = k_; i < coded.size(); ++i, ++j) {
             if (coded.at(i) >= KmerDef::alphabet.size()) {
                 chars = 0;
                 continue;
@@ -177,33 +184,30 @@ void KmerBloomFilter<KmerHasher>
 
             assert(i >= k_);
             fwd.shift_left(coded.at(i), coded.at(i - k_));
-
-            assert(j + k_ < coded.size());
-            rev.shift_right(rc_coded.at(j), rc_coded.at(j + k_));
+            rev.shift_right(rc_coded.at(j), rc_coded.at(j - k_));
 
             if (++chars >= k_) {
                 const auto &canonical = std::min(fwd, rev);
-                callback(i + 1 - (k_ << 1),
+                callback(i - k_ + 1,
                          canonical.template get_hash<0>(),
                          canonical.template get_hash<1>());
             }
         }
 
     } else {
-        auto coded = encode_with_sentinel_prefix(begin, end, k_, KmerDef::alphabet.size());
+        if (chars == k_)
+            callback(0, fwd.template get_hash<0>(), fwd.template get_hash<1>());
 
-        size_t chars = 0;
-        for (size_t i = 0; i < coded.size(); ++i) {
+        for (size_t i = k_; i < coded.size(); ++i) {
             if (coded.at(i) >= KmerDef::alphabet.size()) {
                 chars = 0;
                 continue;
             }
 
-            assert(i >= k_);
             fwd.shift_left(coded.at(i), coded.at(i - k_));
 
             if (++chars >= k_)
-                callback(i + 1 - (k_ << 1),
+                callback(i - k_ + 1,
                          fwd.template get_hash<0>(),
                          fwd.template get_hash<1>());
         }
