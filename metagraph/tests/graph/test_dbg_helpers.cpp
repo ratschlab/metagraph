@@ -182,11 +182,13 @@ bool check_graph(const std::string &alphabet, bool canonical, bool check_sequenc
 
     auto graph = build_graph<Graph>(20, sequences, canonical);
 
-    const auto nnodes = graph->num_nodes();
-    for (DeBruijnGraph::node_index i = 1; i <= nnodes; ++i) {
+    bool node_remap_failed = false;
+    graph->call_nodes([&graph, &node_remap_failed](DeBruijnGraph::node_index i) {
         if (graph->kmer_to_node(graph->get_node_sequence(i)) != i)
-            return false;
-    }
+            node_remap_failed = true;
+    }, [&node_remap_failed](){ return node_remap_failed; });
+    if (node_remap_failed)
+        return false;
 
     if (!check_sequence)
         return true;

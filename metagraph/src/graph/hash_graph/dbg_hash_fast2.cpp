@@ -172,7 +172,7 @@ DBGHashFast2Impl<KMER>::DBGHashFast2Impl(size_t k,
       : k_(k),
         canonical_mode_(canonical_mode),
         packed_serialization_(packed_serialization),
-        kIgnoreLastCharMask(~KmerPrefix(((1llu << KMER::kBitsPerChar) - 1) << (KMER::kBitsPerChar * (k - 1))))
+        kIgnoreLastCharMask(~(KmerPrefix((1llu << KMER::kBitsPerChar) - 1) << int(KMER::kBitsPerChar * (k - 1))))
       {};
 
 template <typename KMER>
@@ -181,9 +181,12 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
     bool first_kmer = true;
-    KMER prev_kmer = sequence_to_kmers(sequence.substr(0, k_))[0];
+    KMER prev_kmer;
 
     for (const auto &kmer : sequence_to_kmers(sequence)) {
+        if (first_kmer)
+            prev_kmer = kmer;
+
         Bits val = Bits(1) << kmer[k_ - 1];
 
         auto key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
@@ -212,9 +215,11 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
         return;
 
     first_kmer = true;
-    prev_kmer = sequence_to_kmers(sequence.substr(0, k_))[0];
 
     for (const auto &kmer : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
+        if (first_kmer)
+            prev_kmer = kmer;
+
         Bits val = Bits(1) << kmer[k_ - 1];
         auto key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
 
@@ -274,6 +279,7 @@ template <typename KMER>
 void DBGHashFast2Impl<KMER>::map_to_nodes(const std::string &sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
+
     const auto &kmers = sequence_to_kmers(sequence, canonical_mode_);
     auto it = kmers.begin();
     for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
@@ -283,8 +289,7 @@ void DBGHashFast2Impl<KMER>::map_to_nodes(const std::string &sequence,
         if (terminate())
             return;
 
-        assert((find_kmer(KmerPrefix((*it).data()) & kIgnoreLastCharMask) == kmers_.end()) ||
-               *it == get_kmer(get_index(*it), get_const_iter(get_index(*it))));
+        assert(!get_index(*it) || *it == get_kmer(get_index(*it), get_const_iter(get_index(*it))));
 
         callback(is_valid ? get_index(*it++) : npos);
     }
@@ -336,8 +341,11 @@ void DBGHashFast2Impl<KMER>::call_incoming_kmers(node_index node,
 
         auto prev_kmer_iter = find_kmer(KmerPrefix(prev_kmer.data()) & kIgnoreLastCharMask);
 
+        if (prev_kmer_iter == kmers_.end())
+            continue;
+
         if ((*prev_kmer_iter).second & (Bits(1) << kmer[k_ - 2]))
-            callback(get_index(prev_kmer_iter) + seq_encoder_.encode(c), c);
+            callback(get_index(prev_kmer_iter) + prev_kmer[k_ - 1], c);
     }
 }
 
@@ -393,6 +401,8 @@ size_t DBGHashFast2Impl<KMER>::outdegree(node_index node) const {
 
     const auto next_kmer_prefix_it
         = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
+
+    assert(next_kmer_prefix_it != kmers_.end());
 
     const auto val = (*next_kmer_prefix_it).second & ~kHasNoIncomingFlag;
 
@@ -636,6 +646,9 @@ typename DBGHashFast2Impl<KMER>::node_index
 DBGHashFast2Impl<KMER>::get_index(const Kmer &kmer) const {
     const auto find = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
     if (find == kmers_.end())
+        return npos;
+
+    if (!(Bits(1) & (find.value() >> kmer[k_ - 1])))
         return npos;
 
     node_index node = get_index(find) + kmer[k_ - 1];
