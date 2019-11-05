@@ -50,12 +50,23 @@ class BRWTBottomUpBuilder : public BRWTBuilder {
                       size_t num_nodes_parallel = 1,
                       size_t num_threads = 1);
 
+    static BRWT merge(std::vector<BRWT>&& nodes,
+                      Partitioner partitioner = get_basic_partitioner(2),
+                      size_t num_nodes_parallel = 1,
+                      size_t num_threads = 1);
+
   private:
     static std::pair<NodeBRWT, std::unique_ptr<bit_vector>>
-    merge(std::vector<NodeBRWT> &&nodes,
-          std::vector<std::unique_ptr<bit_vector>> &&nonzero_rows,
+    merge(std::vector<NodeBRWT>&& nodes,
+          std::vector<std::unique_ptr<bit_vector>>&& nonzero_rows,
           sdsl::bit_vector *buffer,
           ThreadPool &thread_pool);
+
+    static BRWT merge(VectorsPtr&& columns,
+                      std::vector<NodeBRWT>&& nodes,
+                      Partitioner partitioner,
+                      size_t num_nodes_parallel,
+                      size_t num_threads);
 };
 
 

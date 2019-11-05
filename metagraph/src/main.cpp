@@ -1,5 +1,6 @@
 #include <json/json.h>
 #include <ips4o.hpp>
+#include <fmt/format.h>
 
 #include "unix_tools.hpp"
 #include "config.hpp"
@@ -302,7 +303,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
 
                     const std::string sequence(read_stream->seq.s);
                     for (size_t i = 0; i < sequence.size(); i += genome_bin_size) {
-                        labels.back() = std::to_string(i);
+                        labels.back() = fmt::format_int(i).c_str();
 
                         // forward: |0 =>  |6 =>  |12=>  |18=>  |24=>  |30=>|
                         // reverse: |<=30|  <=24|  <=18|  <=12|  <= 6|  <= 0|
@@ -357,9 +358,8 @@ void annotate_coordinates(const std::vector<std::string> &files,
     anno_graph->join();
 }
 
-
-void execute_query(std::string seq_name,
-                   std::string sequence,
+void execute_query(const std::string &seq_name,
+                   const std::string &sequence,
                    bool count_labels,
                    bool suppress_unlabeled,
                    size_t num_top_labels,
@@ -367,7 +367,8 @@ void execute_query(std::string seq_name,
                    std::string anno_labels_delimiter,
                    const AnnotatedDBG &anno_graph,
                    std::ostream &output_stream) {
-    std::ostringstream oss;
+    std::string output;
+    output.reserve(1'000);
 
     if (count_labels) {
         auto top_labels = anno_graph.get_top_labels(sequence,
@@ -377,15 +378,17 @@ void execute_query(std::string seq_name,
         if (!top_labels.size() && suppress_unlabeled)
             return;
 
-        oss << seq_name << "\t";
+        output += seq_name;
 
-        if (top_labels.size()) {
-            oss << "<" << top_labels[0].first << ">:" << top_labels[0].second;
+        for (const auto &[label, count] : top_labels) {
+            output += "\t<";
+            output += label;
+            output += ">:";
+            output += fmt::format_int(count).c_str();
         }
-        for (size_t i = 1; i < top_labels.size(); ++i) {
-            oss << "\t<" << top_labels[i].first << ">:" << top_labels[i].second;
-        }
-        oss << "\n";
+
+        output += '\n';
+
     } else {
         auto labels_discovered
                 = anno_graph.get_labels(sequence, discovery_fraction);
@@ -393,12 +396,14 @@ void execute_query(std::string seq_name,
         if (!labels_discovered.size() && suppress_unlabeled)
             return;
 
-        oss << seq_name << "\t"
-            << utils::join_strings(labels_discovered,
-                                   anno_labels_delimiter) << "\n";
+        output += seq_name;
+        output += '\t';
+        output += utils::join_strings(labels_discovered,
+                                      anno_labels_delimiter);
+        output += '\n';
     }
 
-    output_stream << oss.str();
+    output_stream << output;
 }
 
 std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_type,
@@ -601,12 +606,65 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 }
 
 
-std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
-                                           const Config &config) {
-    auto dbg_config = DBGAlignerConfig(config, graph);
+void set_aligner_parameters(const DeBruijnGraph &graph, Config &config) {
+    // fix seed length bounds
+    if (!config.alignment_min_seed_length || config.alignment_seed_unimems)
+        config.alignment_min_seed_length = graph.get_k();
+
+    if (config.alignment_max_seed_length == std::numeric_limits<size_t>::max()
+            && !config.alignment_seed_unimems)
+        config.alignment_max_seed_length = graph.get_k();
+
+    if (config.verbose) {
+        std::cout << "Alignment settings:" << "\n"
+                  << "\t Seeding: " << (config.alignment_seed_unimems ? "unimems" : "nodes") << "\n"
+                  << "\t Alignments to report: " << config.alignment_num_alternative_paths << "\n"
+                  << "\t Priority queue size: " << config.alignment_queue_size << "\n"
+                  << "\t Min seed length: " << config.alignment_min_seed_length << "\n"
+                  << "\t Max seed length: " << config.alignment_max_seed_length << "\n"
+                  << "\t Max num seeds per locus: " << config.alignment_max_num_seeds_per_locus << "\n"
+                  << "\t Scoring matrix: " << (config.alignment_edit_distance ? "unit costs" : "matrix") << "\n"
+                  << "\t Gap opening penalty: " << int64_t(config.alignment_gap_opening_penalty) << "\n"
+                  << "\t Gap extension penalty: " << int64_t(config.alignment_gap_extension_penalty) << "\n"
+                  << "\t Min DP table cell score: " << int64_t(config.alignment_min_cell_score) << "\n"
+                  << "\t Min alignment score: " << config.alignment_min_path_score << std::endl;
+
+        if (!config.alignment_edit_distance)
+            std::cout << "\t Match score: " << int64_t(config.alignment_match_score) << "\n"
+                      << "\t (DNA) Transition score: " << int64_t(config.alignment_mm_transition) << "\n"
+                      << "\t (DNA) Transversion score: " << int64_t(config.alignment_mm_transversion) << "\n";
+
+        std::cout << std::endl;
+    }
+}
+
+std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &config) {
+    set_aligner_parameters(graph, config);
+
+    // TODO: fix this when alphabets are no longer set at compile time
+    #if _PROTEIN_GRAPH
+        const auto *alphabet = alphabets::kAlphabetProtein;
+        const auto *alphabet_encoding = alphabets::kCharToProtein;
+    #elif _DNA_CASE_SENSITIVE_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #elif _DNA5_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #elif _DNA_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+    #endif
+
+    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
 
     if (config.alignment_seed_unimems) {
-        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, dbg_config);
+        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, DBGAlignerConfig(config));
 
     } else if (config.alignment_min_seed_length < graph.get_k()) {
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
@@ -616,10 +674,10 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
         }
 
         // Use the seeder that seeds to node suffixes
-        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, dbg_config);
+        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, DBGAlignerConfig(config));
 
     } else {
-        return std::make_unique<DBGAligner<>>(graph, dbg_config);
+        return std::make_unique<DBGAligner<>>(graph, DBGAlignerConfig(config));
     }
 }
 
@@ -1877,15 +1935,17 @@ int main(int argc, const char *argv[]) {
             }
 
             if (config->anno_type == Config::RowCompressed) {
-                annotate::merge<annotate::RowCompressed<>>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::RowCompressed<>>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::RowFlat) {
-                annotate::merge<annotate::RowFlatAnnotator>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::RowFlatAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::RBFish) {
-                annotate::merge<annotate::RainbowfishAnnotator>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::RainbowfishAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::BinRelWT_sdsl) {
-                annotate::merge<annotate::BinRelWT_sdslAnnotator>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::BinRelWT_sdslAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::BinRelWT) {
-                annotate::merge<annotate::BinRelWTAnnotator>(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::BinRelWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
+            } else if (config->anno_type == Config::BRWT) {
+                annotate::merge<annotate::BRWTCompressed<>>(std::move(annotators), stream_files, config->outfbase);
             } else {
                 std::cerr << "ERROR: Merging of annotations to '"
                           << config->annotype_to_string(config->anno_type)
@@ -1907,7 +1967,7 @@ int main(int argc, const char *argv[]) {
             // iterate over input files
             for (const auto &file : files) {
                 if (config->verbose) {
-                    std::cout << "\nParsing " << file << std::endl;
+                    std::cout << "\nParsing sequences from " + file + '\n' << std::flush;
                 }
 
                 Timer curr_timer;
@@ -1934,19 +1994,17 @@ int main(int argc, const char *argv[]) {
                     graph_to_query = query_graph.get();
 
                     if (config->verbose) {
-                        std::cout << "Query graph constructed in "
-                                  << curr_timer.elapsed() << " sec" << std::endl;
+                        std::cout << "Query graph constructed for "
+                                        + file + " in "
+                                        + std::to_string(curr_timer.elapsed())
+                                        + " sec\n" << std::flush;
                     }
-                }
-
-                if (config->verbose) {
-                    std::cout << "Querying sequences from file " << file << std::endl;
                 }
 
                 read_fasta_file_critical(file,
                     [&](kseq_t *read_stream) {
                         thread_pool.enqueue(execute_query,
-                            std::to_string(seq_count++) + "\t"
+                            fmt::format_int(seq_count++).str() + "\t"
                                 + read_stream->name.s,
                             std::string(read_stream->seq.s),
                             config->count_labels,
@@ -1965,12 +2023,11 @@ int main(int argc, const char *argv[]) {
                 thread_pool.join();
 
                 if (config->verbose) {
-                    std::cout << "File processed in "
-                              << curr_timer.elapsed()
-                              << "sec, current mem usage: "
-                              << (get_curr_RSS() >> 20) << " MiB"
-                              << ", total time: " << timer.elapsed()
-                              << "sec" << std::endl;
+                    std::cout << "File " + file + " was processed in "
+                                    + std::to_string(curr_timer.elapsed())
+                                    + " sec, total time: "
+                                    + std::to_string(timer.elapsed())
+                                    + " sec\n" << std::flush;
                 }
             }
 
@@ -3113,37 +3170,7 @@ int main(int argc, const char *argv[]) {
                 return 0;
             }
 
-            // fix seed length bounds
-            if (!config->alignment_min_seed_length || config->alignment_seed_unimems)
-                config->alignment_min_seed_length = graph->get_k();
-
-            if (config->alignment_max_seed_length == std::numeric_limits<size_t>::max()
-                    && !config->alignment_seed_unimems)
-                config->alignment_max_seed_length = graph->get_k();
-
-            if (config->verbose) {
-                std::cout << "Alignment settings:" << "\n"
-                          << "\t Seeding: " << (config->alignment_seed_unimems ? "unimems" : "nodes") << "\n"
-                          << "\t Alignments to report: " << config->alignment_num_alternative_paths << "\n"
-                          << "\t Priority queue size: " << config->alignment_queue_size << "\n"
-                          << "\t Min seed length: " << config->alignment_min_seed_length << "\n"
-                          << "\t Max seed length: " << config->alignment_max_seed_length << "\n"
-                          << "\t Max num seeds per locus: " << config->alignment_max_num_seeds_per_locus << "\n"
-                          << "\t Scoring matrix: " << (config->alignment_edit_distance ? "unit costs" : "matrix") << "\n"
-                          << "\t Gap opening penalty: " << int64_t(config->alignment_gap_opening_penalty) << "\n"
-                          << "\t Gap extension penalty: " << int64_t(config->alignment_gap_extension_penalty) << "\n"
-                          << "\t Min DP table cell score: " << int64_t(config->alignment_min_cell_score) << "\n"
-                          << "\t Min alignment score: " << config->alignment_min_path_score << std::endl;
-
-                if (!config->alignment_edit_distance)
-                    std::cout << "\t Match score: " << int64_t(config->alignment_match_score) << "\n"
-                              << "\t (DNA) Transition score: " << int64_t(config->alignment_mm_transition) << "\n"
-                              << "\t (DNA) Transversion score: " << int64_t(config->alignment_mm_transversion) << "\n";
-
-                std::cout << std::endl;
-            }
-
-            Cigar::initialize_opt_table(graph->alphabet());
+            auto aligner = build_aligner(*graph, *config);
 
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
@@ -3154,11 +3181,8 @@ int main(int argc, const char *argv[]) {
                     ? new std::ofstream(config->outfbase)
                     : &std::cout;
 
-                bool write_json = utils::ends_with(config->outfbase, ".json");
                 Json::StreamWriterBuilder builder;
                 builder["indentation"] = "";
-
-                auto aligner = build_aligner(*graph, *config);
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     thread_pool.enqueue([&](std::string query,
@@ -3166,7 +3190,7 @@ int main(int argc, const char *argv[]) {
                             auto paths = aligner->align(query);
 
                             std::ostringstream ostr;
-                            if (!write_json) {
+                            if (!config->output_json) {
                                 for (const auto &path : paths) {
                                     const auto& path_query = path.get_orientation()
                                         ? paths.get_query_reverse_complement()
@@ -3182,7 +3206,7 @@ int main(int argc, const char *argv[]) {
                                     ostr << header << "\t"
                                          << query << "\t"
                                          << "*\t*\t"
-                                         << config->alignment_min_path_score << "\t*\t*"
+                                         << config->alignment_min_path_score << "\t*\t*\t*"
                                          << std::endl;
                             } else {
                                 bool secondary = false;
@@ -3276,7 +3300,7 @@ int main(int argc, const char *argv[]) {
                 : &std::cout;
 
             std::unique_ptr<Json::StreamWriter> json_writer;
-            if (utils::ends_with(config->outfbase, ".json")) {
+            if (config->output_json) {
                 Json::StreamWriterBuilder builder;
                 builder["indentation"] = "";
                 json_writer.reset(builder.newStreamWriter());
@@ -3336,7 +3360,7 @@ int main(int argc, const char *argv[]) {
 
                     // print labels
                     std::lock_guard<std::mutex> lock(print_label_mutex);
-                    if (utils::ends_with(config->outfbase, ".json")) {
+                    if (config->output_json) {
                         json_writer->write(
                             alignment.to_json(
                                 query,

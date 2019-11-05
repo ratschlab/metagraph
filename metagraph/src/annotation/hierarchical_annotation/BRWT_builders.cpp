@@ -28,7 +28,10 @@ BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
     assert(arity > 1u);
 
     return [arity](const VectorsPtr &vectors) {
-        Partition partition((vectors.size() + arity - 1) / arity);
+        if (!vectors.size())
+            return Partition(0);
+
+        Partition partition((vectors.size() - 1) / arity + 1);
         for (size_t i = 0; i < vectors.size(); ++i) {
             partition[i / arity].push_back(i);
         }
@@ -105,8 +108,8 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 }
 
 std::pair<BRWTBottomUpBuilder::NodeBRWT, std::unique_ptr<bit_vector>>
-BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
-                           std::vector<std::unique_ptr<bit_vector>> &&index,
+BRWTBottomUpBuilder::merge(std::vector<NodeBRWT>&& nodes,
+                           std::vector<std::unique_ptr<bit_vector>>&& index,
                            sdsl::bit_vector *buffer,
                            ThreadPool &thread_pool) {
     assert(nodes.size());
@@ -180,10 +183,6 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
                                 Partitioner partitioner,
                                 size_t num_nodes_parallel,
                                 size_t num_threads) {
-    num_threads = std::max(num_nodes_parallel, num_threads);
-
-    ThreadPool thread_pool(num_threads, 100'000 * num_threads);
-
     if (!columns.size())
         return BRWT();
 
@@ -194,6 +193,22 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
         nodes[i].column_arrangement = { i };
         nodes[i].group_sizes = { 1 };
     }
+
+    return merge(std::move(columns),
+                 std::move(nodes),
+                 partitioner,
+                 num_nodes_parallel,
+                 num_threads);
+}
+
+BRWT BRWTBottomUpBuilder::merge(VectorsPtr&& columns,
+                                std::vector<NodeBRWT>&& nodes,
+                                Partitioner partitioner,
+                                size_t num_nodes_parallel,
+                                size_t num_threads) {
+    num_threads = std::max(num_nodes_parallel, num_threads);
+
+    ThreadPool thread_pool(num_threads, 100'000 * num_threads);
 
     // initialize buffer vectors for merging columns
     std::stack<sdsl::bit_vector> buffers;
@@ -255,6 +270,46 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
                       std::move(*columns.at(0)));
 }
 
+BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& brwts,
+                                Partitioner partitioner,
+                                size_t num_nodes_parallel,
+                                size_t num_threads) {
+    if (!brwts.size())
+        return BRWT();
+
+    std::vector<NodeBRWT> nodes(brwts.size());
+    VectorsPtr columns;
+
+    // initialize nodes
+    uint64_t num_cols = 0;
+
+    for (size_t i = 0; i < brwts.size(); ++i) {
+        auto &brwt = brwts[i];
+        auto &node = nodes[i];
+
+        assert(brwt.child_nodes_.size() == brwt.assignments_.num_groups());
+
+        for (size_t j = 0; j < brwt.child_nodes_.size(); ++j) {
+            node.group_sizes.push_back(brwt.child_nodes_[j]->num_columns());
+
+            for (size_t r = 0; r < brwt.child_nodes_[j]->num_columns(); ++r) {
+                node.column_arrangement.push_back(num_cols + brwt.assignments_.get(j, r));
+            }
+        }
+
+        num_cols += brwt.num_columns();
+
+        node.child_nodes = std::move(brwt.child_nodes_);
+
+        columns.emplace_back(new bit_vector_small(std::move(brwt.nonzero_rows_)));
+    }
+
+    return merge(std::move(columns),
+                 std::move(nodes),
+                 partitioner,
+                 num_nodes_parallel,
+                 num_threads);
+}
 
 void BRWTOptimizer::relax(BRWT *brwt_matrix,
                           uint64_t max_arity,

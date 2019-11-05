@@ -243,6 +243,8 @@ include_directories(
   ${INCLUDE_DIRS}
 )
 
+add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
+
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
 )
@@ -277,7 +279,6 @@ if(FOLLY_LIBRARIES)
     -lboost_filesystem
     -lboost_program_options
     -lcrypto
-    ${OpenMP_CXX_LIBRARIES}
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
@@ -330,6 +331,8 @@ set(METALIBS ${METALIBS}
   brwt
   jsoncpp
   progress_bar
+  ${OpenMP_CXX_LIBRARIES}
+  fmt::fmt-header-only
   mersenne_twister
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")

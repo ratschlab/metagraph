@@ -17,6 +17,7 @@
 // Information and Computation 232 (2013): 19-37.
 class BRWT : public BinaryMatrix {
     friend class BRWTBuilder;
+    friend class BRWTBottomUpBuilder;
     friend class BRWTOptimizer;
 
     typedef uint32_t Child;
