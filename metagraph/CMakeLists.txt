@@ -326,7 +326,7 @@ list(REVERSE src_files)
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
-add_library(metagraph STATIC ${src_files} tests/common/test_sorted_set_disk.cpp)
+add_library(metagraph STATIC ${src_files})
 add_executable(metagraph-bin "src/main.cpp")
 set_target_properties(metagraph-bin PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 

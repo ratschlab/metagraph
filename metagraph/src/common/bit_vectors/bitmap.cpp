@@ -1,6 +1,7 @@
 #include "bitmap.hpp"
-#include "utils.hpp"
 #include "bit_vector.hpp"
+
+#include "../utils.hpp"
 
 
 // since std::set needs 32 bytes per element

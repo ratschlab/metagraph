@@ -12,7 +12,7 @@
 #include <fstream>
 #endif
 
-#include <bit_vector.hpp>
+#include "bit_vectors/bit_vector.hpp"
 
 
 void serialize_number(std::ostream &out, uint64_t number);

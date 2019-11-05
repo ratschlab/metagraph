@@ -1,11 +1,12 @@
 #pragma once
 
-#include <mutex>
-#include <shared_mutex>
+#include "utils.hpp"
 
 #include <ips4o.hpp>
 
-#include "utils.hpp"
+#include <fstream> //TODO(ddanciu) - try boost mmapped instead
+#include <mutex>
+#include <shared_mutex>
 
 const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
 
@@ -87,19 +88,19 @@ public:
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_writer_lock(
         multi_write_mutex_);
-    std::vector<std::fstream> chunk_files(chunk_count_);
-    std::fstream sorted_file(output_dir + "sorted.bin", ios::binary | ios::out);
     // write any residual data left
     if (!data_.empty()) {
       sort_and_remove_duplicates(&data_, num_threads_);
       dump_to_file();
     }
+
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
+    std::vector<std::fstream> chunk_files(chunk_count_);
+    std::fstream sorted_file(output_dir + "sorted.bin", ios::binary | ios::out);
     std::priority_queue<std::pair<T, uint32_t>> merge_heap;
     for (uint32_t i = 0; i < chunk_count_; ++i) {
-      chunk_files[i].open(output_dir + "chunk_" + std::to_string(chunk_count_) +
-                              ".bin",
+      chunk_files[i].open(output_dir + "chunk_" + std::to_string(i) + ".bin",
                           std::ios::in | std::ios::binary);
       T dataItem;
       if (chunk_files[i]) {
@@ -124,7 +125,10 @@ public:
     sorted_file.seekg(0, sorted_file.end);
     uint64_t length = sorted_file.tellg();
     sorted_file.seekg(0, sorted_file.beg);
-    sorted_file.read(reinterpret_cast<char *>(&data_), length);
+    size_t totalSize = length / sizeof(value_type);
+    std::cout << "Hello!";
+    data_.resize(totalSize);
+    sorted_file.read(reinterpret_cast<char *>(&data_[0]), length);
     return data_;
   }
 

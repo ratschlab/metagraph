@@ -1,5 +1,6 @@
-#include "kmer_boss.hpp"
-#include "sorted_set_disk.hpp"
+#include "common/sorted_set_disk.hpp"
+
+#include "kmer/kmer_boss.hpp"
 
 #include <gtest/gtest.h>
 
