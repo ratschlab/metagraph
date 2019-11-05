@@ -82,7 +82,7 @@ bool BloomFilter::load(istream &in) {
 template <class KmerHasher>
 void KmerBloomFilter<KmerHasher>
 ::add_sequence(const char *begin, const char *end) {
-    assert(begin + k_ > begin && begin + k_ <= end);
+    assert(end >= begin && static_cast<size_t>(end - begin) >= k_);
 
     #ifndef NDEBUG
     uint64_t counter = 0;
@@ -106,7 +106,7 @@ void KmerBloomFilter<KmerHasher>
 template <class KmerHasher>
 sdsl::bit_vector KmerBloomFilter<KmerHasher>
 ::check_kmer_presence(const char *begin, const char *end) const {
-    if (begin + k_ > end)
+    if (begin >= end || static_cast<size_t>(end - begin) < k_)
         return sdsl::bit_vector();
 
     sdsl::bit_vector check_vec(end - begin - k_ + 1);
