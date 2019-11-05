@@ -768,6 +768,51 @@ namespace utils {
     template <typename... Ts, template <typename, typename...> class U>
     struct is_instance<U<Ts...>, U> : public std::true_type {};
 
+    template <typename T, class Storage = std::vector<T>>
+    class RingBuffer {
+      public:
+        explicit RingBuffer(size_t size)
+              : ring_buffer_(1llu << (sdsl::bits::hi(size - 1) + 1)),
+                size_(size),
+                buffer_it_mask_(ring_buffer_.size() - 1),
+                buffer_it_(0) {}
+
+        void reset() { buffer_it_ = 0; }
+
+        void push_back(const T &obj) {
+            buffer_it_ = (buffer_it_ + 1) & buffer_it_mask_;
+            assert(buffer_it_ < ring_buffer_.size());
+
+            ring_buffer_[buffer_it_] = obj;
+        }
+
+        void push_front(const T &obj) {
+            if (buffer_it_) {
+                --buffer_it_;
+            } else {
+                buffer_it_ = buffer_it_mask_;
+            }
+            assert(buffer_it_ < ring_buffer_.size());
+
+            ring_buffer_[get_front_index()] = obj;
+        }
+
+        T back() const { return ring_buffer_.at(buffer_it_); }
+
+        T front() const { return ring_buffer_.at(get_front_index()); }
+
+      private:
+        size_t get_front_index() const {
+            return (buffer_it_ + buffer_it_mask_ + 2 - size_) & buffer_it_mask_;
+        }
+
+        Storage ring_buffer_;
+        size_t size_;
+        size_t buffer_it_mask_;
+        size_t buffer_it_;
+    };
+
+
 } // namespace utils
 
 template <typename T>
