@@ -35,14 +35,14 @@ class RollingKmerHasher {
         }
 
         for (int i = 0; i < hash_.n; ++i) {
-            shift_right(*it, 0);
+            shift_left(*it, 0);
             ++it;
         }
     }
 
-    void shift_left(TAlphabet next, TAlphabet prev) { hash_.update(prev, next); }
+    void shift_right(TAlphabet next, TAlphabet prev) { hash_.update(prev, next); }
 
-    void shift_right(TAlphabet prev, TAlphabet next) { hash_.reverse_update(prev, next); }
+    void shift_left(TAlphabet prev, TAlphabet next) { hash_.reverse_update(prev, next); }
 
     bool operator<(const RollingKmerHasher &other) const {
         return hash_.hashvalue < other.hash_.hashvalue;
@@ -81,8 +81,6 @@ class RollingKmerMultiHasher {
         assert(hashers_.size() == h);
     }
 
-    // After calling reset, the first k values of prev (next) in shift left (right)
-    // should be those referenced by it
     void reset(const TAlphabet *it) {
         assert(hashers_.size() == h);
         for (size_t i = 0; i < h; ++i) {
@@ -97,17 +95,17 @@ class RollingKmerMultiHasher {
         }
     }
 
-    void shift_left(TAlphabet next, TAlphabet prev) {
+    void shift_right(TAlphabet next, TAlphabet prev) {
         assert(hashers_.size() == h);
         for (size_t i = 0; i < h; ++i) {
-            hashers_[i].shift_left(next, prev);
+            hashers_[i].shift_right(next, prev);
         }
     }
 
-    void shift_right(TAlphabet prev, TAlphabet next) {
+    void shift_left(TAlphabet prev, TAlphabet next) {
         assert(hashers_.size() == h);
         for (size_t i = 0; i < h; ++i) {
-            hashers_[i].shift_right(prev, next);
+            hashers_[i].shift_left(prev, next);
         }
     }
 

@@ -183,8 +183,8 @@ void KmerBloomFilter<KmerHasher>
             assert(rc_coded.at(j) < KmerDef::alphabet.size());
 
             assert(i >= k_);
-            fwd.shift_left(coded.at(i), coded.at(i - k_));
-            rev.shift_right(rc_coded.at(j), rc_coded.at(j - k_));
+            fwd.shift_right(coded.at(i), coded.at(i - k_));
+            rev.shift_left(rc_coded.at(j), rc_coded.at(j - k_));
 
             if (++chars >= k_) {
                 const auto &canonical = std::min(fwd, rev);
@@ -204,7 +204,7 @@ void KmerBloomFilter<KmerHasher>
                 continue;
             }
 
-            fwd.shift_left(coded.at(i), coded.at(i - k_));
+            fwd.shift_right(coded.at(i), coded.at(i - k_));
 
             if (++chars >= k_)
                 callback(i - k_ + 1,
