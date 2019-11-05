@@ -775,9 +775,14 @@ namespace utils {
               : ring_buffer_(1llu << (sdsl::bits::hi(size - 1) + 1)),
                 size_(size),
                 buffer_it_mask_(ring_buffer_.size() - 1),
-                buffer_it_(0) {}
+                buffer_it_(buffer_it_mask_) {}
 
-        void reset() { buffer_it_ = 0; }
+        void reset() { buffer_it_ = buffer_it_mask_; }
+
+        void reset(const T *begin) {
+            buffer_it_ = size_ - 1;
+            std::copy(begin, begin + size_, ring_buffer_.begin());
+        }
 
         void push_back(const T &obj) {
             buffer_it_ = (buffer_it_ + 1) & buffer_it_mask_;
@@ -797,9 +802,11 @@ namespace utils {
             ring_buffer_[get_front_index()] = obj;
         }
 
-        T back() const { return ring_buffer_.at(buffer_it_); }
+        const T& back() const { return ring_buffer_[buffer_it_]; }
+        T& back() { return ring_buffer_[buffer_it_]; }
 
-        T front() const { return ring_buffer_.at(get_front_index()); }
+        const T& front() const { return ring_buffer_[get_front_index()]; }
+        T& front() { return ring_buffer_[get_front_index()]; }
 
       private:
         size_t get_front_index() const {
