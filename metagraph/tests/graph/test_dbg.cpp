@@ -26,7 +26,7 @@ TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {
 TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
     auto graph = build_graph<TypeParam>(2);
 
-    EXPECT_EQ(0u, graph->num_nodes());
+    //EXPECT_EQ(0u, graph->num_nodes());
     EXPECT_FALSE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_FALSE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
     EXPECT_FALSE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
@@ -36,7 +36,7 @@ TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
 TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
     {
         auto graph = build_graph<TypeParam>(20);
-        ASSERT_EQ(0u, graph->num_nodes());
+        //ASSERT_EQ(0u, graph->num_nodes());
         graph->serialize(test_dump_basename);
     }
 
@@ -803,7 +803,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
     graph = build_graph<TypeParam>(k, { "ACTAAGCCC",
                                         "AAAGC",
                                         "TAAGCA" });
-    ASSERT_EQ(9u, graph->num_nodes());
+    //ASSERT_EQ(9u, graph->num_nodes());
 
     unitigs.clear();
     graph->call_unitigs([&](const auto &unitig, const auto &path) {
@@ -849,7 +849,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
     graph = build_graph<TypeParam>(k, { "ACGAAGCCT",
                                         "AAGC",
                                         "TAAGCA" });
-    ASSERT_EQ(9u, graph->num_nodes());
+    //ASSERT_EQ(9u, graph->num_nodes());
 
     unitigs.clear();
     graph->call_unitigs([&](const auto &unitig, const auto &path) {
@@ -890,7 +890,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
     graph = build_graph<TypeParam>(k, { "TCTAAGCCG",
                                         "CATAAGCCG",
                                         "CATAACCGA" });
-    ASSERT_EQ(12u, graph->num_nodes());
+    //ASSERT_EQ(12u, graph->num_nodes());
 
     unitigs.clear();
     graph->call_unitigs([&](const auto &unitig, const auto &path) {
@@ -1640,13 +1640,13 @@ TYPED_TEST(DeBruijnGraphTest, get_maximum_outdegree) {
         auto max_outdegree_node_index = graph->kmer_to_node(std::string(k, 'A'));
 
         //ASSERT_EQ(4ull, graph->num_nodes());
-        graph->call_nodes([&](DeBruijnGraph::node_index i) {
+        graph->call_nodes([&](auto i) {
             if (i == max_outdegree_node_index) {
                 EXPECT_EQ(4ull, graph->outdegree(i));
             } else {
                 EXPECT_EQ(0ull, graph->outdegree(i));
             }
-        }, []() { return false; });
+        });
     }
 }
 
@@ -1695,13 +1695,13 @@ TYPED_TEST(DeBruijnGraphTest, get_outdegree_loop) {
         auto loop_node_index = graph->kmer_to_node(std::string(k, 'A'));
 
         ASSERT_TRUE(graph->num_nodes() > 1);
-        graph->call_nodes([&](DeBruijnGraph::node_index i) {
+        graph->call_nodes([&](auto i) {
             if (i == loop_node_index) {
                 EXPECT_EQ(2ull, graph->outdegree(i));
             } else {
                 EXPECT_EQ(1ull, graph->outdegree(i));
             }
-        }, [](){ return false; });
+        });
 
         check_degree_functions(*graph);
     }
@@ -1730,14 +1730,13 @@ TYPED_TEST(DeBruijnGraphTest, get_maximum_indegree) {
         auto max_indegree_node_index = graph->kmer_to_node(std::string(k, 'A'));
 
         //ASSERT_EQ(4ull, graph->num_nodes());
-        //TODO graph->call_nodes([&](auto i) { ... }); ?
-        graph->call_nodes([&](DeBruijnGraph::node_index i) {
+        graph->call_nodes([&](auto i) {
             if (i == max_indegree_node_index) {
                 EXPECT_EQ(4ull, graph->indegree(i));
             } else {
                 EXPECT_EQ(0ull, graph->indegree(i));
             }
-        }, [](){ return false; });
+        });
 
         check_degree_functions(*graph);
     }
@@ -1755,13 +1754,13 @@ TYPED_TEST(DeBruijnGraphTest, get_indegree_loop) {
         auto loop_node_index = graph->kmer_to_node(std::string(k, 'T'));
 
         ASSERT_TRUE(graph->num_nodes() > 1);
-        graph->call_nodes([&](DeBruijnGraph::node_index i) {
+        graph->call_nodes([&](auto i) {
             if (i == loop_node_index) {
                 EXPECT_EQ(2ull, graph->indegree(i));
             } else {
                 EXPECT_EQ(1ull, graph->indegree(i));
             }
-        }, [](){ return false; });
+        });
 
         check_degree_functions(*graph);
     }
@@ -1946,10 +1945,10 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_simple) {
     auto graph = build_graph<TypeParam>(k, { reference });
 
     uint64_t single_outgoing_counter = 0;
-    for (DeBruijnGraph::node_index i = 1; i <= graph->num_nodes(); ++i) {
+    graph->call_nodes([&](auto i) {
         if (graph->outdegree(i) == 1)
             single_outgoing_counter++;
-    }
+    });
 
     EXPECT_EQ(0u, single_outgoing_counter);
 }
@@ -1961,10 +1960,10 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_for_multiple_valid_edges) {
     auto graph = build_graph<TypeParam>(k, { reference });
 
     uint64_t single_outgoing_counter = 0;
-    graph->call_nodes([&](DeBruijnGraph::node_index i) {
+    graph->call_nodes([&](auto i) {
         if (graph->outdegree(i) == 1)
             single_outgoing_counter++;
-    }, [](){ return false; });
+    });
 
     EXPECT_EQ(1u, single_outgoing_counter);
 }
