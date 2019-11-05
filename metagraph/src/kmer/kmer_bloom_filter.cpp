@@ -150,13 +150,8 @@ void KmerBloomFilter<KmerHasher>
                    [](char c) { return KmerDef::encode(c); });
 
     // determine the number of invalid characters in the first k-mer
-    size_t chars = std::find_if(coded.rend() - k_, coded.rend(),
-                                [](TAlphabet c) { return c >= KmerDef::alphabet.size(); })
-                       - (coded.rend() - k_);
-    assert(chars <= k_);
-
+    size_t chars = 0;
     auto fwd = hasher_;
-    fwd.reset(coded.data());
 
     if (is_canonical_mode()) {
         std::vector<TAlphabet> rc_coded(end - begin);
@@ -165,16 +160,8 @@ void KmerBloomFilter<KmerHasher>
                        [](TAlphabet c) { return KmerDef::complement(c); });
 
         auto rev = hasher_;
-        rev.reverse_reset(rc_coded.data());
 
-        if (chars == k_) {
-            const auto &canonical = std::min(fwd, rev);
-            callback(0,
-                     canonical.template get_hash<0>(),
-                     canonical.template get_hash<1>());
-        }
-
-        for (size_t i = k_, j = k_; i < coded.size(); ++i, ++j) {
+        for (size_t i = 0, j = 0; i < coded.size(); ++i, ++j) {
             if (coded.at(i) >= KmerDef::alphabet.size()) {
                 chars = 0;
                 continue;
@@ -182,23 +169,20 @@ void KmerBloomFilter<KmerHasher>
 
             assert(rc_coded.at(j) < KmerDef::alphabet.size());
 
-            assert(i >= k_);
             fwd.next(coded.at(i));
             rev.prev(rc_coded.at(j));
 
             if (++chars >= k_) {
+                assert(i + 1 >= k_);
                 const auto &canonical = std::min(fwd, rev);
-                callback(i - k_ + 1,
+                callback(i + 1 - k_,
                          canonical.template get_hash<0>(),
                          canonical.template get_hash<1>());
             }
         }
 
     } else {
-        if (chars == k_)
-            callback(0, fwd.template get_hash<0>(), fwd.template get_hash<1>());
-
-        for (size_t i = k_; i < coded.size(); ++i) {
+        for (size_t i = 0; i < coded.size(); ++i) {
             if (coded.at(i) >= KmerDef::alphabet.size()) {
                 chars = 0;
                 continue;
@@ -206,10 +190,12 @@ void KmerBloomFilter<KmerHasher>
 
             fwd.next(coded.at(i));
 
-            if (++chars >= k_)
-                callback(i - k_ + 1,
+            if (++chars >= k_) {
+                assert(i + 1 >= k_);
+                callback(i + 1 - k_,
                          fwd.template get_hash<0>(),
                          fwd.template get_hash<1>());
+            }
         }
     }
 }

@@ -27,28 +27,6 @@ class RollingKmerHasher {
         }
     }
 
-    void reset(const TAlphabet *it) {
-        hash_.reset();
-        for (int i = 0; i < hash_.n; ++i) {
-            hash_.eat(*it);
-            ring_buffer_.push_back(*it);
-            ++it;
-        }
-    }
-
-    void reverse_reset(const TAlphabet *it) {
-        hash_.reset();
-        for (int i = 0; i < hash_.n; ++i) {
-            hash_.eat(0);
-            ring_buffer_.push_back(0);
-        }
-
-        for (int i = 0; i < hash_.n; ++i) {
-            prev(*it);
-            ++it;
-        }
-    }
-
     void next(TAlphabet next_char) {
         hash_.update(ring_buffer_.front(), next_char);
         ring_buffer_.push_back(next_char);
@@ -97,20 +75,6 @@ class RollingKmerMultiHasher {
         }
 
         assert(hashers_.size() == h);
-    }
-
-    void reset(const TAlphabet *it) {
-        assert(hashers_.size() == h);
-        for (size_t i = 0; i < h; ++i) {
-            hashers_[i].reset(it);
-        }
-    }
-
-    void reverse_reset(const TAlphabet *it) {
-        assert(hashers_.size() == h);
-        for (size_t i = 0; i < h; ++i) {
-            hashers_[i].reverse_reset(it);
-        }
     }
 
     void next(TAlphabet next_char) {
