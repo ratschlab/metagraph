@@ -3166,7 +3166,7 @@ int main(int argc, const char *argv[]) {
                                     ostr << header << "\t"
                                          << query << "\t"
                                          << "*\t*\t"
-                                         << config->alignment_min_path_score << "\t*\t*"
+                                         << config->alignment_min_path_score << "\t*\t*\t*"
                                          << std::endl;
                             } else {
                                 bool secondary = false;
