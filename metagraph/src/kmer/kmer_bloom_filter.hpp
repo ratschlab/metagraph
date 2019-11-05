@@ -9,8 +9,10 @@
 #include <cyclichash.h>
 
 #include "kmer_extractor.hpp"
+#include "utils.hpp"
 
 typedef KmerExtractorBOSS KmerDef;
+
 
 template <typename TAlphabet = KmerDef::TAlphabet>
 class RollingKmerHasher {
@@ -18,12 +20,18 @@ class RollingKmerHasher {
     // Note: this constructor is expensive. Try to construct it once and
     // make copies of the object.
     explicit RollingKmerHasher(size_t k, uint32_t seed1 = 0, uint32_t seed2 = 1)
-          : hash_(k, seed1, seed2, 64) {}
+          : hash_(k, seed1, seed2, 64),
+            ring_buffer_(k) {
+        for (int i = 0; i < hash_.n; ++i) {
+            hash_.eat(0);
+        }
+    }
 
     void reset(const TAlphabet *it) {
         hash_.reset();
         for (int i = 0; i < hash_.n; ++i) {
             hash_.eat(*it);
+            ring_buffer_.push_back(*it);
             ++it;
         }
     }
@@ -32,17 +40,26 @@ class RollingKmerHasher {
         hash_.reset();
         for (int i = 0; i < hash_.n; ++i) {
             hash_.eat(0);
+            ring_buffer_.push_back(0);
         }
 
         for (int i = 0; i < hash_.n; ++i) {
-            shift_left(*it, 0);
+            prev(*it);
             ++it;
         }
     }
 
-    void shift_right(TAlphabet next, TAlphabet prev) { hash_.update(prev, next); }
+    void next(TAlphabet next_char) {
+        hash_.update(ring_buffer_.front(), next_char);
+        ring_buffer_.push_back(next_char);
+        assert(next_char == ring_buffer_.back());
+    }
 
-    void shift_left(TAlphabet prev, TAlphabet next) { hash_.reverse_update(prev, next); }
+    void prev(TAlphabet prev_char) {
+        hash_.reverse_update(prev_char, ring_buffer_.back());
+        ring_buffer_.push_front(prev_char);
+        assert(prev_char == ring_buffer_.front());
+    }
 
     bool operator<(const RollingKmerHasher &other) const {
         return hash_.hashvalue < other.hash_.hashvalue;
@@ -62,6 +79,7 @@ class RollingKmerHasher {
 
   private:
     CyclicHash<uint64_t, TAlphabet> hash_;
+    utils::RingBuffer<TAlphabet> ring_buffer_;
 };
 
 
@@ -95,17 +113,17 @@ class RollingKmerMultiHasher {
         }
     }
 
-    void shift_right(TAlphabet next, TAlphabet prev) {
+    void next(TAlphabet next_char) {
         assert(hashers_.size() == h);
         for (size_t i = 0; i < h; ++i) {
-            hashers_[i].shift_right(next, prev);
+            hashers_[i].next(next_char);
         }
     }
 
-    void shift_left(TAlphabet prev, TAlphabet next) {
+    void prev(TAlphabet prev_char) {
         assert(hashers_.size() == h);
         for (size_t i = 0; i < h; ++i) {
-            hashers_[i].shift_left(prev, next);
+            hashers_[i].prev(prev_char);
         }
     }
 
