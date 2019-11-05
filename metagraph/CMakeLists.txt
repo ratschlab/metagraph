@@ -97,12 +97,23 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-old-style-cast \
     -Wno-atomic-alignment \
     -Wno-extra-semi-stmt \
-    -I/usr/include \
-    -I/usr/local/include \
   ")
 endif()
 
-if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
+if (APPLE)
+    # Fix include directories on 10.14+, as they are not added by default any longer
+    string(APPEND CMAKE_CXX_FLAGS " \
+    -I/usr/include \
+    -I/usr/local/include \
+  ")
+  # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
+  LINK_DIRECTORIES(/usr/lib)
+  LINK_DIRECTORIES(/usr/local/lib)
+endif()
+# unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
+# and happily cached, thus messing up the compilation flags forever
+unset(OpenMP_CXX_FLAGS CACHE)
+if ((CMAKE_CXX_COMPILER_ID MATCHES AppleClang) OR (CMAKE_CXX_COMPILER_ID MATCHES Clang))
   find_package(OPENMP REQUIRED)
 else()
   find_package(OpenMP REQUIRED)
@@ -204,8 +215,6 @@ set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
-  /usr/lib
-  /usr/local/lib
   ${CMAKE_BINARY_DIR}/KMC
   ${CMAKE_BINARY_DIR}/lib
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
@@ -317,7 +326,7 @@ list(REVERSE src_files)
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
-add_library(metagraph STATIC ${src_files})
+add_library(metagraph STATIC ${src_files} tests/common/test_sorted_set_disk.cpp)
 add_executable(metagraph-bin "src/main.cpp")
 set_target_properties(metagraph-bin PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
@@ -342,6 +351,7 @@ endif()
 # check for std::filesystem::temp_directory_path
 include(CheckCXXSourceRuns)
 set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+
 unset(CPPNOFS CACHE)
 check_cxx_source_runs("
     #include <iostream>
@@ -351,8 +361,6 @@ check_cxx_source_runs("
         return 0;
     }
 " CPPNOFS)
-
-message("Cpp no fs is" ${CPPNOFS} "Req flags is " ${CMAKE_REQUIRED_FLAGS})
 if(NOT CPPNOFS)
   set(CMAKE_REQUIRED_FLAGS " -std=c++17")
   set(CMAKE_REQUIRED_LIBRARIES "c++fs")
