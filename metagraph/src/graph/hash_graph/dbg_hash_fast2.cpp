@@ -402,7 +402,8 @@ size_t DBGHashFast2Impl<KMER>::outdegree(node_index node) const {
     const auto next_kmer_prefix_it
         = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
 
-    assert(next_kmer_prefix_it != kmers_.end());
+    if (next_kmer_prefix_it == kmers_.end())
+        return 0;
 
     const auto val = (*next_kmer_prefix_it).second & ~kHasNoIncomingFlag;
 
