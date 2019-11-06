@@ -1,7 +1,7 @@
 #include "wavelet_tree.hpp"
 
-#include "../utils.hpp"
-#include "../serialization.hpp"
+#include "common/utils.hpp"
+#include "common/serialization.hpp"
 
 #include <cassert>
 

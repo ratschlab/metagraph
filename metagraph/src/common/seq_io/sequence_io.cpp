@@ -2,8 +2,8 @@
 
 #include "vcf_parser.hpp"
 
-#include "../seq_tools/reverse_complement.hpp"
-#include "../serialization.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "common/serialization.hpp"
 
 #include <fstream>
 #include <iostream>

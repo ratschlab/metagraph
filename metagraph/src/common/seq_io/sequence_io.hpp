@@ -8,7 +8,7 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
 
-#include "../unix_tools.hpp"
+#include "common/unix_tools.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
