@@ -5,7 +5,6 @@
 #include "kmer_collector.hpp"
 #include "threading.hpp"
 #include "sorted_set.hpp"
-#include "sorted_set_disk.hpp"
 #include "sorted_multiset.hpp"
 
 typedef std::function<void(const std::string&)> CallString;
@@ -81,11 +80,6 @@ template <typename KMER,
 using KmerCollector = KmerStorage<KMER,
                                   KmerExtractor,
                                   SortedSet<KMER, Container, Cleaner>>;
-template <typename KMER,
-    class KmerExtractor>
-using KmerCollectorDisk = KmerStorage<KMER,
-                                  KmerExtractor,
-                                  SortedSetDisk<KMER>>;
 
 template <typename KMER,
           class KmerExtractor,
