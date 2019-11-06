@@ -14,7 +14,6 @@ else()
 endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-message("OpenMp flags are " ${OpenMP_CXX_FLAGS})
 
 if (APPLE)
   # Fix include directories on 10.14+, as they are not added by default any longer
