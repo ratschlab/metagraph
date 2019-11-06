@@ -144,6 +144,8 @@ void KmerBloomFilter<KmerHasher>
     if (begin >= end || static_cast<size_t>(end - begin) < k_)
         return;
 
+    const auto max_encoded_val = KmerDef::alphabet.size();
+
     std::vector<TAlphabet> coded(end - begin);
     std::transform(begin, end,
                    coded.begin(),
@@ -154,7 +156,7 @@ void KmerBloomFilter<KmerHasher>
     fwd.reset(coded.data());
     size_t chars = std::find_if(coded.rend() - k_, coded.rend(),
                                 [](TAlphabet c) {
-                                    return c >= KmerDef::alphabet.size();
+                                    return c >= max_encoded_val;
                                 }) - (coded.rend() - k_);
 
     if (is_canonical_mode()) {
@@ -174,12 +176,12 @@ void KmerBloomFilter<KmerHasher>
         }
 
         for (size_t i = k_, j = coded.size() - k_ - 1; i < coded.size(); ++i, --j) {
-            if (coded.at(i) >= KmerDef::alphabet.size()) {
+            if (coded.at(i) >= max_encoded_val) {
                 chars = 0;
                 continue;
             }
 
-            assert(rc_coded.at(j) < KmerDef::alphabet.size());
+            assert(rc_coded.at(j) < max_encoded_val);
 
             fwd.next(coded.at(i));
             rev.prev(rc_coded.at(j));
@@ -199,7 +201,7 @@ void KmerBloomFilter<KmerHasher>
             callback(0, fwd.template get_hash<0>(), fwd.template get_hash<1>());
 
         for (size_t i = k_; i < coded.size(); ++i) {
-            if (coded.at(i) >= KmerDef::alphabet.size()) {
+            if (coded.at(i) >= max_encoded_val) {
                 chars = 0;
                 continue;
             }
