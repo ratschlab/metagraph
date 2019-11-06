@@ -185,7 +185,7 @@ class TestQuery(unittest.TestCase):
                 )
                 res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
                 self.assertEqual(res.returncode, 0)
-                self.assertEqual(len(res.stdout), 137859)
+                self.assertEqual(len(res.stdout), 136959)
 
     def test_query_all_graphs_batch(self):
         """
@@ -427,7 +427,7 @@ class TestQueryCanonical(unittest.TestCase):
                 )
                 res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
                 self.assertEqual(res.returncode, 0)
-                self.assertEqual(len(res.stdout), 137993)
+                self.assertEqual(len(res.stdout), 137093)
 
     def test_query_all_graphs_batch(self):
         """
