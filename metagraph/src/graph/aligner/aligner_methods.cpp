@@ -281,7 +281,9 @@ DefaultColumnExtender<NodeType, Compare>
                 if (overall_end < size)
                     overall_end = std::max(
                         overall_end,
-                        config_.bandwidth <= size - best_pos ? best_pos + config_.bandwidth : size
+                        config_.bandwidth <= size - best_pos
+                            ? best_pos + config_.bandwidth
+                            : size
                     );
             }
 
@@ -328,20 +330,18 @@ DefaultColumnExtender<NodeType, Compare>
                 assert(end);
 
                 char_scores.resize(end - begin);
+                const auto &row = config_.get_row(next_column.last_char);
                 std::transform(align_start + begin,
                                align_start + end - 1,
                                char_scores.begin() + 1,
-                               [row = config_.get_row(next_column.last_char)](char c) {
-                                   return row[c];
-                               });
+                               [&row](char c) { return row[c]; });
 
                 match_ops.resize(end - begin);
+                const auto &op_row = Cigar::get_op_row(next_column.last_char);
                 std::transform(align_start + begin,
                                align_start + end - 1,
                                match_ops.begin() + 1,
-                               [op_row = Cigar::get_op_row(next_column.last_char)](char c) {
-                                   return op_row[c];
-                               });
+                               [&op_row](char c) { return op_row[c]; });
 
                 for (size_t i = begin + 1; i < end; ++i) {
                     // prevent underflow if min_cell_score == MIN_INT
@@ -349,7 +349,8 @@ DefaultColumnExtender<NodeType, Compare>
                             && incoming.scores[i - 1] == config_.min_cell_score)
                         continue;
 
-                    if (incoming.scores[i - 1] + char_scores[i - begin] > std::get<1>(updates[i - overall_begin]))
+                    if (incoming.scores[i - 1] + char_scores[i - begin]
+                            > std::get<1>(updates[i - overall_begin]))
                         updates[i - overall_begin] = std::make_pair(
                             Step { match_ops[i - begin], prev_node },
                             incoming.scores[i - 1] + char_scores[i - begin]
@@ -363,10 +364,10 @@ DefaultColumnExtender<NodeType, Compare>
                     incoming.steps.begin() + begin,
                     incoming.steps.begin() + end,
                     gap_scores.begin(),
-                    [open = config_.gap_opening_penalty,
-                     ext = config_.gap_extension_penalty](const auto &cigar_tuple) {
+                    [this](const auto &cigar_tuple) {
                         return cigar_tuple.cigar_op == Cigar::Operator::DELETION
-                            ? ext : open;
+                            ? config_.gap_extension_penalty
+                            : config_.gap_opening_penalty;
                     }
                 );
 
@@ -377,9 +378,12 @@ DefaultColumnExtender<NodeType, Compare>
                     if (incoming.scores[i] == config_.min_cell_score)
                         continue;
 
-                    if (incoming.scores[i] + gap_scores[i - begin] > std::get<1>(updates[i - overall_begin])) {
-                        updates[i - overall_begin].second = incoming.scores[i] + gap_scores[i - begin];
-                        updates[i - overall_begin].first.cigar_op = Cigar::Operator::DELETION;
+                    if (incoming.scores[i] + gap_scores[i - begin]
+                            > std::get<1>(updates[i - overall_begin])) {
+                        updates[i - overall_begin].second
+                            = incoming.scores[i] + gap_scores[i - begin];
+                        updates[i - overall_begin].first.cigar_op
+                            = Cigar::Operator::DELETION;
                         updates[i - overall_begin].first.prev_node = prev_node;
                     }
                 }
@@ -414,6 +418,7 @@ DefaultColumnExtender<NodeType, Compare>
                 std::tie(next_column.steps[i],
                          next_column.scores[i]) = updates[i - overall_begin];
                 updated = true;
+
                 if (next_column.scores[i] > *max_pos)
                     max_pos = next_column.scores.begin() + i;
             }
@@ -430,12 +435,11 @@ DefaultColumnExtender<NodeType, Compare>
                 //       so the code below has to be used to compute correct scores
                 auto best_score = std::max(start_node->second.best_score(),
                                            min_path_score);
+
                 if (!std::equal(partial_sum.begin() + overall_begin,
                                 partial_sum.begin() + overall_end,
                                 next_column.scores.begin() + overall_begin,
-                                [&](auto a, auto b) {
-                                    return a + b < best_score;
-                                }))
+                                [&](auto a, auto b) { return a + b < best_score; }))
                     columns_to_update.emplace(iter);
             }
         }
