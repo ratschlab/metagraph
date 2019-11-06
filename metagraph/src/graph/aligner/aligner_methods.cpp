@@ -166,25 +166,20 @@ DefaultColumnExtender<NodeType, Compare>
     const auto *align_start = path.get_query_end();
     size_t size = sequence_end - align_start + 1;
 
-    // stop path early if it can't be better than the min_path_score
-    if (path.get_score() + config_.match_score(align_start,
-                                               sequence_end) < min_path_score)
-        return {};
-
+    // compute perfect match scores for all suffixes
     // used for branch and bound checks below
     std::vector<score_t> partial_sum(size);
-    std::string_view extension(align_start - 1, sequence_end - align_start + 1);
-    auto jt = extension.rbegin();
-    partial_sum.back() = config_.get_row(*jt)[*jt];
-    ++jt;
-    for (auto it = partial_sum.rbegin() + 1; it != partial_sum.rend(); ++it) {
-        assert(jt != extension.rend());
-        *it = *(it - 1) + config_.get_row(*jt)[*jt];
-        ++jt;
-    }
+    std::transform(align_start - 1, sequence_end,
+                   partial_sum.begin(),
+                   [&](char c) { return config_.get_row(c)[c]; });
 
-    assert(partial_sum.front() == config_.match_score(align_start - 1, sequence_end));
-    assert(partial_sum.back() == config_.get_row(extension.back())[extension.back()]);
+    std::partial_sum(partial_sum.rbegin(), partial_sum.rend(), partial_sum.rbegin());
+    assert(config_.match_score(align_start - 1, sequence_end) == partial_sum.front());
+    assert(config_.get_row(*(sequence_end - 1))[*(sequence_end - 1)] == partial_sum.back());
+
+    // stop path early if it can't be better than the min_path_score
+    if (path.get_score() + partial_sum.at(1) < min_path_score)
+        return {};
 
     // keep track of which columns to use next
     struct PriorityFunction {
@@ -198,9 +193,7 @@ DefaultColumnExtender<NodeType, Compare>
 
     BoundedPriorityQueue<typename DPTable::value_type*,
                          std::vector<typename DPTable::value_type*>,
-                         PriorityFunction> columns_to_update(
-        config_.queue_size
-    );
+                         PriorityFunction> columns_to_update(config_.queue_size);
 
     auto dp_table = initialize_dp_table(path.back(),
                                         *(align_start - 1),
