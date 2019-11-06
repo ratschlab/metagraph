@@ -150,14 +150,12 @@ void KmerBloomFilter<KmerHasher>
     std::transform(begin, end,
                    coded.begin(),
                    [](char c) { return KmerDef::encode(c); });
+    auto invalid = utils::drag_and_mark_segments(
+        coded, max_encoded_val, k_
+    );
 
-    // determine the number of invalid characters in the first k-mer
     auto fwd = hasher_;
     fwd.reset(coded.data());
-    size_t chars = std::find_if(coded.rend() - k_, coded.rend(),
-                                [&](TAlphabet c) {
-                                    return c >= max_encoded_val;
-                                }) - (coded.rend() - k_);
 
     if (is_canonical_mode()) {
         std::vector<TAlphabet> rc_coded(end - begin);
@@ -168,7 +166,7 @@ void KmerBloomFilter<KmerHasher>
         auto rev = hasher_;
         rev.reset(rc_coded.data() + rc_coded.size() - k_);
 
-        if (chars == k_) {
+        if (LIKELY(!invalid[k_ - 1])) {
             const auto &canonical = std::min(fwd, rev);
             callback(0,
                      canonical.template get_hash<0>(),
@@ -176,17 +174,15 @@ void KmerBloomFilter<KmerHasher>
         }
 
         for (size_t i = k_, j = coded.size() - k_ - 1; i < coded.size(); ++i, --j) {
-            if (coded.at(i) >= max_encoded_val) {
-                chars = 0;
+            if (UNLIKELY(coded.at(i) >= max_encoded_val))
                 continue;
-            }
 
             assert(rc_coded.at(j) < max_encoded_val);
 
             fwd.next(coded.at(i));
             rev.prev(rc_coded.at(j));
 
-            if (++chars >= k_) {
+            if (LIKELY(!invalid[i])) {
                 assert(i + 1 >= k_);
                 const auto &canonical = std::min(fwd, rev);
                 callback(i + 1 - k_,
@@ -196,19 +192,16 @@ void KmerBloomFilter<KmerHasher>
         }
 
     } else {
-        assert(chars <= k_);
-        if (chars == k_)
+        if (LIKELY(!invalid[k_ - 1]))
             callback(0, fwd.template get_hash<0>(), fwd.template get_hash<1>());
 
         for (size_t i = k_; i < coded.size(); ++i) {
-            if (coded.at(i) >= max_encoded_val) {
-                chars = 0;
+            if (UNLIKELY(coded.at(i) >= max_encoded_val))
                 continue;
-            }
 
             fwd.next(coded.at(i));
 
-            if (++chars >= k_) {
+            if (LIKELY(!invalid[i])) {
                 assert(i + 1 >= k_);
                 callback(i + 1 - k_,
                          fwd.template get_hash<0>(),
