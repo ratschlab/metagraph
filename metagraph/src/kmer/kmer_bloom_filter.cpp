@@ -155,7 +155,7 @@ void KmerBloomFilter<KmerHasher>
     auto fwd = hasher_;
     fwd.reset(coded.data());
     size_t chars = std::find_if(coded.rend() - k_, coded.rend(),
-                                [](TAlphabet c) {
+                                [&](TAlphabet c) {
                                     return c >= max_encoded_val;
                                 }) - (coded.rend() - k_);
 
