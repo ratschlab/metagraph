@@ -99,7 +99,7 @@ class Config {
     double label_other_fraction = 1.0;
     double min_count_quantile = 0.;
     double max_count_quantile = 1.;
-    double bloom_fpp = 0.0;
+    double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
     std::vector<double> count_slice_quantiles;
 

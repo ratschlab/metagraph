@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <json/json.h>
 #include <ips4o.hpp>
 #include <fmt/format.h>
@@ -2902,6 +2903,12 @@ int main(int argc, const char *argv[]) {
             assert(files.size() == 1);
             assert(config->outfbase.size());
 
+            if (config->initialize_bloom
+                    && parse_graph_extension(files.at(0)) == Config::GraphType::SUCCINCT)
+                std::filesystem::remove(
+                    utils::remove_suffix(config->outfbase, ".bloom") + ".bloom"
+                );
+
             Timer timer;
             if (config->verbose)
                 std::cout << "Graph loading...\t" << std::flush;
@@ -2917,8 +2924,9 @@ int main(int argc, const char *argv[]) {
                 throw std::runtime_error("Only implemented for DBGSuccinct");
 
             if (config->initialize_bloom) {
-                assert(config->bloom_fpp >= 0.0);
-                assert(config->bloom_bpk > 0.0);
+                assert(config->bloom_fpp > 0.0 && config->bloom_fpp <= 1.0);
+                assert(config->bloom_bpk >= 0.0);
+                assert(config->bloom_fpp < 1.0 || config->bloom_bpk > 0.0);
 
                 if (config->verbose) {
                     std::cout << "Construct Bloom filter for nodes..." << std::endl;
@@ -2926,7 +2934,7 @@ int main(int argc, const char *argv[]) {
 
                 timer.reset();
 
-                if (config->bloom_fpp > 0) {
+                if (config->bloom_fpp < 1.0) {
                     dbg_succ->initialize_bloom_filter_from_fpr(
                         config->bloom_fpp,
                         config->bloom_max_num_hash_functions
@@ -2943,7 +2951,7 @@ int main(int argc, const char *argv[]) {
 
                 assert(dbg_succ->get_bloom_filter());
 
-                auto prefix = utils::remove_suffix(config->outfbase, dbg_succ->file_extension());
+                auto prefix = utils::remove_suffix(config->outfbase, dbg_succ->bloom_filter_file_extension());
                 std::ofstream bloom_outstream(
                     prefix + dbg_succ->bloom_filter_file_extension(), std::ios::binary
                 );

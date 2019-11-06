@@ -221,11 +221,6 @@ Config::Config(int argc, const char *argv[]) {
             initialize_bloom = true;
         } else if (!strcmp(argv[i], "--bloom-fpp")) {
             bloom_fpp = std::stof(get_value(i++));
-            if (bloom_fpp <= 0.0 || bloom_fpp > 1.0) {
-                std::cerr << "Error: bloom-fpp must be > 0.0 and <= 1.0" << std::endl;
-                print_usage(argv[0], identity);
-                exit(1);
-            }
         } else if (!strcmp(argv[i], "--bloom-bpk")) {
             bloom_bpk = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--bloom-max-num-hash-functions")) {
@@ -491,13 +486,18 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
+    if (bloom_fpp <= 0.0 || bloom_fpp > 1.0) {
+        std::cerr << "Error: bloom-fpp must be > 0.0 and < 1.0" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (bloom_bpk <= 0.0) {
         std::cerr << "Error: bloom-bpk must > 0.0" << std::endl;
         print_usage_and_exit = true;
     }
 
-    if (initialize_bloom && bloom_bpk == 0.0 && bloom_fpp == 0.0) {
-        std::cerr << "Error: at least one of bloom_fpp and bloom_bpk must be non-zero" << std::endl;
+    if (initialize_bloom && bloom_bpk == 0.0 && bloom_fpp == 1.0) {
+        std::cerr << "Error: at least one of 0.0 < bloom_fpp < 1.0 or 0.0 < bloom_bpk must be true" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -815,7 +815,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for --initialize-bloom. bloom-fpp, when > 0.0, overrides bloom-bpk.\n");
+            fprintf(stderr, "Advanced options for --initialize-bloom. bloom-fpp, when > 0.0 and < 1.0, overrides bloom-bpk.\n");
             fprintf(stderr, "\t   --bloom-fpp [FLOAT] \t\t\t\texpected false positive rate [0.0]\n");
             fprintf(stderr, "\t   --bloom-bpk [FLOAT] \t\t\t\tnumber of bits per element [4.0]\n");
             fprintf(stderr, "\t   --bloom-max-num-hash-functions [INT] \tmaximum number of hash functions [10]\n");
