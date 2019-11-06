@@ -285,7 +285,6 @@ if(FOLLY_LIBRARIES)
     -lboost_filesystem
     -lboost_program_options
     -lcrypto
-    ${OpenMP_CXX_LIBRARIES}
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}

@@ -21,7 +21,7 @@ const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
  * typically #KMerBOSS instances
  * */
 template <typename T> class SortedSetDisk {
-public:
+ public:
   /**
    * Size of the underlying data structure storing the kmers. The class is
    * guaranteed to flush to disk when the newly added data would exceed this
@@ -39,10 +39,11 @@ public:
    * @param num_threads the number of threads to use by the sorting algorithm
    * @param verbose true if verbose logging is desired
    */
-  SortedSetDisk(size_t num_threads = 1, bool verbose = false)
+  SortedSetDisk(size_t num_threads = 1, bool verbose = false,
+                size_t container_size = CONTAINER_SIZE_BYTES)
       : num_threads_(num_threads), verbose_(verbose) {
     try {
-      try_reserve(CONTAINER_SIZE_BYTES);
+      try_reserve(container_size);
     } catch (const std::bad_alloc &exception) {
       std::cerr << "ERROR: Not enough memory for SortedSetDisk. Requested"
                 << CONTAINER_SIZE_BYTES << " bytes" << std::endl;
@@ -61,8 +62,10 @@ public:
 
     // acquire the mutex to restrict the number of writing threads
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
-
+    assert(data_merged_ == false); // can't insert once we merged the data
     if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
+      std::unique_lock<std::shared_timed_mutex> multi_insert_lock(
+          multi_insert_mutex_);
       // TODO(ddanciu) - test if it's worth it to keep adding in memory if the
       // shrinking was significant
       shrink_data();
@@ -70,14 +73,14 @@ public:
       dump_to_file();
     }
 
-    auto dataEnd = data_.end();
+    size_t offset = data_.size();
     data_.resize(data_.size() + batch_size);
-    std::shared_lock<std::shared_timed_mutex> multi_writer_lock(
-        multi_write_mutex_);
+    std::shared_lock<std::shared_timed_mutex> multi_insert_lock(
+        multi_insert_mutex_);
     exclusive_lock.unlock();
     // different threads will write to different chunks of memory, so it's okay
     // (and desirable) to allow concurrent writes
-    std::copy(begin, end, dataEnd);
+    std::copy(begin, end, data_.begin() + offset);
   }
 
   /**
@@ -86,8 +89,11 @@ public:
    */
   storage_type &data() {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
-    std::unique_lock<std::shared_timed_mutex> multi_writer_lock(
-        multi_write_mutex_);
+    std::unique_lock<std::shared_timed_mutex> multi_insert_lock(
+        multi_insert_mutex_);
+    if (data_merged_) {
+      return data_;
+    }
     // write any residual data left
     if (!data_.empty()) {
       sort_and_remove_duplicates(&data_, num_threads_);
@@ -98,26 +104,41 @@ public:
     // from each chunk
     std::vector<std::fstream> chunk_files(chunk_count_);
     std::fstream sorted_file(output_dir + "sorted.bin", ios::binary | ios::out);
-    std::priority_queue<std::pair<T, uint32_t>> merge_heap;
+    auto comp = [](std::pair<T, uint32_t> a, std::pair<T, uint32_t> b) {
+      return a.first > b.first;
+    };
+    std::priority_queue<std::pair<T, uint32_t>,
+                        std::vector<std::pair<T, uint32_t>>, decltype(comp)>
+        merge_heap(comp);
     for (uint32_t i = 0; i < chunk_count_; ++i) {
       chunk_files[i].open(output_dir + "chunk_" + std::to_string(i) + ".bin",
                           std::ios::in | std::ios::binary);
       T dataItem;
-      if (chunk_files[i]) {
+      if (chunk_files[i].good()) {
         chunk_files[i].read(reinterpret_cast<char *>(&dataItem),
                             sizeof(dataItem));
         merge_heap.push({dataItem, i});
       }
     }
+    uint64_t totalSize = 0;
+    // init with any value that is not the top
+    T lastWritten = merge_heap.empty() ? T(1) : merge_heap.top().first + T(1);
     while (!merge_heap.empty()) {
       std::pair<T, uint32_t> smallest = merge_heap.top();
       merge_heap.pop();
-      sorted_file << smallest.first;
-      if (chunk_files[smallest.second]) {
+      if (smallest.first != lastWritten) {
+        sorted_file.write(reinterpret_cast<char *>(&smallest.first),
+                          sizeof(smallest.first));
+        lastWritten = smallest.first;
+        totalSize++;
+      }
+      if (chunk_files[smallest.second].good()) {
         T dataItem;
-        chunk_files[smallest.second].read(reinterpret_cast<char *>(&dataItem),
-                                          sizeof(dataItem));
-        merge_heap.push({dataItem, smallest.second});
+        if (chunk_files[smallest.second].read(
+            reinterpret_cast<char *>(&dataItem), sizeof(dataItem))) {
+
+          merge_heap.push({dataItem, smallest.second});
+        }
       }
     }
     sorted_file.close();
@@ -125,16 +146,16 @@ public:
     sorted_file.seekg(0, sorted_file.end);
     uint64_t length = sorted_file.tellg();
     sorted_file.seekg(0, sorted_file.beg);
-    size_t totalSize = length / sizeof(value_type);
     data_.resize(totalSize);
     sorted_file.read(reinterpret_cast<char *>(&data_[0]), length);
+    data_merged_ = true;
     return data_;
   }
 
   void clear() {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
-    std::unique_lock<std::shared_timed_mutex> multi_writer_lock(
-        multi_write_mutex_);
+    std::unique_lock<std::shared_timed_mutex> multi_insert_lock(
+        multi_insert_mutex_);
     data_.resize(0); // this makes sure the buffer is not reallocated
   }
 
@@ -149,7 +170,7 @@ public:
     vector->erase(unique_end, vector->end());
   }
 
-private:
+ private:
   void shrink_data() {
     if (verbose_) {
       std::cout << "Allocated capacity exceeded, erasing duplicate values..."
@@ -170,7 +191,7 @@ private:
     std::fstream binary_file = std::fstream(
         output_dir + "chunk_" + std::to_string(chunk_count_) + ".bin",
         std::ios::out | std::ios::binary);
-    binary_file.write((char *)&data_[0], data_.size());
+    binary_file.write((char *)&data_[0], sizeof(data_[0]) * data_.size());
     binary_file.close();
     data_.resize(0);
     chunk_count_++;
@@ -202,6 +223,11 @@ private:
   uint32_t chunk_count_ = 0;
   storage_type data_;
   size_t num_threads_;
+  /**
+   * True if the data was successfully merged from the files on disk and the
+   * already merged data can be returned.
+   */
+  bool data_merged_ = false;
   bool verbose_;
   /**
    * Ensures mutually exclusive access (and thus thread-safety) to #data.
@@ -211,5 +237,5 @@ private:
    * Mutex that can be acquired by multiple threads that are appending to
    * non-overlapping areas of #data_.
    */
-  mutable std::shared_timed_mutex multi_write_mutex_;
+  mutable std::shared_timed_mutex multi_insert_mutex_;
 };
