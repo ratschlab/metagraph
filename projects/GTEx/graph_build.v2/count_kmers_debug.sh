@@ -13,7 +13,7 @@ K="$1"
 FILES="$2"
 OUT="$3"
 SAMPLE="$4"
-cutoff=2
+cutoff=1
 num_threads=4
 
 if [ ! -f $FILES ]; then
@@ -26,6 +26,7 @@ if [ $cutoff -eq 0 ]; then
   exit 0
 fi
 
+#filename="$(basename $FILE)"
 mkdir -p "/scratch/$SAMPLE.cache"
 /usr/bin/time -v $KMC -k$K -m10 -ci$cutoff -fq -t$num_threads "@"$FILES $OUT/${SAMPLE}.k${K} /scratch/$SAMPLE.cache
 rm -r "/scratch/$SAMPLE.cache"
