@@ -204,7 +204,7 @@ class KmerBloomFilter {
     sdsl::bit_vector check_kmer_presence(const char *begin,
                                          const char *end) const;
     sdsl::bit_vector check_kmer_presence(const std::string &sequence) const {
-        return check_kmer_presence(&*sequence.begin(), &*sequence.end());
+        return check_kmer_presence(sequence.data(), sequence.data() + sequence.size());
     }
 
     bool is_canonical_mode() const { return canonical_mode_; }
