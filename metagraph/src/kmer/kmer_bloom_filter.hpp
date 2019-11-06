@@ -197,7 +197,7 @@ class KmerBloomFilter {
     // Add the k-mers of the sequence to the Bloom filter
     void add_sequence(const char *begin, const char *end);
     void add_sequence(const std::string &sequence) {
-        add_sequence(&*sequence.begin(), &*sequence.end());
+        add_sequence(sequence.data(), sequence.data() + sequence.size());
     }
 
     // Checks for k-mer presence in the Bloom filter
