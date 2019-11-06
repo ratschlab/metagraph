@@ -162,6 +162,7 @@ DefaultColumnExtender<NodeType, Compare>
              score_t min_path_score) const {
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query_begin());
+    assert(sequence_end >= path.get_query_end());
 
     const auto *align_start = path.get_query_end();
     size_t size = sequence_end - align_start + 1;
