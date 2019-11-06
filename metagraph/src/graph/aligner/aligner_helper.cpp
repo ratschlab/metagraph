@@ -4,24 +4,6 @@
 #include "alphabets.hpp"
 
 
-std::pair<const char*, const char*>
-get_alphabet_boundaries(const std::string &alphabet) {
-    auto range = std::make_pair(&*alphabet.begin(), &*alphabet.end());
-
-    // TODO: fix graph alphabets and these hacks
-    if (*range.first == '$')
-        ++range.first;
-
-    // TODO: find a better solution for this hack
-    // The last character in these alphabets is a wildcard ('N' or 'X')
-    // make sure that wildcard-wildcard matches are counted as mismatches
-    if (!strcmp(range.first, alphabets::kAlphabetProtein)
-            || !strcmp(range.first, alphabets::kAlphabetDNA5))
-        --range.second;
-
-    return range;
-}
-
 Cigar::Cigar(const std::string &cigar_str) {
     std::string op_count;
     for (auto c : cigar_str) {
@@ -54,16 +36,17 @@ Cigar::Cigar(const std::string &cigar_str) {
 
 Cigar::OperatorTable Cigar::char_to_op;
 
-void Cigar::initialize_opt_table(const std::string &alphabet) {
+void Cigar::initialize_opt_table(const std::string &alphabet, const uint8_t *encoding) {
     for (auto& row : char_to_op) {
         row.fill(Cigar::Operator::MISMATCH);
     }
 
-    auto range = get_alphabet_boundaries(alphabet);
+    for (uint8_t c : alphabet) {
+        if (encoding[c] == encoding[0])
+            continue;
 
-    for (const char *it = range.first; it != range.second; ++it) {
-        char upper = toupper(*it);
-        char lower = tolower(*it);
+        char upper = toupper(c);
+        char lower = tolower(c);
 
         char_to_op[upper][upper]
             = char_to_op[upper][lower]
@@ -248,7 +231,7 @@ DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
         gap_extension_penalty(gap_extension),
         score_matrix_(std::move(score_matrix)) { }
 
-DBGAlignerConfig::DBGAlignerConfig(const Config &config, const DeBruijnGraph &graph)
+DBGAlignerConfig::DBGAlignerConfig(const Config &config)
       : queue_size(config.alignment_queue_size),
         bandwidth(config.alignment_vertical_bandwidth),
         num_alternative_paths(config.alignment_num_alternative_paths),
@@ -260,9 +243,7 @@ DBGAlignerConfig::DBGAlignerConfig(const Config &config, const DeBruijnGraph &gr
         gap_opening_penalty(-config.alignment_gap_opening_penalty),
         gap_extension_penalty(-config.alignment_gap_extension_penalty),
         forward_and_reverse_complement(config.forward_and_reverse),
-        score_matrix_(config.alignment_edit_distance
-                          ? unit_scoring_matrix(1, graph.alphabet())
-                          : scoring_matrix(config, graph)) { }
+        score_matrix_(scoring_matrix(config)) {}
 
 DBGAlignerConfig::score_t DBGAlignerConfig
 ::score_cigar(const char *reference_begin, const char *reference_end,
@@ -305,18 +286,51 @@ DBGAlignerConfig::score_t DBGAlignerConfig
 }
 
 DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
-::scoring_matrix(const Config &config, const DeBruijnGraph &graph) {
-    auto range = get_alphabet_boundaries(graph.alphabet());
+::scoring_matrix(const Config &config) {
+    if (config.alignment_edit_distance) {
+        // TODO: REPLACE THIS
+        #if _PROTEIN_GRAPH
+            const auto *alphabet = alphabets::kAlphabetProtein;
+            const auto *alphabet_encoding = alphabets::kCharToProtein;
+        #elif _DNA_CASE_SENSITIVE_GRAPH
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
+        #elif _DNA5_GRAPH
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
+        #elif _DNA_GRAPH
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
+        #else
+            static_assert(false,
+                "Define an alphabet: either "
+                "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+            );
+        #endif
 
-    if (std::equal(range.first, range.second, alphabets::kAlphabetDNA)) {
+        return unit_scoring_matrix(1, alphabet, alphabet_encoding);
+    }
+
+    #if _PROTEIN_GRAPH
+        return score_matrix_blosum62;
+    #elif _DNA_CASE_SENSITIVE_GRAPH
         return dna_scoring_matrix(config.alignment_match_score,
                                   -config.alignment_mm_transition,
                                   -config.alignment_mm_transversion);
-    } else if (std::equal(range.first, range.second, alphabets::kAlphabetProtein)) {
-        return score_matrix_blosum62;
-    }
-
-    return unit_scoring_matrix(1, graph.alphabet());
+    #elif _DNA5_GRAPH
+        return dna_scoring_matrix(config.alignment_match_score,
+                                  -config.alignment_mm_transition,
+                                  -config.alignment_mm_transversion);
+    #elif _DNA_GRAPH
+        return dna_scoring_matrix(config.alignment_match_score,
+                                  -config.alignment_mm_transition,
+                                  -config.alignment_mm_transversion);
+    #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+    #endif
 }
 
 DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
@@ -341,17 +355,20 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
 }
 
 DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
-::unit_scoring_matrix(int8_t match_score, const std::string &alphabet) {
+::unit_scoring_matrix(int8_t match_score,
+                      const std::string &alphabet,
+                      const uint8_t *encoding) {
     ScoreMatrix score_matrix;
     for (auto& row : score_matrix) {
         row.fill(-match_score);
     }
 
-    auto range = get_alphabet_boundaries(alphabet);
+    for (uint8_t c : alphabet) {
+        if (encoding[c] == encoding[0])
+            continue;
 
-    for (const char *it = range.first; it != range.second; ++it) {
-        char upper = toupper(*it);
-        char lower = tolower(*it);
+        char upper = toupper(c);
+        char lower = tolower(c);
 
         score_matrix[upper][upper]
             = score_matrix[upper][lower]
@@ -483,7 +500,6 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
 
     auto i = start_pos;
     const auto* step = &column->second.steps.at(i);
-    assert(step->cigar_op == Cigar::Operator::MATCH);
 
     if (!i && step->prev_node == DeBruijnGraph::npos)
         return;
