@@ -8,10 +8,13 @@
 - HTSlib
 - boost
 - folly (optional)
+- Google Test
 - Python 3 (for running integration tests)
 
-All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh)
+Most can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh)
 
+Google Test installation instructions are
+[here](https://medium.com/@alexanderbussan/getting-started-with-google-test-on-os-x-a07eee7ae6dc)
 #### For compiling with GNU GCC:
 ```
 brew install gcc autoconf automake libtool cmake make htslib

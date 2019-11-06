@@ -126,7 +126,6 @@ public:
     uint64_t length = sorted_file.tellg();
     sorted_file.seekg(0, sorted_file.beg);
     size_t totalSize = length / sizeof(value_type);
-    std::cout << "Hello!";
     data_.resize(totalSize);
     sorted_file.read(reinterpret_cast<char *>(&data_[0]), length);
     return data_;
