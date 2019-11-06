@@ -89,7 +89,7 @@ class TestBuild(unittest.TestCase):
             convert_command = '{exe} transform -o {outfile} --initialize-bloom {bloom_param} {input}'.format(
                 exe=METAGRAPH,
                 outfile=self.tempdir.name + '/graph',
-                bloom_param='--bloom-filter-size 10000',
+                bloom_param='',
                 input=self.tempdir.name + '/graph.dbg'
             )
             res = subprocess.run([convert_command], shell=True)
