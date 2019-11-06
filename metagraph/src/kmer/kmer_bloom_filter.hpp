@@ -203,6 +203,7 @@ class KmerBloomFilter {
     // Checks for k-mer presence in the Bloom filter
     sdsl::bit_vector check_kmer_presence(const char *begin,
                                          const char *end) const;
+
     sdsl::bit_vector check_kmer_presence(const std::string &sequence) const {
         return check_kmer_presence(sequence.data(), sequence.data() + sequence.size());
     }
