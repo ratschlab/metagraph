@@ -163,7 +163,7 @@ DefaultColumnExtender<NodeType, Compare>
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query_begin());
 
-    const auto align_start = &*path.get_query_end();
+    const auto *align_start = path.get_query_end();
     size_t size = sequence_end - align_start + 1;
 
     // stop path early if it can't be better than the min_path_score
@@ -175,10 +175,12 @@ DefaultColumnExtender<NodeType, Compare>
     std::vector<score_t> partial_sum(size);
     std::string_view extension(align_start - 1, sequence_end - align_start + 1);
     auto jt = extension.rbegin();
-    partial_sum.back() = config_.get_row(*jt)[*jt++];
+    partial_sum.back() = config_.get_row(*jt)[*jt];
+    ++jt;
     for (auto it = partial_sum.rbegin() + 1; it != partial_sum.rend(); ++it) {
         assert(jt != extension.rend());
-        *it = *(it - 1) + config_.get_row(*jt)[*jt++];
+        *it = *(it - 1) + config_.get_row(*jt)[*jt];
+        ++jt;
     }
 
     assert(partial_sum.front() == config_.match_score(align_start - 1, sequence_end));
@@ -207,11 +209,8 @@ DefaultColumnExtender<NodeType, Compare>
                                         size,
                                         config_.gap_opening_penalty,
                                         config_.gap_extension_penalty);
-    assert(dp_table.size());
-
-    // keep track of node and position in column to start backtracking
-    // store raw pointer since they are not invalidated by emplace
-    auto start_node = &*dp_table.begin();
+    assert(dp_table.size() == 1);
+    assert(dp_table.find(path.back()) != dp_table.end());
 
     // for storage of intermediate values
     std::vector<typename DPTable::value_type*> out_columns;
@@ -222,8 +221,10 @@ DefaultColumnExtender<NodeType, Compare>
     std::vector<int8_t> gap_scores;
 
     // dynamic programming
-    assert(dp_table.find(path.back()) != dp_table.end());
-    columns_to_update.emplace(&*dp_table.begin());
+    // keep track of node and position in column to start backtracking
+    // store raw pointer since they are not invalidated by emplace
+    auto *start_node = &*dp_table.begin();
+    columns_to_update.emplace(start_node);
     while (columns_to_update.size()) {
         const auto cur_col = columns_to_update.pop_top();
         auto cur_node = cur_col->first;
@@ -246,12 +247,13 @@ DefaultColumnExtender<NodeType, Compare>
                 if (!emplace.second)
                     emplace.first->second.last_char = c;
 
+                assert(emplace.first != dp_table.end());
                 out_columns.emplace_back(&*emplace.first);
             }
         );
 
         // update columns
-        for (auto &iter : out_columns) {
+        for (auto iter : out_columns) {
             auto next_node = iter->first;
             auto& next_column = iter->second;
 
@@ -427,7 +429,7 @@ DefaultColumnExtender<NodeType, Compare>
                 next_column.best_pos = max_pos - next_column.scores.begin();
 
                 if (*max_pos > start_node->second.best_score())
-                    start_node = &*iter;
+                    start_node = iter;
 
                 // branch and bound
                 // TODO: this cuts off too early (before the scores have converged)
@@ -440,7 +442,7 @@ DefaultColumnExtender<NodeType, Compare>
                                 [&](auto a, auto b) {
                                     return a + b < best_score;
                                 }))
-                    columns_to_update.emplace(&*iter);
+                    columns_to_update.emplace(iter);
             }
         }
     }
