@@ -114,7 +114,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          bool call_unitigs = false,
                          uint64_t min_tip_size = 0,
                          bool kmers_in_single_form = false) {
-    assert(graph.in_graph(start));
+    if (!graph.in_graph(start))
+        return;
+
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
     assert(visited);
@@ -333,11 +335,13 @@ void call_sequences(const DeBruijnGraph &graph,
     //       \___
     //
     call_zeros(visited, [&](auto node) {
-        if (graph.has_multiple_outgoing(node)) {
-            graph.adjacent_outgoing_nodes(node, [&](auto next) {
-                if (!visited[next])
-                    call_paths_from(next);
-            });
+        if (graph.in_graph(node)) {
+            if (graph.has_multiple_outgoing(node)) {
+                graph.adjacent_outgoing_nodes(node, [&](auto next) {
+                    if (!visited[next])
+                        call_paths_from(next);
+                });
+            }
         }
     });
 

@@ -256,6 +256,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 full_graph,
                 [&](const auto &index) {
                     return index != DeBruijnGraph::npos
+                        && full_graph->in_graph(index)
                         && full_graph->get_node_sequence(index) != first_kmer;
                 }
             );
@@ -283,9 +284,9 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 << *reconstructed;
 
             std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
+            full_graph->call_nodes([&](auto i) {
                 ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
+            });
 
             std::set<std::string> rec_nodes;
             reconstructed->call_nodes([&](const auto &index) {
@@ -315,6 +316,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 full_graph,
                 [&](const auto &index) {
                     return index != DeBruijnGraph::npos
+                        && full_graph->in_graph(index)
                         && full_graph->get_node_sequence(index) != first_kmer;
                 }
             );
@@ -342,9 +344,9 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 << *reconstructed;
 
             std::set<std::string> ref_nodes;
-            for (DeBruijnGraph::node_index i = 1; i <= full_graph->num_nodes(); ++i) {
+            full_graph->call_nodes([&](auto i) {
                 ref_nodes.insert(full_graph->get_node_sequence(i));
-            }
+            });
 
             std::set<std::string> rec_nodes;
             reconstructed->call_nodes([&](const auto &index) {
@@ -390,8 +392,11 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
 
         for (const auto &sequence : sequences) {
             auto mask = std::make_unique<bit_vector_stat>(
-                full_graph->num_nodes() + 1, true
+                full_graph->num_nodes() + 1, false
             );
+            full_graph->call_nodes([&](auto index) {
+                mask->set(index, true);
+            });
             mask->set(DeBruijnGraph::npos, false);
             full_graph->map_to_nodes(
                 sequence,
@@ -516,8 +521,11 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckNodes) {
 
         for (const auto &sequence : sequences) {
             auto mask = std::make_unique<bit_vector_stat>(
-                full_graph->num_nodes() + 1, true
+                full_graph->num_nodes() + 1, false
             );
+            full_graph->call_nodes([&](auto index) {
+                mask->set(index, true);
+            });
             mask->set(DeBruijnGraph::npos, false);
             std::set<std::string> erased;
             full_graph->map_to_nodes(
@@ -588,8 +596,11 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckOutgoingNodes) {
 
         for (const auto &sequence : sequences) {
             auto mask = std::make_unique<bit_vector_stat>(
-                full_graph->num_nodes() + 1, true
+                full_graph->num_nodes() + 1, false
             );
+            full_graph->call_nodes([&](auto index) {
+                mask->set(index, true);
+            });
             mask->set(DeBruijnGraph::npos, false);
             std::set<std::string> erased;
             full_graph->map_to_nodes(
@@ -631,8 +642,11 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckIncomingNodes) {
 
         for (const auto &sequence : sequences) {
             auto mask = std::make_unique<bit_vector_stat>(
-                full_graph->num_nodes() + 1, true
+                full_graph->num_nodes() + 1, false
             );
+            full_graph->call_nodes([&](auto index) {
+                mask->set(index, true);
+            });
             mask->set(DeBruijnGraph::npos, false);
             std::set<std::string> erased;
             full_graph->map_to_nodes(

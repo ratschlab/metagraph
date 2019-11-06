@@ -83,7 +83,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     size_t get_k() const { return k_; }
     bool is_canonical_mode() const { return canonical_mode_; }
 
-    uint64_t num_nodes() const { return kmers_.capacity() + 1; }
+    uint64_t num_nodes() const { return kmers_.end() - kmers_.begin(); }
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -560,9 +560,8 @@ const KMER& DBGHashFastImpl<KMER>::get_kmer(node_index node) const {
 
 template <typename KMER>
 bool DBGHashFastImpl<KMER>::in_graph(node_index node) const {
-    //assert(node > 0 && node <= kmers_.size());
-    std::ignore = node;
-    return true;
+    auto it = kmers_.begin() + (node - 1);
+    return !it.get_bucket()->empty();
 }
 
 template <typename KMER>

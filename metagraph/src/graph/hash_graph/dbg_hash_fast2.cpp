@@ -101,7 +101,7 @@ class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
     size_t get_k() const { return k_; }
     bool is_canonical_mode() const { return canonical_mode_; }
 
-    uint64_t num_nodes() const { return kmers_.capacity() << KMER::kBitsPerChar; }
+    uint64_t num_nodes() const { return (kmers_.end() - kmers_.begin()) << KMER::kBitsPerChar; }
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -124,13 +124,13 @@ class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
 
     KmerIterator find_kmer(const KmerPrefix &kmer_prefix) {
         KmerIterator find = kmers_.find(kmer_prefix);
-        assert(find == kmers_.end() || KMER(kmer_prefix) == get_kmer(get_index(find), find));
+        assert(find == kmers_.end() || !in_graph(get_index(find)) || KMER(kmer_prefix) == get_kmer(get_index(find), find));
         return find;
     }
 
     KmerConstIterator find_kmer(const KmerPrefix &kmer_prefix) const {
         KmerConstIterator find = kmers_.find(kmer_prefix);
-        assert(find == kmers_.end() || KMER(kmer_prefix) == get_kmer(get_index(find), find));
+        assert(find == kmers_.end() || !in_graph(get_index(find)) || KMER(kmer_prefix) == get_kmer(get_index(find), find));
         return find;
     }
 
@@ -201,7 +201,7 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
         iter.value() &= ~kHasNoIncomingFlag;
 
         if (first_kmer || !kmers_overlap(prev_kmer, kmer)) //TODO should be something faster but this doesn't take a lot of time
-            iter.value() |= (indegree(get_index(iter)) == 0) ? kHasNoIncomingFlag : 0;
+            iter.value() |= (indegree(get_index(iter) + kmer[k_ - 1]) == 0) ? kHasNoIncomingFlag : 0;
 
         first_kmer = false;
 
@@ -265,8 +265,9 @@ void DBGHashFast2Impl<KMER>::map_to_nodes_sequentially(
         if (terminate())
             return;
 
-        assert((find_kmer(KmerPrefix((*it).data()) & kIgnoreLastCharMask) == kmers_.end()) ||
-               *it == get_kmer(get_index(*it), get_const_iter(get_index(*it))));
+        assert((find_kmer(KmerPrefix((*it).data()) & kIgnoreLastCharMask) == kmers_.end())
+               || get_index(*it) == npos
+               || *it == get_kmer(get_index(*it), get_const_iter(get_index(*it))));
 
         callback(is_valid ? get_index(*it++) : npos);
     }
@@ -660,8 +661,6 @@ DBGHashFast2Impl<KMER>::get_index(const Kmer &kmer) const {
 template <typename KMER>
 typename DBGHashFast2Impl<KMER>::KmerIterator
 DBGHashFast2Impl<KMER>::get_iter(node_index node) {
-    assert(in_graph(node));
-
     KmerIterator iter = (kmers_.begin() + ((node - 1) >> KMER::kBitsPerChar));
     return iter;
 }
@@ -669,8 +668,6 @@ DBGHashFast2Impl<KMER>::get_iter(node_index node) {
 template <typename KMER>
 typename DBGHashFast2Impl<KMER>::KmerConstIterator
 DBGHashFast2Impl<KMER>::get_const_iter(node_index node) const {
-    assert(in_graph(node));
-
     KmerConstIterator iter = (kmers_.begin() + ((node - 1) >> KMER::kBitsPerChar));
     return iter;
 }
@@ -694,8 +691,12 @@ const KMER DBGHashFast2Impl<KMER>
 
 template <typename KMER>
 bool DBGHashFast2Impl<KMER>::in_graph(node_index node) const {
-    std::ignore = node;
-    return true;
+    auto it = get_const_iter(node);
+    if (it.get_bucket()->empty())
+        return false;
+
+    KmerPrefix c = (node - 1) & KmerPrefix((1llu << KMER::kBitsPerChar) - 1);
+    return Bits(1) & ((*it).second >> c);
 }
 
 template <typename KMER>
