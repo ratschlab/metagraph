@@ -21,7 +21,7 @@ const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
  * typically #KMerBOSS instances
  * */
 template <typename T> class SortedSetDisk {
- public:
+public:
   /**
    * Size of the underlying data structure storing the kmers. The class is
    * guaranteed to flush to disk when the newly added data would exceed this
@@ -122,11 +122,13 @@ template <typename T> class SortedSetDisk {
     }
     uint64_t totalSize = 0;
     // init with any value that is not the top
-    T lastWritten = merge_heap.empty() ? T(1) : merge_heap.top().first + T(1);
+    T lastWritten;
+    bool hasWritten = false;
     while (!merge_heap.empty()) {
       std::pair<T, uint32_t> smallest = merge_heap.top();
       merge_heap.pop();
-      if (smallest.first != lastWritten) {
+      if (hasWritten && smallest.first != lastWritten) {
+        hasWritten = true;
         sorted_file.write(reinterpret_cast<char *>(&smallest.first),
                           sizeof(smallest.first));
         lastWritten = smallest.first;
@@ -135,7 +137,7 @@ template <typename T> class SortedSetDisk {
       if (chunk_files[smallest.second].good()) {
         T dataItem;
         if (chunk_files[smallest.second].read(
-            reinterpret_cast<char *>(&dataItem), sizeof(dataItem))) {
+                reinterpret_cast<char *>(&dataItem), sizeof(dataItem))) {
 
           merge_heap.push({dataItem, smallest.second});
         }
@@ -170,7 +172,7 @@ template <typename T> class SortedSetDisk {
     vector->erase(unique_end, vector->end());
   }
 
- private:
+private:
   void shrink_data() {
     if (verbose_) {
       std::cout << "Allocated capacity exceeded, erasing duplicate values..."

@@ -23,11 +23,13 @@ find_package(GTest REQUIRED)
 set(EXTERNAL_LIB_DIR "../../external-libraries")
 link_directories(
         ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
-        /usr/local/lib/
 )
+if(APPLE)
+  # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
+  LINK_DIRECTORIES(/usr/local/lib)
+endif()
 
 file(GLOB test_files "*.cpp")
 add_executable(tests ${test_files})
 target_include_directories(tests PRIVATE ${GTEST_INCLUDE_DIRS})
 target_link_libraries(tests gtest_main ${GTEST_BOTH_LIBRARIES} common)
-message("Gtest libs " ${GTEST_BOTH_LIBRARIES})

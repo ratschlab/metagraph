@@ -12,7 +12,6 @@ if ((CMAKE_CXX_COMPILER_ID MATCHES AppleClang) OR (CMAKE_CXX_COMPILER_ID MATCHES
 else()
   find_package(OpenMP REQUIRED)
 endif()
-message("Flags are " ${CMAKE_CXX_FLAGS}})
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 

@@ -2,14 +2,13 @@
 
 #include "kmer/kmer_boss.hpp"
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 template <typename T> class SortedSetDiskTest : public ::testing::Test {};
 
 typedef ::testing::Types<uint64_t, int32_t> SortedDiskElementTypes;
 
-TYPED_TEST_SUITE(SortedSetDiskTest, SortedDiskElementTypes);
+TYPED_TEST_CASE(SortedSetDiskTest, SortedDiskElementTypes);
 
 TYPED_TEST(SortedSetDiskTest, Empty) {
   SortedSetDisk<TypeParam> underTest;
@@ -20,8 +19,8 @@ TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
   SortedSetDisk<TypeParam> underTest;
   std::array<TypeParam, 1> elements = {42};
   underTest.insert(elements.begin(), elements.end());
-  EXPECT_EQ(1UL, underTest.data().size());
-  EXPECT_EQ(42, underTest.data()[0]);
+  EXPECT_EQ(1U, underTest.data().size());
+  EXPECT_EQ(TypeParam(42), underTest.data()[0]);
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
@@ -29,7 +28,10 @@ TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
   std::array<TypeParam, 4> elements = {42, 43, 44, 45};
   underTest.insert(elements.begin(), elements.end());
   EXPECT_EQ(4UL, underTest.data().size());
-  EXPECT_THAT(underTest.data(), ::testing::ElementsAre(42, 43, 44, 45));
+  // TODO(ddanciu) - use EXPECT_THAT(..., ::testing::ElementsAre(...)); once we
+  // can use gmock
+  EXPECT_EQ(underTest.data()[0], TypeParam(42));
+  EXPECT_EQ(underTest.data()[3], TypeParam(45));
 }
 
 /**
@@ -41,7 +43,8 @@ TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
   std::array<TypeParam, 4> elements = {42, 43, 44, 45};
   underTest.insert(elements.begin(), elements.end());
   EXPECT_EQ(4UL, underTest.data().size());
-  EXPECT_THAT(underTest.data(), ::testing::ElementsAre(42, 43, 44, 45));
+  EXPECT_EQ(underTest.data()[0], TypeParam(42));
+  EXPECT_EQ(underTest.data()[3], TypeParam(45));
 }
 
 /**
@@ -59,7 +62,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
   }
   EXPECT_EQ(400UL, underTest.data().size());
   for (uint32_t i = 0; i < underTest.data().size(); ++i) {
-    ASSERT_EQ(i, underTest.data()[i]);
+    ASSERT_EQ(TypeParam(i), underTest.data()[i]);
   }
 }
 
@@ -76,7 +79,8 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesNonDistinct) {
     underTest.insert(elements.begin(), elements.end());
   }
   EXPECT_EQ(4UL, underTest.data().size());
-  EXPECT_THAT(underTest.data(), ::testing::ElementsAre(0, 1, 2, 3));
+  EXPECT_EQ(underTest.data()[0], TypeParam(0));
+  EXPECT_EQ(underTest.data()[3], TypeParam(3));
 }
 
 /**
@@ -99,7 +103,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
                 [](std::thread &t) { t.join(); });
   EXPECT_EQ(400UL, underTest.data().size());
   for (uint32_t i = 0; i < underTest.data().size(); ++i) {
-    ASSERT_EQ(i, underTest.data()[i]);
+    ASSERT_EQ(TypeParam(i), underTest.data()[i]);
   }
 }
 
@@ -124,6 +128,6 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
                 [](std::thread &t) { t.join(); });
   EXPECT_EQ(300UL, underTest.data().size());
   for (uint32_t i = 0; i < underTest.data().size(); ++i) {
-    ASSERT_EQ(i, underTest.data()[i]);
+    ASSERT_EQ(TypeParam(i), underTest.data()[i]);
   }
 }
