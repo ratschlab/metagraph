@@ -82,6 +82,8 @@ Config::Config(int argc, const char *argv[]) {
         return argv[i + 1];
     };
 
+    bool print_usage_and_exit = false;
+
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
@@ -219,6 +221,11 @@ Config::Config(int argc, const char *argv[]) {
             initialize_bloom = true;
         } else if (!strcmp(argv[i], "--bloom-fpp")) {
             bloom_fpp = std::stof(get_value(i++));
+            if (bloom_fpp <= 0.0 || bloom_fpp > 1.0) {
+                std::cerr << "Error: bloom-fpp must be > 0.0 and <= 1.0" << std::endl;
+                print_usage(argv[0], identity);
+                exit(1);
+            }
         } else if (!strcmp(argv[i], "--bloom-bpk")) {
             bloom_bpk = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--bloom-max-num-hash-functions")) {
@@ -345,8 +352,6 @@ Config::Config(int argc, const char *argv[]) {
                 fname.push_back(line);
         }
     }
-
-    bool print_usage_and_exit = false;
 
     if (!count_slice_quantiles.size()) {
         count_slice_quantiles.push_back(0);
@@ -483,11 +488,6 @@ Config::Config(int argc, const char *argv[]) {
 
     if (alignment_max_seed_length < alignment_min_seed_length) {
         std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
-        print_usage_and_exit = true;
-    }
-
-    if (bloom_fpp < 0.0 || bloom_fpp > 1.0) {
-        std::cerr << "Error: bloom-fpp must > 0.0 and <= 1.0" << std::endl;
         print_usage_and_exit = true;
     }
 
