@@ -263,6 +263,8 @@ DefaultColumnExtender<NodeType, Compare>
             size_t overall_begin = size;
             size_t overall_end = 0;
 
+            // find incoming nodes to check for alignment extension
+            // set boundaries for vertical band
             for (const auto &prev_node : in_nodes) {
                 const auto& best_pos = dp_table.emplace(
                     prev_node,
