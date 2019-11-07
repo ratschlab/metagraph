@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.6.1)
-project(common)
+project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -14,11 +14,6 @@ else()
 endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-
-set(EXTERNAL_LIB_DIR "../../external-libraries")
-link_directories(
-        ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
-)
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
 find_library(FOLLY_LIBRARIES
@@ -38,10 +33,10 @@ endif()
 
 file(GLOB src_files "*.cpp" "*/*.cpp")
 
-add_library(common STATIC ${src_files})
+add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "../../external-libraries")
 
-target_include_directories(common
+target_include_directories(metagraph_common
   PUBLIC
     ${Boost_INCLUDE_DIRS}
     ${EXTERNAL_LIB_DIR}/asio/asio/include
@@ -51,10 +46,14 @@ target_include_directories(common
     ${EXTERNAL_LIB_DIR}/libmaus2/include
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    .. # this ensures that this libs include files are visible to its deps
+    .. # this ensures that this lib's include files are visible
+       # to itself deps as "metagraph_common/foo.hpp"
 )
-target_link_libraries(common
-    PUBLIC
+set(EXTERNAL_LIB_DIR "${CMAKE_SOURCE_DIR}/../../external-libraries")
+target_link_directories(metagraph_common INTERFACE
+        ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
+)
+target_link_libraries(metagraph_common
         ${FOLLY_LIBRARIES}
-        -lsdsl
+        sdsl
         Boost::iostreams)
