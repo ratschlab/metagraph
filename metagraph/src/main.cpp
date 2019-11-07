@@ -49,6 +49,12 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
     } else if (utils::ends_with(filename, ".orhashdbg")) {
         return Config::GraphType::HASH;
 
+    } else if (utils::ends_with(filename, ".hashfastdbg")) {
+        return Config::GraphType::HASH_FAST;
+
+    } else if (utils::ends_with(filename, ".hashfast2dbg")) {
+        return Config::GraphType::HASH_FAST_2;
+
     } else if (utils::ends_with(filename, ".hashstrdbg")) {
         return Config::GraphType::HASH_STR;
 
@@ -113,7 +119,12 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGSuccinct>(filename);
 
         case Config::GraphType::HASH:
-            //return load_critical_graph_from_file<DBGHashOrdered>(filename);
+            return load_critical_graph_from_file<DBGHashOrdered>(filename);
+
+        case Config::GraphType::HASH_FAST:
+            return load_critical_graph_from_file<DBGHashFast>(filename);
+
+        case Config::GraphType::HASH_FAST_2:
             return load_critical_graph_from_file<DBGHashFast2>(filename);
 
         case Config::GraphType::HASH_PACKED:
@@ -1503,7 +1514,14 @@ int main(int argc, const char *argv[]) {
                         break;
 
                     case Config::GraphType::HASH:
-                        //graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        break;
+
+                    case Config::GraphType::HASH_FAST:
+                        graph.reset(new DBGHashFast(config->k, config->canonical));
+                        break;
+
+                    case Config::GraphType::HASH_FAST_2:
                         graph.reset(new DBGHashFast2(config->k, config->canonical));
                         break;
 

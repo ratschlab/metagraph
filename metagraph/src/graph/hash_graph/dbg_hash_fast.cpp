@@ -18,8 +18,8 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
                                      utils::Hash<Kmer>,
                                      std::equal_to<Kmer>,
                                      std::allocator<Kmer>,
-                                     true,
-                                     tsl::rh::power_of_two_growth_policy<8>>;
+                                     false,
+                                     tsl::rh::power_of_two_growth_policy<2>>;
     using KmerIterator = typename KmerIndex::const_iterator;
   public:
     explicit DBGHashFastImpl(size_t k,

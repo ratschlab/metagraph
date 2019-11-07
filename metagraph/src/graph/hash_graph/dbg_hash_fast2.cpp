@@ -33,8 +33,8 @@ class DBGHashFast2Impl : public DBGHashFast2::DBGHashFast2Interface {
                                      utils::Hash<KmerPrefix>,
                                      std::equal_to<KmerPrefix>,
                                      std::allocator<KmerPrefix>,
-                                     true,
-                                     tsl::rh::power_of_two_growth_policy<8>>;
+                                     false,
+                                     tsl::rh::power_of_two_growth_policy<2>>;
 
     using KmerIterator = typename KmerIndex::iterator;
     using KmerConstIterator = typename KmerIndex::const_iterator;
@@ -201,7 +201,7 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
         iter.value() &= ~kHasNoIncomingFlag;
 
         if (first_kmer || !kmers_overlap(prev_kmer, kmer)) //TODO should be something faster but this doesn't take a lot of time
-            iter.value() |= (indegree(get_index(iter) + kmer[k_ - 1]) == 0) ? kHasNoIncomingFlag : 0;
+            iter.value() |= kHasNoIncomingFlag;
 
         first_kmer = false;
 

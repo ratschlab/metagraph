@@ -334,6 +334,7 @@ void call_sequences(const DeBruijnGraph &graph,
     //  ____.____
     //       \___
     //
+    // TODO if-statement (graph.continuous_indexed), if it affects performance
     call_zeros(visited, [&](auto node) {
         if (graph.in_graph(node)) {
             if (graph.has_multiple_outgoing(node)) {
@@ -344,6 +345,17 @@ void call_sequences(const DeBruijnGraph &graph,
             }
         }
     });
+
+    //graph.call_nodes([&](auto node) {
+    //    if (!visited[node]) {
+    //        if (graph.has_multiple_outgoing(node)) {
+    //            graph.adjacent_outgoing_nodes(node, [&](auto next) {
+    //                if (!visited[next])
+    //                    call_paths_from(next);
+    //            });
+    //        }
+    //    }
+    //});
 
     // then the rest (loops)
     call_zeros(visited, call_paths_from);

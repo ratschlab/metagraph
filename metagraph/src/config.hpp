@@ -163,6 +163,8 @@ class Config {
         INVALID = -1,
         SUCCINCT = 1,
         HASH,
+        HASH_FAST,
+        HASH_FAST_2,
         HASH_PACKED,
         HASH_STR,
         BITMAP,

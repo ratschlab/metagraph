@@ -129,7 +129,7 @@ class DBGHashFast2 : public DeBruijnGraph {
 
     bool in_graph(node_index node) const { return hash_dbg_->in_graph(node); }
 
-    static constexpr auto kExtension = ".orhashdbg";
+    static constexpr auto kExtension = ".hashfast2dbg";
 
     class DBGHashFast2Interface : public DeBruijnGraph {
       public:
