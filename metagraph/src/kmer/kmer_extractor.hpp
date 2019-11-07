@@ -8,6 +8,7 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+#include "string_utils.hpp"
 #include "utils.hpp"
 #include "kmer.hpp"
 #include "kmer_boss.hpp"

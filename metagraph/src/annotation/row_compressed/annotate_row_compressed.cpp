@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 #include "serialization.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "vector_row_binmat.hpp"
 #include "eigen_spmat.hpp"
 #include "binary_matrix.hpp"

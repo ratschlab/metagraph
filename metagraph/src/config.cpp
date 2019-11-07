@@ -5,6 +5,8 @@
 #include <unordered_set>
 #include <filesystem>
 
+#include "string_utils.hpp"
+#include "file_utils.hpp"
 #include "utils.hpp"
 #include "threading.hpp"
 

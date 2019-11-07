@@ -1,10 +1,12 @@
 #include "taxid_mapper.hpp"
 
+#include <iostream>
 #include <sstream>
 
 #include <zlib.h>
 
-#include "utils.hpp"
+#include "string_utils.hpp"
+#include "serialization.hpp"
 
 
 std::string TaxIDMapper::parse_label(const std::string &gb) {
