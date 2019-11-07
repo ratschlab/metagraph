@@ -2,7 +2,6 @@
 #define __ANNOTATED_GRAPH_ALGORITHM_HPP__
 
 #include <vector>
-#include <unordered_set>
 #include <functional>
 
 #include "annotated_dbg.hpp"
@@ -33,8 +32,8 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
 // and (label_other_fraction * 100)% of the labels are neither in or out masked.
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
-                            const std::unordered_set<AnnotatedDBG::Annotator::Label> &labels_in,
-                            const std::unordered_set<AnnotatedDBG::Annotator::Label> &labels_out,
+                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
+                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
                             double label_mask_in_fraction = 1.0,
                             double label_mask_out_fraction = 0.0,
                             double label_other_fraction = 1.0);
