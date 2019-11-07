@@ -1,17 +1,18 @@
 #ifndef __KMER_EXTRACTOR_HPP__
 #define __KMER_EXTRACTOR_HPP__
 
-#include <cstdint>
-#include <string>
-#include <vector>
+#include "kmer.hpp"
+#include "kmer_boss.hpp"
+#include "alphabets.hpp"
+
+#include "common/utils.hpp"
 
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
-#include "utils.hpp"
-#include "kmer.hpp"
-#include "kmer_boss.hpp"
-#include "alphabets.hpp"
+#include <cstdint>
+#include <string>
+#include <vector>
 
 
 class KmerExtractorBOSS {

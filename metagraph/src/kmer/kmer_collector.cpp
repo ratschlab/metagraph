@@ -1,11 +1,13 @@
 #include "kmer_collector.hpp"
 
+#include "kmer.hpp"
+
+#include "common/unix_tools.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+
 #include <type_traits>
 #include <ips4o.hpp>
 
-#include "kmer.hpp"
-#include "unix_tools.hpp"
-#include "reverse_complement.hpp"
 
 const size_t kMaxKmersChunkSize = 30'000'000;
 
