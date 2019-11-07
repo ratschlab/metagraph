@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.6.1)
-project(common)
+project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Boost REQUIRED)
+find_package(Boost REQUIRED COMPONENTS iostreams)
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
 # and happily cached, thus messing up the compilation flags forever
 unset(OpenMP_CXX_FLAGS CACHE)
@@ -38,20 +38,23 @@ endif()
 
 file(GLOB src_files "*.cpp" "*/*.cpp")
 
-add_library(common STATIC ${src_files})
+add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "../../external-libraries")
 
-#TODO(ddanciu) - check if all these actually need to be public
-target_include_directories(common PUBLIC ${Boost_INCLUDE_DIRS})
-target_include_directories(common PUBLIC ${EXTERNAL_LIB_DIR}/asio/asio/include)
-target_include_directories(common PUBLIC ${EXTERNAL_LIB_DIR}/DYNAMIC/include)
-target_include_directories(common PUBLIC ${EXTERNAL_LIB_DIR}/hopscotch-map/include)
-target_include_directories(common PUBLIC ${EXTERNAL_LIB_DIR}/ips4o)
-target_include_directories(common PUBLIC ${EXTERNAL_LIB_DIR}/libmaus2/include)
-target_include_directories(common PUBLIC ${EXTERNAL_LIB_DIR}/ordered-map/include)
-target_include_directories(common PUBLIC ${EXTERNAL_LIB_DIR}/sdsl-lite/include)
-# this ensures that this libs include files are visible to its deps
-target_include_directories(common PUBLIC ..)
-
-target_link_libraries(common  ${FOLLY_LIBRARIES} -lsdsl)
-target_link_libraries(common ${Boost_LIB_DIRS})
+target_include_directories(metagraph_common
+  PUBLIC
+    ${Boost_INCLUDE_DIRS}
+    ${EXTERNAL_LIB_DIR}/asio/asio/include
+    ${EXTERNAL_LIB_DIR}/DYNAMIC/include
+    ${EXTERNAL_LIB_DIR}/hopscotch-map/include
+    ${EXTERNAL_LIB_DIR}/ips4o
+    ${EXTERNAL_LIB_DIR}/libmaus2/include
+    ${EXTERNAL_LIB_DIR}/ordered-map/include
+    ${EXTERNAL_LIB_DIR}/sdsl-lite/include
+    .. # this ensures that this libs include files are visible to its deps
+)
+target_link_libraries(metagraph_common
+    PUBLIC
+        ${FOLLY_LIBRARIES}
+        -lsdsl
+        Boost::iostreams)
