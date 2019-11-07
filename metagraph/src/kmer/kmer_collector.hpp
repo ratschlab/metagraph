@@ -9,6 +9,7 @@
 #include "common/sorted_set_disk.hpp"
 #include "common/sorted_multiset.hpp"
 
+
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
 
@@ -82,11 +83,6 @@ template <typename KMER,
 using KmerCollector = KmerStorage<KMER,
                                   KmerExtractor,
                                   SortedSet<KMER, Container, Cleaner>>;
-template <typename KMER,
-    class KmerExtractor>
-using KmerCollectorDisk = KmerStorage<KMER,
-                                  KmerExtractor,
-                                  SortedSetDisk<KMER>>;
 
 template <typename KMER,
           class KmerExtractor,

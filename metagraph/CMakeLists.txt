@@ -100,20 +100,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   ")
 endif()
 
-if (APPLE)
-    # Fix include directories on 10.14+, as they are not added by default any longer
-    string(APPEND CMAKE_CXX_FLAGS " \
-    -I/usr/include \
-    -I/usr/local/include \
-  ")
-  # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
-  LINK_DIRECTORIES(/usr/lib)
-  LINK_DIRECTORIES(/usr/local/lib)
-endif()
-# unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
-# and happily cached, thus messing up the compilation flags forever
-unset(OpenMP_CXX_FLAGS CACHE)
-if ((CMAKE_CXX_COMPILER_ID MATCHES AppleClang) OR (CMAKE_CXX_COMPILER_ID MATCHES Clang))
+if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
   find_package(OPENMP REQUIRED)
 else()
   find_package(OpenMP REQUIRED)
@@ -354,8 +341,6 @@ endif()
 # check for std::filesystem::temp_directory_path
 include(CheckCXXSourceRuns)
 set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-
-unset(CPPNOFS CACHE)
 check_cxx_source_runs("
     #include <iostream>
     #include <filesystem>
