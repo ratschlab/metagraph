@@ -3,10 +3,7 @@
 #include <cstdio>
 #include <fstream>
 #include <algorithm>
-#include <cstdlib>
 #include <filesystem>
-
-#include "binary_matrix.hpp"
 
 
 namespace utils {
@@ -297,7 +294,7 @@ std::vector<uint64_t> RowsFromColumnsIterator::next_row() {
     return indices;
 }
 
-void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
+void call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback,
                RowsFromColumnsTransformer&& transformer) {
     uint64_t cur_row = 0;
     std::vector<uint64_t> indices;
@@ -319,15 +316,6 @@ void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> 
     }
 
     assert(!transformer.values_left());
-}
-
-void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
-               const BinaryMatrix &row_major_matrix) {
-    const auto num_rows = row_major_matrix.num_rows();
-
-    for (size_t i = 0; i < num_rows; ++i) {
-        callback(row_major_matrix.get_row(i));
-    }
 }
 
 template <class BitVectorType>

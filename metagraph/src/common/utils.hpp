@@ -34,7 +34,6 @@
 #endif
 
 #include "serialization.hpp"
-#include "binary_matrix.hpp"
 
 
 struct VectorHash {
@@ -47,8 +46,6 @@ struct VectorHash {
         return static_cast<std::size_t>(hash);
     }
 };
-
-class BinaryMatrix;
 
 
 namespace utils {
@@ -451,10 +448,7 @@ namespace utils {
         uint64_t column_;
     };
 
-    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
-                   const BinaryMatrix &row_major_matrix);
-
-    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
+    void call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback,
                    RowsFromColumnsTransformer&& transformer);
 
     template <class BitVectorType = bit_vector_stat>
