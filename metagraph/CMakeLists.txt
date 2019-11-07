@@ -100,7 +100,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   ")
 endif()
 
-if (APPLE)
+if(APPLE)
     # Fix include directories on 10.14+, as they are not added by default any longer
     string(APPEND CMAKE_CXX_FLAGS " \
     -I/usr/include \
@@ -113,7 +113,7 @@ endif()
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
 # and happily cached, thus messing up the compilation flags forever
 unset(OpenMP_CXX_FLAGS CACHE)
-if ((CMAKE_CXX_COMPILER_ID MATCHES AppleClang) OR (CMAKE_CXX_COMPILER_ID MATCHES Clang))
+if((CMAKE_CXX_COMPILER_ID MATCHES AppleClang) OR (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES Clang))
   find_package(OPENMP REQUIRED)
 else()
   find_package(OpenMP REQUIRED)
