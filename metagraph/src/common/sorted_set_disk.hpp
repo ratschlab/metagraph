@@ -127,7 +127,7 @@ public:
     while (!merge_heap.empty()) {
       std::pair<T, uint32_t> smallest = merge_heap.top();
       merge_heap.pop();
-      if (hasWritten && smallest.first != lastWritten) {
+      if (!hasWritten || smallest.first != lastWritten) {
         hasWritten = true;
         sorted_file.write(reinterpret_cast<char *>(&smallest.first),
                           sizeof(smallest.first));
