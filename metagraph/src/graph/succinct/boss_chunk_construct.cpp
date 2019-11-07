@@ -19,7 +19,7 @@ enum class ExtractorContainer {
   VECTOR_DISK
 };
 constexpr static ExtractorContainer kExtractorContainer =
-    ExtractorContainer::VECTOR;
+    ExtractorContainer::VECTOR_DISK;
 const static uint8_t kBitsPerCount = 8;
 
 template <class Array>

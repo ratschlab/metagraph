@@ -20,7 +20,8 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
-    static_assert(utils::is_instance<Container, SortedSet>{});
+    static_assert(utils::is_instance<Container, SortedSet>{} ||
+        utils::is_instance<Container, SortedSetDisk>{});
     static_assert(std::is_same_v<KMER, typename Container::key_type>);
 
     Vector<KMER> temp_storage;
@@ -169,7 +170,8 @@ void KmerStorage<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
-    if constexpr(utils::is_instance<Container, SortedSet>{}) {
+    if constexpr(utils::is_instance<Container, SortedSet>{} ||
+            utils::is_instance<Container, SortedSetDisk>{}) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>, generate_sequences,
                              k_, both_strands_mode_, &kmers_,
                              filter_suffix_encoded_,
@@ -189,7 +191,8 @@ void KmerStorage<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-    if constexpr(utils::is_instance<Container, SortedSet>{}) {
+    if constexpr(utils::is_instance<Container, SortedSet>{} ||
+            utils::is_instance<Container, SortedSetDisk>{}) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallString callback) {
                                  generate_sequences([&](const std::string &seq, uint64_t) {
@@ -258,6 +261,14 @@ INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, Vector, 
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, Vector, utils::NoCleanup)
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, Vector, utils::NoCleanup)
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, Vector, utils::NoCleanup)
+
+template class KmerStorage<KmerExtractorBOSS::Kmer64, KmerExtractorBOSS,
+    SortedSetDisk<KmerExtractorBOSS::Kmer64>>;
+template class KmerStorage<KmerExtractorBOSS::Kmer128, KmerExtractorBOSS,
+     SortedSetDisk<KmerExtractorBOSS::Kmer128>>;
+template class KmerStorage<KmerExtractorBOSS::Kmer256, KmerExtractorBOSS,
+     SortedSetDisk<KmerExtractorBOSS::Kmer256>>;
+
 
 
 // INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, utils::DequeStorage, utils::NoCleanup)

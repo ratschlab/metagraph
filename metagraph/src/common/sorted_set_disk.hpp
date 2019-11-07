@@ -172,6 +172,10 @@ public:
     vector->erase(unique_end, vector->end());
   }
 
+  void reserve(size_t size) {
+    std::cerr << "SortedSetDisk: Ignoring reserving size " << size << std::endl;
+  }
+
 private:
   void shrink_data() {
     if (verbose_) {
