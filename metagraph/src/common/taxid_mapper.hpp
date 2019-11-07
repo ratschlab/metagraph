@@ -1,11 +1,11 @@
 #ifndef __TAXID_MAPPER_HPP__
 #define __TAXID_MAPPER_HPP__
 
-
 #include <fstream>
 #include <string>
 #include <unordered_map>
 #include <tsl/hopscotch_map.h>
+
 
 class TaxIDMapper {
   public:

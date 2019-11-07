@@ -1,7 +1,6 @@
 #ifndef __UTILS_HPP__
 #define __UTILS_HPP__
 
-#include <cstdint>
 #include <string>
 #include <vector>
 #include <deque>
@@ -9,6 +8,7 @@
 #include <stdexcept>
 #include <queue>
 #include <utility>
+#include <set>
 #include <bitset>
 
 #if _USE_FOLLY
@@ -94,25 +94,6 @@ namespace utils {
     bool get_verbose();
     void set_verbose(bool verbose);
 
-    bool ends_with(const std::string &str, const std::string &suffix);
-
-    std::string remove_suffix(const std::string &str, const std::string &suffix);
-
-    template <typename... String>
-    std::string remove_suffix(const std::string &str, const std::string &suffix,
-                                                      const String&... other_suffixes) {
-        return remove_suffix(remove_suffix(str, suffix), other_suffixes...);
-    }
-
-    std::string join_strings(const std::vector<std::string> &strings,
-                             const std::string &delimiter,
-                             bool discard_empty_strings = false);
-
-    std::vector<std::string> split_string(const std::string &string,
-                                          const std::string &delimiter);
-
-    bool check_if_writable(const std::string &filename);
-
     /**
      *  This function checks whether two given strings are identical.
      */
@@ -166,11 +147,6 @@ namespace utils {
 
         return mask;
     }
-
-    std::string get_filetype(const std::string &fname);
-
-    std::deque<std::string> generate_strings(const std::string &alphabet,
-                                             size_t length);
 
     inline uint32_t code_length(uint64_t x) { return sdsl::bits::hi(x) + 1; }
 
@@ -455,25 +431,6 @@ namespace utils {
     std::vector<std::unique_ptr<bit_vector>>
     transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix);
 
-
-    class TempFile {
-      public:
-        // The state flow:
-        //    init -> APPEND -> READ -> deinit
-        enum State { APPEND, READ };
-
-        TempFile(const std::string &tmp_dir = "");
-        ~TempFile();
-
-        std::ofstream& ofstream();
-        std::ifstream& ifstream();
-
-      private:
-        std::string tmp_file_name_;
-        State state_;
-        std::unique_ptr<std::ofstream> tmp_ostream_;
-        std::unique_ptr<std::ifstream> tmp_istream_;
-    };
 
     // Partitions a range of numbers in [0,n) into groups.
     // The groups must not be empty.

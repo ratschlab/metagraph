@@ -1,6 +1,6 @@
 #include "annotate_static.hpp"
 
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "static_annotators_def.hpp"
 
 using utils::remove_suffix;

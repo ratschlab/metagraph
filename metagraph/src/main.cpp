@@ -13,6 +13,8 @@
 #include "annotate_column_compressed.hpp"
 #include "serialization.hpp"
 #include "utils.hpp"
+#include "string_utils.hpp"
+#include "file_utils.hpp"
 #include "threading.hpp"
 #include "reverse_complement.hpp"
 #include "static_annotators_def.hpp"

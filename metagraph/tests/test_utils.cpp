@@ -3,6 +3,8 @@
 
 #include "annotate_column_compressed.hpp"
 #include "utils.hpp"
+#include "string_utils.hpp"
+#include "file_utils.hpp"
 #include "threading.hpp"
 #include "bit_vector.hpp"
 

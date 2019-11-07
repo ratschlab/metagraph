@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "serialization.hpp"
+#include "string_utils.hpp"
 #include "utils.hpp"
 #include "threading.hpp"
 #include "annotate_row_compressed.hpp"

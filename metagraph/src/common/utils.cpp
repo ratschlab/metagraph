@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "serialization.hpp"
+
 
 namespace utils {
 
@@ -12,141 +14,6 @@ static bool VERBOSE = false;
 
 bool get_verbose() { return VERBOSE; }
 void set_verbose(bool verbose) { VERBOSE = verbose; }
-
-
-bool ends_with(const std::string &str, const std::string &suffix) {
-    auto actual_suffix = str.substr(
-        std::max(0, static_cast<int>(str.size())
-                    - static_cast<int>(suffix.size()))
-    );
-    return actual_suffix == suffix;
-}
-
-std::string remove_suffix(const std::string &str, const std::string &suffix) {
-    return ends_with(str, suffix)
-            ? str.substr(0, str.size() - suffix.size())
-            : str;
-}
-
-std::string join_strings(const std::vector<std::string> &strings,
-                         const std::string &delimiter,
-                         bool discard_empty_strings) {
-    auto it = std::find_if(strings.begin(), strings.end(),
-        [&](const auto &str) { return !discard_empty_strings || !str.empty(); }
-    );
-
-    std::string result;
-
-    for (; it != strings.end(); ++it) {
-        if (it->size() || !discard_empty_strings) {
-            result += *it;
-            result += delimiter;
-        }
-    }
-    // remove last appended delimiter
-    if (result.size())
-        result.resize(result.size() - delimiter.size());
-
-    return result;
-}
-
-std::vector<std::string> split_string(const std::string &string,
-                                      const std::string &delimiter) {
-    if (!string.size())
-        return {};
-
-    if (!delimiter.size())
-        return { string, };
-
-    std::vector<std::string> result;
-
-    size_t current_pos = 0;
-    size_t delimiter_pos;
-
-    while ((delimiter_pos = string.find(delimiter, current_pos))
-                                             != std::string::npos) {
-        if (delimiter_pos > current_pos)
-            result.push_back(string.substr(current_pos, delimiter_pos - current_pos));
-        current_pos = delimiter_pos + delimiter.size();
-    }
-    if (current_pos < string.size()) {
-        result.push_back(string.substr(current_pos));
-    }
-
-    assert(result.size());
-    return result;
-}
-
-bool check_if_writable(const std::string &filename) {
-    std::ifstream ifstream(filename, std::ios::binary);
-    bool existed = ifstream.good();
-    ifstream.close();
-
-    std::ofstream ofstream(filename, std::ios::binary
-                                        | std::ofstream::ios_base::app);
-    bool can_write = ofstream.good();
-    ofstream.close();
-
-    if (!can_write)
-        return false;
-
-    if (!existed)
-        std::remove(filename.c_str());
-
-    return true;
-}
-
-/**
- *  Returns the input file type, given a filename
- */
-std::string get_filetype(const std::string &fname) {
-    size_t dotind = fname.rfind(".");
-    if (dotind == std::string::npos)
-        return "";
-
-    std::string ext = fname.substr(dotind);
-
-    if (ext == ".kmc_pre" || ext == ".kmc_suf")
-        return "KMC";
-
-    if (ext == ".gz") {
-        size_t nextind = fname.substr(0, dotind - 1).rfind(".");
-        if (nextind == std::string::npos)
-            return "";
-
-        ext = fname.substr(nextind, dotind - nextind);
-    }
-
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-
-    if (ext == ".vcf") {
-        return "VCF";
-
-    } else if ((ext == ".fq") || (ext == ".fastq")) {
-        return "FASTQ";
-
-    } else {
-        return "FASTA";
-    }
-}
-
-/**
- * Given a minimum number of splits,
- * generate a list of suffixes from the alphabet.
- */
-std::deque<std::string> generate_strings(const std::string &alphabet,
-                                         size_t length) {
-
-    std::deque<std::string> suffixes = { "" };
-    while (suffixes[0].length() < length) {
-        for (const char c : alphabet) {
-            suffixes.push_back(c + suffixes[0]);
-        }
-        suffixes.pop_front();
-    }
-    assert(suffixes.size() == std::pow(alphabet.size(), length));
-    return suffixes;
-}
 
 
 RowsFromColumnsTransformer
@@ -353,48 +220,6 @@ transpose<bit_vector_small>(const std::vector<std::unique_ptr<bit_vector>> &matr
 template
 std::vector<std::unique_ptr<bit_vector>>
 transpose<bit_vector_dyn>(const std::vector<std::unique_ptr<bit_vector>> &matrix);
-
-
-TempFile::TempFile(const std::string &tmp_dir)
-      : tmp_file_name_((tmp_dir.size()
-                          ? tmp_dir
-                          : std::filesystem::temp_directory_path().string())
-                                                + std::string("/tmp.XXXXXX")) {
-    // create a file
-    int fd = mkstemp(tmp_file_name_.data());
-    if (fd == -1)
-        throw std::runtime_error("Error: temp file "
-                                    + tmp_file_name_ + " creation failed");
-    // close the file descriptor
-    close(fd);
-
-    tmp_ostream_.reset(new std::ofstream(tmp_file_name_,
-                                         std::ios::binary | std::ios::app));
-    if (!tmp_ostream_->good()) {
-        unlink(tmp_file_name_.c_str());
-        throw std::runtime_error("Error: temp file "
-                                    + tmp_file_name_ + " open failed");
-    }
-    state_ = APPEND;
-}
-
-TempFile::~TempFile() {
-    unlink(tmp_file_name_.c_str());
-}
-
-std::ofstream& TempFile::ofstream() {
-    assert(state_ == APPEND && "Can't write after reading");
-    return *tmp_ostream_;
-}
-
-std::ifstream& TempFile::ifstream() {
-    if (!tmp_istream_.get()) {
-        state_ = READ;
-        tmp_ostream_.reset();
-        tmp_istream_.reset(new std::ifstream(tmp_file_name_, std::ios::binary));
-    }
-    return *tmp_istream_;
-}
 
 
 RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,
