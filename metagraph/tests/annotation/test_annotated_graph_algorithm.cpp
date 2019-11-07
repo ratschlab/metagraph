@@ -71,8 +71,8 @@ test_mask_unitigs(double inlabel_fraction,
                   double outlabel_fraction,
                   double other_label_fraction,
                   const std::unordered_set<std::string> &ref_kmers) {
-    const std::unordered_set<std::string> ingroup { "B", "C" };
-    const std::unordered_set<std::string> outgroup { "A" };
+    const std::vector<std::string> ingroup { "B", "C" };
+    const std::vector<std::string> outgroup { "A" };
     size_t k = 3;
 
     {
