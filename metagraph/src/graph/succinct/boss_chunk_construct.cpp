@@ -5,6 +5,7 @@
 #include "unix_tools.hpp"
 #include "boss_chunk.hpp"
 #include "kmer_collector.hpp"
+#include "deque_vector.hpp"
 
 const static bool kUseDeque = false;
 const static uint8_t kBitsPerCount = 8;
@@ -190,7 +191,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         }
 
         if constexpr(std::is_same_v<typename KmerStorage::Data,
-                                    utils::DequeStorage<typename KmerStorage::Value>>) {
+                                    DequeStorage<typename KmerStorage::Value>>) {
             kmers.shrink_to_fit();
         }
 
@@ -258,19 +259,19 @@ using KmerCollectorVectorClean = KmerCollector<KMER, KmerExtractorBOSS,
 
 template <typename KMER>
 using KmerCounterDeque = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                     utils::DequeStorage<std::pair<KMER, uint8_t>>,
+                                     DequeStorage<std::pair<KMER, uint8_t>>,
                                      utils::NoCleanup>;
 template <typename KMER>
 using KmerCounterDequeClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                          utils::DequeStorage<std::pair<KMER, uint8_t>>,
+                                          DequeStorage<std::pair<KMER, uint8_t>>,
                                           utils::DummyKmersCleaner>;
 template <typename KMER>
 using KmerCollectorDeque = KmerCollector<KMER, KmerExtractorBOSS,
-                                         utils::DequeStorage<KMER>,
+                                         DequeStorage<KMER>,
                                          utils::NoCleanup>;
 template <typename KMER>
 using KmerCollectorDequeClean = KmerCollector<KMER, KmerExtractorBOSS,
-                                              utils::DequeStorage<KMER>,
+                                              DequeStorage<KMER>,
                                               utils::DummyKmersCleaner>;
 
 std::unique_ptr<IBOSSChunkConstructor>

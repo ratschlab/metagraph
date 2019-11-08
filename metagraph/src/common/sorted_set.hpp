@@ -121,22 +121,17 @@ class SortedSet {
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
-        if constexpr(std::is_same_v<utils::DequeStorage<T>, storage_type>) {
-            data_.try_reserve(size, min_size);
+        size = std::max(size, min_size);
 
-        } else {
-            size = std::max(size, min_size);
-
-            while (size > min_size) {
-                try {
-                    data_.reserve(size);
-                    return;
-                } catch (const std::bad_alloc &exception) {
-                    size = min_size + (size - min_size) * 2 / 3;
-                }
+        while (size > min_size) {
+            try {
+                data_.reserve(size);
+                return;
+            } catch (const std::bad_alloc &exception) {
+                size = min_size + (size - min_size) * 2 / 3;
             }
-            data_.reserve(min_size);
         }
+        data_.reserve(min_size);
     }
 
     storage_type data_;

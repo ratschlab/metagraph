@@ -7,6 +7,7 @@
 #include "file_utils.hpp"
 #include "threading.hpp"
 #include "bit_vector.hpp"
+#include "deque_vector.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -803,17 +804,17 @@ TEST(Deque, ResizeInfinityCheckThrow) {
 }
 
 TEST(DequeStorage, ReserveInfinityCheckThrow) {
-    utils::DequeStorage<int> array;
+    DequeStorage<int> array;
     EXPECT_THROW(array.reserve(1llu << 60), std::bad_alloc);
 }
 
 TEST(DequeStorage, ResizeInfinityCheckThrow) {
-    utils::DequeStorage<int> array;
+    DequeStorage<int> array;
     EXPECT_THROW(array.resize(1llu << 60), std::bad_alloc);
 }
 
 TEST(DequeStorage, Erase) {
-    utils::DequeStorage<int> storage;
+    DequeStorage<int> storage;
     storage.push_back(1);
     storage.push_back(3);
     storage.push_back(1);
