@@ -356,7 +356,6 @@ endif()
 # check for std::filesystem::temp_directory_path
 include(CheckCXXSourceRuns)
 set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-
 check_cxx_source_runs("
     #include <iostream>
     #include <filesystem>
