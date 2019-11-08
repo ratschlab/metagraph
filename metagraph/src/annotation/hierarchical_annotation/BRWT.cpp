@@ -4,6 +4,7 @@
 #include <numeric>
 
 #include "serialization.hpp"
+#include "utils.hpp"
 
 
 bool BRWT::get(Row row, Column column) const {

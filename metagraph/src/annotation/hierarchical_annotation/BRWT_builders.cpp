@@ -14,8 +14,8 @@ BRWT
 BRWTBuilder::initialize(NodeBRWT&& node, bit_vector&& nonzero_rows) {
     BRWT brwt;
 
-    brwt.assignments_ = utils::RangePartition(node.column_arrangement,
-                                              node.group_sizes);
+    brwt.assignments_ = RangePartition(node.column_arrangement,
+                                       node.group_sizes);
     brwt.nonzero_rows_ = nonzero_rows.convert_to<bit_vector_small>();
 
     brwt.child_nodes_ = std::move(node.child_nodes);
