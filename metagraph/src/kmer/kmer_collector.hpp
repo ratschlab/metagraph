@@ -75,20 +75,18 @@ class KmerStorage {
 
 template <typename KMER,
           class KmerExtractor,
-          class Container = Vector<KMER>,
-          class Cleaner = utils::NoCleanup>
+          class Container = Vector<KMER>>
 using KmerCollector = KmerStorage<KMER,
                                   KmerExtractor,
-                                  SortedSet<KMER, Container, Cleaner>>;
+                                  SortedSet<KMER, Container>>;
 
 template <typename KMER,
           class KmerExtractor,
           typename KmerCount = uint8_t,
-          class Container = Vector<std::pair<KMER, KmerCount>>,
-          class Cleaner = utils::NoCleanup>
+          class Container = Vector<std::pair<KMER, KmerCount>>>
 using KmerCounter = KmerStorage<KMER,
                                 KmerExtractor,
-                                SortedMultiset<KMER, KmerCount, Container, Cleaner>>;
+                                SortedMultiset<KMER, KmerCount, Container>>;
 
 
 #endif // __KMER_COLLECTOR_HPP__
