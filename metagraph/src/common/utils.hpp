@@ -391,69 +391,6 @@ namespace utils {
     }
 
 
-    class NoCleanup {
-      public:
-        template <class Array>
-        static void cleanup(Array*) {}
-    };
-
-    // removes redundant dummy BOSS k-mers from a sorted list
-    class DummyKmersCleaner {
-      public:
-        template <class Array>
-        static void cleanup(Array *kmers) {
-            using KMER = std::remove_reference_t<decltype(get_first(kmers->at(0)))>;
-
-            assert(std::is_sorted(kmers->begin(), kmers->end(),
-                                  utils::LessFirst<typename Array::value_type>()));
-            assert(std::unique(kmers->begin(), kmers->end(),
-                               utils::EqualFirst<typename Array::value_type>()) == kmers->end());
-
-            if (kmers->size() < 2)
-                return;
-
-            // last k-mer is never redundant. Start with the next one.
-            uint64_t last = kmers->size() - 1;
-
-            typename KMER::CharType edge_label, node_last_char;
-
-            std::vector<uint64_t> last_kmer(1llu << KMER::kBitsPerChar, kmers->size());
-
-            last_kmer[get_first(kmers->at(last))[0]] = last;
-
-            for (int64_t i = last - 1; i >= 0; --i) {
-                const KMER &kmer = get_first(kmers->at(i));
-                node_last_char = kmer[1];
-                edge_label = kmer[0];
-
-                // assert((edge_label || node_last_char)
-                //             && "dummy k-mer cannot be both source and sink dummy");
-
-                if (!edge_label) {
-                    // sink dummy k-mer
-
-                    // skip if redundant
-                    if (node_last_char && KMER::compare_suffix(kmer, get_first(kmers->at(last)), 0))
-                        continue;
-
-                } else if (!node_last_char) {
-                    // source dummy k-mer
-
-                    // skip if redundant
-                    if (last_kmer[edge_label] < kmers->size()
-                            && KMER::compare_suffix(kmer, get_first(kmers->at(last_kmer[edge_label])), 1))
-                        continue;
-                }
-
-                // the k-mer is either not dummy, or not redundant -> keep the k-mer
-                kmers->at(--last) = kmers->at(i);
-                last_kmer[edge_label] = last;
-            }
-
-            kmers->erase(kmers->begin(), kmers->begin() + last);
-        }
-    };
-
     template <typename, template <typename, typename...> class>
     struct is_instance : public std::false_type {};
 

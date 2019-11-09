@@ -242,37 +242,19 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
 
 template <typename KMER>
 using KmerCounterVector = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                      Vector<std::pair<KMER, uint8_t>>,
-                                      utils::NoCleanup>;
-template <typename KMER>
-using KmerCounterVectorClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                           Vector<std::pair<KMER, uint8_t>>,
-                                           utils::DummyKmersCleaner>;
+                                      Vector<std::pair<KMER, uint8_t>>>;
+
 template <typename KMER>
 using KmerCollectorVector = KmerCollector<KMER, KmerExtractorBOSS,
-                                          Vector<KMER>,
-                                          utils::NoCleanup>;
-template <typename KMER>
-using KmerCollectorVectorClean = KmerCollector<KMER, KmerExtractorBOSS,
-                                               Vector<KMER>,
-                                               utils::DummyKmersCleaner>;
+                                          Vector<KMER>>;
 
 template <typename KMER>
 using KmerCounterDeque = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                     DequeStorage<std::pair<KMER, uint8_t>>,
-                                     utils::NoCleanup>;
-template <typename KMER>
-using KmerCounterDequeClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                          DequeStorage<std::pair<KMER, uint8_t>>,
-                                          utils::DummyKmersCleaner>;
+                                     DequeStorage<std::pair<KMER, uint8_t>>>;
+
 template <typename KMER>
 using KmerCollectorDeque = KmerCollector<KMER, KmerExtractorBOSS,
-                                         DequeStorage<KMER>,
-                                         utils::NoCleanup>;
-template <typename KMER>
-using KmerCollectorDequeClean = KmerCollector<KMER, KmerExtractorBOSS,
-                                              DequeStorage<KMER>,
-                                              utils::DummyKmersCleaner>;
+                                         DequeStorage<KMER>>;
 
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor
@@ -287,36 +269,16 @@ IBOSSChunkConstructor
     #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
 
     if (count_kmers) {
-
-        if (filter_suffix.size()) {
-
-            if (!kUseDeque || memory_preallocated > 0) {
-                return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
-            } else {
-                return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
-            }
+        if (!kUseDeque || memory_preallocated > 0) {
+            return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
         } else {
-            if (!kUseDeque || memory_preallocated > 0) {
-                return initialize_boss_chunk_constructor<KmerCounterVectorClean>(OTHER_ARGS);
-            } else {
-                return initialize_boss_chunk_constructor<KmerCounterDequeClean>(OTHER_ARGS);
-            }
+            return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
         }
     } else {
-
-        if (filter_suffix.size()) {
-
-            if (!kUseDeque || memory_preallocated > 0) {
-                return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
-            } else {
-                return initialize_boss_chunk_constructor<KmerCollectorDeque>(OTHER_ARGS);
-            }
+        if (!kUseDeque || memory_preallocated > 0) {
+            return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
         } else {
-            if (!kUseDeque || memory_preallocated > 0) {
-                return initialize_boss_chunk_constructor<KmerCollectorVectorClean>(OTHER_ARGS);
-            } else {
-                return initialize_boss_chunk_constructor<KmerCollectorDequeClean>(OTHER_ARGS);
-            }
+            return initialize_boss_chunk_constructor<KmerCollectorDeque>(OTHER_ARGS);
         }
     }
 }

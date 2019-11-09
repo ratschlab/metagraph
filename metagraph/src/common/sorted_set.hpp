@@ -6,13 +6,9 @@
 
 #include <ips4o.hpp>
 
-#include "utils.hpp"
-
 
 // Thread safe data storage to extract distinct elements
-template <typename T,
-          class Container = Vector<T>,
-          class Cleaner = utils::NoCleanup>
+template <typename T, class Container = Vector<T>>
 class SortedSet {
   public:
     static_assert(std::is_same_v<T, typename Container::value_type>);
@@ -21,9 +17,10 @@ class SortedSet {
     typedef T value_type;
     typedef Container storage_type;
 
-    SortedSet(size_t num_threads = 1,
+    SortedSet(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
+              size_t num_threads = 1,
               bool verbose = false)
-      : num_threads_(num_threads), verbose_(verbose) {}
+      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
 
     ~SortedSet() {}
 
@@ -98,7 +95,7 @@ class SortedSet {
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
 
-        Cleaner::cleanup(vector);
+        cleanup_(vector);
     }
 
   private:
@@ -137,6 +134,8 @@ class SortedSet {
     storage_type data_;
     size_t num_threads_;
     bool verbose_;
+
+    std::function<void(storage_type*)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values
     uint64_t sorted_end_ = 0;
