@@ -50,6 +50,9 @@ struct VectorHash {
 
 namespace utils {
 
+    bool get_verbose();
+    void set_verbose(bool verbose);
+
     template <typename T>
     struct is_pair : std::false_type {};
 
@@ -61,6 +64,14 @@ namespace utils {
 
     static_assert(!is_pair<std::tuple<int,size_t>>::value);
     static_assert(!is_pair<int>::value);
+
+    template <typename, template <typename, typename...> class>
+    struct is_instance : public std::false_type {};
+
+    template <typename... Ts, template <typename, typename...> class U>
+    struct is_instance<U<Ts...>, U> : public std::true_type {};
+
+    template <class T> struct dependent_false : std::false_type {};
 
     template <typename T, typename... Us>
     inline const T& get_first(const std::tuple<T, Us...> &tuple) { return std::get<0>(tuple); }
@@ -90,9 +101,6 @@ namespace utils {
             return get_first(p1) == get_first(p2);
         }
     };
-
-    bool get_verbose();
-    void set_verbose(bool verbose);
 
     /**
      *  This function checks whether two given strings are identical.
@@ -323,7 +331,7 @@ namespace utils {
         }
 
         std::tuple<uint64_t, uint64_t> next_set_bit();
-        uint64_t values_left() { return transformer_->values_left(); };
+        uint64_t values_left() { return transformer_->values_left(); }
 
         std::vector<uint64_t> next_row();
 
@@ -359,9 +367,6 @@ namespace utils {
                                          uint64_t sample_size,
                                          std::mt19937 &gen);
 
-    template<class T> struct dependent_false : std::false_type {};
-
-
     template <typename T>
     T get_quantile(const std::vector<std::pair<T, uint64_t>> &count_hist, double q) {
         assert(q >= 0.0);
@@ -389,13 +394,6 @@ namespace utils {
         assert(false);
         return count_hist.back().first;
     }
-
-
-    template <typename, template <typename, typename...> class>
-    struct is_instance : public std::false_type {};
-
-    template <typename... Ts, template <typename, typename...> class U>
-    struct is_instance<U<Ts...>, U> : public std::true_type {};
 
 } // namespace utils
 
