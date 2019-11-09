@@ -4,6 +4,7 @@
 
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #include "BRWT.hpp"
 #include "BRWT_builders.hpp"
 #include "bin_rel_wt.hpp"
