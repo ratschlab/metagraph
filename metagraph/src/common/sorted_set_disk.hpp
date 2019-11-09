@@ -10,7 +10,8 @@
 
 const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
 
-/** Thread safe data storage that is able to sort and extract distinct elements
+/**
+ * Thread safe data storage that is able to sort and extract distinct elements
  * from the underlying Container using external storage to avoid memory overlow.
  * Data is pushed into the data structure in chunks using the #insert() method.
  * Once the internal buffer is full, the data is sorted and written to disk,
@@ -38,6 +39,8 @@ public:
    * specified in CONTAINER_SIZE_BYTES.
    * @param num_threads the number of threads to use by the sorting algorithm
    * @param verbose true if verbose logging is desired
+   * @param container_size the size of the in-memory container that is written
+   * to disk when full
    */
   SortedSetDisk(size_t num_threads = 1, bool verbose = false,
                 size_t container_size = CONTAINER_SIZE_BYTES)
@@ -53,7 +56,8 @@ public:
 
   /**
    * Insert the data between #begin and #end into the buffer. If the buffer is
-   * full, the data is sorted, de-duped and written to disk.
+   * full, the data is sorted, de-duped and written to disk, after which the
+   * buffer is cleared.
    */
   template <class Iterator> void insert(Iterator begin, Iterator end) {
     assert(begin <= end);
@@ -78,8 +82,8 @@ public:
     std::shared_lock<std::shared_timed_mutex> multi_insert_lock(
         multi_insert_mutex_);
     exclusive_lock.unlock();
-    // different threads will write to different chunks of memory, so it's okay
-    // (and desirable) to allow concurrent writes
+    // different threads will insert to different chunks of memory, so it's okay
+    // (and desirable) to allow concurrent inserts
     std::copy(begin, end, data_.begin() + offset);
   }
 
