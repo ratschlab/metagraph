@@ -313,27 +313,3 @@ std::vector<uint64_t> sample_indexes(uint64_t universe_size,
 }
 
 } // namespace utils
-
-
-template <typename T>
-std::set<T> convert_to_set(const std::vector<T> &vector) {
-    return std::set<T>(vector.begin(), vector.end());
-}
-
-template
-std::set<std::string>
-convert_to_set(const std::vector<std::string> &vector);
-
-template
-std::set<uint64_t>
-convert_to_set(const std::vector<uint64_t> &vector);
-
-
-std::set<std::string> convert_to_set(const std::vector<std::string> &vector) {
-    return convert_to_set<std::string>(vector);
-}
-
-std::set<std::pair<std::string, size_t>>
-to_set(const std::vector<std::pair<std::string, size_t>> &vector) {
-    return std::set<std::pair<std::string, size_t>>(vector.begin(), vector.end());
-}
