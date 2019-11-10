@@ -53,7 +53,7 @@ void initialize_chunk(uint64_t alph_size,
         assert(utils::is_pair<T>::value);
         weights->resize(end - begin + 1);
         sdsl::util::set_to_value(*weights, 0);
-        max_count = utils::max_uint(weights->width());
+        max_count = utils::max_ull(weights->width());
     }
 
     assert(std::is_sorted(begin, end, utils::LessFirst<T>()));
