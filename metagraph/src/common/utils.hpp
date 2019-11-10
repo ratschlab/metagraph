@@ -286,11 +286,23 @@ namespace utils {
         RowsFromColumnsTransformer(uint64_t num_rows,
                                    const std::vector<std::string> &files);
 
-        template <typename BitVectorPtr>
-        RowsFromColumnsTransformer(const std::vector<BitVectorPtr> &columns);
+        explicit RowsFromColumnsTransformer(const std::vector<const bit_vector*> &columns);
+        explicit RowsFromColumnsTransformer(const std::vector<std::unique_ptr<bit_vector>> &columns);
+        explicit RowsFromColumnsTransformer(const std::vector<std::shared_ptr<bit_vector>> &columns);
+        template <typename BitVector>
+        explicit RowsFromColumnsTransformer(const std::vector<BitVector> &columns) {
+            std::vector<const bit_vector*> cols;
+            for (const auto &col : columns) {
+                cols.push_back(&col);
+            }
+            initialize(cols);
+        }
 
-        RowsFromColumnsTransformer(const bit_vector_small &columns_concatenated,
+        RowsFromColumnsTransformer(const bit_vector &columns_concatenated,
                                    uint64_t column_size);
+
+        RowsFromColumnsTransformer(RowsFromColumnsTransformer&&) = default;
+        RowsFromColumnsTransformer& operator=(RowsFromColumnsTransformer&&) = default;
 
         using ValueCallback = std::function<void(uint64_t /*row*/,
                                                  uint64_t /*column*/)>;
@@ -302,7 +314,10 @@ namespace utils {
         // get the number of set bits in the vectors left
         uint64_t values_left() const { return num_set_bits_left_; }
 
+        void call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback);
+
       private:
+        void initialize(const std::vector<const bit_vector*> &columns);
         void init_heap();
 
         std::vector<std::unique_ptr<VectorStream>> streams_;
@@ -343,13 +358,13 @@ namespace utils {
         uint64_t column_;
     };
 
-    void call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback,
-                   RowsFromColumnsTransformer&& transformer);
-
     template <class BitVectorType = bit_vector_stat>
     std::vector<std::unique_ptr<bit_vector>>
     transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix);
 
+    // indexes are distinct and sorted
+    sdsl::bit_vector subvector(const bit_vector &col,
+                               const std::vector<uint64_t> &indexes);
 
     template <typename T>
     std::vector<T> arange(T first, size_t size) {
@@ -357,11 +372,6 @@ namespace utils {
         std::iota(result.begin(), result.end(), first);
         return result;
     }
-
-
-    // indexes are distinct and sorted
-    sdsl::bit_vector subvector(const bit_vector &col,
-                               const std::vector<uint64_t> &indexes);
 
     std::vector<uint64_t> sample_indexes(uint64_t universe_size,
                                          uint64_t sample_size,

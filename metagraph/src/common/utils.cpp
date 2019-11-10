@@ -29,51 +29,31 @@ RowsFromColumnsTransformer
     init_heap();
 }
 
-template <typename BitVectorPtr>
 RowsFromColumnsTransformer
-::RowsFromColumnsTransformer(const std::vector<BitVectorPtr> &columns) {
-    if (!columns.size()) {
-        num_rows_ = 0;
-        return;
-    }
-
-    num_rows_ = columns.at(0)->size();
-    for (const auto &column : columns) {
-        if (column->size() != num_rows_)
-            throw std::runtime_error("Error: columns are not of the same size");
-    }
-
-    streams_.reserve(columns.size());
-    for (const auto &col_ptr : columns) {
-        streams_.emplace_back(new VectorBitStream(*col_ptr));
-    }
-
-    init_heap();
+::RowsFromColumnsTransformer(const std::vector<const bit_vector*> &columns) {
+    initialize(columns);
 }
 
-template
 RowsFromColumnsTransformer
-::RowsFromColumnsTransformer(const std::vector<const bit_vector_small*> &);
-
-template
-RowsFromColumnsTransformer
-::RowsFromColumnsTransformer(const std::vector<std::unique_ptr<bit_vector_sd>> &);
-
-template
-RowsFromColumnsTransformer
-::RowsFromColumnsTransformer(const std::vector<std::unique_ptr<bit_vector_small>> &);
-
-template
-RowsFromColumnsTransformer
-::RowsFromColumnsTransformer(const std::vector<std::unique_ptr<bit_vector>> &);
-
-template
-RowsFromColumnsTransformer
-::RowsFromColumnsTransformer(const std::vector<std::shared_ptr<bit_vector_small>> &);
-
+::RowsFromColumnsTransformer(const std::vector<std::unique_ptr<bit_vector>> &columns) {
+    std::vector<const bit_vector*> cols;
+    for (const auto &col_ptr : columns) {
+        cols.push_back(col_ptr.get());
+    }
+    initialize(cols);
+}
 
 RowsFromColumnsTransformer
-::RowsFromColumnsTransformer(const bit_vector_small &columns_concatenated,
+::RowsFromColumnsTransformer(const std::vector<std::shared_ptr<bit_vector>> &columns) {
+    std::vector<const bit_vector*> cols;
+    for (const auto &col_ptr : columns) {
+        cols.push_back(col_ptr.get());
+    }
+    initialize(cols);
+}
+
+RowsFromColumnsTransformer
+::RowsFromColumnsTransformer(const bit_vector &columns_concatenated,
                              uint64_t column_size) {
     assert(columns_concatenated.size() % column_size == 0);
 
@@ -89,6 +69,27 @@ RowsFromColumnsTransformer
         streams_.emplace_back(new VectorBitStream(columns_concatenated,
                                                   column_size * i,
                                                   column_size * (i + 1)));
+    }
+
+    init_heap();
+}
+
+void RowsFromColumnsTransformer
+::initialize(const std::vector<const bit_vector*> &columns) {
+    if (!columns.size()) {
+        num_rows_ = 0;
+        return;
+    }
+
+    num_rows_ = columns.at(0)->size();
+    for (const auto &column : columns) {
+        if (column->size() != num_rows_)
+            throw std::runtime_error("Error: columns are not of the same size");
+    }
+
+    streams_.reserve(columns.size());
+    for (const auto &col_ptr : columns) {
+        streams_.emplace_back(new VectorBitStream(*col_ptr));
     }
 
     init_heap();
@@ -161,13 +162,13 @@ std::vector<uint64_t> RowsFromColumnsIterator::next_row() {
     return indices;
 }
 
-void call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback,
-               RowsFromColumnsTransformer&& transformer) {
+void RowsFromColumnsTransformer
+::call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback) {
     uint64_t cur_row = 0;
     std::vector<uint64_t> indices;
 
-    while (transformer.values_left()) {
-        transformer.call_next([&](uint64_t row, uint64_t column) {
+    while (values_left()) {
+        call_next([&](uint64_t row, uint64_t column) {
             while (cur_row < row) {
                 callback(indices);
                 indices.clear();
@@ -177,12 +178,12 @@ void call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback
         });
     }
 
-    while (cur_row++ < transformer.rows()) {
+    while (cur_row++ < rows()) {
         callback(indices);
         indices.clear();
     }
 
-    assert(!transformer.values_left());
+    assert(!values_left());
 }
 
 template <class BitVectorType>
@@ -196,16 +197,18 @@ transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix) {
     uint64_t num_columns = matrix[0]->size();
     transposed.reserve(num_columns);
 
-    utils::call_rows(
+    RowsFromColumnsTransformer transformer(matrix);
+    //TODO: use call_next directly, without creating std::vector<uint64_t>
+    transformer.call_rows(
         [&](const std::vector<uint64_t> &column_indices) {
             sdsl::bit_vector bv(num_rows, false);
             for (const auto &row_id : column_indices) {
                 bv[row_id] = true;
             }
             transposed.emplace_back(new BitVectorType(std::move(bv)));
-        },
-        matrix
+        }
     );
+
     return transposed;
 }
 

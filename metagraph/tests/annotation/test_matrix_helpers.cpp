@@ -215,7 +215,7 @@ BinMat build_matrix_from_rows(BitVectorPtrArray&& columns, uint64_t num_rows) {
 
     return build_matrix_from_rows<BinMat>(
         [&](auto row_callback) {
-            utils::call_rows(row_callback, std::move(columns));
+            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
         },
         num_columns, num_rows, num_set_bits
     );
@@ -244,7 +244,7 @@ BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_row
 
     return build_matrix_from_rows<BinMat>(
         [&](auto row_callback) {
-            utils::call_rows(row_callback, columns);
+            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
         },
         num_columns, num_rows, num_set_bits
     );
