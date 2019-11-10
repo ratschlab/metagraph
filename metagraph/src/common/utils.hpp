@@ -145,7 +145,7 @@ namespace utils {
         return mask;
     }
 
-    inline uint32_t code_length(uint64_t x) { return sdsl::bits::hi(x) + 1; }
+    inline uint8_t code_length(uint64_t x) { return sdsl::bits::hi(x) + 1; }
 
     inline uint64_t max_uint(uint8_t width) { return ~uint64_t(0) >> (64 - width); }
 

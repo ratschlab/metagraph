@@ -53,7 +53,7 @@ class BOSS::Chunk {
     static constexpr auto kFileExtension = ".dbg.chunk";
 
   private:
-    uint8_t extended_alph_size() const;
+    uint8_t get_W_width() const;
 
     size_t alph_size_;
     size_t k_;
