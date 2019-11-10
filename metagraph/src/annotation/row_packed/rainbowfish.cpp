@@ -60,7 +60,7 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
             v.clear();
 
             uint64_t code = vector_coder.size();
-            coded_rows_size += utils::code_length(code) * index_count.second;
+            coded_rows_size += (sdsl::bits::hi(code) + 1) * index_count.second;
             coded_rows_set_bits += sdsl::bits::cnt(code) * index_count.second;
 
             assert(vector_coder.find(vectors[index_count.first]) == vector_coder.end());
@@ -76,7 +76,7 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
         if (vector_coder.size()) {
             auto code_find = vector_coder.find(row_indices_small);
             if (code_find != vector_coder.end()) {
-                coded_rows_size += utils::code_length(code_find.value());
+                coded_rows_size += sdsl::bits::hi(code_find.value()) + 1;
                 coded_rows_set_bits += sdsl::bits::cnt(code_find.value());
                 return;
             }
@@ -120,7 +120,7 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
         num_relations_ += row_indices_small.size();
 
         uint64_t code = vector_coder[row_indices_small];
-        uint64_t code_length = utils::code_length(code);
+        uint64_t code_length = sdsl::bits::hi(code) + 1;
 
         assert(code % buffer_size_
             < reduced_matrix_[code / buffer_size_]->num_rows());
