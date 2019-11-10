@@ -1,15 +1,13 @@
 #ifndef __METHOD_CONSTRUCTORS_HPP__
 #define __METHOD_CONSTRUCTORS_HPP__
 
-#include <sdsl/rrr_vector.hpp>
-
 #include "static_annotators_def.hpp"
 #include "BRWT_builders.hpp"
 #include "column_major.hpp"
 #include "data_generation.hpp"
 #include "vector_row_binmat.hpp"
 #include "partitionings.hpp"
-#include "utils.hpp"
+#include "bitmap_mergers.hpp"
 #include "threading.hpp"
 
 

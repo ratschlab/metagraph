@@ -3,7 +3,6 @@
 #include <cassert>
 #include <iterator>
 
-#include "utils.hpp"
 #include "serialization.hpp"
 
 typedef brwt::binary_relation::object_id object_id;

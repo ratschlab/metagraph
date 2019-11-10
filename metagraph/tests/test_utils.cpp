@@ -3,8 +3,10 @@
 
 #include "annotate_column_compressed.hpp"
 #include "utils.hpp"
+#include "vectors.hpp"
 #include "string_utils.hpp"
 #include "file_utils.hpp"
+#include "bitmap_mergers.hpp"
 #include "threading.hpp"
 #include "bit_vector.hpp"
 #include "deque_vector.hpp"
@@ -34,6 +36,7 @@ const std::vector<std::vector<uint64_t>> indices {
     { 4, 1 },
     { 5, 0 }, { 5, 1 }
 };
+
 
 utils::RowsFromColumnsTransformer generate_rct_file() {
     annotate::ColumnCompressed<> annotation(6);

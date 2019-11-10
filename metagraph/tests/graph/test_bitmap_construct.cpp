@@ -15,7 +15,7 @@
 
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "reverse_complement.hpp"
 #include "sorted_set.hpp"
 

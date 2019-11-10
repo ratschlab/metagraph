@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "utils.hpp"
+#include "serialization.hpp"
 
 
 BinRelWT_sdsl
