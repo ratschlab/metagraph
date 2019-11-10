@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "binary_matrix.hpp"
-#include "utils.hpp"
+#include "vectors.hpp"
 
 
 template <typename RowType = SmallVector<uint32_t>>

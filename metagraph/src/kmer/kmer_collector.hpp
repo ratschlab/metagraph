@@ -2,7 +2,6 @@
 #define __KMER_COLLECTOR_HPP__
 
 #include "kmer_extractor.hpp"
-#include "kmer_collector.hpp"
 #include "threading.hpp"
 #include "sorted_set.hpp"
 #include "sorted_multiset.hpp"

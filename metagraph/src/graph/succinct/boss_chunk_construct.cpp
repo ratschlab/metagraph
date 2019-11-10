@@ -2,6 +2,7 @@
 
 #include <ips4o.hpp>
 
+#include "utils.hpp"
 #include "unix_tools.hpp"
 #include "boss_chunk.hpp"
 #include "kmer_collector.hpp"

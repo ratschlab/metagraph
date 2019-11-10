@@ -2,7 +2,6 @@
 
 #include "../test_helpers.hpp"
 #include "test_annotation.hpp"
-#include "utils.hpp"
 
 
 std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotator,

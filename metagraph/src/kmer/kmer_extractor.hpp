@@ -7,9 +7,10 @@
 
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
+#include <sdsl/int_vector.hpp>
 
 #include "string_utils.hpp"
-#include "utils.hpp"
+#include "vectors.hpp"
 #include "kmer.hpp"
 #include "kmer_boss.hpp"
 #include "alphabets.hpp"

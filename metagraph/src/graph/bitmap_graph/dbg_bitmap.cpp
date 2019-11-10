@@ -4,7 +4,6 @@
 #include <cmath>
 
 #include "serialization.hpp"
-#include "utils.hpp"
 #include "dbg_bitmap_construct.hpp"
 
 

@@ -5,7 +5,7 @@
 #define protected public
 
 #include "kmer_extractor.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "reverse_complement.hpp"
 
 

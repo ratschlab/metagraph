@@ -13,6 +13,7 @@
 #include "partitionings.hpp"
 #include "string_utils.hpp"
 #include "utils.hpp"
+#include "bitmap_mergers.hpp"
 #include "binary_matrix.hpp"
 #include "annotate_row_compressed.hpp"
 #include "vector_row_binmat.hpp"

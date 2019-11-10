@@ -2,8 +2,6 @@
 
 #include <cmath>
 
-#include "utils.hpp"
-
 
 bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
                           const NodeWeights &node_weights,

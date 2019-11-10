@@ -5,6 +5,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "utils.hpp"
+#include "vectors.hpp"
 #include "serialization.hpp"
 #include "binary_matrix.hpp"
 
@@ -18,7 +19,7 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
 
     using IndexVectorMap = tsl::hopscotch_map<SmallVector<uint32_t>,
                                               uint64_t,
-                                              VectorHash>;
+                                              utils::VectorHash>;
     IndexVectorMap vector_counter;
     IndexVectorMap vector_coder;
     uint64_t coded_rows_size = 0;
