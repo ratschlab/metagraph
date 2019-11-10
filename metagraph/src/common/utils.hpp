@@ -147,7 +147,7 @@ namespace utils {
 
     inline uint8_t code_length(uint64_t x) { return sdsl::bits::hi(x) + 1; }
 
-    inline uint64_t max_uint(uint8_t width) { return ~uint64_t(0) >> (64 - width); }
+    inline uint64_t max_ull(uint8_t width) { return sdsl::bits::lo_set[width]; }
 
     template <class AIt, class BIt>
     uint64_t count_intersection(AIt first_begin, AIt first_end,
