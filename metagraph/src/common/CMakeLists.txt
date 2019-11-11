@@ -3,6 +3,7 @@ project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(Boost_NO_BOOST_CMAKE ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
 # and happily cached, thus messing up the compilation flags forever
@@ -36,6 +37,53 @@ else()
           " and enable other optimizations.")
 endif()
 
+# check for std::filesystem::temp_directory_path
+include(CheckCXXSourceRuns)
+set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+check_cxx_source_runs("
+    #include <iostream>
+    #include <filesystem>
+    int main() {
+        std::cout << std::filesystem::temp_directory_path();
+        return 0;
+    }
+" CPPNOFS)
+if(NOT CPPNOFS)
+  set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+  set(CMAKE_REQUIRED_LIBRARIES "c++fs")
+  check_cxx_source_runs("
+      #include <iostream>
+      #include <filesystem>
+      int main() {
+          std::cout << std::filesystem::temp_directory_path();
+          return 0;
+      }
+  " CPPFS)
+  unset(CMAKE_REQUIRED_FLAGS)
+  unset(CMAKE_REQUIRED_LIBRARIES)
+  if(CPPFS)
+    set(FILESYSTEM_LIBRARY -lc++fs)
+  else()
+    set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+    set(CMAKE_REQUIRED_LIBRARIES "stdc++fs")
+    check_cxx_source_runs("
+        #include <iostream>
+        #include <filesystem>
+        int main() {
+            std::cout << std::filesystem::temp_directory_path();
+            return 0;
+        }
+    " STDCPPFS)
+    unset(CMAKE_REQUIRED_FLAGS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if(STDCPPFS)
+      set(FILESYSTEM_LIBRARY -lstdc++fs)
+    else()
+      message(FATAL_ERROR "std::filesystem not found")
+    endif()
+  endif()
+endif()
+
 file(GLOB src_files "*.cpp" "*/*.cpp")
 
 add_library(metagraph_common STATIC ${src_files})
@@ -57,6 +105,7 @@ target_include_directories(metagraph_common
 target_link_libraries(metagraph_common
   PUBLIC
     ${FOLLY_LIBRARIES}
+    ${FILESYSTEM_LIBRARY}
     -lsdsl
     Boost::iostreams
 )
