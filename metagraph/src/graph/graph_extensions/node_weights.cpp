@@ -1,14 +1,15 @@
 #include "node_weights.hpp"
-#include "utils.hpp"
+
+#include "algorithms.hpp"
 
 
 NodeWeights::NodeWeights(uint64_t num_nodes, size_t bits_per_count)
       : weights_(num_nodes, 0, bits_per_count),
-        max_weight_(utils::max_uint(weights_.width())) {}
+        max_weight_(utils::max_ull(weights_.width())) {}
 
 NodeWeights::NodeWeights(sdsl::int_vector<>&& weights)
       : weights_(std::move(weights)),
-        max_weight_(utils::max_uint(weights_.width())) {}
+        max_weight_(utils::max_ull(weights_.width())) {}
 
 void NodeWeights::insert_nodes(const bitmap &nodes_inserted) {
     utils::insert(&weights_, nodes_inserted, 0);
@@ -35,7 +36,7 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
             return false;
 
         weights_.load(instream);
-        max_weight_ = utils::max_uint(weights_.width());
+        max_weight_ = utils::max_ull(weights_.width());
         return true;
 
     } catch (...) {

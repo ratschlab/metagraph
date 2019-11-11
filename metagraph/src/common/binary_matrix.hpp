@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#include "bit_vectors/bit_vector.hpp"
+#include "common/bit_vectors/bit_vector.hpp"
 
 
 class BinaryMatrix {

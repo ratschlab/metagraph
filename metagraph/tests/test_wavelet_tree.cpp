@@ -612,3 +612,11 @@ TYPED_TEST(WaveletTreeTest, operator_neq) {
         }
     }
 }
+
+TYPED_TEST(WaveletTreeTest, width) {
+    for (uint8_t width : { 1, 2, 3, 4, 5, 6, 7, 8, 15, 16, 18 }) {
+        const TypeParam wt(width, sdsl::int_vector<>(100, 1llu << (width - 1)));
+
+        EXPECT_EQ(width, wt.logsigma());
+    }
+}

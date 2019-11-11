@@ -3,6 +3,8 @@
 #include <ips4o.hpp>
 #include <progress_bar.hpp>
 
+#include "algorithms.hpp"
+
 const uint64_t kNumRowsSampled = 1'000'000;
 
 
@@ -24,7 +26,7 @@ get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < columns.size(); ++i) {
-        submatrix[i] = utils::subvector(*columns[i], row_indexes);
+        submatrix[i] = subvector(*columns[i], row_indexes);
 
 #ifndef NDEBUG
         for (size_t j = 0; j < row_indexes.size(); ++j) {

@@ -7,7 +7,7 @@
 
 #include "binary_matrix.hpp"
 #include "bit_vector.hpp"
-#include "utils.hpp"
+#include "range_partition.hpp"
 
 
 // Compress sparse binary matrix (binary relations)
@@ -59,7 +59,7 @@ class BRWT : public BinaryMatrix {
     void BFT(std::function<void(const BRWT &node)> callback) const;
 
     // assigns columns to the child nodes
-    utils::RangePartition assignments_;
+    RangePartition assignments_;
     bit_vector_small nonzero_rows_;
     std::vector<std::unique_ptr<BinaryMatrix>> child_nodes_;
 };

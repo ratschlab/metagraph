@@ -2,7 +2,7 @@
 
 #include "alphabets.hpp"
 #include "annotate_column_compressed.hpp"
-#include "utils.hpp"
+#include "algorithms.hpp"
 #include "int_vector.hpp"
 #include "masked_graph.hpp"
 

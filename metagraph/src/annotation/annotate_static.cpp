@@ -1,7 +1,8 @@
 #include "annotate_static.hpp"
 
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "static_annotators_def.hpp"
+#include "serialization.hpp"
 
 using utils::remove_suffix;
 

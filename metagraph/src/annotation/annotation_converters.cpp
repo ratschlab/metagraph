@@ -11,7 +11,10 @@
 #include "annotate_column_compressed.hpp"
 #include "BRWT_builders.hpp"
 #include "partitionings.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
+#include "template_utils.hpp"
+#include "algorithms.hpp"
+#include "bitmap_mergers.hpp"
 #include "binary_matrix.hpp"
 #include "annotate_row_compressed.hpp"
 #include "vector_row_binmat.hpp"
@@ -180,7 +183,7 @@ convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<RowConcatenated<>>([&](auto callback) {
-        utils::call_rows(callback, annotator.bitmatrix_);
+        utils::RowsFromColumnsTransformer(annotator.bitmatrix_).call_rows(callback);
     }, num_columns, num_rows, num_set_bits);
 
     return std::make_unique<RowFlatAnnotator>(std::move(matrix),
@@ -195,7 +198,7 @@ convert<RainbowfishAnnotator, std::string>(ColumnCompressed<std::string>&& annot
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        utils::call_rows(callback, annotator.bitmatrix_);
+        utils::RowsFromColumnsTransformer(annotator.bitmatrix_).call_rows(callback);
     }, num_columns);
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
@@ -274,7 +277,7 @@ convert<BinRelWT_sdslAnnotator, std::string>(ColumnCompressed<std::string>&& ann
 
     auto matrix = std::make_unique<BinRelWT_sdsl>(
         [&](auto callback) {
-            utils::call_rows(callback, annotator.bitmatrix_);
+            utils::RowsFromColumnsTransformer(annotator.bitmatrix_).call_rows(callback);
         },
         num_set_bits,
         num_columns

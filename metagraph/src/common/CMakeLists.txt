@@ -7,7 +7,7 @@ find_package(Boost REQUIRED COMPONENTS iostreams)
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
 # and happily cached, thus messing up the compilation flags forever
 unset(OpenMP_CXX_FLAGS CACHE)
-if ((CMAKE_CXX_COMPILER_ID MATCHES AppleClang) OR (CMAKE_CXX_COMPILER_ID MATCHES Clang))
+if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
   find_package(OPENMP REQUIRED)
 else()
   find_package(OpenMP REQUIRED)
@@ -17,17 +17,17 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
 set(EXTERNAL_LIB_DIR "../../external-libraries")
 link_directories(
-        ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
+  ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
 )
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
 find_library(FOLLY_LIBRARIES
-        NAMES folly
-        HINTS
-        ENV LD_LIBRARY_PATH
-        PATHS
-        $ENV{HOME}/.linuxbrew/lib
-        )
+  NAMES folly
+  HINTS
+  ENV LD_LIBRARY_PATH
+  PATHS
+    $ENV{HOME}/.linuxbrew/lib
+)
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
 else()
@@ -53,8 +53,10 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
     .. # this ensures that this libs include files are visible to its deps
 )
+
 target_link_libraries(metagraph_common
-    PUBLIC
-        ${FOLLY_LIBRARIES}
-        -lsdsl
-        Boost::iostreams)
+  PUBLIC
+    ${FOLLY_LIBRARIES}
+    -lsdsl
+    Boost::iostreams
+)
