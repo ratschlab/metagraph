@@ -775,7 +775,9 @@ namespace utils {
               : ring_buffer_(1llu << (sdsl::bits::hi(size - 1) + 1)),
                 size_(size),
                 buffer_it_mask_(ring_buffer_.size() - 1),
-                buffer_it_(buffer_it_mask_) {}
+                buffer_it_(buffer_it_mask_) {
+            assert(ring_buffer_.size() >= size);
+        }
 
         void reset() { buffer_it_ = buffer_it_mask_; }
 
