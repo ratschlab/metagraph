@@ -228,6 +228,7 @@ class Alignment {
               size_t offset = 0);
 
     // TODO: construct multiple alignments from the same starting point
+    // Since insertions into DPTable may invalidate iterators, use pointers instead
     Alignment(const DPTable &dp_table,
               const typename DPTable::value_type *column,
               size_t start_pos,
@@ -380,8 +381,8 @@ class QueryAlignment {
     explicit QueryAlignment(const std::string &query)
           : query_(query),
             query_rc_(query) {
-        reverse_complement(const_cast<char*>(&*query_rc_.begin()),
-                           const_cast<char*>(&*query_rc_.end()));
+        reverse_complement(const_cast<char*>(query_rc_.data()),
+                           const_cast<char*>(query_rc_.data() + query_rc_.size()));
     }
 
     size_t size() const { return alignments_.size(); }
@@ -392,13 +393,13 @@ class QueryAlignment {
         alignments_.emplace_back(std::forward<Args>(args)...);
 
         assert(alignments_.back().get_orientation()
-            || alignments_.back().get_query_begin() >= &*query_.begin());
+            || alignments_.back().get_query_begin() >= query_.c_str());
         assert(alignments_.back().get_orientation()
-            || alignments_.back().get_query_end() <= &*query_.end());
+            || alignments_.back().get_query_end() <= query_.c_str() + query_.size());
         assert(!alignments_.back().get_orientation()
-            || alignments_.back().get_query_begin() >= &*query_rc_.begin());
+            || alignments_.back().get_query_begin() >= query_rc_.c_str());
         assert(!alignments_.back().get_orientation()
-            || alignments_.back().get_query_end() <= &*query_rc_.end());
+            || alignments_.back().get_query_end() <= query_rc_.c_str() + query_rc_.size());
     }
 
     void push_back(const value_type &alignment) { emplace_back(alignment); }
@@ -441,15 +442,15 @@ class QueryAlignment {
             const auto &other_query = alignment.get_orientation() ? query_rc : query;
             const auto &this_query = alignment.get_orientation() ? query_rc_ : query_;
 
-            assert(alignment.get_query_begin() >= &*other_query.begin());
-            assert(alignment.get_query_end() <= &*other_query.end());
+            assert(alignment.get_query_begin() >= other_query.c_str());
+            assert(alignment.get_query_end() <= other_query.c_str() + other_query.size());
 
             alignment.set_query_begin(
-                this_query.c_str() + (alignment.get_query_begin() - &*other_query.begin())
+                this_query.c_str() + (alignment.get_query_begin() - other_query.c_str())
             );
 
-            assert(alignment.get_query_begin() >= &*this_query.begin());
-            assert(alignment.get_query_end() <= &*this_query.end());
+            assert(alignment.get_query_begin() >= this_query.c_str());
+            assert(alignment.get_query_end() <= this_query.c_str() + this_query.size());
         }
     }
 
