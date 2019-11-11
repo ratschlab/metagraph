@@ -8,13 +8,10 @@
 - HTSlib
 - boost
 - folly (optional)
-- Google Test
 - Python 3 (for running integration tests)
 
-Most can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh)
+All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh)
 
-Google Test installation instructions are
-[here](https://medium.com/@alexanderbussan/getting-started-with-google-test-on-os-x-a07eee7ae6dc)
 #### For compiling with GNU GCC:
 ```
 brew install gcc autoconf automake libtool cmake make htslib
@@ -202,6 +199,29 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
                         -a <GRAPH_DIR>/annotation.column.annodbg \
                         --discovery-fraction 0.8 --labels-delimiter ", " \
                         query_seq.fa
+```
+
+### Align to graph
+```bash
+./metagraph align -v -i <GRAPH_DIR>/graph.dbg query_seq.fa
+```
+
+### Assemble sequences
+```bash
+./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
+                        -o assembled.fa \
+                        --unitigs
+```
+
+### Assemble differential sequences
+```bash
+./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
+                        --unitigs \
+                        -a <GRAPH_DIR>/annotation.column.annodbg \
+                        --label-mask-in LABEL_1 \
+                        --label-mask-in LABEL_2 \
+                        --label-mask-out LABEL_3 \
+                        -o diff_assembled.fa
 ```
 
 ### Get stats
