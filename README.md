@@ -201,6 +201,29 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
                         query_seq.fa
 ```
 
+### Align to graph
+```bash
+./metagraph align -v -i <GRAPH_DIR>/graph.dbg query_seq.fa
+```
+
+### Assemble sequences
+```bash
+./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
+                        -o assembled.fa \
+                        --unitigs
+```
+
+### Assemble differential sequences
+```bash
+./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
+                        --unitigs \
+                        -a <GRAPH_DIR>/annotation.column.annodbg \
+                        --label-mask-in LABEL_1 \
+                        --label-mask-in LABEL_2 \
+                        --label-mask-out LABEL_3 \
+                        -o diff_assembled.fa
+```
+
 ### Get stats
 Stats for graph
 ```bash
