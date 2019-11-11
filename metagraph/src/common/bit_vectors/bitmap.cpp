@@ -1,5 +1,6 @@
 #include "bitmap.hpp"
-#include "utils.hpp"
+
+#include "algorithms.hpp"
 #include "bit_vector.hpp"
 
 

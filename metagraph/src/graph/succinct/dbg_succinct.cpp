@@ -8,7 +8,8 @@
 
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
+#include "algorithms.hpp"
 
 using utils::remove_suffix;
 

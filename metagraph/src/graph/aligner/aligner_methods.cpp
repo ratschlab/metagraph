@@ -5,7 +5,6 @@
 
 #include "dbg_succinct.hpp"
 #include "bounded_priority_queue.hpp"
-#include "utils.hpp"
 
 
 template <typename NodeType>

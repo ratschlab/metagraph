@@ -2,7 +2,7 @@
 
 #include "kmer_extractor.hpp"
 #include "serialization.hpp"
-#include "utils.hpp"
+#include "algorithms.hpp"
 
 typedef KmerExtractorBOSS KmerDef;
 typedef KmerDef::TAlphabet TAlphabet;

@@ -4,7 +4,6 @@
 
 #include "serialization.hpp"
 #include "bit_vector.hpp"
-#include "utils.hpp"
 #include "alphabets.hpp"
 
 

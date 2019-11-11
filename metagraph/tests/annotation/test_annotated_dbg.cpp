@@ -3,6 +3,7 @@
 #include <set>
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
 #include "annotation_converters.hpp"

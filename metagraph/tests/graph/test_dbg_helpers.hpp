@@ -13,8 +13,6 @@
 #include "dbg_bitmap.hpp"
 #include "aligner_helper.hpp"
 
-std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
-
 
 template <size_t numerator, size_t denominator>
 class DBGSuccinctBloomFPR : public DBGSuccinct {

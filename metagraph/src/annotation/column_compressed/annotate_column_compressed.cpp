@@ -5,7 +5,9 @@
 #include <stdexcept>
 
 #include "serialization.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
+#include "algorithms.hpp"
+#include "bitmap_mergers.hpp"
 #include "threading.hpp"
 #include "annotate_row_compressed.hpp"
 
