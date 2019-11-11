@@ -10,7 +10,6 @@
 #include <queue>
 #include <utility>
 #include <bitset>
-#include <boost/functional/hash/hash.hpp>
 
 #if _USE_FOLLY
 #include <folly/FBVector.h>
@@ -35,17 +34,18 @@
 #endif
 
 #include "serialization.hpp"
-#include "binary_matrix.hpp"
 
 
 struct VectorHash {
     template <class Vector>
     std::size_t operator()(const Vector &vector) const {
-        return boost::hash_range(vector.begin(), vector.end());
+        uint64_t hash = 0;
+        for (uint64_t value : vector) {
+            hash ^= value + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        }
+        return static_cast<std::size_t>(hash);
     }
 };
-
-class BinaryMatrix;
 
 
 namespace utils {
@@ -448,10 +448,7 @@ namespace utils {
         uint64_t column_;
     };
 
-    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
-                   const BinaryMatrix &row_major_matrix);
-
-    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
+    void call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback,
                    RowsFromColumnsTransformer&& transformer);
 
     template <class BitVectorType = bit_vector_stat>
