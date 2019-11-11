@@ -1,9 +1,11 @@
 #ifndef __ROLLING_HASHER_HPP__
 #define __ROLLING_HASHER_HPP__
 
-#include "common/utils.hpp"
+#include <vector>
 
 #include <cyclichash.h>
+
+#include "utils.hpp"
 
 
 template <typename TAlphabet = uint8_t>

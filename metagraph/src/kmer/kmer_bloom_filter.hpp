@@ -1,10 +1,10 @@
 #ifndef __KMER_BLOOM_FILTER_HPP__
 #define __KMER_BLOOM_FILTER_HPP__
 
-#include "common/hash/rolling_hasher.hpp"
-#include "common/hash/bloom_filter.hpp"
-
 #include <iostream>
+
+#include "rolling_hasher.hpp"
+#include "bloom_filter.hpp"
 
 
 // Bloom filter for approximate membership queries on k-mers

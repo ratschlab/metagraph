@@ -1,10 +1,10 @@
 #ifndef __BLOOM_FILTER_HPP__
 #define __BLOOM_FILTER_HPP__
 
-#include <sdsl/int_vector.hpp>
-
 #include <iostream>
 #include <cmath>
+
+#include <sdsl/int_vector.hpp>
 
 
 class BloomFilter {

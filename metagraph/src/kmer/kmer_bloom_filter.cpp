@@ -1,8 +1,8 @@
-#include "kmer/kmer_bloom_filter.hpp"
+#include "kmer_bloom_filter.hpp"
 
-#include "kmer/kmer_extractor.hpp"
-#include "common/serialization.hpp"
-#include "common/utils.hpp"
+#include "kmer_extractor.hpp"
+#include "serialization.hpp"
+#include "utils.hpp"
 
 typedef KmerExtractorBOSS KmerDef;
 typedef KmerDef::TAlphabet TAlphabet;
