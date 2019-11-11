@@ -1,8 +1,9 @@
 #include "wavelet_tree.hpp"
 
 #include <cassert>
+
+#include "algorithms.hpp"
 #include "serialization.hpp"
-#include "utils.hpp"
 
 
 // TODO: run benchmarks and optimize these parameters

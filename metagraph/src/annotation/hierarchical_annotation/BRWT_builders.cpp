@@ -3,12 +3,13 @@
 #include <omp.h>
 #include <progress_bar.hpp>
 
-#include "utils.hpp"
+#include "algorithms.hpp"
 
 const uint64_t kBlockSize = 1'000'000 / 64 * 64;
 
 // Each block is a multiple of 64 bits for thread safety
 static_assert((kBlockSize % 64) == 0);
+
 
 BRWT
 BRWTBuilder::initialize(NodeBRWT&& node, bit_vector&& nonzero_rows) {

@@ -3,7 +3,7 @@
 #include <ips4o.hpp>
 #include <progress_bar.hpp>
 
-#include "utils.hpp"
+#include "algorithms.hpp"
 
 const uint64_t kNumRowsSampled = 1'000'000;
 

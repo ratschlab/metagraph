@@ -1,11 +1,10 @@
-#ifndef __UTILS_HPP__
-#define __UTILS_HPP__
+#ifndef __ALGORITHMS_HPP__
+#define __ALGORITHMS_HPP__
 
 #include <vector>
 #include <functional>
 #include <utility>
 #include <set>
-#include <bitset>
 
 #include "bitmap.hpp"
 
@@ -21,75 +20,6 @@ namespace utils {
 
     bool get_verbose();
     void set_verbose(bool verbose);
-
-    template <typename T>
-    struct Hash {
-        size_t operator()(const T &x) const {
-            return hasher(reinterpret_cast<const std::bitset<sizeof(T) * 8>&>(x));
-        }
-
-        std::hash<std::bitset<sizeof(T) * 8>> hasher;
-    };
-
-    struct VectorHash {
-        template <class Vector>
-        std::size_t operator()(const Vector &vector) const {
-            uint64_t hash = 0;
-            for (uint64_t value : vector) {
-                hash ^= value + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-            }
-            return static_cast<std::size_t>(hash);
-        }
-    };
-
-    template <typename T>
-    struct is_pair : std::false_type {};
-
-    template <typename T1, typename T2>
-    struct is_pair<std::pair<T1,T2>> : std::true_type {};
-
-    static_assert(is_pair<std::pair<int,size_t>>::value);
-    static_assert(is_pair<std::pair<uint64_t,size_t>>::value);
-
-    static_assert(!is_pair<std::tuple<int,size_t>>::value);
-    static_assert(!is_pair<int>::value);
-
-    template <typename, template <typename, typename...> class>
-    struct is_instance : public std::false_type {};
-
-    template <typename... Ts, template <typename, typename...> class U>
-    struct is_instance<U<Ts...>, U> : public std::true_type {};
-
-    template <class T> struct dependent_false : std::false_type {};
-
-    template <typename T, typename... Us>
-    inline const T& get_first(const std::tuple<T, Us...> &tuple) { return std::get<0>(tuple); }
-
-    template <typename T, typename... Us>
-    inline T& get_first(std::tuple<T, Us...> &tuple) { return std::get<0>(tuple); }
-
-    template <typename T, typename U>
-    inline const T& get_first(const std::pair<T, U> &pair) { return pair.first; }
-
-    template <typename T, typename U>
-    inline T& get_first(std::pair<T, U> &pair) { return pair.first; }
-
-    template <typename T>
-    inline T& get_first(T &value) { return value; }
-
-    template <typename T>
-    struct LessFirst {
-        bool operator()(const T &p1, const T &p2) const {
-            return get_first(p1) < get_first(p2);
-        }
-    };
-
-    template <typename T>
-    struct EqualFirst {
-        bool operator()(const T &p1, const T &p2) const {
-            return get_first(p1) == get_first(p2);
-        }
-    };
 
     /**
      *  This function checks whether two given strings are identical.
@@ -300,4 +230,4 @@ namespace utils {
 
 } // namespace utils
 
-#endif // __UTILS_HPP__
+#endif // __ALGORITHMS_HPP__

@@ -1,6 +1,6 @@
 #include "binary_matrix.hpp"
 
-#include "utils.hpp"
+#include "algorithms.hpp"
 #include "serialization.hpp"
 
 

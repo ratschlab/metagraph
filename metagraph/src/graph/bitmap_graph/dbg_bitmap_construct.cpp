@@ -4,7 +4,8 @@
 
 #include "kmer_collector.hpp"
 #include "node_weights.hpp"
-#include "utils.hpp"
+#include "template_utils.hpp"
+#include "algorithms.hpp"
 
 
 template <typename KmerStorage>
