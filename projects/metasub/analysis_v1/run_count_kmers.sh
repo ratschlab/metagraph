@@ -27,4 +27,4 @@ do
     fnames_file=${fnames_dir}/${uuid}.txt
     echo $line | cut -f 41 -d ',' | tr ':' '\n' > $fnames_file
     echo "$(pwd)/count_kmers.sh $K $fnames_file $outdir $uuid" | bsub -M $mem -n $threads -R "rusage[mem=${pmem}]" -We 12:00 -n 1 -J kmc_metasub -o ${outdir}/${uuid}.k${K}.cluster.log
-done < complete_metadata_extended.clean.csv
+done < ../complete_metadata_extended.clean.csv

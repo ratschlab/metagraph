@@ -130,7 +130,7 @@ bool Cigar::is_valid(const char *reference_begin, const char *reference_end,
                     return false;
                 }
 
-                if (strncmp(&*ref_it, &*alt_it, op.second)) {
+                if (strncmp(ref_it, alt_it, op.second)) {
                     std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
                               << to_string() << std::endl
                               << std::string(reference_begin, reference_end) << std::endl
@@ -197,19 +197,17 @@ bool Cigar::is_valid(const char *reference_begin, const char *reference_end,
 
     if (ref_it != reference_end) {
         std::cerr << "Reference end not reached" << std::endl
-
-                              << to_string() << std::endl
-                              << std::string(reference_begin, reference_end) << std::endl
-                              << std::string(query_begin, query_end) << std::endl;
+                  << to_string() << std::endl
+                  << std::string(reference_begin, reference_end) << std::endl
+                  << std::string(query_begin, query_end) << std::endl;
         return false;
     }
 
     if (alt_it != query_end) {
         std::cerr << "Query end not reached" << std::endl
-
-                              << to_string() << std::endl
-                              << std::string(reference_begin, reference_end) << std::endl
-                              << std::string(query_begin, query_end) << std::endl;
+                  << to_string() << std::endl
+                  << std::string(reference_begin, reference_end) << std::endl
+                  << std::string(query_begin, query_end) << std::endl;
         return false;
     }
 
@@ -250,8 +248,6 @@ DBGAlignerConfig::score_t DBGAlignerConfig
               const char *query_begin, const char *query_end,
               const Cigar &cigar) const {
     score_t score = 0;
-    const char *ref_it = reference_begin;
-    const char *alt_it = query_begin;
 
     assert(cigar.is_valid(reference_begin, reference_end, query_begin, query_end));
     std::ignore = reference_end;
@@ -262,22 +258,24 @@ DBGAlignerConfig::score_t DBGAlignerConfig
             case Cigar::Operator::CLIPPED:
                 break;
             case Cigar::Operator::MATCH: {
-                score += match_score(ref_it, ref_it + op.second);
-                ref_it += op.second;
-                alt_it += op.second;
+                score += match_score(reference_begin, reference_begin + op.second);
+                reference_begin += op.second;
+                query_begin += op.second;
             } break;
             case Cigar::Operator::MISMATCH: {
-                score += score_sequences(ref_it, ref_it + op.second, alt_it);
-                ref_it += op.second;
-                alt_it += op.second;
+                score += score_sequences(reference_begin,
+                                         reference_begin + op.second,
+                                         query_begin);
+                reference_begin += op.second;
+                query_begin += op.second;
             } break;
             case Cigar::Operator::INSERTION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
-                alt_it += op.second;
+                query_begin += op.second;
             } break;
             case Cigar::Operator::DELETION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
-                ref_it += op.second;
+                reference_begin += op.second;
             } break;
         }
     }
@@ -496,7 +494,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         score_(score),
         orientation_(orientation),
         offset_(offset) {
-    assert(column != &*dp_table.end());
+    assert(column);
 
     auto i = start_pos;
     const auto* step = &column->second.steps.at(i);
@@ -517,8 +515,9 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         if (step->cigar_op == Cigar::Operator::MATCH)
             num_matches_++;
 
-        column = &*dp_table.find(step->prev_node);
-        assert(column != &*dp_table.end());
+        auto find = dp_table.find(step->prev_node);
+        assert(find != dp_table.end());
+        column = &*find;
 
         step = &column->second.steps.at(i);
     }
@@ -596,8 +595,10 @@ void Alignment<NodeType>::append(Alignment&& other, size_t overlap, int8_t match
 
 template <typename NodeType>
 void Alignment<NodeType>::recompute_score(const DBGAlignerConfig &config) {
-    auto new_score = config.score_cigar(&*sequence_.begin(), &*sequence_.end(),
-                                        query_begin_, query_end_,
+    auto new_score = config.score_cigar(sequence_.c_str(),
+                                        sequence_.c_str() + sequence_.size(),
+                                        query_begin_,
+                                        query_end_,
                                         cigar_);
 
     if (utils::get_verbose() && score_ != new_score)
@@ -942,14 +943,16 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
         return false;
     }
 
-    if (!cigar_.is_valid(&*sequence_.begin(), &*sequence_.end(),
+    if (!cigar_.is_valid(sequence_.c_str(), sequence_.c_str() + sequence_.size(),
                          query_begin_, query_end_)) {
         std::cerr << "ERROR: CIGAR invalid" << std::endl;
         return false;
     }
 
-    if (config && score_ != config->score_cigar(&*sequence_.begin(), &*sequence_.end(),
-                                                query_begin_, query_end_,
+    if (config && score_ != config->score_cigar(sequence_.c_str(),
+                                                sequence_.c_str() + sequence_.size(),
+                                                query_begin_,
+                                                query_end_,
                                                 cigar_)) {
         std::cerr << "ERROR: mismatch between CIGAR and score" << std::endl
                   << *this << std::endl;

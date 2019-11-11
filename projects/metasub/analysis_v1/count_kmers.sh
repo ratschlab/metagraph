@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 
-KMC="$(dirname ${BASH_SOURCE[0]})/../../metagraph/build/KMC/kmc"
+KMC="$(dirname ${BASH_SOURCE[0]})/../../../metagraph/build/KMC/kmc"
 
 
 if [ $# -ne 4 ]; then

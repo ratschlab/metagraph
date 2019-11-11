@@ -62,7 +62,7 @@ class DBGAligner : public IDBGAligner {
 
         seeder.initialize(query, orientation);
 
-        align(&*query_alignment.begin(), &*query_alignment.end(),
+        align(query_alignment.c_str(), query_alignment.c_str() + query_alignment.size(),
               [&](DBGAlignment&& path) {
                   paths.emplace_back(std::move(path));
               },
@@ -84,7 +84,7 @@ class DBGAligner : public IDBGAligner {
 
         seeder.initialize(forward, false);
 
-        align(&*forward.begin(), &*forward.end(),
+        align(forward.c_str(), forward.c_str() + forward.size(),
               [&](DBGAlignment&& alignment) {
                   all_paths.emplace_back(std::move(alignment));
               },
@@ -96,7 +96,7 @@ class DBGAligner : public IDBGAligner {
 
         seeder.initialize(rev_comp, true);
 
-        align(&*rev_comp.begin(), &*rev_comp.end(),
+        align(rev_comp.c_str(), rev_comp.c_str() + rev_comp.size(),
               [&](DBGAlignment&& alignment) {
                   all_paths.emplace_back(std::move(alignment));
               },
@@ -121,16 +121,12 @@ class DBGAligner : public IDBGAligner {
     }
 
     // Align a sequence to the graph
-    void align(const char *query_begin_it,
-               const char *query_end_it,
+    void align(const char *query_begin,
+               const char *query_end,
                const std::function<void(DBGAlignment&&)> &callback,
                bool orientation,
                score_t min_path_score,
                const Seeder &seeder) const {
-
-        const char *query_begin = &*query_begin_it;
-        const char *query_end = &*query_end_it;
-
         min_path_score = std::max(min_path_score, config_.min_cell_score);
 
         BoundedPriorityQueue<DBGAlignment> path_queue(config_.num_alternative_paths);

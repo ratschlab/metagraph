@@ -737,6 +737,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\t   --fwd-and-reverse \t\talign both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
@@ -750,8 +751,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
-            fprintf(stderr, "\t   --json \t\t\t\toutput alignment in JSON format [off]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
+            fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
