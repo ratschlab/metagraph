@@ -273,10 +273,9 @@ template <typename KMER>
 using KmerCollectorVectorDisk = KmerCollectorDisk<KMER, KmerExtractorBOSS>;
 
 template <typename KMER>
-using KmerCounterDeque =
-    KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                utils::DequeStorage<std::pair<KMER, uint8_t>>,
-                utils::NoCleanup>;
+using KmerCounterDeque = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
+                                     utils::DequeStorage<std::pair<KMER, uint8_t>>,
+                                     utils::NoCleanup>;
 template <typename KMER>
 using KmerCounterDequeClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
                                           utils::DequeStorage<std::pair<KMER, uint8_t>>,
