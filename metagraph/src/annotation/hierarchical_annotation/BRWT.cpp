@@ -3,8 +3,8 @@
 #include <queue>
 #include <numeric>
 
+#include "algorithms.hpp"
 #include "serialization.hpp"
-#include "utils.hpp"
 
 
 bool BRWT::get(Row row, Column column) const {

@@ -5,7 +5,7 @@
 #include <tsl/hopscotch_map.h>
 #include <ips4o.hpp>
 
-#include "utils.hpp"
+#include "hash_utils.hpp"
 #include "vectors.hpp"
 #include "serialization.hpp"
 #include "binary_matrix.hpp"

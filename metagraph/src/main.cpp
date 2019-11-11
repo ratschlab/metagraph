@@ -12,7 +12,7 @@
 #include "annotate_row_compressed.hpp"
 #include "annotate_column_compressed.hpp"
 #include "serialization.hpp"
-#include "utils.hpp"
+#include "algorithms.hpp"
 #include "string_utils.hpp"
 #include "file_utils.hpp"
 #include "threading.hpp"

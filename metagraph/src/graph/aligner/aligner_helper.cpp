@@ -1,6 +1,6 @@
 #include "aligner_helper.hpp"
 
-#include "utils.hpp"
+#include "algorithms.hpp"
 #include "alphabets.hpp"
 
 

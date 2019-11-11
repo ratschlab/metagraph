@@ -2,8 +2,9 @@
 
 #include <boost/multiprecision/integer.hpp>
 
+#include "algorithms.hpp"
+#include "template_utils.hpp"
 #include "serialization.hpp"
-#include "utils.hpp"
 
 
 template <typename KMER, typename COUNT>

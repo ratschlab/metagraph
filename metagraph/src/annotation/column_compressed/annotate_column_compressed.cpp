@@ -6,7 +6,7 @@
 
 #include "serialization.hpp"
 #include "string_utils.hpp"
-#include "utils.hpp"
+#include "algorithms.hpp"
 #include "bitmap_mergers.hpp"
 #include "threading.hpp"
 #include "annotate_row_compressed.hpp"

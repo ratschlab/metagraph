@@ -5,7 +5,7 @@
 
 #include "serialization.hpp"
 #include "threading.hpp"
-#include "utils.hpp"
+#include "algorithms.hpp"
 
 
 template <typename RowType>

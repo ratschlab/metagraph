@@ -4,7 +4,7 @@
 
 #include "serialization.hpp"
 #include "bit_vector.hpp"
-#include "utils.hpp"
+#include "hash_utils.hpp"
 
 
 template <typename KMER = KmerExtractor2Bit::Kmer64>

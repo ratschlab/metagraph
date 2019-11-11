@@ -4,7 +4,7 @@
 #include <ips4o.hpp>
 
 #include "kmer.hpp"
-#include "utils.hpp"
+#include "template_utils.hpp"
 #include "unix_tools.hpp"
 #include "reverse_complement.hpp"
 
