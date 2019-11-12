@@ -114,9 +114,6 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          bool call_unitigs = false,
                          uint64_t min_tip_size = 0,
                          bool kmers_in_single_form = false) {
-    if (!graph.in_graph(start))
-        return;
-
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
     assert(visited);
@@ -275,8 +272,10 @@ void call_sequences(const DeBruijnGraph &graph,
                     bool call_unitigs,
                     uint64_t min_tip_size = 0,
                     bool kmers_in_single_form = false) {
+    // TODO if-statement (graph.continuous_indexed)
     sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
+    //sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
     sdsl::bit_vector visited = discovered;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
@@ -334,7 +333,6 @@ void call_sequences(const DeBruijnGraph &graph,
     //  ____.____
     //       \___
     //
-    // TODO if-statement (graph.continuous_indexed), if it affects performance
     call_zeros(visited, [&](auto node) {
         if (graph.in_graph(node)) {
             if (graph.has_multiple_outgoing(node)) {
@@ -358,6 +356,10 @@ void call_sequences(const DeBruijnGraph &graph,
     //});
 
     // then the rest (loops)
+    //graph.call_nodes([&](auto node) {
+    //    if (!visited[node])
+    //        call_paths_from(node);
+    //});
     call_zeros(visited, call_paths_from);
 }
 

@@ -3,7 +3,6 @@
 #include <cassert>
 
 #include <tsl/robin_set.h>
-#include <unordered_set>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "serialization.hpp"
@@ -104,6 +103,12 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
 
+    bool kmers_overlap(const Kmer &out_kmer, const Kmer &in_kmer) const {
+        KMER overlap = out_kmer;
+        overlap.to_next(k_, in_kmer[k_ - 1]);
+        return overlap == in_kmer;
+    }
+
     node_index get_index(const KmerIterator &iter) const;
     node_index get_index(const Kmer &kmer) const;
     const Kmer& get_kmer(node_index node) const;
@@ -112,6 +117,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     bool canonical_mode_;
 
     KmerIndex kmers_;
+    KmerIndex maybe_source_kmers_;
     KmerExtractor2Bit seq_encoder_;
 
     bool packed_serialization_;
@@ -132,21 +138,46 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
                                             bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
+    bool first_kmer = true;
+    KMER prev_kmer;
+
     for (const auto &kmer : sequence_to_kmers(sequence)) {
+        if (first_kmer)
+            prev_kmer = kmer;
+
         auto index_insert = kmers_.insert(kmer);
+
+        if (first_kmer || !kmers_overlap(prev_kmer, kmer))
+            maybe_source_kmers_.insert(kmer);
+
+        first_kmer = false;
 
         if (index_insert.second && nodes_inserted)
             nodes_inserted->insert_bit(get_index(index_insert.first), true);
+
+        prev_kmer = kmer;
     }
 
     if (!canonical_mode_)
         return;
 
+    first_kmer = true;
+
     for (const auto &kmer : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
+        if (first_kmer)
+            prev_kmer = kmer;
+
         auto index_insert = kmers_.insert(kmer);
+
+        if (first_kmer || !kmers_overlap(prev_kmer, kmer))
+            maybe_source_kmers_.insert(kmer);
+
+        first_kmer = false;
 
         if (index_insert.second && nodes_inserted)
             nodes_inserted->insert_bit(get_index(index_insert.first), true);
+
+        prev_kmer = kmer;
     }
 }
 
@@ -359,6 +390,9 @@ bool DBGHashFastImpl<KMER>::has_no_incoming(node_index node) const {
 
     const auto &kmer = get_kmer(node);
 
+    if (maybe_source_kmers_.find(kmer) == maybe_source_kmers_.end())
+        return false;
+
     for (char c : seq_encoder_.alphabet) {
         auto prev_kmer = kmer;
         prev_kmer.to_prev(k_, seq_encoder_.encode(c));
@@ -450,6 +484,8 @@ void DBGHashFastImpl<KMER>::serialize(std::ostream &out) const {
     if (packed_serialization_) {
         serialize_number(out, kmers_.size());
         std::for_each(kmers_.begin(), kmers_.end(), serializer);
+        serialize_number(out, maybe_source_kmers_.size());
+        std::for_each(maybe_source_kmers_.begin(), maybe_source_kmers_.end(), serializer);
     } else {
         throw std::runtime_error("not implemented");
         //serialize_number(out, std::numeric_limits<uint64_t>::max());
@@ -489,6 +525,12 @@ bool DBGHashFastImpl<KMER>::load(std::istream &in) {
             kmers_.reserve(size + 1);
             for (uint64_t i = 0; i < size; ++i) {
                 kmers_.insert(deserializer.operator()<Kmer>());
+            }
+
+            uint64_t size2 = load_number(in);
+            maybe_source_kmers_.reserve(size2 + 1);
+            for (uint64_t i = 0; i < size2; ++i) {
+                maybe_source_kmers_.insert(deserializer.operator()<Kmer>());
             }
 
         } else {

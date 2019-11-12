@@ -1865,7 +1865,7 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_indegree_traverse_back) {
                     num_incoming_edges++;
             }
             EXPECT_EQ(graph->indegree(node), num_incoming_edges)
-                << "traverse_back and indegree are inconsistent for node: " << node;
+                << "traverse_back and indegree are inconsistent for node: " << graph->get_node_sequence(node);
         });
 
         check_degree_functions(*graph);

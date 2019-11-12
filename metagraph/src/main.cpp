@@ -1,6 +1,5 @@
 #include <json/json.h>
 #include <ips4o.hpp>
-#include <chrono>
 
 #include "unix_tools.hpp"
 #include "config.hpp"
@@ -1180,7 +1179,7 @@ void parse_sequences(const std::vector<std::string> &files,
 
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
-            if (files.size() >= config.parallel) {
+            if (config.parallel > 1 && files.size() >= config.parallel) {
                 auto forward_and_reverse = config.forward_and_reverse;
 
                 // capture all required values by copying to be able
@@ -1196,6 +1195,24 @@ void parse_sequences(const std::vector<std::string> &files,
                     // add read to the graph constructor as a callback
                     call_sequence(read_stream->seq.s);
                 }, config.forward_and_reverse);
+                /*
+                std::vector<std::string> seqs;
+                read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+                    if (seqs.size() < 100) {
+                        seqs.push_back(read_stream->seq.s);
+                    } else {
+                        for (const auto &seq : seqs) {
+                            std::string s(seq);
+                            call_sequence(std::move(s));
+                        }
+                        seqs.clear();
+                    }
+                }, config.forward_and_reverse);
+                for (const auto &seq : seqs) {
+                    std::string s(seq);
+                    call_sequence(std::move(s));
+                }
+                */
             }
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -2990,12 +3007,31 @@ int main(int argc, const char *argv[]) {
             FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
                                config->header, true);
 
+            //std::vector<std::string> seqs;
             if (config->unitigs || config->min_tip_size > 1) {
-                graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); },
+                graph->call_unitigs([&](const auto &unitig, auto&&) {
+                    writer.write(unitig);
+                    /*
+                    if (seqs.size() < 100) {
+                        seqs.push_back(unitig);
+                    } else {
+                        seqs.clear();
+                    }
+                    */
+                },
                                     config->min_tip_size,
                                     config->kmers_in_single_form);
             } else {
-                graph->call_sequences([&](const auto &contig, auto&&) { writer.write(contig); },
+                graph->call_sequences([&](const auto &contig, auto&&) {
+                    writer.write(contig);
+                    /*
+                    if (seqs.size() < 100) {
+                        seqs.push_back(contig);
+                    } else {
+                        seqs.clear();
+                    }
+                    */
+                },
                                       config->kmers_in_single_form);
             }
 
