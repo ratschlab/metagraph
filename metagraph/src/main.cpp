@@ -369,14 +369,38 @@ void execute_query(const std::string &seq_name,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
                    const AnnotatedDBG &anno_graph,
-                   std::ostream &output_stream) {
+                   std::ostream &output_stream,
+                   IDBGAligner *aligner = nullptr) {
+    std::vector<std::string> sequences;
+
+    std::vector<double> weights;
+
+    if (aligner) {
+        auto alignments = aligner->align(sequence);
+        sequences.reserve(alignments.size());
+        weights.reserve(alignments.size());
+
+        for (const auto &alignment : alignments) {
+            sequences.emplace_back(alignment.get_sequence());
+            weights.emplace_back(std::exp(alignment.get_score()
+                - aligner->get_config().match_score(sequences.back().begin(),
+                                                    sequences.back().end())));
+        }
+    }
+
+    assert(sequences.size() == weights.size());
+    assert(!aligner || sequences.size());
+
     std::string output;
     output.reserve(1'000);
 
     if (count_labels) {
-        auto top_labels = anno_graph.get_top_labels(sequence,
-                                                    num_top_labels,
-                                                    discovery_fraction);
+        auto top_labels = aligner
+            ? anno_graph.get_top_labels(sequences,
+                                        weights,
+                                        num_top_labels,
+                                        discovery_fraction)
+            : anno_graph.get_top_labels(sequence, num_top_labels, discovery_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return;
@@ -393,8 +417,9 @@ void execute_query(const std::string &seq_name,
         output += '\n';
 
     } else {
-        auto labels_discovered
-                = anno_graph.get_labels(sequence, discovery_fraction);
+        auto labels_discovered = aligner
+            ? anno_graph.get_labels(sequences, weights, discovery_fraction)
+            : anno_graph.get_labels(sequence, discovery_fraction);
 
         if (!labels_discovered.size() && suppress_unlabeled)
             return;
@@ -1278,7 +1303,8 @@ void parse_sequences(const std::vector<std::string> &files,
 
 std::string form_client_reply(const std::string &received_message,
                               const AnnotatedDBG &anno_graph,
-                              const Config &config) {
+                              const Config &config,
+                              IDBGAligner *aligner = nullptr) {
     try {
         Json::Value json;
 
@@ -1319,7 +1345,8 @@ std::string form_client_reply(const std::string &received_message,
                           discovery_fraction,
                           config.anno_labels_delimiter,
                           anno_graph,
-                          oss);
+                          oss,
+                          aligner);
         };
 
         if (!seq.isNull()) {
@@ -1961,11 +1988,17 @@ int main(int argc, const char *argv[]) {
         case Config::QUERY: {
             assert(config->infbase_annotators.size() == 1);
 
-            auto anno_graph = initialize_annotated_dbg(*config);
+            auto graph = load_critical_dbg(config->infbase);
+            auto anno_graph = initialize_annotated_dbg(graph, *config);
 
             ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
 
             Timer timer;
+
+            std::unique_ptr<IDBGAligner> aligner;
+            // TODO: make aligner work with batch querying
+            if (config->align_sequences && !config->fast)
+                aligner.reset(build_aligner(*graph, *config).release());
 
             // iterate over input files
             for (const auto &file : files) {
@@ -2016,7 +2049,8 @@ int main(int argc, const char *argv[]) {
                             config->discovery_fraction,
                             config->anno_labels_delimiter,
                             std::ref(*graph_to_query),
-                            std::ref(std::cout)
+                            std::ref(std::cout),
+                            aligner.get()
                         );
                     },
                     config->forward_and_reverse
@@ -2043,11 +2077,17 @@ int main(int argc, const char *argv[]) {
 
             std::cout << "Loading graph..." << std::endl;
 
-            auto anno_graph = initialize_annotated_dbg(*config);
+            auto graph = load_critical_dbg(config->infbase);
+            auto anno_graph = initialize_annotated_dbg(graph, *config);
 
             std::cout << "Graph loaded in "
                       << timer.elapsed() << "sec, current mem usage: "
                       << (get_curr_RSS() >> 20) << " MiB" << std::endl;
+
+            std::unique_ptr<IDBGAligner> aligner;
+            // TODO: make aligner work with batch querying
+            if (config->align_sequences && !config->fast)
+                aligner.reset(build_aligner(*graph, *config).release());
 
             const size_t num_threads = std::max(1u, config->parallel);
 
@@ -2066,7 +2106,8 @@ int main(int argc, const char *argv[]) {
                         return form_client_reply(
                             received_message,
                             *anno_graph,
-                            *config
+                            *config,
+                            aligner.get()
                         );
                     }
                 );

@@ -51,6 +51,10 @@ class AnnotatedDBG {
     // return labels that occur at least in |presence_ratio| k-mers
     std::vector<std::string> get_labels(const std::string &sequence,
                                         double presence_ratio) const;
+    // Weights don't need to sum to 1
+    std::vector<std::string> get_labels(const std::vector<std::string> &sequences,
+                                        const std::vector<double> &weights,
+                                        double presence_ratio) const;
     std::vector<std::string> get_labels(const std::unordered_map<row_index, size_t> &index_counts,
                                         size_t min_count) const;
 
@@ -59,6 +63,13 @@ class AnnotatedDBG {
     get_top_labels(const std::string &sequence,
                    size_t num_top_labels,
                    double presence_ratio = 0.0) const;
+
+    // Weights don't need to sum to 1
+    std::vector<std::pair<std::string, size_t>>
+    get_top_labels(const std::vector<std::string> &sequences,
+                   const std::vector<double> &weights,
+                   size_t num_top_labels,
+                   double min_label_frequency = 0.0) const;
 
     std::vector<std::pair<std::string, size_t>>
     get_top_labels(const std::unordered_map<row_index, size_t> &index_counts,
