@@ -1,14 +1,12 @@
 #ifndef __KMER_BLOOM_FILTER_HPP__
 #define __KMER_BLOOM_FILTER_HPP__
 
-#include <iostream>
-
 #include "rolling_hasher.hpp"
 #include "bloom_filter.hpp"
 
 
 // Bloom filter for approximate membership queries on k-mers
-template <class KmerHasher = RollingMultiHasher<2>>
+template <class KmerHasher = RollingMultiHash<2>>
 class KmerBloomFilter {
   public:
     typedef KmerHasher KmerHasherType;
@@ -43,11 +41,7 @@ class KmerBloomFilter {
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
 
-    void print_stats() const {
-        std::cout << "Bloom filter parameters" << std::endl
-                  << "Size:\t\t\t" << size() << " bits" << std::endl
-                  << "Num hash functions:\t" << num_hash_functions() << std::endl;
-    }
+    void print_stats() const;
 
   private:
     void call_kmers(const char *begin, const char *end,

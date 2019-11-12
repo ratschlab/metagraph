@@ -9,11 +9,11 @@
 
 
 template <typename TAlphabet = uint8_t>
-class RollingHasher {
+class RollingHash {
   public:
     // Note: this constructor is expensive. Try to construct it once and
     // make copies of the object.
-    explicit RollingHasher(size_t k, uint32_t seed1 = 0, uint32_t seed2 = 1)
+    explicit RollingHash(size_t k, uint32_t seed1 = 0, uint32_t seed2 = 1)
           : hash_(k, seed1, seed2, 64),
             ring_buffer_(k) {
         for (int i = 0; i < hash_.n; ++i) {
@@ -42,21 +42,21 @@ class RollingHasher {
         assert(prev_char == ring_buffer_.front());
     }
 
-    bool operator<(const RollingHasher &other) const {
+    bool operator<(const RollingHash &other) const {
         return hash_.hashvalue < other.hash_.hashvalue;
     }
 
-    bool operator>(const RollingHasher &other) const {
+    bool operator>(const RollingHash &other) const {
         return hash_.hashvalue > other.hash_.hashvalue;
     }
 
-    bool operator==(const RollingHasher &other) const {
+    bool operator==(const RollingHash &other) const {
         return hash_.hashvalue == other.hash_.hashvalue;
     }
 
     size_t get_k() const { return hash_.n; }
 
-    uint64_t get_hash() const { return hash_.hashvalue; }
+    operator uint64_t() const { return hash_.hashvalue; }
 
   private:
     CyclicHash<uint64_t, TAlphabet> hash_;
@@ -64,72 +64,62 @@ class RollingHasher {
 };
 
 
-template <int h,
+template <int num_hashes,
           typename TAlphabet = uint8_t,
-          class RollingHasher = ::RollingHasher<TAlphabet>>
-class RollingMultiHasher {
+          class RollingHash = ::RollingHash<TAlphabet>>
+class RollingMultiHash {
   public:
-    explicit RollingMultiHasher(size_t k) {
-        static_assert(h);
+    explicit RollingMultiHash(size_t k) {
+        static_assert(num_hashes);
 
-        hashers_.reserve(h);
-        for (size_t i = 0; i < h; ++i) {
+        hashers_.reserve(num_hashes);
+        for (size_t i = 0; i < num_hashes; ++i) {
             hashers_.emplace_back(k, i * 2, i * 2 + 1);
         }
 
-        assert(hashers_.size() == h);
+        assert(hashers_.size() == num_hashes);
     }
 
     void reset(const TAlphabet *it) {
-        assert(hashers_.size() == h);
-        for (size_t i = 0; i < h; ++i) {
+        for (size_t i = 0; i < num_hashes; ++i) {
             hashers_[i].reset(it);
         }
     }
 
     void next(TAlphabet next_char) {
-        assert(hashers_.size() == h);
-        for (size_t i = 0; i < h; ++i) {
+        for (size_t i = 0; i < num_hashes; ++i) {
             hashers_[i].next(next_char);
         }
     }
 
     void prev(TAlphabet prev_char) {
-        assert(hashers_.size() == h);
-        for (size_t i = 0; i < h; ++i) {
+        for (size_t i = 0; i < num_hashes; ++i) {
             hashers_[i].prev(prev_char);
         }
     }
 
-    bool operator<(const RollingMultiHasher &other) const {
-        assert(hashers_.size() == h);
+    bool operator<(const RollingMultiHash &other) const {
         return hashers_ < other.hashers_;
     }
 
-    bool operator>(const RollingMultiHasher &other) const {
-        assert(hashers_.size() == h);
+    bool operator>(const RollingMultiHash &other) const {
         return hashers_ > other.hashers_;
     }
 
-    bool operator==(const RollingMultiHasher &other) const {
-        assert(hashers_.size() == h);
+    bool operator==(const RollingMultiHash &other) const {
         return hashers_ == other.hashers_;
     }
 
-    size_t get_k() const {
-        assert(hashers_.size() == h);
-        return hashers_.at(0).get_k();
-    }
+    size_t get_k() const { return hashers_[0].get_k(); }
 
     template <int j>
     uint64_t get_hash() const {
-        static_assert(j < h);
-        assert(hashers_.size() == h);
-        return hashers_.at(j).get_hash();
+        static_assert(j < num_hashes);
+        return hashers_[j];
     }
 
   private:
-    std::vector<RollingHasher> hashers_;
+    std::vector<RollingHash> hashers_;
 };
 
 

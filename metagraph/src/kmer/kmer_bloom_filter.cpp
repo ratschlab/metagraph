@@ -4,6 +4,7 @@
 #include "serialization.hpp"
 #include "algorithms.hpp"
 
+// TODO: switch to KmerExtractor once it supports all alphabets
 typedef KmerExtractorBOSS KmerDef;
 typedef KmerDef::TAlphabet TAlphabet;
 
@@ -155,4 +156,12 @@ void KmerBloomFilter<KmerHasher>
     }
 }
 
-template class KmerBloomFilter<RollingMultiHasher<2>>;
+template <class KmerHasher>
+void KmerBloomFilter<KmerHasher>
+::print_stats() const {
+    std::cout << "Bloom filter parameters" << std::endl
+              << "Size:\t\t\t" << size() << " bits" << std::endl
+              << "Num hash functions:\t" << num_hash_functions() << std::endl;
+}
+
+template class KmerBloomFilter<>;
