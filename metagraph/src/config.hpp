@@ -44,6 +44,7 @@ class Config {
     bool call_bubbles = false;
     bool call_breakpoints = false;
     bool map_sequences = false;
+    bool align_sequences = false;
     bool filter_by_kmer = false;
     bool output_json = false;
 
