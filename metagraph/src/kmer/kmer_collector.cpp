@@ -5,9 +5,13 @@
 #include <ips4o.hpp>
 
 #include "utils/template_utils.hpp"
+#include "common/sorted_set.hpp"
+#include "common/sorted_multiset.hpp"
+#include "common/sorted_set_disk.hpp"
 #include "common/unix_tools.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "kmer.hpp"
+#include "kmer_extractor.hpp"
 
 const size_t kMaxKmersChunkSize = 30'000'000;
 
