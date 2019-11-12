@@ -7,38 +7,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_subdirectory(../common metagraph_common)
 SET(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
-#-------------------
-# KMC k-mer counter
-#-------------------
-set(KMC_MAIN_DIR "${PROJECT_PARENT_DIR}/external-libraries/KMC/kmer_counter")
-if(NOT DEFINED BUILD_KMC)
-  set(BUILD_KMC TRUE)
-endif()
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/KMC)
-configure_file(${PROJECT_PARENT_DIR}/CMakeListsKMC.txt.in ${PROJECT_PARENT_DIR}/external-libraries/KMC/CMakeLists.txt
-        @ONLY)
-execute_process(COMMAND ${CMAKE_COMMAND} -G ${CMAKE_GENERATOR} "${PROJECT_PARENT_DIR}/external-libraries/KMC/"
-        -DCMAKE_CXX_FLAGS="-w"
-        RESULT_VARIABLE result
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
-        )
-if(result)
-  message(FATAL_ERROR "CMake step for KMC failed: ${result}")
-endif()
-execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j
-        RESULT_VARIABLE result
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
-        )
-if(result)
-  message(FATAL_ERROR "Build step for KMC failed: ${result}")
-endif()
-link_directories(
-        ${CMAKE_BINARY_DIR}/KMC
-)
-#-------------------
-# End KMC k-mer counter
-#-------------------
-
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
 # and happily cached, thus messing up the compilation flags forever
 unset(OpenMP_CXX_FLAGS CACHE)
