@@ -5,6 +5,7 @@
 #include <shared_mutex>
 #include <iostream>
 #include <vector>
+#include <cassert>
 
 #include <ips4o.hpp>
 
