@@ -3,6 +3,8 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <iostream>
+#include <vector>
 
 #include <ips4o.hpp>
 
@@ -10,7 +12,7 @@
 // Thread safe data storage for counting
 template <typename T,
           typename C = uint8_t,
-          class Container = Vector<std::pair<T, C>>>
+          class Container = std::vector<std::pair<T, C>>>
 class SortedMultiset {
   public:
     static_assert(std::is_same_v<std::pair<T, C>, typename Container::value_type>);

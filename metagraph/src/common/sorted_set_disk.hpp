@@ -13,8 +13,6 @@
 
 const std::string output_dir = "/tmp/";  // TODO(ddanciu) - use a flag instead
 
-using std::ios;
-
 /**
  * Thread safe data storage that is able to sort and extract distinct elements
  * from the underlying Container using external storage to avoid memory overlow.
@@ -114,7 +112,7 @@ public:
         // start merging disk chunks by using a heap to store the current element
         // from each chunk
         std::vector<std::fstream> chunk_files(chunk_count_);
-        std::fstream sorted_file(output_dir + "sorted.bin", ios::binary | ios::out);
+        std::fstream sorted_file(output_dir + "sorted.bin", std::ios::binary | std::ios::out);
         auto comp = [](std::pair<T, uint32_t> a, std::pair<T, uint32_t> b) {
             return a.first > b.first;
         };
@@ -154,7 +152,7 @@ public:
             }
         }
         sorted_file.close();
-        sorted_file.open(output_dir + "sorted.bin", ios::binary | ios::in);
+        sorted_file.open(output_dir + "sorted.bin", std::ios::binary | std::ios::in);
         sorted_file.seekg(0, sorted_file.end);
         uint64_t length = sorted_file.tellg();
         sorted_file.seekg(0, sorted_file.beg);
