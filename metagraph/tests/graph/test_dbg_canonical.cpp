@@ -13,17 +13,21 @@ template <typename Graph>
 class DeBruijnGraphCanonicalTest : public DeBruijnGraphTest<Graph> { };
 typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered,
-                         DBGSuccinct> CanonicalGraphTypes;
+                         DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 1>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>> CanonicalGraphTypes;
 TYPED_TEST_CASE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 template <typename Graph>
 class DeBruijnGraphWithNTest : public DeBruijnGraphTest<Graph> { };
-#ifndef _DNA_GRAPH
 typedef ::testing::Types<DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 1>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>,
                          DBGHashString> WithNGraphTypes;
-#else
-typedef ::testing::Types<> WithNGraphTypes;
-#endif
 TYPED_TEST_CASE(DeBruijnGraphWithNTest, WithNGraphTypes);
 
 template <typename Graph>
@@ -33,6 +37,10 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered> NoNGraphTypes;
 #else
 typedef ::testing::Types<DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 1>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>,
                          DBGHashString,
                          DBGHashOrdered,
                          DBGBitmap> NoNGraphTypes;
@@ -52,8 +60,8 @@ TYPED_TEST(DeBruijnGraphNoNTest, CheckGraph) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGTN", false));
 }
 
-TEST(DeBruijnGraphWithNTest, CheckGraphCanonical) {
-    EXPECT_TRUE(check_graph<DBGSuccinct>("ACGTN", true));
+TYPED_TEST(DeBruijnGraphWithNTest, CheckGraphCanonical) {
+    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", true));
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CheckGraphSequence) {
@@ -61,7 +69,11 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CheckGraphSequence) {
 }
 
 TYPED_TEST(DeBruijnGraphWithNTest, CheckGraphSequence) {
+#ifndef _DNA_GRAPH
     EXPECT_TRUE(check_graph<TypeParam>("ACGTN", false, true));
+#else
+    EXPECT_FALSE(check_graph<TypeParam>("ACGTN", false, true));
+#endif
 }
 
 TYPED_TEST(DeBruijnGraphNoNTest, CheckGraphSequence) {
@@ -69,11 +81,11 @@ TYPED_TEST(DeBruijnGraphNoNTest, CheckGraphSequence) {
     EXPECT_FALSE(check_graph<TypeParam>("ACGTN", false, true));
 }
 
-TEST(DeBruijnGraphWithNTest, CheckGraphSequenceCanonical) {
+TYPED_TEST(DeBruijnGraphWithNTest, CheckGraphSequenceCanonical) {
 #if _DNA_GRAPH
-    EXPECT_FALSE(check_graph<DBGSuccinct>("ACGTN", true, true));
+    EXPECT_FALSE(check_graph<TypeParam>("ACGTN", true, true));
 #else
-    EXPECT_TRUE(check_graph<DBGSuccinct>("ACGTN", true, true));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", true, true));
 #endif
 }
 

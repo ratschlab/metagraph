@@ -86,7 +86,8 @@ class BOSS {
 
     // Check whether the graph contains a fraction of (k+1)-mers from the sequence
     bool find(const std::string &sequence,
-              double kmer_discovery_fraction = 1) const;
+              double kmer_discovery_fraction = 1,
+              const std::function<bool()> &is_invalid = ALWAYS_FALSE) const;
 
     bool find(const std::string &sequence,
               double kmer_discovery_fraction,

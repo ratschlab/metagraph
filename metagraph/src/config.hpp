@@ -27,6 +27,7 @@ class Config {
     bool to_gfa = false;
     bool unitigs = false;
     bool kmers_in_single_form = false;
+    bool initialize_bloom = false;
     bool count_kmers = false;
     bool query_presence = false;
     bool filter_present = false;
@@ -71,6 +72,7 @@ class Config {
     unsigned int min_unitig_median_kmer_abundance = 1;
     unsigned int fallback_abundance_cutoff = 1;
     unsigned int port = 5555;
+    unsigned int bloom_max_num_hash_functions = 10;
 
     // Alignment options
     bool alignment_seed_unimems = false;
@@ -98,6 +100,8 @@ class Config {
     double label_other_fraction = 1.0;
     double min_count_quantile = 0.;
     double max_count_quantile = 1.;
+    double bloom_fpp = 1.0;
+    double bloom_bpk = 4.0;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fname;

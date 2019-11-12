@@ -473,5 +473,7 @@ map_sequence_to_nodes(const DeBruijnGraph &graph, const std::string &sequence) {
         [&nodes](auto node) { nodes.push_back(node); }
     );
 
+    assert(nodes.size() == sequence.size() - graph.get_k() + 1);
+
     return nodes;
 }

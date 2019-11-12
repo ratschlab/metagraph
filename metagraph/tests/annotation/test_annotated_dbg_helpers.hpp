@@ -32,6 +32,14 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        double other_label_fraction = 1.0,
                                        double lazy_evaluation_density_cutoff = 0.05);
 
+typedef ::testing::Types<DBGBitmap,
+                         DBGHashString,
+                         DBGHashOrdered,
+                         DBGSuccinct> MaskedGraphTypes;
+
+typedef ::testing::Types<DBGBitmap,
+                         DBGSuccinct> MaskedStableGraphTypes;
+
 typedef ::testing::Types<std::pair<DBGBitmap, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashString, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annotate::ColumnCompressed<>>,

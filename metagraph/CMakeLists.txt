@@ -253,6 +253,7 @@ include_directories(
   external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
   external-libraries/nvbio/contrib/priority-deque
+  external-libraries/rollinghashcpp
   ${INCLUDE_DIRS}
 )
 
@@ -260,6 +261,10 @@ add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
+)
+
+add_library(mersenne_twister STATIC
+  external-libraries/rollinghashcpp/mersennetwister.cpp
 )
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
@@ -342,6 +347,7 @@ set(METALIBS ${METALIBS}
   progress_bar
   ${OpenMP_CXX_LIBRARIES}
   fmt::fmt-header-only
+  mersenne_twister
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)

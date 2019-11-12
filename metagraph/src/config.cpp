@@ -84,6 +84,8 @@ Config::Config(int argc, const char *argv[]) {
         return argv[i + 1];
     };
 
+    bool print_usage_and_exit = false;
+
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
@@ -219,6 +221,14 @@ Config::Config(int argc, const char *argv[]) {
             port = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
+        } else if (!strcmp(argv[i], "--initialize-bloom")) {
+            initialize_bloom = true;
+        } else if (!strcmp(argv[i], "--bloom-fpp")) {
+            bloom_fpp = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--bloom-bpk")) {
+            bloom_bpk = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--bloom-max-num-hash-functions")) {
+            bloom_max_num_hash_functions = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--state")) {
             state = string_to_state(get_value(i++));
 
@@ -342,8 +352,6 @@ Config::Config(int argc, const char *argv[]) {
         }
     }
 
-    bool print_usage_and_exit = false;
-
     if (!count_slice_quantiles.size()) {
         count_slice_quantiles.push_back(0);
         count_slice_quantiles.push_back(1);
@@ -366,6 +374,14 @@ Config::Config(int argc, const char *argv[]) {
                   << std::endl;
         print_usage_and_exit = true;
     }
+
+    #if _PROTEIN_GRAPH
+    if (canonical || forward_and_reverse) {
+        std::cerr << "Error: reverse complement not defined for protein alphabets"
+                  << std::endl;
+        print_usage_and_exit = true;
+    }
+    #endif
 
     if (identity != CONCATENATE
             && identity != STATS
@@ -471,6 +487,21 @@ Config::Config(int argc, const char *argv[]) {
 
     if (alignment_max_seed_length < alignment_min_seed_length) {
         std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (bloom_fpp <= 0.0 || bloom_fpp > 1.0) {
+        std::cerr << "Error: bloom-fpp must be > 0.0 and < 1.0" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (bloom_bpk <= 0.0) {
+        std::cerr << "Error: bloom-bpk must > 0.0" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (initialize_bloom && bloom_bpk == 0.0 && bloom_fpp == 1.0) {
+        std::cerr << "Error: at least one of 0.0 < bloom_fpp < 1.0 or 0.0 < bloom_bpk must be true" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -782,11 +813,17 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --initialize-bloom \tconstruct a Bloom filter for faster detection of non-existing k-mers [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --primary-kmers \toutput each k-mer only in one if its forms (canonical/non-canonical) [off]\n");
             fprintf(stderr, "\t   --to-gfa \t\tdump graph layout to GFA [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "Advanced options for --initialize-bloom. bloom-fpp, when < 1, overrides bloom-bpk.\n");
+            fprintf(stderr, "\t   --bloom-fpp [FLOAT] \t\t\t\texpected false positive rate [1.0]\n");
+            fprintf(stderr, "\t   --bloom-bpk [FLOAT] \t\t\t\tnumber of bits per kmer [4.0]\n");
+            fprintf(stderr, "\t   --bloom-max-num-hash-functions [INT] \tmaximum number of hash functions [10]\n");
         } break;
         case ASSEMBLE: {
             fprintf(stderr, "Usage: %s assemble -o <outfile-base> [options] GRAPH\n"

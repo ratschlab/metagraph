@@ -75,6 +75,7 @@ class KmerExtractorBOSS {
 
     static std::vector<TAlphabet>
     reverse_complement(const std::vector<TAlphabet> &sequence);
+    static TAlphabet complement(TAlphabet c);
 
     /**
      * Generate all valid suffixes of the given length

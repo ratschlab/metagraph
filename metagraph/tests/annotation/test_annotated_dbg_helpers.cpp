@@ -7,9 +7,10 @@
 
 
 template <class Graph, class Annotation>
-std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
-                                               const std::vector<std::string> &sequences,
-                                               const std::vector<std::string> &labels) {
+std::unique_ptr<AnnotatedDBG>
+build_anno_graph(uint64_t k,
+                 const std::vector<std::string> &sequences,
+                 const std::vector<std::string> &labels) {
     assert(sequences.size() == labels.size());
     auto graph = build_graph_batch<Graph>(k, sequences);
 
