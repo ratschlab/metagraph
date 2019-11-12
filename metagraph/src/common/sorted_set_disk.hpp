@@ -154,7 +154,7 @@ class SortedSetDisk {
         uint64_t length = sorted_file.tellg();
         sorted_file.seekg(0, sorted_file.beg);
         data_.resize(totalSize);
-        sorted_file.read(reinterpret_cast<char *>(&data_[0]), length);
+        sorted_file.read(reinterpret_cast<char *>(data_.data()), length);
         data_merged_ = true;
         return data_;
     }
