@@ -5,13 +5,13 @@
 
 #include <ips4o.hpp>
 
-#include <fstream>  //TODO(ddanciu) - try boost mmapped instead
-#include <mutex>
+#include <fstream> //TODO(ddanciu) - try boost mmapped instead
 #include <iostream>
-#include <shared_mutex>
+#include <mutex>
 #include <queue>
+#include <shared_mutex>
 
-const std::string output_dir = "/tmp/";  // TODO(ddanciu) - use a flag instead
+const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
 
 /**
  * Thread safe data storage that is able to sort and extract distinct elements
@@ -24,15 +24,15 @@ const std::string output_dir = "/tmp/";  // TODO(ddanciu) - use a flag instead
  * @tparam T the type of the elements that are being stored and sorted,
  * typically #KMerBOSS instances
  * */
-template<typename T>
+template <typename T>
 class SortedSetDisk {
-public:
+  public:
     /**
      * Size of the underlying data structure storing the kmers. The class is
      * guaranteed to flush to disk when the newly added data would exceed this
      * size.
      */
-    static constexpr size_t CONTAINER_SIZE_BYTES = 1e9;  // 1 GB
+    static constexpr size_t CONTAINER_SIZE_BYTES = 1e9; // 1 GB
 
     typedef T key_type;
     typedef T value_type;
@@ -46,12 +46,11 @@ public:
      * @param container_size the size of the in-memory container that is written
      * to disk when full
      */
-    SortedSetDisk(
-            std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-            size_t num_threads = 1,
-            bool verbose = false,
-            size_t container_size = CONTAINER_SIZE_BYTES) :
-            num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {
+    SortedSetDisk(std::function<void(storage_type *)> cleanup = [](storage_type *) {},
+                  size_t num_threads = 1,
+                  bool verbose = false,
+                  size_t container_size = CONTAINER_SIZE_BYTES)
+          : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {
         try {
             try_reserve(container_size);
         } catch (const std::bad_alloc &exception) {
@@ -66,7 +65,7 @@ public:
      * full, the data is sorted, de-duped and written to disk, after which the
      * buffer is cleared.
      */
-    template<class Iterator>
+    template <class Iterator>
     void insert(Iterator begin, Iterator end) {
         assert(begin <= end);
 
@@ -74,8 +73,8 @@ public:
 
         // acquire the mutex to restrict the number of writing threads
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
-        assert(data_merged_ == false);  // can't insert once we merged the data
-        if (data_.size() + batch_size > data_.capacity()) {  // time to write to disk
+        assert(data_merged_ == false); // can't insert once we merged the data
+        if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
             std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
             // TODO(ddanciu) - test if it's worth it to keep adding in memory if the
             // shrinking was significant
@@ -113,20 +112,19 @@ public:
         // from each chunk
         std::vector<std::fstream> chunk_files(chunk_count_);
         std::fstream sorted_file(output_dir + "sorted.bin", std::ios::binary | std::ios::out);
-        auto comp = [](std::pair<T, uint32_t> a, std::pair<T, uint32_t> b) {
-            return a.first > b.first;
-        };
-        std::priority_queue<
-                std::pair<T, uint32_t>, std::vector<std::pair<T, uint32_t>>, decltype(comp)>
-                merge_heap(comp);
+
+        auto comp = [](const auto &a, const auto &b) { return a.first > b.first; };
+        std::priority_queue<std::pair<T, uint32_t>,
+                            std::vector<std::pair<T, uint32_t>>,
+                            decltype(comp)> merge_heap(comp);
+
         for (uint32_t i = 0; i < chunk_count_; ++i) {
-            chunk_files[i].open(
-                    output_dir + "chunk_" + std::to_string(i) + ".bin",
-                    std::ios::in | std::ios::binary);
+            chunk_files[i].open(output_dir + "chunk_" + std::to_string(i) + ".bin",
+                                std::ios::in | std::ios::binary);
             T dataItem;
             if (chunk_files[i].good()) {
                 chunk_files[i].read(reinterpret_cast<char *>(&dataItem), sizeof(dataItem));
-                merge_heap.push({dataItem, i});
+                merge_heap.push({ dataItem, i });
             }
         }
         uint64_t totalSize = 0;
@@ -138,16 +136,15 @@ public:
             merge_heap.pop();
             if (!hasWritten || smallest.first != lastWritten) {
                 hasWritten = true;
-                sorted_file.write(
-                        reinterpret_cast<char *>(&smallest.first), sizeof(smallest.first));
+                sorted_file.write(reinterpret_cast<char *>(&smallest.first), sizeof(smallest.first));
                 lastWritten = smallest.first;
                 totalSize++;
             }
             if (chunk_files[smallest.second].good()) {
                 T dataItem;
-                if (chunk_files[smallest.second].read(
-                            reinterpret_cast<char *>(&dataItem), sizeof(dataItem))) {
-                    merge_heap.push({dataItem, smallest.second});
+                if (chunk_files[smallest.second].read(reinterpret_cast<char *>(&dataItem),
+                                                      sizeof(dataItem))) {
+                    merge_heap.push({ dataItem, smallest.second });
                 }
             }
         }
@@ -165,16 +162,15 @@ public:
     void clear() {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-        data_.resize(0);  // this makes sure the buffer is not reallocated
+        data_.resize(0); // this makes sure the buffer is not reallocated
     }
 
-    template<class Array>
+    template <class Array>
     void sort_and_remove_duplicates(Array *vector, size_t num_threads) const {
         assert(vector);
 
-        ips4o::parallel::sort(
-                vector->begin(), vector->end(), std::less<typename Array::value_type>(),
-                num_threads);
+        ips4o::parallel::sort(vector->begin(), vector->end(),
+                              std::less<typename Array::value_type>(), num_threads);
         // remove duplicates
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
@@ -186,7 +182,7 @@ public:
         std::cerr << "SortedSetDisk: Ignoring reserving size " << size << std::endl;
     }
 
-private:
+  private:
     void shrink_data() {
         if (verbose_) {
             std::cout << "Allocated capacity exceeded, erasing duplicate values..." << std::flush;
@@ -202,9 +198,9 @@ private:
     }
 
     void dump_to_file() {
-        std::fstream binary_file = std::fstream(
-                output_dir + "chunk_" + std::to_string(chunk_count_) + ".bin",
-                std::ios::out | std::ios::binary);
+        std::fstream binary_file
+            = std::fstream(output_dir + "chunk_" + std::to_string(chunk_count_) + ".bin",
+                           std::ios::out | std::ios::binary);
         binary_file.write((char *)&data_[0], sizeof(data_[0]) * data_.size());
         binary_file.close();
         data_.resize(0);
@@ -247,7 +243,7 @@ private:
     /**
      * Removes redundant elements from container while extracting unique ones.
      */
-    std::function<void(storage_type*)> cleanup_;
+    std::function<void(storage_type *)> cleanup_;
 
     /**
      * Ensures mutually exclusive access (and thus thread-safety) to #data.

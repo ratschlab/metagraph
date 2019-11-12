@@ -12,16 +12,17 @@
  * What type of data structure to use in the #KmerCollector.
  */
 enum class ExtractorContainer {
-  DEQUE,
-  VECTOR,
-  /**
-   * Uses several vectors that are written to disk and then merged, as defined
-   * in #SortedSetDisk
-   */
-  VECTOR_DISK
+    DEQUE,
+    VECTOR,
+    /**
+     * Uses several vectors that are written to disk and then merged, as defined
+     * in #SortedSetDisk
+     */
+    VECTOR_DISK
 };
-constexpr static ExtractorContainer kExtractorContainer =
-    ExtractorContainer::VECTOR;
+
+constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR;
+
 const static uint8_t kBitsPerCount = 8;
 
 
