@@ -1,7 +1,7 @@
 #include "binary_matrix.hpp"
 
-#include "algorithms.hpp"
-#include "serialization.hpp"
+#include "utils/algorithms.hpp"
+#include "common/serialization.hpp"
 
 
 std::vector<std::vector<BinaryMatrix::Column>>
