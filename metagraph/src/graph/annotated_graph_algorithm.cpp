@@ -2,7 +2,7 @@
 
 #include "alphabets.hpp"
 #include "annotate_column_compressed.hpp"
-#include "utils.hpp"
+#include "algorithms.hpp"
 #include "int_vector.hpp"
 #include "masked_graph.hpp"
 
@@ -390,7 +390,7 @@ void call_breakpoints(const DeBruijnGraph &graph,
                     }
 
                     DBGAlignment breakpoint(ref.c_str(),
-                                            &*ref.end(),
+                                            ref.c_str() + ref.size(),
                                             { first, next_index },
                                             std::move(var),
                                             score);
@@ -461,7 +461,7 @@ void call_bubbles_from_path(const DeBruijnGraph &foreground,
                                                             var.begin());
 
                 DBGAlignment bubble(ref.c_str(),
-                                    &*ref.end(),
+                                    ref.c_str() + ref.size(),
                                     std::move(nodes),
                                     std::move(var),
                                     score);

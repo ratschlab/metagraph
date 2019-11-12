@@ -128,6 +128,26 @@ for i in {1..20}; do
 done
 ```
 
+### Rename columns
+```bash
+./metagraph stats --print-col-names -a ~/metagenome/data/BIGSI/subsets/annotation_subset_15000.column.annodbg > ~/metagenome/data/BIGSI/subsets/rename_columns.txt
+tail -n +3 ~/metagenome/data/BIGSI/subsets/rename_columns.txt > ~/metagenome/data/BIGSI/subsets/rename_columns_.txt
+for x in $(cat ~/metagenome/data/BIGSI/subsets/rename_columns_.txt); do echo "$x $(basename ${x%.unitigs.fasta.gz})"; done > ~/metagenome/data/BIGSI/subsets/rename_columns.txt
+rm ~/metagenome/data/BIGSI/subsets/rename_columns_.txt
+
+for anno_type in {"column","flat","brwt","rbfish","row"}; do
+    extension=".${anno_type}.annodbg";
+    for annotation in $(find ~/metagenome/data/BIGSI/subsets/ -name "*${extension}"); do
+        old="${annotation%$extension}.path_labels${extension}";
+        mv $annotation $old;
+        ./metagraph transform_anno \
+            --rename-cols ~/metagenome/data/BIGSI/subsets/rename_columns.txt \
+            -o "${annotation%${extension}}" \
+            $old;
+    done
+done
+```
+
 ## Transform annotation
 ```bash
 for i in {1..20}; do

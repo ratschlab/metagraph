@@ -394,4 +394,8 @@ typedef bit_vector_adaptive_stat<smart_representation> bit_vector_smart;
 template <class BitVector>
 uint64_t predict_size(uint64_t size, uint64_t num_set_bits);
 
+// indexes are distinct and sorted
+sdsl::bit_vector subvector(const bit_vector &col,
+                           const std::vector<uint64_t> &indexes);
+
 #endif // __BIT_VECTOR_HPP__

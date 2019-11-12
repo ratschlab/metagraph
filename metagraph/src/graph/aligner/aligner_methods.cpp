@@ -5,7 +5,6 @@
 
 #include "dbg_succinct.hpp"
 #include "bounded_priority_queue.hpp"
-#include "utils.hpp"
 
 
 template <typename NodeType>
@@ -162,27 +161,25 @@ DefaultColumnExtender<NodeType, Compare>
              score_t min_path_score) const {
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query_begin());
+    assert(sequence_end >= path.get_query_end());
 
-    const auto align_start = &*path.get_query_end();
+    const auto *align_start = path.get_query_end();
     size_t size = sequence_end - align_start + 1;
 
-    // stop path early if it can't be better than the min_path_score
-    if (path.get_score() + config_.match_score(align_start,
-                                               sequence_end) < min_path_score)
-        return {};
-
+    // compute perfect match scores for all suffixes
     // used for branch and bound checks below
     std::vector<score_t> partial_sum(size);
-    std::string_view extension(align_start - 1, sequence_end - align_start + 1);
-    auto jt = extension.rbegin();
-    partial_sum.back() = config_.get_row(*jt)[*jt++];
-    for (auto it = partial_sum.rbegin() + 1; it != partial_sum.rend(); ++it) {
-        assert(jt != extension.rend());
-        *it = *(it - 1) + config_.get_row(*jt)[*jt++];
-    }
+    std::transform(align_start - 1, sequence_end,
+                   partial_sum.begin(),
+                   [&](char c) { return config_.get_row(c)[c]; });
 
-    assert(partial_sum.front() == config_.match_score(align_start - 1, sequence_end));
-    assert(partial_sum.back() == config_.get_row(extension.back())[extension.back()]);
+    std::partial_sum(partial_sum.rbegin(), partial_sum.rend(), partial_sum.rbegin());
+    assert(config_.match_score(align_start - 1, sequence_end) == partial_sum.front());
+    assert(config_.get_row(*(sequence_end - 1))[*(sequence_end - 1)] == partial_sum.back());
+
+    // stop path early if it can't be better than the min_path_score
+    if (path.get_score() + partial_sum.at(1) < min_path_score)
+        return {};
 
     // keep track of which columns to use next
     struct PriorityFunction {
@@ -196,9 +193,7 @@ DefaultColumnExtender<NodeType, Compare>
 
     BoundedPriorityQueue<typename DPTable::value_type*,
                          std::vector<typename DPTable::value_type*>,
-                         PriorityFunction> columns_to_update(
-        config_.queue_size
-    );
+                         PriorityFunction> columns_to_update(config_.queue_size);
 
     auto dp_table = initialize_dp_table(path.back(),
                                         *(align_start - 1),
@@ -207,11 +202,8 @@ DefaultColumnExtender<NodeType, Compare>
                                         size,
                                         config_.gap_opening_penalty,
                                         config_.gap_extension_penalty);
-    assert(dp_table.size());
-
-    // keep track of node and position in column to start backtracking
-    // store raw pointer since they are not invalidated by emplace
-    auto start_node = &*dp_table.begin();
+    assert(dp_table.size() == 1);
+    assert(dp_table.find(path.back()) != dp_table.end());
 
     // for storage of intermediate values
     std::vector<typename DPTable::value_type*> out_columns;
@@ -222,8 +214,10 @@ DefaultColumnExtender<NodeType, Compare>
     std::vector<int8_t> gap_scores;
 
     // dynamic programming
-    assert(dp_table.find(path.back()) != dp_table.end());
-    columns_to_update.emplace(&*dp_table.begin());
+    // keep track of node and position in column to start backtracking
+    // store raw pointer since they are not invalidated by emplace
+    auto *start_node = &*dp_table.begin();
+    columns_to_update.emplace(start_node);
     while (columns_to_update.size()) {
         const auto cur_col = columns_to_update.pop_top();
         auto cur_node = cur_col->first;
@@ -246,12 +240,13 @@ DefaultColumnExtender<NodeType, Compare>
                 if (!emplace.second)
                     emplace.first->second.last_char = c;
 
+                assert(emplace.first != dp_table.end());
                 out_columns.emplace_back(&*emplace.first);
             }
         );
 
         // update columns
-        for (auto &iter : out_columns) {
+        for (auto iter : out_columns) {
             auto next_node = iter->first;
             auto& next_column = iter->second;
 
@@ -267,6 +262,8 @@ DefaultColumnExtender<NodeType, Compare>
             size_t overall_begin = size;
             size_t overall_end = 0;
 
+            // find incoming nodes to check for alignment extension
+            // set boundaries for vertical band
             for (const auto &prev_node : in_nodes) {
                 const auto& best_pos = dp_table.emplace(
                     prev_node,
@@ -285,7 +282,9 @@ DefaultColumnExtender<NodeType, Compare>
                 if (overall_end < size)
                     overall_end = std::max(
                         overall_end,
-                        config_.bandwidth <= size - best_pos ? best_pos + config_.bandwidth : size
+                        config_.bandwidth <= size - best_pos
+                            ? best_pos + config_.bandwidth
+                            : size
                     );
             }
 
@@ -332,20 +331,18 @@ DefaultColumnExtender<NodeType, Compare>
                 assert(end);
 
                 char_scores.resize(end - begin);
+                const auto &row = config_.get_row(next_column.last_char);
                 std::transform(align_start + begin,
                                align_start + end - 1,
                                char_scores.begin() + 1,
-                               [row = config_.get_row(next_column.last_char)](char c) {
-                                   return row[c];
-                               });
+                               [&row](char c) { return row[c]; });
 
                 match_ops.resize(end - begin);
+                const auto &op_row = Cigar::get_op_row(next_column.last_char);
                 std::transform(align_start + begin,
                                align_start + end - 1,
                                match_ops.begin() + 1,
-                               [op_row = Cigar::get_op_row(next_column.last_char)](char c) {
-                                   return op_row[c];
-                               });
+                               [&op_row](char c) { return op_row[c]; });
 
                 for (size_t i = begin + 1; i < end; ++i) {
                     // prevent underflow if min_cell_score == MIN_INT
@@ -353,7 +350,8 @@ DefaultColumnExtender<NodeType, Compare>
                             && incoming.scores[i - 1] == config_.min_cell_score)
                         continue;
 
-                    if (incoming.scores[i - 1] + char_scores[i - begin] > std::get<1>(updates[i - overall_begin]))
+                    if (incoming.scores[i - 1] + char_scores[i - begin]
+                            > std::get<1>(updates[i - overall_begin]))
                         updates[i - overall_begin] = std::make_pair(
                             Step { match_ops[i - begin], prev_node },
                             incoming.scores[i - 1] + char_scores[i - begin]
@@ -367,10 +365,10 @@ DefaultColumnExtender<NodeType, Compare>
                     incoming.steps.begin() + begin,
                     incoming.steps.begin() + end,
                     gap_scores.begin(),
-                    [open = config_.gap_opening_penalty,
-                     ext = config_.gap_extension_penalty](const auto &cigar_tuple) {
+                    [this](const auto &cigar_tuple) {
                         return cigar_tuple.cigar_op == Cigar::Operator::DELETION
-                            ? ext : open;
+                            ? config_.gap_extension_penalty
+                            : config_.gap_opening_penalty;
                     }
                 );
 
@@ -381,9 +379,12 @@ DefaultColumnExtender<NodeType, Compare>
                     if (incoming.scores[i] == config_.min_cell_score)
                         continue;
 
-                    if (incoming.scores[i] + gap_scores[i - begin] > std::get<1>(updates[i - overall_begin])) {
-                        updates[i - overall_begin].second = incoming.scores[i] + gap_scores[i - begin];
-                        updates[i - overall_begin].first.cigar_op = Cigar::Operator::DELETION;
+                    if (incoming.scores[i] + gap_scores[i - begin]
+                            > std::get<1>(updates[i - overall_begin])) {
+                        updates[i - overall_begin].second
+                            = incoming.scores[i] + gap_scores[i - begin];
+                        updates[i - overall_begin].first.cigar_op
+                            = Cigar::Operator::DELETION;
                         updates[i - overall_begin].first.prev_node = prev_node;
                     }
                 }
@@ -418,6 +419,7 @@ DefaultColumnExtender<NodeType, Compare>
                 std::tie(next_column.steps[i],
                          next_column.scores[i]) = updates[i - overall_begin];
                 updated = true;
+
                 if (next_column.scores[i] > *max_pos)
                     max_pos = next_column.scores.begin() + i;
             }
@@ -427,20 +429,19 @@ DefaultColumnExtender<NodeType, Compare>
                 next_column.best_pos = max_pos - next_column.scores.begin();
 
                 if (*max_pos > start_node->second.best_score())
-                    start_node = &*iter;
+                    start_node = iter;
 
                 // branch and bound
                 // TODO: this cuts off too early (before the scores have converged)
                 //       so the code below has to be used to compute correct scores
                 auto best_score = std::max(start_node->second.best_score(),
                                            min_path_score);
+
                 if (!std::equal(partial_sum.begin() + overall_begin,
                                 partial_sum.begin() + overall_end,
                                 next_column.scores.begin() + overall_begin,
-                                [&](auto a, auto b) {
-                                    return a + b < best_score;
-                                }))
-                    columns_to_update.emplace(&*iter);
+                                [&](auto a, auto b) { return a + b < best_score; }))
+                    columns_to_update.emplace(iter);
             }
         }
     }

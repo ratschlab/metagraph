@@ -5,7 +5,7 @@
 
 #include "boss.hpp"
 #include "boss_construct.hpp"
-#include "utils.hpp"
+#include "algorithms.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 

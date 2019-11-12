@@ -1,5 +1,6 @@
 # MetaSUB
 
+## Sample processing - version 1 (see analysis_v1)
 
 ### Count k-mers with KMC
 
@@ -123,6 +124,8 @@ $METAGRAPH transform_anno --rename-cols rename_columns.txt \
     -o metasub_f2_k17_brwt_pm_final.brwt.annodbg \
     ../metasub_wasabi_graph_anno.k17.f2.brwt_pm_40.brwt.annodbg
 ```
+
+## Sample processing - version 2 (see analysis_v2)
 
 ## Start jobs with MetaSUB database
 

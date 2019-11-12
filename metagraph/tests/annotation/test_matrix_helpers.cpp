@@ -4,12 +4,13 @@
 
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #include "BRWT.hpp"
 #include "BRWT_builders.hpp"
 #include "bin_rel_wt.hpp"
 #include "bin_rel_wt_sdsl.hpp"
 #include "column_major.hpp"
-#include "utils.hpp"
+#include "bitmap_mergers.hpp"
 
 typedef std::vector<BinaryMatrix::Column> RowSetBits;
 typedef std::function<void(const RowSetBits &)> RowCallback;
@@ -214,7 +215,7 @@ BinMat build_matrix_from_rows(BitVectorPtrArray&& columns, uint64_t num_rows) {
 
     return build_matrix_from_rows<BinMat>(
         [&](auto row_callback) {
-            utils::call_rows(row_callback, std::move(columns));
+            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
         },
         num_columns, num_rows, num_set_bits
     );
@@ -243,7 +244,7 @@ BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_row
 
     return build_matrix_from_rows<BinMat>(
         [&](auto row_callback) {
-            utils::call_rows(row_callback, columns);
+            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
         },
         num_columns, num_rows, num_set_bits
     );

@@ -4,7 +4,8 @@
 #include <iterator>
 #include <cmath>
 
-#include "utils.hpp"
+#include "algorithms.hpp"
+#include "serialization.hpp"
 
 
 BinRelWT_sdsl

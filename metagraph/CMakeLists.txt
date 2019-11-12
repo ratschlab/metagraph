@@ -100,6 +100,20 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   ")
 endif()
 
+if(APPLE)
+    # Fix include directories on 10.14+, as they are not added by default any longer
+    string(APPEND CMAKE_CXX_FLAGS " \
+    -I/usr/include \
+    -I/usr/local/include \
+  ")
+  # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
+  LINK_DIRECTORIES(/usr/lib)
+  LINK_DIRECTORIES(/usr/local/lib)
+endif()
+
+# unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
+# and happily cached, thus messing up the compilation flags forever
+unset(OpenMP_CXX_FLAGS CACHE)
 if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
   find_package(OPENMP REQUIRED)
 else()
@@ -242,6 +256,8 @@ include_directories(
   ${INCLUDE_DIRS}
 )
 
+add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
+
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
 )
@@ -272,7 +288,6 @@ if(FOLLY_LIBRARIES)
     -lboost_filesystem
     -lboost_program_options
     -lcrypto
-    ${OpenMP_CXX_LIBRARIES}
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
@@ -325,6 +340,8 @@ set(METALIBS ${METALIBS}
   brwt
   jsoncpp
   progress_bar
+  ${OpenMP_CXX_LIBRARIES}
+  fmt::fmt-header-only
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)

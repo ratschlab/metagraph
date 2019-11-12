@@ -3,6 +3,7 @@
 #define private public
 #define protected public
 
+#include "../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 #include "node_weights.hpp"
 

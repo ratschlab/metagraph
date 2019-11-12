@@ -2,9 +2,14 @@
 #include "test_helpers.hpp"
 
 #include "annotate_column_compressed.hpp"
-#include "utils.hpp"
+#include "vectors.hpp"
+#include "string_utils.hpp"
+#include "file_utils.hpp"
+#include "algorithms.hpp"
+#include "bitmap_mergers.hpp"
 #include "threading.hpp"
 #include "bit_vector.hpp"
+#include "deque_vector.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -31,6 +36,7 @@ const std::vector<std::vector<uint64_t>> indices {
     { 4, 1 },
     { 5, 0 }, { 5, 1 }
 };
+
 
 utils::RowsFromColumnsTransformer generate_rct_file() {
     annotate::ColumnCompressed<> annotation(6);
@@ -61,17 +67,6 @@ std::vector<bit_vector_small> generate_rows() {
     return rows;
 }
 
-std::vector<bit_vector_small const*>
-generate_ptrs(const std::vector<bit_vector_small> &rows) {
-    std::vector<bit_vector_small const*> rows_ptr;
-    std::transform(rows.begin(), rows.end(), std::back_inserter(rows_ptr),
-        [](auto &a) {
-            return &a;
-        });
-
-    return rows_ptr;
-}
-
 void check_rows(utils::RowsFromColumnsTransformer&& rct) {
     ASSERT_EQ(2u, rct.columns());
     ASSERT_EQ(7u, rct.rows());
@@ -79,13 +74,13 @@ void check_rows(utils::RowsFromColumnsTransformer&& rct) {
     // ASSERT_EQ(std::vector<uint64_t>({ 3, 5 }), rct.num_set_bits());
 
     uint64_t i = 0;
-    utils::call_rows([&](auto&& row_indices) {
+    rct.call_rows([&](auto&& row_indices) {
         sdsl::bit_vector bv(rct.columns());
         for (auto j : row_indices) {
             bv[j] = 1;
         }
         EXPECT_EQ(matrix[i++], bv) << i;
-    }, std::move(rct));
+    });
 
     ASSERT_EQ(7u, i);
 }
@@ -121,13 +116,13 @@ TEST(Utils, RowsFromColumnsTransformerCallIndicesFile) {
 
 TEST(Utils, RowsFromColumnsTransformerCallRowsColumns) {
     auto rows = generate_rows();
-    utils::RowsFromColumnsTransformer rct(generate_ptrs(rows));
+    utils::RowsFromColumnsTransformer rct(rows);
     check_rows(std::move(rct));
 }
 
 TEST(Utils, RowsFromColumnsTransformerCallIndicesColumns) {
     auto rows = generate_rows();
-    utils::RowsFromColumnsTransformer rct(generate_ptrs(rows));
+    utils::RowsFromColumnsTransformer rct(rows);
     check_indices(std::move(rct));
 }
 
@@ -801,17 +796,17 @@ TEST(Deque, ResizeInfinityCheckThrow) {
 }
 
 TEST(DequeStorage, ReserveInfinityCheckThrow) {
-    utils::DequeStorage<int> array;
+    DequeStorage<int> array;
     EXPECT_THROW(array.reserve(1llu << 60), std::bad_alloc);
 }
 
 TEST(DequeStorage, ResizeInfinityCheckThrow) {
-    utils::DequeStorage<int> array;
+    DequeStorage<int> array;
     EXPECT_THROW(array.resize(1llu << 60), std::bad_alloc);
 }
 
 TEST(DequeStorage, Erase) {
-    utils::DequeStorage<int> storage;
+    DequeStorage<int> storage;
     storage.push_back(1);
     storage.push_back(3);
     storage.push_back(1);

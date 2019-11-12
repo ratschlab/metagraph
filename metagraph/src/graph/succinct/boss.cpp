@@ -14,7 +14,7 @@
 #include "boss_construct.hpp"
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
-#include "utils.hpp"
+#include "algorithms.hpp"
 #include "threading.hpp"
 
 using utils::remove_suffix;

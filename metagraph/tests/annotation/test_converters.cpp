@@ -2,6 +2,7 @@
 
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
 #include "static_annotators_def.hpp"
@@ -13,8 +14,6 @@ const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_row_compressed_merge = test_dump_basename + "_row_compressed_merge";
 const std::string test_dump_basename_rowflat_merge = test_dump_basename + "_rowflat_merge";
 const std::string test_dump_basename_row_compressed_to_rowflat = test_dump_basename + "_row_compressed_to_rowflat";
-
-std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
 
 
 class ConvertFromRowCompressed : public ::testing::Test {
