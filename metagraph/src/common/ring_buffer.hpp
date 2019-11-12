@@ -48,6 +48,8 @@ class RingBuffer {
     const T& front() const { return ring_buffer_[get_front_index()]; }
     T& front() { return ring_buffer_[get_front_index()]; }
 
+    size_t capacity() const { return size_; }
+
   private:
     size_t get_front_index() const {
         return (buffer_back_it_ + buffer_it_mask_ + 2 - size_) & buffer_it_mask_;
