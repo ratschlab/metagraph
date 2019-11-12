@@ -34,6 +34,10 @@ template
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGHashFast2>(uint64_t, const std::vector<std::string> &, bool);
 
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGHashFast3>(uint64_t, const std::vector<std::string> &, bool);
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGHashString>(uint64_t k,
@@ -96,6 +100,10 @@ template
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGHashFast2>(uint64_t, const std::vector<std::string> &, bool);
 
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGHashFast3>(uint64_t, const std::vector<std::string> &, bool);
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGHashString>(uint64_t k,
@@ -153,6 +161,10 @@ build_graph_iterative<DBGHashFast>(uint64_t, std::function<void(std::function<vo
 template
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative<DBGHashFast2>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGHashFast3>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
 
 template
 std::shared_ptr<DeBruijnGraph>
@@ -215,4 +227,5 @@ template bool check_graph<DBGBitmap>(const std::string &, bool, bool);
 template bool check_graph<DBGHashOrdered>(const std::string &, bool, bool);
 template bool check_graph<DBGHashFast>(const std::string &, bool, bool);
 template bool check_graph<DBGHashFast2>(const std::string &, bool, bool);
+template bool check_graph<DBGHashFast3>(const std::string &, bool, bool);
 template bool check_graph<DBGHashString>(const std::string &, bool, bool);

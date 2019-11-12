@@ -20,6 +20,7 @@
 #include "dbg_hash_ordered.hpp"
 #include "dbg_hash_fast.hpp"
 #include "dbg_hash_fast2.hpp"
+#include "dbg_hash_fast3.hpp"
 #include "dbg_hash_string.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
@@ -53,6 +54,9 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, ".hashfast2dbg")) {
         return Config::GraphType::HASH_FAST_2;
+
+    } else if (utils::ends_with(filename, ".hashfast3dbg")) {
+        return Config::GraphType::HASH_FAST_3;
 
     } else if (utils::ends_with(filename, ".hashstrdbg")) {
         return Config::GraphType::HASH_STR;
@@ -125,6 +129,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH_FAST_2:
             return load_critical_graph_from_file<DBGHashFast2>(filename);
+
+        case Config::GraphType::HASH_FAST_3:
+            return load_critical_graph_from_file<DBGHashFast3>(filename);
 
         case Config::GraphType::HASH_PACKED:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
@@ -1540,6 +1547,10 @@ int main(int argc, const char *argv[]) {
 
                     case Config::GraphType::HASH_FAST_2:
                         graph.reset(new DBGHashFast2(config->k, config->canonical));
+                        break;
+
+                    case Config::GraphType::HASH_FAST_3:
+                        graph.reset(new DBGHashFast3(config->k, config->canonical));
                         break;
 
                     case Config::GraphType::HASH_PACKED:

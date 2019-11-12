@@ -6,6 +6,8 @@
 #include "reverse_complement.hpp"
 #include "threading.hpp"
 #include "bitmap.hpp"
+#include "dbg_hash_fast.hpp"
+#include "dbg_hash_fast2.hpp"
 
 namespace utils {
     bool get_verbose();
@@ -272,10 +274,16 @@ void call_sequences(const DeBruijnGraph &graph,
                     bool call_unitigs,
                     uint64_t min_tip_size = 0,
                     bool kmers_in_single_form = false) {
-    // TODO if-statement (graph.continuous_indexed)
+    //sdsl::bit_vector discovered;
+    //if (dynamic_cast<const DBGHashFast*>(&graph) ||
+    //    dynamic_cast<const DBGHashFast2*>(&graph)) {
+    //    discovered = sdsl::bit_vector(graph.num_nodes() + 1, true);
+    //    graph.call_nodes([&](auto node) { discovered[node] = false; });
+    //} else {
+    //    discovered = sdsl::bit_vector(graph.num_nodes() + 1, false);
+    //}
     sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
-    //sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
     sdsl::bit_vector visited = discovered;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),

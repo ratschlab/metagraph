@@ -12,6 +12,7 @@
 #include "dbg_hash_ordered.hpp"
 #include "dbg_hash_fast.hpp"
 #include "dbg_hash_fast2.hpp"
+#include "dbg_hash_fast3.hpp"
 #include "dbg_bitmap.hpp"
 #include "aligner_helper.hpp"
 
@@ -45,6 +46,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered,
                          DBGHashFast,
                          DBGHashFast2,
+                         DBGHashFast3,
                          DBGSuccinct> GraphTypes;
 
 // in stable graphs the order of input sequences
