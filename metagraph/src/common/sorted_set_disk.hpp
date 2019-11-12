@@ -9,6 +9,7 @@
 #include <iostream>
 #include <mutex>
 #include <queue>
+#include <cassert>
 #include <shared_mutex>
 
 const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
