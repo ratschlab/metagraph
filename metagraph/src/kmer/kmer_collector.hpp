@@ -1,11 +1,11 @@
 #ifndef __KMER_COLLECTOR_HPP__
 #define __KMER_COLLECTOR_HPP__
 
-#include "kmer_extractor.hpp"
 #include "common/threading.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_set_disk.hpp"
+#include "kmer_extractor.hpp"
 
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
@@ -83,8 +83,8 @@ using KmerCollector = KmerStorage<KMER,
 template <typename KMER,
           class KmerExtractor>
 using KmerCollectorDisk = KmerStorage<KMER,
-                                  KmerExtractor,
-                                  SortedSetDisk<KMER>>;
+                                      KmerExtractor,
+                                      SortedSetDisk<KMER>>;
 
 template <typename KMER,
           class KmerExtractor,

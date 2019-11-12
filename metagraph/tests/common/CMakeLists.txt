@@ -28,20 +28,19 @@ if(APPLE)
   # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
   target_link_directories(tests INTERFACE /usr/local/lib )
 endif()
-message( "Lib dir is "
-        ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
-)
+message("Lib dir is " ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_directories(tests INTERFACE ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
-target_include_directories(tests PRIVATE
-        ${GTEST_INCLUDE_DIRS}
-        "../../src/"
-        ${Boost_INCLUDE_DIRS}
-        ${EXTERNAL_LIB_DIR}/asio/asio/include
-        ${EXTERNAL_LIB_DIR}/DYNAMIC/include
-        ${EXTERNAL_LIB_DIR}/hopscotch-map/include
-        ${EXTERNAL_LIB_DIR}/ips4o
-        ${EXTERNAL_LIB_DIR}/libmaus2/include
-        ${EXTERNAL_LIB_DIR}/ordered-map/include
-        ${EXTERNAL_LIB_DIR}/sdsl-lite/include)
+target_include_directories(tests
+  PRIVATE
+    ${GTEST_INCLUDE_DIRS}
+    "../../src/"
+    ${Boost_INCLUDE_DIRS}
+    ${EXTERNAL_LIB_DIR}/asio/asio/include
+    ${EXTERNAL_LIB_DIR}/DYNAMIC/include
+    ${EXTERNAL_LIB_DIR}/hopscotch-map/include
+    ${EXTERNAL_LIB_DIR}/ips4o
+    ${EXTERNAL_LIB_DIR}/libmaus2/include
+    ${EXTERNAL_LIB_DIR}/ordered-map/include
+    ${EXTERNAL_LIB_DIR}/sdsl-lite/include
+)
 target_link_libraries(tests ${GTEST_BOTH_LIBRARIES} metagraph_common)
-
