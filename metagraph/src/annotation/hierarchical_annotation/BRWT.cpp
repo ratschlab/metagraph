@@ -3,6 +3,7 @@
 #include <queue>
 #include <numeric>
 
+#include "algorithms.hpp"
 #include "serialization.hpp"
 
 

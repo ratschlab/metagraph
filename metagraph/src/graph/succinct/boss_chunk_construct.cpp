@@ -2,9 +2,11 @@
 
 #include <ips4o.hpp>
 
+#include "template_utils.hpp"
+#include "unix_tools.hpp"
 #include "boss_chunk.hpp"
 #include "kmer_collector.hpp"
-#include "unix_tools.hpp"
+#include "deque_vector.hpp"
 
 /**
  * What type of data structure to use in the #KmerCollector.
@@ -203,7 +205,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         }
 
         if constexpr(std::is_same_v<typename KmerStorage::Data,
-                                    utils::DequeStorage<typename KmerStorage::Value>>) {
+                                    DequeStorage<typename KmerStorage::Value>>) {
             kmers.shrink_to_fit();
         }
 
@@ -254,40 +256,22 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
 
 template <typename KMER>
 using KmerCounterVector = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                      Vector<std::pair<KMER, uint8_t>>,
-                                      utils::NoCleanup>;
-template <typename KMER>
-using KmerCounterVectorClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                           Vector<std::pair<KMER, uint8_t>>,
-                                           utils::DummyKmersCleaner>;
+                                      Vector<std::pair<KMER, uint8_t>>>;
+
 template <typename KMER>
 using KmerCollectorVector = KmerCollector<KMER, KmerExtractorBOSS,
-                                          Vector<KMER>,
-                                          utils::NoCleanup>;
-template <typename KMER>
-using KmerCollectorVectorClean = KmerCollector<KMER, KmerExtractorBOSS,
-                                               Vector<KMER>,
-                                               utils::DummyKmersCleaner>;
+                                          Vector<KMER>>;
 
 template <typename KMER>
 using KmerCollectorVectorDisk = KmerCollectorDisk<KMER, KmerExtractorBOSS>;
 
 template <typename KMER>
 using KmerCounterDeque = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                     utils::DequeStorage<std::pair<KMER, uint8_t>>,
-                                     utils::NoCleanup>;
-template <typename KMER>
-using KmerCounterDequeClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                          utils::DequeStorage<std::pair<KMER, uint8_t>>,
-                                          utils::DummyKmersCleaner>;
+                                     DequeStorage<std::pair<KMER, uint8_t>>>;
+
 template <typename KMER>
 using KmerCollectorDeque = KmerCollector<KMER, KmerExtractorBOSS,
-                                         utils::DequeStorage<KMER>,
-                                         utils::NoCleanup>;
-template <typename KMER>
-using KmerCollectorDequeClean = KmerCollector<KMER, KmerExtractorBOSS,
-                                              utils::DequeStorage<KMER>,
-                                              utils::DummyKmersCleaner>;
+                                         DequeStorage<KMER>>;
 
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor
@@ -302,8 +286,7 @@ IBOSSChunkConstructor
     #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
 
     if (count_kmers) {
-        if (filter_suffix.size()) {
-            switch (kExtractorContainer) {
+        switch (kExtractorContainer) {
             case ExtractorContainer::VECTOR:
                 return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
             case ExtractorContainer::DEQUE:
@@ -312,22 +295,9 @@ IBOSSChunkConstructor
                 throw std::logic_error(
                         "Unsupported extractor container specified for "
                         "counter. Only VECTOR and DEQUE are supported");
-            }
-        } else {
-            switch (kExtractorContainer) {
-            case ExtractorContainer::VECTOR:
-                return initialize_boss_chunk_constructor<KmerCounterVectorClean>(OTHER_ARGS);
-            case ExtractorContainer::DEQUE:
-                return initialize_boss_chunk_constructor<KmerCounterDequeClean>(OTHER_ARGS);
-            default:
-                throw std::logic_error(
-                        "Unsupported extractor container specified for "
-                        "counter. Only VECTOR and DEQUE are supported");
-            }
         }
     } else {
-        if (filter_suffix.size()) {
-            switch (kExtractorContainer) {
+        switch (kExtractorContainer) {
             case ExtractorContainer::VECTOR:
                 return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
             case ExtractorContainer::DEQUE:
@@ -338,19 +308,6 @@ IBOSSChunkConstructor
                 throw std::logic_error(
                         "Unknown extractor container: " +
                         to_string(static_cast<uint32_t>(kExtractorContainer)));
-            }
-        } else {
-            switch (kExtractorContainer) {
-            case ExtractorContainer::VECTOR:
-                return initialize_boss_chunk_constructor<KmerCollectorVectorClean>(OTHER_ARGS);
-            case ExtractorContainer::DEQUE:
-                return initialize_boss_chunk_constructor<KmerCollectorDequeClean>(OTHER_ARGS);
-            default:
-                throw std::logic_error(
-                        "Unsupported extractor container specified for "
-                        "collector. Only VECTOR and DEQUE are supported");
-            }
         }
     }
 }
-

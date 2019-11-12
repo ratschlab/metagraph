@@ -1,5 +1,6 @@
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #include "test_annotation.hpp"
 
 
@@ -262,9 +263,9 @@ TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels) {
                              std::make_pair("Label0", 1) }),
               get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }));
 
-    EXPECT_EQ(to_set(VectorCounts({ std::make_pair("Label1", 1),
-                                    std::make_pair("Label2", 1) })),
-              to_set(get_top_labels(*this->annotation, { 2 })));
+    EXPECT_EQ(convert_to_set(VectorCounts({ std::make_pair("Label1", 1),
+                                            std::make_pair("Label2", 1) })),
+              convert_to_set(get_top_labels(*this->annotation, { 2 })));
 
     EXPECT_EQ(VectorCounts({}),
               get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0));
@@ -356,9 +357,9 @@ TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels_by_label) {
                              std::make_pair("Label0", 1) }),
               get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }));
 
-    EXPECT_EQ(to_set(VectorCounts({ std::make_pair("Label1", 1),
-                                    std::make_pair("Label2", 1) })),
-              to_set(get_top_labels_by_label(*this->annotation, { 2 })));
+    EXPECT_EQ(convert_to_set(VectorCounts({ std::make_pair("Label1", 1),
+                                            std::make_pair("Label2", 1) })),
+              convert_to_set(get_top_labels_by_label(*this->annotation, { 2 })));
 
     EXPECT_EQ(VectorCounts({}),
               get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0));

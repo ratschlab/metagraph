@@ -1,12 +1,11 @@
 #include "sequence_io.hpp"
 
-#include "vcf_parser.hpp"
-
-#include "common/seq_tools/reverse_complement.hpp"
-#include "common/serialization.hpp"
-
-#include <fstream>
 #include <iostream>
+#include <fstream>
+
+#include "vcf_parser.hpp"
+#include "common/serialization.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 const char kDefaultFastQualityChar = 'I';
 

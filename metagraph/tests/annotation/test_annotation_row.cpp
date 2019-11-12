@@ -2,6 +2,7 @@
 
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #define private public
 #include "annotate_row_compressed.hpp"
 
@@ -9,9 +10,6 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
 const std::string test_dump_basename_vec_good = test_dump_basename + "_row_compressed";
-
-
-std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
 
 
 TEST(RowCompressed, load_label_encoder) {

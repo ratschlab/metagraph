@@ -1,14 +1,19 @@
 #pragma once
 
-#include "common/utils.hpp"
+#include "common/deque_vector.hpp"
+#include "common/vectors.hpp"
 
 #include <ips4o.hpp>
 
 #include <fstream>  //TODO(ddanciu) - try boost mmapped instead
 #include <mutex>
+#include <iostream>
 #include <shared_mutex>
+#include <queue>
 
 const std::string output_dir = "/tmp/";  // TODO(ddanciu) - use a flag instead
+
+using std::ios;
 
 /**
  * Thread safe data storage that is able to sort and extract distinct elements
@@ -44,10 +49,11 @@ public:
      * to disk when full
      */
     SortedSetDisk(
+            std::function<void(storage_type*)> cleanup = [](storage_type*) {},
             size_t num_threads = 1,
             bool verbose = false,
             size_t container_size = CONTAINER_SIZE_BYTES) :
-            num_threads_(num_threads), verbose_(verbose) {
+            num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {
         try {
             try_reserve(container_size);
         } catch (const std::bad_alloc &exception) {
@@ -174,6 +180,8 @@ public:
         // remove duplicates
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
+
+        cleanup_(vector);
     }
 
     void reserve(size_t size) {
@@ -206,7 +214,7 @@ private:
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
-        if constexpr (std::is_same_v<utils::DequeStorage<T>, storage_type>) {
+        if constexpr (std::is_same_v<DequeStorage<T>, storage_type>) {
             data_.try_reserve(size, min_size);
 
         } else {
@@ -237,6 +245,12 @@ private:
      */
     bool data_merged_ = false;
     bool verbose_;
+
+    /**
+     * Removes redundant elements from container while extracting unique ones.
+     */
+    std::function<void(storage_type*)> cleanup_;
+
     /**
      * Ensures mutually exclusive access (and thus thread-safety) to #data.
      */
