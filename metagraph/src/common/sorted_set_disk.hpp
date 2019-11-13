@@ -1,15 +1,17 @@
 #pragma once
 
 #include "common/deque_vector.hpp"
+#include "common/threading.hpp"
 #include "common/vectors.hpp"
 
 #include <ips4o.hpp>
 
+#include <cassert>
 #include <fstream> //TODO(ddanciu) - try boost mmapped instead
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <queue>
-#include <cassert>
 #include <shared_mutex>
 
 const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
@@ -108,6 +110,9 @@ class SortedSetDisk {
             sort_and_remove_duplicates(&data_, num_threads_);
             dump_to_file();
         }
+        if (write_to_disk_future_.valid()) {
+            write_to_disk_future_.get(); // make sure all pending data was written
+        }
 
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
@@ -204,15 +209,31 @@ private:
     }
   }
 
-  void dump_to_file() {
+    template <class storage_type>
+    static void dump_to_file_sync(uint32_t chunk_count, storage_type &data) {
         std::fstream binary_file
-            = std::fstream(output_dir + "chunk_" + std::to_string(chunk_count_) + ".bin",
-        std::ios::out | std::ios::binary);
-    binary_file.write((char *)&data_[0], sizeof(data_[0]) * data_.size());
-    binary_file.close();
-    data_.resize(0);
-    chunk_count_++;
-  }
+            = std::fstream(output_dir + "chunk_" + std::to_string(chunk_count) + ".bin",
+                           std::ios::out | std::ios::binary);
+        binary_file.write((char *)&data[0], sizeof(data[0]) * data.size());
+        binary_file.close();
+        data.resize(0);
+    }
+
+    void dump_to_file() {
+        if (write_to_disk_future_.valid()) {
+            write_to_disk_future_.get(); // wait for other thread to finish writing
+        }
+        if (data_.data() == data1_.data()) {
+            write_to_disk_future_
+                = thread_pool_.enqueue(this->dump_to_file_sync<storage_type>, chunk_count_, data1_);
+            data_ = data2_;
+        } else {
+            write_to_disk_future_
+                = thread_pool_.enqueue(this->dump_to_file_sync<storage_type>, chunk_count_, data2_);
+            data_ = data1_;
+        }
+        chunk_count_++;
+    }
 
     void try_reserve(size_t size, size_t min_size = 0) {
         if constexpr (std::is_same_v<DequeStorage<T>, storage_type>) {
@@ -238,7 +259,19 @@ private:
      * the order of thousands, so a 32 bit integer should suffice for storage.
      */
     uint32_t chunk_count_ = 0;
-    storage_type data_;
+    /**
+     * Alternating buffers into which data is inserted using #insert(). While
+     * one buffer is being written to disk using #dump_to_file() the other one
+     * is inserted into using #insert(). Once the insert buffer is full, we
+     * wait for the disk write operation to finish (if needed) and then swap
+     * buffers.
+     */
+    storage_type data1_, data2_;
+    /**
+     * Reference to the buffer data is currently written into (either #data1_
+     * or #data2_)
+     */
+    storage_type &data_ = data1_;
     size_t num_threads_;
     /**
      * True if the data was successfully merged from the files on disk and the
@@ -261,4 +294,16 @@ private:
      * non-overlapping areas of #data_.
      */
     mutable std::shared_timed_mutex multi_insert_mutex_;
+
+    /**
+     * Thread pool for writing to disk. The pool contains 1 thread that
+     * has a single task - namely to write the current chunk to disk. While the
+     * current chunk is being written to disk, the class may accept new
+     * insertions which will be written into the other #data_ buffer.
+     */
+    ThreadPool thread_pool_ = ThreadPool(1, 1);
+    /**
+     * Future that signals whether the current writing to disk job was done.
+     */
+    std::future<void> write_to_disk_future_;
 };

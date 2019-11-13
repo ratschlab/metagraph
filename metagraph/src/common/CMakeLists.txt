@@ -11,11 +11,6 @@ set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/OpenMP.txt)
 
-set(EXTERNAL_LIB_DIR "../../external-libraries")
-link_directories(
-  ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
-)
-
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
 find_library(FOLLY_LIBRARIES
   NAMES folly
@@ -97,10 +92,11 @@ target_include_directories(metagraph_common
     .. # this ensures that this libs include files are visible to its deps
 )
 
+find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(metagraph_common
   PUBLIC
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
-    -lsdsl
+    ${SDSL_LIBRARY}
     Boost::iostreams
 )
