@@ -35,8 +35,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     ColumnCompressed(const ColumnCompressed &) = delete;
     ColumnCompressed &operator=(const ColumnCompressed &) = delete;
 
-    ~ColumnCompressed();
-
     using MultiLabelEncoded<uint64_t, Label>::set;
     void set_labels(Index i, const VLabels &labels) override;
 
