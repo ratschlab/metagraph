@@ -22,15 +22,15 @@ template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           bool verbose)
-      : num_rows_(num_rows),
-        cached_columns_(num_columns_cached,
-                        caches::LRUCachePolicy<size_t>(),
-                        [this](size_t j, auto *col_uncompressed) {
-                            assert(col_uncompressed);
-                            this->flush(j, *col_uncompressed);
-                            delete col_uncompressed;
-                        }),
-        verbose_(verbose) {
+    : num_rows_(num_rows),
+      cached_columns_(num_columns_cached,
+                      caches::LRUCachePolicy<size_t>(),
+                      [this](size_t j, auto *col_uncompressed) {
+                          assert(col_uncompressed);
+                          this->flush(j, *col_uncompressed);
+                          delete col_uncompressed;
+                      }),
+      verbose_(verbose) {
     assert(num_columns_cached > 0);
 }
 
@@ -224,17 +224,17 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                     auto num_set_bits = new_column->num_set_bits();
 
                     std::cout << "Column <" + label_encoder_load.decode(c) + ">"
-                            + ", density: "
-                            + std::to_string(static_cast<double>(num_set_bits)
-                                             / new_column->size())
-                            + ", set bits: " + std::to_string(num_set_bits) + "\n"
+                                    + ", density: "
+                                    + std::to_string(static_cast<double>(num_set_bits)
+                                                     / new_column->size())
+                                    + ", set bits: " + std::to_string(num_set_bits) + "\n"
                               << std::flush;
                 }
 
 #pragma omp critical
                 {
                     size_t col
-                        = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
+                            = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
 
                     // set |num_rows_| with the first column inserted
                     if (!col)
@@ -399,8 +399,8 @@ void ColumnCompressed<Label>::flush(size_t j, const bitmap &vector) {
 
     bitmatrix_[j].reset();
     bitmatrix_[j].reset(
-        new bit_vector_smart([&](const auto &callback) { vector.call_ones(callback); },
-                             vector.size(), vector.num_set_bits()));
+            new bit_vector_smart([&](const auto &callback) { vector.call_ones(callback); },
+                                 vector.size(), vector.num_set_bits()));
 
     assert(vector.size() == bitmatrix_[j]->size());
     assert(vector.num_set_bits() == bitmatrix_[j]->num_set_bits());
@@ -452,34 +452,34 @@ void ColumnCompressed<Label>::convert_to_row_annotator(const std::string &outfba
     ProgressBar progress_bar(num_rows_, "Serialized rows", std::cerr, !utils::get_verbose());
 
     RowCompressed<Label>::write_rows(
-        outfbase, label_encoder_, [&](BinaryMatrix::RowCallback write_row) {
+            outfbase, label_encoder_, [&](BinaryMatrix::RowCallback write_row) {
 
 #pragma omp parallel for ordered schedule(dynamic) num_threads(get_num_threads())
-            for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
-                uint64_t begin = i;
-                uint64_t end = std::min(i + kNumRowsInBlock, num_rows_);
+                for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
+                    uint64_t begin = i;
+                    uint64_t end = std::min(i + kNumRowsInBlock, num_rows_);
 
-                std::vector<std::vector<uint64_t>> rows(end - begin);
+                    std::vector<std::vector<uint64_t>> rows(end - begin);
 
-                assert(begin <= end);
-                assert(end <= num_rows_);
+                    assert(begin <= end);
+                    assert(end <= num_rows_);
 
-                // TODO: use RowsFromColumnsTransformer
-                for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-                    bitmatrix_[j]->call_ones_in_range(begin, end, [&](uint64_t idx) {
-                        rows[idx - begin].push_back(j);
-                    });
-                }
+                    // TODO: use RowsFromColumnsTransformer
+                    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+                        bitmatrix_[j]->call_ones_in_range(begin, end, [&](uint64_t idx) {
+                            rows[idx - begin].push_back(j);
+                        });
+                    }
 
 #pragma omp ordered
-                {
-                    for (const auto &row : rows) {
-                        write_row(row);
-                        ++progress_bar;
+                    {
+                        for (const auto &row : rows) {
+                            write_row(row);
+                            ++progress_bar;
+                        }
                     }
                 }
-            }
-        });
+            });
 }
 
 template <typename Label>
@@ -536,7 +536,7 @@ bool ColumnCompressed<Label>::dump_columns(const std::string &prefix,
 #pragma omp parallel for num_threads(num_threads)
         for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
             std::ofstream outstream(remove_suffix(prefix, kExtension) + "."
-                                        + std::to_string(i) + ".raw.annodbg",
+                                            + std::to_string(i) + ".raw.annodbg",
                                     std::ios::binary);
 
             if (!outstream.good()) {
@@ -580,7 +580,7 @@ template <class RowIterator>
 class IterateRowsByRowIterator : public IterateRows {
   public:
     IterateRowsByRowIterator(std::unique_ptr<RowIterator> row_iterator)
-          : row_iterator_(std::move(row_iterator)) {};
+        : row_iterator_(std::move(row_iterator)) {};
 
     std::vector<uint64_t> next_row() override final { return row_iterator_->next_row(); }
 

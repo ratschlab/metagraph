@@ -46,10 +46,10 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     // For each index i in indices, check if i has the label.
     void call_relations(
-        const std::vector<Index> &indices,
-        const Label &label,
-        std::function<void(Index, bool)> callback,
-        std::function<bool()> terminate = []() { return false; }) const;
+            const std::vector<Index> &indices,
+            const Label &label,
+            std::function<void(Index, bool)> callback,
+            std::function<bool()> terminate = []() { return false; }) const;
 
     bool has_labels(Index i, const VLabels &labels) const override;
 
