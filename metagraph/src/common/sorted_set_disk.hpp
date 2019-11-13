@@ -109,104 +109,110 @@ class SortedSetDisk {
             dump_to_file();
         }
 
-        // start merging disk chunks by using a heap to store the current element
-        // from each chunk
-        std::vector<std::fstream> chunk_files(chunk_count_);
+    // start merging disk chunks by using a heap to store the current element
+    // from each chunk
+    std::vector<std::fstream> chunk_files(chunk_count_);
         std::fstream sorted_file(output_dir + "sorted.bin", std::ios::binary | std::ios::out);
 
         auto comp = [](const auto &a, const auto &b) { return a.first > b.first; };
-        std::priority_queue<std::pair<T, uint32_t>,
+    std::priority_queue<std::pair<T, uint32_t>,
                             std::vector<std::pair<T, uint32_t>>,
                             decltype(comp)> merge_heap(comp);
 
-        for (uint32_t i = 0; i < chunk_count_; ++i) {
-            chunk_files[i].open(output_dir + "chunk_" + std::to_string(i) + ".bin",
-                                std::ios::in | std::ios::binary);
-            T dataItem;
-            if (chunk_files[i].good()) {
+    for (uint32_t i = 0; i < chunk_count_; ++i) {
+      chunk_files[i].open(output_dir + "chunk_" + std::to_string(i) + ".bin",
+                          std::ios::in | std::ios::binary);
+      T dataItem;
+      if (chunk_files[i].good()) {
                 chunk_files[i].read(reinterpret_cast<char *>(&dataItem), sizeof(dataItem));
-                merge_heap.push({ dataItem, i });
-            }
-        }
-        uint64_t totalSize = 0;
-        // init with any value that is not the top
-        T lastWritten;
-        bool hasWritten = false;
-        while (!merge_heap.empty()) {
-            std::pair<T, uint32_t> smallest = merge_heap.top();
-            merge_heap.pop();
-            if (!hasWritten || smallest.first != lastWritten) {
-                hasWritten = true;
+        merge_heap.push({dataItem, i});
+      }
+    }
+    uint64_t totalSize = 0;
+    // init with any value that is not the top
+    T lastWritten;
+    bool hasWritten = false;
+    while (!merge_heap.empty()) {
+      std::pair<T, uint32_t> smallest = merge_heap.top();
+      merge_heap.pop();
+      if (!hasWritten || smallest.first != lastWritten) {
+        hasWritten = true;
                 sorted_file.write(reinterpret_cast<char *>(&smallest.first), sizeof(smallest.first));
-                lastWritten = smallest.first;
-                totalSize++;
-            }
-            if (chunk_files[smallest.second].good()) {
-                T dataItem;
-                if (chunk_files[smallest.second].read(reinterpret_cast<char *>(&dataItem),
-                                                      sizeof(dataItem))) {
-                    merge_heap.push({ dataItem, smallest.second });
-                }
-            }
+        lastWritten = smallest.first;
+        totalSize++;
+      }
+      if (chunk_files[smallest.second].good()) {
+        T dataItem;
+        if (chunk_files[smallest.second].read(reinterpret_cast<char *>(&dataItem), sizeof(dataItem))) {
+          //TODO(ddanciu): apply logic from cleanup_ to remove redundant
+          // dummy BOSS kmers
+          merge_heap.push({dataItem, smallest.second});
         }
-        sorted_file.close();
+      }
+    }
+    sorted_file.close();
         sorted_file.open(output_dir + "sorted.bin", std::ios::binary | std::ios::in);
-        sorted_file.seekg(0, sorted_file.end);
-        uint64_t length = sorted_file.tellg();
-        sorted_file.seekg(0, sorted_file.beg);
-        data_.resize(totalSize);
-        sorted_file.read(reinterpret_cast<char *>(data_.data()), length);
-        data_merged_ = true;
-        return data_;
+    sorted_file.seekg(0, sorted_file.end);
+    uint64_t length = sorted_file.tellg();
+    sorted_file.seekg(0, sorted_file.beg);
+    data_.resize(totalSize);
+    if (length != totalSize * sizeof(data_[0])) {
+      throw std::length_error("Size of output file is " +
+                              std::to_string(length) + " expected " +
+                              std::to_string(totalSize * sizeof(data_[0])));
     }
+    sorted_file.read(reinterpret_cast<char *>(&data_[0]), length);
+    data_merged_ = true;
+    return data_;
+  }
 
-    void clear() {
-        std::unique_lock<std::mutex> exclusive_lock(mutex_);
+  void clear() {
+    std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-        data_.resize(0); // this makes sure the buffer is not reallocated
-    }
+    data_.resize(0); // this makes sure the buffer is not reallocated
+  }
 
-    template <class Array>
-    void sort_and_remove_duplicates(Array *vector, size_t num_threads) const {
-        assert(vector);
+  template <class Array>
+  void sort_and_remove_duplicates(Array *vector, size_t num_threads) const {
+    assert(vector);
 
-        ips4o::parallel::sort(vector->begin(), vector->end(),
-                              std::less<typename Array::value_type>(), num_threads);
-        // remove duplicates
-        auto unique_end = std::unique(vector->begin(), vector->end());
-        vector->erase(unique_end, vector->end());
+    ips4o::parallel::sort(vector->begin(), vector->end(),
+                          std::less<typename Array::value_type>(), num_threads);
+    // remove duplicates
+    auto unique_end = std::unique(vector->begin(), vector->end());
+    vector->erase(unique_end, vector->end());
 
         cleanup_(vector);
-    }
+  }
 
-    void reserve(size_t size) {
-        std::cerr << "SortedSetDisk: Ignoring reserving size " << size << std::endl;
-    }
+  void reserve(size_t size) {
+    std::cerr << "SortedSetDisk: Ignoring reserving size " << size << std::endl;
+  }
 
-  private:
-    void shrink_data() {
-        if (verbose_) {
+private:
+  void shrink_data() {
+    if (verbose_) {
             std::cout << "Allocated capacity exceeded, erasing duplicate values..." << std::flush;
-        }
+    }
 
-        size_t old_size = data_.size();
-        sort_and_remove_duplicates(&data_, num_threads_);
+    size_t old_size = data_.size();
+    sort_and_remove_duplicates(&data_, num_threads_);
 
-        if (verbose_) {
+    if (verbose_) {
             std::cout << " done. Size reduced from " << old_size << " to " << data_.size() << ", "
                       << (data_.size() * sizeof(T) >> 20) << "Mb" << std::endl;
-        }
     }
+  }
 
-    void dump_to_file() {
+  void dump_to_file() {
         std::fstream binary_file
             = std::fstream(output_dir + "chunk_" + std::to_string(chunk_count_) + ".bin",
-                           std::ios::out | std::ios::binary);
-        binary_file.write((char *)&data_[0], sizeof(data_[0]) * data_.size());
-        binary_file.close();
-        data_.resize(0);
-        chunk_count_++;
-    }
+        std::ios::out | std::ios::binary);
+    binary_file.write((char *)&data_[0], sizeof(data_[0]) * data_.size());
+    binary_file.close();
+    data_.resize(0);
+    chunk_count_++;
+  }
 
     void try_reserve(size_t size, size_t min_size = 0) {
         if constexpr (std::is_same_v<DequeStorage<T>, storage_type>) {
@@ -221,11 +227,11 @@ class SortedSetDisk {
                     return;
                 } catch (const std::bad_alloc &exception) {
                     size = min_size + (size - min_size) * 2 / 3;
-                }
-            }
-            data_.reserve(min_size);
         }
+      }
+      data_.reserve(min_size);
     }
+  }
 
     /**
      * Current number of chunks written to disk. We expect this to be at most in

@@ -6,18 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(../common metagraph_common)
 SET(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
-
-# unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
-# and happily cached, thus messing up the compilation flags forever
-unset(OpenMP_CXX_FLAGS CACHE)
-if ((CMAKE_CXX_COMPILER_ID MATCHES AppleClang) OR (CMAKE_CXX_COMPILER_ID MATCHES Clang))
-  find_package(OPENMP REQUIRED)
-else()
-  find_package(OpenMP REQUIRED)
-endif()
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-
+include(${PROJECT_PARENT_DIR}/OpenMP.txt)
 
 file(GLOB src_files "*.cpp" "kmc_counter/*.cpp")
 
