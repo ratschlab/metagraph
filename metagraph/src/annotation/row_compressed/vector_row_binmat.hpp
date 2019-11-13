@@ -30,7 +30,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     uint64_t num_rows() const { return vector_.size(); }
 
     bool get(Row row, Column column) const;
-    std::vector<Column> get_row(Row row) const;
+    SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
 
     void set(Row row, Column column);

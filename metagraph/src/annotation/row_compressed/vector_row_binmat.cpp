@@ -63,14 +63,14 @@ void VectorRowBinMat<RowType>::standardize_rows() {
 }
 
 template <typename RowType>
-std::vector<typename VectorRowBinMat<RowType>::Column>
+typename VectorRowBinMat<RowType>::SetBitPositions
 VectorRowBinMat<RowType>::get_row(Row row) const {
     assert(row < vector_.size());
-    if constexpr(std::is_same_v<RowType, std::vector<Column>>) {
+    if constexpr(std::is_same_v<RowType, SetBitPositions>) {
         return vector_[row];
     } else {
         const auto &v = vector_[row];
-        return std::vector<Column>(v.begin(), v.end());
+        return SetBitPositions(v.begin(), v.end());
     }
 }
 
@@ -163,4 +163,4 @@ double VectorRowBinMat<RowType>::density() const {
 }
 
 template class VectorRowBinMat<SmallVector<uint32_t>>;
-template class VectorRowBinMat<std::vector<uint64_t>>;
+template class VectorRowBinMat<Vector<uint64_t>>;

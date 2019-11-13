@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "common/bit_vectors/bit_vector.hpp"
+#include "common/vectors.hpp"
 
 
 class BinaryMatrix {
@@ -11,7 +12,7 @@ class BinaryMatrix {
     typedef uint64_t Row;
     typedef uint64_t Column;
 
-    typedef std::vector<Column> SetBitPositions;
+    typedef Vector<Column> SetBitPositions;
     typedef std::function<void(const SetBitPositions &)> RowCallback;
     typedef std::function<void(Row, Column)> ValueCallback;
 
@@ -22,8 +23,8 @@ class BinaryMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     virtual bool get(Row row, Column column) const = 0;
-    virtual std::vector<Column> get_row(Row row) const = 0;
-    virtual std::vector<std::vector<Column>> get_rows(const std::vector<Row> &rows) const;
+    virtual SetBitPositions get_row(Row row) const = 0;
+    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
 
     virtual bool load(std::istream &in) = 0;

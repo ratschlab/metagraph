@@ -189,9 +189,10 @@ namespace utils {
         vector->resize(j);
     }
 
-    template <typename T>
-    std::vector<T> arange(T first, size_t size) {
-        std::vector<T> result(size);
+    template <typename T, class Vector = std::vector<T>>
+    Vector arange(T first, size_t size) {
+        static_assert(std::is_same_v<typename Vector::value_type, T>);
+        Vector result(size);
         std::iota(result.begin(), result.end(), first);
         return result;
     }

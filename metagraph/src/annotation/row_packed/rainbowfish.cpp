@@ -53,7 +53,7 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
             get_num_threads()
         );
 
-        std::vector<Column> v;
+        SetBitPositions v;
 
         for (const auto &index_count : index_counts) {
             v.assign(vectors[index_count.first].begin(),
@@ -169,12 +169,12 @@ bool Rainbowfish::get(Row row, Column column) const {
                                                      column);
 }
 
-std::vector<Rainbowfish::Column> Rainbowfish::get_row(Row row) const {
+Rainbowfish::SetBitPositions Rainbowfish::get_row(Row row) const {
     uint64_t code = get_code(row);
     return reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_);
 }
 
-std::vector<std::vector<Rainbowfish::Column>>
+std::vector<Rainbowfish::SetBitPositions>
 Rainbowfish::get_rows(const std::vector<Row> &rows) const {
     std::vector<std::pair<uint64_t, /* code */
                           uint64_t /* row */>> row_codes(rows.size());
@@ -186,9 +186,9 @@ Rainbowfish::get_rows(const std::vector<Row> &rows) const {
     ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
                           utils::LessFirst(), get_num_threads());
 
-    std::vector<std::vector<Column>> result(rows.size());
+    std::vector<SetBitPositions> result(rows.size());
 
-    std::vector<Column> *last_row = nullptr;
+    SetBitPositions *last_row = nullptr;
     uint64_t last_code = std::numeric_limits<uint64_t>::max();
 
     for (const auto &[code, row] : row_codes) {

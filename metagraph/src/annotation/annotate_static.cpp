@@ -132,7 +132,8 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
 }
 
 template <class BinaryMatrixType, typename Label>
-std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
+typename StaticBinRelAnnotator<BinaryMatrixType, Label>::SetBitPositions
+StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::get_label_codes(Index i) const {
     if (!cached_rows_.get())
         return matrix_->get_row(i);
@@ -147,7 +148,7 @@ std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
-std::vector<std::vector<uint64_t>>
+std::vector<typename StaticBinRelAnnotator<BinaryMatrixType, Label>::SetBitPositions>
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::get_label_codes(const std::vector<Index> &indices) const {
     return matrix_->get_rows(indices);

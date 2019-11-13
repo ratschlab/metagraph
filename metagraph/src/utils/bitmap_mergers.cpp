@@ -1,5 +1,7 @@
 #include "bitmap_mergers.hpp"
 
+#include "common/vectors.hpp"
+
 
 namespace utils {
 
@@ -128,8 +130,9 @@ std::tuple<uint64_t, uint64_t> RowsFromColumnsIterator::next_set_bit() {
     return std::make_tuple(row, column);
 }
 
-std::vector<uint64_t> RowsFromColumnsIterator::next_row() {
-    std::vector<uint64_t> indices;
+template <typename Vector>
+Vector RowsFromColumnsIterator::next_row() {
+    Vector indices;
 
     if (i_ > 0 && (row_ == i_)) {
         indices.push_back(column_);
@@ -150,10 +153,15 @@ std::vector<uint64_t> RowsFromColumnsIterator::next_row() {
     return indices;
 }
 
+template std::vector<uint64_t> RowsFromColumnsIterator::next_row<std::vector<uint64_t>>();
+template Vector<uint64_t> RowsFromColumnsIterator::next_row<Vector<uint64_t>>();
+
+
+template <typename Vector>
 void RowsFromColumnsTransformer
-::call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback) {
+::call_rows(const std::function<void(const Vector &)> &callback) {
     uint64_t cur_row = 0;
-    std::vector<uint64_t> indices;
+    Vector indices;
 
     while (values_left()) {
         call_next([&](uint64_t row, uint64_t column) {
@@ -174,6 +182,11 @@ void RowsFromColumnsTransformer
     assert(!values_left());
 }
 
+template void RowsFromColumnsTransformer::call_rows<std::vector<uint64_t>>(
+        const std::function<void(const std::vector<uint64_t> &)> &callback);
+template void RowsFromColumnsTransformer::call_rows<Vector<uint64_t>>(
+        const std::function<void(const Vector<uint64_t> &)> &callback);
+
 template <class BitVectorType>
 std::vector<std::unique_ptr<bit_vector>>
 transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix) {
@@ -186,9 +199,9 @@ transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix) {
     transposed.reserve(num_columns);
 
     RowsFromColumnsTransformer transformer(matrix);
-    //TODO: use call_next directly, without creating std::vector<uint64_t>
-    transformer.call_rows(
-        [&](const std::vector<uint64_t> &column_indices) {
+    //TODO: use call_next directly, without creating Vector<uint64_t>
+    transformer.call_rows<Vector<uint64_t>>(
+        [&](const Vector<uint64_t> &column_indices) {
             sdsl::bit_vector bv(num_rows, false);
             for (const auto &row_id : column_indices) {
                 bv[row_id] = true;

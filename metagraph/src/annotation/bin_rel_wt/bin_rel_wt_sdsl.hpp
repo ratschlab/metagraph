@@ -24,7 +24,7 @@ class BinRelWT_sdsl : public BinaryMatrix {
     uint64_t num_rows() const;
 
     bool get(Row row, Column column) const;
-    std::vector<Column> get_row(Row row) const;
+    SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);

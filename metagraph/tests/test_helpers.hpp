@@ -52,6 +52,11 @@ inline std::set<T> convert_to_set(const std::vector<T> &vector) {
     return std::set<T>(vector.begin(), vector.end());
 }
 
+template <class Container>
+inline std::set<typename Container::value_type> convert_to_set(const Container &vector) {
+    return std::set<typename Container::value_type>(vector.begin(), vector.end());
+}
+
 // To support calls 'convert_to_set({ "string_1", "string_2" });'
 inline std::set<std::string> convert_to_set(const std::vector<std::string> &vector) {
     return std::set<std::string>(vector.begin(), vector.end());

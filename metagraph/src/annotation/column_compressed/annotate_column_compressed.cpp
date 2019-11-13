@@ -60,10 +60,11 @@ void ColumnCompressed<Label>::set_labels(Index i, const VLabels &labels) {
 }
 
 template <typename Label>
-std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
+typename ColumnCompressed<Label>::SetBitPositions
+ColumnCompressed<Label>::get_label_codes(Index i) const {
     assert(i < num_rows_);
 
-    std::vector<uint64_t> label_indices;
+    SetBitPositions label_indices;
     for (size_t j = 0; j < num_labels(); ++j) {
         if (is_set(i, j))
             label_indices.push_back(j);
@@ -72,9 +73,9 @@ std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
 }
 
 template <typename Label>
-std::vector<std::vector<uint64_t>>
+std::vector<typename ColumnCompressed<Label>::SetBitPositions>
 ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) const {
-    std::vector<std::vector<uint64_t>> rows(indices.size());
+    std::vector<SetBitPositions> rows(indices.size());
 
     for (size_t j = 0; j < num_labels(); ++j) {
         for (size_t i = 0; i < indices.size(); ++i) {
@@ -470,7 +471,7 @@ void ColumnCompressed<Label>
                 uint64_t begin = i;
                 uint64_t end = std::min(i + kNumRowsInBlock, num_rows_);
 
-                std::vector<std::vector<uint64_t>> rows(end - begin);
+                std::vector<SetBitPositions> rows(end - begin);
 
                 assert(begin <= end);
                 assert(end <= num_rows_);
@@ -600,28 +601,28 @@ bool ColumnCompressed<Label>
     return success;
 }
 
-template <class RowIterator>
-class IterateRowsByRowIterator : public IterateRows {
+template <class Annotator>
+class IterateTransposed : public Annotator::IterateRows {
   public:
-    IterateRowsByRowIterator(std::unique_ptr<RowIterator> row_iterator)
-          : row_iterator_(std::move(row_iterator)) {};
+    IterateTransposed(std::unique_ptr<utils::RowsFromColumnsTransformer> transformer)
+          : row_iterator_(std::move(transformer)) {}
 
-    std::vector<uint64_t> next_row() override final {
-        return row_iterator_->next_row();
+    typename Annotator::SetBitPositions next_row() override final {
+        return row_iterator_.next_row<typename Annotator::SetBitPositions>();
     }
 
   private:
-    std::unique_ptr<RowIterator> row_iterator_;
+    utils::RowsFromColumnsIterator row_iterator_;
 };
 
 template <typename Label>
-std::unique_ptr<IterateRows>
+std::unique_ptr<typename ColumnCompressed<Label>::IterateRows>
 ColumnCompressed<Label>::iterator() const {
     flush();
-    auto transformer = std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_);
-    auto row_iter = std::make_unique<utils::RowsFromColumnsIterator>(std::move(transformer));
-    using iter_type = IterateRowsByRowIterator<utils::RowsFromColumnsIterator>;
-    return std::make_unique<iter_type>(std::move(row_iter));
+
+    return std::make_unique<IterateTransposed<ColumnCompressed<Label>>>(
+        std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_)
+    );
 };
 
 template class ColumnCompressed<std::string>;

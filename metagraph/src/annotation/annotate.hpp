@@ -8,6 +8,8 @@
 #include <memory>
 #include <functional>
 
+#include "common/vectors.hpp"
+
 
 namespace annotate {
 
@@ -151,13 +153,6 @@ class LabelEncoder {
 };
 
 
-class IterateRows {
-  public:
-    virtual ~IterateRows() {}
-    virtual std::vector<uint64_t> next_row() = 0;
-};
-
-
 template <typename IndexType, typename LabelType>
 class MultiLabelEncoded
       : public MultiLabelAnnotation<IndexType, LabelType> {
@@ -165,6 +160,13 @@ class MultiLabelEncoded
     using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<IndexType, LabelType>::Label;
     using VLabels = typename MultiLabelAnnotation<IndexType, LabelType>::VLabels;
+    typedef Vector<uint64_t> SetBitPositions;
+
+    class IterateRows {
+      public:
+        virtual ~IterateRows() {}
+        virtual SetBitPositions next_row() = 0;
+    };
 
     virtual ~MultiLabelEncoded() {}
 
@@ -173,8 +175,8 @@ class MultiLabelEncoded
     get_labels(const std::vector<Index> &indices) const override final;
 
     virtual std::unique_ptr<IterateRows> iterator() const;
-    virtual std::vector<uint64_t> get_label_codes(Index i) const = 0;
-    virtual std::vector<std::vector<uint64_t>>
+    virtual SetBitPositions get_label_codes(Index i) const = 0;
+    virtual std::vector<SetBitPositions>
     get_label_codes(const std::vector<Index> &indices) const;
 
     virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
@@ -188,7 +190,7 @@ class MultiLabelEncoded
     // For each Index in indices, call row_callback on the vector of its
     // corresponding label indices. Terminate early if terminate returns true.
     virtual void call_rows(const std::vector<Index> &indices,
-                           const std::function<void(std::vector<uint64_t>&&)> &row_callback,
+                           const std::function<void(SetBitPositions&&)> &row_callback,
                            const std::function<bool()> &terminate = []() { return false; }) const;
 
     virtual bool label_exists(const Label &label) const override final {
