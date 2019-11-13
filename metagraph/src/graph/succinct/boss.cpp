@@ -883,7 +883,8 @@ BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded) const {
 }
 
 bool BOSS::find(const std::string &sequence,
-                double kmer_discovery_fraction) const {
+                double kmer_discovery_fraction,
+                const std::function<bool()> &is_invalid) const {
     size_t kmer_size = k_ + 1;
 
     if (sequence.length() < kmer_size)
@@ -904,8 +905,16 @@ bool BOSS::find(const std::string &sequence,
             }
         },
         [&]() { return num_kmers_missing > max_kmers_missing
-                        || num_kmers_discovered >= min_kmers_discovered; }
+                        || num_kmers_discovered >= min_kmers_discovered; },
+        [&]() {
+            if (!is_invalid())
+                return false;
+
+            num_kmers_missing++;
+            return true;
+        }
     );
+
     return num_kmers_missing <= max_kmers_missing;
 }
 

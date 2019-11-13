@@ -5,6 +5,7 @@
 #include "bit_vector.hpp"
 #include "config.hpp"
 #include "boss.hpp"
+#include "kmer_bloom_filter.hpp"
 
 class MaskedDeBruijnGraph;
 
@@ -108,6 +109,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool load(const std::string &filename_base) override;
     virtual void serialize(const std::string &filename_base) const override;
     virtual std::string file_extension() const override final { return kExtension; }
+    std::string bloom_filter_file_extension() const { return kBloomFilterExtension; }
 
     virtual void switch_state(Config::StateType new_state) final;
     virtual Config::StateType get_state() const final;
@@ -132,6 +134,14 @@ class DBGSuccinct : public DeBruijnGraph {
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 
+    void initialize_bloom_filter_from_fpr(double false_positive_rate,
+                                          size_t max_num_hash_functions = -1);
+
+    void initialize_bloom_filter(double bits_per_kmer,
+                                 size_t max_num_hash_functions = -1);
+
+    const KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
+
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
 
@@ -141,8 +151,11 @@ class DBGSuccinct : public DeBruijnGraph {
 
     bool canonical_mode_;
 
+    std::unique_ptr<KmerBloomFilter<>> bloom_filter_;
+
     static constexpr auto kExtension = ".dbg";
     static constexpr auto kDummyMaskExtension = ".edgemask";
+    static constexpr auto kBloomFilterExtension = ".bloom";
 };
 
 

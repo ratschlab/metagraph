@@ -14,6 +14,22 @@
 #include "aligner_helper.hpp"
 
 
+template <size_t numerator, size_t denominator>
+class DBGSuccinctBloomFPR : public DBGSuccinct {
+  public:
+    template <typename... Args>
+    DBGSuccinctBloomFPR(Args&&... args)
+          : DBGSuccinct(std::forward<Args>(args)...) {}
+};
+
+template <size_t filter_size, size_t num_hash_functions>
+class DBGSuccinctBloom : public DBGSuccinct {
+  public:
+    template <typename... Args>
+    DBGSuccinctBloom(Args&&... args)
+          : DBGSuccinct(std::forward<Args>(args)...) {}
+};
+
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
@@ -41,14 +57,22 @@ class DeBruijnGraphTest : public ::testing::Test { };
 typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
                          DBGHashOrdered,
-                         DBGSuccinct> GraphTypes;
+                         DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 1>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>> GraphTypes;
 
 // in stable graphs the order of input sequences
 // does not change the order of k-mers and their indexes
 template <typename Graph>
 class StableDeBruijnGraphTest : public ::testing::Test { };
 typedef ::testing::Types<DBGBitmap,
-                         DBGSuccinct> StableGraphTypes;
+                         DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 1>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>> StableGraphTypes;
 
 
 template <typename NodeType>
