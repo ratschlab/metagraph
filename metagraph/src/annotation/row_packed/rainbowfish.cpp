@@ -5,6 +5,7 @@
 #include <tsl/hopscotch_map.h>
 #include <ips4o.hpp>
 
+#include "utils/template_utils.hpp"
 #include "hash_utils.hpp"
 #include "vectors.hpp"
 #include "serialization.hpp"
@@ -167,9 +168,40 @@ bool Rainbowfish::get(Row row, Column column) const {
     return reduced_matrix_[code / buffer_size_]->get(code % buffer_size_,
                                                      column);
 }
+
 std::vector<Rainbowfish::Column> Rainbowfish::get_row(Row row) const {
     uint64_t code = get_code(row);
     return reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_);
+}
+
+std::vector<std::vector<Rainbowfish::Column>>
+Rainbowfish::get_rows(const std::vector<Row> &rows) const {
+    std::vector<std::pair<uint64_t, /* code */
+                          uint64_t /* row */>> row_codes(rows.size());
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        row_codes[i] = { get_code(rows[i]), i };
+    }
+
+    ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
+                          utils::LessFirst(), get_num_threads());
+
+    std::vector<std::vector<Column>> result(rows.size());
+
+    std::vector<Column> *last_row = nullptr;
+    uint64_t last_code = std::numeric_limits<uint64_t>::max();
+
+    for (const auto &[code, row] : row_codes) {
+        if (code == last_code) {
+            result[row] = *last_row;
+        } else {
+            result[row] = reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_);
+            last_row = &result[row];
+            last_code = code;
+        }
+    }
+
+    return result;
 }
 
 std::vector<Rainbowfish::Row> Rainbowfish::get_column(Column column) const {

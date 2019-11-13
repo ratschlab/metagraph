@@ -13,7 +13,7 @@ class BinaryMatrix {
 
     typedef std::vector<Column> SetBitPositions;
     typedef std::function<void(const SetBitPositions &)> RowCallback;
-    typedef std::function<void(Row, Column)> ValueCallback ;
+    typedef std::function<void(Row, Column)> ValueCallback;
 
     virtual ~BinaryMatrix() {}
 
@@ -23,8 +23,7 @@ class BinaryMatrix {
     // row is in [0, num_rows), column is in [0, num_columns)
     virtual bool get(Row row, Column column) const = 0;
     virtual std::vector<Column> get_row(Row row) const = 0;
-    virtual std::vector<std::vector<Column>>
-    get_rows(const std::vector<Row> &rows) const;
+    virtual std::vector<std::vector<Column>> get_rows(const std::vector<Row> &rows) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
 
     virtual bool load(std::istream &in) = 0;

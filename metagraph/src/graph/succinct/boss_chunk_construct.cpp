@@ -17,11 +17,11 @@ void sort_and_remove_duplicates(Array *array,
                                 size_t num_threads,
                                 size_t offset) {
     ips4o::parallel::sort(array->begin() + offset, array->end(),
-                          utils::LessFirst<typename Array::value_type>(),
+                          utils::LessFirst(),
                           num_threads);
     // remove duplicates
     auto unique_end = std::unique(array->begin() + offset, array->end(),
-                                  utils::EqualFirst<typename Array::value_type>());
+                                  utils::EqualFirst());
     array->erase(unique_end, array->end());
 }
 
@@ -116,7 +116,7 @@ void recover_source_dummy_nodes(size_t k,
         }
     }
     ips4o::parallel::sort(kmers->begin(), kmers->end(),
-                          utils::LessFirst<typename Array::value_type>(),
+                          utils::LessFirst(),
                           num_threads);
 }
 
