@@ -21,21 +21,19 @@ class RowCompressed;
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     template <class A, typename L>
-    friend std::unique_ptr<A> convert(ColumnCompressed<L>&&);
+    friend std::unique_ptr<A> convert(ColumnCompressed<L> &&);
 
     template <class A, typename L, class P>
-    friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t, size_t);
+    friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L> &&, P, size_t, size_t);
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
-    ColumnCompressed(uint64_t num_rows = 0,
-                     size_t num_columns_cached = 1,
-                     bool verbose = false);
+    ColumnCompressed(uint64_t num_rows = 0, size_t num_columns_cached = 1, bool verbose = false);
 
-    ColumnCompressed(const ColumnCompressed&) = delete;
-    ColumnCompressed& operator=(const ColumnCompressed&) = delete;
+    ColumnCompressed(const ColumnCompressed &) = delete;
+    ColumnCompressed &operator=(const ColumnCompressed &) = delete;
 
     ~ColumnCompressed();
 
@@ -44,16 +42,16 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     void add_label(Index i, const Label &label) override;
     void add_labels(Index i, const VLabels &labels) override;
-    void add_labels(const std::vector<Index> &indices,
-                    const VLabels &labels) override;
+    void add_labels(const std::vector<Index> &indices, const VLabels &labels) override;
 
     bool has_label(Index i, const Label &label) const override;
 
     // For each index i in indices, check if i has the label.
-    void call_relations(const std::vector<Index> &indices,
-                        const Label &label,
-                        std::function<void(Index, bool)> callback,
-                        std::function<bool()> terminate = []() { return false; }) const;
+    void call_relations(
+        const std::vector<Index> &indices,
+        const Label &label,
+        std::function<void(Index, bool)> callback,
+        std::function<bool()> terminate = []() { return false; }) const;
 
     bool has_labels(Index i, const VLabels &labels) const override;
 
@@ -69,8 +67,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     uint64_t num_objects() const override;
     size_t num_labels() const override;
     uint64_t num_relations() const override;
-    void call_objects(const Label &label,
-                      std::function<void(Index)> callback) const override;
+    void call_objects(const Label &label, std::function<void(Index)> callback) const override;
 
     void convert_to_row_annotator(const std::string &outfbase) const;
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
@@ -80,11 +77,11 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
                       bool binary = false,
                       size_t num_threads = 1) const;
 
-    const auto& data() const { return bitmatrix_; };
+    const auto &data() const { return bitmatrix_; };
 
     std::unique_ptr<IterateRows> iterator() const override;
 
-    const bitmap& get_column(const Label &label) const;
+    const bitmap &get_column(const Label &label) const;
 
     std::string file_extension() const override { return kExtension; }
 
@@ -92,14 +89,15 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     void set(Index i, size_t j, bool value);
     bool is_set(Index i, size_t j) const;
 
-    void add_labels(uint64_t begin, uint64_t end,
+    void add_labels(uint64_t begin,
+                    uint64_t end,
                     RowCompressed<Label> *annotator,
                     ProgressBar *progress_bar) const;
     void release();
     void flush() const;
     void flush(size_t j, const bitmap &annotation_curr);
-    bitmap_dyn& decompress(size_t j);
-    const bitmap& get_column(size_t j) const;
+    bitmap_dyn &decompress(size_t j);
+    const bitmap &get_column(size_t j) const;
 
     std::vector<uint64_t> get_label_codes(Index i) const override;
     std::vector<std::vector<uint64_t>>
@@ -109,13 +107,9 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
 
-    caches::fixed_sized_cache<size_t,
-                              bitmap_dyn*,
-                              caches::LRUCachePolicy<size_t>> cached_columns_;
+    caches::fixed_sized_cache<size_t, bitmap_dyn *, caches::LRUCachePolicy<size_t>> cached_columns_;
 
-    LabelEncoder<Label> &label_encoder_ {
-        MultiLabelEncoded<uint64_t, Label>::label_encoder_
-    };
+    LabelEncoder<Label> &label_encoder_ { MultiLabelEncoded<uint64_t, Label>::label_encoder_ };
 
     bool verbose_;
 
