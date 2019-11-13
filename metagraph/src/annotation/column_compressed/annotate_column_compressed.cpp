@@ -395,7 +395,11 @@ void ColumnCompressed<Label>::flush() const {
 template <typename Label>
 void ColumnCompressed<Label>::flush(size_t j, const bitmap &vector) {
     assert(j < bitmatrix_.size());
-    assert(cached_columns_.Cached(j));
+
+    // Note: asserting that j is cached cannot be done here when this function
+    //       is invovled as part of the OnEraseCallback, since the mutex locking
+    //       in the caches library would cause the check to be done after it has
+    //       been erased.
 
     bitmatrix_[j].reset();
     bitmatrix_[j].reset(
