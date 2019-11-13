@@ -79,6 +79,8 @@ file(GLOB src_files "*.cpp" "*/*.cpp")
 add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 
+# ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
+target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE)
 target_include_directories(metagraph_common
   PUBLIC
     ${Boost_INCLUDE_DIRS}
@@ -87,6 +89,7 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
     ${EXTERNAL_LIB_DIR}/ips4o
     ${EXTERNAL_LIB_DIR}/libmaus2/include
+    ${EXTERNAL_LIB_DIR}/nvbio/contrib/htslib
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
     .. # this ensures that this libs include files are visible to its deps
