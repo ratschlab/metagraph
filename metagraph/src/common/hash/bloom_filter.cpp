@@ -1,6 +1,6 @@
 #include "bloom_filter.hpp"
 
-#include "serialization.hpp"
+#include "common/serialization.hpp"
 
 
 BloomFilter::BloomFilter(size_t filter_size, size_t num_hash_functions)
