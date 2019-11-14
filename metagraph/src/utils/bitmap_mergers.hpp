@@ -47,7 +47,8 @@ class RowsFromColumnsTransformer {
     // get the number of set bits in the vectors left
     uint64_t values_left() const { return num_set_bits_left_; }
 
-    void call_rows(const std::function<void(const std::vector<uint64_t>&)> &callback);
+    template <typename Vector = std::vector<uint64_t>>
+    void call_rows(const std::function<void(const Vector &)> &callback);
 
   private:
     void initialize(const std::vector<const bit_vector*> &columns);
@@ -81,7 +82,8 @@ class RowsFromColumnsIterator {
     std::tuple<uint64_t, uint64_t> next_set_bit();
     uint64_t values_left() { return transformer_->values_left(); }
 
-    std::vector<uint64_t> next_row();
+    template <typename Vector = std::vector<uint64_t>>
+    Vector next_row();
 
   private:
     std::unique_ptr<RowsFromColumnsTransformer> transformer_;

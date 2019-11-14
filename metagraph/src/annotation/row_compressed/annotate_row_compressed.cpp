@@ -29,9 +29,9 @@ template <typename Label>
 RowCompressed<Label>::RowCompressed(uint64_t num_rows,
                                     const std::vector<Label> &labels,
                                     std::function<void(CallRow)> call_rows)
-      : matrix_(new VectorRowBinMat<std::vector<uint64_t>>(num_rows,
-                                                           labels.size(),
-                                                           call_rows)) {
+      : matrix_(new VectorRowBinMat<SetBitPositions>(num_rows,
+                                                     labels.size(),
+                                                     call_rows)) {
     for (const auto &label : labels) {
         label_encoder_.insert_and_encode(label);
     }

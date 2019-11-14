@@ -24,7 +24,7 @@ bool BRWT::get(Row row, Column column) const {
                                          assignments_.rank(column));
 }
 
-std::vector<BRWT::Column> BRWT::get_row(Row row) const {
+BRWT::SetBitPositions BRWT::get_row(Row row) const {
     assert(row < num_rows());
 
     // check if the row is empty
@@ -36,11 +36,11 @@ std::vector<BRWT::Column> BRWT::get_row(Row row) const {
         assert(assignments_.size() == 1);
 
         // the bit is set
-        return utils::arange<Column>(0, assignments_.size());
+        return utils::arange<Column, SetBitPositions>(0, assignments_.size());
     }
 
     // check all child nodes
-    std::vector<Column> row_set_bits;
+    SetBitPositions row_set_bits;
     uint64_t index_in_child = nonzero_rows_.rank1(row) - 1;
 
     for (size_t i = 0; i < child_nodes_.size(); ++i) {
@@ -53,9 +53,9 @@ std::vector<BRWT::Column> BRWT::get_row(Row row) const {
     return row_set_bits;
 }
 
-std::vector<std::vector<BRWT::Column>>
+std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<std::vector<Column>> rows(row_ids.size());
+    std::vector<SetBitPositions> rows(row_ids.size());
 
     // check whether it is a leaf
     if (!child_nodes_.size()) {
@@ -65,7 +65,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
             assert(row_ids[i] < num_rows());
 
             if (nonzero_rows_[row_ids[i]])
-                rows[i] = utils::arange<Column>(0, assignments_.size());
+                rows[i] = utils::arange<Column, SetBitPositions>(0, assignments_.size());
         }
 
         return rows;

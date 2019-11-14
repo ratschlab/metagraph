@@ -74,7 +74,7 @@ void check_rows(utils::RowsFromColumnsTransformer&& rct) {
     // ASSERT_EQ(std::vector<uint64_t>({ 3, 5 }), rct.num_set_bits());
 
     uint64_t i = 0;
-    rct.call_rows([&](auto&& row_indices) {
+    rct.call_rows<Vector<uint64_t>>([&](const auto &row_indices) {
         sdsl::bit_vector bv(rct.columns());
         for (auto j : row_indices) {
             bv[j] = 1;

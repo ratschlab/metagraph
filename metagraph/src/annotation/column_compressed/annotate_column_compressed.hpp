@@ -6,8 +6,9 @@
 #include <lru_cache_policy.hpp>
 #include <progress_bar.hpp>
 
-#include "annotate.hpp"
-#include "bit_vector.hpp"
+#include "annotation/annotate.hpp"
+#include "common/bit_vectors/bit_vector.hpp"
+#include "common/vectors.hpp"
 
 
 namespace annotate {
@@ -29,6 +30,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
+    using IterateRows = typename MultiLabelEncoded<uint64_t, Label>::IterateRows;
+    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
 
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
@@ -99,8 +102,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     bitmap_dyn& decompress(size_t j);
     const bitmap& get_column(size_t j) const;
 
-    std::vector<uint64_t> get_label_codes(Index i) const override;
-    std::vector<std::vector<uint64_t>>
+    SetBitPositions get_label_codes(Index i) const override;
+    std::vector<SetBitPositions>
     get_label_codes(const std::vector<Index> &indices) const override;
 
     uint64_t num_rows_;

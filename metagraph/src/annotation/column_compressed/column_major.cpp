@@ -31,11 +31,11 @@ bool ColMajorCompressed::get(Row row, Column column) const {
     return (*columns_[column])[row];
 }
 
-std::vector<ColMajorCompressed::Column>
+ColMajorCompressed::SetBitPositions
 ColMajorCompressed::get_row(Row row) const {
     assert(row < num_rows());
 
-    std::vector<Column> result;
+    SetBitPositions result;
     for (size_t i = 0; i < columns_.size(); ++i) {
         assert(columns_[i].get());
 
@@ -45,9 +45,9 @@ ColMajorCompressed::get_row(Row row) const {
     return result;
 }
 
-std::vector<std::vector<ColMajorCompressed::Column>>
+std::vector<ColMajorCompressed::SetBitPositions>
 ColMajorCompressed::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<std::vector<Column>> rows(row_ids.size());
+    std::vector<SetBitPositions> rows(row_ids.size());
 
     for (size_t j = 0; j < columns_.size(); ++j) {
         assert(columns_[j].get());

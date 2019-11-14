@@ -57,7 +57,7 @@ void initialize_chunk(uint64_t alph_size,
         max_count = utils::max_ull(weights->width());
     }
 
-    assert(std::is_sorted(begin, end, utils::LessFirst<T>()));
+    assert(std::is_sorted(begin, end, utils::LessFirst()));
 
     // the array containing edge labels
     W->at(0) = 0;

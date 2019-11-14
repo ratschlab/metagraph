@@ -4,9 +4,9 @@
 #include "common/serialization.hpp"
 
 
-std::vector<std::vector<BinaryMatrix::Column>>
+std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<std::vector<Column>> rows(row_ids.size());
+    std::vector<SetBitPositions> rows(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
         rows[i] = get_row(row_ids[i]);
