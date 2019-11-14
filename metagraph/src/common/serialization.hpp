@@ -91,6 +91,7 @@ class VectorFileStream : public VectorStream {
 
     Stream istream_;
     uint64_t values_left_;
+    uint64_t max_val_;
 };
 
 // Return set bits from a bit vector

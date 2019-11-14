@@ -418,13 +418,25 @@ VectorFileStream::VectorFileStream(const std::string &file)
     if (!istream_.good())
         throw std::ifstream::failure(std::string("Bad stream file ") + file);
 
+    max_val_ = load_number(istream_);
+
     values_left_ = load_number(istream_);
 }
 
 uint64_t VectorFileStream::next_value() {
     assert(values_left_ > 0);
     values_left_--;
-    return load_number(istream_);
+
+    size_t cur_val = load_number(istream_);
+
+    if (cur_val >= max_val_)
+        throw std::runtime_error(
+            "Error: invalid index "
+                + std::to_string(cur_val) + " >= "
+                + std::to_string(max_val_)
+        );
+
+    return cur_val;
 }
 
 VectorBitStream::VectorBitStream(const bit_vector &vec,
