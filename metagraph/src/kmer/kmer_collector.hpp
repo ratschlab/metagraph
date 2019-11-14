@@ -1,10 +1,7 @@
 #ifndef __KMER_COLLECTOR_HPP__
 #define __KMER_COLLECTOR_HPP__
 
-#include "kmer_extractor.hpp"
-#include "threading.hpp"
-#include "sorted_set.hpp"
-#include "sorted_multiset.hpp"
+#include "common/threading.hpp"
 
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
@@ -70,22 +67,5 @@ class KmerStorage {
 
     bool both_strands_mode_;
 };
-
-
-template <typename KMER,
-          class KmerExtractor,
-          class Container = Vector<KMER>>
-using KmerCollector = KmerStorage<KMER,
-                                  KmerExtractor,
-                                  SortedSet<KMER, Container>>;
-
-template <typename KMER,
-          class KmerExtractor,
-          typename KmerCount = uint8_t,
-          class Container = Vector<std::pair<KMER, KmerCount>>>
-using KmerCounter = KmerStorage<KMER,
-                                KmerExtractor,
-                                SortedMultiset<KMER, KmerCount, Container>>;
-
 
 #endif // __KMER_COLLECTOR_HPP__

@@ -9,8 +9,8 @@
 #include <sdsl/uint256_t.hpp>
 #include <sdsl/int_vector.hpp>
 
-#include "string_utils.hpp"
-#include "vectors.hpp"
+#include "utils/string_utils.hpp"
+#include "common/vectors.hpp"
 #include "kmer.hpp"
 #include "kmer_boss.hpp"
 #include "alphabets.hpp"

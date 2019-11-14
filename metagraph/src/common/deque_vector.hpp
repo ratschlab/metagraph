@@ -2,6 +2,7 @@
 #define __DEQUE_STORAGE_HPP__
 
 #include <deque>
+#include <stdexcept>
 
 
 /**

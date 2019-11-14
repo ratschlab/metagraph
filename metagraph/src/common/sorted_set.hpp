@@ -3,12 +3,15 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <iostream>
+#include <vector>
+#include <cassert>
 
 #include <ips4o.hpp>
 
 
 // Thread safe data storage to extract distinct elements
-template <typename T, class Container = Vector<T>>
+template <typename T, class Container = std::vector<T>>
 class SortedSet {
   public:
     static_assert(std::is_same_v<T, typename Container::value_type>);
