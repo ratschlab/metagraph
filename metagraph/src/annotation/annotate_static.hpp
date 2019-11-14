@@ -18,6 +18,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     typedef BinaryMatrixType binary_matrix_type;
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
+    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
 
     explicit StaticBinRelAnnotator(size_t row_cache_size = 0);
 
@@ -62,12 +63,12 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    std::vector<uint64_t> get_label_codes(Index i) const override;
-    std::vector<std::vector<uint64_t>>
+    SetBitPositions get_label_codes(Index i) const override;
+    std::vector<SetBitPositions>
     get_label_codes(const std::vector<Index> &indices) const override;
 
     typedef caches::fixed_sized_cache<Index,
-                                      std::vector<uint64_t>,
+                                      SetBitPositions,
                                       caches::LRUCachePolicy<Index>> RowCacheType;
     mutable std::unique_ptr<RowCacheType> cached_rows_;
 

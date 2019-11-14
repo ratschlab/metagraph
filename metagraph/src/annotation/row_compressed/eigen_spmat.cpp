@@ -27,11 +27,11 @@ void EigenSpMat::set(Row row, Column column) {
         num_columns_ = column + 1;
 }
 
-std::vector<EigenSpMat::Column>
+EigenSpMat::SetBitPositions
 EigenSpMat::get_row(Row row) const {
     assert(row < num_rows());
 
-    std::vector<Column> result;
+    SetBitPositions result;
     for (decltype(mat_)::InnerIterator it(mat_, row); it; ++it) {
         result.push_back(it.index());
     }

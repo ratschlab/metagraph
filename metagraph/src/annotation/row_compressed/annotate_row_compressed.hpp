@@ -29,19 +29,16 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     friend void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, L>>>&&,
                       const std::vector<std::string>&,
                       const std::string&);
-    template <typename L>
-    friend void merge_rows(const std::vector<const LabelEncoder<L> *>&,
-                           std::function<const std::vector<uint64_t>(uint64_t)>,
-                           uint64_t,
-                           const std::string&);
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
+    using IterateRows = typename MultiLabelEncoded<uint64_t, Label>::IterateRows;
+    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
-    typedef std::function<void(Index, std::vector<uint64_t>&&)> CallRow;
+    typedef std::function<void(Index, SetBitPositions&&)> CallRow;
     RowCompressed(uint64_t num_rows,
                   const std::vector<Label> &labels,
                   std::function<void(CallRow)> call_rows);
@@ -69,6 +66,10 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     uint64_t num_relations() const;
 
     std::string file_extension() const { return kExtension; }
+
+    static void write_rows(std::string filename,
+                           const LabelEncoder<Label> &label_encoder,
+                           const std::function<void(BinaryMatrix::RowCallback)> &call_rows);
 
   private:
     void reinitialize(uint64_t num_rows);
@@ -100,11 +101,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
         std::unique_ptr<::StreamRows<RowType>> sr_;
     };
 
-    static void write_rows(std::string filename,
-                           const LabelEncoder<Label> &label_encoder,
-                           const std::function<void(BinaryMatrix::RowCallback)> &call_rows);
-
-    std::vector<uint64_t> get_label_codes(Index i) const {
+    SetBitPositions get_label_codes(Index i) const {
         return matrix_->get_row(i);
     }
 

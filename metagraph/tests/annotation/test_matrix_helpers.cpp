@@ -12,7 +12,7 @@
 #include "column_major.hpp"
 #include "bitmap_mergers.hpp"
 
-typedef std::vector<BinaryMatrix::Column> RowSetBits;
+typedef BinaryMatrix::SetBitPositions RowSetBits;
 typedef std::function<void(const RowSetBits &)> RowCallback;
 
 

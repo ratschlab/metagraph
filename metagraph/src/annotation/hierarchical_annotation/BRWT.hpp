@@ -35,8 +35,8 @@ class BRWT : public BinaryMatrix {
     uint64_t num_rows() const { return nonzero_rows_.size(); }
 
     bool get(Row row, Column column) const;
-    std::vector<Column> get_row(Row row) const;
-    std::vector<std::vector<Column>> get_rows(const std::vector<Row> &rows) const;
+    SetBitPositions get_row(Row row) const;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);

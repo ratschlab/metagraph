@@ -22,7 +22,7 @@ class EigenSpMat : public BinaryMatrixRowDynamic {
     uint64_t num_rows() const { return mat_.rows(); }
 
     bool get(Row row, Column column) const;
-    std::vector<Column> get_row(Row row) const;
+    SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
 
     void set(Row row, Column column);

@@ -104,7 +104,7 @@ void MultiLabelEncoded<IndexType, LabelType>
 template <typename IndexType, typename LabelType>
 void MultiLabelEncoded<IndexType, LabelType>
 ::call_rows(const std::vector<Index> &indices,
-            const std::function<void(std::vector<uint64_t>&&)> &row_callback,
+            const std::function<void(SetBitPositions&&)> &row_callback,
             const std::function<bool()> &terminate) const {
     for (Index i : indices) {
         if (terminate())
@@ -114,13 +114,12 @@ void MultiLabelEncoded<IndexType, LabelType>
     }
 }
 
-template <typename Annotator>
-class IterateRowsByIndex : public IterateRows {
+template <class Annotator>
+class IterateRowsByIndex : public Annotator::IterateRows {
   public:
-    IterateRowsByIndex(const Annotator &annotator)
-          : annotator_(annotator) {};
+    IterateRowsByIndex(const Annotator &annotator) : annotator_(annotator) {};
 
-    std::vector<uint64_t> next_row() override final {
+    typename Annotator::SetBitPositions next_row() override final {
         return annotator_.get_label_codes(i_++);
     };
 
@@ -130,7 +129,7 @@ class IterateRowsByIndex : public IterateRows {
 };
 
 template <typename IndexType, typename LabelType>
-std::unique_ptr<IterateRows>
+std::unique_ptr<typename MultiLabelEncoded<IndexType, LabelType>::IterateRows>
 MultiLabelEncoded<IndexType, LabelType>::iterator() const {
     return std::make_unique<IterateRowsByIndex<MultiLabelEncoded<IndexType, LabelType>>>(*this);
 }
@@ -175,10 +174,10 @@ MultiLabelEncoded<IndexType, LabelType>
 
 // calls get_label_codes(i)
 template <typename IndexType, typename LabelType>
-std::vector<std::vector<uint64_t>>
+std::vector<typename MultiLabelEncoded<IndexType, LabelType>::SetBitPositions>
 MultiLabelEncoded<IndexType, LabelType>
 ::get_label_codes(const std::vector<Index> &indices) const {
-    std::vector<std::vector<uint64_t>> rows(indices.size());
+    std::vector<SetBitPositions> rows(indices.size());
 
     for (size_t i = 0; i < indices.size(); ++i) {
         assert(indices[i] < this->num_objects());

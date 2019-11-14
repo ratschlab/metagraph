@@ -23,7 +23,8 @@ class Rainbowfish : public BinaryMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const;
-    std::vector<Column> get_row(Row row) const;
+    SetBitPositions get_row(Row row) const;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);

@@ -300,7 +300,7 @@ convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotato
 
 template <typename Label>
 void merge_rows(const std::vector<const LabelEncoder<Label> *> &label_encoders,
-                std::function<const std::vector<uint64_t>(uint64_t)> get_next_row,
+                std::function<const BinaryMatrix::SetBitPositions(uint64_t)> get_next_row,
                 uint64_t num_rows,
                 const std::string &outfile) {
     LabelEncoder<Label> merged_label_enc;
@@ -328,7 +328,7 @@ void merge_rows(const std::vector<const LabelEncoder<Label> *> &label_encoders,
                         indexes.insert(old_index_to_new[old_i]);
                     }
                 }
-                std::vector<uint64_t> merged_row(indexes.begin(), indexes.end());
+                BinaryMatrix::SetBitPositions merged_row(indexes.begin(), indexes.end());
                 write_row(merged_row);
 
                 indexes.clear();
@@ -357,7 +357,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, Label>>>&& an
     assert(num_rows);
 
     std::vector<const LEncoder*> label_encoders;
-    std::vector<std::unique_ptr<IterateRows>> annotator_row_iterators;
+    std::vector<std::unique_ptr<typename MultiLabelEncoded<uint64_t, Label>::IterateRows>> annotator_row_iterators;
     for (const auto &annotator : annotators) {
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
@@ -385,7 +385,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, Label>>>&& an
 
     merge_rows(
         label_encoders,
-        [&](uint64_t annotator_idx) -> const std::vector<uint64_t> {
+        [&](uint64_t annotator_idx) -> const BinaryMatrix::SetBitPositions {
             if (annotator_idx < annotators.size()) {
                 return annotator_row_iterators.at(annotator_idx)->next_row();
             } else {
