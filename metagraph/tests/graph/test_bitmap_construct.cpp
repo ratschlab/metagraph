@@ -205,12 +205,12 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
 // TODO: k is node length
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        SortedSet<KMER> *kmers,
+                                        SortedSet<KMER, Vector<KMER>> *kmers,
                                         const std::vector<KmerExtractor2Bit::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    extract_kmers<KMER, KmerExtractor2Bit, SortedSet<KMER>>(
+    extract_kmers<KMER, KmerExtractor2Bit, SortedSet<KMER, Vector<KMER>>>(
         [reads](CallbackString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
@@ -220,7 +220,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
-    SortedSet<KMER> result;
+    SortedSet<KMER, Vector<KMER>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -267,7 +267,7 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
-    SortedSet<KMER> result;
+    SortedSet<KMER, Vector<KMER>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -311,7 +311,7 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
-    SortedSet<KMER> result;
+    SortedSet<KMER, Vector<KMER>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -357,7 +357,7 @@ TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
-    SortedSet<KMER> result;
+    SortedSet<KMER, Vector<KMER>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),

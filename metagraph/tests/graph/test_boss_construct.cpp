@@ -366,12 +366,12 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
 template <typename KMER>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        SortedSet<KMER> *kmers,
+                                        SortedSet<KMER, Vector<KMER>> *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    extract_kmers<KMER, KmerExtractorBOSS, SortedSet<KMER>>(
+    extract_kmers<KMER, KmerExtractorBOSS, SortedSet<KMER, Vector<KMER>>>(
         [reads](CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
@@ -381,7 +381,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
-    SortedSet<TypeParam> result;
+    SortedSet<TypeParam, Vector<TypeParam>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -424,7 +424,7 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
 }
 
 TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
-    SortedSet<TypeParam> result;
+    SortedSet<TypeParam, Vector<TypeParam>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -457,7 +457,7 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
 }
 
 TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {
-    SortedSet<TypeParam> result;
+    SortedSet<TypeParam, Vector<TypeParam>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -508,7 +508,7 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {
 }
 
 TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
-    SortedSet<TypeParam> result;
+    SortedSet<TypeParam, Vector<TypeParam>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -571,11 +571,17 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
 template <typename TypeParam, typename KmerCount>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        SortedMultiset<TypeParam, KmerCount> *kmers,
+                                        SortedMultiset<TypeParam,
+                                                       KmerCount,
+                                                       Vector<std::pair<TypeParam, KmerCount>>> *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    count_kmers<TypeParam, KmerExtractorBOSS, SortedMultiset<TypeParam, KmerCount>>(
+    count_kmers<TypeParam,
+                KmerExtractorBOSS,
+                SortedMultiset<TypeParam,
+                               KmerCount,
+                               Vector<std::pair<TypeParam, KmerCount>>>>(
         [reads](CallStringCount callback) {
             for (const auto &read : *reads) {
                 callback(read, 1);
@@ -587,7 +593,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TYPED_TEST(CountKmers, CountKmers8bits) {
-    SortedMultiset<TypeParam> result;
+    SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -661,7 +667,7 @@ TYPED_TEST(CountKmers, CountKmers8bits) {
 }
 
 TYPED_TEST(CountKmers, CountKmers32bits) {
-    SortedMultiset<TypeParam, uint32_t> result;
+    SortedMultiset<TypeParam, uint32_t, Vector<std::pair<TypeParam, uint32_t>>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -735,7 +741,7 @@ TYPED_TEST(CountKmers, CountKmers32bits) {
 }
 
 TYPED_TEST(CountKmers, CountKmersAppendParallel) {
-    SortedMultiset<TypeParam> result;
+    SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
