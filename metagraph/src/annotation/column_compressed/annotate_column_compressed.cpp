@@ -36,6 +36,8 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
 
 template <typename Label>
 ColumnCompressed<Label>::~ColumnCompressed() {
+    // Note: this is needed to make sure that everything is flushed to bitmatrix_
+    //       BEFORE bitmatrix_ is destroyed
     cached_columns_.Clear();
 }
 
