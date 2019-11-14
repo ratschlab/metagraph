@@ -105,7 +105,7 @@ class SortedSetDisk {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         if (data_merged_) {
-            return data1_;
+            return dataFirst_;
         }
         // write any residual data left
         if (!data_->empty()) {
@@ -115,6 +115,7 @@ class SortedSetDisk {
         if (write_to_disk_future_.valid()) {
             write_to_disk_future_.wait(); // make sure all pending data was written
         }
+        dataSecond_ = storage_type();
 
         // start merging disk chunks by using a heap to store the current element
         // from each chunk
@@ -170,15 +171,15 @@ class SortedSetDisk {
         sorted_file.seekg(0, sorted_file.end);
         uint64_t length = sorted_file.tellg();
         sorted_file.seekg(0, sorted_file.beg);
-        data1_.resize(totalSize);
-        if (length != totalSize * sizeof(data1_[0])) {
+        dataFirst_.resize(totalSize);
+        if (length != totalSize * sizeof(dataFirst_[0])) {
             throw std::length_error("Size of output file is " + std::to_string(length)
                                     + " expected "
-                                    + std::to_string(totalSize * sizeof(data1_[0])));
+                                    + std::to_string(totalSize * sizeof(dataFirst_[0])));
         }
-        sorted_file.read(reinterpret_cast<char *>(&data1_[0]), length);
+        sorted_file.read(reinterpret_cast<char *>(&dataFirst_[0]), length);
         data_merged_ = true;
-        return data1_;
+        return dataFirst_;
     }
 
     void clear() {
@@ -228,7 +229,7 @@ class SortedSetDisk {
      * memory will remain unaffected
      */
     template <class storage_type>
-    static void dump_to_file_sync(uint32_t chunk_count, storage_type *data) {
+    static void dump_to_file(uint32_t chunk_count, storage_type *data) {
         std::fstream binary_file
                 = std::fstream(output_dir + "chunk_" + std::to_string(chunk_count)
                                        + ".bin",
@@ -245,39 +246,39 @@ class SortedSetDisk {
         if (write_to_disk_future_.valid()) {
             write_to_disk_future_.wait(); // wait for other thread to finish writing
         }
-        if (data_->data() == data1_.data()) {
+        if (data_->data() == dataFirst_.data()) {
             write_to_disk_future_
-                    = thread_pool_.enqueue(this->dump_to_file_sync<storage_type>,
-                                           chunk_count_, &data1_);
-            data_ = &data2_;
+                    = thread_pool_.enqueue(this->dump_to_file<storage_type>,
+                                           chunk_count_, &dataFirst_);
+            data_ = &dataSecond_;
         } else {
             write_to_disk_future_
-                    = thread_pool_.enqueue(this->dump_to_file_sync<storage_type>,
-                                           chunk_count_, &data2_);
-            data_ = &data1_;
+                    = thread_pool_.enqueue(this->dump_to_file<storage_type>,
+                                           chunk_count_, &dataSecond_);
+            data_ = &dataFirst_;
         }
         chunk_count_++;
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
         if constexpr (std::is_same_v<DequeStorage<T>, storage_type>) {
-            data1_.try_reserve(size, min_size);
-            data2_.try_reserve(size, min_size);
+            dataFirst_.try_reserve(size, min_size);
+            dataSecond_.try_reserve(size, min_size);
 
         } else {
             size = std::max(size, min_size);
 
             while (size > min_size) {
                 try {
-                    data1_.reserve(size);
-                    data2_.reserve(size);
+                    dataFirst_.reserve(size);
+                    dataSecond_.reserve(size);
                     return;
                 } catch (const std::bad_alloc &exception) {
                     size = min_size + (size - min_size) * 2 / 3;
                 }
             }
-            data1_.reserve(min_size);
-            data2_.reserve(min_size);
+            dataFirst_.reserve(min_size);
+            dataSecond_.reserve(min_size);
         }
     }
 
@@ -293,12 +294,13 @@ class SortedSetDisk {
      * wait for the disk write operation to finish (if needed) and then swap
      * buffers.
      */
-    storage_type data1_, data2_;
+    storage_type dataFirst_;
+    storage_type dataSecond_;
     /**
      * Reference to the buffer data is currently written into (either #data1_
      * or #data2_)
      */
-    storage_type *data_ = &data1_;
+    storage_type *data_ = &dataFirst_;
     size_t num_threads_;
     /**
      * True if the data was successfully merged from the files on disk and the
