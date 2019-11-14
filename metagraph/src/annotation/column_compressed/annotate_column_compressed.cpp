@@ -23,17 +23,20 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           bool verbose)
       : num_rows_(num_rows),
-        cached_columns_(
-            num_columns_cached,
-            caches::LRUCachePolicy<size_t>(),
-            [this](size_t j, auto *col_uncompressed) {
-                assert(col_uncompressed);
-                this->flush(j, *col_uncompressed);
-                delete col_uncompressed;
-            }
-        ),
+        cached_columns_(num_columns_cached,
+                        caches::LRUCachePolicy<size_t>(),
+                        [this](size_t j, bitmap *col_uncompressed) {
+                            assert(col_uncompressed);
+                            this->flush(j, *col_uncompressed);
+                            delete col_uncompressed;
+                        }),
         verbose_(verbose) {
     assert(num_columns_cached > 0);
+}
+
+template <typename Label>
+ColumnCompressed<Label>::~ColumnCompressed() {
+    cached_columns_.Clear();
 }
 
 template <typename Label>
