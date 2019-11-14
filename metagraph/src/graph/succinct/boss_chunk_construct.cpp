@@ -2,13 +2,62 @@
 
 #include <ips4o.hpp>
 
-#include "template_utils.hpp"
-#include "unix_tools.hpp"
+#include "utils/template_utils.hpp"
+#include "common/sorted_set.hpp"
+#include "common/sorted_multiset.hpp"
+#include "common/sorted_set_disk.hpp"
+#include "common/deque_vector.hpp"
+#include "common/unix_tools.hpp"
+#include "kmer/kmer_collector.hpp"
 #include "boss_chunk.hpp"
-#include "kmer_collector.hpp"
-#include "deque_vector.hpp"
 
-const static bool kUseDeque = false;
+template <typename KMER>
+using KmerCounterVector = KmerStorage<KMER,
+                                      KmerExtractorBOSS,
+                                      SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>;
+
+template <typename KMER>
+using KmerCounterDeque = KmerStorage<KMER,
+                                     KmerExtractorBOSS,
+                                     SortedMultiset<KMER, uint8_t, DequeStorage<std::pair<KMER, uint8_t>>>>;
+
+template <typename KMER>
+using KmerCollectorVector = KmerStorage<KMER,
+                                        KmerExtractorBOSS,
+                                        SortedSet<KMER, Vector<KMER>>>;
+
+template <typename KMER>
+using KmerCollectorDeque = KmerStorage<KMER,
+                                       KmerExtractorBOSS,
+                                       SortedSet<KMER, DequeStorage<KMER>>>;
+
+template <typename KMER>
+using KmerCollectorDisk = KmerStorage<KMER,
+                                      KmerExtractorBOSS,
+                                      SortedSetDisk<KMER>>;
+
+template <typename KMER,
+          typename KmerCount = uint8_t,
+          class Container = Vector<std::pair<KMER, KmerCount>>>
+using KmerCounter = KmerStorage<KMER,
+                                KmerExtractorBOSS,
+                                SortedMultiset<KMER, KmerCount, Container>>;
+
+/**
+ * What type of data structure to use in the #KmerCollector.
+ */
+enum class ExtractorContainer {
+    DEQUE,
+    VECTOR,
+    /**
+     * Uses several vectors that are written to disk and then merged, as defined
+     * in #SortedSetDisk
+     */
+    VECTOR_DISK
+};
+
+constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR;
+
 const static uint8_t kBitsPerCount = 8;
 
 
@@ -241,22 +290,6 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
     }
 }
 
-template <typename KMER>
-using KmerCounterVector = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                      Vector<std::pair<KMER, uint8_t>>>;
-
-template <typename KMER>
-using KmerCollectorVector = KmerCollector<KMER, KmerExtractorBOSS,
-                                          Vector<KMER>>;
-
-template <typename KMER>
-using KmerCounterDeque = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                     DequeStorage<std::pair<KMER, uint8_t>>>;
-
-template <typename KMER>
-using KmerCollectorDeque = KmerCollector<KMER, KmerExtractorBOSS,
-                                         DequeStorage<KMER>>;
-
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor
 ::initialize(size_t k,
@@ -270,16 +303,28 @@ IBOSSChunkConstructor
     #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
 
     if (count_kmers) {
-        if (!kUseDeque || memory_preallocated > 0) {
-            return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
-        } else {
-            return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
+        switch (kExtractorContainer) {
+            case ExtractorContainer::VECTOR:
+                return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
+            case ExtractorContainer::DEQUE:
+                return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
+            default:
+                throw std::logic_error(
+                        "Unsupported extractor container specified for "
+                        "counter. Only VECTOR and DEQUE are supported");
         }
     } else {
-        if (!kUseDeque || memory_preallocated > 0) {
-            return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
-        } else {
-            return initialize_boss_chunk_constructor<KmerCollectorDeque>(OTHER_ARGS);
+        switch (kExtractorContainer) {
+            case ExtractorContainer::VECTOR:
+                return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
+            case ExtractorContainer::DEQUE:
+                return initialize_boss_chunk_constructor<KmerCollectorDeque>(OTHER_ARGS);
+            case ExtractorContainer::VECTOR_DISK:
+                return initialize_boss_chunk_constructor<KmerCollectorDisk>(OTHER_ARGS);
+            default:
+                throw std::logic_error(
+                        "Unknown extractor container: " +
+                        to_string(static_cast<uint32_t>(kExtractorContainer)));
         }
     }
 }

@@ -7,21 +7,9 @@ set(BOOST_INCLUDEDIR "~/.linuxbrew/include/")
 set(Boost_NO_BOOST_CMAKE ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
 
-# unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
-# and happily cached, thus messing up the compilation flags forever
-unset(OpenMP_CXX_FLAGS CACHE)
-if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
-  find_package(OPENMP REQUIRED)
-else()
-  find_package(OpenMP REQUIRED)
-endif()
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
-set(EXTERNAL_LIB_DIR "../../external-libraries")
-link_directories(
-  ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
-)
+include(${PROJECT_PARENT_DIR}/OpenMP.txt)
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
 find_library(FOLLY_LIBRARIES
@@ -89,8 +77,10 @@ endif()
 file(GLOB src_files "*.cpp" "*/*.cpp")
 
 add_library(metagraph_common STATIC ${src_files})
-set(EXTERNAL_LIB_DIR "../../external-libraries")
+set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 
+# ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
+target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
 target_include_directories(metagraph_common
   PUBLIC
     ${Boost_INCLUDE_DIRS}
@@ -99,15 +89,18 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
     ${EXTERNAL_LIB_DIR}/ips4o
     ${EXTERNAL_LIB_DIR}/libmaus2/include
+    ${EXTERNAL_LIB_DIR}/nvbio/contrib/htslib
     ${EXTERNAL_LIB_DIR}/ordered-map/include
+    ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
     .. # this ensures that this libs include files are visible to its deps
 )
 
+find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(metagraph_common
   PUBLIC
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
-    -lsdsl
+    ${SDSL_LIBRARY}
     Boost::iostreams
 )
