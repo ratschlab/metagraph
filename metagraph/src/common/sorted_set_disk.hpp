@@ -260,37 +260,37 @@ class SortedSetDisk {
         if (write_to_disk_future_.valid()) {
             write_to_disk_future_.wait(); // wait for other thread to finish writing
         }
-        if (data_->data() == data1_.data()) {
+        if (data_->data() == data_first.data()) {
             write_to_disk_future_ = thread_pool_.enqueue(dump_to_file_sync<storage_type>,
-                                                         chunk_count_, &data1_);
-            data_ = &data2_;
+                                                         chunk_count_, &data_first);
+            data_ = &data_second;
         } else {
             write_to_disk_future_ = thread_pool_.enqueue(dump_to_file_sync<storage_type>,
-                                                         chunk_count_, &data2_);
-            data_ = &data1_;
+                                                         chunk_count_, &data_second);
+            data_ = &data_first;
         }
         chunk_count_++;
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
         if constexpr (std::is_same_v<DequeStorage<T>, storage_type>) {
-            data1_.try_reserve(size, min_size);
-            data2_.try_reserve(size, min_size);
+            data_first.try_reserve(size, min_size);
+            data_second.try_reserve(size, min_size);
 
         } else {
             size = std::max(size, min_size);
 
             while (size > min_size) {
                 try {
-                    data1_.reserve(size);
-                    data2_.reserve(size);
+                    data_first.reserve(size);
+                    data_second.reserve(size);
                     return;
                 } catch (const std::bad_alloc &exception) {
                     size = min_size + (size - min_size) * 2 / 3;
                 }
             }
-            data1_.reserve(min_size);
-            data2_.reserve(min_size);
+            data_first.reserve(min_size);
+            data_second.reserve(min_size);
         }
     }
 
@@ -306,12 +306,12 @@ class SortedSetDisk {
      * wait for the disk write operation to finish (if needed) and then swap
      * buffers.
      */
-    storage_type data1_, data2_;
+    storage_type data_first, data_second;
     /**
      * Reference to the buffer data is currently written into (either #data1_
      * or #data2_)
      */
-    storage_type *data_ = &data1_;
+    storage_type *data_ = &data_first;
     size_t num_threads_;
     /**
      * True if the data merging thread was started, and data started flowing into the #merge_queue_.
