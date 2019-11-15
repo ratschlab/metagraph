@@ -9,7 +9,7 @@
 #include "utils/bit_vectors/wavelet_tree.hpp"
 //TODO(ddanciu) - this dep is ugly and needs to be fixed, probably by moving
 // sequence_graph
-#include "../sequence_graph.hpp"
+#include "graph/sequence_graph.hpp"
 
 class BOSSConstructor;
 
