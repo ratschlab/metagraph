@@ -11,69 +11,9 @@ find_package(Boost REQUIRED COMPONENTS iostreams)
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
-
-set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
-find_library(FOLLY_LIBRARIES
-  NAMES folly
-  HINTS
-  ENV LD_LIBRARY_PATH
-  PATHS
-    $ENV{HOME}/.linuxbrew/lib
-)
-if(FOLLY_LIBRARIES)
-  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-else()
-  message(WARNING "Folly (Facebook Open Source Library) not found."
-          " Install folly to reduce memory taken up by the Row-Compressed annotator"
-          " and enable other optimizations.")
-endif()
-
-# check for std::filesystem::temp_directory_path
-include(CheckCXXSourceRuns)
-set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-check_cxx_source_runs("
-    #include <iostream>
-    #include <filesystem>
-    int main() {
-        std::cout << std::filesystem::temp_directory_path();
-        return 0;
-    }
-" CPPNOFS)
-if(NOT CPPNOFS)
-  set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-  set(CMAKE_REQUIRED_LIBRARIES "c++fs")
-  check_cxx_source_runs("
-      #include <iostream>
-      #include <filesystem>
-      int main() {
-          std::cout << std::filesystem::temp_directory_path();
-          return 0;
-      }
-  " CPPFS)
-  unset(CMAKE_REQUIRED_FLAGS)
-  unset(CMAKE_REQUIRED_LIBRARIES)
-  if(CPPFS)
-    set(FILESYSTEM_LIBRARY -lc++fs)
-  else()
-    set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-    set(CMAKE_REQUIRED_LIBRARIES "stdc++fs")
-    check_cxx_source_runs("
-        #include <iostream>
-        #include <filesystem>
-        int main() {
-            std::cout << std::filesystem::temp_directory_path();
-            return 0;
-        }
-    " STDCPPFS)
-    unset(CMAKE_REQUIRED_FLAGS)
-    unset(CMAKE_REQUIRED_LIBRARIES)
-    if(STDCPPFS)
-      set(FILESYSTEM_LIBRARY -lstdc++fs)
-    else()
-      message(FATAL_ERROR "std::filesystem not found")
-    endif()
-  endif()
-endif()
+findOpenMP()
+findFolly()
+checkFileSystem() # check for std::filesystem::temp_directory_path
 
 file(GLOB src_files "*.cpp" "*/*.cpp")
 

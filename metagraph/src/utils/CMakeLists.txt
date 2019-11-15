@@ -10,6 +10,7 @@ find_package(Boost REQUIRED COMPONENTS iostreams)
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
+findOpenMP()
 
 checkFileSystem() # verify if std::filesystem::temp_directory_path() is available
 file(GLOB src_files "*.cpp" "*/*.cpp")

@@ -7,6 +7,7 @@ set(CMAKE_VERBOSE_MAKEFILE 1)
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
+findOpenMP()
 
 add_subdirectory(${PROJECT_PARENT_DIR}/src/common metagraph_common)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/utils metagraph_utils)
