@@ -23,21 +23,21 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           bool verbose)
       : num_rows_(num_rows),
-        cached_columns_(
-            num_columns_cached,
-            caches::LRUCachePolicy<size_t>(),
-            [this](size_t j, bitmap *col_uncompressed) {
-                assert(col_uncompressed);
-                this->flush(j, *col_uncompressed);
-                delete col_uncompressed;
-            }
-        ),
+        cached_columns_(num_columns_cached,
+                        caches::LRUCachePolicy<size_t>(),
+                        [this](size_t j, bitmap *col_uncompressed) {
+                            assert(col_uncompressed);
+                            this->flush(j, *col_uncompressed);
+                            delete col_uncompressed;
+                        }),
         verbose_(verbose) {
     assert(num_columns_cached > 0);
 }
 
 template <typename Label>
 ColumnCompressed<Label>::~ColumnCompressed() {
+    // Note: this is needed to make sure that everything is flushed to bitmatrix_
+    //       BEFORE bitmatrix_ is destroyed
     cached_columns_.Clear();
 }
 
@@ -401,7 +401,11 @@ void ColumnCompressed<Label>::flush() const {
 template <typename Label>
 void ColumnCompressed<Label>::flush(size_t j, const bitmap &vector) {
     assert(j < bitmatrix_.size());
-    assert(cached_columns_.Cached(j));
+
+    // Note: asserting that j is cached cannot be done here when this function
+    //       is invovled as part of the OnEraseCallback, since the mutex locking
+    //       in the caches library would cause the check to be done after it has
+    //       been erased.
 
     bitmatrix_[j].reset();
     bitmatrix_[j].reset(new bit_vector_smart(
