@@ -93,7 +93,7 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    .. # this ensures that this libs include files are visible to its deps
+    .. # this ensures that this libs include files are visible to its deps as "#include common/*"
 )
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
