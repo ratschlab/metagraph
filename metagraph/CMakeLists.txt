@@ -140,12 +140,6 @@ else()
 message(STATUS "Compiling without msse4.2 instructions!")
 endif()
 
-if(WITH_MMAP)
-message(STATUS "Enabling boost iostreams for mmapped reader")
-string(APPEND CMAKE_CXX_FLAGS " -D_USE_MMAP")
-set(METALIBS ${METALIBS} -lboost_iostreams)
-endif()
-
 #-------------------
 # KMC k-mer counter
 #-------------------

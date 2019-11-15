@@ -6,19 +6,6 @@
 namespace utils {
 
 RowsFromColumnsTransformer
-::RowsFromColumnsTransformer(uint64_t num_rows,
-                             const std::vector<std::string> &files)
-      : num_rows_(num_rows) {
-    streams_.reserve(files.size());
-    for (const auto &file : files) {
-        // initialize stream
-        streams_.emplace_back(new VectorFileStream(file));
-    }
-
-    init_heap();
-}
-
-RowsFromColumnsTransformer
 ::RowsFromColumnsTransformer(const std::vector<const bit_vector*> &columns) {
     initialize(columns);
 }

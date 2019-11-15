@@ -16,10 +16,6 @@ namespace utils {
 // Read indices of set bits from a vector of VectorStreams
 class RowsFromColumnsTransformer {
   public:
-    // Files store serialized vectors as plain indexes of the set bits
-    RowsFromColumnsTransformer(uint64_t num_rows,
-                               const std::vector<std::string> &files);
-
     explicit RowsFromColumnsTransformer(const std::vector<const bit_vector*> &columns);
     explicit RowsFromColumnsTransformer(const std::vector<std::unique_ptr<bit_vector>> &columns);
     explicit RowsFromColumnsTransformer(const std::vector<std::shared_ptr<bit_vector>> &columns);
