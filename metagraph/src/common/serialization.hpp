@@ -84,8 +84,8 @@ class BitVectorFileIStream : public VectorIStream {
 class VectorBitIStream : public VectorIStream {
   public:
     VectorBitIStream(const bit_vector &vector,
-                    uint64_t begin = 0,
-                    uint64_t end = static_cast<uint64_t>(-1));
+                     uint64_t begin = 0,
+                     uint64_t end = static_cast<uint64_t>(-1));
 
     uint64_t next_value();
     uint64_t values_left() const { return max_rank_ - current_rank_; }
