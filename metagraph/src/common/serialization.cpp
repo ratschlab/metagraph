@@ -413,8 +413,8 @@ bool load_set(std::istream &in, Set *set) {
 template bool load_set(std::istream &in, OrderedSet<std::string> *set);
 
 
-BitVectorFileStream::BitVectorFileStream(const std::string &file)
-      : istream_(file) {
+BitVectorFileIStream::BitVectorFileIStream(const std::string &file)
+      : istream_(file, std::ios::binary) {
     if (!istream_.good())
         throw std::ifstream::failure(std::string("Bad stream file ") + file);
 
@@ -422,9 +422,9 @@ BitVectorFileStream::BitVectorFileStream(const std::string &file)
     values_left_ = load_number(istream_);
 }
 
-uint64_t BitVectorFileStream::next_value() {
+uint64_t BitVectorFileIStream::next_value() {
     assert(values_left_ > 0);
-    values_left_--;
+    --values_left_;
 
     uint64_t next_val = load_number(istream_);
 
@@ -436,9 +436,9 @@ uint64_t BitVectorFileStream::next_value() {
     return next_val;
 }
 
-VectorBitStream::VectorBitStream(const bit_vector &vec,
-                                 uint64_t begin,
-                                 uint64_t end)
+VectorBitIStream::VectorBitIStream(const bit_vector &vec,
+                                   uint64_t begin,
+                                   uint64_t end)
       : vector_(vec),
         begin_(begin),
         current_rank_(begin ? vector_.rank1(begin - 1) : 0) {
@@ -449,7 +449,60 @@ VectorBitStream::VectorBitStream(const bit_vector &vec,
                     : (end ? vector_.rank1(end - 1) : 0));
 }
 
-uint64_t VectorBitStream::next_value() {
+uint64_t VectorBitIStream::next_value() {
     assert(current_rank_ < max_rank_);
     return vector_.select1(++current_rank_) - begin_;
+}
+
+
+BitVectorBinaryFileOStream::BitVectorBinaryFileOStream(const std::string &file,
+                                                       size_t length,
+                                                       uint64_t num_set_bits)
+      : ostream_(file, std::ios::binary),
+        length_(length),
+        num_bits_left_(num_set_bits) {
+    if (!ostream_.good())
+        throw std::ofstream::failure(std::string("Bad stream file ") + file);
+
+    serialize_number(ostream_, length_);
+    serialize_number(ostream_, num_bits_left_);
+}
+
+void BitVectorBinaryFileOStream::write_value(uint64_t value) {
+    if (!num_bits_left_)
+        throw std::runtime_error("Serializing too many numbers");
+
+    if (value >= length_)
+        throw std::runtime_error(
+            "Index " + std::to_string(value) + " >= " + std::to_string(length_)
+        );
+
+    serialize_number(ostream_, value);
+    --num_bits_left_;
+}
+
+
+BitVectorTextFileOStream::BitVectorTextFileOStream(const std::string &file,
+                                                   size_t length,
+                                                   uint64_t num_set_bits)
+      : ostream_(file),
+        length_(length),
+        num_bits_left_(num_set_bits) {
+    if (!ostream_.good())
+        throw std::ofstream::failure(std::string("Bad stream file ") + file);
+
+    ostream_ << length_ << " " << num_bits_left_ << std::endl;
+}
+
+void BitVectorTextFileOStream::write_value(uint64_t value) {
+    if (!num_bits_left_)
+        throw std::runtime_error("Serializing too many numbers");
+
+    if (value >= length_)
+        throw std::runtime_error(
+            "Index " + std::to_string(value) + " >= " + std::to_string(length_)
+        );
+
+    ostream_ << value << std::endl;
+    --num_bits_left_;
 }

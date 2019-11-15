@@ -51,7 +51,7 @@ class RowsFromColumnsTransformer {
     void initialize(const std::vector<const bit_vector*> &columns);
     void init_heap();
 
-    std::vector<std::unique_ptr<VectorStream>> streams_;
+    std::vector<std::unique_ptr<VectorIStream>> streams_;
     uint64_t num_set_bits_left_ = 0;
     uint64_t num_rows_;
 

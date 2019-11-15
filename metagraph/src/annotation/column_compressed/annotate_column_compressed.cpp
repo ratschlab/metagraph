@@ -551,55 +551,24 @@ bool ColumnCompressed<Label>
 ::dump_columns(const std::string &prefix, bool binary, size_t num_threads) const {
     bool success = true;
 
-    if (binary) {
-        #pragma omp parallel for num_threads(num_threads)
-        for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".raw.annodbg",
-                std::ios::binary
+    #pragma omp parallel for num_threads(num_threads)
+    for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
+        const auto &column = get_column(i);
+        const std::string outfile = remove_suffix(prefix, kExtension)
+            + "." + std::to_string(i) + (binary ? ".raw" : ".text") + ".annodbg";
+
+        std::unique_ptr<VectorOStream> outstream;
+        if (binary) {
+            outstream = std::make_unique<BitVectorBinaryFileOStream>(
+                outfile, num_objects(), column.num_set_bits()
             );
-
-            if (!outstream.good()) {
-                std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
-                success = false;
-                continue;
-            }
-
-            serialize_number(outstream, num_objects());
-
-            const auto &column = get_column(i);
-
-            serialize_number(outstream, column.num_set_bits());
-            column.call_ones([&](const auto &pos) {
-                serialize_number(outstream, pos);
-            });
-        }
-    } else {
-        #pragma omp parallel for num_threads(num_threads)
-        for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".text.annodbg"
+        } else {
+            outstream = std::make_unique<BitVectorTextFileOStream>(
+                outfile, num_objects(), column.num_set_bits()
             );
-
-            if (!outstream.good()) {
-                std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
-                success = false;
-                continue;
-            }
-
-            outstream << num_objects() << " ";
-
-            const auto &column = get_column(i);
-
-            outstream << column.num_set_bits() << std::endl;
-            column.call_ones([&](const auto &pos) {
-                outstream << pos << std::endl;
-            });
         }
+
+        column.call_ones([&](const auto &pos) { outstream->write_value(pos); });
     }
 
     return success;

@@ -42,9 +42,9 @@ RowsFromColumnsTransformer
     uint64_t num_columns = columns_concatenated.size() / column_size;
     streams_.reserve(num_columns);
     for (uint64_t i = 0; i < num_columns; ++i) {
-        streams_.emplace_back(new VectorBitStream(columns_concatenated,
-                                                  column_size * i,
-                                                  column_size * (i + 1)));
+        streams_.emplace_back(new VectorBitIStream(columns_concatenated,
+                                                   column_size * i,
+                                                   column_size * (i + 1)));
     }
 
     init_heap();
@@ -65,7 +65,7 @@ void RowsFromColumnsTransformer
 
     streams_.reserve(columns.size());
     for (const auto &col_ptr : columns) {
-        streams_.emplace_back(new VectorBitStream(*col_ptr));
+        streams_.emplace_back(new VectorBitIStream(*col_ptr));
     }
 
     init_heap();
