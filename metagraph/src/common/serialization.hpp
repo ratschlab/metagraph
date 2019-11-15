@@ -90,6 +90,7 @@ class VectorFileStream : public VectorStream {
 #endif
 
     Stream istream_;
+    uint64_t max_val_;
     uint64_t values_left_;
 };
 

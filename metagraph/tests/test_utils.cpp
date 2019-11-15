@@ -39,7 +39,7 @@ const std::vector<std::vector<uint64_t>> indices {
 
 
 utils::RowsFromColumnsTransformer generate_rct_file() {
-    annotate::ColumnCompressed<> annotation(6);
+    annotate::ColumnCompressed<> annotation(7);
 
     annotation.set_labels(1, { "Label0", "Label1" });
     annotation.set_labels(2, { "Label0", "Label1" });
@@ -47,11 +47,11 @@ utils::RowsFromColumnsTransformer generate_rct_file() {
     annotation.set_labels(4, { "Label1" });
     annotation.set_labels(5, { "Label0", "Label1" });
 
-    annotation.dump_columns(test_dump_basename);
+    annotation.dump_columns(test_dump_basename, true);
 
     utils::RowsFromColumnsTransformer rct(7, {
-        test_dump_basename + ".0.raw.column.annodbg",
-        test_dump_basename + ".1.raw.column.annodbg"
+        test_dump_basename + ".0.raw.annodbg",
+        test_dump_basename + ".1.raw.annodbg"
     });
 
     return rct;
