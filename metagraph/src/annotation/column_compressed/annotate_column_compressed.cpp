@@ -548,27 +548,17 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
 
 template <typename Label>
 bool ColumnCompressed<Label>
-::dump_columns(const std::string &prefix, bool binary, size_t num_threads) const {
+::dump_columns(const std::string &prefix, size_t num_threads) const {
     bool success = true;
 
     #pragma omp parallel for num_threads(num_threads)
     for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
         const auto &column = get_column(i);
         const std::string outfile = remove_suffix(prefix, kExtension)
-            + "." + std::to_string(i) + (binary ? ".raw" : ".text") + ".annodbg";
+            + "." + std::to_string(i) + ".text.annodbg";
 
-        std::unique_ptr<VectorOStream> outstream;
-        if (binary) {
-            outstream = std::make_unique<BitVectorBinaryFileOStream>(
-                outfile, num_objects(), column.num_set_bits()
-            );
-        } else {
-            outstream = std::make_unique<BitVectorTextFileOStream>(
-                outfile, num_objects(), column.num_set_bits()
-            );
-        }
-
-        column.call_ones([&](const auto &pos) { outstream->write_value(pos); });
+        BitVectorFileOutStream outstream(outfile, num_objects(), column.num_set_bits());
+        column.call_ones([&](const auto &pos) { outstream.write_value(pos); });
     }
 
     return success;

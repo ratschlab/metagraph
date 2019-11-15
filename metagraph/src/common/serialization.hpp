@@ -59,20 +59,21 @@ bool load_set(std::istream &in, Set *set);
  */
 
 // Read vector from a source
-class VectorIStream {
+class VectorInStream {
   public:
-    virtual ~VectorIStream() {}
+    virtual ~VectorInStream() {}
     virtual uint64_t next_value() = 0;
     virtual uint64_t values_left() const = 0;
 };
 
 // Return set bits from a bit vector encoded in a file
-class BitVectorFileIStream : public VectorIStream {
+class BitVectorFileInStream : public VectorInStream {
   public:
-    BitVectorFileIStream(const std::string &file);
+    BitVectorFileInStream(const std::string &file);
 
     uint64_t next_value();
     uint64_t values_left() const { return values_left_; }
+    void close() { istream_.close(); }
 
   private:
     std::ifstream istream_;
@@ -81,11 +82,11 @@ class BitVectorFileIStream : public VectorIStream {
 };
 
 // Return set bits from a bit vector
-class VectorBitIStream : public VectorIStream {
+class VectorBitInStream : public VectorInStream {
   public:
-    VectorBitIStream(const bit_vector &vector,
-                     uint64_t begin = 0,
-                     uint64_t end = static_cast<uint64_t>(-1));
+    VectorBitInStream(const bit_vector &vector,
+                      uint64_t begin = 0,
+                      uint64_t end = static_cast<uint64_t>(-1));
 
     uint64_t next_value();
     uint64_t values_left() const { return max_rank_ - current_rank_; }
@@ -99,33 +100,20 @@ class VectorBitIStream : public VectorIStream {
 
 
 // Write vector from a source
-class VectorOStream {
+class VectorOutStream {
   public:
-    virtual ~VectorOStream() {}
+    virtual ~VectorOutStream() {}
     virtual void write_value(uint64_t value) = 0;
 };
 
-class BitVectorBinaryFileOStream : public VectorOStream {
+class BitVectorFileOutStream : public VectorOutStream {
   public:
-    BitVectorBinaryFileOStream(const std::string &file,
-                               size_t length,
-                               uint64_t num_set_bits);
+    BitVectorFileOutStream(const std::string &file,
+                           size_t length,
+                           uint64_t num_set_bits);
 
     void write_value(uint64_t value);
-
-  private:
-    std::ofstream ostream_;
-    uint64_t length_;
-    uint64_t num_bits_left_;
-};
-
-class BitVectorTextFileOStream : public VectorOStream {
-  public:
-    BitVectorTextFileOStream(const std::string &file,
-                             size_t length,
-                             uint64_t num_set_bits);
-
-    void write_value(uint64_t value);
+    void close() { ostream_.close(); }
 
   private:
     std::ofstream ostream_;

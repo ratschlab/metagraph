@@ -159,3 +159,50 @@ TEST(bit_vector, SerializeAndLoad) {
         EXPECT_EQ(v_loaded.get_block(i), v.get_block(i));
     }
 }
+
+
+void test_random_vector_stream(size_t length) {
+    for (size_t i = 0; i < 10; ++i) {
+        std::vector<uint8_t> numbers(length);
+        for (size_t j = 0; j < length; ++j) {
+            numbers[j] = rand() % 256;
+        }
+
+        BitVectorFileOutStream outstream(test_dump_basename, 256, length);
+        for (uint8_t num : numbers) {
+            outstream.write_value(num);
+        }
+
+        outstream.close();
+
+        BitVectorFileInStream instream(test_dump_basename);
+
+        for (size_t j = 0; j < length; ++j) {
+            ASSERT_TRUE(instream.values_left());
+            ASSERT_EQ(numbers[j], instream.next_value());
+        }
+
+        ASSERT_FALSE(instream.values_left());
+        instream.close();
+    }
+}
+
+TEST(Serialization, SerializationRandomUInt8VectorStream0) {
+    test_random_vector_stream(0);
+}
+
+TEST(Serialization, SerializationRandomUInt8VectorStream10) {
+    test_random_vector_stream(10);
+}
+
+TEST(Serialization, SerializationRandomUInt8VectorStream1000) {
+    test_random_vector_stream(1000);
+}
+
+TEST(Serialization, SerializationRandomUInt8VectorStream1000000) {
+    test_random_vector_stream(1000000);
+}
+
+TEST(Serialization, SerializationRandomUInt8VectorStream10000000) {
+    test_random_vector_stream(10000000);
+}
