@@ -1,6 +1,6 @@
 #include "bitmap_mergers.hpp"
 
-#include "common/vectors.hpp"
+#include "utils/vectors.hpp"
 
 
 namespace utils {

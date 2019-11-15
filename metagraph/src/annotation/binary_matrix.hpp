@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#include "common/vectors.hpp"
+#include "utils/vectors.hpp"
 #include "utils/bit_vectors/bit_vector.hpp"
 
 
