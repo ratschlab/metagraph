@@ -172,6 +172,69 @@ MultiLabelEncoded<IndexType, LabelType>
     return annotation;
 }
 
+template <typename IndexType, typename LabelType>
+std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
+MultiLabelEncoded<IndexType, LabelType>
+::count_labels(const std::unordered_map<Index, size_t> &index_counts,
+               size_t min_count,
+               size_t count_cap) const {
+
+    min_count = std::max(min_count, size_t(1));
+
+    assert(count_cap >= min_count);
+
+    size_t total_sum_count = 0;
+    for (const auto &pair : index_counts) {
+        total_sum_count += pair.second;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
+
+    std::vector<uint64_t> indices(index_counts.size());
+    std::transform(index_counts.begin(), index_counts.end(), indices.begin(),
+                   [](const auto &pair) { return pair.first; });
+
+    std::vector<size_t> code_counts(this->num_labels(), 0);
+    size_t max_matched = 0;
+    size_t total_checked = 0;
+
+    auto it = index_counts.begin();
+    call_rows(
+        indices,
+        [&](const auto &row) {
+            assert(it != index_counts.end());
+
+            for (size_t label_code : row) {
+                assert(label_code < code_counts.size());
+
+                code_counts[label_code] += it->second;
+                max_matched = std::max(max_matched, code_counts[label_code]);
+            }
+
+            total_checked += it->second;
+
+            ++it;
+        },
+        [&]() { return max_matched + (total_sum_count - total_checked) < min_count; }
+    );
+
+    if (max_matched < min_count)
+        return {};
+
+    std::vector<std::pair<uint64_t, size_t>> label_counts;
+    label_counts.reserve(code_counts.size());
+
+    for (size_t label_code = 0; label_code < code_counts.size(); ++label_code) {
+        if (code_counts[label_code] >= min_count) {
+            label_counts.emplace_back(label_code,
+                                      std::min(code_counts[label_code], count_cap));
+        }
+    }
+
+    return label_counts;
+}
+
 // calls get_label_codes(i)
 template <typename IndexType, typename LabelType>
 std::vector<typename MultiLabelEncoded<IndexType, LabelType>::SetBitPositions>

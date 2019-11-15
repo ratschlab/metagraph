@@ -100,19 +100,6 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
               convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
 }
 
-std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-count_labels(const annotate::ColumnCompressed<> &annotation,
-             const std::unordered_map<uint64_t, size_t> &index_counts,
-             size_t min_count,
-             size_t count_cap);
-
-std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-count_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotation,
-             const std::unordered_map<uint64_t, size_t> &index_counts,
-             size_t min_count,
-             size_t count_cap);
-
-
 std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
@@ -124,13 +111,7 @@ std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<u
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    auto code_counts
-        = dynamic_cast<const annotate::ColumnCompressed<>*>(&annotator)
-            // Iterate by column instead of by row for column-major annotators
-            ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(annotator),
-                           index_counts, min_count, min_count)
-            : count_labels(annotator,
-                           index_counts, min_count, min_count);
+    auto code_counts = annotator.count_labels(index_counts, min_count, min_count);
 
     std::vector<std::string> labels;
     labels.reserve(code_counts.size());
@@ -308,13 +289,7 @@ get_top_labels_by_label(const annotate::MultiLabelEncoded<uint64_t, std::string>
         index_counts[i] = 1;
     }
 
-    auto code_counts
-        = dynamic_cast<const annotate::ColumnCompressed<>*>(&annotator)
-            // Iterate by column instead of by row for column-major annotators
-            ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(annotator),
-                           index_counts, min_count, std::numeric_limits<size_t>::max())
-            : count_labels(annotator,
-                           index_counts, min_count, std::numeric_limits<size_t>::max());
+    auto code_counts = annotator.count_labels(index_counts, min_count);
 
     assert(std::all_of(
         code_counts.begin(), code_counts.end(),
