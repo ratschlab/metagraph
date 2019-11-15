@@ -3,7 +3,7 @@
 
 #include "boss.hpp"
 
-#include "../sequence_graph.hpp"
+#include "graph/sequence_graph.hpp"
 #include "common/config.hpp"
 #include "kmer/kmer_bloom_filter.hpp"
 #include "utils/bit_vectors/bit_vector.hpp"
