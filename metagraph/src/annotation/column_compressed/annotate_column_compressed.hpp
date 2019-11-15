@@ -75,8 +75,10 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
 
-    // return all labels for which counts are greater than |min_count|
-    // stop counting if count is greater than |count_cap|
+    /**
+     * Return all labels for which counts are greater than or equal to |min_count|.
+     * Stop counting if count is greater than |count_cap|.
+     */
     std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
     count_labels(const std::unordered_map<Index, size_t> &index_counts,
                  size_t min_count = 1,

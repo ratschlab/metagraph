@@ -179,8 +179,10 @@ class MultiLabelEncoded
     virtual std::vector<SetBitPositions>
     get_label_codes(const std::vector<Index> &indices) const;
 
-    // return all labels for which counts are greater than |min_count|
-    // stop counting if count is greater than |count_cap|
+    /**
+     * Return all labels for which counts are greater than or equal to |min_count|.
+     * Stop counting if count is greater than |count_cap|.
+     */
     virtual std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
     count_labels(const std::unordered_map<Index, size_t> &index_counts,
                  size_t min_count = 1,
