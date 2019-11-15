@@ -72,10 +72,10 @@ class VectorStream {
     virtual uint64_t values_left() const = 0;
 };
 
-// Read numbers from file
-class VectorFileStream : public VectorStream {
+// Return set bits from a bit vector encoded in a file
+class BitVectorFileStream : public VectorStream {
   public:
-    VectorFileStream(const std::string &file);
+    BitVectorFileStream(const std::string &file);
 
     uint64_t next_value();
     uint64_t values_left() const { return values_left_; }
@@ -90,7 +90,7 @@ class VectorFileStream : public VectorStream {
 #endif
 
     Stream istream_;
-    uint64_t max_val_;
+    uint64_t length_;
     uint64_t values_left_;
 };
 

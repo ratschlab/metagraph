@@ -413,25 +413,25 @@ bool load_set(std::istream &in, Set *set) {
 template bool load_set(std::istream &in, OrderedSet<std::string> *set);
 
 
-VectorFileStream::VectorFileStream(const std::string &file)
+BitVectorFileStream::BitVectorFileStream(const std::string &file)
       : istream_(MappedFile(file)) {
     if (!istream_.good())
         throw std::ifstream::failure(std::string("Bad stream file ") + file);
 
-    max_val_ = load_number(istream_);
+    length_ = load_number(istream_);
     values_left_ = load_number(istream_);
 }
 
-uint64_t VectorFileStream::next_value() {
+uint64_t BitVectorFileStream::next_value() {
     assert(values_left_ > 0);
     values_left_--;
 
     uint64_t next_val = load_number(istream_);
 
-    if (next_val >= max_val_)
-        throw std::runtime_error("Error: index "
+    if (next_val >= length_)
+        throw std::runtime_error("Error: index >= length: "
             + std::to_string(next_val)
-            + " >= " + std::to_string(max_val_));
+            + " >= " + std::to_string(length_));
 
     return next_val;
 }

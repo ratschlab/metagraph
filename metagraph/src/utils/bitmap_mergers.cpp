@@ -12,7 +12,7 @@ RowsFromColumnsTransformer
     streams_.reserve(files.size());
     for (const auto &file : files) {
         // initialize stream
-        streams_.emplace_back(new VectorFileStream(file));
+        streams_.emplace_back(new BitVectorFileStream(file));
     }
 
     init_heap();
