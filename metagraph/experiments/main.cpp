@@ -5,7 +5,6 @@
 #include <sdsl/rrr_vector.hpp>
 #include <ips4o.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
-#include <boost/multiprecision/integer.hpp>
 #include <progress_bar.hpp>
 
 #include "method_constructors.hpp"
@@ -1121,7 +1120,7 @@ int main(int argc, char *argv[]) {
 
             F_.pop_back();
 
-            size_t bits_per_char_W = boost::multiprecision::msb(alph_size - 1) + 2;
+            size_t bits_per_char_W = sdsl::bits::hi(alph_size - 1) + 2;
 
             wavelet_tree *W_;
             bit_vector *last_;

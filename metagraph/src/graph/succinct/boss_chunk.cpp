@@ -1,7 +1,5 @@
 #include "boss_chunk.hpp"
 
-#include <boost/multiprecision/integer.hpp>
-
 #include "algorithms.hpp"
 #include "template_utils.hpp"
 #include "serialization.hpp"
