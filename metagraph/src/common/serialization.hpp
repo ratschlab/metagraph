@@ -1,16 +1,9 @@
 #ifndef __SERIALIZATION_HPP__
 #define __SERIALIZATION_HPP__
 
+#include <fstream>
 #include <string>
 #include <vector>
-
-
-#if _USE_MMAP
-#include <boost/iostreams/device/mapped_file.hpp>
-#include <boost/iostreams/stream.hpp>
-#else
-#include <fstream>
-#endif
 
 #include "common/bit_vectors/bit_vector.hpp"
 
@@ -81,15 +74,7 @@ class BitVectorFileStream : public VectorStream {
     uint64_t values_left() const { return values_left_; }
 
   private:
-#if _USE_MMAP
-    using MappedFile = boost::iostreams::mapped_file_source;
-    using Stream = boost::iostreams::stream<MappedFile>;
-#else
-    using MappedFile = std::string;
-    using Stream = std::ifstream;
-#endif
-
-    Stream istream_;
+    std::ifstream istream_;
     uint64_t length_;
     uint64_t values_left_;
 };

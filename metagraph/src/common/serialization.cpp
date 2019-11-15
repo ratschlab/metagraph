@@ -414,7 +414,7 @@ template bool load_set(std::istream &in, OrderedSet<std::string> *set);
 
 
 BitVectorFileStream::BitVectorFileStream(const std::string &file)
-      : istream_(MappedFile(file)) {
+      : istream_(file) {
     if (!istream_.good())
         throw std::ifstream::failure(std::string("Bad stream file ") + file);
 
