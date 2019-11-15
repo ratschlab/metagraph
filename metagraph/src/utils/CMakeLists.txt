@@ -20,21 +20,23 @@ set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 
 # ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
 target_compile_options(metagraph_utils PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
+
 target_include_directories(metagraph_utils
-        PUBLIC
-        ${Boost_INCLUDE_DIRS}
-        ${EXTERNAL_LIB_DIR}/DYNAMIC/include
-        ${EXTERNAL_LIB_DIR}/hopscotch-map/include
-        ${EXTERNAL_LIB_DIR}/libmaus2/include
-        ${EXTERNAL_LIB_DIR}/ordered-map/include
-        ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-        .. # this ensures that this libs include files are visible to its deps as "#include utils/*"
-        )
+  PUBLIC
+    ${Boost_INCLUDE_DIRS}
+    ${EXTERNAL_LIB_DIR}/DYNAMIC/include
+    ${EXTERNAL_LIB_DIR}/hopscotch-map/include
+    ${EXTERNAL_LIB_DIR}/libmaus2/include
+    ${EXTERNAL_LIB_DIR}/ordered-map/include
+    ${EXTERNAL_LIB_DIR}/sdsl-lite/include
+    .. # this ensures that this libs include files are visible to its deps as "#include utils/*"
+)
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
+
 target_link_libraries(metagraph_utils
-        PUBLIC
-        ${FILESYSTEM_LIBRARY}
-        ${SDSL_LIBRARY}
-        Boost::iostreams
-        )
+  PUBLIC
+    ${FILESYSTEM_LIBRARY}
+    ${SDSL_LIBRARY}
+    Boost::iostreams
+)

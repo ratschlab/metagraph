@@ -3,9 +3,8 @@
 #include <iostream>
 #include <fstream>
 
-#include "vcf_parser.hpp"
-
 #include "common/seq_tools/reverse_complement.hpp"
+#include "vcf_parser.hpp"
 
 const char kDefaultFastQualityChar = 'I';
 

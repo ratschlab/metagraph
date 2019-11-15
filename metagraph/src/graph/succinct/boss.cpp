@@ -11,12 +11,11 @@
 #include <boost/multiprecision/integer.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
-#include "boss_construct.hpp"
-
 #include "common/threading.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "utils/serialization.hpp"
 #include "utils/algorithms.hpp"
+#include "boss_construct.hpp"
 
 using utils::remove_suffix;
 using TAlphabet = BOSS::TAlphabet;

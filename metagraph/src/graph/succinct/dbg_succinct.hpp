@@ -1,18 +1,16 @@
 #ifndef __DBG_SUCCINCT_HPP__
 #define __DBG_SUCCINCT_HPP__
 
-#include "boss.hpp"
-
-#include "graph/sequence_graph.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
 #include "common/config.hpp"
 #include "kmer/kmer_bloom_filter.hpp"
-#include "utils/bit_vectors/bit_vector.hpp"
+#include "graph/sequence_graph.hpp"
+#include "boss.hpp"
 
-class MaskedDeBruijnGraph;
 
 class DBGSuccinct : public DeBruijnGraph {
   public:
-    friend MaskedDeBruijnGraph;
+    friend class MaskedDeBruijnGraph;
 
     explicit DBGSuccinct(size_t k, bool canonical_mode = false);
     explicit DBGSuccinct(BOSS *boss_graph, bool canonical_mode = false);
