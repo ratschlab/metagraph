@@ -8,7 +8,6 @@
 #include <cstdio>
 
 #include <progress_bar.hpp>
-#include <boost/multiprecision/integer.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "common/threading.hpp"
@@ -40,7 +39,7 @@ const size_t MAX_ITER_WAVELET_TREE_SMALL = 10;
 BOSS::BOSS(size_t k)
       : alph_size(kmer_extractor_.alphabet.size()),
         alphabet(kmer_extractor_.alphabet),
-        bits_per_char_W_(boost::multiprecision::msb(alph_size - 1) + 2),
+        bits_per_char_W_(sdsl::bits::hi(alph_size - 1) + 2),
         k_(k),
         last_(new bit_vector_dyn()),
         F_(alph_size, 0),
