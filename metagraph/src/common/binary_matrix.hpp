@@ -3,8 +3,8 @@
 
 #include <vector>
 
-#include "common/bit_vectors/bit_vector.hpp"
 #include "common/vectors.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
 
 
 class BinaryMatrix {
@@ -53,13 +53,13 @@ class StreamRows {
   public:
     StreamRows(const std::string &filename, size_t offset);
 
-    //TODO: implement constructor from stream once
+    // TODO: implement constructor from stream once
     //      it's implemented for sdsl::int_vector_buffer<>.
     //      Then, use StreamRows to simplify load functions.
     // StreamRows(std::istream &instream);
 
     // return nullptr after all rows have been called
-    RowType* next_row();
+    RowType *next_row();
 
   private:
     RowType row_;

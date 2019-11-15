@@ -1,3 +1,4 @@
+include_guard(GLOBAL)
 cmake_minimum_required(VERSION 3.6.1)
 project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
@@ -9,7 +10,7 @@ find_package(Boost REQUIRED COMPONENTS iostreams)
 
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
-include(${PROJECT_PARENT_DIR}/OpenMP.txt)
+include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
 find_library(FOLLY_LIBRARIES
@@ -80,7 +81,7 @@ add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 
 # ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
-target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE)
+target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
 target_include_directories(metagraph_common
   PUBLIC
     ${Boost_INCLUDE_DIRS}
@@ -91,8 +92,9 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/libmaus2/include
     ${EXTERNAL_LIB_DIR}/nvbio/contrib/htslib
     ${EXTERNAL_LIB_DIR}/ordered-map/include
+    ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    .. # this ensures that this libs include files are visible to its deps
+    .. # this ensures that this libs include files are visible to its deps as "#include common/*"
 )
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)

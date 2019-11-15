@@ -3,11 +3,13 @@
 
 #include <type_traits>
 
-#include "sequence_graph.hpp"
-#include "config.hpp"
-#include "wavelet_tree.hpp"
-#include "bit_vector.hpp"
-#include "kmer_extractor.hpp"
+#include "common/config.hpp"
+#include "kmer/kmer_extractor.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
+#include "utils/bit_vectors/wavelet_tree.hpp"
+//TODO(ddanciu) - this dep is ugly and needs to be fixed, probably by moving
+// sequence_graph
+#include "../sequence_graph.hpp"
 
 class BOSSConstructor;
 
@@ -81,8 +83,7 @@ class BOSS {
                       const std::function<bool()> &skip = ALWAYS_FALSE) const;
 
     // |seq_encoded| must have no sentinels (zeros)
-    std::vector<edge_index>
-    map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
+    std::vector<edge_index> map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
 
     // Check whether the graph contains a fraction of (k+1)-mers from the sequence
     bool find(const std::string &sequence,
@@ -100,24 +101,23 @@ class BOSS {
      * Traverse boss graph and call all its edges
      * except for the dummy source of sink ones
      */
-    void call_kmers(Call<edge_index, const std::string&> callback) const;
+    void call_kmers(Call<edge_index, const std::string &> callback) const;
 
     // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;
 
     // call contigs (or unitigs if |unitigs| is true) that cover
     // exactly all edges in graph (or subgraph, if |subgraph_mask| is passed)
-    void call_paths(Call<std::vector<edge_index>&&,
-                         std::vector<TAlphabet>&&> callback,
+    void call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&> callback,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL) const;
 
-    void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
+    void call_sequences(Call<std::string &&, std::vector<edge_index> &&> callback,
                         bool kmers_in_single_form = false,
                         const bitmap *subgraph_mask = NULL) const;
 
-    void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
+    void call_unitigs(Call<std::string &&, std::vector<edge_index> &&> callback,
                       size_t max_pruned_dead_end_size = 0,
                       bool kmers_in_single_form = false,
                       const bitmap *subgraph_mask = NULL) const;
@@ -146,10 +146,9 @@ class BOSS {
      * of non-redundant dummy source edges.
      * Return value: edges removed from the initial graph.
      */
-    sdsl::bit_vector
-    erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges = NULL,
-                                size_t num_threads = 0,
-                                bool verbose = false);
+    sdsl::bit_vector erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges = NULL,
+                                                 size_t num_threads = 0,
+                                                 bool verbose = false);
 
     uint64_t mark_source_dummy_edges(sdsl::bit_vector *mask = NULL,
                                      size_t num_threads = 0,
@@ -176,11 +175,11 @@ class BOSS {
                   std::function<bool(edge_index)> end_branch) const;
 
     /**
-    * Heavily borrowing from the graph sequence traversal, this function gets
-    * a graph `other` and merges its nodes into the target graph object.
-    * The edges of `other` are fully traversed and nodes are added if not existing yet.
-    * This function is well suited to merge small graphs into large ones.
-    */
+     * Heavily borrowing from the graph sequence traversal, this function gets
+     * a graph `other` and merges its nodes into the target graph object.
+     * The edges of `other` are fully traversed and nodes are added if not existing yet.
+     * This function is well suited to merge small graphs into large ones.
+     */
     void merge(const BOSS &other);
 
     /**
@@ -268,7 +267,7 @@ class BOSS {
      * Return value of last at position i.
      */
     bool get_last(uint64_t i) const { return (*last_)[i]; }
-    const bit_vector& get_last() const { return *last_; }
+    const bit_vector &get_last() const { return *last_; }
 
     /**
      * Uses the object's array last and a position and
@@ -298,7 +297,7 @@ class BOSS {
      * Return value of W at position i.
      */
     TAlphabet get_W(uint64_t i) const { return (*W_)[i]; }
-    const wavelet_tree& get_W() const { return *W_; }
+    const wavelet_tree &get_W() const { return *W_; }
 
     /**
      * Uses the object's array W, a given position i in W and a character c
@@ -335,7 +334,7 @@ class BOSS {
      * The index is over the alphabet!
      */
     uint64_t get_F(TAlphabet k) const { return F_.at(k); }
-    const std::vector<uint64_t>& get_F() const { return F_; }
+    const std::vector<uint64_t> &get_F() const { return F_; }
 
     /**
      * This functions gets a position i reflecting the r-th occurence of the corresponding
@@ -366,9 +365,10 @@ class BOSS {
     template <typename RandomAccessIt>
     std::tuple<edge_index, edge_index, RandomAccessIt>
     index_range(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
-                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
-                      "Only encoded sequences can be queried");
+        static_assert(
+                std::is_same_v<TAlphabet &,
+                               decltype(*begin)> || std::is_same_v<const TAlphabet &, decltype(*begin)>,
+                "Only encoded sequences can be queried");
 
         assert(end >= begin);
         assert(end <= begin + k_);
@@ -384,12 +384,9 @@ class BOSS {
         TAlphabet s = *begin;
 
         // initial range
-        edge_index rl = F_.at(s) + 1 < W_->size()
-                        ? succ_last(F_.at(s) + 1)
-                        : W_->size(); // lower bound
-        edge_index ru = s < F_.size() - 1
-                        ? F_.at(s + 1)
-                        : W_->size() - 1; // upper bound
+        edge_index rl = F_.at(s) + 1 < W_->size() ? succ_last(F_.at(s) + 1)
+                                                  : W_->size(); // lower bound
+        edge_index ru = s < F_.size() - 1 ? F_.at(s + 1) : W_->size() - 1; // upper bound
         if (rl > ru)
             return std::make_tuple(edge_index(0), edge_index(0), begin);
 
@@ -454,7 +451,8 @@ class BOSS {
      * creates an outgoing edge from the same source node with
      * label c if it is not a part of the graph yet.
      */
-    edge_index append_pos(TAlphabet c, edge_index source_node,
+    edge_index append_pos(TAlphabet c,
+                          edge_index source_node,
                           const TAlphabet *source_node_kmer,
                           std::vector<uint64_t> *edges_inserted = NULL);
 
@@ -500,9 +498,10 @@ class BOSS {
      */
     template <typename RandomAccessIt>
     uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
-                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
-                      "Only encoded sequences can be queried");
+        static_assert(
+                std::is_same_v<TAlphabet &,
+                               decltype(*begin)> || std::is_same_v<const TAlphabet &, decltype(*begin)>,
+                "Only encoded sequences can be queried");
         assert(begin + k_ == end);
 
         auto match = index_range(begin, end);
@@ -514,13 +513,13 @@ class BOSS {
 
 #ifdef DBGDEBUG
     template <typename T, typename... Targs>
-    void verbose_cout(const T &arg, Targs ...rest) const {
+    void verbose_cout(const T &arg, Targs... rest) const {
         std::cout << arg << std::flush;
         verbose_cout(rest...);
     }
 #else
     template <typename T, typename... Targs>
-    void verbose_cout(const T&, Targs...) const {}
+    void verbose_cout(const T &, Targs...) const {}
 #endif
 
     bool is_valid() const;
@@ -529,7 +528,7 @@ class BOSS {
     class Chunk;
 };
 
-std::ostream& operator<<(std::ostream &os, const BOSS &graph);
+std::ostream &operator<<(std::ostream &os, const BOSS &graph);
 
 
 #endif // __BOSS_HPP__

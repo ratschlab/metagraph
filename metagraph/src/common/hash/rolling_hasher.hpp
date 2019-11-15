@@ -5,7 +5,7 @@
 
 #include <cyclichash.h>
 
-#include "ring_buffer.hpp"
+#include "common/ring_buffer.hpp"
 
 
 template <typename TAlphabet = uint8_t>

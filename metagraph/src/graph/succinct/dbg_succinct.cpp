@@ -6,10 +6,10 @@
 #include <string>
 #include <filesystem>
 
-#include "serialization.hpp"
-#include "reverse_complement.hpp"
-#include "string_utils.hpp"
-#include "algorithms.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "utils/serialization.hpp"
+#include "utils/string_utils.hpp"
+#include "utils/algorithms.hpp"
 
 using utils::remove_suffix;
 

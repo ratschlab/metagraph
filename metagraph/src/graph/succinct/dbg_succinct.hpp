@@ -1,11 +1,12 @@
 #ifndef __DBG_SUCCINCT_HPP__
 #define __DBG_SUCCINCT_HPP__
 
-#include "sequence_graph.hpp"
-#include "bit_vector.hpp"
-#include "config.hpp"
 #include "boss.hpp"
-#include "kmer_bloom_filter.hpp"
+
+#include "../sequence_graph.hpp"
+#include "common/config.hpp"
+#include "kmer/kmer_bloom_filter.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
 
 class MaskedDeBruijnGraph;
 
