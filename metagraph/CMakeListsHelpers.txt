@@ -1,3 +1,6 @@
+# Contains common functions used by all cmake files, such as finding various libraries
+# or checking for the presence of specific system features
+
 function (findOpenMP)
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
 # and happily cached, thus messing up the compilation flags forever
