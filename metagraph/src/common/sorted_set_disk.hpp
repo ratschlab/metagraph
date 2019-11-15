@@ -1,4 +1,5 @@
-#pragma once
+#ifndef __SORTED_SET_DISK_HPP__
+#define __SORTED_SET_DISK_HPP__
 
 #include "common/chunked_wait_queue.hpp"
 #include "common/deque_vector.hpp"
@@ -36,11 +37,10 @@ class SortedSetDisk {
    * guaranteed to flush to disk when the newly added data would exceed this
    * size.
    */
-  static constexpr size_t CONTAINER_SIZE_BYTES = 1e3; // 1 GB
-  //TODO:set back to 1e9 before submitting, also below
+  static constexpr size_t CONTAINER_SIZE_BYTES = 1e9; // 1 GB
 
   /** Size of the merge queue's underlying circular buffer */
-  static constexpr size_t MERGE_QUEUE_SIZE = 1e3; // 1GB
+  static constexpr size_t MERGE_QUEUE_SIZE = 1e9; // 1GB
   /** Number of elements that can be iterated backwards in the merge queue */
   static constexpr size_t MERGE_QUEUE_BACKWARDS_COUNT = 100;
 
@@ -347,3 +347,5 @@ class SortedSetDisk {
 
   threads::ChunkedWaitQueue<T> merge_queue_;
 };
+
+#endif // __SORTED_SET_DISK_HPP__
