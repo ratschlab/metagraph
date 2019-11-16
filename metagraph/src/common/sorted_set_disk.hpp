@@ -1,8 +1,8 @@
 #pragma once
 
+#include "utils/vectors.hpp"
 #include "common/deque_vector.hpp"
 #include "common/threading.hpp"
-#include "common/vectors.hpp"
 
 #include <ips4o.hpp>
 

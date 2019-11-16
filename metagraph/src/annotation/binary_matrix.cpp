@@ -1,7 +1,7 @@
 #include "binary_matrix.hpp"
 
 #include "utils/algorithms.hpp"
-#include "common/serialization.hpp"
+#include "utils/serialization.hpp"
 
 
 std::vector<BinaryMatrix::SetBitPositions>

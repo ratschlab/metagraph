@@ -10,7 +10,7 @@
 #include <sdsl/int_vector.hpp>
 
 #include "utils/string_utils.hpp"
-#include "common/vectors.hpp"
+#include "utils/vectors.hpp"
 #include "kmer.hpp"
 #include "kmer_boss.hpp"
 #include "alphabets.hpp"
