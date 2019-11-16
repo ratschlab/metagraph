@@ -2,7 +2,7 @@
 
 #include <cassert>
 #include <condition_variable>
-#include <deque>
+#include <vector>
 #include <mutex>
 #include <thread>
 
@@ -120,105 +120,13 @@ class ChunkedWaitQueue {
         }
     }
 
-    /**
-     * Defines the (unique) iterator of a ChunkedWaitQueue. The iterator traverses the
-     * queue forward and has support for a limited window of backward operations.
-     * As the iterator is moving forward, it will remove older chunks from the queue in
-     * order to make room for new elements. An iterator with a nullptr parent denotes the
-     * end of the queue.
-     */
-    class Iterator {
-      public:
-        /**
-         * Creates an iterator for the given queue.
-         * @param parent the ChunkedWaitQueue this class iterates
-         */
-        Iterator(ChunkedWaitQueue *parent) : parent_(parent) {}
-
-        /**
-         * Returns the element currently pointed at by the iterator.
-         * @throw std::runtime_error If the iterator is pointing at the past-the-end
-         * element
-         */
-        T &operator*() {
-            std::unique_lock<std::mutex> l(parent_->mutex_);
-            if (parent_ == nullptr) {
-                throw std::runtime_error(
-                        "Attempting to dereference past-the-end iterator.");
-            }
-            return parent_->queue_[idx_];
-        }
-
-        /**
-         * Moves the iterator to the next element in the queue.
-         * Blocks if no elements are available. If the iterator moved past
-         * parent_->chunk_size_ + parent_->fence_size_ from the oldest element, the oldest
-         * parent_->chunk_size_ elements are cleaned up from the queue to make room for
-         * new elements.
-         * @return a pointer to the next element or the special "end iterator" if there
-         * are no elements left and the queue was shut down.
-         */
-        Iterator &operator++() {
-            std::unique_lock<std::mutex> l(parent_->mutex_);
-            if (no_more_elements()) {
-                parent_->not_empty_.wait(l, [this]() {
-                    return parent_->is_shutdown_ || !no_more_elements();
-                });
-                if (parent_->is_shutdown_ && no_more_elements()) { // reached the end
-                    // notify waiting destructor that object is ready to be destroyed
-                    parent_->empty_.notify_all();
-                    parent_ = nullptr;
-                    idx_ = 0;
-                    return *this;
-                }
-            }
-            idx_ = (idx_ + 1) % parent_->queue_.size();
-            if (index_dist() >= parent_->chunk_size_ + parent_->fence_size_) {
-                parent_->pop_chunk();
-            }
-            return *this;
-        }
-
-        /**
-         * Moves the iterator to the previous element in the queue.
-         * @throw std::runtime_error if attempting to move before the first element
-         */
-        Iterator &operator--() {
-            std::unique_lock<std::mutex> l(parent_->mutex_);
-            if (idx_ == parent_->first_) { // underflow
-                throw std::runtime_error("Attempting to move before the first element.");
-            }
-            (idx_ > 0) ? idx_-- : idx_ = parent_->queue_.size() - 1;
-            return *this;
-        }
-
-        bool operator==(const Iterator &other) {
-            return parent_ == other.parent_ && idx_ == other.idx_;
-        }
-        bool operator!=(const Iterator &other) { return !(*this == other); }
-        friend ChunkedWaitQueue;
-
-        Iterator(const Iterator &other) = delete; // non construction-copyable
-        Iterator &operator=(const Iterator &) = delete; // non copyable
-
-      private:
-        size_type idx_ = 0;
-        ChunkedWaitQueue *parent_;
-
-      private:
-        size_type index_dist() {
-            return idx_ >= parent_->first_ ? idx_ - parent_->first_
-                                           : parent_->size() + idx_ - parent_->first_;
-        }
-
-        bool no_more_elements() { return parent_->empty() || idx_ == parent_->last_; }
-    };
+    class Iterator;
 
     /**
      * Special iterator indicating the end of the queue - the end is reached when the
      * queue was shut down *and* the iterator past the last element in the queue.
      */
-    Iterator &end() { return endIterator; }
+    Iterator &end() { return end_iterator; }
 
     /**
      * Returns the iterator of the queue. Note that a queue only has one iterator, so
@@ -233,14 +141,14 @@ class ChunkedWaitQueue {
             not_empty_.wait(l, [this]() { return is_shutdown_ || !empty(); });
         }
         if (empty() && is_shutdown_) {
-            return endIterator;
+            return end_iterator;
         }
 
         return iterator_;
     }
 
   private:
-    static Iterator endIterator;
+    static Iterator end_iterator;
     static constexpr size_type INVALID_IDX = std::numeric_limits<size_type>::max();
     size_type chunk_size_;
     size_type fence_size_;
@@ -278,8 +186,103 @@ class ChunkedWaitQueue {
     }
 };
 
+
 template <typename T, typename Alloc>
-typename ChunkedWaitQueue<T, Alloc>::Iterator ChunkedWaitQueue<T, Alloc>::endIterator
+typename ChunkedWaitQueue<T, Alloc>::Iterator ChunkedWaitQueue<T, Alloc>::end_iterator
         = ChunkedWaitQueue<T, Alloc>::Iterator(nullptr);
+
+/**
+ * Defines the (unique) iterator of a ChunkedWaitQueue. The iterator traverses the
+ * queue forward and has support for a limited window of backward operations.
+ * As the iterator is moving forward, it will remove older chunks from the queue in
+ * order to make room for new elements. An iterator with a nullptr parent denotes the
+ * end of the queue.
+ */
+template <typename T, typename Alloc>
+class ChunkedWaitQueue<T, Alloc>::Iterator {
+  public:
+    /**
+     * Creates an iterator for the given queue.
+     * @param parent the ChunkedWaitQueue this class iterates
+     */
+    Iterator(ChunkedWaitQueue *parent) : parent_(parent) {}
+
+    /**
+     * Returns the element currently pointed at by the iterator.
+     * @throw std::runtime_error If the iterator is pointing at the past-the-end
+     * element
+     */
+    T &operator*() {
+        std::unique_lock<std::mutex> l(parent_->mutex_);
+        if (parent_ == nullptr) {
+            throw std::runtime_error(
+                    "Attempting to dereference past-the-end iterator.");
+        }
+        return parent_->queue_[idx_];
+    }
+
+    /**
+     * Moves the iterator to the next element in the queue.
+     * Blocks if no elements are available. If the iterator moved past
+     * parent_->chunk_size_ + parent_->fence_size_ from the oldest element, the oldest
+     * parent_->chunk_size_ elements are cleaned up from the queue to make room for
+     * new elements.
+     * @return a pointer to the next element or the special "end iterator" if there
+     * are no elements left and the queue was shut down.
+     */
+    Iterator &operator++() {
+        std::unique_lock<std::mutex> l(parent_->mutex_);
+        if (no_more_elements()) {
+            parent_->not_empty_.wait(l, [this]() {
+                return parent_->is_shutdown_ || !no_more_elements();
+            });
+            if (parent_->is_shutdown_ && no_more_elements()) { // reached the end
+                // notify waiting destructor that object is ready to be destroyed
+                parent_->empty_.notify_all();
+                parent_ = nullptr;
+                idx_ = 0;
+                return *this;
+            }
+        }
+        idx_ = (idx_ + 1) % parent_->queue_.size();
+        if (index_dist() >= parent_->chunk_size_ + parent_->fence_size_) {
+            parent_->pop_chunk();
+        }
+        return *this;
+    }
+
+    /**
+     * Moves the iterator to the previous element in the queue.
+     * @throw std::runtime_error if attempting to move before the first element
+     */
+    Iterator &operator--() {
+        std::unique_lock<std::mutex> l(parent_->mutex_);
+        if (idx_ == parent_->first_) { // underflow
+            throw std::runtime_error("Attempting to move before the first element.");
+        }
+        (idx_ > 0) ? idx_-- : idx_ = parent_->queue_.size() - 1;
+        return *this;
+    }
+
+    bool operator==(const Iterator &other) {
+        return parent_ == other.parent_ && idx_ == other.idx_;
+    }
+    bool operator!=(const Iterator &other) { return !(*this == other); }
+
+    Iterator(const Iterator &other) = delete; // non construction-copyable
+    Iterator &operator=(const Iterator &) = delete; // non copyable
+
+  private:
+    size_type idx_ = 0;
+    ChunkedWaitQueue *parent_;
+
+  private:
+    size_type index_dist() {
+        return idx_ >= parent_->first_ ? idx_ - parent_->first_
+                                       : parent_->size() + idx_ - parent_->first_;
+    }
+
+    bool no_more_elements() { return parent_->empty() || idx_ == parent_->last_; }
+};
 
 } // namespace threads
