@@ -7,8 +7,8 @@
 #include <progress_bar.hpp>
 
 #include "annotation/annotate.hpp"
-#include "common/bit_vectors/bit_vector.hpp"
-#include "common/vectors.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
+#include "utils/vectors.hpp"
 
 
 namespace annotate {

@@ -1,6 +1,6 @@
 #include "bitmap_mergers.hpp"
 
-#include "common/vectors.hpp"
+#include "utils/vectors.hpp"
 
 
 namespace utils {
@@ -153,7 +153,6 @@ Vector RowsFromColumnsIterator::next_row() {
     return indices;
 }
 
-template std::vector<uint64_t> RowsFromColumnsIterator::next_row<std::vector<uint64_t>>();
 template Vector<uint64_t> RowsFromColumnsIterator::next_row<Vector<uint64_t>>();
 
 
@@ -182,8 +181,6 @@ void RowsFromColumnsTransformer
     assert(!values_left());
 }
 
-template void RowsFromColumnsTransformer::call_rows<std::vector<uint64_t>>(
-        const std::function<void(const std::vector<uint64_t> &)> &callback);
 template void RowsFromColumnsTransformer::call_rows<Vector<uint64_t>>(
         const std::function<void(const Vector<uint64_t> &)> &callback);
 

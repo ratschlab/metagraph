@@ -3,8 +3,8 @@
 
 #include <vector>
 
+#include "utils/vectors.hpp"
 #include "binary_matrix.hpp"
-#include "vectors.hpp"
 
 
 template <typename RowType = SmallVector<uint32_t>>

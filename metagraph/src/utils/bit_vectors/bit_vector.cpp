@@ -4,7 +4,7 @@
 #include <type_traits>
 #include <cassert>
 
-#include "common/serialization.hpp"
+#include "utils/serialization.hpp"
 
 const double STAT_BITS_PER_BIT_IF_SPARSE = 1.07;
 // TODO: why is this so large? Check the sdsl implementation

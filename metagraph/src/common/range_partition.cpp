@@ -1,6 +1,6 @@
 #include "range_partition.hpp"
 
-#include "serialization.hpp"
+#include "utils/serialization.hpp"
 
 
 RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,

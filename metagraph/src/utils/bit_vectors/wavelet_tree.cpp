@@ -3,7 +3,7 @@
 #include <cassert>
 
 #include "utils/algorithms.hpp"
-#include "common/serialization.hpp"
+#include "utils/serialization.hpp"
 
 
 // TODO: run benchmarks and optimize these parameters
