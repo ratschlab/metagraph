@@ -21,6 +21,8 @@
 #include "dbg_hash_fast.hpp"
 #include "dbg_hash_fast2.hpp"
 #include "dbg_hash_fast3.hpp"
+#include "dbg_hash_fast4.hpp"
+#include "dbg_hash_fast5.hpp"
 #include "dbg_hash_string.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
@@ -57,6 +59,12 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, ".hashfast3dbg")) {
         return Config::GraphType::HASH_FAST_3;
+
+    } else if (utils::ends_with(filename, ".hashfast4dbg")) {
+        return Config::GraphType::HASH_FAST_4;
+
+    } else if (utils::ends_with(filename, ".hashfast5dbg")) {
+        return Config::GraphType::HASH_FAST_5;
 
     } else if (utils::ends_with(filename, ".hashstrdbg")) {
         return Config::GraphType::HASH_STR;
@@ -132,6 +140,12 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH_FAST_3:
             return load_critical_graph_from_file<DBGHashFast3>(filename);
+
+        case Config::GraphType::HASH_FAST_4:
+            return load_critical_graph_from_file<DBGHashFast4>(filename);
+
+        case Config::GraphType::HASH_FAST_5:
+            return load_critical_graph_from_file<DBGHashFast5>(filename);
 
         case Config::GraphType::HASH_PACKED:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
@@ -1198,11 +1212,12 @@ void parse_sequences(const std::vector<std::string> &files,
                     }, forward_and_reverse);
                 });
             } else {
+                /*
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     // add read to the graph constructor as a callback
                     call_sequence(read_stream->seq.s);
                 }, config.forward_and_reverse);
-                /*
+                */
                 std::vector<std::string> seqs;
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     if (seqs.size() < 100) {
@@ -1219,7 +1234,6 @@ void parse_sequences(const std::vector<std::string> &files,
                     std::string s(seq);
                     call_sequence(std::move(s));
                 }
-                */
             }
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -1553,6 +1567,14 @@ int main(int argc, const char *argv[]) {
                         graph.reset(new DBGHashFast3(config->k, config->canonical));
                         break;
 
+                    case Config::GraphType::HASH_FAST_4:
+                        graph.reset(new DBGHashFast4(config->k, config->canonical));
+                        break;
+
+                    case Config::GraphType::HASH_FAST_5:
+                        graph.reset(new DBGHashFast5(config->k, config->canonical));
+                        break;
+
                     case Config::GraphType::HASH_PACKED:
                         graph.reset(new DBGHashOrdered(config->k, config->canonical, true));
                         break;
@@ -1624,7 +1646,43 @@ int main(int argc, const char *argv[]) {
 
             auto finish = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed = finish - start;
-            std::cout << "Elapsed time: " << elapsed.count() << " s\n";
+            std::cout << "Elapsed time (build): " << elapsed.count() << " s\n";
+///
+            timer.reset();
+            start = std::chrono::high_resolution_clock::now();
+
+            FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
+                               config->header, true);
+
+            std::vector<std::string> seqs;
+            if (config->unitigs || config->min_tip_size > 1) {
+                graph->call_unitigs([&](const auto &unitig, auto&&) {
+                    //writer.write(unitig);
+                    if (seqs.size() < 100) {
+                        seqs.push_back(unitig);
+                    } else {
+                        seqs.clear();
+                    }
+                },
+                                    config->min_tip_size,
+                                    config->kmers_in_single_form);
+            } else {
+                graph->call_sequences([&](const auto &contig, auto&&) {
+                    //writer.write(contig);
+                    if (seqs.size() < 100) {
+                        seqs.push_back(contig);
+                    } else {
+                        seqs.clear();
+                    }
+                },
+                                      config->kmers_in_single_form);
+            }
+
+            finish = std::chrono::high_resolution_clock::now();
+            elapsed = finish - start;
+            std::cout << "Elapsed time (assemble): " << elapsed.count() << " s\n";
+///
+
             if (!config->outfbase.empty()) {
                 if (dynamic_cast<DBGSuccinct*>(graph.get()) && config->mark_dummy_kmers) {
                     if (config->verbose)
@@ -2989,9 +3047,6 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Extracting sequences from graph...\t" << std::flush;
 
-            timer.reset();
-            auto start = std::chrono::high_resolution_clock::now();
-
             if (config->to_gfa) {
                 if (!config->unitigs) {
                     std::cerr << "'--unitigs' must be set for GFA output" << std::endl;
@@ -3015,33 +3070,32 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
+            timer.reset();
+            auto start = std::chrono::high_resolution_clock::now();
+
             FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
                                config->header, true);
 
-            //std::vector<std::string> seqs;
+            std::vector<std::string> seqs;
             if (config->unitigs || config->min_tip_size > 1) {
                 graph->call_unitigs([&](const auto &unitig, auto&&) {
                     writer.write(unitig);
-                    /*
-                    if (seqs.size() < 100) {
-                        seqs.push_back(unitig);
-                    } else {
-                        seqs.clear();
-                    }
-                    */
+                    //if (seqs.size() < 100) {
+                    //    seqs.push_back(unitig);
+                    //} else {
+                    //    seqs.clear();
+                    //}
                 },
                                     config->min_tip_size,
                                     config->kmers_in_single_form);
             } else {
                 graph->call_sequences([&](const auto &contig, auto&&) {
                     writer.write(contig);
-                    /*
-                    if (seqs.size() < 100) {
-                        seqs.push_back(contig);
-                    } else {
-                        seqs.clear();
-                    }
-                    */
+                    //if (seqs.size() < 100) {
+                    //    seqs.push_back(contig);
+                    //} else {
+                    //    seqs.clear();
+                    //}
                 },
                                       config->kmers_in_single_form);
             }

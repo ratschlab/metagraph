@@ -213,6 +213,8 @@ void DBGHashFast2Impl<KMER>::add_sequence(const std::string &sequence,
         next_kmer_prefix_it = iter;
     }
 
+    //std::cout << num_nodes() << std::endl;
+
     if (!canonical_mode_)
         return;
 

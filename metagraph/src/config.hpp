@@ -166,6 +166,8 @@ class Config {
         HASH_FAST,
         HASH_FAST_2,
         HASH_FAST_3,
+        HASH_FAST_4,
+        HASH_FAST_5,
         HASH_PACKED,
         HASH_STR,
         BITMAP,

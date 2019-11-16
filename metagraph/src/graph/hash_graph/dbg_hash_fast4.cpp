@@ -1,18 +1,20 @@
-#include "dbg_hash_fast3.hpp"
+#include "dbg_hash_fast4.hpp"
 
 #include <cassert>
 
 #include <tsl/ordered_set.h>
 //#include <tsl/robin_map.h>
+#include <tsl/robin_set.h>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "serialization.hpp"
 #include "bit_vector.hpp"
 #include "utils.hpp"
 
+#include <unordered_set> //TODO remove after debug
 
 template <typename KMER = KmerExtractor2Bit::Kmer64>
-class DBGHashFast3Impl : public DBGHashFast3::DBGHashFast3Interface {
+class DBGHashFast4Impl : public DBGHashFast4::DBGHashFast4Interface {
     using Kmer = KMER;
     using TAlphabet = KmerExtractor2Bit::TAlphabet;
     using KmerPrefix = typename KMER::WordType;
@@ -47,7 +49,7 @@ class DBGHashFast3Impl : public DBGHashFast3::DBGHashFast3Interface {
     using KmerConstIterator = typename KmerIndex::const_iterator;
 
   public:
-    explicit DBGHashFast3Impl(size_t k,
+    explicit DBGHashFast4Impl(size_t k,
                               bool canonical_mode,
                               bool packed_serialization);
 
@@ -77,7 +79,6 @@ class DBGHashFast3Impl : public DBGHashFast3::DBGHashFast3Interface {
 
     void call_incoming_kmers(node_index node,
                              const IncomingEdgeCallback &callback) const;
-
     void call_nodes(const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &stop_early) const;
 
@@ -108,7 +109,7 @@ class DBGHashFast3Impl : public DBGHashFast3::DBGHashFast3Interface {
     size_t get_k() const { return k_; }
     bool is_canonical_mode() const { return canonical_mode_; }
 
-    uint64_t num_nodes() const { return kmers_.size() << KMER::kBitsPerChar; }
+    uint64_t num_nodes() const { return kmers_.size() << (KMER::kBitsPerChar * 4); }
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -129,30 +130,42 @@ class DBGHashFast3Impl : public DBGHashFast3::DBGHashFast3Interface {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
 
-    KmerIterator find_kmer(const KmerPrefix &kmer_prefix) {
-        KmerIterator find = kmers_.find(kmer_prefix);
-        assert(find == kmers_.end() || !in_graph(get_index(find)) || KMER(kmer_prefix) == get_kmer(get_index(find), find));
-        return find;
-    }
-
-    KmerConstIterator find_kmer(const KmerPrefix &kmer_prefix) const {
-        KmerConstIterator find = kmers_.find(kmer_prefix);
-        assert(find == kmers_.end() || !in_graph(get_index(find)) || KMER(kmer_prefix) == get_kmer(get_index(find), find));
-        return find;
-    }
-
     bool kmers_overlap(const Kmer &out_kmer, const Kmer &in_kmer) const {
         KMER overlap = out_kmer;
         overlap.to_next(k_, in_kmer[k_ - 1]);
         return overlap == in_kmer;
     }
 
+    size_t find_shift(node_index node) const {
+        return ((node - 1) >> (KMER::kBitsPerChar * 3)) & ((1 << KMER::kBitsPerChar) - 1);
+    }
+
+    size_t get_rest(KMER kmer, size_t shift) const {
+        const KmerPrefix before_mask = before_mask_[shift];
+        const KmerPrefix after_mask = after_mask_[shift];
+
+        return ((KmerPrefix(kmer.data()) & before_mask) << int(KMER::kBitsPerChar * (3 - shift))) |
+            ((KmerPrefix(kmer.data()) & after_mask) >> int(KMER::kBitsPerChar * (k_ - 3 + shift)));
+    }
+
+    void print_internal_representation() {
+        for (auto iter = kmers_.begin(); iter != kmers_.end(); ++iter) {
+            auto val = values_[iter - kmers_.begin()];
+            std::cout << KMER(*iter).to_string(k_ - 3, seq_encoder_.alphabet) << " " << std::bitset<64>(val[0]) << "," << std::bitset<64>(val[1]) << "," << std::bitset<64>(val[2]) << "," << std::bitset<64>(val[3]) << " ";
+            for (size_t shift = 0; shift <= 3; ++shift) {
+                for (size_t i = 0; i < (1ul << (KMER::kBitsPerChar * 3)); ++i) {
+                    if (val[shift] & (1ull << i))
+                        std::cout << KMER(i).to_string(3, seq_encoder_.alphabet) << " (" << shift << "),";
+                }
+            }
+            std::cout << std::endl;
+        }
+        std::cout << "---" << std::endl;
+    }
+
     node_index get_index(const KmerConstIterator &iter) const;
     node_index get_index(const Kmer &kmer) const;
-
-    size_t get_bit_index(const KmerConstIterator &iter) const {
-        return iter - kmers_.begin();
-    }
+    node_index get_index(const Kmer &kmer, const KmerConstIterator &iter) const;
 
     KmerIterator get_iter(node_index node);
     KmerConstIterator get_const_iter(node_index node) const;
@@ -172,25 +185,137 @@ class DBGHashFast3Impl : public DBGHashFast3::DBGHashFast3Interface {
     const KmerPrefix kIgnoreLastCharMask;
     const Bits kLastCharMask = (Bits(1) << seq_encoder_.alphabet.size()) - 1;
     const Bits kIncomingEdgesMask = kLastCharMask << seq_encoder_.alphabet.size();
-    static constexpr auto kExtension = DBGHashFast3::kExtension;
+    static constexpr auto kExtension = DBGHashFast4::kExtension;
+
+    unsigned char prefixes_[4096];
+    std::vector<std::array<uint64_t, 4>> values_;
+    std::vector<bool> may_contain_source_kmer_;
+
+    const KmerPrefix prefix_mask_ = KmerPrefix((1 << KMER::kBitsPerChar * 6) - 1);
+    const KmerPrefix first3_mask_ = prefix_mask_ >> int(KMER::kBitsPerChar * 3);
+    KmerPrefix before_mask_[4];
+    KmerPrefix after_mask_[4];
+    KmerPrefix both_mask_[4];
+    KmerPrefix neither_mask_[4];
+
+    std::unordered_set<std::string> debug_;
 };
 
 template <typename KMER>
-DBGHashFast3Impl<KMER>::DBGHashFast3Impl(size_t k,
+DBGHashFast4Impl<KMER>::DBGHashFast4Impl(size_t k,
                                          bool canonical_mode,
                                          bool packed_serialization)
       : k_(k),
         canonical_mode_(canonical_mode),
         packed_serialization_(packed_serialization),
         kIgnoreLastCharMask(~(KmerPrefix((1llu << KMER::kBitsPerChar) - 1) << int(KMER::kBitsPerChar * (k - 1))))
-      {};
+{
+    for (uint32_t i = 0; i < (KmerPrefix(1) << (KMER::kBitsPerChar * 6)); ++i) {
+        KMER prefix{KmerPrefix(i)};
+
+        const KmerPrefix lower_2 = (1 << 3) - 1;
+        
+        for (unsigned char shift = 0; shift <= 4; ++shift) {
+            const int shift_bits = shift * KMER::kBitsPerChar;
+            KmerPrefix data = prefix.data();
+
+            if (shift == 4 ||
+                (__builtin_popcount(data & (lower_2 << shift_bits)) + 
+                 __builtin_popcount(data & (lower_2 << (shift_bits + 3)))) % 3 == 1) {
+                if (shift == 4) {
+                    if ((__builtin_popcount(data & (lower_2 << (1 * KMER::kBitsPerChar))) + 
+                         __builtin_popcount(data & (lower_2 << (2 * KMER::kBitsPerChar)))) % 2 == 1) {
+                        prefixes_[size_t(data)] = 2;
+                    } else if ((__builtin_popcount(data & (lower_2 << (0 * KMER::kBitsPerChar))) + 
+                                __builtin_popcount(data & (lower_2 << (1 * KMER::kBitsPerChar)))) % 2 == 1) {
+                        prefixes_[size_t(data)] = 1;
+                    } else {
+                        prefixes_[size_t(data)] = 0;
+                    }
+                } else {
+                    prefixes_[size_t(data)] = shift;
+                }
+                break;
+            }
+        }
+    }
+
+    for (size_t shift = 0; shift <= 3; ++shift) {
+        before_mask_[shift] = first3_mask_ >> int(KMER::kBitsPerChar * (3 - shift));
+        after_mask_[shift] = (first3_mask_ >> int(KMER::kBitsPerChar * shift)) <<
+                             int(KMER::kBitsPerChar * (k_ - (3 - shift)));
+        both_mask_[shift] = before_mask_[shift] | after_mask_[shift];
+        neither_mask_[shift] = ~both_mask_[shift];
+    }
+};
 
 
 template <typename KMER>
-void DBGHashFast3Impl<KMER>::add_sequence(const std::string &sequence,
+void DBGHashFast4Impl<KMER>::add_sequence(const std::string &sequence,
                                             bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
+    size_t shift = 4;
+    size_t last_shift = 0;
+    KmerIterator iter = kmers_.end();
+    auto kmers = sequence_to_kmers(sequence);
+    for (size_t kmer_index = 0; kmer_index < kmers.size(); ++kmer_index) {
+        const auto &kmer = kmers[kmer_index];
+        bool inserted = false;
+
+        shift = prefixes_[size_t(KmerPrefix(kmer.data()) & prefix_mask_)];
+        if (shift + 1 != last_shift) {
+            iter = kmers_.end();
+        } else {
+        }
+        last_shift = shift;
+
+        const size_t rest = get_rest(kmer, shift);
+
+        bool may_contain_source_kmer = false;
+        if (kmer_index > 0 && !kmers_overlap(kmers[kmer_index - 1], kmer)) {
+            iter = kmers_.end();
+            may_contain_source_kmer = true;
+        }
+        if (kmer_index == 0)
+            may_contain_source_kmer = true;
+
+        if (iter == kmers_.end()) {
+            KmerPrefix key = KmerPrefix(kmer.data()) & neither_mask_[shift];
+            key = key >> int(KMER::kBitsPerChar * shift);
+            std::tie(iter, inserted) = kmers_.insert(key);
+        }
+
+        const uint64_t val = 1ull << rest;
+        if (inserted) {
+            std::array<uint64_t, 4> arr = {0, 0, 0, 0};
+            arr[shift] = val;
+            values_.push_back(arr);
+            may_contain_source_kmer_.push_back(may_contain_source_kmer);
+        } else {
+            values_[iter - kmers_.begin()][shift] |= val;
+            if (may_contain_source_kmer)
+                may_contain_source_kmer_[iter - kmers_.begin()] = may_contain_source_kmer;
+        }
+
+/*
+        print_internal_representation();
+        call_nodes([&](node_index node) {
+            //auto kmer_iter = get_iter(node);
+            //KmerPrefix key = kmer_iter.key();
+            //KmerPrefix rest = KmerPrefix(node - 1) & first3_mask_;
+            std::cout << node << ":" << get_node_sequence(node) << " (" << find_shift(node) << ")" << ", ";
+        }, [](){ return false; });
+        std::cout << std::endl;
+*/
+
+        assert(kmer.to_string(k_, seq_encoder_.alphabet) == get_node_sequence(get_index(iter) + (shift << (KMER::kBitsPerChar * 3)) + rest));
+        assert((get_index(iter) + (shift << (KMER::kBitsPerChar * 3)) + rest) == kmer_to_node(get_node_sequence(get_index(iter) + (shift << (KMER::kBitsPerChar * 3)) + rest)));
+    }
+
+    std::ignore = nodes_inserted;
+
+/*
     auto kmers = sequence_to_kmers(sequence);
     KmerIterator next_kmer_prefix_it = kmers_.end();
     for (auto kmer_it = kmers.rbegin(); kmer_it != kmers.rend(); ++kmer_it) {
@@ -215,12 +340,12 @@ void DBGHashFast3Impl<KMER>::add_sequence(const std::string &sequence,
         const auto &&key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
 
         auto &&[iter, inserted] = kmers_.insert(key);
-        if (inserted)
-            bits_.push_back(val);
         assert(iter != kmers_.end());
         assert(iter == find_kmer(key));
 
-        if (!inserted)
+        if (inserted)
+            bits_.push_back(val);
+        else
             bits_[get_bit_index(iter)] |= val;
 
         if (iter != kmers_.end() && nodes_inserted)
@@ -256,12 +381,12 @@ void DBGHashFast3Impl<KMER>::add_sequence(const std::string &sequence,
         const auto &&key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
 
         auto &&[iter, inserted] = kmers_.insert(key);
-        if (inserted)
-            bits_.push_back(val);
         assert(iter != kmers_.end());
         assert(iter == find_kmer(key));
 
-        if (!inserted)
+        if (inserted)
+            bits_.push_back(val);
+        else
             bits_[get_bit_index(iter)] |= val;
 
         if (iter != kmers_.end() && nodes_inserted)
@@ -269,6 +394,7 @@ void DBGHashFast3Impl<KMER>::add_sequence(const std::string &sequence,
 
         next_kmer_prefix_it = iter;
     }
+*/
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -276,7 +402,7 @@ void DBGHashFast3Impl<KMER>::add_sequence(const std::string &sequence,
 // Guarantees that nodes are called in the same order as the input sequence.
 // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
 template <typename KMER>
-void DBGHashFast3Impl<KMER>::map_to_nodes_sequentially(
+void DBGHashFast4Impl<KMER>::map_to_nodes_sequentially(
                               std::string::const_iterator begin,
                               std::string::const_iterator end,
                               const std::function<void(node_index)> &callback,
@@ -292,9 +418,9 @@ void DBGHashFast3Impl<KMER>::map_to_nodes_sequentially(
         if (terminate())
             return;
 
-        assert((find_kmer(KmerPrefix((*it).data()) & kIgnoreLastCharMask) == kmers_.end())
-               || get_index(*it) == npos
-               || *it == get_kmer(get_index(*it), get_const_iter(get_index(*it))));
+        //assert((find_kmer(KmerPrefix((*it).data()) & kIgnoreLastCharMask) == kmers_.end())
+        //       || get_index(*it) == npos
+        //       || *it == get_kmer(get_index(*it), get_const_iter(get_index(*it))));
 
         callback(is_valid ? get_index(*it++) : npos);
     }
@@ -304,7 +430,7 @@ void DBGHashFast3Impl<KMER>::map_to_nodes_sequentially(
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied
 template <typename KMER>
-void DBGHashFast3Impl<KMER>::map_to_nodes(const std::string &sequence,
+void DBGHashFast4Impl<KMER>::map_to_nodes(const std::string &sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
 
@@ -325,84 +451,134 @@ void DBGHashFast3Impl<KMER>::map_to_nodes(const std::string &sequence,
 }
 
 template <typename KMER>
-void DBGHashFast3Impl<KMER>::call_outgoing_kmers(node_index node,
+void DBGHashFast4Impl<KMER>::call_outgoing_kmers(node_index node,
                                                  const OutgoingEdgeCallback &callback) const {
-    assert(in_graph(node));
+    KmerConstIterator iter = get_const_iter(node);
+    KmerPrefix key = iter.key();
+    std::ignore = key;
+    KmerPrefix full = get_kmer(node, get_const_iter(node)).data();
 
-    KMER kmer = get_kmer(node, get_const_iter(node));
-    //assert((*find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask)).second
-    //            && "val is not 0, there at least one k-mer");
+    Kmer next_kmer = KMER(full);
+    next_kmer.to_next(k_, 0);
 
-    const auto next_kmer_prefix_it
-        = find_kmer(KmerPrefix(kmer.data()) >> KMER::kBitsPerChar);
+    size_t next_shift = prefixes_[size_t(KmerPrefix(next_kmer.data()) & prefix_mask_)];
 
+    KmerPrefix next_key = KmerPrefix(next_kmer.data()) & neither_mask_[next_shift];
+    next_key = next_key >> int(KMER::kBitsPerChar * next_shift);
 
-    assert(next_kmer_prefix_it != kmers_.end());
+    assert(prefixes_[size_t(full & prefix_mask_)] == find_shift(node));
+    if (next_shift + 1 == find_shift(node)) {
+        assert(next_key == key);
 
-    const Bits val = bits_[get_bit_index(next_kmer_prefix_it)];
+        uint64_t val = values_[iter - kmers_.begin()][next_shift];
 
-    const auto next_kmer_base_index = get_index(next_kmer_prefix_it);
+        for (size_t i = 0; i < seq_encoder_.alphabet.size(); ++i) {
+            Kmer next_kmer = KMER(full);
+            next_kmer.to_next(k_, i);
 
-    for (size_t i = 0; i < seq_encoder_.alphabet.size(); ++i) {
-        if ((val >> i) & 1) {
-            auto next_kmer_index = next_kmer_base_index + i;
+            const size_t next_rest = get_rest(next_kmer, next_shift);
 
-            assert(in_graph(next_kmer_index));
+            if (val & (1ull << next_rest)) {
+                node_index base_node_index = get_index(iter);
+                callback(base_node_index + (next_shift << (KMER::kBitsPerChar * 3)) + next_rest, seq_encoder_.decode(i));
+            }
+        }
+    } else {
+        KmerConstIterator next_iter;
+        if (next_key == key) {
+            next_iter = iter;
+        } else {
+            next_iter = kmers_.find(next_key);
+        }
 
-            callback(next_kmer_index, seq_encoder_.decode(i));
+        for (size_t i = 0; i < seq_encoder_.alphabet.size(); ++i) {
+            Kmer next_kmer = KMER(full);
+            next_kmer.to_next(k_, i);
+            next_shift = prefixes_[size_t(KmerPrefix(next_kmer.data()) & prefix_mask_)];
+
+            KmerPrefix next_key_i = KmerPrefix(next_kmer.data()) & neither_mask_[next_shift];
+            next_key_i = next_key_i >> int(KMER::kBitsPerChar * next_shift);
+
+            node_index next_node;
+            if (next_key_i == next_key) {
+                next_node = get_index(next_kmer, next_iter);
+                assert(get_index(next_kmer) == next_node);
+            } else {
+                next_node = get_index(next_kmer);
+            }
+
+            if (next_node != npos)
+                callback(next_node, seq_encoder_.decode(i));
         }
     }
 }
 
 template <typename KMER>
-void DBGHashFast3Impl<KMER>::call_incoming_kmers(node_index node,
+void DBGHashFast4Impl<KMER>::call_incoming_kmers(node_index node,
                                                  const IncomingEdgeCallback &callback) const {
-    assert(in_graph(node));
-
-    auto kmer_prefix_iter = get_const_iter(node);
-    const Bits val = bits_[get_bit_index(kmer_prefix_iter)] >> seq_encoder_.alphabet.size();
+    KmerConstIterator iter = get_const_iter(node);
+    KmerPrefix key = iter.key();
+    KmerPrefix full = get_kmer(node, get_const_iter(node)).data();
 
     for (size_t i = 0; i < seq_encoder_.alphabet.size(); ++i) {
-        if ((val >> i) & 1) {
-            const auto &kmer = get_kmer(node, kmer_prefix_iter);
+        Kmer prev_kmer = KMER(full);
+        prev_kmer.to_prev(k_, i);
+            
+        size_t prev_shift = prefixes_[size_t(KmerPrefix(prev_kmer.data()) & prefix_mask_)];
 
-            auto prev_kmer = kmer;
-            prev_kmer.to_prev(k_, i);
+        KmerPrefix prev_key = KmerPrefix(prev_kmer.data()) & neither_mask_[prev_shift];
+        prev_key = prev_key >> int(KMER::kBitsPerChar * prev_shift);
 
-            auto prev_kmer_iter = find_kmer(KmerPrefix(prev_kmer.data()) & kIgnoreLastCharMask);
+        if (prev_key == key) {
+            const size_t prev_rest = get_rest(prev_kmer, prev_shift);
 
-            assert(prev_kmer_iter != kmers_.end());
+            uint64_t val = values_[iter - kmers_.begin()][prev_shift];
 
-            assert(bits_[get_bit_index(prev_kmer_iter)] & (Bits(1) << kmer[k_ - 2]));
-
-            callback(get_index(prev_kmer_iter) + prev_kmer[k_ - 1], seq_encoder_.decode(i));
+            if (val & (1ull << prev_rest)) {
+                node_index base_node_index = get_index(iter);
+                callback(base_node_index + (prev_shift << (KMER::kBitsPerChar * 3)) + prev_rest, seq_encoder_.decode(i));
+            }
+        } else {
+            node_index prev_node = get_index(prev_kmer);
+            if (prev_node != npos)
+                callback(prev_node, seq_encoder_.decode(i));
         }
     }
 }
 
 template <typename KMER>
-typename DBGHashFast3Impl<KMER>::node_index
-DBGHashFast3Impl<KMER>::traverse(node_index node, char next_char) const {
+typename DBGHashFast4Impl<KMER>::node_index
+DBGHashFast4Impl<KMER>::traverse(node_index node, char next_char) const {
     assert(in_graph(node));
-
-    auto kmer = get_kmer(node, get_const_iter(node));
-    kmer.to_next(k_, seq_encoder_.encode(next_char));
-    return get_index(kmer);
+    node_index ret = npos;
+    call_outgoing_kmers(
+        node,
+        [&](node_index out_node, char c) {
+        if (c == next_char)
+            ret = out_node;
+        }
+    );
+    return ret;
 }
 
 template <typename KMER>
-typename DBGHashFast3Impl<KMER>::node_index
-DBGHashFast3Impl<KMER>::traverse_back(node_index node, char prev_char) const {
+typename DBGHashFast4Impl<KMER>::node_index
+DBGHashFast4Impl<KMER>::traverse_back(node_index node, char prev_char) const {
     assert(in_graph(node));
-
-    auto kmer = get_kmer(node, get_const_iter(node));
-    kmer.to_prev(k_, seq_encoder_.encode(prev_char));
-    return get_index(kmer);
+    node_index ret = npos;
+    call_incoming_kmers(
+        node,
+        [&](node_index in_node, char c) {
+        if (c == prev_char)
+            ret = in_node;
+        }
+    );
+    return ret;
 }
 
 template <typename KMER>
 void
-DBGHashFast3Impl<KMER>
+DBGHashFast4Impl<KMER>
 ::adjacent_outgoing_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
@@ -412,7 +588,7 @@ DBGHashFast3Impl<KMER>
 
 template <typename KMER>
 void
-DBGHashFast3Impl<KMER>
+DBGHashFast4Impl<KMER>
 ::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
     assert(in_graph(node));
@@ -421,96 +597,64 @@ DBGHashFast3Impl<KMER>
 }
 
 template <typename KMER>
-size_t DBGHashFast3Impl<KMER>::outdegree(node_index node) const {
+size_t DBGHashFast4Impl<KMER>::outdegree(node_index node) const {
     assert(in_graph(node));
 
-    KMER kmer = get_kmer(node, get_const_iter(node));
-    //assert((*find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask)).second
-    //            && "val is not 0, there at least one k-mer");
-
-    kmer.to_next(k_, 0);
-
-    const auto next_kmer_prefix_it
-        = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
-
-    if (next_kmer_prefix_it == kmers_.end())
-        return 0;
-
-    const auto val = bits_[get_bit_index(next_kmer_prefix_it)] & kLastCharMask;
-
-#if _PROTEIN_GRAPH
-    return __builtin_popcountl(val);
-#elif _DNA_CASE_SENSITIVE_GRAPH
-    return __builtin_popcount(val);
-#elif _DNA5_GRAPH
-    return __builtin_popcount(val);
-#elif _DNA_GRAPH
-    return __builtin_popcount(val);
-#else
-    static_assert(false, "invalid or undefined alphabet");
-#endif
+    size_t outdegree = 0;
+    call_outgoing_kmers(node, [&](auto, auto) { outdegree++; });
+    return outdegree;
 }
 
 template <typename KMER>
-bool DBGHashFast3Impl<KMER>::has_single_outgoing(node_index node) const {
+bool DBGHashFast4Impl<KMER>::has_single_outgoing(node_index node) const {
     assert(in_graph(node));
 
     return outdegree(node) == 1;
 }
 
 template <typename KMER>
-bool DBGHashFast3Impl<KMER>::has_multiple_outgoing(node_index node) const {
+bool DBGHashFast4Impl<KMER>::has_multiple_outgoing(node_index node) const {
     assert(in_graph(node));
 
     return outdegree(node) > 1;
 }
 
 template <typename KMER>
-size_t DBGHashFast3Impl<KMER>::indegree(node_index node) const {
+size_t DBGHashFast4Impl<KMER>::indegree(node_index node) const {
     assert(in_graph(node));
 
-    auto kmer_iter = get_const_iter(node);
-
-    const auto val = bits_[get_bit_index(kmer_iter)] & kIncomingEdgesMask;
-
-#if _PROTEIN_GRAPH
-    return __builtin_popcountl(val);
-#elif _DNA_CASE_SENSITIVE_GRAPH
-    return __builtin_popcount(val);
-#elif _DNA5_GRAPH
-    return __builtin_popcount(val);
-#elif _DNA_GRAPH
-    return __builtin_popcount(val);
-#else
-    static_assert(false, "invalid or undefined alphabet");
-#endif
+    size_t indegree = 0;
+    call_incoming_kmers(node, [&](auto, auto) { indegree++; });
+    return indegree;
 }
 
 template <typename KMER>
-bool DBGHashFast3Impl<KMER>::has_no_incoming(node_index node) const {
+bool DBGHashFast4Impl<KMER>::has_no_incoming(node_index node) const {
     assert(in_graph(node));
 
-    const auto kmer_iter = get_const_iter(node);
-    return (bits_[get_bit_index(kmer_iter)] & kIncomingEdgesMask) == 0;
+    if (!may_contain_source_kmer_[get_const_iter(node) - kmers_.begin()])
+        return false;
+
+    return indegree(node) == 0;
 }
 
 template <typename KMER>
-bool DBGHashFast3Impl<KMER>::has_single_incoming(node_index node) const {
+bool DBGHashFast4Impl<KMER>::has_single_incoming(node_index node) const {
     assert(in_graph(node));
 
     return indegree(node) == 1;
 }
 
 template <typename KMER>
-typename DBGHashFast3Impl<KMER>::node_index
-DBGHashFast3Impl<KMER>::kmer_to_node(const std::string &kmer) const {
+typename DBGHashFast4Impl<KMER>::node_index
+DBGHashFast4Impl<KMER>::kmer_to_node(const std::string &kmer) const {
     assert(kmer.length() == k_);
 
     return get_index(seq_encoder_.encode(kmer));
 }
 
 template <typename KMER>
-std::string DBGHashFast3Impl<KMER>::get_node_sequence(node_index node) const {
+std::string DBGHashFast4Impl<KMER>::get_node_sequence(node_index node) const {
     assert(in_graph(node));
 
     return seq_encoder_.kmer_to_sequence(get_kmer(node, get_const_iter(node)), k_);
@@ -545,7 +689,7 @@ class Deserializer {
 };
 
 template <typename KMER>
-void DBGHashFast3Impl<KMER>::serialize(std::ostream &out) const {
+void DBGHashFast4Impl<KMER>::serialize(std::ostream &out) const {
     if (!out.good())
         throw std::ofstream::failure("Error: trying to dump graph to a bad stream");
 
@@ -558,8 +702,12 @@ void DBGHashFast3Impl<KMER>::serialize(std::ostream &out) const {
     if (packed_serialization_) {
         serialize_number(out, kmers_.size());
         std::for_each(kmers_.begin(), kmers_.end(), serializer);
-        serialize_number(out, bits_.size());
-        std::for_each(bits_.begin(), bits_.end(), serializer);
+        serialize_number(out, values_.size());
+        std::for_each(values_.begin(), values_.end(), serializer);
+        serialize_number(out, may_contain_source_kmer_.size());
+        std::for_each(may_contain_source_kmer_.begin(), may_contain_source_kmer_.end(), serializer);
+        //serialize_number(out, shifts_.size());
+        //std::for_each(shifts_.begin(), shifts_.end(), serializer);
     } else {
         throw std::runtime_error("not implemented");
         //serialize_number(out, std::numeric_limits<uint64_t>::max());
@@ -570,14 +718,14 @@ void DBGHashFast3Impl<KMER>::serialize(std::ostream &out) const {
 }
 
 template <typename KMER>
-void DBGHashFast3Impl<KMER>::serialize(const std::string &filename) const {
+void DBGHashFast4Impl<KMER>::serialize(const std::string &filename) const {
     std::ofstream out(utils::remove_suffix(filename, kExtension) + kExtension,
                       std::ios::binary);
     serialize(out);
 }
 
 template <typename KMER>
-bool DBGHashFast3Impl<KMER>::load(std::istream &in) {
+bool DBGHashFast4Impl<KMER>::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -603,9 +751,21 @@ bool DBGHashFast3Impl<KMER>::load(std::istream &in) {
             }
 
             uint64_t size2 = load_number(in);
-            bits_.reserve(size2 + 1);
+            values_.reserve(size2 + 1);
             for (uint64_t i = 0; i < size2; ++i) {
-                bits_.push_back(deserializer.operator()<Bits>());
+                values_.push_back(deserializer.operator()<std::array<uint64_t, 4>>());
+            }
+
+            //uint64_t size3 = load_number(in);
+            //shifts_.reserve(size3 + 1);
+            //for (uint64_t i = 0; i < size3; ++i) {
+            //    shifts_.push_back(deserializer.operator()<bool>());
+            //}
+
+            uint64_t size3 = load_number(in);
+            may_contain_source_kmer_.reserve(size3 + 1);
+            for (uint64_t i = 0; i < size3; ++i) {
+                may_contain_source_kmer_.push_back(deserializer.operator()<bool>());
             }
 
         } else {
@@ -624,23 +784,23 @@ bool DBGHashFast3Impl<KMER>::load(std::istream &in) {
 }
 
 template <typename KMER>
-bool DBGHashFast3Impl<KMER>::load(const std::string &filename) {
+bool DBGHashFast4Impl<KMER>::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
     return load(in);
 }
 
 template <typename KMER>
-bool DBGHashFast3Impl<KMER>::operator==(const DeBruijnGraph &other) const {
+bool DBGHashFast4Impl<KMER>::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
             || is_canonical_mode() != other.is_canonical_mode()
             || num_nodes() != other.num_nodes())
         return false;
 
-    if (!dynamic_cast<const DBGHashFast3Impl*>(&other))
+    if (!dynamic_cast<const DBGHashFast4Impl*>(&other))
         throw std::runtime_error("Not implemented");
 
-    const auto &other_hash = *dynamic_cast<const DBGHashFast3Impl*>(&other);
+    const auto &other_hash = *dynamic_cast<const DBGHashFast4Impl*>(&other);
 
     if (this == &other_hash)
         return true;
@@ -653,101 +813,144 @@ bool DBGHashFast3Impl<KMER>::operator==(const DeBruijnGraph &other) const {
 }
 
 template <typename KMER>
-typename DBGHashFast3Impl<KMER>::node_index
-DBGHashFast3Impl<KMER>::get_index(const KmerConstIterator &kmer_iter) const {
-    return ((kmer_iter - kmers_.begin()) << KMER::kBitsPerChar) + 1;
+typename DBGHashFast4Impl<KMER>::node_index
+DBGHashFast4Impl<KMER>::get_index(const KmerConstIterator &kmer_iter) const {
+    return ((kmer_iter - kmers_.begin()) << int(KMER::kBitsPerChar * 4)) + 1;
 }
 
 template <typename KMER>
-typename DBGHashFast3Impl<KMER>::node_index
-DBGHashFast3Impl<KMER>::get_index(const Kmer &kmer) const {
-    const auto find = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
-    if (find == kmers_.end())
+typename DBGHashFast4Impl<KMER>::node_index
+DBGHashFast4Impl<KMER>::get_index(const Kmer &kmer, const KmerConstIterator &kmer_iter) const {
+    size_t shift = prefixes_[size_t(KmerPrefix(kmer.data()) & prefix_mask_)];
+
+    KmerPrefix key = KmerPrefix(kmer.data()) & neither_mask_[shift];
+    key = key >> int(KMER::kBitsPerChar * shift);
+    KmerConstIterator iter = kmer_iter;
+
+    if (iter == kmers_.end())
         return npos;
 
-    if (!(Bits(1) & (bits_[get_bit_index(find)] >> kmer[k_ - 1])))
-        return npos;
+    const size_t rest = get_rest(kmer, shift);
 
-    node_index node = get_index(find) + kmer[k_ - 1];
-    assert(get_kmer(node, find) == kmer);
-    return node;
+    const uint64_t val = 1ull << rest;
+    if (values_[iter - kmers_.begin()][shift] & val) {
+        node_index base_node_index = ((iter - kmers_.begin()) << (KMER::kBitsPerChar * 4)) + 1;
+        return base_node_index + (shift << (KMER::kBitsPerChar * 3)) + rest;
+    }
+
+    return npos;
 }
 
 template <typename KMER>
-typename DBGHashFast3Impl<KMER>::KmerIterator
-DBGHashFast3Impl<KMER>::get_iter(node_index node) {
-    KmerIterator iter = (kmers_.begin() + ((node - 1) >> KMER::kBitsPerChar));
+typename DBGHashFast4Impl<KMER>::node_index
+DBGHashFast4Impl<KMER>::get_index(const Kmer &kmer) const {
+    size_t shift = prefixes_[size_t(KmerPrefix(kmer.data()) & prefix_mask_)];
+
+    KmerPrefix key = KmerPrefix(kmer.data()) & neither_mask_[shift];
+    key = key >> int(KMER::kBitsPerChar * shift);
+    KmerConstIterator iter = kmers_.find(key);
+
+    if (iter == kmers_.end())
+        return npos;
+
+    const size_t rest = get_rest(kmer, shift);
+
+    const uint64_t val = 1ull << rest;
+    if (values_[iter - kmers_.begin()][shift] & val) {
+        node_index base_node_index = ((iter - kmers_.begin()) << (KMER::kBitsPerChar * 4)) + 1;
+        return base_node_index + (shift << (KMER::kBitsPerChar * 3)) + rest;
+    }
+
+    return npos;
+}
+
+template <typename KMER>
+typename DBGHashFast4Impl<KMER>::KmerIterator
+DBGHashFast4Impl<KMER>::get_iter(node_index node) {
+    KmerIterator iter = kmers_.begin() + ((node - 1) >> (KMER::kBitsPerChar * 4));
     return iter;
 }
 
 template <typename KMER>
-typename DBGHashFast3Impl<KMER>::KmerConstIterator
-DBGHashFast3Impl<KMER>::get_const_iter(node_index node) const {
-    KmerConstIterator iter = (kmers_.begin() + ((node - 1) >> KMER::kBitsPerChar));
+typename DBGHashFast4Impl<KMER>::KmerConstIterator
+DBGHashFast4Impl<KMER>::get_const_iter(node_index node) const {
+    KmerConstIterator iter = kmers_.begin() + ((node - 1) >> (KMER::kBitsPerChar * 4));
     return iter;
 }
 
 template <typename KMER>
-const KMER DBGHashFast3Impl<KMER>
+const KMER DBGHashFast4Impl<KMER>
 ::get_kmer(node_index node,
            KmerConstIterator kmer_iter) const {
     assert(in_graph(node));
 
-    KMER prefix = KMER(*kmer_iter);
+    KmerPrefix key = kmer_iter.key();
+    KmerPrefix rest = KmerPrefix(node - 1) & first3_mask_;
 
-    KmerPrefix c = (node - 1) & KmerPrefix((1llu << KMER::kBitsPerChar) - 1);
+    size_t shift = find_shift(node);
 
-    return KMER(KmerPrefix(prefix.data()) | (c << static_cast<int>(KMER::kBitsPerChar * (k_ - 1))));
+    KmerPrefix kmer = key << int(KMER::kBitsPerChar * shift);
+    kmer |= rest >> int(KMER::kBitsPerChar * (3 - shift));
+    kmer |= (rest & ~KmerPrefix(~0u << int(KMER::kBitsPerChar * (3 - shift)))) << int(KMER::kBitsPerChar * (k_ - (3 - shift)));
+    return KMER(kmer);
 }
 
 template <typename KMER>
-bool DBGHashFast3Impl<KMER>::in_graph(node_index node) const {
+bool DBGHashFast4Impl<KMER>::in_graph(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 
     auto it = get_const_iter(node);
-    KmerPrefix c = (node - 1) & KmerPrefix((1llu << KMER::kBitsPerChar) - 1);
-    return Bits(1) & (bits_[get_bit_index(it)] >> c);
+    KmerPrefix rest = KmerPrefix(node - 1) & first3_mask_;
+    size_t shift = find_shift(node);
+    return 1 & (values_[it - kmers_.begin()][shift] >> rest);
 }
 
 template <typename KMER>
-void DBGHashFast3Impl<KMER>::call_nodes(const std::function<void(node_index)> &callback,
+void DBGHashFast4Impl<KMER>::call_nodes(const std::function<void(node_index)> &callback,
                                const std::function<bool()> &stop_early) const {
     for (auto iter = kmers_.begin(); iter != kmers_.end() && !stop_early(); ++iter) {
-        const auto val = bits_[get_bit_index(iter)];
-        for (size_t i = 0; i < seq_encoder_.alphabet.size(); ++i) {
-            if (val & (Bits(1) << i)) {
-                callback(get_index(iter) + i);
+        for (size_t shift = 0; shift <= 3; ++shift) {
+            auto val = values_[iter - kmers_.begin()][shift];
+            while (val) {
+                size_t i = __builtin_ffsl(val) - 1;
+                if (val & (1ull << i)) {
+                    auto node = get_index(iter) + (shift << (KMER::kBitsPerChar * 3)) + i;
+                    assert(node <= num_nodes());
+                    assert(node == kmer_to_node(get_node_sequence(node)));
+                    callback(node);
+                }
+                val &= ~(1ull << i);
             }
         }
     }
 }
 
-std::unique_ptr<DBGHashFast3::DBGHashFast3Interface>
-DBGHashFast3::initialize_graph(size_t k,
+std::unique_ptr<DBGHashFast4::DBGHashFast4Interface>
+DBGHashFast4::initialize_graph(size_t k,
                                  bool canonical_mode,
                                  bool packed_serialization) {
     if (k * KmerExtractor2Bit::bits_per_char <= 64) {
-        return std::make_unique<DBGHashFast3Impl<KmerExtractor2Bit::Kmer64>>(
+        return std::make_unique<DBGHashFast4Impl<KmerExtractor2Bit::Kmer64>>(
             k, canonical_mode, packed_serialization
         );
     } else if (k * KmerExtractor2Bit::bits_per_char <= 128) {
-        return std::make_unique<DBGHashFast3Impl<KmerExtractor2Bit::Kmer128>>(
+        return std::make_unique<DBGHashFast4Impl<KmerExtractor2Bit::Kmer128>>(
             k, canonical_mode, packed_serialization
         );
     } else {
-        return std::make_unique<DBGHashFast3Impl<KmerExtractor2Bit::Kmer256>>(
+        return std::make_unique<DBGHashFast4Impl<KmerExtractor2Bit::Kmer256>>(
             k, canonical_mode, packed_serialization
         );
     }
 }
 
-DBGHashFast3::DBGHashFast3(size_t k,
+DBGHashFast4::DBGHashFast4(size_t k,
                                bool canonical_mode,
                                bool packed_serialization) {
     hash_dbg_ = initialize_graph(k, canonical_mode, packed_serialization);
 }
 
-bool DBGHashFast3::load(std::istream &in) {
+bool DBGHashFast4::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -764,7 +967,7 @@ bool DBGHashFast3::load(std::istream &in) {
     }
 }
 
-bool DBGHashFast3::load(const std::string &filename) {
+bool DBGHashFast4::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
     return load(in);

@@ -45,6 +45,8 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annotate
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast2, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast3, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast4, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast5, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annotate::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
@@ -53,6 +55,8 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annotate
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast2, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast3, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast4, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast5, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annotate::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 
 

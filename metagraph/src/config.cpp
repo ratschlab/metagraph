@@ -565,6 +565,12 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
     } else if (string == "hash_fast_3") {
         return GraphType::HASH_FAST_3;
 
+    } else if (string == "hash_fast_4") {
+        return GraphType::HASH_FAST_4;
+
+    } else if (string == "hash_fast_5") {
+        return GraphType::HASH_FAST_5;
+
     } else if (string == "hashpacked") {
         return GraphType::HASH_PACKED;
 
