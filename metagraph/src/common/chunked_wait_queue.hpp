@@ -2,9 +2,9 @@
 
 #include <cassert>
 #include <condition_variable>
-#include <vector>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 namespace threads {
 
@@ -201,6 +201,9 @@ typename ChunkedWaitQueue<T, Alloc>::Iterator ChunkedWaitQueue<T, Alloc>::end_it
 template <typename T, typename Alloc>
 class ChunkedWaitQueue<T, Alloc>::Iterator {
   public:
+    Iterator(const Iterator &other) = delete; // non construction-copyable
+    Iterator &operator=(const Iterator &) = delete; // non copyable
+
     /**
      * Creates an iterator for the given queue.
      * @param parent the ChunkedWaitQueue this class iterates
@@ -209,15 +212,15 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
 
     /**
      * Returns the element currently pointed at by the iterator.
-     * @throw std::runtime_error If the iterator is pointing at the past-the-end
-     * element
+     * Undefined behavior if the iterator is pointing at the past-the-end element.
      */
-    T &operator*() {
-        std::unique_lock<std::mutex> l(parent_->mutex_);
+    T operator*() {
+#ifdef DEBUG
         if (parent_ == nullptr) {
-            throw std::runtime_error(
-                    "Attempting to dereference past-the-end iterator.");
+            std::cerr << "Attempting to dereference past-the-end iterator." << std::endl;
+            std::exit(EXIT_FAILURE);
         }
+#endif
         return parent_->queue_[idx_];
     }
 
@@ -268,9 +271,6 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         return parent_ == other.parent_ && idx_ == other.idx_;
     }
     bool operator!=(const Iterator &other) { return !(*this == other); }
-
-    Iterator(const Iterator &other) = delete; // non construction-copyable
-    Iterator &operator=(const Iterator &) = delete; // non copyable
 
   private:
     size_type idx_ = 0;
