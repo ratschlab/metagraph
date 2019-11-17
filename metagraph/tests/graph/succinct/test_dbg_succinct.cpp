@@ -1,6 +1,6 @@
 #include "graph/succinct/dbg_succinct.hpp"
 
-#include "graph/sequence_graph.hpp"
+#include "graph/base/sequence_graph.hpp"
 
 #include <gtest/gtest.h>
 

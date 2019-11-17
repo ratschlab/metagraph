@@ -2,9 +2,10 @@
 
 #include <stack>
 
-#include "sequence_graph.hpp"
-#include "serialization.hpp"
-#include "dbg_succinct.hpp"
+#include "graph/base/sequence_graph.hpp"
+
+#include "utils/serialization.hpp"
+#include "graph/succinct/dbg_succinct.hpp"
 
 
 MaskedDeBruijnGraph
