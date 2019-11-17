@@ -44,13 +44,11 @@ class ChunkedWaitQueue {
     /**
      * Constructs a WaitQueue with the given size parameters.
      * @param buffer_size the size of the buffer used internally by the queue
-     * @param chunk_size the size of the chunks that are popped back when the iterator goes past
-     * chunk_size_ + fence_size_ elements past the first element in the buffer
      * @param fence_size the number of elements that can be iterated backwards. The queue will
      * always keep at least fence_size elements behind the furthest iterator for this purpose.
      */
-    explicit ChunkedWaitQueue(size_type buffer_size, size_type chunk_size, size_type fence_size)
-        : chunk_size_(chunk_size), fence_size_(fence_size), is_shutdown_(false) {
+    explicit ChunkedWaitQueue(size_type buffer_size, size_type fence_size)
+        : chunk_size_(buffer_size / 4), fence_size_(fence_size), is_shutdown_(false) {
         queue_ = std::vector<T>(buffer_size);
     }
 
