@@ -1,6 +1,10 @@
-#include "gtest/gtest.h"
+#include "graph/succinct/dbg_succinct.hpp"
 
-#include "dbg_succinct.hpp"
+#include "graph/sequence_graph.hpp"
+
+#include <gtest/gtest.h>
+
+
 
 
 TEST(DBGSuccinct, get_degree_with_source_dummy) {

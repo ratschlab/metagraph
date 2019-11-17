@@ -1,9 +1,9 @@
 #ifndef __BOSS_CHUNK_CONSTRUCT_HPP__
 #define __BOSS_CHUNK_CONSTRUCT_HPP__
 
-#include "dbg_construct.hpp"
-#include "boss_chunk.hpp"
+#include "graph/succinct/boss_chunk.hpp"
 
+#include "graph/dbg_construct.hpp"
 
 class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
   public:

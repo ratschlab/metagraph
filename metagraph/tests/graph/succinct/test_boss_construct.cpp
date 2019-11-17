@@ -1,3 +1,5 @@
+#include "graph/succinct/boss_construct.hpp"
+
 #include <stdio.h>
 #include <string>
 #include <sstream>
@@ -10,11 +12,11 @@
 #define protected public
 #define private public
 
-#include "boss.hpp"
-#include "boss_construct.hpp"
-#include "reverse_complement.hpp"
-#include "sorted_set.hpp"
-#include "sorted_multiset.hpp"
+#include "graph/succinct/boss.hpp"
+
+#include "common/seq_tools/reverse_complement.hpp"
+#include "common/sorted_set.hpp"
+#include "common/sorted_multiset.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 

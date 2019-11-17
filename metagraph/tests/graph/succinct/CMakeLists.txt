@@ -6,7 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../../..)
 
-add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/succint succinct)
+add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/succinct succinct)
+add_subdirectory(${PROJECT_PARENT_DIR}/src/kmer kmer)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
@@ -23,13 +24,6 @@ find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_include_directories(tests PRIVATE
     ${GTEST_INCLUDE_DIRS}
     "../../src/"
-    ${Boost_INCLUDE_DIRS}
-    ${EXTERNAL_LIB_DIR}/asio/asio/include
-    ${EXTERNAL_LIB_DIR}/DYNAMIC/include
-    ${EXTERNAL_LIB_DIR}/hopscotch-map/include
-    ${EXTERNAL_LIB_DIR}/ips4o
-    ${EXTERNAL_LIB_DIR}/libmaus2/include
-    ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include)
-target_link_libraries(tests ${GTEST_BOTH_LIBRARIES} metagraph_common ${SDSL_LIBRARY})
+target_link_libraries(tests ${GTEST_BOTH_LIBRARIES} ${SDSL_LIBRARY} kmer metagraph_succinct)
 

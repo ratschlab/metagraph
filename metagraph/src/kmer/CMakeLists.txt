@@ -1,3 +1,4 @@
+include_guard(GLOBAL)
 #Library for extracting, sorting, de-duping and storing kmers for further processing
 cmake_minimum_required(VERSION 3.6.1)
 project(kmer)
@@ -24,9 +25,10 @@ target_include_directories(kmer
     ..
 )
 
+find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(kmer
   ${FOLLY_LIBRARIES}
-  -lsdsl
+  ${SDSL_LIBRARY}
   metagraph_common
 )
 
