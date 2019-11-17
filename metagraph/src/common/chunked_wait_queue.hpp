@@ -48,7 +48,8 @@ class ChunkedWaitQueue {
      * always keep at least fence_size elements behind the furthest iterator for this purpose.
      */
     explicit ChunkedWaitQueue(size_type buffer_size, size_type fence_size)
-        : chunk_size_(buffer_size / 4), fence_size_(fence_size), is_shutdown_(false) {
+        : chunk_size_(buffer_size / 3), fence_size_(fence_size), is_shutdown_(false) {
+        assert(chunk_size_ > 0 && chunk_size_ + fence_size < buffer_size);
         queue_ = std::vector<T>(buffer_size);
     }
 
@@ -110,7 +111,7 @@ class ChunkedWaitQueue {
     void push_front(value_type x) {
         std::unique_lock<std::mutex> lock(mutex_);
         not_full_.wait(lock, [this] { return !full(); });
-        bool was_all_read = empty();
+        bool was_all_read = iterator_.no_more_elements();
         last_ = (last_ + 1) % queue_.size();
         queue_[last_] = std::move(x);
         if (was_all_read) { // queue was empty or all items were read
@@ -171,8 +172,9 @@ class ChunkedWaitQueue {
     ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete; // non copyable
 
     void pop_chunk() {
-        // this should only be called if we *know* a chunk can be popped safely
-        assert(size() >= chunk_size_);
+        if (size() < chunk_size_) { // nothing to pop
+            return;
+        }
 
         const bool was_full = full();
 
@@ -198,6 +200,8 @@ typename ChunkedWaitQueue<T, Alloc>::Iterator ChunkedWaitQueue<T, Alloc>::end_it
  */
 template <typename T, typename Alloc>
 class ChunkedWaitQueue<T, Alloc>::Iterator {
+    friend ChunkedWaitQueue;
+
   public:
     Iterator(const Iterator &other) = delete; // non construction-copyable
     Iterator &operator=(const Iterator &) = delete; // non copyable
@@ -233,6 +237,10 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
      */
     Iterator &operator++() {
         std::unique_lock<std::mutex> l(parent_->mutex_);
+        // make some room, if possible
+        if (index_dist() + 1 >= parent_->chunk_size_ + parent_->fence_size_) {
+            parent_->pop_chunk();
+        }
         if (no_more_elements()) {
             parent_->not_empty_.wait(l, [this]() {
                 return parent_->is_shutdown_ || !no_more_elements();
@@ -244,11 +252,12 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
                 idx_ = 0;
                 return *this;
             }
+            // the queue may have filled up while we were sleeping; make some room
+            if (index_dist() + 1 >= parent_->chunk_size_ + parent_->fence_size_) {
+                parent_->pop_chunk();
+            }
         }
         idx_ = (idx_ + 1) % parent_->queue_.size();
-        if (index_dist() >= parent_->chunk_size_ + parent_->fence_size_) {
-            parent_->pop_chunk();
-        }
         return *this;
     }
 

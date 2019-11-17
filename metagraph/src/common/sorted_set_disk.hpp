@@ -64,7 +64,7 @@ class SortedSetDisk {
         : num_threads_(num_threads),
           verbose_(verbose),
           cleanup_(cleanup),
-          merge_queue_(MERGE_QUEUE_SIZE, MERGE_QUEUE_SIZE / 10, MERGE_QUEUE_BACKWARDS_COUNT) {
+          merge_queue_(MERGE_QUEUE_SIZE, MERGE_QUEUE_BACKWARDS_COUNT) {
         try {
             try_reserve(container_size);
         } catch (const std::bad_alloc &exception) {
