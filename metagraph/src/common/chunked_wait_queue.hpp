@@ -44,12 +44,16 @@ class ChunkedWaitQueue {
     /**
      * Constructs a WaitQueue with the given size parameters.
      * @param buffer_size the size of the buffer used internally by the queue
-     * @param fence_size the number of elements that can be iterated backwards. The queue will
-     * always keep at least fence_size elements behind the furthest iterator for this purpose.
+     * @param fence_size the number of elements that can be iterated backwards. The queue
+     * will always keep at least fence_size elements behind the furthest iterator for this
+     * purpose. Must be smaller than #buffer_size, and in practice it's orders of
+     * magnitude smaller.
      */
     explicit ChunkedWaitQueue(size_type buffer_size, size_type fence_size)
-        : chunk_size_(buffer_size / 3), fence_size_(fence_size), is_shutdown_(false) {
-        assert(chunk_size_ > 0 && chunk_size_ + fence_size < buffer_size);
+        : chunk_size_(std::min(std::max(1,buffer_size / 3), buffer_size-fence_size),
+          fence_size_(fence_size),
+          is_shutdown_(false) {
+        assert(fence_size < buffer_size);
         queue_ = std::vector<T>(buffer_size);
     }
 
@@ -67,7 +71,8 @@ class ChunkedWaitQueue {
      * added. Once an element is added, the queue will never be empty again (because
      * the queue will always keep at least #fence_size_ elements for backwards iteration).
      */
-    bool empty() const { return last_ == INVALID_IDX; }
+    bool empty() const {
+        return last_ == INVALID_IDX; }
 
     /**
      * Returns true if the buffer of the queue is full. #push_front operations will block
@@ -81,7 +86,8 @@ class ChunkedWaitQueue {
     /**
      * Returns the capacity of the queue's internal buffer.
      */
-    size_type capacity() const { return queue_.capacity(); }
+    size_type capacity() const {
+        return queue_.capacity(); }
 
     /**
      * Returns the number of elements in the buffer. Sort of irrelevant, as the number of
@@ -125,7 +131,8 @@ class ChunkedWaitQueue {
      * Special iterator indicating the end of the queue - the end is reached when the
      * queue was shut down *and* the iterator past the last element in the queue.
      */
-    Iterator &end() { return end_iterator; }
+    Iterator &end() {
+        return end_iterator; }
 
     /**
      * Returns the iterator of the queue. Note that a queue only has one iterator, so
