@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_subdirectory(../../src/common metagraph_common)
 
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
-include(${PROJECT_PARENT_DIR}/OpenMP.txt)
+include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
+findOpenMP()
 
 enable_testing()
 find_package(GTest REQUIRED)
