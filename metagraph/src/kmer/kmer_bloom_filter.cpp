@@ -1,8 +1,8 @@
 #include "kmer_bloom_filter.hpp"
 
-#include "kmer_extractor.hpp"
-#include "common/serialization.hpp"
+#include "utils/serialization.hpp"
 #include "utils/algorithms.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 // TODO: switch to KmerExtractor once it supports all alphabets
 typedef KmerExtractorBOSS KmerDef;

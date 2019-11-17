@@ -6,8 +6,8 @@
 #include <ips4o.hpp>
 
 #include "utils/template_utils.hpp"
+#include "utils/vectors.hpp"
 #include "hash_utils.hpp"
-#include "vectors.hpp"
 #include "serialization.hpp"
 #include "binary_matrix.hpp"
 #include "threading.hpp"

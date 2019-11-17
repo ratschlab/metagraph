@@ -4,7 +4,7 @@
 #include "common/chunked_wait_queue.hpp"
 #include "common/deque_vector.hpp"
 #include "common/threading.hpp"
-#include "common/vectors.hpp"
+#include "utils/vectors.hpp"
 
 #include <ips4o.hpp>
 
