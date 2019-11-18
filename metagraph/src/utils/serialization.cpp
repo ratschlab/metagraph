@@ -10,6 +10,7 @@
 #include <libmaus2/util/StringSerialisation.hpp>
 #include <sdsl/int_vector.hpp>
 #include <sdsl/sd_vector.hpp>
+#include <fmt/format.h>
 
 using libmaus2::util::NumberSerialisation;
 using libmaus2::util::StringSerialisation;
@@ -463,5 +464,5 @@ VectorFileOutStream::VectorFileOutStream(const std::string &file)
 }
 
 void VectorFileOutStream::write_value(uint64_t value) {
-    ostream_ << value << std::endl;
+    ostream_ << fmt::format_int(value).str() << std::endl;
 }

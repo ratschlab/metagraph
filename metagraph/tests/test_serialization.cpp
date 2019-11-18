@@ -205,7 +205,3 @@ TEST(Serialization, SerializationRandomUInt8VectorStream1000) {
 TEST(Serialization, SerializationRandomUInt8VectorStream1000000) {
     test_random_vector_stream(1000000);
 }
-
-TEST(Serialization, SerializationRandomUInt8VectorStream10000000) {
-    test_random_vector_stream(10000000);
-}
