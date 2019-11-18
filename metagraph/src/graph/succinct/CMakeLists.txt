@@ -45,9 +45,11 @@ target_link_libraries(metagraph_succinct
     ${FILESYSTEM_LIBRARY}
     ${LIBMAUS_LIBRARY}
     ${SDSL_LIBRARY}
+    mersenne_twister
+    progress_bar
     kmer
     metagraph_common
-    ${mersenne_twister}
-    ${metagraph_utils}
-    ${progress_bar}
+    metagraph_utils
+    metagraph_graph_base
 )
+

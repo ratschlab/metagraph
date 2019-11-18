@@ -23,18 +23,19 @@ add_library(metagraph_graph_base STATIC ${src_files})
 
 # the interface of this library depends on stdlib only, so all includes can be private!
 target_include_directories(metagraph_graph_base
-    PRIVATE
+  PRIVATE
     ${PROJECT_PARENT_DIR}/src/
     ${EXTERNAL_LIB_DIR}/cpp_progress_bar
     ${EXTERNAL_LIB_DIR}/rollinchashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    )
+)
 
 target_link_libraries(metagraph_graph_base
-    PUBLIC
+  PUBLIC
     ${SDSL_LIBRARY}
-    metagraph_common
     ${mersenne_twister}
+    progress_bar
+    metagraph_common
     metagraph_utils
-    ${progress_bar}
-    )
+)
+

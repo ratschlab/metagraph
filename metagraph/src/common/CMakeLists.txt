@@ -4,6 +4,8 @@ project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+add_subdirectory(../utils metagraph_utils)
+
 set(BOOST_INCLUDEDIR "~/.linuxbrew/include/")
 set(Boost_NO_BOOST_CMAKE ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
@@ -44,4 +46,5 @@ target_link_libraries(metagraph_common
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
     Boost::iostreams
+    metagraph_utils
 )

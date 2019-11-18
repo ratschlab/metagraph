@@ -11,9 +11,11 @@ find_package(Boost REQUIRED COMPONENTS iostreams)
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
-findOpenMP()
 
+findOpenMP()
+findFolly()
 checkFileSystem() # verify if std::filesystem::temp_directory_path() is available
+
 file(GLOB src_files "*.cpp" "*/*.cpp")
 
 add_library(metagraph_utils STATIC ${src_files})
@@ -34,10 +36,13 @@ target_include_directories(metagraph_utils
 )
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
+find_library(LIBMAUS_LIBRARY maus2 HINTS ${EXTERNAL_LIB_DIR}/libmaus2/lib)
 
 target_link_libraries(metagraph_utils
   PUBLIC
+    ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
+    ${LIBMAUS_LIBRARY}
     Boost::iostreams
 )

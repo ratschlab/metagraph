@@ -36,6 +36,7 @@ target_link_libraries(tests
     metagraph_graph_base
     metagraph_succinct
     metagraph_utils
+    metagraph_common
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
     ${SDSL_LIBRARY}
@@ -43,3 +44,4 @@ target_link_libraries(tests
     ${mersenne_twister}
     z # yes, someone thought that giving zlib a one letter name was a smart idea
 )
+
