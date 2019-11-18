@@ -3,7 +3,7 @@
 
 #include "graph/succinct/boss_chunk.hpp"
 
-#include "graph/dbg_construct.hpp"
+#include "graph/base/dbg_construct.hpp"
 
 class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
   public:
