@@ -3,7 +3,7 @@
 
 #include "graph/succinct/boss_chunk_construct.hpp"
 
-#include "graph/dbg_construct.hpp"
+#include "graph/base/dbg_construct.hpp"
 
 class BOSSConstructor : public IGraphConstructor<BOSS> {
   public:
