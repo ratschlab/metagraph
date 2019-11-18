@@ -1,17 +1,23 @@
 # Contains common functions used by all cmake files, such as finding various libraries
 # or checking for the presence of specific system features
 
+
 function (findOpenMP)
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
 # and happily cached, thus messing up the compilation flags forever
 unset(OpenMP_CXX_FLAGS CACHE)
-if ((CMAKE_CXX_COMPILER_ID MATCHES AppleClang) OR (CMAKE_CXX_COMPILER_ID MATCHES Clang))
+if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
   find_package(OPENMP REQUIRED)
 else()
   find_package(OpenMP REQUIRED)
 endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}" PARENT_SCOPE)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}" PARENT_SCOPE)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -D_THREAD_SAFE -pthread ${OpenMP_CXX_FLAGS}" PARENT_SCOPE)
+set(OpenMP_CXX_LIBRARIES "${OpenMP_CXX_LIBRARIES}" PARENT_SCOPE)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -latomic PARENT_SCOPE)
+endif()
 endfunction()
 
 # check for std::filesystem::temp_directory_path
@@ -61,8 +67,8 @@ if(NOT CPPNOFS)
     endif()
   endif()
 endif()
-
 endfunction()
+
 
 function (findFolly)
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
@@ -82,6 +88,7 @@ else()
 endif()
 endfunction()
 
+
 function (buildProgressBar EXTERNAL_LIB_DIR libName)
 set(${libName} progress_bar PARENT_SCOPE)
 if(TARGET progress_bar)
@@ -92,6 +99,7 @@ add_library(progress_bar STATIC
 )
 endfunction()
 
+
 function (buildMersenneTwister EXTERNAL_LIB_DIR libName)
 set(${libName} mersenne_twister PARENT_SCOPE)
 if(TARGET mersenne_twister)
@@ -100,4 +108,44 @@ endif()
 add_library(mersenne_twister STATIC
     ${EXTERNAL_LIB_DIR}/rollinghashcpp/mersennetwister.cpp
 )
+endfunction()
+
+
+function (findGTest)
+if(FALSE) # there is one gtest version attached with sdsl
+# Download and unpack googletest at configure time
+if(NOT EXISTS ${CMAKE_BINARY_DIR}/googletest-download)
+  configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
+  execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+    RESULT_VARIABLE result
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest-download )
+  if(result)
+    message(FATAL_ERROR "CMake step for googletest failed: ${result}")
+  endif()
+  execute_process(COMMAND ${CMAKE_COMMAND} --build .
+    RESULT_VARIABLE result
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest-download )
+  if(result)
+    message(FATAL_ERROR "Build step for googletest failed: ${result}")
+  endif()
+endif()
+
+# Prevent overriding the parent project's compiler/linker settings on Windows
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE PARENT_SCOPE)
+
+add_subdirectory(
+  ${CMAKE_BINARY_DIR}/googletest-src
+  ${CMAKE_BINARY_DIR}/googletest-build
+  EXCLUDE_FROM_ALL
+)
+
+set(GTEST_INCLUDE_DIRS "${gtest_SOURCE_DIR}/include" PARENT_SCOPE)
+set(GTEST_BOTH_LIBRARIES "-lgtest_main -lgtest" PARENT_SCOPE)
+
+else()
+set(GTEST_INCLUDE_DIRS "${gtest_SOURCE_DIR}/include" PARENT_SCOPE)
+set(GTEST_BOTH_LIBRARIES
+  "${EXTERNAL_LIB_DIR}/sdsl-lite/lib/libgtest_main.a"
+  "${EXTERNAL_LIB_DIR}/sdsl-lite/lib/libgtest.a" PARENT_SCOPE)
+endif()
 endfunction()

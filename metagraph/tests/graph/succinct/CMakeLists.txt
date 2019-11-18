@@ -21,24 +21,25 @@ buildMersenneTwister(EXTERNAL_LIB_DIR mersenne_twister)
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 
 enable_testing()
-find_package(GTest REQUIRED)
+findGTest()
 
 file(GLOB test_files "*.cpp")
 add_executable(tests ${test_files})
 
 target_compile_definitions(tests PUBLIC TEST_DATA_DIR="${PROJECT_PARENT_DIR}/tests/data")
-target_include_directories(tests PRIVATE
+target_include_directories(tests
+  PRIVATE
     ${GTEST_INCLUDE_DIRS}
 )
 target_link_libraries(tests
-    ${GTEST_BOTH_LIBRARIES}
-    ${SDSL_LIBRARY}
     kmer
-    ${mersenne_twister}
     metagraph_graph_base
     metagraph_succinct
     metagraph_utils
+    ${GTEST_BOTH_LIBRARIES}
+    ${OpenMP_CXX_LIBRARIES}
+    ${SDSL_LIBRARY}
     ${progress_bar}
+    ${mersenne_twister}
     z # yes, someone thought that giving zlib a one letter name was a smart idea
-    )
-
+)

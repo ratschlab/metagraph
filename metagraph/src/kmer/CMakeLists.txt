@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(../common metagraph_common)
 SET(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
+
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 
