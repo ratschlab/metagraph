@@ -168,7 +168,10 @@ void test_random_vector_stream(size_t length) {
             numbers[j] = rand() % 256;
         }
 
-        BitVectorFileOutStream outstream(test_dump_basename, 256, length);
+        VectorFileOutStream outstream(test_dump_basename);
+        outstream.write_value(256);
+        outstream.write_value(length);
+
         for (uint8_t num : numbers) {
             outstream.write_value(num);
         }

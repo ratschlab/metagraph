@@ -608,7 +608,9 @@ bool ColumnCompressed<Label>
             + "." + std::to_string(i) + ".text.annodbg";
 
         try {
-            BitVectorFileOutStream outstream(outfile, num_objects(), column.num_set_bits());
+            VectorFileOutStream outstream(outfile);
+            outstream.write_value(num_objects());
+            outstream.write_value(column.num_set_bits());
             column.call_ones([&](const auto &pos) { outstream.write_value(pos); });
         } catch (...) {
             std::cerr << "Failed to write to " << outfile << std::endl;

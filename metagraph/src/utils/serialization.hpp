@@ -64,6 +64,8 @@ class VectorInStream {
     virtual ~VectorInStream() {}
     virtual uint64_t next_value() = 0;
     virtual uint64_t values_left() const = 0;
+
+    virtual void close() = 0;
 };
 
 // Return set bits from a bit vector encoded in a file
@@ -90,6 +92,7 @@ class VectorBitInStream : public VectorInStream {
 
     uint64_t next_value();
     uint64_t values_left() const { return max_rank_ - current_rank_; }
+    void close() {}
 
   private:
     const bit_vector &vector_;
@@ -104,21 +107,20 @@ class VectorOutStream {
   public:
     virtual ~VectorOutStream() {}
     virtual void write_value(uint64_t value) = 0;
+
+    virtual void close() = 0;
 };
 
-class BitVectorFileOutStream : public VectorOutStream {
+// Write a vector to a text file
+class VectorFileOutStream : public VectorOutStream {
   public:
-    BitVectorFileOutStream(const std::string &file,
-                           size_t length,
-                           uint64_t num_set_bits);
+    VectorFileOutStream(const std::string &file);
 
     void write_value(uint64_t value);
     void close() { ostream_.close(); }
 
   private:
     std::ofstream ostream_;
-    uint64_t length_;
-    uint64_t num_bits_left_;
 };
 
 

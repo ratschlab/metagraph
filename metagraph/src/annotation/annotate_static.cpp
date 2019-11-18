@@ -174,7 +174,9 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>
             + "." + std::to_string(i) + ".text.annodbg";
 
         try {
-            BitVectorFileOutStream outstream(outfile, n, column.size());
+            VectorFileOutStream outstream(outfile);
+            outstream.write_value(n);
+            outstream.write_value(column.size());
             for (auto pos : column) {
                 outstream.write_value(pos);
             }

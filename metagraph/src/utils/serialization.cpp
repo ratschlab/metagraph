@@ -456,28 +456,12 @@ uint64_t VectorBitInStream::next_value() {
 }
 
 
-BitVectorFileOutStream::BitVectorFileOutStream(const std::string &file,
-                                               size_t length,
-                                               uint64_t num_set_bits)
-      : ostream_(file),
-        length_(length),
-        num_bits_left_(num_set_bits) {
+VectorFileOutStream::VectorFileOutStream(const std::string &file)
+      : ostream_(file) {
     if (!ostream_.good())
         throw std::ofstream::failure(std::string("Bad stream file ") + file);
-
-    ostream_ << length_ << " " << num_bits_left_ << std::endl;
 }
 
-void BitVectorFileOutStream::write_value(uint64_t value) {
-    if (!num_bits_left_)
-        throw std::runtime_error("Serializing too many numbers");
-
-    if (value >= length_) {
-        throw std::runtime_error(
-            "Index " + std::to_string(value) + " >= " + std::to_string(length_)
-        );
-    }
-
+void VectorFileOutStream::write_value(uint64_t value) {
     ostream_ << value << std::endl;
-    --num_bits_left_;
 }
