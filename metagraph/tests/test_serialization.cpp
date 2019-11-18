@@ -179,6 +179,8 @@ void test_random_vector_stream(size_t length) {
         outstream.close();
 
         BitVectorFileInStream instream(test_dump_basename);
+        ASSERT_EQ(256u, instream.length());
+        ASSERT_EQ(length, instream.values_left());
 
         for (size_t j = 0; j < length; ++j) {
             ASSERT_TRUE(instream.values_left());
@@ -198,10 +200,6 @@ TEST(Serialization, SerializationRandomUInt8VectorStream10) {
     test_random_vector_stream(10);
 }
 
-TEST(Serialization, SerializationRandomUInt8VectorStream1000) {
-    test_random_vector_stream(1000);
-}
-
-TEST(Serialization, SerializationRandomUInt8VectorStream1000000) {
-    test_random_vector_stream(1000000);
+TEST(Serialization, SerializationRandomUInt8VectorStream256) {
+    test_random_vector_stream(256);
 }

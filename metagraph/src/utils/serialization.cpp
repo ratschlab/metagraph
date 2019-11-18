@@ -419,21 +419,46 @@ BitVectorFileInStream::BitVectorFileInStream(const std::string &file)
     if (!istream_.good())
         throw std::ifstream::failure(std::string("Bad stream file ") + file);
 
-    istream_ >> length_;
-    istream_ >> values_left_;
+    std::getline(istream_, buffer_);
+    auto num_read = std::sscanf(buffer_.c_str(),
+                                "%" PRIu64 " %" PRIu64,
+                                &length_,
+                                &values_left_);
+
+    if (!num_read)
+        throw std::ifstream::failure("Empty file " + file);
+
+    if (num_read == 1) {
+        std::getline(istream_, buffer_);
+        if (!std::sscanf(buffer_.c_str(), "%" PRIu64, &values_left_))
+            throw std::ifstream::failure("Missing number of set bits: " + file);
+    }
+
+    // if (values_left_ > length_) {
+    //     throw std::ifstream::failure(
+    //         fmt::format("Number of set bits greater than length: {0} > {1}",
+    //                     values_left_,
+    //                     length_)
+    //     );
+    // }
 }
 
 uint64_t BitVectorFileInStream::next_value() {
     assert(values_left_ > 0);
     --values_left_;
 
+    std::getline(istream_, buffer_);
     uint64_t next_val;
-    istream_ >> next_val;
+    if (!std::sscanf(buffer_.c_str(), "%" PRIu64, &next_val))
+        throw std::runtime_error("Truncated file");
 
-    if (next_val >= length_)
-        throw std::runtime_error("Error: index >= length: "
-            + std::to_string(next_val)
-            + " >= " + std::to_string(length_));
+    if (next_val >= length_) {
+        throw std::runtime_error(
+            fmt::format("Error: index >= length: {} >= {}",
+                        next_val,
+                        length_)
+        );
+    }
 
     return next_val;
 }
@@ -463,6 +488,6 @@ VectorFileOutStream::VectorFileOutStream(const std::string &file)
         throw std::ofstream::failure(std::string("Bad stream file ") + file);
 }
 
-void VectorFileOutStream::write_value(uint64_t value) {
-    ostream_ << fmt::format_int(value).str() << std::endl;
+void VectorFileOutStream::write_value(uint64_t value, char delimiter) {
+    ostream_ << fmt::format("{}{}", value, delimiter);
 }

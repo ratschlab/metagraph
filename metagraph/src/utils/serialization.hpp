@@ -75,11 +75,13 @@ class BitVectorFileInStream : public VectorInStream {
 
     uint64_t next_value();
     uint64_t values_left() const { return values_left_; }
+    size_t length() const { return length_; }
     void close() { istream_.close(); }
 
   private:
     std::ifstream istream_;
-    uint64_t length_;
+    std::string buffer_;
+    size_t length_;
     uint64_t values_left_;
 };
 
@@ -92,6 +94,7 @@ class VectorBitInStream : public VectorInStream {
 
     uint64_t next_value();
     uint64_t values_left() const { return max_rank_ - current_rank_; }
+    size_t length() const { return vector_.size(); }
     void close() {}
 
   private:
@@ -106,7 +109,7 @@ class VectorBitInStream : public VectorInStream {
 class VectorOutStream {
   public:
     virtual ~VectorOutStream() {}
-    virtual void write_value(uint64_t value) = 0;
+    virtual void write_value(uint64_t value, char delimiter = '\n') = 0;
 
     virtual void close() = 0;
 };
@@ -116,7 +119,7 @@ class VectorFileOutStream : public VectorOutStream {
   public:
     VectorFileOutStream(const std::string &file);
 
-    void write_value(uint64_t value);
+    void write_value(uint64_t value, char delimiter = '\n');
     void close() { ostream_.close(); }
 
   private:
