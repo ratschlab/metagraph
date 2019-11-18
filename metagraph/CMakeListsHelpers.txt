@@ -83,20 +83,20 @@ endif()
 endfunction()
 
 function (buildProgressBar EXTERNAL_LIB_DIR libName)
+set(${libName} progress_bar PARENT_SCOPE)
 if(TARGET progress_bar)
   return()
 endif()
-set(libName progress_bar PARENT_SCOPE)
 add_library(progress_bar STATIC
     ${EXTERNAL_LIB_DIR}/cpp_progress_bar/progress_bar.cpp
 )
 endfunction()
 
 function (buildMersenneTwister EXTERNAL_LIB_DIR libName)
+set(${libName} mersenne_twister PARENT_SCOPE)
 if(TARGET mersenne_twister)
   return()
 endif()
-set(libName mersenne_twister PARENT_SCOPE)
 add_library(mersenne_twister STATIC
     ${EXTERNAL_LIB_DIR}/rollinghashcpp/mersennetwister.cpp
 )

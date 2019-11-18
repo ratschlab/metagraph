@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.6.1)
 project(metagraph_succinct)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_VERBOSE_MAKEFILE 0)
 
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../../..)
 
@@ -25,12 +24,13 @@ set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 target_include_directories(metagraph_succinct
   PUBLIC
     ${PROJECT_PARENT_DIR}/src/
-    ${EXTERNAL_LIB_DIR}/cpp_progress_bar
-    ${EXTERNAL_LIB_DIR}/ips4o
-    ${EXTERNAL_LIB_DIR}/libmaus2/include
+    ${Boost_INCLUDE_DIRS}
     ${EXTERNAL_LIB_DIR}/rollinchashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    .. # this ensures that this libs include files are visible to its deps as "#include common/*"
+  PRIVATE
+    ${EXTERNAL_LIB_DIR}/ips4o
+    ${EXTERNAL_LIB_DIR}/libmaus2/include
+    ${EXTERNAL_LIB_DIR}/cpp_progress_bar
 )
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)

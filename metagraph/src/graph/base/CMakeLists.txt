@@ -1,3 +1,5 @@
+# Build file for the basic graph classes
+include_guard(GLOBAL)
 cmake_minimum_required(VERSION 3.6.1)
 project(metagraph_graph_base)
 set(CMAKE_CXX_STANDARD 17)
@@ -10,33 +12,27 @@ include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 
 add_subdirectory(${PROJECT_PARENT_DIR}/src/common metagraph_common)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/utils metagraph_utils)
-add_subdirectory(${PROJECT_PARENT_DIR}/src/kmer kmer)
 
-findFolly()
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 buildProgressBar(${EXTERNAL_LIB_DIR} progress_bar)
-buildMersenneTwister(${EXTERNAL_LIB_DIR} mesenne_twister)
 
 
 file(GLOB src_files "*.cpp" "*.hpp")
 
 add_library(metagraph_graph_base STATIC ${src_files})
 
+# the interface of this library depends on stdlib only, so all includes can be private!
 target_include_directories(metagraph_graph_base
-    PUBLIC
+    PRIVATE
     ${PROJECT_PARENT_DIR}/src/
-    ${Boost_INCLUDE_DIRS}
     ${EXTERNAL_LIB_DIR}/cpp_progress_bar
     ${EXTERNAL_LIB_DIR}/rollinchashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    .. # this ensures that this libs include files are visible to its deps as "#include common/*"
     )
 
 target_link_libraries(metagraph_graph_base
     PUBLIC
-    ${FOLLY_LIBRARIES}
     ${SDSL_LIBRARY}
-    kmer
     metagraph_common
     ${mersenne_twister}
     metagraph_utils
