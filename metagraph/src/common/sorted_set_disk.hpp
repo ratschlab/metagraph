@@ -1,8 +1,10 @@
-#pragma once
+#ifndef __SORTED_SET_DISK_HPP__
+#define __SORTED_SET_DISK_HPP__
 
-#include "utils/vectors.hpp"
+#include "common/chunked_wait_queue.hpp"
 #include "common/deque_vector.hpp"
 #include "common/threading.hpp"
+#include "utils/vectors.hpp"
 
 #include <ips4o.hpp>
 
@@ -37,6 +39,11 @@ class SortedSetDisk {
      */
     static constexpr size_t CONTAINER_SIZE_BYTES = 1e9; // 1 GB
 
+    /** Size of the merge queue's underlying circular buffer */
+    static constexpr size_t MERGE_QUEUE_SIZE = 1e9; // 1GB
+    /** Number of elements that can be iterated backwards in the merge queue */
+    static constexpr size_t MERGE_QUEUE_BACKWARDS_COUNT = 100;
+
     typedef T key_type;
     typedef T value_type;
     typedef Vector<T> storage_type;
@@ -54,7 +61,10 @@ class SortedSetDisk {
             size_t num_threads = 1,
             bool verbose = false,
             size_t container_size = CONTAINER_SIZE_BYTES)
-        : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {
+        : num_threads_(num_threads),
+          verbose_(verbose),
+          cleanup_(cleanup),
+          merge_queue_(MERGE_QUEUE_SIZE, MERGE_QUEUE_BACKWARDS_COUNT) {
         try {
             try_reserve(container_size);
         } catch (const std::bad_alloc &exception) {
@@ -77,7 +87,6 @@ class SortedSetDisk {
 
         // acquire the mutex to restrict the number of writing threads
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
-        assert(data_merged_ == false); // can't insert once we merged the data
         if (data_->size() + batch_size > data_->capacity()) { // time to write to disk
             std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
             // TODO(ddanciu) - test if it's worth it to keep adding in memory if the
@@ -97,43 +106,55 @@ class SortedSetDisk {
         std::copy(begin, end, data_->begin() + offset);
     }
 
+    storage_type &data() {
+        // TODO(ddanciu) - implement an adaptor from ChunkedWaitQueue to the expected
+        //  data structures in KmerStorage
+        throw std::runtime_error("Function not yet implemented");
+    }
+
     /**
      * Returns the globally sorted and de-duped data. Typically called once all
      * the data was inserted via insert().
      */
-    storage_type &data() {
+    threads::ChunkedWaitQueue<T> &dataStream() {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-        if (data_merged_) {
-            return data_first_;
-        }
-        // write any residual data left
-        if (!data_->empty()) {
-            sort_and_remove_duplicates(data_, num_threads_);
-            dump_to_file_async();
-        }
-        if (write_to_disk_future_.valid()) {
-            write_to_disk_future_.wait(); // make sure all pending data was written
-        }
-        data_second_ = storage_type();
 
+        if (!is_merging_) {
+            is_merging_ = true;
+            // write any residual data left
+            if (!data_->empty()) {
+                sort_and_remove_duplicates(data_, num_threads_);
+                dump_to_file_async();
+            }
+            if (write_to_disk_future_.valid()) {
+                write_to_disk_future_.get(); // make sure all pending data was written
+            }
+
+            start_merging();
+        }
+        return merge_queue_;
+    }
+
+    static void merge_data(uint32_t chunk_count, threads::ChunkedWaitQueue<T> *merge_queue) {
         // start merging disk chunks by using a heap to store the current element
         // from each chunk
-        std::vector<std::fstream> chunk_files(chunk_count_);
+        std::vector<std::fstream> chunk_files(chunk_count);
         std::fstream sorted_file(output_dir + "sorted.bin", std::ios::binary | std::ios::out);
 
         auto comp = [](const auto &a, const auto &b) { return a.first > b.first; };
+
         std::priority_queue<std::pair<T, uint32_t>, std::vector<std::pair<T, uint32_t>>, decltype(comp)>
                 merge_heap(comp);
 
-        for (uint32_t i = 0; i < chunk_count_; ++i) {
+        for (uint32_t i = 0; i < chunk_count; ++i) {
             const std::string file_name
                     = output_dir + "chunk_" + std::to_string(i) + ".bin";
             chunk_files[i].open(file_name, std::ios::in | std::ios::binary);
-            T dataItem;
+            T data_item;
             if (chunk_files[i].good()) {
-                chunk_files[i].read(reinterpret_cast<char *>(&dataItem), sizeof(dataItem));
-                merge_heap.push({ dataItem, i });
+                chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(data_item));
+                merge_heap.push({ data_item, i });
             } else {
                 throw std::runtime_error("Unable to open chunk file " + file_name);
             }
@@ -147,12 +168,8 @@ class SortedSetDisk {
             merge_heap.pop();
             if (!has_written || smallest.first != last_written) {
                 has_written = true;
-                if (!sorted_file.write(reinterpret_cast<char *>(&smallest.first),
-                                       sizeof(smallest.first))) {
-                    throw std::runtime_error("Writing of chunk no "
-                                             + std::to_string(smallest.second)
-                                             + " failed.");
-                }
+                merge_queue->push_front(smallest.first);
+
                 last_written = smallest.first;
                 totalSize++;
             }
@@ -166,20 +183,11 @@ class SortedSetDisk {
                 }
             }
         }
-        sorted_file.close();
-        sorted_file.open(output_dir + "sorted.bin", std::ios::binary | std::ios::in);
-        sorted_file.seekg(0, sorted_file.end);
-        uint64_t length = sorted_file.tellg();
-        sorted_file.seekg(0, sorted_file.beg);
-        data_first_.resize(totalSize);
-        if (length != totalSize * sizeof(data_first_[0])) {
-            throw std::length_error("Size of output file is " + std::to_string(length)
-                                    + " expected "
-                                    + std::to_string(totalSize * sizeof(data_first_[0])));
-        }
-        sorted_file.read(reinterpret_cast<char *>(&data_first_[0]), length);
-        data_merged_ = true;
-        return data_first_;
+        merge_queue->shutdown();
+    }
+
+    std::future<void> start_merging() {
+        return thread_pool_.enqueue(merge_data, chunk_count_, &merge_queue_);
     }
 
     void clear() {
@@ -223,10 +231,11 @@ class SortedSetDisk {
 
     /**
      * Dumps the given data to a file, synchronously.
-     * @tparam storage_type the container type for the data being dumped (typically std::vector of folly::Vector)
+     * @tparam storage_type the container type for the data being dumped (typically
+     * std::vector of folly::Vector)
      * @param[in] chunk_count the current chunk number
-     * @param[in,out] data the data to be dumped. At the end of the call, the data will be empty, but its allocated
-     * memory will remain unaffected
+     * @param[in,out] data the data to be dumped. At the end of the call, the data will be
+     * empty, but its allocated memory will remain unaffected
      */
     template <class storage_type>
     static void dump_to_file(uint32_t chunk_count, storage_type *data) {
@@ -242,19 +251,22 @@ class SortedSetDisk {
         data->resize(0);
     }
 
+    /**
+     * Write the current chunk to disk, asynchronously.
+     * While the current chunk is being written to disk, the class may accept new
+     * insertions which will be written into the other #data_ buffer.
+     */
     void dump_to_file_async() {
         if (write_to_disk_future_.valid()) {
             write_to_disk_future_.wait(); // wait for other thread to finish writing
         }
         if (data_->data() == data_first_.data()) {
-            write_to_disk_future_
-                    = thread_pool_.enqueue(this->dump_to_file<storage_type>,
-                                           chunk_count_, &data_first_);
+            write_to_disk_future_ = thread_pool_.enqueue(dump_to_file<storage_type>,
+                                                         chunk_count_, &data_first_);
             data_ = &data_second_;
         } else {
-            write_to_disk_future_
-                    = thread_pool_.enqueue(this->dump_to_file<storage_type>,
-                                           chunk_count_, &data_second_);
+            write_to_disk_future_ = thread_pool_.enqueue(dump_to_file<storage_type>,
+                                                         chunk_count_, &data_second_);
             data_ = &data_first_;
         }
         chunk_count_++;
@@ -303,10 +315,9 @@ class SortedSetDisk {
     storage_type *data_ = &data_first_;
     size_t num_threads_;
     /**
-     * True if the data was successfully merged from the files on disk and the
-     * already merged data can be returned.
+     * True if the data merging thread was started, and data started flowing into the #merge_queue_.
      */
-    bool data_merged_ = false;
+    bool is_merging_ = false;
     bool verbose_;
 
     /**
@@ -325,14 +336,16 @@ class SortedSetDisk {
     mutable std::shared_timed_mutex multi_insert_mutex_;
 
     /**
-     * Thread pool for writing to disk. The pool contains 1 thread that
-     * has a single task - namely to write the current chunk to disk. While the
-     * current chunk is being written to disk, the class may accept new
-     * insertions which will be written into the other #data_ buffer.
+     * Thread pool with two threads: one for writing to disk and one for merging data from disk.
+     * Each thread has a single task (write to disk and merge from disk, respectively).
      */
-    ThreadPool thread_pool_ = ThreadPool(1, 1);
+    ThreadPool thread_pool_ = ThreadPool(2, 1);
     /**
      * Future that signals whether the current writing to disk job was done.
      */
     std::future<void> write_to_disk_future_;
+
+    threads::ChunkedWaitQueue<T> merge_queue_;
 };
+
+#endif // __SORTED_SET_DISK_HPP__

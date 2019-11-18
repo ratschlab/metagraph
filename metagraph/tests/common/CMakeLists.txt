@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_subdirectory(../../src/common metagraph_common)
 
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
-include(${PROJECT_PARENT_DIR}/OpenMP.txt)
+include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
+findOpenMP()
 
 enable_testing()
 find_package(GTest REQUIRED)
@@ -18,6 +19,7 @@ file(GLOB test_files "*.cpp")
 add_executable(tests ${test_files})
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
+target_compile_options(tests PRIVATE -Werror -Wall -Wextra)
 target_include_directories(tests PRIVATE
     ${GTEST_INCLUDE_DIRS}
     "../../src/"
