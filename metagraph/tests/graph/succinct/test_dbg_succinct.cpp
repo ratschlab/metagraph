@@ -5,8 +5,6 @@
 #include <gtest/gtest.h>
 
 
-
-
 TEST(DBGSuccinct, get_degree_with_source_dummy) {
     for (size_t k = 2; k < 10; ++k) {
         auto graph = std::make_unique<DBGSuccinct>(k);
