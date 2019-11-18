@@ -38,3 +38,4 @@ target_link_libraries(tests
     ${OpenMP_CXX_LIBRARIES}
     ${SDSL_LIBRARY}
 )
+
