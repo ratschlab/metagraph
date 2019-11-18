@@ -607,8 +607,13 @@ bool ColumnCompressed<Label>
         const std::string outfile = remove_suffix(prefix, kExtension)
             + "." + std::to_string(i) + ".text.annodbg";
 
-        BitVectorFileOutStream outstream(outfile, num_objects(), column.num_set_bits());
-        column.call_ones([&](const auto &pos) { outstream.write_value(pos); });
+        try {
+            BitVectorFileOutStream outstream(outfile, num_objects(), column.num_set_bits());
+            column.call_ones([&](const auto &pos) { outstream.write_value(pos); });
+        } catch (...) {
+            std::cerr << "Failed to write to " << outfile << std::endl;
+            success = false;
+        }
     }
 
     return success;

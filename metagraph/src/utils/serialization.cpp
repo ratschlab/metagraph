@@ -472,10 +472,11 @@ void BitVectorFileOutStream::write_value(uint64_t value) {
     if (!num_bits_left_)
         throw std::runtime_error("Serializing too many numbers");
 
-    if (value >= length_)
+    if (value >= length_) {
         throw std::runtime_error(
             "Index " + std::to_string(value) + " >= " + std::to_string(length_)
         );
+    }
 
     ostream_ << value << std::endl;
     --num_bits_left_;
