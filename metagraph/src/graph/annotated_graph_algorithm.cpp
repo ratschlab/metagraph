@@ -1,5 +1,7 @@
 #include "annotated_graph_algorithm.hpp"
 
+#include <unordered_set>
+
 #include "alphabets.hpp"
 #include "annotate_column_compressed.hpp"
 #include "algorithms.hpp"
@@ -8,7 +10,8 @@
 
 namespace annotated_graph_algorithm {
 
-typedef DeBruijnGraph::node_index node_index;
+typedef AnnotatedDBG::node_index node_index;
+typedef AnnotatedDBG::row_index row_index;
 typedef AnnotatedDBG::Annotator::Label Label;
 
 
@@ -19,7 +22,7 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
 
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
-            for (auto node : path) {
+            for (const auto node : path) {
                 unitig_mask[node] = true;
             }
         }
@@ -30,51 +33,60 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
 
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
-                            const std::unordered_set<Label> &labels_in,
-                            const std::unordered_set<Label> &labels_out,
+                            const std::vector<Label> &labels_in,
+                            const std::vector<Label> &labels_out,
                             double label_mask_in_fraction,
                             double label_mask_out_fraction,
                             double label_other_fraction) {
     assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
-    assert(labels_in.size() + labels_out.size()
-                <= anno_graph.get_annotation().num_labels());
-
     const auto &dbg = dynamic_cast<const DeBruijnGraph&>(anno_graph.get_graph());
+    const auto &annotation = anno_graph.get_annotation();
+    const auto &label_encoder = annotation.get_label_encoder();
+
+    assert(labels_in.size() + labels_out.size() <= annotation.num_labels());
+
+    const double label_in_factor = label_mask_in_fraction * labels_in.size();
+    const double label_out_factor = label_mask_out_fraction * labels_out.size();
+
+    std::unordered_set<uint64_t> labels_in_enc;
+    for (const auto &label_in : labels_in) {
+        labels_in_enc.emplace(label_encoder.encode(label_in));
+    }
+
+    std::unordered_set<uint64_t> labels_out_enc;
+    for (const auto &label_out : labels_out) {
+        labels_out_enc.emplace(label_encoder.encode(label_out));
+    }
 
     return annotated_graph_algorithm::mask_nodes_by_unitig(
         dbg,
-        [&](const auto &unitig, const auto &path) {
-            assert(unitig.size() >= dbg.get_k());
-
-            std::unordered_map<node_index, size_t> index_counts;
-            for (auto i : path) {
+        [&](const auto &, const auto &path) {
+            std::unordered_map<row_index, size_t> index_counts;
+            for (const auto i : path) {
                 index_counts[anno_graph.graph_to_anno_index(i)]++;
             }
 
-            auto label_counts = anno_graph.get_top_labels(
-                index_counts,
-                anno_graph.get_annotation().num_labels()
-            );
+            size_t other_count = 0;
+            size_t in_count = 0;
+            size_t out_count = 0;
+            const size_t out_count_cutoff = label_out_factor * path.size();
 
-            size_t in_label_count = 0;
-            size_t out_label_count = 0;
-            size_t other_label_count = 0;
-            for (const auto &pair : label_counts) {
-                if (labels_in.find(pair.first) != labels_in.end()) {
-                    in_label_count += pair.second;
-                } else if (labels_out.find(pair.first) != labels_out.end()) {
-                    out_label_count += pair.second;
+            for (const auto &pair : annotation.count_labels(index_counts)) {
+                if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
+                    in_count += pair.second;
+
+                } else if (labels_out_enc.find(pair.first) != labels_out_enc.end()) {
+                    // early cutoff
+                    if ((out_count += pair.second) > out_count_cutoff)
+                        return false;
+
                 } else {
-                    other_label_count += pair.second;
+                    other_count += pair.second;
                 }
             }
 
-            return (in_label_count >= label_mask_in_fraction
-                    * (unitig.size() - dbg.get_k() + 1) * labels_in.size())
-                && (out_label_count <= label_mask_out_fraction
-                    * (unitig.size() - dbg.get_k() + 1) * labels_out.size())
-                && (other_label_count <= label_other_fraction
-                    * (in_label_count + out_label_count + other_label_count));
+            return (in_count >= label_in_factor * path.size())
+                && (other_count <= label_other_fraction * (in_count + out_count + other_count));
         }
     );
 }
@@ -89,16 +101,17 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
     sdsl::int_vector<> counts(anno_graph.get_graph().num_nodes() + 1, 0, width << 1);
 
     for (const auto &label_in : labels_in) {
-        anno_graph.call_annotated_nodes(label_in,
-                                        [&](auto i) { counts[i]++; });
+        anno_graph.call_annotated_nodes(label_in, [&](auto i) { counts[i]++; });
     }
 
     // correct the width of counts, making it single-width
     counts.width(width);
 
     for (const auto &label_out : labels_out) {
-        anno_graph.call_annotated_nodes(label_out,
-                                        [&](auto i) { counts[(i << 1) + 1]++; });
+        anno_graph.call_annotated_nodes(
+            label_out,
+            [&](auto i) { counts[(i << 1) + 1]++; }
+        );
     }
 
     // set the width to be double again

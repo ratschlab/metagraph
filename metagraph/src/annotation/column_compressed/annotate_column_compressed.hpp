@@ -7,8 +7,8 @@
 #include <progress_bar.hpp>
 
 #include "annotation/annotate.hpp"
-#include "common/bit_vectors/bit_vector.hpp"
-#include "common/vectors.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
+#include "utils/vectors.hpp"
 
 
 namespace annotate {
@@ -74,6 +74,15 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     uint64_t num_relations() const override;
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
+
+    /**
+     * Return all labels for which counts are greater than or equal to |min_count|.
+     * Stop counting if count is greater than |count_cap|.
+     */
+    std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
+    count_labels(const std::unordered_map<Index, size_t> &index_counts,
+                 size_t min_count = 1,
+                 size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
     void convert_to_row_annotator(const std::string &outfbase) const;
     void convert_to_row_annotator(RowCompressed<Label> *annotator,

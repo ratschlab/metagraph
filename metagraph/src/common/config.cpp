@@ -5,10 +5,10 @@
 #include <unordered_set>
 #include <filesystem>
 
-#include "string_utils.hpp"
-#include "file_utils.hpp"
-#include "algorithms.hpp"
-#include "threading.hpp"
+#include "utils/string_utils.hpp"
+#include "utils/file_utils.hpp"
+#include "utils/algorithms.hpp"
+#include "common/threading.hpp"
 
 
 Config::Config(int argc, const char *argv[]) {

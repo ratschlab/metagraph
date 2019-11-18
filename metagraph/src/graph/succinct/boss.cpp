@@ -10,11 +10,11 @@
 #include <progress_bar.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
+#include "common/threading.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "utils/serialization.hpp"
+#include "utils/algorithms.hpp"
 #include "boss_construct.hpp"
-#include "serialization.hpp"
-#include "reverse_complement.hpp"
-#include "algorithms.hpp"
-#include "threading.hpp"
 
 using utils::remove_suffix;
 using TAlphabet = BOSS::TAlphabet;

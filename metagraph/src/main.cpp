@@ -568,10 +568,8 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
             graph,
             annotated_graph_algorithm::mask_nodes_by_unitig_labels(
                 anno_graph,
-                std::unordered_set<std::string>(config->label_mask_in.begin(),
-                                                config->label_mask_in.end()),
-                std::unordered_set<std::string>(config->label_mask_out.begin(),
-                                                config->label_mask_out.end()),
+                config->label_mask_in,
+                config->label_mask_out,
                 config->label_mask_in_fraction,
                 config->label_mask_out_fraction,
                 config->label_other_fraction
