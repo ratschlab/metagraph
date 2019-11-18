@@ -26,6 +26,7 @@ find_package(GTest REQUIRED)
 file(GLOB test_files "*.cpp")
 add_executable(tests ${test_files})
 
+target_compile_definitions(tests PUBLIC TEST_DATA_DIR="${PROJECT_PARENT_DIR}/tests/data")
 target_include_directories(tests PRIVATE
     ${GTEST_INCLUDE_DIRS}
 )

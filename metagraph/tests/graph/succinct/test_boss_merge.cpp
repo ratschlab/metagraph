@@ -5,7 +5,7 @@
 #include "graph/succinct/boss.hpp"
 #include "graph/succinct/boss_construct.hpp"
 
-const std::string test_data_dir = "../tests/data";
+const std::string test_data_dir = TEST_DATA_DIR;
 
 
 TEST(BOSSMerge, TraversalMergeWithEmpty) {

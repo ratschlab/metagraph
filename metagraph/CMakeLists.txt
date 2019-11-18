@@ -521,7 +521,7 @@ link_directories(
 )
 
 add_executable(unit_tests ${unit_tests_files})
-
+target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 target_link_libraries(unit_tests gtest_main gtest
   metagraph
   ${METALIBS}
