@@ -1993,78 +1993,78 @@ void call_paths(const BOSS &boss,
         if (!path.size())
             continue;
 
-        if (kmers_in_single_form) {
-            // trim trailing sentinels '$'
-            if (sequence.back() == boss.kSentinelCode) {
-                sequence.pop_back();
-                path.pop_back();
-            }
+        if (!kmers_in_single_form) {
+            callback(std::move(path), std::move(sequence));
+            continue;
+        }
 
-            auto first_valid_it
-                = std::find_if(sequence.begin(), sequence.end(),
-                               [&boss](auto c) { return c != boss.kSentinelCode; });
+        // trim trailing sentinels '$'
+        if (sequence.back() == boss.kSentinelCode) {
+            sequence.pop_back();
+            path.pop_back();
+        }
 
-            sequence.erase(sequence.begin(), first_valid_it);
+        auto first_valid_it
+            = std::find_if(sequence.begin(), sequence.end(),
+                           [&boss](auto c) { return c != boss.kSentinelCode; });
 
-            if (sequence.size() <= boss.get_k())
+        sequence.erase(sequence.begin(), first_valid_it);
+
+        if (sequence.size() <= boss.get_k())
+            continue;
+
+        path.erase(path.begin(),
+                   path.begin() + (first_valid_it - sequence.begin()));
+
+
+        // get dual path (mapping of the reverse complement sequence)
+        auto rev_comp_seq = KmerExtractorBOSS::reverse_complement(sequence);
+
+        auto dual_path = boss.map_to_edges(rev_comp_seq);
+        std::reverse(dual_path.begin(), dual_path.end());
+        size_t begin = 0;
+
+        assert(std::all_of(path.begin(), path.end(),
+                           [&](auto i) { return visited[i]; }));
+
+        progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
+                                      [&](auto node) { return node && !visited[node]; });
+
+        // Mark all nodes in path as unvisited and re-visit them while
+        // traversing the path (iterating through all nodes).
+        std::for_each(path.begin(), path.end(),
+                      [&](auto i) { visited[i] = false; });
+
+        // traverse the path with its dual and visit the nodes
+        for (size_t i = 0; i < path.size(); ++i) {
+            assert(path[i]);
+            visited[path[i]] = true;
+
+            if (!dual_path[i])
                 continue;
 
-            path.erase(path.begin(),
-                       path.begin() + (first_valid_it - sequence.begin()));
-
-
-            // get dual path (mapping of the reverse complement sequence)
-            auto rev_comp_seq = KmerExtractorBOSS::reverse_complement(sequence);
-
-            auto dual_path = boss.map_to_edges(rev_comp_seq);
-            std::reverse(dual_path.begin(), dual_path.end());
-            size_t begin = 0;
-
-            assert(std::all_of(path.begin(), path.end(),
-                               [&](auto i) { return visited[i]; }));
-
-            progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
-                                          [&](auto node) { return node && !visited[node]; });
-
-            // Mark all nodes in path as unvisited and re-visit them while
-            // traversing the path (iterating through all nodes).
-            std::for_each(path.begin(), path.end(),
-                          [&](auto i) { visited[i] = false; });
-
-            // traverse the path with its dual and visit the nodes
-            for (size_t i = 0; i < path.size(); ++i) {
-                assert(path[i]);
-                visited[path[i]] = true;
-
-                if (!dual_path[i])
-                    continue;
-
-                // check if reverse-complement k-mer has been traversed
-                if (!visited[dual_path[i]] || dual_path[i] == path[i]) {
-                    visited[dual_path[i]] = discovered[dual_path[i]] = true;
-                    continue;
-                }
-
-                // The reverse-complement k-mer has been visited
-                // -> Skip this k-mer and call the traversed path segment.
-                if (begin < i)
-                    callback({ path.begin() + begin, path.begin() + i },
-                             { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-
-                begin = i + 1;
+            // check if reverse-complement k-mer has been traversed
+            if (!visited[dual_path[i]] || dual_path[i] == path[i]) {
+                visited[dual_path[i]] = discovered[dual_path[i]] = true;
+                continue;
             }
 
-            // Call the path traversed
-            if (!begin) {
-                callback(std::move(path), std::move(sequence));
+            // The reverse-complement k-mer has been visited
+            // -> Skip this k-mer and call the traversed path segment.
+            if (begin < i)
+                callback({ path.begin() + begin, path.begin() + i },
+                         { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
 
-            } else if (begin < path.size()) {
-                callback({ path.begin() + begin, path.end() },
-                         { sequence.begin() + begin, sequence.end() });
-            }
+            begin = i + 1;
+        }
 
-        } else {
+        // Call the path traversed
+        if (!begin) {
             callback(std::move(path), std::move(sequence));
+
+        } else if (begin < path.size()) {
+            callback({ path.begin() + begin, path.end() },
+                     { sequence.begin() + begin, sequence.end() });
         }
     }
 }
