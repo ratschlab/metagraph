@@ -28,34 +28,6 @@ size_t DBGSuccinct::get_k() const {
     return boss_graph_->get_k() + 1;
 }
 
-std::function<bool()> is_kmer_missing(const KmerBloomFilter<> *bloom_filter,
-                                      const char *begin,
-                                      const char *end) {
-    if (!bloom_filter)
-        return []() { return false; };
-
-    if (begin + bloom_filter->get_k() > end)
-        return []() { return true; };
-
-    // use shared_ptr to prevent copying this vector and keep it alive for the
-    // returned callback
-    auto bloom_check = std::make_shared<sdsl::bit_vector>(
-        bloom_filter->check_kmer_presence(begin, end)
-    );
-
-    assert(begin + bloom_check->size() == end - bloom_filter->get_k() + 1);
-
-    auto it = bloom_check->begin();
-
-    // these need to be specified explicitly to ensure that they're copied
-    return [it,bloom_check]() mutable {
-        assert(it < bloom_check->end());
-        bool in_bloom = *it;
-        ++it;
-        return !in_bloom;
-    };
-}
-
 // Check whether graph contains fraction of nodes from the sequence
 bool DBGSuccinct::find(const std::string &sequence,
                        double discovery_fraction) const {
@@ -68,9 +40,9 @@ bool DBGSuccinct::find(const std::string &sequence,
     size_t num_kmers_discovered = 0;
     size_t num_kmers_missing = 0;
 
-    auto is_invalid = is_kmer_missing(bloom_filter_.get(),
-                                      sequence.data(),
-                                      sequence.data() + sequence.size());
+    auto is_invalid = get_missing_kmer_skipper(bloom_filter_.get(),
+                                               sequence.data(),
+                                               sequence.data() + sequence.size());
 
     boss_graph_->map_to_edges(sequence,
         [&](auto edge) {
@@ -257,7 +229,8 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
     if (begin + get_k() > end)
         return;
 
-    auto is_missing = is_kmer_missing(bloom_filter_.get(), &*begin, &*begin + (end - begin));
+    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(),
+                                               &*begin, &*begin + (end - begin));
 
     boss_graph_->map_to_edges(
         std::string(begin, end),
@@ -431,9 +404,9 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
     if (sequence.size() < get_k())
         return;
 
-    auto is_missing = is_kmer_missing(bloom_filter_.get(),
-                                      sequence.data(),
-                                      sequence.data() + sequence.size());
+    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(),
+                                               sequence.data(),
+                                               sequence.data() + sequence.size());
 
     if (canonical_mode_) {
         std::string sequence_rev_compl = sequence;

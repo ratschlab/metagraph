@@ -849,12 +849,24 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     Timer timer;
 
     // construct graph storing all k-mers in query
-    std::shared_ptr<DeBruijnGraph> graph
-        = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), false);
+    auto graph = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), false);
 
-    call_sequences([&graph](const std::string &sequence) {
-        graph->add_sequence(sequence);
-    });
+    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(full_dbg)) {
+        if (utils::get_verbose() && dbg_succ->get_bloom_filter()) {
+            std::cout << "Indexing k-mers pre-filtered with Bloom filter" << std::endl;
+        }
+        call_sequences([&graph,&dbg_succ](const std::string &sequence) {
+            graph->add_sequence(sequence, get_missing_kmer_skipper(
+                dbg_succ->get_bloom_filter(),
+                sequence.data(),
+                sequence.data() + sequence.size()
+            ));
+        });
+    } else {
+        call_sequences([&graph](const std::string &sequence) {
+            graph->add_sequence(sequence);
+        });
+    }
 
     if (utils::get_verbose()) {
         std::cout << "Query graph --- k-mers indexed: "
@@ -1028,12 +1040,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
     }
 
-    graph = std::make_shared<MaskedDeBruijnGraph>(graph,
+    auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(graph,
         [=](auto i) -> bool { return (*index_in_full_graph)[i]; }
     );
 
     // build annotated graph from the query graph and copied annotations
-    return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
+    return std::make_unique<AnnotatedDBG>(masked_graph, std::move(annotation));
 }
 
 

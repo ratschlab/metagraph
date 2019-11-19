@@ -165,3 +165,32 @@ void KmerBloomFilter<KmerHasher>
 }
 
 template class KmerBloomFilter<>;
+
+
+std::function<bool()> get_missing_kmer_skipper(const KmerBloomFilter<> *bloom_filter,
+                                               const char *begin,
+                                               const char *end) {
+    if (!bloom_filter)
+        return []() { return false; };
+
+    if (begin + bloom_filter->get_k() > end)
+        return []() { return true; };
+
+    // use shared_ptr to prevent copying this vector and keep it alive for the
+    // returned callback
+    auto bloom_check = std::make_shared<sdsl::bit_vector>(
+        bloom_filter->check_kmer_presence(begin, end)
+    );
+
+    assert(begin + bloom_check->size() == end - bloom_filter->get_k() + 1);
+
+    auto it = bloom_check->begin();
+
+    // these need to be specified explicitly to ensure that they're copied
+    return [it,bloom_check]() mutable {
+        assert(it < bloom_check->end());
+        bool in_bloom = *it;
+        ++it;
+        return !in_bloom;
+    };
+}

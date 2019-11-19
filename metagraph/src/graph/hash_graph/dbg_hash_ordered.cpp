@@ -25,6 +25,17 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     // is passed. If passed, |nodes_inserted| must have length equal
     // to the number of nodes in graph.
     void add_sequence(const std::string &sequence,
+                      bit_vector_dyn *nodes_inserted) {
+        add_sequence(sequence, [](){ return false; }, nodes_inserted);
+    }
+
+    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
+    // is passed. If passed, |nodes_inserted| must have length equal
+    // to the number of nodes in graph.
+    // `skip` is called before adding each k-mer into the graph and the k-mer
+    // is skipped if `skip()` returns `false`.
+    void add_sequence(const std::string &sequence,
+                      const std::function<bool()> &skip,
                       bit_vector_dyn *nodes_inserted);
 
     // Traverse graph mapping sequence to the graph nodes
@@ -120,10 +131,21 @@ DBGHashOrderedImpl<KMER>::DBGHashOrderedImpl(size_t k,
 
 template <typename KMER>
 void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
+                                            const std::function<bool()> &skip,
                                             bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
+    if (sequence.size() < get_k())
+        return;
+
+    std::vector<bool> skipped;
+    skipped.reserve(sequence.size() - get_k() + 1);
+
     for (const auto &kmer : sequence_to_kmers(sequence)) {
+        skipped.push_back(skip());
+        if (skipped.back())
+            continue;
+
         auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
@@ -133,7 +155,11 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
     if (!canonical_mode_)
         return;
 
+    auto it = skipped.end();
     for (const auto &kmer : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
+        if (*(--it))
+            continue;
+
         auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
