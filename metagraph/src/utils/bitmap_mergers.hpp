@@ -47,10 +47,26 @@ class RowsFromColumnsTransformer {
     void call_rows(const std::function<void(const Vector &)> &callback);
 
   private:
+    class VectorBitStream {
+      public:
+        VectorBitStream(const bit_vector &vector,
+                        uint64_t begin = 0,
+                        uint64_t end = static_cast<uint64_t>(-1));
+
+        uint64_t next_value();
+        uint64_t values_left() const { return max_rank_ - current_rank_; }
+
+      private:
+        const bit_vector &vector_;
+        uint64_t begin_;
+        uint64_t current_rank_;
+        uint64_t max_rank_;
+    };
+
     void initialize(const std::vector<const bit_vector*> &columns);
     void init_heap();
 
-    std::vector<std::unique_ptr<VectorStream>> streams_;
+    std::vector<std::unique_ptr<VectorBitStream>> streams_;
     uint64_t num_set_bits_left_ = 0;
     uint64_t num_rows_;
 

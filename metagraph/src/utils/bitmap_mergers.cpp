@@ -1,9 +1,30 @@
 #include "bitmap_mergers.hpp"
 
+#include <cassert>
+
 #include "utils/vectors.hpp"
 
 
 namespace utils {
+
+RowsFromColumnsTransformer::VectorBitStream
+::VectorBitStream(const bit_vector &vector,
+                  uint64_t begin,
+                  uint64_t end)
+      : vector_(vector),
+        begin_(begin),
+        current_rank_(begin ? vector_.rank1(begin - 1) : 0) {
+    assert(begin <= end);
+    assert(current_rank_ <= begin);
+    max_rank_ = (end == static_cast<uint64_t>(-1)
+                    ? vector_.num_set_bits()
+                    : (end ? vector_.rank1(end - 1) : 0));
+}
+
+uint64_t RowsFromColumnsTransformer::VectorBitStream::next_value() {
+    assert(current_rank_ < max_rank_);
+    return vector_.select1(++current_rank_) - begin_;
+}
 
 RowsFromColumnsTransformer
 ::RowsFromColumnsTransformer(const std::vector<const bit_vector*> &columns) {
