@@ -454,9 +454,7 @@ uint64_t BitVectorFileInStream::next_value() {
 
     if (next_val >= length_) {
         throw std::runtime_error(
-            fmt::format("Error: index >= length: {} >= {}",
-                        next_val,
-                        length_)
+            fmt::format("Error: index >= length: {} >= {}", next_val, length_)
         );
     }
 
