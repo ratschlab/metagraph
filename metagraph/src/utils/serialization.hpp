@@ -105,7 +105,7 @@ class VectorBitInStream : public VectorInStream {
 class VectorOutStream {
   public:
     virtual ~VectorOutStream() {}
-    virtual void write_value(uint64_t value, char delimiter = '\n') = 0;
+    virtual void write_value(uint64_t value) = 0;
     virtual void close() = 0;
 };
 
@@ -114,7 +114,7 @@ class VectorFileOutStream : public VectorOutStream {
   public:
     VectorFileOutStream(const std::string &file);
 
-    void write_value(uint64_t value, char delimiter = '\n');
+    void write_value(uint64_t value);
     void close() { ostream_.close(); }
 
   private:

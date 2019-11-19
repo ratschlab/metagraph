@@ -420,19 +420,12 @@ BitVectorFileInStream::BitVectorFileInStream(const std::string &file)
         throw std::ifstream::failure(std::string("Bad stream file ") + file);
 
     std::getline(istream_, buffer_);
-    auto num_read = std::sscanf(buffer_.c_str(),
-                                "%" PRIu64 " %" PRIu64,
-                                &length_,
-                                &values_left_);
-
-    if (!num_read)
+    if (!std::sscanf(buffer_.c_str(), "%" PRIu64, &length_))
         throw std::ifstream::failure("Empty file " + file);
 
-    if (num_read == 1) {
-        std::getline(istream_, buffer_);
-        if (!std::sscanf(buffer_.c_str(), "%" PRIu64, &values_left_))
-            throw std::ifstream::failure("Missing number of set bits: " + file);
-    }
+    std::getline(istream_, buffer_);
+    if (!std::sscanf(buffer_.c_str(), "%" PRIu64, &values_left_))
+        throw std::ifstream::failure("Missing number of set bits: " + file);
 
     if (values_left_ > length_) {
         throw std::ifstream::failure(
@@ -486,6 +479,6 @@ VectorFileOutStream::VectorFileOutStream(const std::string &file)
         throw std::ofstream::failure(std::string("Bad stream file ") + file);
 }
 
-void VectorFileOutStream::write_value(uint64_t value, char delimiter) {
-    ostream_ << fmt::to_string(value) << delimiter;
+void VectorFileOutStream::write_value(uint64_t value) {
+    ostream_ << fmt::to_string(value) << '\n';
 }

@@ -607,7 +607,7 @@ bool ColumnCompressed<Label>
     for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
         const auto &column = get_column(i);
         const std::string outfile = remove_suffix(prefix, kExtension)
-            + fmt::format(".{0}.text.annodbg", i);
+            + fmt::format(".{}.text.annodbg", i);
 
         try {
             VectorFileOutStream outstream(outfile);
