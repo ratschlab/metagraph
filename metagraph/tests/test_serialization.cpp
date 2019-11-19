@@ -163,23 +163,23 @@ TEST(bit_vector, SerializeAndLoad) {
 
 void test_random_vector_stream(size_t length) {
     for (size_t i = 0; i < 10; ++i) {
-        std::vector<uint8_t> numbers(length);
+        std::vector<uint64_t> numbers(length);
         for (size_t j = 0; j < length; ++j) {
-            numbers[j] = rand() % 256;
+            numbers[j] = rand() % (length * 2);
         }
 
         VectorFileOutStream outstream(test_dump_basename);
-        outstream.write_value(256);
+        outstream.write_value(length * 2);
         outstream.write_value(length);
 
-        for (uint8_t num : numbers) {
+        for (uint64_t num : numbers) {
             outstream.write_value(num);
         }
 
         outstream.close();
 
         BitVectorFileInStream instream(test_dump_basename);
-        ASSERT_EQ(256u, instream.length());
+        ASSERT_EQ(length * 2, instream.length());
         ASSERT_EQ(length, instream.values_left());
 
         for (size_t j = 0; j < length; ++j) {
@@ -188,18 +188,21 @@ void test_random_vector_stream(size_t length) {
         }
 
         ASSERT_FALSE(instream.values_left());
-        instream.close();
     }
 }
 
-TEST(Serialization, SerializationRandomUInt8VectorStream0) {
+TEST(Serialization, SerializationRandomUInt64VectorStream0) {
     test_random_vector_stream(0);
 }
 
-TEST(Serialization, SerializationRandomUInt8VectorStream10) {
+TEST(Serialization, SerializationRandomUInt64VectorStream10) {
     test_random_vector_stream(10);
 }
 
-TEST(Serialization, SerializationRandomUInt8VectorStream256) {
+TEST(Serialization, SerializationRandomUInt64VectorStream256) {
     test_random_vector_stream(256);
+}
+
+TEST(Serialization, SerializationRandomUInt64VectorStream1000000) {
+    test_random_vector_stream(1000000);
 }
