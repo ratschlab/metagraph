@@ -22,6 +22,39 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
 TYPED_TEST_CASE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
 
 
+TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextEmpty) {
+    AnnotatorTest<TypeParam>::SetUp();
+
+    ASSERT_TRUE(this->annotation->dump_columns(test_dump_basename_vec_good));
+
+    annotate::ColumnCompressed<> loaded(this->annotation->num_objects());
+
+    std::vector<std::string> labels;
+    const auto& label_encoder = this->annotation->get_label_encoder();
+    for (size_t i = 0; i < label_encoder.size(); ++i) {
+        labels.emplace_back(label_encoder.decode(i));
+    }
+
+    uint64_t size, num_set_bits, pos;
+    for (size_t i = 0; i < this->annotation->num_labels(); ++i) {
+        std::ifstream fin(test_dump_basename_vec_good
+                            + "." + std::to_string(i) + ".text.annodbg");
+        ASSERT_TRUE(fin.good());
+
+        fin >> size >> num_set_bits;
+
+        ASSERT_EQ(loaded.num_objects(), size);
+        ASSERT_EQ(0u, size);
+        ASSERT_EQ(0u, num_set_bits);
+
+        while (num_set_bits--) {
+            fin >> pos;
+            ASSERT_GT(this->annotation->num_objects(), pos);
+            loaded.add_labels(pos, { labels[i] });
+        }
+    }
+}
+
 TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadText) {
     ASSERT_TRUE(this->annotation->dump_columns(test_dump_basename_vec_good));
 
