@@ -112,7 +112,7 @@ class VectorOutStream {
 // Write a vector to a text file
 class VectorFileOutStream : public VectorOutStream {
   public:
-    VectorFileOutStream(const std::string &file);
+    explicit VectorFileOutStream(const std::string &file);
 
     void write_value(uint64_t value);
     void close() { ostream_.close(); }
