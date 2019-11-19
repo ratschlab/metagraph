@@ -1,6 +1,8 @@
 #ifndef __VECTORS_HPP__
 #define __VECTORS_HPP__
 
+#include <cstdint>
+
 #if _USE_FOLLY
 #include <folly/FBVector.h>
 #include <folly/small_vector.h>
@@ -11,7 +13,6 @@
     using SmallVector = folly::small_vector<T, NumReserved, SizeType>;
 #else
 #include <vector>
-#include <cstdint>
     template <typename... Args>
     using Vector = std::vector<Args...>;
 
