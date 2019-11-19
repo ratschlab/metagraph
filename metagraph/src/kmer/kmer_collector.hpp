@@ -6,7 +6,12 @@
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
 
-
+/**
+ * Collects k-mers extracted by a KmerExtractor into Container.
+ * @tparam KMER
+ * @tparam KmerExtractor
+ * @tparam Container
+ */
 template <typename KMER, class KmerExtractor, class Container>
 class KmerStorage {
     using Extractor = KmerExtractor;
