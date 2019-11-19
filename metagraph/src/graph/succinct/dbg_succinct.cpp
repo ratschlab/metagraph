@@ -59,11 +59,39 @@ std::function<bool()> is_kmer_missing(const KmerBloomFilter<> *bloom_filter,
 // Check whether graph contains fraction of nodes from the sequence
 bool DBGSuccinct::find(const std::string &sequence,
                        double discovery_fraction) const {
-    return boss_graph_->find(sequence,
-                             discovery_fraction,
-                             is_kmer_missing(bloom_filter_.get(),
-                                             sequence.data(),
-                                             sequence.data() + sequence.size()));
+    if (sequence.length() < get_k())
+        return false;
+
+    const size_t num_kmers = sequence.length() - get_k() + 1;
+    const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
+    const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
+    size_t num_kmers_discovered = 0;
+    size_t num_kmers_missing = 0;
+
+    auto is_invalid = is_kmer_missing(bloom_filter_.get(),
+                                      sequence.data(),
+                                      sequence.data() + sequence.size());
+
+    boss_graph_->map_to_edges(sequence,
+        [&](auto edge) {
+            if (edge) {
+                num_kmers_discovered++;
+            } else {
+                num_kmers_missing++;
+            }
+        },
+        [&]() { return num_kmers_missing > max_kmers_missing
+                        || num_kmers_discovered >= min_kmers_discovered; },
+        [&]() {
+            if (!is_invalid())
+                return false;
+
+            num_kmers_missing++;
+            return true;
+        }
+    );
+
+    return num_kmers_missing <= max_kmers_missing;
 }
 
 // Traverse the outgoing edge
