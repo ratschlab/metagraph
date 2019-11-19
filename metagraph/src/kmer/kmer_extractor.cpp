@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "utils/algorithms.hpp"
+
 
 namespace extractor {
 
@@ -565,27 +567,23 @@ KmerExtractor2BitTDecl(template <typename T> void)
     assert(std::all_of(seq.begin(), seq.end(),
                        [&](auto c) { return c <= alphabet.size(); }));
 
-    TAlphabet *begin_segm = seq.data();
-    TAlphabet *end_segm;
-    TAlphabet *end = seq.data() + seq.size();
+    // Mark where (k+1)-mers with invalid characters end
+    // Example for (k+1)=3: [X]***[X]****[X]***
+    //              ---->   [111]0[111]00[111]0
+    auto invalid = utils::drag_and_mark_segments(seq, alphabet.size(), k);
+    // Set invalid characters to zero so that k-mers don't overflow.
+    // k-mers containing these invalid characters are invalid and will
+    // be skipped anyway.
+    std::replace(seq.begin(), seq.end(), static_cast<TAlphabet>(alphabet.size()),
+                                         static_cast<TAlphabet>(0));
+    size_t i = k - 1;
 
-    while (begin_segm + k <= end) {
-
-        end_segm = std::find_if(begin_segm, end,
-            [&](auto c) { return c >= alphabet.size(); }
-        );
-
-        if (begin_segm + k <= end_segm) {
-            extractor::sequence_to_kmers<Kmer<T>>(
-                begin_segm, end_segm, k, suffix,
-                [&kmers](auto kmer) { kmers->push_back(kmer); },
-                canonical_mode ? complement_code_ : std::vector<uint8_t>(),
-                []() { return false; }
-            );
-        }
-
-        begin_segm = end_segm + 1;
-    }
+    extractor::sequence_to_kmers<Kmer<T>>(
+        seq.data(), seq.data() + seq.size(), k, suffix,
+        [&kmers](auto kmer) { kmers->push_back(kmer); },
+        canonical_mode ? complement_code_ : std::vector<uint8_t>(),
+        [&]() { return invalid[i++]; }
+    );
 }
 
 KmerExtractor2BitTDecl(template <typename KMER> Vector<KMER>)
