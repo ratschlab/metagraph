@@ -434,13 +434,13 @@ BitVectorFileInStream::BitVectorFileInStream(const std::string &file)
             throw std::ifstream::failure("Missing number of set bits: " + file);
     }
 
-    // if (values_left_ > length_) {
-    //     throw std::ifstream::failure(
-    //         fmt::format("Number of set bits greater than length: {0} > {1}",
-    //                     values_left_,
-    //                     length_)
-    //     );
-    // }
+    if (values_left_ > length_) {
+        throw std::ifstream::failure(
+            fmt::format("Number of set bits greater than length: {0} > {1}",
+                        values_left_,
+                        length_)
+        );
+    }
 }
 
 uint64_t BitVectorFileInStream::next_value() {
