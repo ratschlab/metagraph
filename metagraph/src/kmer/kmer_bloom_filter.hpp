@@ -56,4 +56,13 @@ class KmerBloomFilter {
 };
 
 
+/**
+ * Construct a callback which can be called `end`-`begin`+1 times, where
+ * the i-th call returns `true` if the i-th k-mer in sequence is invalid
+ * and `false` otherwise.
+ */
+std::function<bool()> get_missing_kmer_skipper(const KmerBloomFilter<> *bloom_filter,
+                                               const char *begin,
+                                               const char *end);
+
 #endif // __KMER_BLOOM_FILTER_HPP__
