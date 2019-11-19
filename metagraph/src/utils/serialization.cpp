@@ -436,7 +436,7 @@ BitVectorFileInStream::BitVectorFileInStream(const std::string &file)
 
     if (values_left_ > length_) {
         throw std::ifstream::failure(
-            fmt::format("Number of set bits greater than length: {0} > {1}",
+            fmt::format("Number of set bits greater than length: {} > {}",
                         values_left_,
                         length_)
         );
@@ -487,5 +487,5 @@ VectorFileOutStream::VectorFileOutStream(const std::string &file)
 }
 
 void VectorFileOutStream::write_value(uint64_t value, char delimiter) {
-    ostream_ << fmt::format("{}{}", value, delimiter);
+    ostream_ << fmt::to_string(value) << delimiter;
 }
