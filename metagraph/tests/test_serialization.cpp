@@ -8,6 +8,7 @@
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/vector_dump_test";
+const std::string test_dump_basename_bad = test_data_dir + "/vector_dump_test_bad";
 
 
 TEST(Serialization, SerializationVectorBool) {
@@ -205,4 +206,9 @@ TEST(Serialization, SerializationRandomUInt64VectorStream256) {
 
 TEST(Serialization, SerializationRandomUInt64VectorStream1000000) {
     test_random_vector_stream(1000000);
+}
+
+TEST(Serialization, SerializationVectorStreamBadRead) {
+    ASSERT_THROW(std::make_unique<BitVectorFileInStream>(test_dump_basename_bad),
+                 std::ifstream::failure);
 }
