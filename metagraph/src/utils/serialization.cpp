@@ -419,12 +419,12 @@ BitVectorFileInStream::BitVectorFileInStream(const std::string &file)
     if (!istream_.good())
         throw std::ifstream::failure(std::string("Bad stream file ") + file);
 
-    std::getline(istream_, buffer_);
-    if (!std::sscanf(buffer_.c_str(), "%" PRIu64, &length_))
+    if (!std::getline(istream_, buffer_)
+            || !std::sscanf(buffer_.c_str(), "%" PRIu64, &length_))
         throw std::ifstream::failure("Empty file " + file);
 
-    std::getline(istream_, buffer_);
-    if (!std::sscanf(buffer_.c_str(), "%" PRIu64, &values_left_))
+    if (!std::getline(istream_, buffer_)
+            || !std::sscanf(buffer_.c_str(), "%" PRIu64, &values_left_))
         throw std::ifstream::failure("Missing number of set bits: " + file);
 
     if (values_left_ > length_) {
@@ -440,10 +440,10 @@ uint64_t BitVectorFileInStream::next_value() {
     assert(values_left_ > 0);
     --values_left_;
 
-    std::getline(istream_, buffer_);
     uint64_t next_val;
-    if (!std::sscanf(buffer_.c_str(), "%" PRIu64, &next_val))
-        throw std::runtime_error("Truncated file");
+    if (!std::getline(istream_, buffer_)
+            || !std::sscanf(buffer_.c_str(), "%" PRIu64, &next_val))
+        throw std::ifstream::failure("Truncated file");
 
     if (next_val >= length_) {
         throw std::runtime_error(
@@ -480,5 +480,6 @@ VectorFileOutStream::VectorFileOutStream(const std::string &file)
 }
 
 void VectorFileOutStream::write_value(uint64_t value) {
-    ostream_ << fmt::to_string(value) << '\n';
+    if (!(ostream_ << fmt::to_string(value) << '\n'))
+        throw std::ofstream::failure("Bad stream");
 }

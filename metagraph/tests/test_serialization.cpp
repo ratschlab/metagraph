@@ -184,7 +184,7 @@ void test_random_vector_stream(size_t length) {
         ASSERT_EQ(length, instream.values_left());
 
         for (size_t j = 0; j < length; ++j) {
-            ASSERT_TRUE(instream.values_left());
+            ASSERT_EQ(length - j, instream.values_left());
             ASSERT_EQ(numbers[j], instream.next_value());
         }
 
@@ -211,4 +211,25 @@ TEST(Serialization, SerializationRandomUInt64VectorStream1000000) {
 TEST(Serialization, SerializationVectorStreamBadRead) {
     ASSERT_THROW(std::make_unique<BitVectorFileInStream>(test_dump_basename_bad),
                  std::ifstream::failure);
+}
+
+TEST(Serialization, SerializationVectorStreamBadReadShortFile) {
+    VectorFileOutStream outstream(test_dump_basename);
+    outstream.write_value(100000);
+    outstream.write_value(100000);
+
+    for (size_t i = 0; i < 5; ++i) {
+        outstream.write_value(i);
+    }
+
+    outstream.close();
+
+    BitVectorFileInStream instream(test_dump_basename);
+    for (size_t i = 0; i < 5; ++i) {
+        ASSERT_EQ(100000 - i, instream.values_left());
+        ASSERT_EQ(i, instream.next_value());
+    }
+
+    ASSERT_EQ(100000u - 5, instream.values_left());
+    EXPECT_THROW(instream.next_value(), std::ifstream::failure);
 }
