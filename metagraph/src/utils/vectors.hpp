@@ -11,6 +11,7 @@
     using SmallVector = folly::small_vector<T, NumReserved, SizeType>;
 #else
 #include <vector>
+#include <cstdint>
     template <typename... Args>
     using Vector = std::vector<Args...>;
 

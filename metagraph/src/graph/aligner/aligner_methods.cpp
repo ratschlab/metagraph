@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <string_view>
 
+#include "algorithms.hpp"
 #include "dbg_succinct.hpp"
 #include "bounded_priority_queue.hpp"
 
