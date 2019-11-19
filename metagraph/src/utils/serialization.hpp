@@ -69,7 +69,7 @@ class VectorInStream {
 // Return set bits from a bit vector encoded in a file
 class BitVectorFileInStream : public VectorInStream {
   public:
-    BitVectorFileInStream(const std::string &file);
+    explicit BitVectorFileInStream(const std::string &file);
 
     uint64_t next_value();
     uint64_t values_left() const { return values_left_; }
