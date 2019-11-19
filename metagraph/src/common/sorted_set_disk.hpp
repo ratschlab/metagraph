@@ -161,6 +161,8 @@ class SortedSetDisk {
         }
         uint64_t totalSize = 0;
 
+        // init to suppress maybe-uninitialized warnings in GCC
+        // TODO: is there a better way to do this?
         T last_written = {};
         bool has_written = false;
         while (!merge_heap.empty()) {
