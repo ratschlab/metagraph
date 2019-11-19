@@ -428,11 +428,9 @@ BitVectorFileInStream::BitVectorFileInStream(const std::string &file)
         throw std::ifstream::failure("Missing number of set bits: " + file);
 
     if (values_left_ > length_) {
-        throw std::ifstream::failure(
-            fmt::format("Number of set bits greater than length: {} > {}",
-                        values_left_,
-                        length_)
-        );
+        throw std::ifstream::failure(fmt::format(
+            "Number of set bits greater than length: {} > {}", values_left_, length_
+        ));
     }
 }
 
@@ -446,9 +444,9 @@ uint64_t BitVectorFileInStream::next_value() {
         throw std::ifstream::failure("Truncated file");
 
     if (next_val >= length_) {
-        throw std::runtime_error(
-            fmt::format("Error: index >= length: {} >= {}", next_val, length_)
-        );
+        throw std::runtime_error(fmt::format(
+            "Error: index >= length: {} >= {}", next_val, length_
+        ));
     }
 
     return next_val;
