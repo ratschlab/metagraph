@@ -151,8 +151,6 @@ Config::Config(int argc, const char *argv[]) {
             }
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--dump-raw-anno")) {
-            dump_raw_anno = true;
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
@@ -913,7 +911,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
-            fprintf(stderr, "\t   --dump-raw-anno \tdump the columns of the annotator as separate binary files [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");

@@ -598,58 +598,31 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
 
 template <typename Label>
 bool ColumnCompressed<Label>
-::dump_columns(const std::string &prefix, bool binary, size_t num_threads) const {
+::dump_columns(const std::string &prefix, size_t num_threads) const {
     bool success = true;
 
-    if (binary) {
-        #pragma omp parallel for num_threads(num_threads)
-        for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".raw.annodbg",
-                std::ios::binary
-            );
+    #pragma omp parallel for num_threads(num_threads)
+    for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
+        std::ofstream outstream(
+            remove_suffix(prefix, kExtension)
+                + "." + std::to_string(i)
+                + ".text.annodbg"
+        );
 
-            if (!outstream.good()) {
-                std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
-                success = false;
-                continue;
-            }
-
-            serialize_number(outstream, num_objects());
-
-            const auto &column = get_column(i);
-
-            serialize_number(outstream, column.num_set_bits());
-            column.call_ones([&](const auto &pos) {
-                serialize_number(outstream, pos);
-            });
+        if (!outstream.good()) {
+            std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
+            success = false;
+            continue;
         }
-    } else {
-        #pragma omp parallel for num_threads(num_threads)
-        for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".text.annodbg"
-            );
 
-            if (!outstream.good()) {
-                std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
-                success = false;
-                continue;
-            }
+        outstream << num_objects() << " ";
 
-            outstream << num_objects() << " ";
+        const auto &column = get_column(i);
 
-            const auto &column = get_column(i);
-
-            outstream << column.num_set_bits() << std::endl;
-            column.call_ones([&](const auto &pos) {
-                outstream << pos << std::endl;
-            });
-        }
+        outstream << column.num_set_bits() << "\n";
+        column.call_ones([&](const auto &pos) {
+            outstream << pos << "\n";
+        });
     }
 
     return success;
