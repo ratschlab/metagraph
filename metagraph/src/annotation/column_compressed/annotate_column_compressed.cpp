@@ -4,8 +4,6 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include <fmt/format.h>
-
 #include "serialization.hpp"
 #include "string_utils.hpp"
 #include "algorithms.hpp"
@@ -607,7 +605,7 @@ bool ColumnCompressed<Label>
     for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
         const auto &column = get_column(i);
         const std::string outfile = remove_suffix(prefix, kExtension)
-            + fmt::format(".{}.text.annodbg", i);
+            + "." + std::to_string(i) + ".text.annodbg";
 
         try {
             VectorFileOutStream outstream(outfile);

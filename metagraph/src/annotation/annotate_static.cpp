@@ -1,7 +1,5 @@
 #include "annotate_static.hpp"
 
-#include <fmt/format.h>
-
 #include "string_utils.hpp"
 #include "static_annotators_def.hpp"
 #include "serialization.hpp"
@@ -173,7 +171,7 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>
     for (uint64_t i = 0; i < m; ++i) {
         auto column = matrix_->get_column(i);
         const std::string outfile = remove_suffix(prefix, kExtension)
-            + fmt::format(".{}.text.annodbg", i);
+            + "." + std::to_string(i) + ".text.annodbg";
 
         try {
             VectorFileOutStream outstream(outfile);
