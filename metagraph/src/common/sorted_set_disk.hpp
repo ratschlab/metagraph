@@ -160,8 +160,10 @@ class SortedSetDisk {
             }
         }
         uint64_t totalSize = 0;
-        // init with any value that is not the top
-        T last_written;
+
+        // init to suppress maybe-uninitialized warnings in GCC
+        // TODO: is there a better way to do this?
+        T last_written = {};
         bool has_written = false;
         while (!merge_heap.empty()) {
             std::pair<T, uint32_t> smallest = merge_heap.top();
