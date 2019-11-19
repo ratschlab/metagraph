@@ -2,10 +2,7 @@
 #define __SERIALIZATION_HPP__
 
 #include <fstream>
-#include <string>
 #include <vector>
-
-#include "utils/bit_vectors/bit_vector.hpp"
 
 
 void serialize_number(std::ostream &out, uint64_t number);
@@ -50,50 +47,5 @@ void serialize_set(std::ostream &out, const Set &set);
 template <class Set>
 bool load_set(std::istream &in, Set *set);
 
-
-/** Vector streaming
- *
- * Used to extract the indices of set bits from either a file, or compressed data structures
- *
- */
-
-// Read vector from a source
-class VectorStream {
-  public:
-    virtual ~VectorStream() {}
-    virtual uint64_t next_value() = 0;
-    virtual uint64_t values_left() const = 0;
-};
-
-// Read numbers from file
-class VectorFileStream : public VectorStream {
-  public:
-    VectorFileStream(const std::string &file);
-
-    uint64_t next_value();
-    uint64_t values_left() const { return values_left_; }
-
-  private:
-    std::ifstream istream_;
-    uint64_t length_;
-    uint64_t values_left_;
-};
-
-// Return set bits from a bit vector
-class VectorBitStream : public VectorStream {
-  public:
-    VectorBitStream(const bit_vector &vector,
-                    uint64_t begin = 0,
-                    uint64_t end = static_cast<uint64_t>(-1));
-
-    uint64_t next_value();
-    uint64_t values_left() const { return max_rank_ - current_rank_; }
-
-  private:
-    const bit_vector &vector_;
-    uint64_t begin_;
-    uint64_t current_rank_;
-    uint64_t max_rank_;
-};
 
 #endif // __SERIALIZATION_HPP__
