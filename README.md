@@ -15,8 +15,8 @@ All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbr
 #### For compiling with GNU GCC:
 ```
 brew install gcc autoconf automake libtool cmake make htslib
-brew install --build-from-source boost
-(optional) brew install --build-from-source double-conversion gflags glog lz4 snappy zstd folly
+[[ "$OSTYPE" == "darwin"* ]] && brew install --build-from-source boost double-conversion gflags glog lz4 snappy zstd folly
+[[ "$OSTYPE" != "darwin"* ]] && brew install --cc=gcc-5 boost double-conversion gflags glog lz4 snappy zstd folly
 brew install gcc@8
 ```
 Then set the environment variables accordingly:
