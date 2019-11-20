@@ -26,8 +26,8 @@ Then set the environment variables accordingly:
 ```
 echo "\
 # Use gcc-8 with cmake
-export CC=\"\$(which gcc-8)\"
-export CXX=\"\$(which g++-8)\"
+export CC=\"\$(which gcc-9)\"
+export CXX=\"\$(which g++-9)\"
 " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
 ```
 
