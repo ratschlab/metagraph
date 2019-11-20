@@ -7,7 +7,6 @@
 
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
-#include <sdsl/int_vector.hpp>
 
 #include "utils/string_utils.hpp"
 #include "utils/vectors.hpp"
@@ -45,6 +44,7 @@ class KmerExtractorBOSS {
 
     /**
      * Break the sequence into kmers and add them to the kmer storage.
+     * Adds only valid k-mers.
      */
     template <class KMER>
     static void sequence_to_kmers(const std::string &sequence,
@@ -52,14 +52,6 @@ class KmerExtractorBOSS {
                                   const std::vector<TAlphabet> &suffix,
                                   Vector<KMER> *kmers,
                                   bool canonical_mode = false);
-
-    template <class KMER>
-    static Vector<KMER> sequence_to_kmers(const std::string &sequence,
-                                          size_t k,
-                                          bool canonical_mode = false,
-                                          const std::vector<TAlphabet> &suffix = {});
-
-    static sdsl::bit_vector valid_kmers(const std::string &sequence, size_t k);
 
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k) {
@@ -115,6 +107,7 @@ class KmerExtractor2BitT {
 
     /**
      * Break the sequence into kmers and add them to the kmer storage.
+     * Adds only valid k-mers.
      */
     template <class T>
     void sequence_to_kmers(const std::string &sequence,
@@ -122,13 +115,18 @@ class KmerExtractor2BitT {
                            const std::vector<TAlphabet> &suffix,
                            Vector<Kmer<T>> *kmers,
                            bool canonical_mode = false) const;
-    template <class KMER>
-    Vector<KMER> sequence_to_kmers(const std::string &sequence,
-                                   size_t k,
-                                   bool canonical_mode = false,
-                                   const std::vector<TAlphabet> &suffix = {}) const;
 
-    sdsl::bit_vector valid_kmers(const std::string &sequence, size_t k) const;
+    /**
+     * Extract all k-mers from sequence.
+     * Returned pairs are k-mers and flags: `true` for the valid k-mers
+     * and `false` for invalid ones.
+     */
+    template <class KMER>
+    Vector<std::pair<KMER, bool>>
+    sequence_to_kmers(const std::string &sequence,
+                      size_t k,
+                      bool canonical_mode = false,
+                      const std::vector<TAlphabet> &suffix = {}) const;
 
     template <class T>
     std::string kmer_to_sequence(const Kmer<T> &kmer, size_t k) const {

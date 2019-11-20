@@ -103,7 +103,8 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     bool in_graph(node_index node) const;
 
   private:
-    Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const {
+    Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
+                                                    bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
 
@@ -141,9 +142,9 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
     std::vector<bool> skipped;
     skipped.reserve(sequence.size() - get_k() + 1);
 
-    for (const auto &kmer : sequence_to_kmers(sequence)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
         skipped.push_back(skip());
-        if (skipped.back())
+        if (skipped.back() || !is_valid)
             continue;
 
         auto index_insert = kmers_.insert(kmer);
@@ -156,8 +157,8 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
         return;
 
     auto it = skipped.end();
-    for (const auto &kmer : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
-        if (*(--it))
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
+        if (*(--it) || !is_valid)
             continue;
 
         auto index_insert = kmers_.insert(kmer);
@@ -177,19 +178,12 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
                               std::string::const_iterator end,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate) const {
-    std::string sequence(begin, end);
-    const auto &kmers = sequence_to_kmers(sequence);
-    auto it = kmers.begin();
-    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
-
-        assert(it != kmers.end() || !is_valid);
-
+    for (const auto &[kmer, is_valid] : sequence_to_kmers({ begin, end })) {
         if (terminate())
             return;
 
-        callback(is_valid ? get_index(*it++) : npos);
+        callback(is_valid ? get_index(kmer) : npos);
     }
-    assert(it == kmers.end());
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -198,18 +192,12 @@ template <typename KMER>
 void DBGHashOrderedImpl<KMER>::map_to_nodes(const std::string &sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
-    const auto &kmers = sequence_to_kmers(sequence, canonical_mode_);
-    auto it = kmers.begin();
-    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
-
-        assert(it != kmers.end() || !is_valid);
-
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
         if (terminate())
             return;
 
-        callback(is_valid ? get_index(*it++) : npos);
+        callback(is_valid ? get_index(kmer) : npos);
     }
-    assert(it == kmers.end());
 }
 
 template <typename KMER>

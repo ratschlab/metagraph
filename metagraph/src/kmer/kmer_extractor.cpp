@@ -233,43 +233,6 @@ inline void sequence_to_kmers(const TAlphabet *begin,
     }
 }
 
-template <typename TAlphabet>
-inline sdsl::bit_vector valid_kmers(const std::string &sequence,
-                                    size_t k,
-                                    const std::string &alphabet,
-                                    std::function<TAlphabet(char)> encode) {
-    if (sequence.size() < k)
-        return sdsl::bit_vector();
-
-    sdsl::bit_vector valid(sequence.size() - k + 1, true);
-
-    auto is_char_invalid = [&](char c) { return encode(c) >= alphabet.size(); };
-    uint64_t invalid_counter = std::count_if(sequence.begin(),
-                                             sequence.begin() + k,
-                                             is_char_invalid);
-    auto it = valid.begin();
-    *it++ = !invalid_counter;
-
-    for (auto jt = sequence.begin() + k; jt != sequence.end(); ++jt, ++it) {
-        if (is_char_invalid(*jt))
-            invalid_counter++;
-
-        if (is_char_invalid(*(jt - k))) {
-            assert(invalid_counter);
-            invalid_counter--;
-        }
-
-        assert(it != valid.end());
-
-        if (invalid_counter)
-            *it = false;
-    }
-
-    assert(it == valid.end());
-
-    return valid;
-}
-
 } // namespace extractor
 
 
@@ -335,15 +298,6 @@ KmerExtractorBOSS::reverse_complement(const std::vector<TAlphabet> &sequence) {
 KmerExtractorBOSS::TAlphabet KmerExtractorBOSS::complement(TAlphabet c) {
     assert(c < kComplementCode.size());
     return kComplementCode[c];
-}
-
-sdsl::bit_vector KmerExtractorBOSS::valid_kmers(const std::string &sequence, size_t k) {
-    auto valid = extractor::valid_kmers<TAlphabet>(
-        sequence, k, alphabet,
-        [&](char c) -> TAlphabet { return encode(c); }
-    );
-
-    return valid;
 }
 
 /**
@@ -422,40 +376,6 @@ void KmerExtractorBOSS::sequence_to_kmers(const std::string&,
                                           const std::vector<TAlphabet>&,
                                           Vector<Kmer256>*,
                                           bool);
-
-template <typename KMER>
-Vector<KMER> KmerExtractorBOSS::sequence_to_kmers(const std::string &sequence,
-                                                  size_t k,
-                                                  bool canonical_mode,
-                                                  const std::vector<TAlphabet> &suffix) {
-    Vector<KMER> kmers;
-
-    if (sequence.length() < k)
-        return kmers;
-
-    kmers.reserve(sequence.length() + 1 - k);
-    sequence_to_kmers(sequence, k, suffix, &kmers, canonical_mode);
-    return kmers;
-}
-
-template
-Vector<KmerExtractorBOSS::Kmer64>
-KmerExtractorBOSS::sequence_to_kmers(const std::string&,
-                                     size_t,
-                                     bool,
-                                     const std::vector<TAlphabet>&);
-template
-Vector<KmerExtractorBOSS::Kmer128>
-KmerExtractorBOSS::sequence_to_kmers(const std::string&,
-                                     size_t,
-                                     bool,
-                                     const std::vector<TAlphabet>&);
-template
-Vector<KmerExtractorBOSS::Kmer256>
-KmerExtractorBOSS::sequence_to_kmers(const std::string&,
-                                     size_t,
-                                     bool,
-                                     const std::vector<TAlphabet>&);
 
 std::vector<std::string> KmerExtractorBOSS::generate_suffixes(size_t len) {
     std::vector<std::string> valid_suffixes;
@@ -536,16 +456,6 @@ KmerExtractor2BitTDecl(std::vector<std::string>)
     return result;
 }
 
-KmerExtractor2BitTDecl(sdsl::bit_vector)
-::valid_kmers(const std::string &sequence, size_t k) const {
-    auto valid = extractor::valid_kmers<TAlphabet>(
-        sequence, k, alphabet,
-        [&](char c) -> TAlphabet { return encode(c); }
-    );
-
-    return valid;
-}
-
 /**
  * Break the sequence into kmers and add them to the kmer storage.
  */
@@ -586,18 +496,49 @@ KmerExtractor2BitTDecl(template <typename T> void)
     );
 }
 
-KmerExtractor2BitTDecl(template <typename KMER> Vector<KMER>)
+KmerExtractor2BitTDecl(template <typename KMER> Vector<std::pair<KMER, bool>>)
 ::sequence_to_kmers(const std::string &sequence,
                     size_t k,
                     bool canonical_mode,
                     const std::vector<TAlphabet> &suffix) const {
-    Vector<KMER> kmers;
+    assert(k);
+    assert(suffix.size() <= k);
 
-    if (sequence.length() < k)
-        return kmers;
+    if (sequence.size() < k)
+        return {};
 
+    Vector<std::pair<KMER, bool>> kmers;
     kmers.reserve(sequence.length() + 1 - k);
-    sequence_to_kmers(sequence, k, suffix, &kmers, canonical_mode);
+
+    auto seq = encode(sequence);
+
+    assert(std::all_of(seq.begin(), seq.end(),
+                       [&](auto c) { return c <= alphabet.size(); }));
+
+    // Mark where (k+1)-mers with invalid characters end
+    // Example for (k+1)=3: [X]***[X]****[X]***
+    //              ---->   [111]0[111]00[111]0
+    auto invalid = utils::drag_and_mark_segments(seq, alphabet.size(), k);
+    // Set invalid characters to zero so that k-mers don't overflow.
+    // k-mers containing these invalid characters are invalid and will
+    // be replaced anyway.
+    std::replace(seq.begin(), seq.end(), static_cast<TAlphabet>(alphabet.size()),
+                                         static_cast<TAlphabet>(0));
+    size_t i = k - 1;
+
+    extractor::sequence_to_kmers<KMER>(
+        seq.data(), seq.data() + seq.size(), k, suffix,
+        [&kmers](auto kmer) { kmers.emplace_back(kmer, true); },
+        canonical_mode ? complement_code_ : std::vector<uint8_t>(),
+        [&]() {
+            if (!invalid[i++])
+                return false;
+
+            kmers.emplace_back(KMER(), false);
+            return true;
+        }
+    );
+
     return kmers;
 }
 
@@ -619,7 +560,7 @@ ExplicitInstantiation_sequence_to_kmers(sdsl::uint256_t)
 
 #define ExplicitInstantiation_sequence_to_kmers_vector(T) \
 template \
-Vector<KmerExtractor2Bit::Kmer<T>> KmerExtractor2Bit \
+Vector<std::pair<KmerExtractor2Bit::Kmer<T>, bool>> KmerExtractor2Bit \
 ::sequence_to_kmers<KmerExtractor2Bit::Kmer<T>>(const std::string&, \
                                                 size_t, \
                                                 bool, \
