@@ -307,7 +307,7 @@ IBOSSChunkConstructor
             case ExtractorContainer::VECTOR:
                 return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
             case ExtractorContainer::DEQUE:
-                return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
+                // return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
             default:
                 throw std::logic_error(
                         "Unsupported extractor container specified for "
@@ -318,7 +318,8 @@ IBOSSChunkConstructor
             case ExtractorContainer::VECTOR:
                 return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
             case ExtractorContainer::DEQUE:
-                return initialize_boss_chunk_constructor<KmerCollectorDeque>(OTHER_ARGS);
+                // return initialize_boss_chunk_constructor<KmerCollectorDeque>
+                // (OTHER_ARGS);
             case ExtractorContainer::VECTOR_DISK:
                 return initialize_boss_chunk_constructor<KmerCollectorDisk>(OTHER_ARGS);
             default:
