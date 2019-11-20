@@ -41,18 +41,13 @@ class KmerBloomFilter {
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
 
-    void print_stats() const;
+    KmerHasherType get_hasher() const { return hasher_; }
 
   private:
-    void call_kmers(const char *begin, const char *end,
-                    const std::function<void(size_t /* position */,
-                                             uint64_t /* hash1 */,
-                                             uint64_t /* hash2 */)> &callback) const;
-
     BloomFilter filter_;
     bool canonical_mode_;
     size_t k_;
-    KmerHasherType hasher_;
+    const KmerHasherType hasher_;
 };
 
 

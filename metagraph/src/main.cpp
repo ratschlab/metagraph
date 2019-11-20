@@ -1144,6 +1144,17 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "========================================================" << std::endl;
 }
 
+template <class KmerHasher>
+void print_bloom_filter_stats(const KmerBloomFilter<KmerHasher> *kmer_bloom) {
+    if (!kmer_bloom)
+        return;
+
+    std::cout << "====================== BLOOM STATS =====================" << std::endl;
+    std::cout << "Size (bits):\t" << kmer_bloom->size() << std::endl
+              << "Num hashes:\t" << kmer_bloom->num_hash_functions() << std::endl;
+    std::cout << "========================================================" << std::endl;
+}
+
 void print_stats(const Annotator &annotation) {
     std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
     std::cout << "labels:  " << annotation.num_labels() << std::endl;
@@ -2558,8 +2569,8 @@ int main(int argc, const char *argv[]) {
 
                 print_stats(*graph);
 
-                if (dynamic_cast<DBGSuccinct*>(graph.get())) {
-                    const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+                if (auto dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get())) {
+                    const auto &boss_graph = dbg_succ->get_boss();
 
                     print_boss_stats(boss_graph,
                                      config->count_dummy,
@@ -2568,6 +2579,8 @@ int main(int argc, const char *argv[]) {
 
                     if (config->print_graph_internal_repr)
                         boss_graph.print_internal_representation(std::cout);
+
+                    print_bloom_filter_stats(dbg_succ->get_bloom_filter());
                 }
 
                 if (config->print_graph)
