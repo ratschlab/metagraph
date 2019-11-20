@@ -13,7 +13,7 @@ typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
  * @tparam Container
  */
 template <typename KMER, class KmerExtractor, class Container>
-class KmerStorage {
+class KmerCollector {
     using Extractor = KmerExtractor;
     using Sequence = std::vector<typename Extractor::TAlphabet>;
     Extractor kmer_extractor_;
@@ -26,7 +26,7 @@ class KmerStorage {
     using Value = typename Container::value_type;
     using Data = typename Container::storage_type;
 
-    KmerStorage(size_t k,
+    KmerCollector(size_t k,
                 bool both_strands_mode = false,
                 Sequence&& filter_suffix_encoded = {},
                 size_t num_threads = 1,
