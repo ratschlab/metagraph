@@ -190,8 +190,8 @@ std::function<void(StorageType*)> get_cleanup(bool clean_dummy_boss_kmers) {
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-KmerStorage<KMER, KmerExtractor, Container>
-::KmerStorage(size_t k,
+KmerCollector<KMER, KmerExtractor, Container>
+::KmerCollector(size_t k,
               bool both_strands_mode,
               Sequence&& filter_suffix_encoded,
               size_t num_threads,
@@ -219,7 +219,7 @@ KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
+void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequence(std::string&& sequence, uint64_t count) {
     if (sequence.size() < k_)
         return;
@@ -239,7 +239,7 @@ void KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
+void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
     if constexpr(utils::is_instance<Container, SortedSet>{}
                   || utils::is_instance<Container, SortedSetDisk>{}) {
@@ -260,7 +260,7 @@ void KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
+void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
     if constexpr(utils::is_instance<Container, SortedSet>{}
                   || utils::is_instance<Container, SortedSetDisk>{}) {
@@ -282,13 +282,13 @@ void KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
+void KmerCollector<KMER, KmerExtractor, Container>
 ::insert_dummy(const KMER &dummy_kmer) {
     kmers_.insert(&dummy_kmer, &dummy_kmer + 1);
 };
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>::release_task_to_pool() {
+void KmerCollector<KMER, KmerExtractor, Container>::release_task_to_pool() {
     auto *buffered_sequences = new std::vector<std::pair<std::string, uint64_t>>();
     buffered_sequences->swap(buffered_sequences_);
 
@@ -303,20 +303,20 @@ void KmerStorage<KMER, KmerExtractor, Container>::release_task_to_pool() {
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>::join() {
+void KmerCollector<KMER, KmerExtractor, Container>::join() {
     release_task_to_pool();
     thread_pool_.join();
 }
 
 
 #define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER, CONTAINER) \
-    template class KmerStorage<KMER, \
+    template class KmerCollector<KMER, \
                                KMER_EXTRACTOR, \
                                SortedSet<KMER, CONTAINER<KMER>>>; \
-    template class KmerStorage<KMER, \
+    template class KmerCollector<KMER, \
                                KMER_EXTRACTOR, \
                                SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>>>; \
-    template class KmerStorage<KMER, \
+    template class KmerCollector<KMER, \
                                KMER_EXTRACTOR, \
                                SortedMultiset<KMER, uint32_t, CONTAINER<std::pair<KMER, uint32_t>>>>;
 
@@ -325,11 +325,11 @@ INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, Vector)
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, Vector)
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, Vector)
 
-template class KmerStorage<KmerExtractorBOSS::Kmer64, KmerExtractorBOSS,
+template class KmerCollector<KmerExtractorBOSS::Kmer64, KmerExtractorBOSS,
     SortedSetDisk<KmerExtractorBOSS::Kmer64>>;
-template class KmerStorage<KmerExtractorBOSS::Kmer128, KmerExtractorBOSS,
+template class KmerCollector<KmerExtractorBOSS::Kmer128, KmerExtractorBOSS,
     SortedSetDisk<KmerExtractorBOSS::Kmer128>>;
-template class KmerStorage<KmerExtractorBOSS::Kmer256, KmerExtractorBOSS,
+template class KmerCollector<KmerExtractorBOSS::Kmer256, KmerExtractorBOSS,
     SortedSetDisk<KmerExtractorBOSS::Kmer256>>;
 
 

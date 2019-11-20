@@ -12,39 +12,39 @@
 #include "boss_chunk.hpp"
 
 template <typename KMER>
-using KmerCounterVector = KmerStorage<KMER,
+using KmerMultsetVector = KmerCollector<KMER,
                                       KmerExtractorBOSS,
                                       SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>;
 
 template <typename KMER>
-using KmerCounterDeque = KmerStorage<KMER,
+using KmerMultsetDeque = KmerCollector<KMER,
                                      KmerExtractorBOSS,
                                      SortedMultiset<KMER, uint8_t, DequeStorage<std::pair<KMER, uint8_t>>>>;
 
 template <typename KMER>
-using KmerCollectorVector = KmerStorage<KMER,
+using KmerSetVector = KmerCollector<KMER,
                                         KmerExtractorBOSS,
                                         SortedSet<KMER, Vector<KMER>>>;
 
 template <typename KMER>
-using KmerCollectorDeque = KmerStorage<KMER,
+using KmerSetDeque = KmerCollector<KMER,
                                        KmerExtractorBOSS,
                                        SortedSet<KMER, DequeStorage<KMER>>>;
 
 template <typename KMER>
-using KmerCollectorDisk = KmerStorage<KMER,
+using KmerSetDisk = KmerCollector<KMER,
                                       KmerExtractorBOSS,
                                       SortedSetDisk<KMER>>;
 
 template <typename KMER,
           typename KmerCount = uint8_t,
           class Container = Vector<std::pair<KMER, KmerCount>>>
-using KmerCounter = KmerStorage<KMER,
+using KmerMultset = KmerCollector<KMER,
                                 KmerExtractorBOSS,
                                 SortedMultiset<KMER, KmerCount, Container>>;
 
 /**
- * What type of data structure to use in the #KmerCollector.
+ * What type of data structure to use in the #KmerSet.
  */
 enum class ExtractorContainer {
     DEQUE,
@@ -185,7 +185,7 @@ encode_filter_suffix_boss(const std::string &filter_suffix) {
     return filter_suffix_encoded;
 }
 
-template <typename KmerStorage>
+template <typename KmerCollector>
 class BOSSChunkConstructor : public IBOSSChunkConstructor {
     friend IBOSSChunkConstructor;
 
@@ -240,14 +240,14 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           << timer.elapsed() << "sec" << std::endl;
         }
 
-        if constexpr(std::is_same_v<typename KmerStorage::Data,
-                                    DequeStorage<typename KmerStorage::Value>>) {
+        if constexpr(std::is_same_v<typename KmerCollector::Data,
+                                    DequeStorage<typename KmerCollector::Value>>) {
             kmers.shrink_to_fit();
         }
 
         BOSS::Chunk *result;
 
-        if constexpr(utils::is_pair<typename KmerStorage::Value>::value) {
+        if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
             // kmer_collector stores (BOSS::k_ + 1)-mers
             result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
                                      kmer_storage_.get_k() - 1,
@@ -269,7 +269,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
     uint64_t get_k() const { return kmer_storage_.get_k() - 1; }
 
-    KmerStorage kmer_storage_;
+    KmerCollector kmer_storage_;
 };
 
 template <template <typename KMER> class KmerContainer, typename... Args>
@@ -305,9 +305,9 @@ IBOSSChunkConstructor
     if (count_kmers) {
         switch (kExtractorContainer) {
             case ExtractorContainer::VECTOR:
-                return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
+                return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
             case ExtractorContainer::DEQUE:
-                return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
+                return initialize_boss_chunk_constructor<KmerMultsetDeque>(OTHER_ARGS);
             default:
                 throw std::logic_error(
                         "Unsupported extractor container specified for "
@@ -316,11 +316,11 @@ IBOSSChunkConstructor
     } else {
         switch (kExtractorContainer) {
             case ExtractorContainer::VECTOR:
-                return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
+                return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
             case ExtractorContainer::DEQUE:
-                return initialize_boss_chunk_constructor<KmerCollectorDeque>(OTHER_ARGS);
+                return initialize_boss_chunk_constructor<KmerSetDeque>(OTHER_ARGS);
             case ExtractorContainer::VECTOR_DISK:
-                return initialize_boss_chunk_constructor<KmerCollectorDisk>(OTHER_ARGS);
+                return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
             default:
                 throw std::logic_error(
                         "Unknown extractor container: " +
