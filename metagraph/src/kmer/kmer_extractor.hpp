@@ -114,7 +114,7 @@ class KmerExtractor2BitT {
                        const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
 
     /**
-     * Break the sequence into kmers and add them to the kmer storage.
+     * Break the sequence into kmers and add them to the kmer collector.
      */
     template <class T>
     void sequence_to_kmers(const std::string &sequence,
