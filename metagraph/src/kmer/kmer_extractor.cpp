@@ -45,18 +45,22 @@ inline std::vector<TAlphabet> encode(std::string::const_iterator begin,
     return seq_encoded;
 }
 
-template <typename TAlphabet>
-std::vector<TAlphabet>
-inline reverse_complement(const TAlphabet *begin,
-                          const TAlphabet *end,
-                          const std::vector<uint8_t> &complement_code) {
+template <typename Iterator>
+inline void reverse_complement(Iterator begin,
+                               Iterator end,
+                               const std::vector<uint8_t> &complement_code) {
     assert(end >= begin);
     assert(std::all_of(begin, end, [&](auto c) { return c < complement_code.size(); }));
 
-    std::vector<TAlphabet> rev_comp(end - begin);
-    std::transform(begin, end, rev_comp.rbegin(),
-                   [&](const auto c) -> TAlphabet { return complement_code[c]; });
-    return rev_comp;
+    while (begin < --end) {
+        auto temp_value = complement_code[static_cast<int>(*begin)];
+        *begin = complement_code[static_cast<int>(*end)];
+        *end = temp_value;
+        ++begin;
+    }
+
+    if (begin == end)
+        *begin = complement_code[static_cast<int>(*begin)];
 }
 
 
@@ -222,7 +226,8 @@ inline void sequence_to_kmers(const TAlphabet *begin,
             __sequence_to_kmers_slide<KMER>(begin, end, k, suffix, callback, skip);
         }
     } else {
-        auto rev_comp = reverse_complement(begin, end, complement_code);
+        std::vector<TAlphabet> rev_comp(begin, end);
+        reverse_complement(rev_comp.begin(), rev_comp.end(), complement_code);
         assert(rev_comp.size() == static_cast<size_t>(end - begin));
 
         if (suffix.size() > 1) {
@@ -288,11 +293,9 @@ std::string KmerExtractorBOSS::decode(const std::vector<TAlphabet> &sequence) {
     return extractor::decode(sequence, alphabet);
 }
 
-std::vector<KmerExtractorBOSS::TAlphabet>
-KmerExtractorBOSS::reverse_complement(const std::vector<TAlphabet> &sequence) {
-    return extractor::reverse_complement(sequence.data(),
-                                         sequence.data() + sequence.size(),
-                                         kComplementCode);
+void KmerExtractorBOSS::reverse_complement(std::vector<TAlphabet> *sequence) {
+    assert(sequence);
+    return extractor::reverse_complement(sequence->begin(), sequence->end(), kComplementCode);
 }
 
 KmerExtractorBOSS::TAlphabet KmerExtractorBOSS::complement(TAlphabet c) {
@@ -433,18 +436,6 @@ KmerExtractor2BitTDecl(std::vector<typename KmerExtractor2BitT<LogSigma>::TAlpha
 KmerExtractor2BitTDecl(std::string)
 ::decode(const std::vector<TAlphabet> &sequence) const {
     return extractor::decode(sequence, alphabet);
-}
-
-KmerExtractor2BitTDecl(std::string)
-::reverse_complement(const std::string &sequence) const {
-    std::string rev(sequence.size(), 0);
-    std::transform(sequence.rbegin(), sequence.rend(), rev.begin(),
-        [&](char c) {
-            auto code = encode(c);
-            return code >= alphabet.size() ? code : decode(complement_code_[code]);
-        }
-    );
-    return rev;
 }
 
 KmerExtractor2BitTDecl(std::vector<std::string>)
