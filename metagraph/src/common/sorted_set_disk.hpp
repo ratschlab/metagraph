@@ -2,7 +2,6 @@
 #define __SORTED_SET_DISK_HPP__
 
 #include "common/chunked_wait_queue.hpp"
-#include "common/deque_vector.hpp"
 #include "common/threading.hpp"
 #include "utils/vectors.hpp"
 
@@ -108,7 +107,7 @@ class SortedSetDisk {
 
     storage_type &data() {
         // TODO(ddanciu) - implement an adaptor from ChunkedWaitQueue to the expected
-        //  data structures in KmerStorage
+        //  data structures in KmerCollector
         throw std::runtime_error("Function not yet implemented");
     }
 
@@ -160,8 +159,10 @@ class SortedSetDisk {
             }
         }
         uint64_t totalSize = 0;
-        // init with any value that is not the top
-        T last_written;
+
+        // init to suppress maybe-uninitialized warnings in GCC
+        // TODO: is there a better way to do this?
+        T last_written = {};
         bool has_written = false;
         while (!merge_heap.empty()) {
             std::pair<T, uint32_t> smallest = merge_heap.top();
@@ -273,25 +274,19 @@ class SortedSetDisk {
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
-        if constexpr (std::is_same_v<DequeStorage<T>, storage_type>) {
-            data_first_.try_reserve(size, min_size);
-            data_second_.try_reserve(size, min_size);
+        size = std::max(size, min_size);
 
-        } else {
-            size = std::max(size, min_size);
-
-            while (size > min_size) {
-                try {
-                    data_first_.reserve(size);
-                    data_second_.reserve(size);
-                    return;
-                } catch (const std::bad_alloc &exception) {
-                    size = min_size + (size - min_size) * 2 / 3;
-                }
+        while (size > min_size) {
+            try {
+                data_first_.reserve(size);
+                data_second_.reserve(size);
+                return;
+            } catch (const std::bad_alloc &exception) {
+                size = min_size + (size - min_size) * 2 / 3;
             }
-            data_first_.reserve(min_size);
-            data_second_.reserve(min_size);
         }
+        data_first_.reserve(min_size);
+        data_second_.reserve(min_size);
     }
 
     /**
