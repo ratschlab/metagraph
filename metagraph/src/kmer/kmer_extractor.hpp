@@ -65,8 +65,7 @@ class KmerExtractorBOSS {
     static char decode(TAlphabet c);
     static std::string decode(const std::vector<TAlphabet> &sequence);
 
-    static std::vector<TAlphabet>
-    reverse_complement(const std::vector<TAlphabet> &sequence);
+    static void reverse_complement(std::vector<TAlphabet> *sequence);
     static TAlphabet complement(TAlphabet c);
 
     /**
@@ -132,8 +131,6 @@ class KmerExtractor2BitT {
     std::string kmer_to_sequence(const Kmer<T> &kmer, size_t k) const {
         return kmer.to_string(k, alphabet);
     }
-
-    std::string reverse_complement(const std::string &sequence) const;
 
     // map input character to k-mer character
     TAlphabet encode(char s) const;

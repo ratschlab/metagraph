@@ -1,5 +1,8 @@
 #include "kmer_bloom_filter.hpp"
 
+#ifndef NDEBUG
+#include "common/seq_tools/reverse_complement.hpp"
+#endif
 #include "utils/serialization.hpp"
 #include "utils/algorithms.hpp"
 #include "kmer/kmer_extractor.hpp"
@@ -14,25 +17,25 @@ void KmerBloomFilter<KmerHasher>
 ::add_sequence(const char *begin, const char *end) {
     assert(end >= begin && static_cast<size_t>(end - begin) >= k_);
 
-    #ifndef NDEBUG
+#ifndef NDEBUG
     uint64_t counter = 0;
-    #endif
+#endif
 
     call_kmers(begin, end, [&](auto, auto hash1, auto hash2) {
         filter_.insert(hash1, hash2);
         assert(filter_.check(hash1, hash2));
-        #ifndef NDEBUG
+#ifndef NDEBUG
         counter++;
-        #endif
+#endif
     });
 
     assert(sdsl::util::cnt_one_bits(check_kmer_presence(begin, end)) == counter);
+#ifndef NDEBUG
+    std::string rev_comp(begin, end);
+    reverse_complement(rev_comp.begin(), rev_comp.end());
     assert(!canonical_mode_
-            || sdsl::util::cnt_one_bits(check_kmer_presence(
-                   KmerDef::decode(KmerDef::reverse_complement(KmerDef::encode(
-                       std::string(begin, end)
-                   )))
-               )) == counter);
+            || sdsl::util::cnt_one_bits(check_kmer_presence(rev_comp)) == counter);
+#endif
 }
 
 template <class KmerHasher>

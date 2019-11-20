@@ -2,6 +2,7 @@
 
 #include <cassert>
 
+#include "common/seq_tools/reverse_complement.hpp"
 #include "serialization.hpp"
 #include "bit_vector.hpp"
 #include "hash_utils.hpp"
@@ -156,8 +157,11 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
     if (!canonical_mode_)
         return;
 
+    auto rev_comp = sequence;
+    reverse_complement(rev_comp.begin(), rev_comp.end());
+
     auto it = skipped.end();
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(seq_encoder_.reverse_complement(sequence))) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(rev_comp)) {
         if (*(--it) || !is_valid)
             continue;
 

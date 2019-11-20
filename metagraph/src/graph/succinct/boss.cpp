@@ -12,7 +12,6 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "common/threading.hpp"
-#include "common/seq_tools/reverse_complement.hpp"
 #include "utils/serialization.hpp"
 #include "utils/algorithms.hpp"
 #include "boss_construct.hpp"
@@ -2018,7 +2017,8 @@ void call_paths(const BOSS &boss,
 
 
         // get dual path (mapping of the reverse complement sequence)
-        auto rev_comp_seq = KmerExtractorBOSS::reverse_complement(sequence);
+        auto rev_comp_seq = sequence;
+        KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
         auto dual_path = boss.map_to_edges(rev_comp_seq);
         std::reverse(dual_path.begin(), dual_path.end());
@@ -2049,7 +2049,7 @@ void call_paths(const BOSS &boss,
                 continue;
             }
 
-            // The reverse-complement k-mer has been visited
+            // The reverse-complement k-mer had been visited
             // -> Skip this k-mer and call the traversed path segment.
             if (begin < i)
                 callback({ path.begin() + begin, path.begin() + i },
