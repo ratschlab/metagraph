@@ -108,7 +108,7 @@ class SortedSetDisk {
 
     storage_type &data() {
         // TODO(ddanciu) - implement an adaptor from ChunkedWaitQueue to the expected
-        //  data structures in KmerStorage
+        //  data structures in KmerCollector
         throw std::runtime_error("Function not yet implemented");
     }
 
