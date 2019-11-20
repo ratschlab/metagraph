@@ -15,12 +15,16 @@ All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbr
 #### For compiling with GNU GCC:
 ```
 brew install gcc autoconf automake libtool cmake make htslib
-[[ "$OSTYPE" == "darwin"* ]] && brew install --cc=gcc-7 boost double-conversion gflags glog lz4 snappy zstd folly
+[[ "$OSTYPE" == "darwin"* ]] \
+    && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
+    && brew install --cc=gcc-7 boost double-conversion gflags glog lz4 snappy zstd folly \
+    && brew install gcc@9
 [[ "$OSTYPE" != "darwin"* ]] \
-    && brew install --cc=gcc-5 boost double-conversion gflags glog lz4 snappy zstd \
-    && brew install https://raw.githubusercontent.com/karasikov/homebrew-core-1/patch-2/Formula/folly.rb \
-                    --without-shared --with-jemalloc
-brew install gcc@9
+    && brew install gcc@9 \
+    && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
+    && brew install --cc=gcc-9 boost double-conversion gflags glog lz4 snappy zstd \
+    && brew install --cc=gcc-9 https://raw.githubusercontent.com/karasikov/homebrew-core-1/patch-2/Formula/folly.rb \
+                               --without-shared --with-jemalloc
 ```
 Then set the environment variables accordingly:
 ```
