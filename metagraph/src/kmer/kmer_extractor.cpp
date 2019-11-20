@@ -339,7 +339,13 @@ sdsl::bit_vector KmerExtractorBOSS::valid_kmers(const std::string &sequence, siz
 }
 
 /**
- * Break the sequence into kmers and add them to the kmer storage.
+ * Break the sequence into k-mers and add them to the k-mer storage.
+ * @param sequence sequence to be broken into k-mers
+ * @param k the k-mer length
+ * @param suffix if not empty, only k-mers that match this suffix are kept
+ * @param[out] kmers output parameter for the resulting k-mers
+ * @param canonical_mode if true, extracts canonical (lexicographically smaller vs. the
+ * reverse complement) k-mers
  */
 template <typename KMER>
 void KmerExtractorBOSS::sequence_to_kmers(const std::string &sequence,
