@@ -619,9 +619,9 @@ bool ColumnCompressed<Label>
 
         const auto &column = get_column(i);
 
-        outstream << column.num_set_bits() << std::endl;
+        outstream << column.num_set_bits() << "\n";
         column.call_ones([&](const auto &pos) {
-            outstream << pos << std::endl;
+            outstream << pos << "\n";
         });
     }
 

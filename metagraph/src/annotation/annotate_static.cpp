@@ -184,9 +184,9 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 
         auto column = matrix_->get_column(i);
 
-        outstream << column.size() << std::endl;
+        outstream << column.size() << "\n";
         for (auto pos : column) {
-            outstream << pos << std::endl;
+            outstream << pos << "\n";
         }
     }
 
