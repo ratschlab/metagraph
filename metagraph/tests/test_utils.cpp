@@ -789,6 +789,11 @@ TEST(Vector, ResizeInfinityCheckThrow) {
     EXPECT_THROW(vector.resize(1llu << 59), std::bad_alloc);
 }
 
+TEST(Deque, ResizeInfinityCheckThrow) {
+    std::deque<int> array;
+    EXPECT_THROW(array.resize(1llu << 60), std::bad_alloc);
+}
+
 TEST(Misc, get_quantile) {
     EXPECT_EQ(1, utils::get_quantile<int>({ {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1} }, 0.0));
     EXPECT_EQ(5, utils::get_quantile<int>({ {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1} }, 1.0));

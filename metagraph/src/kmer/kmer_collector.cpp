@@ -336,4 +336,3 @@ template class KmerCollector<KmerExtractorBOSS::Kmer256, KmerExtractorBOSS,
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, Vector)
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, Vector)
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, Vector)
-

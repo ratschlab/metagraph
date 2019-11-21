@@ -292,7 +292,7 @@ IBOSSChunkConstructor
             default:
                 throw std::logic_error(
                         "Unsupported extractor container specified for "
-                        "counter. Only VECTOR and DEQUE are supported");
+                        "counter. Only VECTOR is supported");
         }
     } else {
         switch (kExtractorContainer) {
