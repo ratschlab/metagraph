@@ -42,7 +42,8 @@ class DBGHashFast4Impl : public DBGHashFast4::DBGHashFast4Interface {
                                      utils::Hash<KmerPrefix>,
                                      std::equal_to<KmerPrefix>,
                                      std::allocator<KmerPrefix>,
-                                     std::deque<KmerPrefix, std::allocator<KmerPrefix>>,
+                                     //std::deque<KmerPrefix, std::allocator<KmerPrefix>>,
+                                     std::vector<KmerPrefix, std::allocator<KmerPrefix>>,
                                      std::uint64_t>;
 
     using KmerIterator = typename KmerIndex::iterator;
@@ -254,6 +255,9 @@ template <typename KMER>
 void DBGHashFast4Impl<KMER>::add_sequence(const std::string &sequence,
                                             bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
+    kmers_.reserve(50'000'000);
+    values_.reserve(50'000'000);
+    may_contain_source_kmer_.reserve(50'000'000);
 
     size_t shift = 4;
     size_t last_shift = 0;

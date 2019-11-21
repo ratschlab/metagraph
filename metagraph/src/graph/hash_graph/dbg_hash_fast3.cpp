@@ -40,7 +40,8 @@ class DBGHashFast3Impl : public DBGHashFast3::DBGHashFast3Interface {
                                      utils::Hash<KmerPrefix>,
                                      std::equal_to<KmerPrefix>,
                                      std::allocator<KmerPrefix>,
-                                     std::deque<KmerPrefix, std::allocator<KmerPrefix>>,
+                                     //std::deque<KmerPrefix, std::allocator<KmerPrefix>>,
+                                     std::vector<KmerPrefix, std::allocator<KmerPrefix>>,
                                      std::uint64_t>;
 
     using KmerIterator = typename KmerIndex::iterator;
@@ -183,7 +184,10 @@ DBGHashFast3Impl<KMER>::DBGHashFast3Impl(size_t k,
         canonical_mode_(canonical_mode),
         packed_serialization_(packed_serialization),
         kIgnoreLastCharMask(~(KmerPrefix((1llu << KMER::kBitsPerChar) - 1) << int(KMER::kBitsPerChar * (k - 1))))
-      {};
+      //{};
+      { kmers_.reserve(50'000'000);
+        bits_.reserve(50'000'000);
+        };
 
 
 template <typename KMER>

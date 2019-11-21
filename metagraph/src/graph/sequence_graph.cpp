@@ -342,13 +342,11 @@ void call_sequences(const DeBruijnGraph &graph,
     //       \___
     //
     call_zeros(visited, [&](auto node) {
-        if (graph.in_graph(node)) {
-            if (graph.has_multiple_outgoing(node)) {
-                graph.adjacent_outgoing_nodes(node, [&](auto next) {
-                    if (!visited[next])
-                        call_paths_from(next);
-                });
-            }
+        if (graph.has_multiple_outgoing(node)) {
+            graph.adjacent_outgoing_nodes(node, [&](auto next) {
+                if (!visited[next])
+                    call_paths_from(next);
+            });
         }
     });
 

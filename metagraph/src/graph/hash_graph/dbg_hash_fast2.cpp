@@ -171,7 +171,9 @@ DBGHashFast2Impl<KMER>::DBGHashFast2Impl(size_t k,
         canonical_mode_(canonical_mode),
         packed_serialization_(packed_serialization),
         kIgnoreLastCharMask(~(KmerPrefix((1llu << KMER::kBitsPerChar) - 1) << int(KMER::kBitsPerChar * (k - 1))))
-      {};
+      //{};
+      { kmers_.reserve(50'000'000);
+        };
 
 
 template <typename KMER>

@@ -131,7 +131,9 @@ DBGHashFastImpl<KMER>::DBGHashFastImpl(size_t k,
                                              bool packed_serialization)
       : k_(k),
         canonical_mode_(canonical_mode),
-        packed_serialization_(packed_serialization) {}
+        packed_serialization_(packed_serialization) //{}
+      { kmers_.reserve(50'000'000);
+        };
 
 template <typename KMER>
 void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,

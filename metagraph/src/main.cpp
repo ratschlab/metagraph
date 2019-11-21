@@ -1647,6 +1647,9 @@ int main(int argc, const char *argv[]) {
             auto finish = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed = finish - start;
             std::cout << "Elapsed time (build): " << elapsed.count() << " s\n";
+
+///
+            std::cout << "num_nodes: " << graph->num_nodes() << std::endl;
 ///
             timer.reset();
             start = std::chrono::high_resolution_clock::now();
