@@ -10,7 +10,7 @@
 - folly (optional)
 - Python 3 (for running integration tests)
 
-All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh)
+All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (requires no root)
 
 #### For compiling with GNU GCC:
 ```
