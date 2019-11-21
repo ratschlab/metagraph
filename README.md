@@ -20,7 +20,7 @@ brew install gcc autoconf automake libtool cmake make htslib
     && brew install --cc=gcc-7 boost double-conversion gflags glog lz4 snappy zstd folly \
     && brew install gcc@9
 [[ "$OSTYPE" != "darwin"* ]] \
-    && brew install gcc@9 \
+    && brew install gcc@9 libomp \
     && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
     && brew install --cc=gcc-5 glog zstd \
     && brew install --cc=gcc-9 boost double-conversion gflags lz4 snappy openssl \
