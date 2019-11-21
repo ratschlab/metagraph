@@ -38,9 +38,11 @@ namespace common {
 template <typename T, typename Alloc = std::allocator<T>>
 class ChunkedWaitQueue {
   public:
+    class Iterator;
     // typedefs for STL compatibility
     typedef size_t size_type;
     typedef T value_type;
+    typedef Iterator iterator;
 
     /**
      * Constructs a WaitQueue with the given size parameters.
@@ -124,7 +126,12 @@ class ChunkedWaitQueue {
         }
     }
 
-    class Iterator;
+    /**
+     * Added for compatibility with Vector. Note that this method returns the class'
+     * unique iterator, which will point to the first element only before starting
+     * iterating.
+     */
+    Iterator &begin() { return iterator(); }
 
     /**
      * Special iterator indicating the end of the queue - the end is reached when the
@@ -137,7 +144,7 @@ class ChunkedWaitQueue {
      * multiple calls to this method will return the same iterator instance.
      * Should not be called from within multiple threads.
      */
-    Iterator &iterator() {
+    Iterator &iter() {
         std::unique_lock<std::mutex> l(mutex_);
         // if the queue is empty, we don't know if elements will be added at a later time
         // so we need to wait until either an element is added or shutdown() is called
@@ -208,8 +215,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     friend ChunkedWaitQueue;
 
   public:
-    Iterator(const Iterator &other) = delete; // non construction-copyable
-    Iterator &operator=(const Iterator &) = delete; // non copyable
+    // Iterator(const Iterator &other) = delete; // non construction-copyable
+    // Iterator &operator=(const Iterator &) = delete; // non copyable
 
     /**
      * Creates an iterator for the given queue.

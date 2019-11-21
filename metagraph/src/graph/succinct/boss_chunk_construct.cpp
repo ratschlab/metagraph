@@ -109,18 +109,25 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 // k is node length
+/**
+ * @tparam Array the data structure in which the k-mers were merged (e.g. a
+ * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
+ */
 template <typename Array>
 void recover_source_dummy_nodes(size_t k,
                                 Array *kmers,
                                 size_t num_threads,
                                 bool verbose) {
-    using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
+    typename Array::iterator iter = kmers->begin();
+    typename Array::value_type first = *iter;
+    using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
 
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
 
     for (size_t i = 0; i < dummy_begin; ++i) {
-        const KMER &kmer = utils::get_first((*kmers)[i]);
+        typename Array::value_type current = *iter;
+        const KMER &kmer = utils::get_first(current);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 

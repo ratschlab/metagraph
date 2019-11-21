@@ -23,6 +23,7 @@ class SortedMultiset {
     typedef C count_type;
     typedef std::pair<T, C> value_type;
     typedef Container storage_type;
+    typedef Container result_type;
 
     SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
                    size_t num_threads = 1,
@@ -83,7 +84,7 @@ class SortedMultiset {
         try_reserve(size);
     }
 
-    MergeResult<T>& data() {
+    result_type& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
@@ -92,7 +93,7 @@ class SortedMultiset {
             sorted_end_ = data_.size();
         }
 
-        return MergeResultVector(data_);
+        return data_;
     }
 
     void clear() {

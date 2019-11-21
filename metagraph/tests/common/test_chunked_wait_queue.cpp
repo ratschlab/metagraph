@@ -10,6 +10,7 @@
 
 namespace {
 
+using namespace mg;
 using common::ChunkedWaitQueue;
 
 TEST(WaitQueue, Empty) {
@@ -25,7 +26,7 @@ TEST(WaitQueue, PushPop) {
     under_test.push_front(2);
     under_test.push_front(3);
     EXPECT_TRUE(under_test.full());
-    ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.iterator();
+    ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.iter();
     EXPECT_EQ(1, *iterator);
     EXPECT_EQ(2, *(++iterator));
     // the chunk wasn't yet cleaned up, so the queue should be full
@@ -47,7 +48,7 @@ TEST(WaitQueue, Shutdown) {
     ChunkedWaitQueue<std::string> under_test(20, 2);
     under_test.shutdown();
     std::string v;
-    EXPECT_TRUE(under_test.iterator() == under_test.end());
+    EXPECT_TRUE(under_test.iter() == under_test.end());
 }
 
 void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
@@ -59,7 +60,7 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
         std::vector<int32_t> pop_result;
 
         void run() {
-            for (auto &it = under_test->iterator(); it != under_test->end(); ++it) {
+            for (auto &it = under_test->iter(); it != under_test->end(); ++it) {
                 if (delay_read_ms > 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay_read_ms));
                 }

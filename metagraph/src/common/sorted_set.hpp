@@ -10,8 +10,6 @@
 
 #include <ips4o.hpp>
 
-#include "merge_result.hpp"
-
 namespace mg {
 namespace common {
 // Thread safe data storage to extract distinct elements
@@ -23,6 +21,7 @@ class SortedSet {
     typedef T key_type;
     typedef T value_type;
     typedef Container storage_type;
+    typedef Container result_type;
 
     SortedSet(
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
@@ -71,7 +70,7 @@ class SortedSet {
         try_reserve(size);
     }
 
-    MergeResult<T>& data() {
+    result_type& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
@@ -79,11 +78,8 @@ class SortedSet {
             sort_and_remove_duplicates(&data_, num_threads_);
             sorted_end_ = data_.size();
         }
-        if (!returnData_) {
-            returnData_ = common::MergeResultVector(data_);
-        }
 
-        return returnData_.get();
+        return data_;
     }
 
     void clear() {
@@ -139,7 +135,6 @@ class SortedSet {
     }
 
     storage_type data_;
-    std::optional<common::MergeResultVector<T>> returnData_;
     size_t num_threads_;
     bool verbose_;
 

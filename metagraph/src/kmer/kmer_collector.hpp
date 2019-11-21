@@ -1,7 +1,6 @@
 #ifndef __KMER_COLLECTOR_HPP__
 #define __KMER_COLLECTOR_HPP__
 
-#include "common/merge_result.hpp"
 #include "common/threading.hpp"
 
 namespace mg {
@@ -67,7 +66,7 @@ class KmerCollector {
 
     void insert_dummy(const KMER &dummy_kmer);
 
-    inline common::MergeResult<Key> &data() {
+    inline Data &data() {
         join();
         return kmers_.data();
     }

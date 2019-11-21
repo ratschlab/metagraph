@@ -3,7 +3,6 @@
 
 #include "common/chunked_wait_queue.hpp"
 #include "common/deque_vector.hpp"
-#include "common/merge_result.hpp"
 #include "common/threading.hpp"
 #include "utils/vectors.hpp"
 
@@ -50,7 +49,7 @@ class SortedSetDisk {
     typedef T key_type;
     typedef T value_type;
     typedef Vector<T> storage_type;
-    typedef
+    typedef ChunkedWaitQueue<T> result_type;
 
     /**
      * Constructs a SortedSetDisk instance and initializes its buffer to the value
@@ -114,7 +113,7 @@ class SortedSetDisk {
      * Returns the globally sorted and de-duped data. Typically called once all
      * the data was inserted via insert().
      */
-    MergeResult<T> &data() {
+    ChunkedWaitQueue<T> &data() {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
 
@@ -131,7 +130,7 @@ class SortedSetDisk {
 
             start_merging();
         }
-        return MergeResult(merge_queue_);
+        return merge_queue_;
     }
 
     static void merge_data(uint32_t chunk_count, ChunkedWaitQueue<T> *merge_queue) {
