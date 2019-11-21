@@ -3,6 +3,7 @@
 
 #include "common/chunked_wait_queue.hpp"
 #include "common/deque_vector.hpp"
+#include "common/merge_result.hpp"
 #include "common/threading.hpp"
 #include "utils/vectors.hpp"
 
@@ -16,6 +17,8 @@
 #include <queue>
 #include <shared_mutex>
 
+namespace mg {
+namespace common {
 const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
 
 /**
@@ -47,6 +50,7 @@ class SortedSetDisk {
     typedef T key_type;
     typedef T value_type;
     typedef Vector<T> storage_type;
+    typedef
 
     /**
      * Constructs a SortedSetDisk instance and initializes its buffer to the value
@@ -106,17 +110,11 @@ class SortedSetDisk {
         std::copy(begin, end, data_->begin() + offset);
     }
 
-    storage_type &data() {
-        // TODO(ddanciu) - implement an adaptor from ChunkedWaitQueue to the expected
-        //  data structures in KmerCollector
-        throw std::runtime_error("Function not yet implemented");
-    }
-
     /**
      * Returns the globally sorted and de-duped data. Typically called once all
      * the data was inserted via insert().
      */
-    threads::ChunkedWaitQueue<T> &dataStream() {
+    MergeResult<T> &data() {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
 
@@ -133,10 +131,10 @@ class SortedSetDisk {
 
             start_merging();
         }
-        return merge_queue_;
+        return MergeResult(merge_queue_);
     }
 
-    static void merge_data(uint32_t chunk_count, threads::ChunkedWaitQueue<T> *merge_queue) {
+    static void merge_data(uint32_t chunk_count, ChunkedWaitQueue<T> *merge_queue) {
         // start merging disk chunks by using a heap to store the current element
         // from each chunk
         std::vector<std::fstream> chunk_files(chunk_count);
@@ -347,7 +345,10 @@ class SortedSetDisk {
      */
     std::future<void> write_to_disk_future_;
 
-    threads::ChunkedWaitQueue<T> merge_queue_;
+    ChunkedWaitQueue<T> merge_queue_;
 };
+
+} // namespace common
+} // namespace mg
 
 #endif // __SORTED_SET_DISK_HPP__

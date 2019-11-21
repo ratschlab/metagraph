@@ -376,6 +376,9 @@ void KmerExtractorBOSS::sequence_to_kmers(const std::string &sequence,
 
     while (begin_segm + dummy_prefix_size + k + 1 <= end) {
         assert(end >= end_segm);
+        // DNA segments may be stored continuously separated by a character outside of
+        // the valid alphabet (usually 'N'). Each segment is treated as a distinct DNA
+        // read and must be prepended with a dummy prefix
         end_segm = std::find_if(end_segm, end,
             [&](auto c) { return c >= alphabet.size(); }
         );

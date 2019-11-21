@@ -9,7 +9,8 @@
 
 #include <ips4o.hpp>
 
-
+namespace mg {
+namespace common {
 // Thread safe data storage for counting
 template <typename T,
           typename C = uint8_t,
@@ -82,7 +83,7 @@ class SortedMultiset {
         try_reserve(size);
     }
 
-    storage_type& data() {
+    MergeResult<T>& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
@@ -91,7 +92,7 @@ class SortedMultiset {
             sorted_end_ = data_.size();
         }
 
-        return data_;
+        return MergeResultVector(data_);
     }
 
     void clear() {
@@ -180,5 +181,6 @@ class SortedMultiset {
     mutable std::mutex mutex_resize_;
     mutable std::shared_timed_mutex mutex_copy_;
 };
-
+} // namespace common
+} // namespace mg
 #endif // __SORTED_MULTISET_HPP__

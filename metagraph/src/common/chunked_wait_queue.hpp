@@ -6,7 +6,8 @@
 #include <thread>
 #include <vector>
 
-namespace threads {
+namespace mg {
+namespace common {
 
 /**
  *  A ChunkedWaitQueue is a data structure that allows safe zero-copy data transfer from
@@ -129,7 +130,7 @@ class ChunkedWaitQueue {
      * Special iterator indicating the end of the queue - the end is reached when the
      * queue was shut down *and* the iterator past the last element in the queue.
      */
-    Iterator &end() { return end_iterator; }
+    Iterator &end() const { return end_iterator; }
 
     /**
      * Returns the iterator of the queue. Note that a queue only has one iterator, so
@@ -296,4 +297,5 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     bool no_more_elements() { return parent_->empty() || idx_ == parent_->last_; }
 };
 
-} // namespace threads
+} // namespace common
+} // namespace mg

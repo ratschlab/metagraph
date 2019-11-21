@@ -11,37 +11,38 @@
 #include "kmer/kmer_collector.hpp"
 #include "boss_chunk.hpp"
 
-template <typename KMER>
-using KmerMultsetVector = KmerCollector<KMER,
-                                      KmerExtractorBOSS,
-                                      SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>;
+namespace mg {
+namespace succinct {
 
 template <typename KMER>
-using KmerMultsetDeque = KmerCollector<KMER,
-                                     KmerExtractorBOSS,
-                                     SortedMultiset<KMER, uint8_t, DequeStorage<std::pair<KMER, uint8_t>>>>;
+using KmerMultsetVector = kmer::KmerCollector<
+        KMER,
+        KmerExtractorBOSS,
+        common::SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>;
 
 template <typename KMER>
-using KmerSetVector = KmerCollector<KMER,
-                                        KmerExtractorBOSS,
-                                        SortedSet<KMER, Vector<KMER>>>;
+using KmerMultsetDeque = kmer::KmerCollector<
+        KMER,
+        KmerExtractorBOSS,
+        common::SortedMultiset<KMER, uint8_t, DequeStorage<std::pair<KMER, uint8_t>>>>;
 
 template <typename KMER>
-using KmerSetDeque = KmerCollector<KMER,
-                                       KmerExtractorBOSS,
-                                       SortedSet<KMER, DequeStorage<KMER>>>;
+using KmerSetVector
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedSet<KMER, Vector<KMER>>>;
 
 template <typename KMER>
-using KmerSetDisk = KmerCollector<KMER,
-                                      KmerExtractorBOSS,
-                                      SortedSetDisk<KMER>>;
+using KmerSetDeque
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedSet<KMER, DequeStorage<KMER>>>;
+
+template <typename KMER>
+using KmerSetDisk
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedSetDisk<KMER>>;
 
 template <typename KMER,
           typename KmerCount = uint8_t,
           class Container = Vector<std::pair<KMER, KmerCount>>>
-using KmerMultset = KmerCollector<KMER,
-                                KmerExtractorBOSS,
-                                SortedMultiset<KMER, KmerCount, Container>>;
+using KmerMultset
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultiset<KMER, KmerCount, Container>>;
 
 /**
  * What type of data structure to use in the #KmerSet.
@@ -328,3 +329,7 @@ IBOSSChunkConstructor
         }
     }
 }
+
+
+} // namespace succinct
+} // namespace mg

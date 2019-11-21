@@ -1,7 +1,12 @@
 #ifndef __KMER_COLLECTOR_HPP__
 #define __KMER_COLLECTOR_HPP__
 
+#include "common/merge_result.hpp"
 #include "common/threading.hpp"
+
+namespace mg {
+namespace kmer {
+
 
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
@@ -30,7 +35,7 @@ class KmerCollector {
   public:
     using Key = typename Container::key_type;
     using Value = typename Container::value_type;
-    using Data = typename Container::storage_type;
+    using Data = typename Container::result_type;
 
     /**
      * @param k the k-mer length
@@ -62,7 +67,10 @@ class KmerCollector {
 
     void insert_dummy(const KMER &dummy_kmer);
 
-    inline Data& data() { join(); return kmers_.data(); }
+    inline common::MergeResult<Key> &data() {
+        join();
+        return kmers_.data();
+    }
 
     void clear() { join(); kmers_.clear(); }
 
@@ -91,5 +99,7 @@ class KmerCollector {
 
     bool both_strands_mode_;
 };
+} // namespace kmer
+} // namespace mg
 
 #endif // __KMER_COLLECTOR_HPP__

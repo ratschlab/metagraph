@@ -10,7 +10,7 @@
 
 namespace {
 
-using threads::ChunkedWaitQueue;
+using common::ChunkedWaitQueue;
 
 TEST(WaitQueue, Empty) {
     ChunkedWaitQueue<int32_t> under_test(20, 1);

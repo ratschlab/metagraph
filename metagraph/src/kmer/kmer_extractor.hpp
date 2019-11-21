@@ -16,6 +16,14 @@
 #include "alphabets.hpp"
 
 
+/**
+ * Extracts k-mers to be placed in a BOSS table from sequences. Each sequence is
+ * prepended with (k-1) $ characters (aka 'dummy prefix') and terminated with a $ to
+ * facilitate graph traversal.
+ * A sequence may sometimes contain multiple segments separated by a character not in
+ * the alphabet (DNA sequences are typically separated by an N, e.g. AAATNGGGC
+ * resulting in the segments AAAT and GGGC).
+ */
 class KmerExtractorBOSS {
   public:
 

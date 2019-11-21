@@ -16,8 +16,8 @@ template <typename TypeParam>
 void expectEquals(SortedSetDisk<TypeParam> &underTest,
                   const std::vector<TypeParam> &expectedValues) {
     uint32_t size = 0;
-    using ChunkedQueueIterator = typename threads::ChunkedWaitQueue<TypeParam>::Iterator;
-    threads::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.dataStream();
+    using ChunkedQueueIterator = typename common::ChunkedWaitQueue<TypeParam>::Iterator;
+    common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.dataStream();
     for (ChunkedQueueIterator &iterator = merge_queue.iterator();
          iterator != merge_queue.end(); ++iterator) {
         EXPECT_EQ(expectedValues[size], *iterator);
@@ -155,8 +155,8 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
     }
 
     uint32_t size = 0;
-    using ChunkedQueueIterator = typename threads::ChunkedWaitQueue<TypeParam>::Iterator;
-    threads::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.dataStream();
+    using ChunkedQueueIterator = typename common::ChunkedWaitQueue<TypeParam>::Iterator;
+    common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.dataStream();
     for (ChunkedQueueIterator &iterator = merge_queue.iterator();
          iterator != merge_queue.end(); ++iterator) {
         EXPECT_EQ((TypeParam)size, *iterator);

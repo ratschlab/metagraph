@@ -6,10 +6,14 @@
 #include <iostream>
 #include <vector>
 #include <cassert>
+#include <optional>
 
 #include <ips4o.hpp>
 
+#include "merge_result.hpp"
 
+namespace mg {
+namespace common {
 // Thread safe data storage to extract distinct elements
 template <typename T, class Container = std::vector<T>>
 class SortedSet {
@@ -20,10 +24,11 @@ class SortedSet {
     typedef T value_type;
     typedef Container storage_type;
 
-    SortedSet(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-              size_t num_threads = 1,
-              bool verbose = false)
-      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
+    SortedSet(
+            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
+            size_t num_threads = 1,
+            bool verbose = false)
+        : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
 
     ~SortedSet() {}
 
@@ -42,8 +47,7 @@ class SortedSet {
             shrink_data();
 
             try {
-                try_reserve(data_.size() + data_.size() / 2,
-                            data_.size() + batch_size);
+                try_reserve(data_.size() + data_.size() / 2, data_.size() + batch_size);
             } catch (const std::bad_alloc &exception) {
                 std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
                 exit(1);
@@ -67,7 +71,7 @@ class SortedSet {
         try_reserve(size);
     }
 
-    storage_type& data() {
+    MergeResult<T>& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
@@ -75,8 +79,11 @@ class SortedSet {
             sort_and_remove_duplicates(&data_, num_threads_);
             sorted_end_ = data_.size();
         }
+        if (!returnData_) {
+            returnData_ = common::MergeResultVector(data_);
+        }
 
-        return data_;
+        return returnData_.get();
     }
 
     void clear() {
@@ -92,8 +99,7 @@ class SortedSet {
         assert(vector);
 
         ips4o::parallel::sort(vector->begin(), vector->end(),
-                              std::less<typename Array::value_type>(),
-                              num_threads);
+                              std::less<typename Array::value_type>(), num_threads);
         // remove duplicates
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
@@ -113,10 +119,8 @@ class SortedSet {
         sorted_end_ = data_.size();
 
         if (verbose_) {
-            std::cout << " done. Size reduced from " << old_size
-                                                     << " to " << data_.size()
-                      << ", " << (data_.size() * sizeof(T) >> 20) << "Mb"
-                      << std::endl;
+            std::cout << " done. Size reduced from " << old_size << " to " << data_.size()
+                      << ", " << (data_.size() * sizeof(T) >> 20) << "Mb" << std::endl;
         }
     }
 
@@ -135,10 +139,11 @@ class SortedSet {
     }
 
     storage_type data_;
+    std::optional<common::MergeResultVector<T>> returnData_;
     size_t num_threads_;
     bool verbose_;
 
-    std::function<void(storage_type*)> cleanup_;
+    std::function<void(storage_type *)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values
     uint64_t sorted_end_ = 0;
@@ -146,5 +151,6 @@ class SortedSet {
     mutable std::mutex mutex_resize_;
     mutable std::shared_timed_mutex mutex_copy_;
 };
-
+} // namespace common
+} // namespace mg
 #endif // __SORTED_SET_HPP__
