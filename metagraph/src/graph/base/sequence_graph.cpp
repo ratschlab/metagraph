@@ -3,9 +3,9 @@
 #include <cassert>
 #include <progress_bar.hpp>
 
-#include "reverse_complement.hpp"
-#include "threading.hpp"
-#include "bitmap.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "common/threading.hpp"
+#include "utils/bit_vectors/bitmap.hpp"
 
 namespace utils {
     bool get_verbose();

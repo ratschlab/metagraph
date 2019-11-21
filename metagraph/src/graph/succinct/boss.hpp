@@ -4,12 +4,10 @@
 #include <type_traits>
 
 #include "common/config.hpp"
+#include "graph/base/sequence_graph.hpp"
 #include "kmer/kmer_extractor.hpp"
 #include "utils/bit_vectors/bit_vector.hpp"
 #include "utils/bit_vectors/wavelet_tree.hpp"
-//TODO(ddanciu) - this dep is ugly and needs to be fixed, probably by moving
-// sequence_graph
-#include "graph/sequence_graph.hpp"
 
 class BOSSConstructor;
 
