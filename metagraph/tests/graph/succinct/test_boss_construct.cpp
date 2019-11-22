@@ -1,3 +1,5 @@
+#include "graph/succinct/boss_construct.hpp"
+
 #include <stdio.h>
 #include <string>
 #include <sstream>
@@ -10,15 +12,15 @@
 #define protected public
 #define private public
 
-#include "boss.hpp"
-#include "boss_construct.hpp"
-#include "reverse_complement.hpp"
-#include "sorted_set.hpp"
-#include "sorted_multiset.hpp"
+#include "graph/succinct/boss.hpp"
+
+#include "common/seq_tools/reverse_complement.hpp"
+#include "common/sorted_set.hpp"
+#include "common/sorted_multiset.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
-const std::string test_data_dir = "../tests/data";
+const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 

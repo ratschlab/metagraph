@@ -4,7 +4,7 @@
 #include "utils/bit_vectors/bit_vector.hpp"
 #include "common/config.hpp"
 #include "kmer/kmer_bloom_filter.hpp"
-#include "graph/sequence_graph.hpp"
+#include "graph/base/sequence_graph.hpp"
 #include "boss.hpp"
 
 

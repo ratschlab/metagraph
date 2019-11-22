@@ -1,10 +1,11 @@
-#include "gtest/gtest.h"
+#include "graph/succinct/boss_merge.hpp"
 
-#include "boss.hpp"
-#include "boss_merge.hpp"
-#include "boss_construct.hpp"
+#include <gtest/gtest.h>
 
-const std::string test_data_dir = "../tests/data";
+#include "graph/succinct/boss.hpp"
+#include "graph/succinct/boss_construct.hpp"
+
+const std::string test_data_dir = TEST_DATA_DIR;
 
 
 TEST(BOSSMerge, TraversalMergeWithEmpty) {

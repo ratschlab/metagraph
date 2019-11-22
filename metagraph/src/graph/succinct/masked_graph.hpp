@@ -4,8 +4,9 @@
 #include <functional>
 #include <vector>
 
-#include "sequence_graph.hpp"
-#include "bitmap.hpp"
+#include "graph/base/sequence_graph.hpp"
+
+#include "utils/bit_vectors/bitmap.hpp"
 
 
 class MaskedDeBruijnGraph : public DeBruijnGraph {
