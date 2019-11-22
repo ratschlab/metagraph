@@ -21,12 +21,9 @@ brew install gcc autoconf automake libtool cmake make htslib
     && brew install gcc@9
 [[ "$OSTYPE" != "darwin"* ]] \
     && brew install gcc@9 libomp \
-    && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
+    && brew remove -f openssl@1.1 boost double-conversion gflags glog lz4 snappy zstd folly \
     && brew install --cc=gcc-5 glog zstd \
-    && brew install --cc=gcc-9 boost double-conversion gflags lz4 snappy openssl \
-    && brew install --cc=gcc-9 https://raw.githubusercontent.com/karasikov/homebrew-core-1/patch-2/Formula/folly.rb \
-                               --without-shared --with-jemalloc \
-    && brew reinstall glog double-conversion
+    && brew install --cc=gcc-9 openssl@1.1 boost folly
 ```
 Then set the environment variables accordingly:
 ```
