@@ -1,4 +1,6 @@
 #include <filesystem>
+#include <typeinfo>
+
 #include <json/json.h>
 #include <ips4o.hpp>
 #include <fmt/format.h>
@@ -34,13 +36,13 @@
 #include "masked_graph.hpp"
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
-#include <typeinfo>
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
 static const size_t kRowBatchSize = 100'000;
+const bool kPrefilterWithBloom = false;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -851,7 +853,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // construct graph storing all k-mers in query
     auto graph = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), false);
 
-    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(full_dbg)) {
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(full_dbg);
+    if (kPrefilterWithBloom && dbg_succ) {
         if (utils::get_verbose() && dbg_succ->get_bloom_filter()) {
             std::cout << "Indexing k-mers pre-filtered with Bloom filter" << std::endl;
         }
