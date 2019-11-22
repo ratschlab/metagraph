@@ -1,9 +1,9 @@
 #include "dbg_hash_fast5.hpp"
 
 #include <cassert>
+#include <limits>
 
 #include <tsl/ordered_set.h>
-//#include <tsl/robin_map.h>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "serialization.hpp"
@@ -14,27 +14,26 @@
 template <typename KMER = KmerExtractor2Bit::Kmer64>
 class DBGHashFast5Impl : public DBGHashFast5::DBGHashFast5Interface {
     using Kmer = KMER;
+    using KmerWord = typename KMER::WordType;
     using TAlphabet = KmerExtractor2Bit::TAlphabet;
-    using KmerPrefix = typename KMER::WordType;
 
 #if _PROTEIN_GRAPH
     using Bits = uint32_t;
 #elif _DNA_CASE_SENSITIVE_GRAPH
     using Bits = uint16_t;
 #elif _DNA5_GRAPH
-    using Bits = unsigned char;
+    using Bits = uint16_t;
 #elif _DNA_GRAPH
     using Bits = unsigned char;
 #else
     static_assert(false, "invalid or undefined alphabet");
 #endif
 
-    using KmerIndex = tsl::ordered_set<KmerPrefix,
-                                     utils::Hash<KmerPrefix>,
-                                     std::equal_to<KmerPrefix>,
-                                     std::allocator<KmerPrefix>,
-                                     //std::deque<KmerPrefix, std::allocator<KmerPrefix>>,
-                                     std::vector<KmerPrefix, std::allocator<KmerPrefix>>,
+    using KmerIndex = tsl::ordered_set<KmerWord,
+                                     utils::Hash<KmerWord>,
+                                     std::equal_to<KmerWord>,
+                                     std::allocator<KmerWord>,
+                                     std::vector<KmerWord, std::allocator<KmerWord>>,
                                      std::uint64_t>;
 
     using KmerIterator = typename KmerIndex::iterator;
@@ -43,7 +42,8 @@ class DBGHashFast5Impl : public DBGHashFast5::DBGHashFast5Interface {
   public:
     explicit DBGHashFast5Impl(size_t k,
                               bool canonical_mode,
-                              bool packed_serialization);
+                              bool packed_serialization,
+                              size_t reserve = 0);
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -102,7 +102,7 @@ class DBGHashFast5Impl : public DBGHashFast5::DBGHashFast5Interface {
     size_t get_k() const { return k_; }
     bool is_canonical_mode() const { return canonical_mode_; }
 
-    uint64_t num_nodes() const { return kmers_.size() << KMER::kBitsPerChar; }
+    uint64_t num_nodes() const { return kmers_.size() << kBitsPerChar; }
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -123,15 +123,19 @@ class DBGHashFast5Impl : public DBGHashFast5::DBGHashFast5Interface {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
 
-    KmerIterator find_kmer(const KmerPrefix &kmer_prefix) {
+    KmerIterator find_kmer(const KmerWord &kmer_prefix) {
         KmerIterator find = kmers_.find(kmer_prefix);
-        assert(find == kmers_.end() || !in_graph(get_index(find)) || KMER(kmer_prefix) == get_kmer(get_index(find), find));
+        assert(find == kmers_.end()
+                   || !in_graph(get_node_index(find))
+                   || KMER(kmer_prefix) == get_kmer(get_node_index(find), find));
         return find;
     }
 
-    KmerConstIterator find_kmer(const KmerPrefix &kmer_prefix) const {
+    KmerConstIterator find_kmer(const KmerWord &kmer_prefix) const {
         KmerConstIterator find = kmers_.find(kmer_prefix);
-        assert(find == kmers_.end() || !in_graph(get_index(find)) || KMER(kmer_prefix) == get_kmer(get_index(find), find));
+        assert(find == kmers_.end()
+                   || !in_graph(get_node_index(find))
+                   || KMER(kmer_prefix) == get_kmer(get_node_index(find), find));
         return find;
     }
 
@@ -141,18 +145,30 @@ class DBGHashFast5Impl : public DBGHashFast5::DBGHashFast5Interface {
         return overlap == in_kmer;
     }
 
-    node_index get_index(const KmerConstIterator &iter) const;
-    node_index get_index(const Kmer &kmer) const;
+    node_index get_node_index(const KmerConstIterator &iter) const;
+    node_index get_node_index(const Kmer &kmer) const;
 
-    size_t get_bit_index(const KmerConstIterator &iter) const {
+    size_t get_vec_index(const KmerConstIterator &iter) const {
         return iter - kmers_.begin();
     }
 
     KmerIterator get_iter(node_index node);
     KmerConstIterator get_const_iter(node_index node) const;
 
+    const Kmer get_kmer(node_index node) const {
+        return get_kmer(node, get_const_iter(node));
+    }
     const Kmer get_kmer(node_index node,
                         KmerConstIterator kmer_iter) const;
+
+    void print_internal_representation() const {
+        for (auto it = kmers_.begin(); it != kmers_.end(); ++it) {
+            const auto index = get_vec_index(it);
+            std::cout << (uint64_t)(it - kmers_.begin()) << "," << get_node_index(it) << ":";
+            std::cout << KMER(it.key()).to_string(k_ - 1, seq_encoder_.alphabet) << " ";
+            std::cout << std::bitset<std::numeric_limits<Bits>::digits>(bits_[index]) << " " << std::endl;
+        }
+    }
 
     size_t k_;
     bool canonical_mode_;
@@ -163,28 +179,40 @@ class DBGHashFast5Impl : public DBGHashFast5::DBGHashFast5Interface {
 
     bool packed_serialization_;
 
-    const KmerPrefix kIgnoreLastCharMask;
-    const Bits kLastCharMask = (Bits(1) << seq_encoder_.alphabet.size()) - 1;
+    const KmerWord kIgnoreLastCharMask;
+
+    // bits layout:
+    //     <--- leading 0's --->
+    //     < 1-bit flag for "may contain source kmer" >
+    //     < kBitsPerNullableChar-bits for "next_char + 1" >
+    //     < alphabet_size length bit field for each possible k'th char in kmer>
+    // e.g. 0 100 1001 for two kmers with the same (k-1) prefix ending in 00 and 11, which
+    // are known not to be source kmers, and where the (k-1) prefix hash entry for the 11
+    // outgoing edge is known to be in the previous slot in KmerIndex (next_char = 100 - 1 == 11)
+    const Bits kLastCharNBits = seq_encoder_.alphabet.size();
+    const Bits kLastCharMask = (Bits(1) << kLastCharNBits) - 1;
     const Bits kIncomingEdgesMask = kLastCharMask << seq_encoder_.alphabet.size();
+    const size_t kBitsPerNullableChar = utils::code_length(seq_encoder_.alphabet.size());
+    const Bits kNextCharMask = (Bits(1) << kBitsPerNullableChar) - 1;
+    const Bits kMayContainSourceKmer = Bits(1) << (kLastCharNBits + kBitsPerNullableChar);
+
     static constexpr auto kExtension = DBGHashFast5::kExtension;
+    static constexpr auto kBitsPerChar = KMER::kBitsPerChar;
 };
 
 template <typename KMER>
 DBGHashFast5Impl<KMER>::DBGHashFast5Impl(size_t k,
                                          bool canonical_mode,
-                                         bool packed_serialization)
+                                         bool packed_serialization,
+                                         size_t reserve)
       : k_(k),
         canonical_mode_(canonical_mode),
         packed_serialization_(packed_serialization),
-        kIgnoreLastCharMask(~(KmerPrefix((1llu << KMER::kBitsPerChar) - 1) << int(KMER::kBitsPerChar * (k - 1))))
-      { kmers_.reserve(50'000'000);
-        bits_.reserve(50'000'000); };
-//      { kmers_.reserve(50'000);
-//        bits_.reserve(50'000);
-//        next_node_.reserve(50'000);
-//        next_char_.reserve(50'000);
-//        may_contain_source_kmer_.reserve(50'000); };
-//    {};
+        kIgnoreLastCharMask(~(KmerWord((1llu << kBitsPerChar) - 1) << int(kBitsPerChar * (k - 1)))) {
+
+    kmers_.reserve(reserve);
+    bits_.reserve(reserve);
+};
 
 
 template <typename KMER>
@@ -193,7 +221,7 @@ void DBGHashFast5Impl<KMER>::add_sequence(const std::string &sequence,
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
     auto kmers = sequence_to_kmers(sequence);
-    KmerIterator iter = kmers_.end();
+
     bool may_contain_source_kmer = true;
     bool next_iter = false;
     for (auto kmer_it = kmers.rbegin(); kmer_it != kmers.rend(); ++kmer_it) {
@@ -203,38 +231,22 @@ void DBGHashFast5Impl<KMER>::add_sequence(const std::string &sequence,
 
         Bits val = Bits(1) << kmer[k_ - 1];
 
-        const auto &&key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
+        const auto &&key = KmerWord(kmer.data()) & kIgnoreLastCharMask;
 
-        bool inserted;
-        std::tie(iter, inserted) = kmers_.insert(key);
+        auto &&[iter, inserted] = kmers_.insert(key);
         if (inserted) {
-            val |= next_iter ? (kmer[k_ - 1] + 1) << seq_encoder_.alphabet.size() : 0;
-            val |= may_contain_source_kmer ? 1 << (seq_encoder_.alphabet.size() + KMER::kBitsPerChar + 1) : 0;
+            val |= next_iter ? (kmer[k_ - 1] + 1) << kLastCharNBits : 0;
+            val |= may_contain_source_kmer ? kMayContainSourceKmer  : 0;
             bits_.push_back(val);
         }
         assert(iter != kmers_.end());
         assert(iter == find_kmer(key));
 
         if (!inserted) {
-            const auto index = get_bit_index(iter);
-            val |= may_contain_source_kmer ? 1 << (seq_encoder_.alphabet.size() + KMER::kBitsPerChar + 1) : 0;
+            const auto index = get_vec_index(iter);
+            val |= may_contain_source_kmer ? kMayContainSourceKmer : 0;
             bits_[index] |= val;
         }
-
-/*
-        std::cout << "sequence: " << sequence << std::endl;
-        std::cout << "kmer: " << kmer.to_string(k_, seq_encoder_.alphabet) << std::endl;
-        for (auto it = kmers_.begin(); it != kmers_.end(); ++it) {
-            const auto index = get_bit_index(it);
-            std::cout << (uint64_t)(it - kmers_.begin()) << "," << get_index(it) << ":";
-            std::cout << KMER(it.key()).to_string(k_ - 1, seq_encoder_.alphabet) << " ";
-            std::cout << std::bitset<8>(bits_[index]) << " ";
-            std::cout << next_node_[index] << " ";
-            std::cout << next_char_[index] << " " << std::endl;
-        }
-        std::cout << "---" << std::endl;
-*/
-
 
         if (iter != kmers_.end() && nodes_inserted)
             nodes_inserted->insert_bit(kmers_.size() - 1, true);
@@ -244,45 +256,39 @@ void DBGHashFast5Impl<KMER>::add_sequence(const std::string &sequence,
 
     if (!canonical_mode_)
         return;
-/*
+
+    may_contain_source_kmer = true;
+    next_iter = false;
     auto rev_kmers = sequence_to_kmers(seq_encoder_.reverse_complement(sequence));
-    next_kmer_prefix_it = kmers_.end();
     for (auto kmer_it = rev_kmers.rbegin(); kmer_it != rev_kmers.rend(); ++kmer_it) {
         const auto &kmer = *kmer_it;
 
-        if (kmer_it == kmers.rbegin() || !kmers_overlap(kmer, *(kmer_it - 1))) {
-            const auto &next_kmer_prefix = KmerPrefix(kmer.data()) >> KMER::kBitsPerChar;
-            next_kmer_prefix_it = find_kmer(next_kmer_prefix);
-
-            if (next_kmer_prefix_it == kmers_.end()) {
-                next_kmer_prefix_it = kmers_.insert(next_kmer_prefix).first; // dummy
-                bits_.push_back(Bits(0));
-            }
-        }
-
-        Bits incoming_val = (Bits(1) << kmer[0]) << seq_encoder_.alphabet.size();
-        assert(next_kmer_prefix_it != kmers_.end());
-        bits_[get_bit_index(next_kmer_prefix_it)] |= incoming_val;
+        may_contain_source_kmer = kmer_it + 1 == kmers.rend() || !kmers_overlap(*(kmer_it + 1), kmer);
 
         Bits val = Bits(1) << kmer[k_ - 1];
 
-        const auto &&key = KmerPrefix(kmer.data()) & kIgnoreLastCharMask;
+        const auto &&key = KmerWord(kmer.data()) & kIgnoreLastCharMask;
 
         auto &&[iter, inserted] = kmers_.insert(key);
-        if (inserted)
+        if (inserted) {
+            val |= next_iter ? (kmer[k_ - 1] + 1) << kLastCharNBits : 0;
+            val |= may_contain_source_kmer ? kMayContainSourceKmer : 0;
             bits_.push_back(val);
+        }
         assert(iter != kmers_.end());
         assert(iter == find_kmer(key));
 
-        if (!inserted)
-            bits_[get_bit_index(iter)] |= val;
+        if (!inserted) {
+            const auto index = get_vec_index(iter);
+            val |= may_contain_source_kmer ? kMayContainSourceKmer : 0;
+            bits_[index] |= val;
+        }
 
         if (iter != kmers_.end() && nodes_inserted)
             nodes_inserted->insert_bit(kmers_.size() - 1, true);
 
-        next_kmer_prefix_it = iter;
+        next_iter = inserted && !may_contain_source_kmer;
     }
-*/
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -306,11 +312,11 @@ void DBGHashFast5Impl<KMER>::map_to_nodes_sequentially(
         if (terminate())
             return;
 
-        assert((find_kmer(KmerPrefix((*it).data()) & kIgnoreLastCharMask) == kmers_.end())
-               || get_index(*it) == npos
-               || *it == get_kmer(get_index(*it), get_const_iter(get_index(*it))));
+        assert((find_kmer(KmerWord((*it).data()) & kIgnoreLastCharMask) == kmers_.end())
+               || get_node_index(*it) == npos
+               || *it == get_kmer(get_node_index(*it)));
 
-        callback(is_valid ? get_index(*it++) : npos);
+        callback(is_valid ? get_node_index(*it++) : npos);
     }
     assert(it == kmers.end());
 }
@@ -319,8 +325,8 @@ void DBGHashFast5Impl<KMER>::map_to_nodes_sequentially(
 // and run callback for each node until the termination condition is satisfied
 template <typename KMER>
 void DBGHashFast5Impl<KMER>::map_to_nodes(const std::string &sequence,
-                                            const std::function<void(node_index)> &callback,
-                                            const std::function<bool()> &terminate) const {
+                                          const std::function<void(node_index)> &callback,
+                                          const std::function<bool()> &terminate) const {
 
     const auto &kmers = sequence_to_kmers(sequence, canonical_mode_);
     auto it = kmers.begin();
@@ -331,9 +337,9 @@ void DBGHashFast5Impl<KMER>::map_to_nodes(const std::string &sequence,
         if (terminate())
             return;
 
-        assert(!get_index(*it) || *it == get_kmer(get_index(*it), get_const_iter(get_index(*it))));
+        assert(!get_node_index(*it) || *it == get_kmer(get_node_index(*it)));
 
-        callback(is_valid ? get_index(*it++) : npos);
+        callback(is_valid ? get_node_index(*it++) : npos);
     }
     assert(it == kmers.end());
 }
@@ -343,31 +349,32 @@ void DBGHashFast5Impl<KMER>::call_outgoing_kmers(node_index node,
                                                  const OutgoingEdgeCallback &callback) const {
     assert(in_graph(node));
 
-    KMER kmer = get_kmer(node, get_const_iter(node));
+    KMER kmer = get_kmer(node);
 
     node_index next_kmer_base_index;
     KmerConstIterator next_kmer_prefix_it;
 
-    unsigned char next_char = ((bits_[get_bit_index(get_const_iter(node))] >> seq_encoder_.alphabet.size()) & ((1 << (KMER::kBitsPerChar + 1)) - 1)) - 1;
+    const Bits val = bits_[get_vec_index(get_const_iter(node))];
+    unsigned char next_char = ((val >> kLastCharNBits) & kNextCharMask) - 1;
     if (kmer[k_ - 1] == next_char) {
 
-        next_kmer_base_index = (((((node - 1) >> KMER::kBitsPerChar) - 1) << KMER::kBitsPerChar) + 1);
+        next_kmer_base_index = ((((node - 1) >> kBitsPerChar) - 1) << kBitsPerChar) + 1;
         next_kmer_prefix_it = get_const_iter(next_kmer_base_index);
 
-        assert(next_kmer_prefix_it == find_kmer(KmerPrefix(kmer.data()) >> KMER::kBitsPerChar));
+        assert(next_kmer_prefix_it == find_kmer(KmerWord(kmer.data()) >> kBitsPerChar));
     } else {
-        next_kmer_prefix_it = find_kmer(KmerPrefix(kmer.data()) >> KMER::kBitsPerChar);
+        next_kmer_prefix_it = find_kmer(KmerWord(kmer.data()) >> kBitsPerChar);
 
         if (next_kmer_prefix_it == kmers_.end())
             return;
 
-        next_kmer_base_index = get_index(next_kmer_prefix_it);
+        next_kmer_base_index = get_node_index(next_kmer_prefix_it);
     }
 
-    const Bits val = bits_[get_bit_index(next_kmer_prefix_it)];
+    const Bits next_val = bits_[get_vec_index(next_kmer_prefix_it)];
 
-    for (size_t i = 0; i < seq_encoder_.alphabet.size(); ++i) {
-        if ((val >> i) & 1) {
+    for (size_t i = 0; i < kLastCharNBits; ++i) {
+        if ((next_val >> i) & 1) {
             auto next_kmer_index = next_kmer_base_index + i;
 
             assert(in_graph(next_kmer_index));
@@ -383,13 +390,13 @@ void DBGHashFast5Impl<KMER>::call_incoming_kmers(node_index node,
     assert(in_graph(node));
 
 
-    const auto &kmer = get_kmer(node, get_const_iter(node));
+    const auto &kmer = get_kmer(node);
 
     for (char c : seq_encoder_.alphabet) {
         auto prev_kmer = kmer;
         prev_kmer.to_prev(k_, seq_encoder_.encode(c));
 
-        auto prev = get_index(prev_kmer);
+        auto prev = get_node_index(prev_kmer);
         if (prev != npos)
             callback(prev, c);
     }
@@ -401,9 +408,9 @@ typename DBGHashFast5Impl<KMER>::node_index
 DBGHashFast5Impl<KMER>::traverse(node_index node, char next_char) const {
     assert(in_graph(node));
 
-    auto kmer = get_kmer(node, get_const_iter(node));
+    auto kmer = get_kmer(node);
     kmer.to_next(k_, seq_encoder_.encode(next_char));
-    return get_index(kmer);
+    return get_node_index(kmer);
 }
 
 template <typename KMER>
@@ -411,9 +418,9 @@ typename DBGHashFast5Impl<KMER>::node_index
 DBGHashFast5Impl<KMER>::traverse_back(node_index node, char prev_char) const {
     assert(in_graph(node));
 
-    auto kmer = get_kmer(node, get_const_iter(node));
+    auto kmer = get_kmer(node);
     kmer.to_prev(k_, seq_encoder_.encode(prev_char));
-    return get_index(kmer);
+    return get_node_index(kmer);
 }
 
 template <typename KMER>
@@ -440,19 +447,17 @@ template <typename KMER>
 size_t DBGHashFast5Impl<KMER>::outdegree(node_index node) const {
     assert(in_graph(node));
 
-    KMER kmer = get_kmer(node, get_const_iter(node));
-    //assert((*find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask)).second
-    //            && "val is not 0, there at least one k-mer");
+    KMER kmer = get_kmer(node);
 
     kmer.to_next(k_, 0);
 
     const auto next_kmer_prefix_it
-        = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
+        = find_kmer(KmerWord(kmer.data()) & kIgnoreLastCharMask);
 
     if (next_kmer_prefix_it == kmers_.end())
         return 0;
 
-    const auto val = bits_[get_bit_index(next_kmer_prefix_it)] & kLastCharMask;
+    const auto val = bits_[get_vec_index(next_kmer_prefix_it)] & kLastCharMask;
 
 #if _PROTEIN_GRAPH
     return __builtin_popcountl(val);
@@ -495,7 +500,7 @@ bool DBGHashFast5Impl<KMER>::has_no_incoming(node_index node) const {
     assert(in_graph(node));
 
 
-    if (!(bits_[get_const_iter(node) - kmers_.begin()] & (1 << (seq_encoder_.alphabet.size() + KMER::kBitsPerChar + 1))))
+    if (!(bits_[get_const_iter(node) - kmers_.begin()] & kMayContainSourceKmer))
         return false;
 
     return indegree(node) == 0;
@@ -513,14 +518,14 @@ typename DBGHashFast5Impl<KMER>::node_index
 DBGHashFast5Impl<KMER>::kmer_to_node(const std::string &kmer) const {
     assert(kmer.length() == k_);
 
-    return get_index(seq_encoder_.encode(kmer));
+    return get_node_index(seq_encoder_.encode(kmer));
 }
 
 template <typename KMER>
 std::string DBGHashFast5Impl<KMER>::get_node_sequence(node_index node) const {
     assert(in_graph(node));
 
-    return seq_encoder_.kmer_to_sequence(get_kmer(node, get_const_iter(node)), k_);
+    return seq_encoder_.kmer_to_sequence(get_kmer(node), k_);
 }
 
 class Serializer {
@@ -568,9 +573,10 @@ void DBGHashFast5Impl<KMER>::serialize(std::ostream &out) const {
         serialize_number(out, bits_.size());
         std::for_each(bits_.begin(), bits_.end(), serializer);
     } else {
-        throw std::runtime_error("not implemented");
-        //serialize_number(out, std::numeric_limits<uint64_t>::max());
-        //kmers_.serialize(serializer);
+        serialize_number(out, std::numeric_limits<uint64_t>::max());
+        kmers_.serialize(serializer);
+        serialize_number(out, bits_.size());
+        std::for_each(bits_.begin(), bits_.end(), serializer);
     }
 
     serialize_number(out, canonical_mode_);
@@ -606,7 +612,7 @@ bool DBGHashFast5Impl<KMER>::load(std::istream &in) {
             const auto size = tag;
             kmers_.reserve(size + 1);
             for (uint64_t i = 0; i < size; ++i) {
-                kmers_.insert(deserializer.operator()<KmerPrefix>());
+                kmers_.insert(deserializer.operator()<KmerWord>());
             }
 
             uint64_t size2 = load_number(in);
@@ -616,9 +622,14 @@ bool DBGHashFast5Impl<KMER>::load(std::istream &in) {
             }
 
         } else {
-            throw std::runtime_error("not implemented");
-            //packed_serialization_ = false;
-            //kmers_ = KmerIndex::deserialize(deserializer, true);
+            packed_serialization_ = false;
+            kmers_ = KmerIndex::deserialize(deserializer, true);
+
+            uint64_t size2 = load_number(in);
+            bits_.reserve(size2 + 1);
+            for (uint64_t i = 0; i < size2; ++i) {
+                bits_.push_back(deserializer.operator()<Bits>());
+            }
         }
 
         canonical_mode_ = load_number(in);
@@ -661,21 +672,21 @@ bool DBGHashFast5Impl<KMER>::operator==(const DeBruijnGraph &other) const {
 
 template <typename KMER>
 typename DBGHashFast5Impl<KMER>::node_index
-DBGHashFast5Impl<KMER>::get_index(const KmerConstIterator &kmer_iter) const {
-    return ((kmer_iter - kmers_.begin()) << KMER::kBitsPerChar) + 1;
+DBGHashFast5Impl<KMER>::get_node_index(const KmerConstIterator &kmer_iter) const {
+    return ((kmer_iter - kmers_.begin()) << kBitsPerChar) + 1;
 }
 
 template <typename KMER>
 typename DBGHashFast5Impl<KMER>::node_index
-DBGHashFast5Impl<KMER>::get_index(const Kmer &kmer) const {
-    const auto find = find_kmer(KmerPrefix(kmer.data()) & kIgnoreLastCharMask);
+DBGHashFast5Impl<KMER>::get_node_index(const Kmer &kmer) const {
+    const auto find = find_kmer(KmerWord(kmer.data()) & kIgnoreLastCharMask);
     if (find == kmers_.end())
         return npos;
 
-    if (!(Bits(1) & (bits_[get_bit_index(find)] >> kmer[k_ - 1])))
+    if (!(Bits(1) & (bits_[get_vec_index(find)] >> kmer[k_ - 1])))
         return npos;
 
-    node_index node = get_index(find) + kmer[k_ - 1];
+    node_index node = get_node_index(find) + kmer[k_ - 1];
     assert(get_kmer(node, find) == kmer);
     return node;
 }
@@ -683,14 +694,14 @@ DBGHashFast5Impl<KMER>::get_index(const Kmer &kmer) const {
 template <typename KMER>
 typename DBGHashFast5Impl<KMER>::KmerIterator
 DBGHashFast5Impl<KMER>::get_iter(node_index node) {
-    KmerIterator iter = (kmers_.begin() + ((node - 1) >> KMER::kBitsPerChar));
+    KmerIterator iter = (kmers_.begin() + ((node - 1) >> kBitsPerChar));
     return iter;
 }
 
 template <typename KMER>
 typename DBGHashFast5Impl<KMER>::KmerConstIterator
 DBGHashFast5Impl<KMER>::get_const_iter(node_index node) const {
-    KmerConstIterator iter = (kmers_.begin() + ((node - 1) >> KMER::kBitsPerChar));
+    KmerConstIterator iter = (kmers_.begin() + ((node - 1) >> kBitsPerChar));
     return iter;
 }
 
@@ -702,9 +713,9 @@ const KMER DBGHashFast5Impl<KMER>
 
     KMER prefix = KMER(*kmer_iter);
 
-    KmerPrefix c = (node - 1) & KmerPrefix((1llu << KMER::kBitsPerChar) - 1);
+    KmerWord c = (node - 1) & KmerWord((1llu << kBitsPerChar) - 1);
 
-    return KMER(KmerPrefix(prefix.data()) | (c << static_cast<int>(KMER::kBitsPerChar * (k_ - 1))));
+    return KMER(KmerWord(prefix.data()) | (c << static_cast<int>(kBitsPerChar * (k_ - 1))));
 }
 
 template <typename KMER>
@@ -712,18 +723,18 @@ bool DBGHashFast5Impl<KMER>::in_graph(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 
     auto it = get_const_iter(node);
-    KmerPrefix c = (node - 1) & KmerPrefix((1llu << KMER::kBitsPerChar) - 1);
-    return Bits(1) & (bits_[get_bit_index(it)] >> c);
+    KmerWord c = (node - 1) & KmerWord((1llu << kBitsPerChar) - 1);
+    return Bits(1) & (bits_[get_vec_index(it)] >> c);
 }
 
 template <typename KMER>
 void DBGHashFast5Impl<KMER>::call_nodes(const std::function<void(node_index)> &callback,
                                const std::function<bool()> &stop_early) const {
     for (auto iter = kmers_.begin(); iter != kmers_.end() && !stop_early(); ++iter) {
-        const auto val = bits_[get_bit_index(iter)];
-        for (size_t i = 0; i < seq_encoder_.alphabet.size(); ++i) {
+        const auto val = bits_[get_vec_index(iter)];
+        for (size_t i = 0; i < kLastCharNBits; ++i) {
             if (val & (Bits(1) << i)) {
-                callback(get_index(iter) + i);
+                callback(get_node_index(iter) + i);
             }
         }
     }
