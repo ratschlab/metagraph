@@ -56,7 +56,7 @@ class ChunkedWaitQueue {
         : chunk_size_(std::min(std::max(1UL, buffer_size / 3), buffer_size - fence_size)),
           fence_size_(fence_size),
           is_shutdown_(false) {
-        assert(fence_size < buffer_size);
+        assert(fence_size * sizeof(T) < buffer_size);
         queue_ = std::vector<T>(buffer_size);
     }
 
