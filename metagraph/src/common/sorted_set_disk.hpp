@@ -50,20 +50,26 @@ class SortedSetDisk {
     /**
      * Constructs a SortedSetDisk instance and initializes its buffer to the value
      * specified in CONTAINER_SIZE_BYTES.
+     * @param _ unused cleanup, only present for compatibility with SortedSet's interface
+     * @param out_file directory and filename to write the merged output to. If
+     * empty, the merged output will not be written to a file
      * @param num_threads the number of threads to use by the sorting algorithm
      * @param verbose true if verbose logging is desired
      * @param container_size the size of the in-memory container that is written
      * to disk when full
      */
     SortedSetDisk(
-            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-            size_t num_threads = 1,
-            bool verbose = false,
-            size_t container_size = CONTAINER_SIZE_BYTES)
+            std::function<void(storage_type *)> = [](storage_type *) {},
+            const std::string &out_file = "",
+                  size_t num_threads = 1,
+                  bool verbose = false,
+                  size_t container_size = CONTAINER_SIZE_BYTES,
+                  size_t merge_queue_size = MERGE_QUEUE_SIZE,
+                  size_t merge_queue_backwards_count = MERGE_QUEUE_BACKWARDS_COUNT)
         : num_threads_(num_threads),
           verbose_(verbose),
-          cleanup_(cleanup),
-          merge_queue_(MERGE_QUEUE_SIZE, MERGE_QUEUE_BACKWARDS_COUNT) {
+          out_file_(out_file),
+          merge_queue_(merge_queue_size, merge_queue_backwards_count) {
         try {
             try_reserve(container_size);
         } catch (const std::bad_alloc &exception) {
@@ -135,11 +141,12 @@ class SortedSetDisk {
         return merge_queue_;
     }
 
-    static void merge_data(uint32_t chunk_count, threads::ChunkedWaitQueue<T> *merge_queue) {
+    static void merge_data(uint32_t chunk_count,
+                           threads::ChunkedWaitQueue<T> *merge_queue,
+                           const std::string &out_file) {
         // start merging disk chunks by using a heap to store the current element
         // from each chunk
         std::vector<std::fstream> chunk_files(chunk_count);
-        std::fstream sorted_file(output_dir + "sorted.bin", std::ios::binary | std::ios::out);
 
         auto comp = [](const auto &a, const auto &b) { return a.first > b.first; };
 
@@ -160,9 +167,16 @@ class SortedSetDisk {
         }
         uint64_t totalSize = 0;
 
-        // init to suppress maybe-uninitialized warnings in GCC
-        // TODO: is there a better way to do this?
+        // initialized to suppress maybe-uninitialized warnings in GCC
         T last_written = {};
+        std::fstream sorted_file;
+        if (out_file != "") {
+            sorted_file = std::fstream(out_file, std::ios::binary | std::ios::out);
+            if (!sorted_file) {
+                std::cerr << "Could not create file " << out_file << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
+        }
         bool has_written = false;
         while (!merge_heap.empty()) {
             std::pair<T, uint32_t> smallest = merge_heap.top();
@@ -170,6 +184,16 @@ class SortedSetDisk {
             if (!has_written || smallest.first != last_written) {
                 has_written = true;
                 merge_queue->push_front(smallest.first);
+                if (out_file != "") {
+                    //TODO(ddanciu) - consider writing asynchronously if this proves to
+                    // be a bottleneck (a simple produce/consumer queue should work)
+                    if (!sorted_file.write(reinterpret_cast<char *>(&smallest.first),
+                                           sizeof(T))) {
+                        std::cerr << "Writing of merged data to " + out_file + " failed."
+                                  << std::endl;
+                        std::exit(EXIT_FAILURE);
+                    }
+                }
 
                 last_written = smallest.first;
                 totalSize++;
@@ -178,17 +202,23 @@ class SortedSetDisk {
                 T data_item;
                 if (chunk_files[smallest.second].read(reinterpret_cast<char *>(&data_item),
                                                       sizeof(data_item))) {
-                    // TODO(ddanciu): apply logic from cleanup_ to remove redundant
-                    // dummy BOSS kmers
                     merge_heap.push({ data_item, smallest.second });
                 }
             }
         }
         merge_queue->shutdown();
+        sorted_file.close();
+        if (out_file != "") {
+            for (uint32_t i = 0; i < chunk_count; ++i) {
+                const std::string file_name
+                        = output_dir + "chunk_" + std::to_string(i) + ".bin";
+                std::filesystem::remove(file_name);
+            }
+        }
     }
 
     std::future<void> start_merging() {
-        return thread_pool_.enqueue(merge_data, chunk_count_, &merge_queue_);
+        return thread_pool_.enqueue(merge_data, chunk_count_, &merge_queue_, out_file_);
     }
 
     void clear() {
@@ -207,7 +237,6 @@ class SortedSetDisk {
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
 
-        cleanup_(vector);
     }
 
     void reserve(size_t size) {
@@ -314,11 +343,7 @@ class SortedSetDisk {
      */
     bool is_merging_ = false;
     bool verbose_;
-
-    /**
-     * Removes redundant elements from container while extracting unique ones.
-     */
-    std::function<void(storage_type *)> cleanup_;
+    std::string out_file_;
 
     /**
      * Ensures mutually exclusive access (and thus thread-safety) to #data.
