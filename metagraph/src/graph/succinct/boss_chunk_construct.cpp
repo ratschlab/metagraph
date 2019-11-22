@@ -181,7 +181,10 @@ void recover_source_dummy_nodes(size_t k,
     common::ChunkedWaitQueue<T> &current_kmers = *kmers;
     using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
     size_t num_dummy_parent_kmers = 0;
-    common::SortedSetDisk<T> sorted_dummy_kmers;
+    auto cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
+    std::vector<std::string> files_to_merge;
+    files_to_merge.push_back("/tmp/dummy2");
+    common::SortedSetDisk<T> sorted_dummy_kmers(cleanup, files_to_merge.back());
     Vector<KMER> dummy_kmers;
     dummy_kmers.resize(sorted_dummy_kmers.capacity());
     for (const auto &kmer_el : current_kmers) {
@@ -214,7 +217,10 @@ void recover_source_dummy_nodes(size_t k,
     common::SortedSetDisk<T> sorted_dummy_kmers2;
     common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
     common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
+
     for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
+        files_to_merge.push_back("/tmp/dummy" + std::to_string(dummy_pref_len - 1));
+        source->set_out_file(files_to_merge.back());
         dummy_kmers.resize(0);
         size_t num_kmers = 0;
         for (const auto &kmer : source->data()) {
@@ -237,9 +243,15 @@ void recover_source_dummy_nodes(size_t k,
         }
         std::swap(source, dest);
     }
-    ips4o::parallel::sort(kmers->begin(), kmers->end(),
-                          utils::LessFirst(),
-                          num_threads);
+    files_to_merge.push_back("/tmp/dummy" + std::to_string(k));
+    source->set_out_file(files_to_merge.back());
+    for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
+        // only iterate to write the data to disk
+    }
+
+    // at this point, we have the dummy kmers with dummy prefix of length x in
+    // /tmp/dummy{x}
+    *kmers = std::move(common::FileMerger(files_to_merge).data());
 }
 
 inline std::vector<KmerExtractorBOSS::TAlphabet>

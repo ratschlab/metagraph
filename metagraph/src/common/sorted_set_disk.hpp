@@ -244,6 +244,14 @@ class SortedSetDisk {
         return data_->capacity();
     }
 
+    /**
+     * Changes the name of the output file - useful after #reset()-ing if we don't want
+     * to overwrite data.
+     */
+    void set_out_file(const std::string &out_file) {
+        out_file_ = out_file;
+    }
+
   private:
     void shrink_data() {
         if (verbose_) {
