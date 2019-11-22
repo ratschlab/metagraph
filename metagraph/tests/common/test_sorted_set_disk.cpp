@@ -6,6 +6,8 @@
 #include <array>
 #include <filesystem>
 
+namespace {
+using namespace mg;
 template <typename T>
 class SortedSetDiskTest : public ::testing::Test {};
 
@@ -14,7 +16,7 @@ typedef ::testing::Types<uint64_t, int32_t> SortedDiskElementTypes;
 TYPED_TEST_CASE(SortedSetDiskTest, SortedDiskElementTypes);
 
 template <typename TypeParam>
-void expect_equals(SortedSetDisk<TypeParam> &underTest,
+void expect_equals(common::SortedSetDisk<TypeParam> &underTest,
                    const std::vector<TypeParam> &expectedValues) {
     uint32_t size = 0;
     using ChunkedQueueIterator = typename common::ChunkedWaitQueue<TypeParam>::Iterator;
@@ -48,25 +50,26 @@ void expect_disk_data(const std::string &file_name,
 }
 
 template <typename T>
-SortedSetDisk<T> create_sorted_set_disk() {
+common::SortedSetDisk<T> create_sorted_set_disk() {
     constexpr bool verbose = false;
     constexpr size_t thread_count = 1;
     constexpr size_t container_size = 8;
     constexpr size_t merge_queue_size = 1000;
-    constexpr size_t merge_queue_backwards_count = 10;
-    auto cleanup = [](typename SortedSetDisk<T>::storage_type *) {};
-    return SortedSetDisk<T>(cleanup, out_file, thread_count, verbose, container_size,
-                            merge_queue_size, merge_queue_backwards_count);
+    constexpr size_t num_last_elements_cached = 10;
+    auto cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
+    return common::SortedSetDisk<T>(cleanup, out_file, thread_count, verbose,
+            container_size,
+                            merge_queue_size, num_last_elements_cached);
 }
 
 TYPED_TEST(SortedSetDiskTest, Empty) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     expect_equals(underTest, {});
     expect_disk_data(out_file, std::vector<TypeParam>());
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::array<TypeParam, 1> elements = { 42 };
     underTest.insert(elements.begin(), elements.end());
     expect_equals(underTest, { 42 });
@@ -74,7 +77,7 @@ TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
     underTest.insert(elements.begin(), elements.end());
     expect_equals(underTest, { 42, 43, 44, 45 });
@@ -85,7 +88,7 @@ TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
  * Test that elements are correctly merged from multiple buffers
  */
 TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<TypeParam> elements = { 42, 43, 44, 45 };
     underTest.insert(elements.begin(), elements.end());
     expect_equals(underTest, elements);
@@ -97,7 +100,7 @@ TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
  * multiple inserts.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
         std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
@@ -114,7 +117,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
  * across multiple inserts.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesNonDistinct) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     for (uint32_t i = 0; i < 100; ++i) {
         std::array<TypeParam, 4> elements
                 = { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) };
@@ -131,7 +134,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesNonDistinct) {
  * multiple inserts across multiple threads.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<std::thread> workers;
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
@@ -155,7 +158,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
  * multiple inserts across multiple threads. Each insert will have dupes.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<std::thread> workers;
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
@@ -175,7 +178,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
 }
 
 TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
-    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
         std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
@@ -203,3 +206,4 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
     }
     expect_disk_data(out_file, expected_result);
 }
+} // namespace

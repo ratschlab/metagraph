@@ -43,7 +43,7 @@ class SortedSetDisk {
     /** Size of the merge queue's underlying circular buffer */
     static constexpr size_t MERGE_QUEUE_SIZE = 1e9; // 1GB
     /** Number of elements that can be iterated backwards in the merge queue */
-    static constexpr size_t MERGE_QUEUE_BACKWARDS_COUNT = 100;
+    static constexpr size_t NUM_LAST_ELEMENTS_CACHED = 100;
 
     typedef T key_type;
     typedef T value_type;
@@ -64,15 +64,16 @@ class SortedSetDisk {
     SortedSetDisk(
             std::function<void(storage_type *)> = [](storage_type *) {},
             const std::string &out_file = "",
-                  size_t num_threads = 1,
-                  bool verbose = false,
-                  size_t container_size = CONTAINER_SIZE_BYTES,
-                  size_t merge_queue_size = MERGE_QUEUE_SIZE,
-                  size_t merge_queue_backwards_count = MERGE_QUEUE_BACKWARDS_COUNT)
+
+            size_t num_threads = 1,
+            bool verbose = false,
+            size_t container_size = CONTAINER_SIZE_BYTES,
+            size_t merge_queue_size = MERGE_QUEUE_SIZE,
+            size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
         : num_threads_(num_threads),
           verbose_(verbose),
           out_file_(out_file),
-          merge_queue_(merge_queue_size, merge_queue_backwards_count) {
+          merge_queue_(merge_queue_size, num_last_elements_cached) {
         try {
             try_reserve(container_size);
         } catch (const std::bad_alloc &exception) {
@@ -149,17 +150,18 @@ class SortedSetDisk {
 
         std::priority_queue<std::pair<T, uint32_t>, std::vector<std::pair<T, uint32_t>>, decltype(comp)>
                 merge_heap(comp);
-
+        auto get_chunk_file_name = [](uint32_t i) {
+            return output_dir + "chunk_" + std::to_string(i) + ".bin";
+        };
         for (uint32_t i = 0; i < chunk_count; ++i) {
-            const std::string file_name
-                    = output_dir + "chunk_" + std::to_string(i) + ".bin";
-            chunk_files[i].open(file_name, std::ios::in | std::ios::binary);
+            chunk_files[i].open(get_chunk_file_name(i), std::ios::in | std::ios::binary);
             T data_item;
             if (chunk_files[i].good()) {
                 chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(data_item));
                 merge_heap.push({ data_item, i });
             } else {
-                throw std::runtime_error("Unable to open chunk file " + file_name);
+                throw std::runtime_error("Unable to open chunk file "
+                                         + get_chunk_file_name(i));
             }
         }
         uint64_t totalSize = 0;
@@ -170,7 +172,7 @@ class SortedSetDisk {
         if (out_file != "") {
             sorted_file = std::fstream(out_file, std::ios::binary | std::ios::out);
             if (!sorted_file) {
-                std::cerr << "Could not create file " << out_file << std::endl;
+                std::cerr << "Error: Could not create file " << out_file << std::endl;
                 std::exit(EXIT_FAILURE);
             }
         }
@@ -186,7 +188,8 @@ class SortedSetDisk {
                     // be a bottleneck (a simple produce/consumer queue should work)
                     if (!sorted_file.write(reinterpret_cast<char *>(&smallest.first),
                                            sizeof(T))) {
-                        std::cerr << "Writing of merged data to " + out_file + " failed."
+                        std::cerr << "Error: Writing of merged data to " + out_file
+                                        + " failed."
                                   << std::endl;
                         std::exit(EXIT_FAILURE);
                     }
@@ -205,12 +208,9 @@ class SortedSetDisk {
         }
         merge_queue->shutdown();
         sorted_file.close();
-        if (out_file != "") {
-            for (uint32_t i = 0; i < chunk_count; ++i) {
-                const std::string file_name
-                        = output_dir + "chunk_" + std::to_string(i) + ".bin";
-                std::filesystem::remove(file_name);
-            }
+
+        for (uint32_t i = 0; i < chunk_count; ++i) {
+            std::filesystem::remove(get_chunk_file_name(i));
         }
     }
 
