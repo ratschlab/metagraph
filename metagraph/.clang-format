@@ -13,10 +13,6 @@ AllowShortBlocksOnASingleLine: false
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: Inline
 AllowShortIfStatementsOnASingleLine: false
-<<<<<<< HEAD
-=======
-#AllowShortLambdasOnASingleLine: All
->>>>>>> origin/master
 AllowShortLoopsOnASingleLine: false
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: true
@@ -80,10 +76,6 @@ ReflowComments: true
 SortIncludes: true
 SortUsingDeclarations: false
 SpaceAfterCStyleCast: false
-<<<<<<< HEAD
-=======
-#SpaceAfterLogicalNot: false
->>>>>>> origin/master
 SpaceAfterTemplateKeyword: true
 SpaceBeforeAssignmentOperators: true
 SpaceBeforeCpp11BracedList: true

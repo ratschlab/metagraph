@@ -211,6 +211,10 @@ class SortedSetDisk {
         std::cerr << "SortedSetDisk: Ignoring reserving size " << size << std::endl;
     }
 
+    size_t capacity() {
+        return data_->capacity();
+    }
+
   private:
     void shrink_data() {
         if (verbose_) {

@@ -109,10 +109,7 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
 template < class Container>
-static void recover_source_dummy_nodes(size_t k,
-                                Container *kmers,
-                                size_t num_threads,
-                                bool verbose) {
+void recover_source_dummy_nodes(size_t k, Container *kmers, size_t num_threads, bool verbose) {
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
@@ -169,23 +166,26 @@ static void recover_source_dummy_nodes(size_t k,
                           num_threads);
 }
 
-template < typename U>
+/**
+ * Specialization of recover_dummy_nodes for a #common::ChunkedWaitQueue (used by
+ * #common::SortedSetDisk).
+ */
+template <typename T>
 void recover_source_dummy_nodes(size_t k,
-                                common::ChunkedWaitQueue<U> *kmers,
+                                common::ChunkedWaitQueue<T> *kmers,
                                 size_t num_threads,
                                 bool verbose) {
-    using Iterator = typename common::ChunkedWaitQueue<U>::iterator;
-  Iterator iter =  kmers->begin();
-    U first = *iter;
-
+    using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
+    Iterator iter = kmers->begin();
+    T first = *iter;
+    common::ChunkedWaitQueue<T> &current_kmers = *kmers;
     using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
-
-    size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
-
-    for (size_t i = 0; i < dummy_begin; ++i) {
-        typename Array::value_type current = *iter;
-        const KMER &kmer = utils::get_first(current);
+    common::SortedSetDisk<T> sorted_dummy_kmers;
+    Vector<KMER> dummy_kmers;
+    dummy_kmers.resize(sorted_dummy_kmers.capacity());
+    for (const auto &kmer_el : current_kmers) {
+        const KMER &kmer = utils::get_first(kmer_el);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 
@@ -197,38 +197,45 @@ void recover_source_dummy_nodes(size_t k,
 
         num_dummy_parent_kmers++;
 
-        if (kmers->size() + 1 > kmers->capacity())
-            shrink_kmers(kmers, num_threads, verbose, dummy_begin);
+        if (dummy_kmers.size() == dummy_kmers.capacity()) {
+            sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
+            dummy_kmers.resize(0);
+        }
 
-        push_back(*kmers, kmer).to_prev(k + 1, BOSS::kSentinelCode);
+        push_back(dummy_kmers, kmer).to_prev(k + 1, BOSS::kSentinelCode);
     }
+    // push out the leftover dummy kmers
+    sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
+
     if (verbose) {
         std::cout << "Number of dummy k-mers with dummy prefix of length 1: "
                   << num_dummy_parent_kmers << std::endl;
     }
-    sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
+    common::SortedSetDisk<T> sorted_dummy_kmers2;
+    common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
+    common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
+    for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
+        dummy_kmers.resize(0);
+        size_t num_kmers = 0;
+        for (const auto &kmer : source->data()) {
+            if (dummy_kmers.size() == dummy_kmers.capacity()) {
+                dest->insert(dummy_kmers.begin(), dummy_kmers.end());
+                dummy_kmers.resize(0);
+            }
 
-    if (verbose) {
-        std::cout << "Number of dummy k-mers with dummy prefix of length 2: "
-                  << kmers->size() - dummy_begin << std::endl;
-    }
 
-    for (size_t c = 3; c < k + 1; ++c) {
-        size_t succ_dummy_begin = dummy_begin;
-        dummy_begin = kmers->size();
-
-        for (size_t i = succ_dummy_begin; i < dummy_begin; ++i) {
-            if (kmers->size() + 1 > kmers->capacity())
-                shrink_kmers(kmers, num_threads, verbose, dummy_begin);
-
-            push_back(*kmers, utils::get_first((*kmers)[i])).to_prev(k + 1, BOSS::kSentinelCode);
+            push_back(dummy_kmers, utils::get_first(kmer)).to_prev(k + 1, BOSS::kSentinelCode);
+            num_kmers++;
         }
-        sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
+        // push out the leftover dummy kmers
+        dest->insert(dummy_kmers.begin(), dummy_kmers.end());
+
 
         if (verbose) {
-            std::cout << "Number of dummy k-mers with dummy prefix of length " << c
-                      << ": " << kmers->size() - dummy_begin << std::endl;
+            std::cout << "Number of dummy k-mers with dummy prefix of length "
+                      << (dummy_pref_len - 1) << ": " << num_kmers << std::endl;
         }
+        std::swap(source, dest);
     }
     ips4o::parallel::sort(kmers->begin(), kmers->end(),
                           utils::LessFirst(),
