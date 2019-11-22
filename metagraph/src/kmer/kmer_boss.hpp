@@ -12,7 +12,7 @@
  * Just like $KMer, each character in the k-mer uses L bits of the internal representation
  * type G (typically a 64,128 or 256 bit integer) and characters ares stored in reverse
  * order.
- * The  only  difference from #KMer is that #KmerBoss places the last character in the
+ * The  only  difference from #KMer is that #KmerBoss leaves the last character in the
  * least significant bits of G. For example, the k-mer "ACGT" is stored in memory as
  * "GCAT", while #KMer stores it as "TGCA".
  *

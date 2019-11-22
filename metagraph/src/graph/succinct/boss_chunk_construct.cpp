@@ -98,16 +98,86 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
 // the experiments show it's already fast enough.
 // k is node length
 /**
- * @tparam Array the data structure in which the k-mers were merged (e.g. a
+ * Adds dummy source nodes for the given kmers.
+ * The assumption is that only dummy sources with sentinels of of length 1 were added in
+ * the  previous phases and this method will gradually add dummy sources with sentinels
+ * of length 2,3,... up to k-1.
+ * For example, if the input k-mers are {ACG, $TA, $CG}, the first k-mer will be
+ * ignored (not a dummy source) and the last 2 k-mers will be expanded to sentinels of
+ * length 2, by appending {$$T, $$C}
+ * @tparam Container the data structure in which the k-mers were merged (e.g. a
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
-template <typename Array>
-void recover_source_dummy_nodes(size_t k,
-                                Array *kmers,
+template < class Container>
+static void recover_source_dummy_nodes(size_t k,
+                                Container *kmers,
                                 size_t num_threads,
                                 bool verbose) {
-    typename Array::iterator iter = kmers->begin();
-    typename Array::value_type first = *iter;
+    using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
+
+    size_t dummy_begin = kmers->size();
+    size_t num_dummy_parent_kmers = 0;
+
+    for (size_t i = 0; i < dummy_begin; ++i) {
+        const KMER &kmer = utils::get_first((*kmers)[i]);
+        // we never add reads shorter than k
+        assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
+
+        auto node_last_char = kmer[1];
+        auto edge_label = kmer[0];
+        // nothing to do if it's not a source dummy kmer
+        if (node_last_char || !edge_label)
+            continue;
+
+        num_dummy_parent_kmers++;
+
+        if (kmers->size() + 1 > kmers->capacity())
+            shrink_kmers(kmers, num_threads, verbose, dummy_begin);
+
+        push_back(*kmers, kmer).to_prev(k + 1, BOSS::kSentinelCode);
+    }
+    if (verbose) {
+        std::cout << "Number of dummy k-mers with dummy prefix of length 1: "
+                  << num_dummy_parent_kmers << std::endl;
+    }
+    sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
+
+    if (verbose) {
+        std::cout << "Number of dummy k-mers with dummy prefix of length 2: "
+                  << kmers->size() - dummy_begin << std::endl;
+    }
+
+    for (size_t c = 3; c < k + 1; ++c) {
+        size_t succ_dummy_begin = dummy_begin;
+        dummy_begin = kmers->size();
+
+        for (size_t i = succ_dummy_begin; i < dummy_begin; ++i) {
+            if (kmers->size() + 1 > kmers->capacity())
+                shrink_kmers(kmers, num_threads, verbose, dummy_begin);
+
+            push_back(*kmers, utils::get_first((*kmers)[i])).to_prev(k + 1, BOSS::kSentinelCode);
+        }
+        sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
+
+        if (verbose) {
+            std::cout << "Number of dummy k-mers with dummy prefix of length " << c
+                      << ": " << kmers->size() - dummy_begin << std::endl;
+        }
+    }
+    ips4o::parallel::sort(kmers->begin(), kmers->end(),
+                          utils::LessFirst(),
+                          num_threads);
+}
+
+template < typename U>
+void recover_source_dummy_nodes(size_t k,
+                                common::ChunkedWaitQueue<U> *kmers,
+                                size_t num_threads,
+                                bool verbose) {
+    using Iterator = typename common::ChunkedWaitQueue<U>::iterator;
+  Iterator iter =  kmers->begin();
+    U first = *iter;
+
     using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
 
     size_t dummy_begin = kmers->size();
@@ -121,7 +191,7 @@ void recover_source_dummy_nodes(size_t k,
 
         auto node_last_char = kmer[1];
         auto edge_label = kmer[0];
-        // check if it's not a source dummy kmer
+        // nothing to do if it's not a source dummy kmer
         if (node_last_char || !edge_label)
             continue;
 
