@@ -17,7 +17,7 @@ All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbr
 brew install gcc autoconf automake libtool cmake make htslib
 [[ "$OSTYPE" == "darwin"* ]] \
     && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
-    && brew install --cc=gcc-7 boost double-conversion gflags glog lz4 snappy zstd folly \
+    && brew install --cc=gcc-7 boost folly \
     && brew install gcc@9
 [[ "$OSTYPE" != "darwin"* ]] \
     && brew install gcc@9 libomp \
