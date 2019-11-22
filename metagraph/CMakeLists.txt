@@ -285,6 +285,7 @@ find_library(FOLLY_LIBRARIES
 )
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
+  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
   set(METALIBS ${METALIBS}
     ${FOLLY_LIBRARIES}
     -ldouble-conversion
@@ -292,7 +293,7 @@ if(FOLLY_LIBRARIES)
     -lboost_regex
     -lboost_filesystem
     -lboost_program_options
-    -lcrypto
+    OpenSSL::Crypto
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
@@ -355,7 +356,9 @@ endif()
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
-  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl -lssl -lcrypto)
+  set(OPENSSL_USE_STATIC_LIBS TRUE)
+  find_package(OpenSSL REQUIRED)
+  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl ${OPENSSL_LIBRARIES})
 endif()
 
 # check for std::filesystem::temp_directory_path
