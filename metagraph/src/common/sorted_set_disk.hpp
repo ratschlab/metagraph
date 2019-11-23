@@ -8,6 +8,7 @@
 #include <ips4o.hpp>
 
 #include <cassert>
+#include <filesystem>
 #include <fstream> //TODO(ddanciu) - try boost mmapped instead
 #include <future>
 #include <iostream>
