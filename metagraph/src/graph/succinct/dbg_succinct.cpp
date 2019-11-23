@@ -907,8 +907,10 @@ void DBGSuccinct
         std::min(max_num_hash_functions, BloomFilter::optim_h(false_positive_rate))
     );
 
-    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); },
-                   canonical_mode_);
+    bloom_filter_->add_sequences([&](const auto &callback) {
+        call_sequences([&](const auto &sequence, auto&&) { callback(sequence); },
+                       canonical_mode_);
+    });
 }
 
 void DBGSuccinct
@@ -922,8 +924,10 @@ void DBGSuccinct
         max_num_hash_functions
     );
 
-    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); },
-                   canonical_mode_);
+    bloom_filter_->add_sequences([&](const auto &callback) {
+        call_sequences([&](const auto &sequence, auto&&) { callback(sequence); },
+                       canonical_mode_);
+    });
 }
 
 bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {

@@ -1,5 +1,8 @@
 #include "kmer_bloom_filter.hpp"
 
+#include <ips4o.hpp>
+
+#include "common/threading.hpp"
 #include "utils/serialization.hpp"
 #include "utils/algorithms.hpp"
 #include "kmer/kmer_extractor.hpp"
@@ -18,9 +21,8 @@ void KmerBloomFilter<KmerHasher>
     uint64_t counter = 0;
     #endif
 
-    call_kmers(begin, end, [&](auto, auto hash1, auto hash2) {
-        filter_.insert(hash1, hash2);
-        assert(filter_.check(hash1, hash2));
+    call_kmers(begin, end, [&](auto, auto hash) {
+        filter_.insert(hash);
         #ifndef NDEBUG
         counter++;
         #endif
@@ -36,20 +38,109 @@ void KmerBloomFilter<KmerHasher>
 }
 
 template <class KmerHasher>
+void KmerBloomFilter<KmerHasher>
+::add_sequences(const std::function<void(const CallString&)> &generate_sequences) {
+    constexpr size_t buffer_size = 1000000;
+    std::vector<uint64_t> buffer;
+    buffer.reserve(buffer_size);
+
+    generate_sequences([&](const std::string &sequence) {
+        if (sequence.size() < k_)
+            return;
+
+        if (buffer.capacity() < buffer.size() + sequence.size() - k_ + 1) {
+            if (buffer.capacity() < sequence.size() - k_ + 1) {
+                buffer.reserve(buffer.size() + sequence.size() - k_ + 1);
+            } else {
+                ips4o::parallel::sort(buffer.begin(), buffer.end(),
+                                      std::less<uint64_t>(),
+                                      get_num_threads());
+                filter_.batch_insert(buffer.data(), buffer.size());
+                buffer.clear();
+            }
+        }
+
+        call_kmers(sequence.c_str(), sequence.c_str() + sequence.size(),
+                   [&](auto, auto hash) { buffer.emplace_back(hash); });
+    });
+
+    ips4o::parallel::sort(buffer.begin(), buffer.end(),
+                          std::less<uint64_t>(),
+                          get_num_threads());
+
+    filter_.batch_insert(buffer.data(), buffer.size());
+}
+
+template <class KmerHasher>
+bool KmerBloomFilter<KmerHasher>
+::find(const char *begin, const char *end, double discovery_fraction) const {
+    if (static_cast<size_t>(end - begin) < k_)
+        return false;
+
+    size_t num_kmers = end - begin - k_ + 1;
+    size_t min_num_kmers = std::max(size_t(1), size_t(std::ceil(discovery_fraction * num_kmers)));
+    size_t num_discovered = 0;
+    size_t i = 0;
+
+    call_kmer_presence(
+        begin, end,
+        [&](bool val) { num_discovered += val; ++i; },
+        [&]() { return num_discovered >= min_num_kmers
+            || num_discovered + num_kmers - i < min_num_kmers; }
+    );
+
+    return num_discovered >= min_num_kmers;
+}
+
+template <class KmerHasher>
 sdsl::bit_vector KmerBloomFilter<KmerHasher>
 ::check_kmer_presence(const char *begin, const char *end) const {
     if (begin >= end || static_cast<size_t>(end - begin) < k_)
         return sdsl::bit_vector();
 
     sdsl::bit_vector check_vec(end - begin - k_ + 1);
-    call_kmers(begin, end, [&](auto i, auto hash1, auto hash2) {
-        assert(i < check_vec.size());
 
-        if (filter_.check(hash1, hash2))
-            check_vec[i] = true;
+    // aggregate and sort hashes to ensure contiguous access to filter
+    std::vector<std::pair<uint64_t, size_t>> hash_index;
+
+    call_kmers(begin, end, [&](auto i, auto hash) {
+        assert(i < static_cast<size_t>(end - begin - k_ + 1));
+
+        hash_index.emplace_back(hash, i);
     });
 
+    std::sort(hash_index.begin(), hash_index.end());
+
+    for (const auto [hash, index] : hash_index) {
+        check_vec[index] = filter_.check(hash);
+    }
+
     return check_vec;
+}
+
+template <class KmerHasher>
+void KmerBloomFilter<KmerHasher>
+::call_kmer_presence(const char *begin,
+                     const char *end,
+                     const std::function<void(bool)> &callback,
+                     const std::function<bool()> &terminate) const {
+    if (begin >= end || static_cast<size_t>(end - begin) < k_ || terminate())
+        return;
+
+    size_t j = 0;
+    call_kmers(begin, end, [&](auto i, auto hash) {
+        assert(i < static_cast<size_t>(end - begin - k_ + 1));
+        assert(j <= i);
+
+        while (j < i) {
+            callback(false);
+            ++j;
+        }
+
+        callback(filter_.check(hash));
+
+        ++j;
+    }, terminate);
 }
 
 template <class KmerHasher>
@@ -72,7 +163,7 @@ bool KmerBloomFilter<KmerHasher>
     try {
         k_ = load_number(in);
         canonical_mode_ = load_number(in);
-        hasher_ = KmerHasherType(k_);
+        const_cast<KmerHasherType&>(hasher_) = KmerHasherType(k_);
 
         return filter_.load(in);
     } catch (...) {
@@ -84,9 +175,9 @@ template <class KmerHasher>
 void KmerBloomFilter<KmerHasher>
 ::call_kmers(const char *begin, const char *end,
              const std::function<void(size_t /* position */,
-                                      uint64_t /* hash1 */,
-                                      uint64_t /* hash2 */)> &callback) const {
-    if (begin >= end || static_cast<size_t>(end - begin) < k_)
+                                      uint64_t /* hash */)> &callback,
+             const std::function<bool()> &terminate) const {
+    if (begin >= end || static_cast<size_t>(end - begin) < k_ || terminate())
         return;
 
     const auto max_encoded_val = KmerDef::alphabet.size();
@@ -99,7 +190,7 @@ void KmerBloomFilter<KmerHasher>
         coded, max_encoded_val, k_
     );
 
-    auto fwd = hasher_;
+    KmerHasher fwd(hasher_);
     fwd.reset(coded.data());
 
     if (is_canonical_mode()) {
@@ -108,14 +199,15 @@ void KmerBloomFilter<KmerHasher>
                        rc_coded.rbegin(),
                        [](TAlphabet c) { return KmerDef::complement(c); });
 
-        auto rev = hasher_;
+        KmerHasher rev(hasher_);
         rev.reset(rc_coded.data() + rc_coded.size() - k_);
 
         if (LIKELY(!invalid[k_ - 1])) {
             const auto &canonical = std::min(fwd, rev);
-            callback(0,
-                     canonical.template get_hash<0>(),
-                     canonical.template get_hash<1>());
+            callback(0, canonical);
+
+            if (terminate())
+                return;
         }
 
         for (size_t i = k_, j = coded.size() - k_ - 1; i < coded.size(); ++i, --j) {
@@ -130,15 +222,21 @@ void KmerBloomFilter<KmerHasher>
             if (LIKELY(!invalid[i])) {
                 assert(i + 1 >= k_);
                 const auto &canonical = std::min(fwd, rev);
-                callback(i + 1 - k_,
-                         canonical.template get_hash<0>(),
-                         canonical.template get_hash<1>());
+                callback(i + 1 - k_, canonical);
+
+                if (terminate())
+                    return;
             }
         }
 
     } else {
-        if (LIKELY(!invalid[k_ - 1]))
-            callback(0, fwd.template get_hash<0>(), fwd.template get_hash<1>());
+        if (LIKELY(!invalid[k_ - 1])) {
+            callback(0, fwd);
+
+            if (terminate())
+                return;
+        }
+
 
         for (size_t i = k_; i < coded.size(); ++i) {
             if (UNLIKELY(coded.at(i) >= max_encoded_val))
@@ -148,9 +246,10 @@ void KmerBloomFilter<KmerHasher>
 
             if (LIKELY(!invalid[i])) {
                 assert(i + 1 >= k_);
-                callback(i + 1 - k_,
-                         fwd.template get_hash<0>(),
-                         fwd.template get_hash<1>());
+                callback(i + 1 - k_, fwd);
+
+                if (terminate())
+                    return;
             }
         }
     }
