@@ -213,8 +213,6 @@ Config::Config(int argc, const char *argv[]) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
-        } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
-            kmer_mapping_mode = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -751,7 +749,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of k-mers required to count sequence [1.0]\n");
-            fprintf(stderr, "\t   --kmer-mapping-mode \t\tlevel of heuristics to use for mapping k-mers (0, 1, or 2) [0]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
