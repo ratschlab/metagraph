@@ -34,6 +34,8 @@ namespace common {
  *  When the queue is shutdown, the reader will unblock. At destruction time, the queue is
  * shut down (if not already shut down) and the destructor will wait until all elements
  * were read (i.e. the iterator reaches past the last available element).
+ *
+ * The class is not copyable or copy constructible, but it is moveable.
  */
 template <typename T, typename Alloc = std::allocator<T>>
 class ChunkedWaitQueue {
@@ -43,6 +45,9 @@ class ChunkedWaitQueue {
     typedef size_t size_type;
     typedef T value_type;
     typedef Iterator iterator;
+
+    ChunkedWaitQueue(const ChunkedWaitQueue &other) = delete; // non construction-copyable
+    ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete; // non copyable
 
     /**
      * Constructs a WaitQueue with the given size parameters.
@@ -68,6 +73,16 @@ class ChunkedWaitQueue {
         shutdown();
         std::unique_lock<std::mutex> lock(mutex_);
         empty_.wait(lock, [this] { return empty() || iterator_ == end(); });
+    }
+
+    /**
+     * Resets the queue to an empty state.
+     * Undefined behavior is the queue is reset while iterating over it.
+     */
+    void reset() {
+        first_ = 0;
+        last_ = INVALID_IDX;
+        is_shutdown_ = false;
     }
 
     /**
@@ -181,9 +196,6 @@ class ChunkedWaitQueue {
     bool is_shutdown_;
 
   private:
-    ChunkedWaitQueue(const ChunkedWaitQueue &other) = delete; // non construction-copyable
-    ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete; // non copyable
-
     void pop_chunk() {
         if (size() < chunk_size_) { // nothing to pop
             return;

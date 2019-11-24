@@ -3,6 +3,7 @@
 #include <ips4o.hpp>
 
 #include "utils/template_utils.hpp"
+#include "common/file_merger.hh"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_set_disk.hpp"
@@ -12,7 +13,7 @@
 
 namespace mg {
 namespace succinct {
-
+using namespace mg;
 template <typename KMER>
 using KmerMultsetVector = kmer::KmerCollector<
         KMER,
@@ -173,7 +174,7 @@ void recover_source_dummy_nodes(size_t k, Container *kmers, size_t num_threads, 
 template <typename T>
 void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
-                                size_t num_threads,
+                                size_t, /* num_threads unused */
                                 bool verbose) {
     using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
     Iterator iter = kmers->begin();
@@ -250,8 +251,9 @@ void recover_source_dummy_nodes(size_t k,
     }
 
     // at this point, we have the dummy kmers with dummy prefix of length x in
-    // /tmp/dummy{x}
-    *kmers = std::move(common::FileMerger(files_to_merge).data());
+    // /tmp/dummy{x}, and we'll merge them all into a single stream
+    kmers->reset();
+    common::merge_files(files_to_merge, "/tmp/alldummy",kmers);
 }
 
 inline std::vector<KmerExtractorBOSS::TAlphabet>
