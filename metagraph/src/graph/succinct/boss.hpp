@@ -84,10 +84,6 @@ class BOSS {
     std::vector<edge_index>
     map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
 
-    bool find(const std::string &sequence,
-              double kmer_discovery_fraction = 1,
-              size_t kmer_mapping_mode = 0) const;
-
     template <class... T>
     using Call = typename std::function<void(T...)>;
 
