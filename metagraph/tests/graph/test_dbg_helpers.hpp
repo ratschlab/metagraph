@@ -10,6 +10,7 @@
 #include "dbg_succinct.hpp"
 #include "dbg_hash_string.hpp"
 #include "dbg_hash_ordered.hpp"
+#include "dbg_hash_fast.hpp"
 #include "dbg_bitmap.hpp"
 #include "aligner_helper.hpp"
 
@@ -57,6 +58,7 @@ class DeBruijnGraphTest : public ::testing::Test { };
 typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
                          DBGHashOrdered,
+                         DBGHashFast,
                          DBGSuccinct,
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,

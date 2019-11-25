@@ -61,6 +61,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                               bool kmers_in_single_form = false) const override;
 
     virtual uint64_t num_nodes() const override;
+    virtual uint64_t max_index() const override;
 
     virtual bool load(const std::string &) override {
         throw std::runtime_error("Not implemented");
@@ -95,7 +96,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }
 
     virtual inline bool in_graph(node_index node) const override {
-        assert(node > 0 && node <= graph_->num_nodes());
+        assert(node > 0 && node <= graph_->max_index());
         assert(kmers_in_graph_.get());
 
         return (*kmers_in_graph_)[node] && graph_->in_graph(node);

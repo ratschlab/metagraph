@@ -14,7 +14,7 @@ MaskedDeBruijnGraph
       : graph_(graph),
         kmers_in_graph_(std::move(kmers_in_graph)) {
     assert(kmers_in_graph_.get());
-    assert(kmers_in_graph_->size() == graph->num_nodes() + 1);
+    assert(kmers_in_graph_->size() == graph->max_index() + 1);
 }
 
 MaskedDeBruijnGraph
@@ -24,7 +24,7 @@ MaskedDeBruijnGraph
       : MaskedDeBruijnGraph(graph,
                             std::make_unique<bitmap_lazy>(
                                 std::move(callback),
-                                graph->num_nodes() + 1,
+                                graph->max_index() + 1,
                                 num_set_bits)
                             ) {}
 
@@ -160,6 +160,7 @@ void MaskedDeBruijnGraph
 void MaskedDeBruijnGraph
 ::call_nodes(const std::function<void(node_index)> &callback,
              const std::function<bool()> &stop_early) const {
+    assert(max_index() + 1 == kmers_in_graph_->size());
     kmers_in_graph_->call_ones(
         [&](auto index) {
             if (!index)
@@ -210,6 +211,10 @@ void MaskedDeBruijnGraph
 //       we remove that restriction that, this will stay like this.
 uint64_t MaskedDeBruijnGraph::num_nodes() const {
     return graph_->num_nodes();
+}
+
+uint64_t MaskedDeBruijnGraph::max_index() const {
+    return graph_->max_index();
 }
 
 // Get string corresponding to |node_index|.
