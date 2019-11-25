@@ -852,12 +852,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     std::shared_ptr<DeBruijnGraph> graph
         = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), false);
 
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(full_dbg);
-    const auto *bloom_filter = dbg_succ ? dbg_succ->get_bloom_filter() : nullptr;
-
     call_sequences([&](const std::string &sequence) {
-        if (!bloom_filter || sdsl::util::cnt_one_bits(bloom_filter->check_kmer_presence(sequence)))
-            graph->add_sequence(sequence);
+        graph->add_sequence(sequence);
     });
 
     if (utils::get_verbose()) {
@@ -865,8 +861,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                   << timer.elapsed() << " sec" << std::endl;
         timer.reset();
     }
-
-    exit(1);
 
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
