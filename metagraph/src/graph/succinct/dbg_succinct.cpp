@@ -898,7 +898,7 @@ DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) con
 
 void DBGSuccinct
 ::initialize_bloom_filter_from_fpr(double false_positive_rate,
-                                   size_t max_num_hash_functions) {
+                                   uint32_t max_num_hash_functions) {
     bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
         get_k(),
         canonical_mode_,
@@ -915,7 +915,7 @@ void DBGSuccinct
 
 void DBGSuccinct
 ::initialize_bloom_filter(double bits_per_kmer,
-                          size_t max_num_hash_functions) {
+                          uint32_t max_num_hash_functions) {
     bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
         get_k(),
         canonical_mode_,

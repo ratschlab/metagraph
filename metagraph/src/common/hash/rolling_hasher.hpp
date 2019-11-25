@@ -23,20 +23,9 @@ class RollingHash {
           : hash_(new Hasher(*other.hash_)),
             ring_buffer_(other.ring_buffer_) {}
 
-    RollingHash(RollingHash&& other) noexcept
-          : hash_(new Hasher(std::move(*other.hash_))),
-            ring_buffer_(std::move(other.ring_buffer_)) {}
-
     RollingHash& operator=(const RollingHash &other) {
         hash_ = std::make_unique<Hasher>(*other.hash_);
         ring_buffer_ = other.ring_buffer_;
-
-        return *this;
-    }
-
-    RollingHash& operator=(RollingHash&& other) noexcept {
-        hash_ = std::make_unique<Hasher>(std::move(*other.hash_));
-        ring_buffer_ = std::move(other.ring_buffer_);
 
         return *this;
     }

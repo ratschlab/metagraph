@@ -14,8 +14,11 @@ const std::hash<size_t> hasher;
 TEST(BloomFilter, empty) {
     BloomFilter filter(0, 0, 4);
 
+    // Bloom filter sizes are multiples of 512, empty filters are not allowed
+    ASSERT_EQ(512u, filter.size());
+
     for (size_t i = 0; i < 10000; ++i) {
-        EXPECT_TRUE(filter.check(hasher(i)));
+        EXPECT_FALSE(filter.check(hasher(i)));
     }
 }
 

@@ -111,7 +111,7 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
 
     std::sort(hash_index.begin(), hash_index.end());
 
-    for (const auto [hash, index] : hash_index) {
+    for (const auto &[hash, index] : hash_index) {
         check_vec[index] = filter_.check(hash);
     }
 
