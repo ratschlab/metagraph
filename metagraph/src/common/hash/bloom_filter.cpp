@@ -29,8 +29,8 @@ void BloomFilter::insert(uint64_t hash) {
     size_t offset = ((hash % size) >> SHIFT) << SHIFT;
 
     // split 64-bit hash into two 32-bit hashes
-    uint32_t base = hash;
-    uint32_t jump = hash >> 32;
+    uint32_t h1 = hash;
+    uint32_t h2 = hash >> 32;
 
     /*
      * Use two 32-bit hashes to generate num_hash_functions hashes
@@ -40,7 +40,7 @@ void BloomFilter::insert(uint64_t hash) {
      */
     for (uint32_t i = 0; i < num_hash_functions_; ++i) {
         // set bits within block
-        filter_[offset + ((base + i * jump) & BLOCK_MASK)] = true;
+        filter_[offset + ((h1 + i * h2) & BLOCK_MASK)] = true;
     }
 
     assert(check(hash));
@@ -63,11 +63,11 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
     // use the 64-bit hash to select a 512-bit block
     for (const auto &[offset, hash] : sorted_hashes) {
         // split 64-bit hash into two 32-bit hashes
-        uint32_t base = hash;
-        uint32_t jump = hash >> 32;
+        uint32_t h1 = hash;
+        uint32_t h2 = hash >> 32;
 
         for (uint32_t i = 0; i < num_hash_functions_; ++i) {
-            filter_[offset + ((base + i * jump) & BLOCK_MASK)] = true;
+            filter_[offset + ((h1 + i * h2) & BLOCK_MASK)] = true;
         }
 
         assert(check(hash));
@@ -83,12 +83,12 @@ bool BloomFilter::check(uint64_t hash) const {
     size_t offset = ((hash % size) >> SHIFT) << SHIFT;
 
     // split 64-bit hash into two 32-bit hashes
-    uint32_t base = hash;
-    uint32_t jump = hash >> 32;
+    uint32_t h1 = hash;
+    uint32_t h2 = hash >> 32;
 
     for (uint32_t i = 0; i < num_hash_functions_; ++i) {
         // check bits within block
-        found &= filter_[offset + ((base + i * jump) & BLOCK_MASK)];
+        found &= filter_[offset + ((h1 + i * h2) & BLOCK_MASK)];
     }
 
     return found;
