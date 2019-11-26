@@ -148,12 +148,6 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return find;
     }
 
-    bool kmers_overlap(const Kmer &out_kmer, const Kmer &in_kmer) const {
-        KMER overlap = out_kmer;
-        overlap.to_next(k_, in_kmer[k_ - 1]);
-        return overlap == in_kmer;
-    }
-
     node_index get_node_index(const KmerConstIterator &iter) const;
     node_index get_node_index(const Kmer &kmer) const;
 
@@ -231,12 +225,18 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
 
     const auto &kmers = sequence_to_kmers(sequence);
 
-    bool may_contain_source_kmer = true;
     bool next_iter = false;
-    for (auto kmer_it = kmers.rbegin(); kmer_it != kmers.rend(); ++kmer_it) {
+
+    for (auto kmer_it = kmers.rbegin(); kmer_it != kmers.rend();) {
+        if (!kmer_it->second) {
+            ++kmer_it;
+            continue;
+        }
+
         const auto &kmer = kmer_it->first;
 
-        may_contain_source_kmer = kmer_it + 1 == kmers.rend() || !kmers_overlap((kmer_it + 1)->first, kmer);
+        // check if it's the first k-mer or its preceeding is invalid
+        bool may_contain_source_kmer = ++kmer_it == kmers.rend() || !kmer_it->second;
 
         Bits val = Bits(1) << kmer[k_ - 1];
 
@@ -266,18 +266,22 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
     if (!canonical_mode_)
         return;
 
-    may_contain_source_kmer = true;
-    next_iter = false;
-
     auto rev_comp = sequence;
     reverse_complement(rev_comp.begin(), rev_comp.end());
 
+    next_iter = false;
+
     auto rev_kmers = sequence_to_kmers(rev_comp);
 
-    for (auto kmer_it = rev_kmers.rbegin(); kmer_it != rev_kmers.rend(); ++kmer_it) {
+    for (auto kmer_it = rev_kmers.rbegin(); kmer_it != rev_kmers.rend();) {
+        if (!kmer_it->second) {
+            ++kmer_it;
+            continue;
+        }
+
         const auto &kmer = kmer_it->first;
 
-        may_contain_source_kmer = kmer_it + 1 == kmers.rend() || !kmers_overlap((kmer_it + 1)->first, kmer);
+        bool may_contain_source_kmer = ++kmer_it == kmers.rend() || !kmer_it->second;
 
         Bits val = Bits(1) << kmer[k_ - 1];
 
