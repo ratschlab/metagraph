@@ -23,6 +23,7 @@
 #include "kmc_parser.hpp"
 #include "dbg_hash_ordered.hpp"
 #include "dbg_hash_string.hpp"
+#include "dbg_hash_fast.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
@@ -52,6 +53,9 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, ".hashstrdbg")) {
         return Config::GraphType::HASH_STR;
+
+    } else if (utils::ends_with(filename, ".hashfastdbg")) {
+        return Config::GraphType::HASH_FAST;
 
     } else if (utils::ends_with(filename, ".bitmapdbg")) {
         return Config::GraphType::BITMAP;
@@ -94,6 +98,7 @@ std::string remove_graph_extension(const std::string &filename) {
     return utils::remove_suffix(filename, ".dbg",
                                           ".orhashdbg",
                                           ".hashstrdbg",
+                                          ".hashfastdbg",
                                           ".bitmapdbg");
 }
 
@@ -121,6 +126,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH_STR:
             return load_critical_graph_from_file<DBGHashString>(filename);
+
+        case Config::GraphType::HASH_FAST:
+            return load_critical_graph_from_file<DBGHashFast>(filename);
 
         case Config::GraphType::BITMAP:
             return load_critical_graph_from_file<DBGBitmap>(filename);
@@ -987,7 +995,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
     auto annotation = std::make_unique<annotate::RowCompressed<>>(
-        graph->num_nodes(),
+        graph->max_index(),
         full_annotation.get_label_encoder().get_labels(),
         [&](annotate::RowCompressed<>::CallRow call_row) {
 
@@ -1598,6 +1606,10 @@ int main(int argc, const char *argv[]) {
                         graph.reset(new DBGHashOrdered(config->k, config->canonical, true));
                         break;
 
+                    case Config::GraphType::HASH_FAST:
+                        graph.reset(new DBGHashFast(config->k, config->canonical, true));
+                        break;
+
                     case Config::GraphType::HASH_STR:
                         if (config->canonical) {
                             std::cerr << "Warning: string hash-based de Bruijn graph"
@@ -1902,7 +1914,7 @@ int main(int argc, const char *argv[]) {
             auto graph_temp = load_critical_dbg(config->infbase);
 
             auto annotation_temp
-                = std::make_unique<annotate::RowCompressed<>>(graph_temp->num_nodes());
+                = std::make_unique<annotate::RowCompressed<>>(graph_temp->max_index());
 
             if (config->infbase_annotators.size()
                     && !annotation_temp->load(config->infbase_annotators.at(0))) {

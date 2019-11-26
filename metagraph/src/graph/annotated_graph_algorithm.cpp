@@ -149,6 +149,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
         &anno_graph.get_annotation()
     );
 
+    //TODO: why do we have num_nodes + 1 here and not just num_nodes?
     if (columns) {
         size_t frequent_column_label_min_count
             = (anno_graph.get_graph().num_nodes() + 1)

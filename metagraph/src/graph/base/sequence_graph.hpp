@@ -16,7 +16,8 @@ namespace utils {
 
 class SequenceGraph {
   public:
-    // node indexes [1,...,num_nodes]
+    // Node indexes [1,...,max_index], but only num_nodes of them are real.
+    // For iteration, call `call_nodes`
     typedef uint64_t node_index;
     static constexpr uint64_t npos = 0;
 

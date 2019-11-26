@@ -161,15 +161,22 @@ void MaskedDeBruijnGraph
 ::call_nodes(const std::function<void(node_index)> &callback,
              const std::function<bool()> &stop_early) const {
     assert(max_index() + 1 == kmers_in_graph_->size());
+
+    bool stop = false;
+
+    // TODO: add terminate<bool(void)> to call_ondes
     kmers_in_graph_->call_ones(
         [&](auto index) {
-            if (!index)
+            if (stop || !index)
                 return;
 
             assert(in_graph(index));
 
-            if (!stop_early())
+            if (stop_early()) {
+                stop = true;
+            } else {
                 callback(index);
+            }
         }
     );
 }
@@ -204,17 +211,6 @@ void MaskedDeBruijnGraph
         },
         terminate
     );
-}
-
-// TODO: This should ideally return kmers_in_graph_->num_set_bits(), but the
-//       API assumes that all node indices from 1 to num_nodes are valid. Until
-//       we remove that restriction that, this will stay like this.
-uint64_t MaskedDeBruijnGraph::num_nodes() const {
-    return graph_->num_nodes();
-}
-
-uint64_t MaskedDeBruijnGraph::max_index() const {
-    return graph_->max_index();
 }
 
 // Get string corresponding to |node_index|.
