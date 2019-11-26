@@ -65,7 +65,7 @@ class SortedSetDisk {
             size_t num_threads = 1,
             bool verbose = false,
             size_t container_size = CONTAINER_SIZE_BYTES,
-            size_t merge_queue_size = MERGE_QUEUE_SIZE,
+            size_t merge_queue_size = MERGE_QUEUE_SIZE / sizeof(T),
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
         : num_threads_(num_threads),
           verbose_(verbose),
