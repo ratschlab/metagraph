@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <filesystem>
 
 template <typename T>
 class SortedSetDiskTest : public ::testing::Test {};
@@ -13,8 +14,8 @@ typedef ::testing::Types<uint64_t, int32_t> SortedDiskElementTypes;
 TYPED_TEST_CASE(SortedSetDiskTest, SortedDiskElementTypes);
 
 template <typename TypeParam>
-void expectEquals(SortedSetDisk<TypeParam> &underTest,
-                  const std::vector<TypeParam> &expectedValues) {
+void expect_equals(SortedSetDisk<TypeParam> &underTest,
+                   const std::vector<TypeParam> &expectedValues) {
     uint32_t size = 0;
     using ChunkedQueueIterator = typename threads::ChunkedWaitQueue<TypeParam>::Iterator;
     threads::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.dataStream();
@@ -26,35 +27,69 @@ void expectEquals(SortedSetDisk<TypeParam> &underTest,
     EXPECT_EQ(expectedValues.size(), size);
 }
 
+const std::string out_file = "/tmp/out";
+template <typename TypeParam>
+void expect_disk_data(const std::string &file_name,
+                      const std::vector<TypeParam> &expectedValues) {
+    uint32_t size = 0;
+    std::ifstream in(file_name, std::ios::binary);
+    while (true) {
+        TypeParam v;
+        if (!in.read(reinterpret_cast<char *>(&v), sizeof(TypeParam))) {
+            break;
+        }
+        EXPECT_LT(size, expectedValues.size());
+        EXPECT_EQ(expectedValues[size], v);
+        size++;
+    }
+    EXPECT_EQ(expectedValues.size(), size);
+
+    std::filesystem::remove(out_file);
+}
+
+template <typename T>
+SortedSetDisk<T> create_sorted_set_disk() {
+    constexpr bool verbose = false;
+    constexpr size_t thread_count = 1;
+    constexpr size_t container_size = 8;
+    constexpr size_t merge_queue_size = 1000;
+    constexpr size_t num_last_elements_cached = 10;
+    auto cleanup = [](typename SortedSetDisk<T>::storage_type *) {};
+    return SortedSetDisk<T>(cleanup, out_file, thread_count, verbose, container_size,
+                            merge_queue_size, num_last_elements_cached);
+}
+
 TYPED_TEST(SortedSetDiskTest, Empty) {
-    SortedSetDisk<TypeParam> underTest;
-    expectEquals(underTest, {});
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    expect_equals(underTest, {});
+    expect_disk_data(out_file, std::vector<TypeParam>());
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
-    SortedSetDisk<TypeParam> underTest;
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::array<TypeParam, 1> elements = { 42 };
     underTest.insert(elements.begin(), elements.end());
-    expectEquals(underTest, { 42 });
+    expect_equals(underTest, { 42 });
+    expect_disk_data<TypeParam>(out_file, { 42 });
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
-    SortedSetDisk<TypeParam> underTest;
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
     underTest.insert(elements.begin(), elements.end());
-    expectEquals(underTest, { 42, 43, 44, 45 });
+    expect_equals(underTest, { 42, 43, 44, 45 });
+    expect_disk_data<TypeParam>(out_file, { 42, 43, 44, 45 });
 }
 
 /**
  * Test that elements are correctly merged from multiple buffers
  */
 TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
-    auto cleanup = [](typename SortedSetDisk<TypeParam>::storage_type *) {};
-    SortedSetDisk<TypeParam> underTest(cleanup, 1 /*threads*/, false /*verbose*/,
-                                       8 /* Max buffer size */);
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<TypeParam> elements = { 42, 43, 44, 45 };
     underTest.insert(elements.begin(), elements.end());
-    expectEquals(underTest, elements);
+    expect_equals(underTest, elements);
+    expect_disk_data(out_file, elements);
 }
 
 /**
@@ -62,9 +97,7 @@ TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
  * multiple inserts.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
-    auto cleanup = [](typename SortedSetDisk<TypeParam>::storage_type *) {};
-    SortedSetDisk<TypeParam> underTest(cleanup, 1 /*threads*/, false /*verbose*/,
-                                       8 /* Max buffer size */);
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
         std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
@@ -72,7 +105,8 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
         underTest.insert(elements.begin(), elements.end());
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
-    expectEquals(underTest, expected_result);
+    expect_equals(underTest, expected_result);
+    expect_disk_data(out_file, expected_result);
 }
 
 /**
@@ -80,15 +114,16 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
  * across multiple inserts.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesNonDistinct) {
-    auto cleanup = [](typename SortedSetDisk<TypeParam>::storage_type *) {};
-    SortedSetDisk<TypeParam> underTest(cleanup, 1 /*threads*/, false /*verbose*/,
-                                       8 /* Max buffer size */);
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     for (uint32_t i = 0; i < 100; ++i) {
         std::array<TypeParam, 4> elements
                 = { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) };
         underTest.insert(elements.begin(), elements.end());
     }
-    expectEquals(underTest, { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) });
+    std::vector<TypeParam> expected_result
+            = { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) };
+    expect_equals(underTest, expected_result);
+    expect_disk_data(out_file, expected_result);
 }
 
 /**
@@ -96,9 +131,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesNonDistinct) {
  * multiple inserts across multiple threads.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
-    auto cleanup = [](typename SortedSetDisk<TypeParam>::storage_type *) {};
-    SortedSetDisk<TypeParam> underTest(cleanup, 1 /*threads*/, false /*verbose*/,
-                                       8 /* Max buffer size */);
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<std::thread> workers;
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
@@ -113,7 +146,8 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
-    expectEquals(underTest, expected_result);
+    expect_equals(underTest, expected_result);
+    expect_disk_data(out_file, expected_result);
 }
 
 /**
@@ -121,10 +155,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
  * multiple inserts across multiple threads. Each insert will have dupes.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
-    SortedSetDisk<TypeParam> underTest([](auto *) {} /*cleanup*/, 1 /*threads*/,
-                                       false
-                                       /*verbose*/,
-                                       8 /* Max buffer size */);
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<std::thread> workers;
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
@@ -139,13 +170,12 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
-    expectEquals(underTest, expected_result);
+    expect_equals(underTest, expected_result);
+    expect_disk_data(out_file, expected_result);
 }
 
 TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
-    auto cleanup = [](typename SortedSetDisk<TypeParam>::storage_type *) {};
-    SortedSetDisk<TypeParam> underTest(cleanup, 1 /*threads*/, false /*verbose*/,
-                                       8 /* Max buffer size */);
+    SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
         std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
@@ -171,4 +201,5 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
         }
         size++;
     }
+    expect_disk_data(out_file, expected_result);
 }

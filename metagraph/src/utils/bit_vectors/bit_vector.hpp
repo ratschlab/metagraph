@@ -5,7 +5,9 @@
 #include <mutex>
 #include <atomic>
 
-#include <sdsl/wavelet_trees.hpp>
+#include <sdsl/int_vector.hpp>
+#include <sdsl/rrr_vector.hpp>
+#include <sdsl/sd_vector.hpp>
 #include <dynamic.hpp>
 
 #include "bitmap.hpp"
@@ -14,7 +16,7 @@
 // Bitmap with rank and select operations ( rank/select dictionary )
 class bit_vector : public bitmap {
   public:
-    virtual ~bit_vector() {};
+    virtual ~bit_vector() {}
 
     // Computes the number of set bits in the subarray indexed by [0,1,...,id]
     virtual uint64_t rank1(uint64_t id) const = 0;
@@ -278,7 +280,7 @@ class bit_vector_adaptive : public bit_vector {
     friend bit_vector;
 
   public:
-    virtual ~bit_vector_adaptive() {};
+    virtual ~bit_vector_adaptive() {}
 
     virtual uint64_t rank1(uint64_t id) const override final { return vector_->rank1(id); }
     virtual uint64_t select1(uint64_t id) const override final { return vector_->select1(id); }

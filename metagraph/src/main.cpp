@@ -1,4 +1,6 @@
 #include <filesystem>
+#include <typeinfo>
+
 #include <json/json.h>
 #include <ips4o.hpp>
 #include <fmt/format.h>
@@ -35,13 +37,13 @@
 #include "masked_graph.hpp"
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
-#include <typeinfo>
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
 static const size_t kRowBatchSize = 100'000;
+const bool kPrefilterWithBloom = false;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -726,32 +728,24 @@ void map_sequences_in_file(const std::string &file,
 
     Timer data_reading_timer;
 
-    std::function<bool(std::string)> map_kmers;
-    if (dbg) {
-        map_kmers = [&](std::string sequence) {
-            return dbg->get_boss().find(sequence,
-                                        config.discovery_fraction,
-                                        config.kmer_mapping_mode);
-        };
-    } else {
-        map_kmers = [&](std::string sequence) {
-            return graph.find(sequence, config.discovery_fraction);
-        };
-    }
-
     read_fasta_file_critical(file, [&](kseq_t *read_stream) {
         if (config.verbose)
             std::cout << "Sequence: " << read_stream->seq.s << "\n";
 
         if (config.query_presence
                 && config.alignment_length == graph.get_k()) {
-            if (config.filter_present) {
-                if (map_kmers(std::string(read_stream->seq.s)))
-                    std::cout << ">" << read_stream->name.s << "\n"
-                                     << read_stream->seq.s << "\n";
-            } else {
-                std::cout << map_kmers(std::string(read_stream->seq.s)) << "\n";
+
+            bool found = graph.find(read_stream->seq.s,
+                                    config.discovery_fraction);
+
+            if (!config.filter_present) {
+                std::cout << found << "\n";
+
+            } else if (found) {
+                std::cout << ">" << read_stream->name.s << "\n"
+                                 << read_stream->seq.s << "\n";
             }
+
             return;
         }
 
@@ -856,12 +850,25 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     Timer timer;
 
     // construct graph storing all k-mers in query
-    std::shared_ptr<DeBruijnGraph> graph
-        = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), false);
+    auto graph = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), false);
 
-    call_sequences([&graph](const std::string &sequence) {
-        graph->add_sequence(sequence);
-    });
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(full_dbg);
+    if (kPrefilterWithBloom && dbg_succ) {
+        if (utils::get_verbose() && dbg_succ->get_bloom_filter()) {
+            std::cout << "Indexing k-mers pre-filtered with Bloom filter" << std::endl;
+        }
+        call_sequences([&graph,&dbg_succ](const std::string &sequence) {
+            graph->add_sequence(sequence, get_missing_kmer_skipper(
+                dbg_succ->get_bloom_filter(),
+                sequence.data(),
+                sequence.data() + sequence.size()
+            ));
+        });
+    } else {
+        call_sequences([&graph](const std::string &sequence) {
+            graph->add_sequence(sequence);
+        });
+    }
 
     if (utils::get_verbose()) {
         std::cout << "Query graph --- k-mers indexed: "
@@ -1035,12 +1042,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
     }
 
-    graph = std::make_shared<MaskedDeBruijnGraph>(graph,
+    auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(graph,
         [=](auto i) -> bool { return (*index_in_full_graph)[i]; }
     );
 
     // build annotated graph from the query graph and copied annotations
-    return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
+    return std::make_unique<AnnotatedDBG>(masked_graph, std::move(annotation));
 }
 
 
@@ -1136,6 +1143,17 @@ void print_stats(const DeBruijnGraph &graph) {
         }
     }
 
+    std::cout << "========================================================" << std::endl;
+}
+
+template <class KmerHasher>
+void print_bloom_filter_stats(const KmerBloomFilter<KmerHasher> *kmer_bloom) {
+    if (!kmer_bloom)
+        return;
+
+    std::cout << "====================== BLOOM STATS =====================" << std::endl;
+    std::cout << "Size (bits):\t" << kmer_bloom->size() << std::endl
+              << "Num hashes:\t" << kmer_bloom->num_hash_functions() << std::endl;
     std::cout << "========================================================" << std::endl;
 }
 
@@ -2557,8 +2575,8 @@ int main(int argc, const char *argv[]) {
 
                 print_stats(*graph);
 
-                if (dynamic_cast<DBGSuccinct*>(graph.get())) {
-                    const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+                if (auto dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get())) {
+                    const auto &boss_graph = dbg_succ->get_boss();
 
                     print_boss_stats(boss_graph,
                                      config->count_dummy,
@@ -2567,6 +2585,8 @@ int main(int argc, const char *argv[]) {
 
                     if (config->print_graph_internal_repr)
                         boss_graph.print_internal_representation(std::cout);
+
+                    print_bloom_filter_stats(dbg_succ->get_bloom_filter());
                 }
 
                 if (config->print_graph)

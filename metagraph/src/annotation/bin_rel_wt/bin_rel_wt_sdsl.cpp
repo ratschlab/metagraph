@@ -4,6 +4,8 @@
 #include <iterator>
 #include <cmath>
 
+#include <sdsl/construct.hpp>
+
 #include "algorithms.hpp"
 #include "serialization.hpp"
 

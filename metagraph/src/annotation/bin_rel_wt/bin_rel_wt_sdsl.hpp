@@ -4,6 +4,7 @@
 #include <sdsl/wt_int.hpp>
 
 #include "binary_matrix.hpp"
+#include "bit_vector.hpp"
 
 
 class BinRelWT_sdsl : public BinaryMatrix {

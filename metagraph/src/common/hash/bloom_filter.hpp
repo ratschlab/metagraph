@@ -15,8 +15,23 @@ class BloomFilter {
                 size_t expected_num_elements,
                 size_t max_num_hash_functions);
 
+    // TODO: pass all hashes `insert(uint64_t hashes[])`
     void insert(uint64_t hash1, uint64_t hash2);
-    bool check(uint64_t hash1, uint64_t hash2) const;
+
+    // TODO: pass all hashes `insert(uint64_t hashes[])`
+    inline bool check(uint64_t hash1, uint64_t hash2) const {
+        const auto size = filter_.size();
+        if (!size)
+            return true;
+
+        for (size_t i = 0; i < num_hash_functions_; ++i) {
+            const auto hash = hash1 + i * hash2;
+            if (!filter_[hash - hash / size * size])
+                return false;
+        }
+
+        return true;
+    }
 
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);

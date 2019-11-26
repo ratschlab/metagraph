@@ -12,7 +12,6 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "common/threading.hpp"
-#include "common/seq_tools/reverse_complement.hpp"
 #include "utils/serialization.hpp"
 #include "utils/algorithms.hpp"
 #include "boss_construct.hpp"
@@ -880,146 +879,6 @@ BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded) const {
     map_to_edges(seq_encoded,
                  [&indices](edge_index i) { indices.push_back(i); });
     return indices;
-}
-
-bool BOSS::find(const std::string &sequence,
-                double kmer_discovery_fraction,
-                const std::function<bool()> &is_invalid) const {
-    size_t kmer_size = k_ + 1;
-
-    if (sequence.length() < kmer_size)
-        return false;
-
-    const size_t num_kmers = sequence.length() - kmer_size + 1;
-    const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
-    const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
-    size_t num_kmers_discovered = 0;
-    size_t num_kmers_missing = 0;
-
-    map_to_edges(sequence,
-        [&](edge_index edge) {
-            if (edge) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-        },
-        [&]() { return num_kmers_missing > max_kmers_missing
-                        || num_kmers_discovered >= min_kmers_discovered; },
-        [&]() {
-            if (!is_invalid())
-                return false;
-
-            num_kmers_missing++;
-            return true;
-        }
-    );
-
-    return num_kmers_missing <= max_kmers_missing;
-}
-
-bool BOSS::find(const std::string &sequence,
-                double kmer_discovery_fraction,
-                size_t kmer_mapping_mode) const {
-    if (!kmer_mapping_mode)
-        return find(sequence, kmer_discovery_fraction);
-
-    size_t kmer_size = k_ + 1;
-
-    if (sequence.length() < kmer_size)
-        return false;
-
-    const size_t num_kmers = sequence.length() - kmer_size + 1;
-    const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
-    const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
-    size_t num_kmers_discovered = 0;
-    size_t num_kmers_missing = 0;
-
-    auto seq_encoded = encode(sequence);
-
-    std::vector<size_t> skipped_kmers;
-    skipped_kmers.reserve(seq_encoded.size());
-
-    for (size_t i = 0; i < seq_encoded.size() - kmer_size + 1; ++i) {
-        auto edge = map_to_edge(seq_encoded.data() + i,
-                                seq_encoded.data() + i + kmer_size);
-        if (edge) {
-            num_kmers_discovered++;
-        } else {
-            num_kmers_missing++;
-        }
-
-        if (num_kmers_missing > max_kmers_missing
-                || num_kmers_discovered >= min_kmers_discovered)
-            return num_kmers_discovered >= min_kmers_discovered;
-
-        while (edge && i + kmer_size < seq_encoded.size()) {
-            edge = fwd(edge);
-            edge = pick_edge(edge, seq_encoded[i + kmer_size]);
-            if (edge) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-
-            if (num_kmers_missing > max_kmers_missing
-                    || num_kmers_discovered >= min_kmers_discovered)
-                return num_kmers_discovered >= min_kmers_discovered;
-
-            i++;
-        }
-
-        if (kmer_discovery_fraction < 1
-            && (kmer_mapping_mode == 1
-                || kmer_size * (max_kmers_missing - num_kmers_missing)
-                    > min_kmers_discovered - num_kmers_discovered)) {
-            size_t i_old = i;
-
-            // jump over the missing k-mer
-            i += kmer_size - 1;
-
-            // Save skipped kmers for the end
-            while (++i_old <= i && i_old < seq_encoded.size() - kmer_size + 1) {
-                skipped_kmers.push_back(i_old);
-            }
-        }
-    }
-
-    for (size_t j = 0; j < skipped_kmers.size(); ++j) {
-        size_t i = skipped_kmers[j];
-
-        auto edge = map_to_edge(seq_encoded.data() + i,
-                                seq_encoded.data() + i + kmer_size);
-        if (edge) {
-            num_kmers_discovered++;
-        } else {
-            num_kmers_missing++;
-        }
-
-        if (num_kmers_missing > max_kmers_missing
-                || num_kmers_discovered >= min_kmers_discovered)
-            return num_kmers_discovered >= min_kmers_discovered;
-
-        while (edge && j + 1 < skipped_kmers.size()
-                    && i + 1 == skipped_kmers[j + 1]) {
-            edge = fwd(edge);
-            edge = pick_edge(edge, seq_encoded[i + kmer_size]);
-            if (edge) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-
-            if (num_kmers_missing > max_kmers_missing
-                    || num_kmers_discovered >= min_kmers_discovered)
-                return num_kmers_discovered >= min_kmers_discovered;
-
-            i++;
-            j++;
-        }
-    }
-
-    return num_kmers_missing <= max_kmers_missing;
 }
 
 /**
@@ -2032,78 +1891,79 @@ void call_paths(const BOSS &boss,
         if (!path.size())
             continue;
 
-        if (kmers_in_single_form) {
-            // trim trailing sentinels '$'
-            if (sequence.back() == boss.kSentinelCode) {
-                sequence.pop_back();
-                path.pop_back();
-            }
+        if (!kmers_in_single_form) {
+            callback(std::move(path), std::move(sequence));
+            continue;
+        }
 
-            auto first_valid_it
-                = std::find_if(sequence.begin(), sequence.end(),
-                               [&boss](auto c) { return c != boss.kSentinelCode; });
+        // trim trailing sentinels '$'
+        if (sequence.back() == boss.kSentinelCode) {
+            sequence.pop_back();
+            path.pop_back();
+        }
 
-            sequence.erase(sequence.begin(), first_valid_it);
+        auto first_valid_it
+            = std::find_if(sequence.begin(), sequence.end(),
+                           [&boss](auto c) { return c != boss.kSentinelCode; });
 
-            if (sequence.size() <= boss.get_k())
+        sequence.erase(sequence.begin(), first_valid_it);
+
+        if (sequence.size() <= boss.get_k())
+            continue;
+
+        path.erase(path.begin(),
+                   path.begin() + (first_valid_it - sequence.begin()));
+
+
+        // get dual path (mapping of the reverse complement sequence)
+        auto rev_comp_seq = sequence;
+        KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
+
+        auto dual_path = boss.map_to_edges(rev_comp_seq);
+        std::reverse(dual_path.begin(), dual_path.end());
+        size_t begin = 0;
+
+        assert(std::all_of(path.begin(), path.end(),
+                           [&](auto i) { return visited[i]; }));
+
+        progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
+                                      [&](auto node) { return node && !visited[node]; });
+
+        // Mark all nodes in path as unvisited and re-visit them while
+        // traversing the path (iterating through all nodes).
+        std::for_each(path.begin(), path.end(),
+                      [&](auto i) { visited[i] = false; });
+
+        // traverse the path with its dual and visit the nodes
+        for (size_t i = 0; i < path.size(); ++i) {
+            assert(path[i]);
+            visited[path[i]] = true;
+
+            if (!dual_path[i])
                 continue;
 
-            path.erase(path.begin(),
-                       path.begin() + (first_valid_it - sequence.begin()));
-
-
-            // get dual path (mapping of the reverse complement sequence)
-            auto rev_comp_seq = KmerExtractorBOSS::reverse_complement(sequence);
-
-            auto dual_path = boss.map_to_edges(rev_comp_seq);
-            std::reverse(dual_path.begin(), dual_path.end());
-            size_t begin = 0;
-
-            assert(std::all_of(path.begin(), path.end(),
-                               [&](auto i) { return visited[i]; }));
-
-            progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
-                                          [&](auto node) { return node && !visited[node]; });
-
-            // Mark all nodes in path as unvisited and re-visit them while
-            // traversing the path (iterating through all nodes).
-            std::for_each(path.begin(), path.end(),
-                          [&](auto i) { visited[i] = false; });
-
-            // traverse the path with its dual and visit the nodes
-            for (size_t i = 0; i < path.size(); ++i) {
-                assert(path[i]);
-                visited[path[i]] = true;
-
-                if (!dual_path[i])
-                    continue;
-
-                // check if reverse-complement k-mer has been traversed
-                if (!visited[dual_path[i]] || dual_path[i] == path[i]) {
-                    visited[dual_path[i]] = discovered[dual_path[i]] = true;
-                    continue;
-                }
-
-                // The reverse-complement k-mer has been visited
-                // -> Skip this k-mer and call the traversed path segment.
-                if (begin < i)
-                    callback({ path.begin() + begin, path.begin() + i },
-                             { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-
-                begin = i + 1;
+            // check if reverse-complement k-mer has been traversed
+            if (!visited[dual_path[i]] || dual_path[i] == path[i]) {
+                visited[dual_path[i]] = discovered[dual_path[i]] = true;
+                continue;
             }
 
-            // Call the path traversed
-            if (!begin) {
-                callback(std::move(path), std::move(sequence));
+            // The reverse-complement k-mer had been visited
+            // -> Skip this k-mer and call the traversed path segment.
+            if (begin < i)
+                callback({ path.begin() + begin, path.begin() + i },
+                         { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
 
-            } else if (begin < path.size()) {
-                callback({ path.begin() + begin, path.end() },
-                         { sequence.begin() + begin, sequence.end() });
-            }
+            begin = i + 1;
+        }
 
-        } else {
+        // Call the path traversed
+        if (!begin) {
             callback(std::move(path), std::move(sequence));
+
+        } else if (begin < path.size()) {
+            callback({ path.begin() + begin, path.end() },
+                     { sequence.begin() + begin, sequence.end() });
         }
     }
 }
