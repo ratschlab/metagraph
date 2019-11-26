@@ -321,11 +321,8 @@ void call_sequences(const DeBruijnGraph &graph,
         //  .____  or  .____
         //              \___
         //
-        graph.call_source_nodes([&](auto node) {
-            assert(graph.has_no_incoming(node));
-            assert(!visited[node] || kmers_in_single_form);
-
-            if (!kmers_in_single_form || !visited[node])
+        call_zeros(visited, [&](auto node) {
+            if (graph.has_no_incoming(node) && !visited[node])
                 call_paths_from(node);
         });
     }
@@ -335,6 +332,7 @@ void call_sequences(const DeBruijnGraph &graph,
     //       \___
     //
     call_zeros(visited, [&](auto node) {
+        // TODO: this two calls to outgoing nodes could be combined into one
         if (graph.has_multiple_outgoing(node)) {
             graph.adjacent_outgoing_nodes(node, [&](auto next) {
                 if (!visited[next])
