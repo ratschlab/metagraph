@@ -108,7 +108,7 @@ test_mask_unitigs(double inlabel_fraction,
             )
         );
 
-        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+        EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 
         masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
 

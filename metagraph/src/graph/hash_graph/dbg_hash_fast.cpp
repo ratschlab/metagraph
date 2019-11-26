@@ -6,6 +6,7 @@
 #include <tsl/ordered_set.h>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
+#include "common/seq_tools/reverse_complement.hpp"
 #include "serialization.hpp"
 #include "bit_vector.hpp"
 #include "utils/algorithms.hpp"
@@ -126,7 +127,8 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     bool in_graph(node_index node) const;
 
   private:
-    Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const {
+    Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
+                                                    bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
 
@@ -224,17 +226,17 @@ DBGHashFastImpl<KMER>::DBGHashFastImpl(size_t k,
 
 template <typename KMER>
 void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
-                                            bit_vector_dyn *nodes_inserted) {
+                                         bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == max_index() + 1);
 
-    auto kmers = sequence_to_kmers(sequence);
+    const auto &kmers = sequence_to_kmers(sequence);
 
     bool may_contain_source_kmer = true;
     bool next_iter = false;
     for (auto kmer_it = kmers.rbegin(); kmer_it != kmers.rend(); ++kmer_it) {
-        const auto &kmer = *kmer_it;
+        const auto &kmer = kmer_it->first;
 
-        may_contain_source_kmer = kmer_it + 1 == kmers.rend() || !kmers_overlap(*(kmer_it + 1), kmer);
+        may_contain_source_kmer = kmer_it + 1 == kmers.rend() || !kmers_overlap((kmer_it + 1)->first, kmer);
 
         Bits val = Bits(1) << kmer[k_ - 1];
 
@@ -266,11 +268,16 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
 
     may_contain_source_kmer = true;
     next_iter = false;
-    auto rev_kmers = sequence_to_kmers(seq_encoder_.reverse_complement(sequence));
-    for (auto kmer_it = rev_kmers.rbegin(); kmer_it != rev_kmers.rend(); ++kmer_it) {
-        const auto &kmer = *kmer_it;
 
-        may_contain_source_kmer = kmer_it + 1 == kmers.rend() || !kmers_overlap(*(kmer_it + 1), kmer);
+    auto rev_comp = sequence;
+    reverse_complement(rev_comp.begin(), rev_comp.end());
+
+    auto rev_kmers = sequence_to_kmers(rev_comp);
+
+    for (auto kmer_it = rev_kmers.rbegin(); kmer_it != rev_kmers.rend(); ++kmer_it) {
+        const auto &kmer = kmer_it->first;
+
+        may_contain_source_kmer = kmer_it + 1 == kmers.rend() || !kmers_overlap((kmer_it + 1)->first, kmer);
 
         Bits val = Bits(1) << kmer[k_ - 1];
 
@@ -304,51 +311,36 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
 // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
 template <typename KMER>
 void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
-                              std::string::const_iterator begin,
-                              std::string::const_iterator end,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate) const {
-    std::string sequence(begin, end);
-
-    const auto &kmers = sequence_to_kmers(sequence);
-    auto it = kmers.begin();
-    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
-
-        assert(it != kmers.end() || !is_valid);
-
+                                std::string::const_iterator begin,
+                                std::string::const_iterator end,
+                                const std::function<void(node_index)> &callback,
+                                const std::function<bool()> &terminate) const {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers({ begin, end })) {
         if (terminate())
             return;
 
-        assert((find_kmer(KmerWord((*it).data()) & kIgnoreLastCharMask) == kmers_.end())
-               || get_node_index(*it) == npos
-               || *it == get_kmer(get_node_index(*it)));
+        assert((find_kmer(KmerWord(kmer.data()) & kIgnoreLastCharMask) == kmers_.end())
+               || get_node_index(kmer) == npos
+               || kmer == get_kmer(get_node_index(kmer)));
 
-        callback(is_valid ? get_node_index(*it++) : npos);
+        callback(is_valid ? get_node_index(kmer) : npos);
     }
-    assert(it == kmers.end());
 }
 
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied
 template <typename KMER>
 void DBGHashFastImpl<KMER>::map_to_nodes(const std::string &sequence,
-                                          const std::function<void(node_index)> &callback,
-                                          const std::function<bool()> &terminate) const {
-
-    const auto &kmers = sequence_to_kmers(sequence, canonical_mode_);
-    auto it = kmers.begin();
-    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
-
-        assert(it != kmers.end() || !is_valid);
-
+                                         const std::function<void(node_index)> &callback,
+                                         const std::function<bool()> &terminate) const {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
         if (terminate())
             return;
 
-        assert(!get_node_index(*it) || *it == get_kmer(get_node_index(*it)));
+        assert(!get_node_index(kmer) || kmer == get_kmer(get_node_index(kmer)));
 
-        callback(is_valid ? get_node_index(*it++) : npos);
+        callback(is_valid ? get_node_index(kmer) : npos);
     }
-    assert(it == kmers.end());
 }
 
 template <typename KMER>
