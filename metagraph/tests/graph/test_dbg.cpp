@@ -103,7 +103,7 @@ void test_graph_serialization(size_t k_max) {
         {
             Graph graph(2);
 
-            ASSERT_TRUE(graph.load(test_dump_basename));
+            ASSERT_TRUE(graph.load(test_dump_basename)) << "k: " << k;
 
             EXPECT_EQ(k, graph.get_k());
 
@@ -125,6 +125,10 @@ TEST(DBGHashString, SerializeAnyK) {
 
 TEST(DBGHashOrdered, SerializeAnyK) {
     test_graph_serialization<DBGHashOrdered>(256 / KmerExtractor2Bit::bits_per_char);
+}
+
+TEST(DBGHashFast, SerializeAnyK) {
+    test_graph_serialization<DBGHashFast>(256 / KmerExtractor2Bit::bits_per_char);
 }
 
 TEST(DBGSuccinct, SerializeAnyK) {

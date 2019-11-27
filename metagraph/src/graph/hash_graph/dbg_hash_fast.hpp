@@ -4,14 +4,15 @@
 #include <fstream>
 
 #include "sequence_graph.hpp"
-#include "kmer_extractor.hpp"
 
 
 class DBGHashFast : public DeBruijnGraph {
   public:
-    explicit DBGHashFast(size_t k,
-                            bool canonical_mode = false,
-                            bool packed_serialization = true);
+    DBGHashFast(size_t k,
+                bool canonical_mode = false,
+                bool packed_serialization = false) {
+        hash_dbg_ = initialize_graph(k, canonical_mode, packed_serialization);
+    }
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -50,8 +51,8 @@ class DBGHashFast : public DeBruijnGraph {
     // returns true, or if the sequence is exhausted.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
     void traverse(node_index start,
-                  const char* begin,
-                  const char* end,
+                  const char *begin,
+                  const char *end,
                   const std::function<void(node_index)> &callback,
                   const std::function<bool()> &terminate = [](){ return false; }) const {
         hash_dbg_->traverse(start, begin, end, callback, terminate);

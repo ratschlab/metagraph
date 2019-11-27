@@ -5,7 +5,6 @@
 #include <tsl/ordered_set.h>
 
 #include "sequence_graph.hpp"
-#include "kmer_extractor.hpp"
 
 
 class DBGHashOrdered : public DeBruijnGraph {
