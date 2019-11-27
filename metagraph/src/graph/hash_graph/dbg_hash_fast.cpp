@@ -163,6 +163,8 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     const Kmer get_kmer(node_index node,
                         KmerConstIterator kmer_iter) const;
 
+    KmerConstIterator next_kmer(node_index node) const;
+
     void print_internal_representation() const {
         for (auto it = kmers_.begin(); it != kmers_.end(); ++it) {
             const auto index = get_vec_index(it);
@@ -186,17 +188,12 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     // Flags layout:
     //     <--- leading 0's --->
     //     < 1-bit flag for "may contain source kmer" >
-    //     < kBitsPerNullableChar-Flags for "next_char + 1" >
+    //     < 1-bit flag for "next kmer (in ordered set) is adjacent" >
     //     < alphabet_size length bit field for each possible k'th char in kmer>
-    // e.g. 0 100 1001 for two kmers with the same (k-1) prefix ending in 00 and 11, which
-    // are known not to be source kmers, and where the (k-1) prefix hash entry for the 11
-    // outgoing edge is known to be in the previous slot in KmerIndex (next_char = 100 - 1 == 11)
     const Flags kLastCharNBits = seq_encoder_.alphabet.size();
     const Flags kLastCharMask = (Flags(1) << kLastCharNBits) - 1;
-    const Flags kIncomingEdgesMask = kLastCharMask << seq_encoder_.alphabet.size();
-    const size_t kBitsPerNullableChar = utils::code_length(seq_encoder_.alphabet.size());
-    const Flags kNextCharMask = (Flags(1) << kBitsPerNullableChar) - 1;
-    const Flags kMayBeSourceKmer = Flags(1) << (kLastCharNBits + kBitsPerNullableChar);
+    const Flags kAdjacent = Flags(1) << kLastCharNBits;
+    const Flags kMayBeSourceKmer = Flags(1) << (kLastCharNBits + 1);
 
     static constexpr auto kExtension = DBGHashFast::kExtension;
     static constexpr auto kBitsPerChar = KMER::kBitsPerChar;
@@ -239,9 +236,8 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
 
             Flags *val;
             if (inserted) {
-                //TODO: use just a single big to indicate adjacent k-mers
                 if (previous_inserted)
-                    bits_.back() |= (kmer[k_ - 2] + 1) << kLastCharNBits;
+                    bits_.back() |= kAdjacent;
 
                 bits_.push_back(0);
                 val = &bits_.back();
@@ -312,35 +308,38 @@ void DBGHashFastImpl<KMER>::map_to_nodes(const std::string &sequence,
     }
 }
 
+
+template <typename KMER>
+typename DBGHashFastImpl<KMER>::KmerConstIterator
+DBGHashFastImpl<KMER>::next_kmer(node_index node) const {
+
+    KmerConstIterator kmer_it = get_const_iter(node);
+    KMER kmer = get_kmer(node, kmer_it);
+
+    const Flags val = bits_[get_vec_index(kmer_it)];
+
+    KmerConstIterator next_it = kmer_it + 1;
+
+    if ((val & kAdjacent) && kmer[k_ - 1] == KMER(next_it.key())[k_ - 2]) {
+
+        assert(next_it == find_kmer(kmer.data() >> kBitsPerChar));
+
+        return next_it;
+    } else {
+        return find_kmer(kmer.data() >> kBitsPerChar);
+    }
+}
+
 template <typename KMER>
 void DBGHashFastImpl<KMER>::call_outgoing_kmers(node_index node,
                                                 const OutgoingEdgeCallback &callback) const {
     assert(in_graph(node));
 
-    KMER kmer = get_kmer(node);
+    KmerConstIterator next_kmer_prefix_it = next_kmer(node);
+    if (next_kmer_prefix_it == kmers_.end())
+        return;
 
-    node_index next_kmer_base_index;
-    KmerConstIterator next_kmer_prefix_it;
-
-    // TODO: write as a helper function
-    const Flags val = bits_[get_vec_index(get_const_iter(node))];
-    unsigned char next_char = ((val >> kLastCharNBits) & kNextCharMask) - 1;
-    if (kmer[k_ - 1] == next_char) {
-
-        next_kmer_base_index = ((((node - 1) >> kBitsPerChar) + 1) << kBitsPerChar) + 1;
-        next_kmer_prefix_it = get_const_iter(next_kmer_base_index);
-
-        assert(next_kmer_prefix_it == find_kmer(kmer.data() >> kBitsPerChar));
-
-    } else {
-        next_kmer_prefix_it = find_kmer(kmer.data() >> kBitsPerChar);
-
-        if (next_kmer_prefix_it == kmers_.end())
-            return;
-
-        next_kmer_base_index = get_node_index(next_kmer_prefix_it);
-    }
-
+    node_index next_kmer_base_index = get_node_index(next_kmer_prefix_it);
     const Flags next_val = bits_[get_vec_index(next_kmer_prefix_it)];
 
     for (size_t i = 0; i < kLastCharNBits; ++i) {
@@ -415,14 +414,7 @@ template <typename KMER>
 size_t DBGHashFastImpl<KMER>::outdegree(node_index node) const {
     assert(in_graph(node));
 
-    KMER kmer = get_kmer(node);
-
-    kmer.to_next(k_, 0);
-
-    // TODO: shift to the next k-mer with the helper function
-    // (using linear optimization)
-    const auto next_kmer_prefix_it
-        = find_kmer(kmer.data() & kIgnoreLastCharMask);
+    KmerConstIterator next_kmer_prefix_it = next_kmer(node);
 
     if (next_kmer_prefix_it == kmers_.end())
         return 0;
@@ -671,7 +663,6 @@ DBGHashFastImpl<KMER>::get_node_index(const Kmer &kmer) const {
     return node;
 }
 
-//TODO: unwrap this `get_const_iter` in other functions to see what can be simplified
 template <typename KMER>
 typename DBGHashFastImpl<KMER>::KmerConstIterator
 DBGHashFastImpl<KMER>::get_const_iter(node_index node) const {
