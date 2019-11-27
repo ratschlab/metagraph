@@ -28,7 +28,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
 #elif _DNA5_GRAPH
     using Flags = uint16_t;
 #elif _DNA_GRAPH
-    using Flags = unsigned char;
+    using Flags = uint8_t;
 #else
     static_assert(false, "invalid or undefined alphabet");
 #endif
@@ -40,7 +40,6 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
                                        std::vector<KmerWord, std::allocator<KmerWord>>,
                                        std::uint64_t>;
 
-    using KmerIterator = typename KmerIndex::iterator;
     using KmerConstIterator = typename KmerIndex::const_iterator;
 
   public:
