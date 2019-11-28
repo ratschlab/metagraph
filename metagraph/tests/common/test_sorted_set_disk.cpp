@@ -15,21 +15,25 @@ typedef ::testing::Types<uint64_t, int32_t> SortedDiskElementTypes;
 
 TYPED_TEST_CASE(SortedSetDiskTest, SortedDiskElementTypes);
 
+const std::string out_file = "/tmp/out";
+
 template <typename TypeParam>
 void expect_equals(common::SortedSetDisk<TypeParam> &underTest,
-                   const std::vector<TypeParam> &expectedValues) {
+                   const std::vector<TypeParam> &expectedValues,
+                   const std::string output_file) {
     uint32_t size = 0;
     using ChunkedQueueIterator = typename common::ChunkedWaitQueue<TypeParam>::Iterator;
-    common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.dataStream();
-    for (ChunkedQueueIterator &iterator = merge_queue.iterator();
+    common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.data();
+    merge_queue.set_out_file(output_file);
+    for (ChunkedQueueIterator &iterator = merge_queue.begin();
          iterator != merge_queue.end(); ++iterator) {
         EXPECT_EQ(expectedValues[size], *iterator);
         size++;
     }
     EXPECT_EQ(expectedValues.size(), size);
+    merge_queue.shutdown();
 }
 
-const std::string out_file = "/tmp/out";
 template <typename TypeParam>
 void expect_disk_data(const std::string &file_name,
                       const std::vector<TypeParam> &expectedValues) {
@@ -46,7 +50,7 @@ void expect_disk_data(const std::string &file_name,
     }
     EXPECT_EQ(expectedValues.size(), size);
 
-    std::filesystem::remove(out_file);
+    std::filesystem::remove(file_name);
 }
 
 template <typename T>
@@ -57,14 +61,13 @@ common::SortedSetDisk<T> create_sorted_set_disk() {
     constexpr size_t merge_queue_size = 1000;
     constexpr size_t num_last_elements_cached = 10;
     auto cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
-    return common::SortedSetDisk<T>(cleanup, out_file, thread_count, verbose,
-            container_size,
-                            merge_queue_size, num_last_elements_cached);
+    return common::SortedSetDisk<T>(cleanup, thread_count, verbose, container_size,
+                                    merge_queue_size, num_last_elements_cached);
 }
 
 TYPED_TEST(SortedSetDiskTest, Empty) {
     common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
-    expect_equals(underTest, {});
+    expect_equals(underTest, {}, out_file);
     expect_disk_data(out_file, std::vector<TypeParam>());
 }
 
@@ -72,7 +75,7 @@ TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
     common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::array<TypeParam, 1> elements = { 42 };
     underTest.insert(elements.begin(), elements.end());
-    expect_equals(underTest, { 42 });
+    expect_equals(underTest, { 42 }, out_file);
     expect_disk_data<TypeParam>(out_file, { 42 });
 }
 
@@ -80,7 +83,7 @@ TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
     common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
     underTest.insert(elements.begin(), elements.end());
-    expect_equals(underTest, { 42, 43, 44, 45 });
+    expect_equals(underTest, { 42, 43, 44, 45 }, out_file);
     expect_disk_data<TypeParam>(out_file, { 42, 43, 44, 45 });
 }
 
@@ -91,7 +94,7 @@ TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
     common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
     std::vector<TypeParam> elements = { 42, 43, 44, 45 };
     underTest.insert(elements.begin(), elements.end());
-    expect_equals(underTest, elements);
+    expect_equals(underTest, elements, out_file);
     expect_disk_data(out_file, elements);
 }
 
@@ -108,7 +111,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
         underTest.insert(elements.begin(), elements.end());
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
-    expect_equals(underTest, expected_result);
+    expect_equals(underTest, expected_result, out_file);
     expect_disk_data(out_file, expected_result);
 }
 
@@ -125,7 +128,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesNonDistinct) {
     }
     std::vector<TypeParam> expected_result
             = { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) };
-    expect_equals(underTest, expected_result);
+    expect_equals(underTest, expected_result, out_file);
     expect_disk_data(out_file, expected_result);
 }
 
@@ -149,7 +152,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
-    expect_equals(underTest, expected_result);
+    expect_equals(underTest, expected_result, out_file);
     expect_disk_data(out_file, expected_result);
 }
 
@@ -173,7 +176,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
-    expect_equals(underTest, expected_result);
+    expect_equals(underTest, expected_result, out_file);
     expect_disk_data(out_file, expected_result);
 }
 
@@ -189,8 +192,9 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
 
     uint32_t size = 0;
     using ChunkedQueueIterator = typename common::ChunkedWaitQueue<TypeParam>::Iterator;
-    common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.dataStream();
-    for (ChunkedQueueIterator &iterator = merge_queue.iterator();
+    common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.data();
+    merge_queue.set_out_file(out_file);
+    for (ChunkedQueueIterator &iterator = merge_queue.begin();
          iterator != merge_queue.end(); ++iterator) {
         EXPECT_EQ((TypeParam)size, *iterator);
         for (uint32_t idx = 0; idx < 10 && size - idx > 0; ++idx) {
@@ -205,5 +209,6 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
         size++;
     }
     expect_disk_data(out_file, expected_result);
+    std::filesystem::remove("/tmp/out");
 }
 } // namespace

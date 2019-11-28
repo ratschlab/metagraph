@@ -19,6 +19,8 @@
 #include "dbg_bitmap.hpp"
 #include "masked_graph.hpp"
 
+using namespace mg::bitmap_graph;
+
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
@@ -61,5 +63,4 @@ typedef ::testing::Types<std::pair<DBGHashString, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashString, annotate::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annotate::RowFlatAnnotator>
                         > GraphWithNAnnotationPairTypes;
-
 #endif // __TEST_ANNOTATED_DBG_HELPERS_HPP__

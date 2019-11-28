@@ -295,12 +295,12 @@ uint64_t BOSS::rank_W(uint64_t i, TAlphabet c) const {
 
 /**
  * Uses the array W and gets a count i and a character c from
- * the alphabet and returns the position of the i-th occurence of c in W.
+ * the alphabet and returns the position of the i-th occurrence of c in W.
  */
 uint64_t BOSS::select_W(uint64_t i, TAlphabet c) const {
     assert(i + (c == 0) <= W_->rank(c, W_->size() - 1));
-
     return i == 0 ? 0 : W_->select(c, i + (c == 0));
+
 }
 
 // get prev character without optimizations (via rank/select calls)

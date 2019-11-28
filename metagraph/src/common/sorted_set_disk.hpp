@@ -9,7 +9,6 @@
 #include <ips4o.hpp>
 
 #include <cassert>
-#include <filesystem>
 #include <fstream> //TODO(ddanciu) - try boost mmapped instead
 #include <future>
 #include <iostream>
@@ -40,10 +39,10 @@ class SortedSetDisk {
      * guaranteed to flush to disk when the newly added data would exceed this
      * size.
      */
-    static constexpr size_t CONTAINER_SIZE_BYTES = 1e9; // 1 GB
+    static constexpr size_t CONTAINER_SIZE_BYTES = 1e4; // 1 GB
 
     /** Size of the merge queue's underlying circular buffer */
-    static constexpr size_t MERGE_QUEUE_SIZE = 1e9; // 1GB
+    static constexpr size_t MERGE_QUEUE_SIZE = 1e4; // 1GB
     /** Number of elements that can be iterated backwards in the merge queue */
     static constexpr size_t NUM_LAST_ELEMENTS_CACHED = 100;
 
@@ -56,8 +55,6 @@ class SortedSetDisk {
      * Constructs a SortedSetDisk instance and initializes its buffer to the value
      * specified in CONTAINER_SIZE_BYTES.
      * @param _ unused cleanup, only present for compatibility with SortedSet's interface
-     * @param out_file directory and filename to write the merged output to. If
-     * empty, the merged output will not be written to a file
      * @param num_threads the number of threads to use by the sorting algorithm
      * @param verbose true if verbose logging is desired
      * @param container_size the size of the in-memory container that is written
@@ -65,8 +62,6 @@ class SortedSetDisk {
      */
     SortedSetDisk(
             std::function<void(storage_type *)> = [](storage_type *) {},
-            const std::string &out_file = "",
-
             size_t num_threads = 1,
             bool verbose = false,
             size_t container_size = CONTAINER_SIZE_BYTES,
@@ -74,14 +69,13 @@ class SortedSetDisk {
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
         : num_threads_(num_threads),
           verbose_(verbose),
-          out_file_(out_file),
           merge_queue_(merge_queue_size, num_last_elements_cached) {
         try {
             try_reserve(container_size);
         } catch (const std::bad_alloc &exception) {
             std::cerr << "ERROR: Not enough memory for SortedSetDisk. Requested"
                       << CONTAINER_SIZE_BYTES << " bytes" << std::endl;
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     }
 
@@ -135,24 +129,35 @@ class SortedSetDisk {
             if (write_to_disk_future_.valid()) {
                 write_to_disk_future_.get(); // make sure all pending data was written
             }
-
-            start_merging();
+                start_merging();
         }
         return merge_queue_;
+    }
+
+    /**
+     * Sets the output file where the merged data will be written to.
+     */
+    void set_out_file(const std::string &out_file) {
+        merge_queue_.set_out_file(out_file);
     }
 
     std::future<void> start_merging() {
         std::vector<std::string> file_names(chunk_count_);
         for (uint32_t i = 0; i<chunk_count_;++i) {
-            file_names[i] = output_dir + "chunk_" + std::to_string(i) + ".bin";
+            file_names[i] = file_name_for_chunk(i);
         }
-        return thread_pool_.enqueue(merge_files, file_names,  out_file_, &merge_queue_);
+        return thread_pool_.enqueue(merge_files<T>, file_names, &merge_queue_);
     }
 
     void clear() {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-        data_->resize(0); // this makes sure the buffer is not reallocated
+        is_merging_ = false;
+        chunk_count_ = 0;
+        data_ = &data_first_;
+        data_first_.resize(0); // this makes sure the buffer is not reallocated
+        data_second_.resize(0);
+        merge_queue_.reset();
     }
 
     template <class Array>
@@ -168,19 +173,10 @@ class SortedSetDisk {
     }
 
     void reserve(size_t size) {
-        std::cerr << "SortedSetDisk: Ignoring reserving size " << size << std::endl;
     }
 
     size_t capacity() {
         return data_->capacity();
-    }
-
-    /**
-     * Changes the name of the output file - useful after #reset()-ing if we don't want
-     * to overwrite data.
-     */
-    void set_out_file(const std::string &out_file) {
-        out_file_ = out_file;
     }
 
   private:
@@ -199,6 +195,10 @@ class SortedSetDisk {
         }
     }
 
+    static std::string file_name_for_chunk(uint32_t chunk) {
+        return output_dir + "chunk_" + std::to_string(chunk) + ".bin";
+    }
+
     /**
      * Dumps the given data to a file, synchronously.
      * @tparam storage_type the container type for the data being dumped (typically
@@ -209,15 +209,22 @@ class SortedSetDisk {
      */
     template <class storage_type>
     static void dump_to_file(uint32_t chunk_count, storage_type *data) {
-        std::fstream binary_file
-                = std::fstream(output_dir + "chunk_" + std::to_string(chunk_count)
-                                       + ".bin",
-                               std::ios::out | std::ios::binary);
+        std::string file_name = file_name_for_chunk(chunk_count);
+        std::fstream binary_file = std::fstream(file_name, std::ios::out | std::ios::binary);
+        if (!binary_file) {
+            std::cerr << "Error creating chunk file " << file_name << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
         if (!binary_file.write((char *)&((*data)[0]), sizeof((*data)[0]) * data->size())) {
-            throw std::runtime_error("Writing of chunk no " + std::to_string(chunk_count)
-                                     + " failed.");
+            std::cerr << "Error: Writing to " << file_name << " failed." << std::endl;
+            std::exit(EXIT_FAILURE);
         }
         binary_file.close();
+        if (!std::filesystem::exists(file_name)) {
+            std::cerr << "OOPs again!\n";
+            std::exit(EXIT_FAILURE);
+        }
+
         data->resize(0);
     }
 
@@ -230,6 +237,7 @@ class SortedSetDisk {
         if (write_to_disk_future_.valid()) {
             write_to_disk_future_.wait(); // wait for other thread to finish writing
         }
+        assert(!data_->empty());
         if (data_->data() == data_first_.data()) {
             write_to_disk_future_ = thread_pool_.enqueue(dump_to_file<storage_type>,
                                                          chunk_count_, &data_first_);
@@ -283,7 +291,6 @@ class SortedSetDisk {
      */
     bool is_merging_ = false;
     bool verbose_;
-    std::string out_file_;
 
     /**
      * Ensures mutually exclusive access (and thus thread-safety) to #data.

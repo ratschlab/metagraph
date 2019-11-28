@@ -2,9 +2,15 @@
 
 #include <cassert>
 #include <condition_variable>
+#include <fstream>
+#include <iostream>
 #include <mutex>
+#include <optional>
+#include <stack>
 #include <thread>
 #include <vector>
+
+#include "common/threading.hpp"
 
 namespace mg {
 namespace common {
@@ -35,35 +41,43 @@ namespace common {
  * shut down (if not already shut down) and the destructor will wait until all elements
  * were read (i.e. the iterator reaches past the last available element).
  *
- * The class is not copyable or copy constructible, but it is moveable.
+ * The class will write all enqueued elements to a file specified via #set_out_file.
+ * The #push_front operation will block until an output file is specified.
+ *
+ * The class is not copyable or copy constructible.
  */
 template <typename T, typename Alloc = std::allocator<T>>
 class ChunkedWaitQueue {
   public:
     class Iterator;
+    class ConstIterator;
     // typedefs for STL compatibility
     typedef size_t size_type;
     typedef T value_type;
     typedef Iterator iterator;
+    typedef Iterator const_iterator;
 
     ChunkedWaitQueue(const ChunkedWaitQueue &other) = delete; // non construction-copyable
     ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete; // non copyable
 
     /**
      * Constructs a WaitQueue with the given size parameters.
-     * @param buffer_size_bytes the size of the buffer in bytes used internally by the queue
+     * @param buffer_size the size of the buffer (number of elements) used internally by
+     * the queue. The actual memory footprint is buffer_size*sizeof(T)
      * @param fence_size the number of elements that can be iterated backwards. The queue
      * will always keep at least fence_size elements behind the furthest iterator for this
      * purpose. Must be smaller than #buffer_size, and in practice it's orders of
      * magnitude smaller.
      */
-    explicit ChunkedWaitQueue(size_type buffer_size_bytes, size_type fence_size)
-        : chunk_size_(std::min(std::max(1UL, buffer_size_bytes / 3),
-                               buffer_size_bytes - fence_size)),
+    explicit ChunkedWaitQueue(size_type buffer_size, size_type fence_size)
+        : chunk_size_(std::min(std::max(1UL, buffer_size / 3), buffer_size - fence_size)),
           fence_size_(fence_size),
+          buffer_size_(buffer_size),
+          end_iterator_(Iterator(this, buffer_size)),
           is_shutdown_(false) {
-        assert(fence_size * sizeof(T) < buffer_size_bytes);
-        queue_ = std::vector<T>(buffer_size_bytes);
+        assert(fence_size < buffer_size);
+        queue_ = std::vector<T>(buffer_size);
+        output_file_.status = OutputFile::Status::NotSet;
     }
 
     /**
@@ -80,9 +94,12 @@ class ChunkedWaitQueue {
      * Undefined behavior is the queue is reset while iterating over it.
      */
     void reset() {
+        shutdown();
         first_ = 0;
-        last_ = INVALID_IDX;
+        last_ = buffer_size_;
         is_shutdown_ = false;
+        iterator_.idx_ = 0;
+        output_file_.status = OutputFile::Status::NotSet;
     }
 
     /**
@@ -90,7 +107,7 @@ class ChunkedWaitQueue {
      * added. Once an element is added, the queue will never be empty again (because
      * the queue will always keep at least #fence_size_ elements for backwards iteration).
      */
-    bool empty() const { return last_ == INVALID_IDX; }
+    bool empty() const { return last_ == buffer_size_; }
 
     /**
      * Returns true if the buffer of the queue is full. #push_front operations will block
@@ -98,7 +115,7 @@ class ChunkedWaitQueue {
      * the older elements via #pop_chunk().
      */
     bool full() const {
-        return last_ != INVALID_IDX && first_ == (last_ + 1) % queue_.size();
+        return last_ != buffer_size_ && first_ == (last_ + 1) % queue_.size();
     }
 
     /**
@@ -111,7 +128,7 @@ class ChunkedWaitQueue {
      * elements is not under user control.
      */
     size_type size() {
-        if (last_ == INVALID_IDX) {
+        if (last_ == buffer_size_) {
             return 0;
         }
         return first_ <= last_ ? last_ - first_ + 1 : queue_.size() + last_ - first_ + 1;
@@ -122,8 +139,15 @@ class ChunkedWaitQueue {
      */
     void shutdown() {
         std::unique_lock<std::mutex> lock(mutex_);
+        if (is_shutdown_) {
+            return;
+        }
         is_shutdown_ = true;
         not_empty_.notify_all();
+        file_write_pool_.join();
+        if (output_file_.status == OutputFile::Status::Set && output_file_.stream.is_open()) {
+            output_file_.stream.close();
+        }
     }
 
     /**
@@ -133,10 +157,23 @@ class ChunkedWaitQueue {
      */
     void push_front(value_type x) {
         std::unique_lock<std::mutex> lock(mutex_);
-        not_full_.wait(lock, [this] { return !full(); });
+        not_full_.wait(lock, [this] {
+            return !full() && output_file_.status != OutputFile::Status::NotSet;
+        });
         bool was_all_read = iterator_.no_more_elements();
-        last_ = (last_ + 1) % queue_.size();
+        last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
         queue_[last_] = std::move(x);
+        if (output_file_.status == OutputFile::Status::Set) {
+            auto write_to_file = [this](const T v) {
+                if (!output_file_.stream.write(reinterpret_cast<const char *>(&v),
+                                               sizeof(value_type))) {
+                    std::cerr << "Error: Writing of merged data failed." << std::endl;
+                    std::exit(EXIT_FAILURE);
+                }
+            };
+            write_to_file(queue_[last_]);
+            // file_write_pool_.enqueue(write_to_file, queue_[last_]);
+        }
         if (was_all_read) { // queue was empty or all items were read
             not_empty_.notify_one();
         }
@@ -147,51 +184,79 @@ class ChunkedWaitQueue {
      * unique iterator, which will point to the first element only before starting
      * iterating.
      */
-    Iterator &begin() { return iterator(); }
+    Iterator &begin() { return iter(); }
 
     /**
      * Special iterator indicating the end of the queue - the end is reached when the
      * queue was shut down *and* the iterator past the last element in the queue.
      */
-    Iterator &end() const { return end_iterator; }
+    Iterator &end() { return end_iterator_; }
 
     /**
-     * Returns the iterator of the queue. Note that a queue only has one iterator, so
-     * multiple calls to this method will return the same iterator instance.
-     * Should not be called from within multiple threads.
+     * Sets the name of the output file.
+     * The queue's #push_front will block until a (possibly empty) output file was
+     * specified.
      */
-    Iterator &iter() {
-        std::unique_lock<std::mutex> l(mutex_);
-        // if the queue is empty, we don't know if elements will be added at a later time
-        // so we need to wait until either an element is added or shutdown() is called
-        if (empty()) {
-            not_empty_.wait(l, [this]() { return is_shutdown_ || !empty(); });
+    void set_out_file(const std::string &output_name) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (output_file_.status == OutputFile::Status::Set && output_file_.stream.is_open()) {
+            file_write_pool_.join();
+            output_file_.stream.close();
         }
-        if (empty() && is_shutdown_) {
-            return end_iterator;
+        if (output_name == "") {
+            output_file_.status = OutputFile::Status::SetNoOutput;
+        } else {
+            output_file_.stream
+                    = std::fstream(output_name, std::ios::binary | std::ios::out);
+            if (!output_file_.stream) {
+                std::cerr << "Error: Could not open output file " + output_name << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
+            output_file_.status = OutputFile::Status::Set;
         }
-
-        return iterator_;
+        // we can now start pushing elements into the queue
+        not_full_.notify_all();
     }
 
   private:
-    static Iterator end_iterator;
-    static constexpr size_type INVALID_IDX = std::numeric_limits<size_type>::max();
-    size_type chunk_size_;
-    size_type fence_size_;
+    const size_type chunk_size_;
+    const size_type fence_size_;
+    const size_type buffer_size_;
+
     std::vector<T, Alloc> queue_;
+
+    /**
+     * mutex_ used for synchronizing access to the queue. Both #mutex_ and #not_empty_
+     * need to be mutable in order to simulate const iterators (see #iterator_)
+     */
     std::mutex mutex_;
-    std::condition_variable empty_;
     /**
      * Signals that the queue is not empty (an element was added) or that it
      * was shut down.
      */
     std::condition_variable not_empty_;
+    std::condition_variable empty_;
+
+    /**
+     * Signals that the queue is ready to accept new elements, i.e. it is not full and
+     * an output file was set vai #set_out_file.
+     */
     std::condition_variable not_full_;
+
     size_type first_ = 0;
-    size_type last_ = INVALID_IDX;
+    size_type last_ = buffer_size_;
+
+    /** The queue may optionally write its input to a file */
+    struct OutputFile {
+        enum class Status { NotSet, SetNoOutput, Set } status;
+        std::fstream stream;
+    } output_file_;
+
+    // TODO(ddanciu): consider using a WaitQueue instead, to reduce per-task overhead
+    ThreadPool file_write_pool_ = ThreadPool(1, 100);
 
     Iterator iterator_ = Iterator(this);
+    Iterator end_iterator_;
 
     bool is_shutdown_;
 
@@ -209,15 +274,29 @@ class ChunkedWaitQueue {
             not_full_.notify_one();
         }
     }
+
+    /**
+     * Returns the iterator of the queue. Note that a queue only has one iterator, so
+     * multiple calls to this method will return the same iterator instance.
+     * Should not be called from within multiple threads.
+     */
+    Iterator &iter() {
+        std::unique_lock<std::mutex> l(mutex_);
+        // if the queue is empty, we don't know if elements will be added at a later time
+        // so we need to wait until either an element is added or shutdown() is called
+        if (empty()) {
+            not_empty_.wait(l, [this]() { return is_shutdown_ || !empty(); });
+        }
+        if (empty() && is_shutdown_) {
+            return end_iterator_;
+        }
+
+        return iterator_;
+    }
 };
 
-
-template <typename T, typename Alloc>
-typename ChunkedWaitQueue<T, Alloc>::Iterator ChunkedWaitQueue<T, Alloc>::end_iterator
-        = ChunkedWaitQueue<T, Alloc>::Iterator(nullptr);
-
 /**
- * Defines the (unique) iterator of a ChunkedWaitQueue. The iterator traverses the
+ * Defines the (unique) const iterator of a ChunkedWaitQueue. The iterator traverses the
  * queue forward and has support for a limited window of backward operations.
  * As the iterator is moving forward, it will remove older chunks from the queue in
  * order to make room for new elements. An iterator with a nullptr parent denotes the
@@ -226,10 +305,9 @@ typename ChunkedWaitQueue<T, Alloc>::Iterator ChunkedWaitQueue<T, Alloc>::end_it
 template <typename T, typename Alloc>
 class ChunkedWaitQueue<T, Alloc>::Iterator {
     friend ChunkedWaitQueue;
-
   public:
-    // Iterator(const Iterator &other) = delete; // non construction-copyable
-    // Iterator &operator=(const Iterator &) = delete; // non copyable
+    Iterator(const Iterator &other) = delete; // non construction-copyable
+    Iterator &operator=(const Iterator &) = delete; // non copyable
 
     /**
      * Creates an iterator for the given queue.
@@ -238,12 +316,18 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     Iterator(ChunkedWaitQueue *parent) : parent_(parent) {}
 
     /**
+     * Creates an iterator for the given queue.
+     * @param parent the ChunkedWaitQueue this class iterates
+     */
+    Iterator(ChunkedWaitQueue *parent, size_t idx) : parent_(parent), idx_(idx) {}
+
+    /**
      * Returns the element currently pointed at by the iterator.
      * Undefined behavior if the iterator is pointing at the past-the-end element.
      */
-    T operator*() {
+    T operator*() const {
 #ifdef DEBUG
-        if (parent_ == nullptr) {
+        if (idx_ == parent_->buffer_size_) {
             std::cerr << "Attempting to dereference past-the-end iterator." << std::endl;
             std::exit(EXIT_FAILURE);
         }
@@ -273,8 +357,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
             if (parent_->is_shutdown_ && no_more_elements()) { // reached the end
                 // notify waiting destructor that object is ready to be destroyed
                 parent_->empty_.notify_all();
-                parent_ = nullptr;
-                idx_ = 0;
+                idx_ = parent_->buffer_size_;
                 return *this;
             }
             // the queue may have filled up while we were sleeping; make some room
@@ -295,8 +378,32 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         if (idx_ == parent_->first_) { // underflow
             throw std::runtime_error("Attempting to move before the first element.");
         }
-        (idx_ > 0) ? idx_-- : idx_ = parent_->queue_.size() - 1;
+        if (idx_ == parent_->buffer_size_) {
+            idx_ = parent_->last_;
+        } else {
+            (idx_ > 0) ? idx_-- : idx_ = parent_->queue_.size() - 1;
+        }
         return *this;
+    }
+
+    /**
+     * Returns true if the iterator is pointing at the first available element. Note
+     * that this is not necessarily the same as pointing to the first element in the
+     * queue - as this element my no longer be available.
+     * Useful when iterating backwards - this method returns false if the iterator
+     * reached the oldest available element.
+     * */
+    bool at_begin() {
+        return (idx_ == parent_->first_);
+    }
+
+    void push_pos() {
+        saved_indexes_.push(idx_);
+    }
+
+    void pop_pos() {
+        idx_ = saved_indexes_.top();
+        saved_indexes_.pop();
     }
 
     bool operator==(const Iterator &other) {
@@ -304,9 +411,15 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     }
     bool operator!=(const Iterator &other) { return !(*this == other); }
 
+    void reset() {
+        idx_ = 0;
+        saved_indexes_.swap(std::stack<T>());
+    }
+
   private:
     size_type idx_ = 0;
     ChunkedWaitQueue *parent_;
+    std::stack<size_type> saved_indexes_;
 
   private:
     size_type index_dist() {
@@ -316,6 +429,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
 
     bool no_more_elements() { return parent_->empty() || idx_ == parent_->last_; }
 };
+
 
 } // namespace common
 } // namespace mg

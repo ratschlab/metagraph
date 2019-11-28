@@ -13,6 +13,7 @@
 #include "dbg_bitmap.hpp"
 #include "aligner_helper.hpp"
 
+using namespace mg::bitmap_graph;
 
 template <size_t numerator, size_t denominator>
 class DBGSuccinctBloomFPR : public DBGSuccinct {

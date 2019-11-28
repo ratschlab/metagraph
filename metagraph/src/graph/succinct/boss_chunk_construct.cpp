@@ -35,7 +35,8 @@ using KmerMultset
         = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultiset<KMER, KmerCount, Container>>;
 
 /**
- * What type of data structure to use in the #KmerSet.
+ * What type of data structure to use in the #KmerSet for k-mer storage.
+ * Note: does not apply for k-mer counting, where only VECTOR is supported.
  */
 enum class ExtractorContainer {
     VECTOR,
@@ -46,7 +47,7 @@ enum class ExtractorContainer {
     VECTOR_DISK
 };
 
-constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR;
+constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR_DISK;
 
 const static uint8_t kBitsPerCount = 8;
 
@@ -109,7 +110,7 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * @tparam Container the data structure in which the k-mers were merged (e.g. a
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
-template < class Container>
+template <typename Container>
 void recover_source_dummy_nodes(size_t k, Container *kmers, size_t num_threads, bool verbose) {
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
@@ -168,33 +169,46 @@ void recover_source_dummy_nodes(size_t k, Container *kmers, size_t num_threads, 
 }
 
 /**
- * Specialization of recover_dummy_nodes for a #common::ChunkedWaitQueue (used by
- * #common::SortedSetDisk).
+ * Specialization of recover_dummy_nodes for a #common::ChunkedWaitQueue container
+ * (used by #common::SortedSetDisk).
+ * The method gradually constructs dummy source k-mers of prefix length 2..k and writes
+ * them into separate files, de-duped and sorted. The final result is obtained by merging
+ * the original #kmers (containing dummy source k-mers of prefix length 1) with the dummy
+ * source k-mers for prefix length 2..k which were generated and saved into files.
  */
 template <typename T>
 void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
                                 size_t, /* num_threads unused */
                                 bool verbose) {
-    using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
-    Iterator iter = kmers->begin();
-    T first = *iter;
-    common::ChunkedWaitQueue<T> &current_kmers = *kmers;
+    // name of the file containing dummy k-mers of given prefix length
+    auto get_file_name
+            = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
+
+    std::vector<std::string> files_to_merge;
+    files_to_merge.push_back("/tmp/original_kmers");
+    kmers->set_out_file(files_to_merge.back());
+
+    // First generate dummy k-mers of prefix length 2. This needs to be special-cased,
+    // as the source contains both dummy and non-dummy kmers.
+    const T first = *(kmers->begin());
     using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
     size_t num_dummy_parent_kmers = 0;
     auto cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
-    std::vector<std::string> files_to_merge;
-    files_to_merge.push_back("/tmp/dummy2");
-    common::SortedSetDisk<T> sorted_dummy_kmers(cleanup, files_to_merge.back());
-    Vector<KMER> dummy_kmers;
-    dummy_kmers.resize(sorted_dummy_kmers.capacity());
-    for (const auto &kmer_el : current_kmers) {
-        const KMER &kmer = utils::get_first(kmer_el);
+
+    // this will contain dummy k-mers of prefix length 2
+    common::SortedSetDisk<T> sorted_dummy_kmers(cleanup);
+    files_to_merge.push_back(get_file_name(2));
+    sorted_dummy_kmers.set_out_file(files_to_merge.back());
+    Vector<T> dummy_kmers;
+    dummy_kmers.reserve(sorted_dummy_kmers.capacity());
+    for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
+        const T el = *it;
+        const KMER &kmer = utils::get_first(el);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
-
-        auto node_last_char = kmer[1];
-        auto edge_label = kmer[0];
+        const auto node_last_char = kmer[1];
+        const auto edge_label = kmer[0];
         // nothing to do if it's not a source dummy kmer
         if (node_last_char || !edge_label)
             continue;
@@ -215,16 +229,20 @@ void recover_source_dummy_nodes(size_t k,
         std::cout << "Number of dummy k-mers with dummy prefix of length 1: "
                   << num_dummy_parent_kmers << std::endl;
     }
+
+    // generate dummy k-mers of prefix length 3..k
     common::SortedSetDisk<T> sorted_dummy_kmers2;
     common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
     common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
 
     for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
-        files_to_merge.push_back("/tmp/dummy" + std::to_string(dummy_pref_len - 1));
-        source->set_out_file(files_to_merge.back());
+        files_to_merge.push_back(get_file_name(dummy_pref_len));
+        dest->clear();
+        dest->set_out_file(files_to_merge.back());
         dummy_kmers.resize(0);
         size_t num_kmers = 0;
-        for (const auto &kmer : source->data()) {
+        for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
+            const T &kmer = *it;
             if (dummy_kmers.size() == dummy_kmers.capacity()) {
                 dest->insert(dummy_kmers.begin(), dummy_kmers.end());
                 dummy_kmers.resize(0);
@@ -244,16 +262,15 @@ void recover_source_dummy_nodes(size_t k,
         }
         std::swap(source, dest);
     }
-    files_to_merge.push_back("/tmp/dummy" + std::to_string(k));
-    source->set_out_file(files_to_merge.back());
     for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
-        // only iterate to write the data to disk
+        // we iterate to merge the data and write it to disk
     }
 
     // at this point, we have the dummy kmers with dummy prefix of length x in
     // /tmp/dummy{x}, and we'll merge them all into a single stream
     kmers->reset();
-    common::merge_files(files_to_merge, "/tmp/alldummy",kmers);
+    kmers->set_out_file("/tmp/alldummy");
+    common::merge_files(files_to_merge, kmers);
 }
 
 inline std::vector<KmerExtractorBOSS::TAlphabet>
@@ -385,14 +402,7 @@ IBOSSChunkConstructor
     #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
 
     if (count_kmers) {
-        switch (kExtractorContainer) {
-            case ExtractorContainer::VECTOR:
-                return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
-            default:
-                throw std::logic_error(
-                        "Unsupported extractor container specified for "
-                        "counter. Only VECTOR is supported");
-        }
+        return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
     } else {
         switch (kExtractorContainer) {
             case ExtractorContainer::VECTOR:

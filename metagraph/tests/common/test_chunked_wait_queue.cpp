@@ -21,12 +21,13 @@ TEST(WaitQueue, Empty) {
 
 TEST(WaitQueue, PushPop) {
     ChunkedWaitQueue<int32_t> under_test(3, 1);
+    under_test.set_out_file("/tmp/out");
     under_test.push_front(1);
     EXPECT_FALSE(under_test.full());
     under_test.push_front(2);
     under_test.push_front(3);
     EXPECT_TRUE(under_test.full());
-    ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.iter();
+    ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.begin();
     EXPECT_EQ(1, *iterator);
     EXPECT_EQ(2, *(++iterator));
     // the chunk wasn't yet cleaned up, so the queue should be full
@@ -42,25 +43,26 @@ TEST(WaitQueue, PushPop) {
     under_test.shutdown();
     ++iterator;
     EXPECT_TRUE(iterator == under_test.end());
+    std::filesystem::remove("/tmp/out");
 }
 
 TEST(WaitQueue, Shutdown) {
     ChunkedWaitQueue<std::string> under_test(20, 2);
     under_test.shutdown();
     std::string v;
-    EXPECT_TRUE(under_test.iter() == under_test.end());
+    EXPECT_TRUE(under_test.begin() == under_test.end());
 }
 
 void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
     ChunkedWaitQueue<int32_t> under_test(20, 2);
-
+    under_test.set_out_file("/tmp/out");
     struct Receiver {
         ChunkedWaitQueue<int32_t> *const under_test;
         uint32_t delay_read_ms;
         std::vector<int32_t> pop_result;
 
         void run() {
-            for (auto &it = under_test->iter(); it != under_test->end(); ++it) {
+            for (auto &it = under_test->begin(); it != under_test->end(); ++it) {
                 if (delay_read_ms > 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay_read_ms));
                 }
@@ -92,6 +94,7 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
     for (int32_t i = 0; i < 100; ++i) {
         EXPECT_EQ(i, receiver.pop_result[i]);
     }
+    std::filesystem::remove("/tmp/out");
 }
 
 TEST(WaitQueue, OneWriterOneReader) {

@@ -40,7 +40,7 @@ class BOSS::Chunk {
     Chunk(uint64_t alph_size,
           size_t k,
           bool canonical,
-          const Array &kmers_with_counts,
+          Array &kmers_with_counts,
           uint8_t bits_per_count);
 
     /**
@@ -48,7 +48,7 @@ class BOSS::Chunk {
      * and sorted.
      */
     template <typename Array>
-    Chunk(uint64_t alph_size, size_t k, bool canonical, const Array &kmers);
+    Chunk(uint64_t alph_size, size_t k, bool canonical, Array &kmers);
 
     /**
      * Adds an entry into the BOSS table.

@@ -18,6 +18,12 @@
 #include "string_utils.hpp"
 #include "reverse_complement.hpp"
 #include "sorted_set.hpp"
+#include "kmer/kmer_collector.hpp"
+
+
+namespace {
+using namespace mg::bitmap_graph;
+using namespace mg;
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -192,26 +198,16 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
 }
 
 
-typedef std::function<void(const std::string&)> CallbackString;
-
-template <typename KMER, class KmerExtractor, class Container>
-void extract_kmers(std::function<void(CallString)> generate_reads,
-                   size_t k,
-                   bool both_strands_mode,
-                   Container *kmers,
-                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                   bool remove_redundant = true);
-
 // TODO: k is node length
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        SortedSet<KMER, Vector<KMER>> *kmers,
+                                        common::SortedSet<KMER, Vector<KMER>> *kmers,
                                         const std::vector<KmerExtractor2Bit::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    extract_kmers<KMER, KmerExtractor2Bit, SortedSet<KMER, Vector<KMER>>>(
-        [reads](CallbackString callback) {
+    kmer::extract_kmers<KMER, KmerExtractor2Bit, common::SortedSet<KMER, Vector<KMER>>>(
+        [reads](mg::kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
         k, false, kmers, suffix, remove_redundant
@@ -220,7 +216,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
-    SortedSet<KMER, Vector<KMER>> result;
+    common::SortedSet<KMER, Vector<KMER>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -267,7 +263,7 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
-    SortedSet<KMER, Vector<KMER>> result;
+    common::SortedSet<KMER, Vector<KMER>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -311,7 +307,7 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
-    SortedSet<KMER, Vector<KMER>> result;
+    common::SortedSet<KMER, Vector<KMER>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -357,7 +353,7 @@ TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
-    SortedSet<KMER, Vector<KMER>> result;
+    common::SortedSet<KMER, Vector<KMER>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -643,3 +639,4 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
         ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
 }
+} // namespace

@@ -98,6 +98,24 @@ class KmerCollector {
 
     bool both_strands_mode_;
 };
+
+/** Visible For Testing */
+template <typename KMER, class KmerExtractor, class Container>
+void extract_kmers(std::function<void(CallString)> generate_reads,
+                   size_t k,
+                   bool both_strands_mode,
+                   Container *kmers,
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
+                   bool remove_redundant = true);
+
+/** Visible For Testing */
+template <typename KMER, class KmerExtractor, class Container>
+void count_kmers(std::function<void(CallStringCount)> generate_reads,
+                 size_t k,
+                 bool both_strands_mode,
+                 Container *kmers,
+                 const std::vector<typename KmerExtractor::TAlphabet> &suffix);
+
 } // namespace kmer
 } // namespace mg
 
