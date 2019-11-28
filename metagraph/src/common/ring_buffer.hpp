@@ -19,6 +19,7 @@ class RingBuffer {
 
     void reset() { buffer_back_it_ = buffer_it_mask_; }
 
+    // TODO: replace with `push_back(It begin, It end)`
     void reset(const T *begin) {
         buffer_back_it_ = size_ - 1;
         std::copy(begin, begin + size_, ring_buffer_.begin());

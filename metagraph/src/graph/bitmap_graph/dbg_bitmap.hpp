@@ -33,23 +33,21 @@ class DBGBitmap : public DeBruijnGraph {
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(
-            const std::string &sequence,
-            const std::function<void(node_index)> &callback,
-            const std::function<bool()> &terminate = []() { return false; }) const;
+    void map_to_nodes(const std::string &sequence,
+                      const std::function<void(node_index)> &callback,
+                      const std::function<bool()> &terminate = [](){ return false; }) const;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(
-            std::string::const_iterator begin,
-            std::string::const_iterator end,
-            const std::function<void(node_index)> &callback,
-            const std::function<bool()> &terminate = []() { return false; }) const;
+    void map_to_nodes_sequentially(std::string::const_iterator begin,
+                                   std::string::const_iterator end,
+                                   const std::function<void(node_index)> &callback,
+                                   const std::function<bool()> &terminate = [](){ return false; }) const;
 
-    void call_outgoing_kmers(node_index, const OutgoingEdgeCallback &) const;
-    void call_incoming_kmers(node_index, const IncomingEdgeCallback &) const;
+    void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const;
+    void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const;
 
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;
@@ -99,7 +97,7 @@ class DBGBitmap : public DeBruijnGraph {
 
     bool is_complete() const { return complete_; }
 
-    const std::string &alphabet() const { return seq_encoder_.alphabet; }
+    const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
     void print(std::ostream &out) const;
 
@@ -110,7 +108,8 @@ class DBGBitmap : public DeBruijnGraph {
   private:
     using Kmer = KmerExtractor2Bit::Kmer64;
 
-    Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const;
+    Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
+                                                    bool canonical = false) const;
 
     uint64_t node_to_index(node_index node) const;
     Kmer node_to_kmer(node_index node) const;

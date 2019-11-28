@@ -5,10 +5,11 @@
 
 #include "binary_matrix.hpp"
 
+class bit_vector;
 
 class BinRelWT : public BinaryMatrix {
   public:
-    BinRelWT() {};
+    BinRelWT() {}
 
     BinRelWT(const std::function<void(const RowCallback &)> &generate_rows,
              uint64_t num_set_bits, uint64_t num_columns);

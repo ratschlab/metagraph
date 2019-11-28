@@ -3,8 +3,9 @@
 
 #include <vector>
 
+#include <sdsl/int_vector.hpp>
+
 #include "utils/vectors.hpp"
-#include "utils/bit_vectors/bit_vector.hpp"
 
 
 class BinaryMatrix {
