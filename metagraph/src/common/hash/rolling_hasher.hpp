@@ -14,19 +14,15 @@ class RollingHash {
     // Note: this constructor is expensive. Try to construct it once and
     // make copies of the object.
     explicit RollingHash(size_t k, uint32_t seed1 = 0, uint32_t seed2 = 1)
-          : hash_(k, seed1, seed2, 64),
-            ring_buffer_(k) {
-        for (int i = 0; i < hash_.n; ++i) {
-            hash_.eat(0);
-        }
-    }
+          : hash_(k, seed1, seed2, 64), ring_buffer_(k) {}
 
-    void reset(const TAlphabet *it) {
+    // TODO: replace with `initialize(Iterator kmer_begin)`
+    void reset(const TAlphabet *kmer_begin) {
         hash_.reset();
-        ring_buffer_.reset(it);
+        ring_buffer_.reset(kmer_begin);
         for (int i = 0; i < hash_.n; ++i) {
-            hash_.eat(*it);
-            ++it;
+            hash_.eat(*kmer_begin);
+            ++kmer_begin;
         }
     }
 

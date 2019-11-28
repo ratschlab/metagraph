@@ -4,12 +4,10 @@
 #include <type_traits>
 
 #include "common/config.hpp"
+#include "graph/base/sequence_graph.hpp"
 #include "kmer/kmer_extractor.hpp"
 #include "utils/bit_vectors/bit_vector.hpp"
 #include "utils/bit_vectors/wavelet_tree.hpp"
-//TODO(ddanciu) - this dep is ugly and needs to be fixed, probably by moving
-// sequence_graph
-#include "graph/sequence_graph.hpp"
 
 class BOSSConstructor;
 
@@ -85,15 +83,6 @@ class BOSS {
     // |seq_encoded| must have no sentinels (zeros)
     std::vector<edge_index>
     map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
-
-    // Check whether the graph contains a fraction of (k+1)-mers from the sequence
-    bool find(const std::string &sequence,
-              double kmer_discovery_fraction = 1,
-              const std::function<bool()> &is_invalid = ALWAYS_FALSE) const;
-
-    bool find(const std::string &sequence,
-              double kmer_discovery_fraction,
-              size_t kmer_mapping_mode) const;
 
     template <class... T>
     using Call = typename std::function<void(T...)>;

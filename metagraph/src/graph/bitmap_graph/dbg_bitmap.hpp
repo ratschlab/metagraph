@@ -107,8 +107,8 @@ class DBGBitmap : public DeBruijnGraph {
   private:
     using Kmer = KmerExtractor2Bit::Kmer64;
 
-    Vector<Kmer> sequence_to_kmers(const std::string &sequence,
-                                   bool canonical = false) const;
+    Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
+                                                    bool canonical = false) const;
 
     uint64_t node_to_index(node_index node) const;
     Kmer node_to_kmer(node_index node) const;

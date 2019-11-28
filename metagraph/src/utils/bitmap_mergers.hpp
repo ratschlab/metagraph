@@ -1,6 +1,7 @@
 #ifndef __BIT_VECTOR_UTILS_HPP__
 #define __BIT_VECTOR_UTILS_HPP__
 
+#include <queue>
 #include <vector>
 #include <string>
 #include <memory>

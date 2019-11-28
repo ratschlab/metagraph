@@ -6,7 +6,6 @@
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_set_disk.hpp"
-#include "common/deque_vector.hpp"
 #include "common/unix_tools.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "boss_chunk.hpp"
@@ -17,19 +16,9 @@ using KmerMultsetVector = KmerCollector<KMER,
                                       SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>;
 
 template <typename KMER>
-using KmerMultsetDeque = KmerCollector<KMER,
-                                     KmerExtractorBOSS,
-                                     SortedMultiset<KMER, uint8_t, DequeStorage<std::pair<KMER, uint8_t>>>>;
-
-template <typename KMER>
 using KmerSetVector = KmerCollector<KMER,
                                         KmerExtractorBOSS,
                                         SortedSet<KMER, Vector<KMER>>>;
-
-template <typename KMER>
-using KmerSetDeque = KmerCollector<KMER,
-                                       KmerExtractorBOSS,
-                                       SortedSet<KMER, DequeStorage<KMER>>>;
 
 template <typename KMER>
 using KmerSetDisk = KmerCollector<KMER,
@@ -47,7 +36,6 @@ using KmerMultset = KmerCollector<KMER,
  * What type of data structure to use in the #KmerSet.
  */
 enum class ExtractorContainer {
-    DEQUE,
     VECTOR,
     /**
      * Uses several vectors that are written to disk and then merged, as defined
@@ -240,11 +228,6 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           << timer.elapsed() << "sec" << std::endl;
         }
 
-        if constexpr(std::is_same_v<typename KmerCollector::Data,
-                                    DequeStorage<typename KmerCollector::Value>>) {
-            kmers.shrink_to_fit();
-        }
-
         BOSS::Chunk *result;
 
         if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
@@ -306,19 +289,15 @@ IBOSSChunkConstructor
         switch (kExtractorContainer) {
             case ExtractorContainer::VECTOR:
                 return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
-            case ExtractorContainer::DEQUE:
-                return initialize_boss_chunk_constructor<KmerMultsetDeque>(OTHER_ARGS);
             default:
                 throw std::logic_error(
                         "Unsupported extractor container specified for "
-                        "counter. Only VECTOR and DEQUE are supported");
+                        "counter. Only VECTOR is supported");
         }
     } else {
         switch (kExtractorContainer) {
             case ExtractorContainer::VECTOR:
                 return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
-            case ExtractorContainer::DEQUE:
-                return initialize_boss_chunk_constructor<KmerSetDeque>(OTHER_ARGS);
             case ExtractorContainer::VECTOR_DISK:
                 return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
             default:

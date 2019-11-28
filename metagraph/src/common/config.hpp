@@ -63,7 +63,6 @@ class Config {
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 1000;
-    unsigned int kmer_mapping_mode = 0;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
     unsigned int row_cache_size = 0;

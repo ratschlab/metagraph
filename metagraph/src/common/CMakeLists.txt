@@ -4,6 +4,8 @@ project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+add_subdirectory(../utils metagraph_utils)
+
 set(BOOST_INCLUDEDIR "~/.linuxbrew/include/")
 set(Boost_NO_BOOST_CMAKE ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
@@ -34,7 +36,7 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    .. # this ensures that this libs include files are visible to its deps as "#include common/*"
+    .. # this ensures include files in the project are visible relative to the project root
 )
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
@@ -44,4 +46,5 @@ target_link_libraries(metagraph_common
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
     Boost::iostreams
+    metagraph_utils
 )
