@@ -213,7 +213,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         for (auto it = kmers_.begin(); it != kmers_.end(); ++it) {
             size_t bucket = it - kmers_.begin();
             std::cout << bucket << ", " << bucket_to_node(bucket) << ": ";
-            std::cout << *it.to_string(k_ - 1, seq_encoder_.alphabet) << ' ';
+            std::cout << KMER(*it).to_string(k_ - 1, seq_encoder_.alphabet) << ' ';
             std::cout << std::bitset<std::numeric_limits<Flags>::digits>(bits_[bucket]) << '\n';
         }
         std::cout << std::flush;
@@ -348,7 +348,7 @@ DBGHashFastImpl<KMER>::next_kmer(node_index node) const {
     size_t bucket = node_to_bucket(node);
     KmerConstIterator next_it = kmers_.begin() + (bucket + 1);
 
-    return next_it.key() == next_kmer_prefix
+    return next_it != kmers_.end() && next_it.key() == next_kmer_prefix
             ? next_it
             : kmers_.find(next_kmer_prefix);
 }
