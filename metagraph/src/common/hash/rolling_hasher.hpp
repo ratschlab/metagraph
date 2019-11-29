@@ -5,7 +5,7 @@
 
 #include <cyclichash.h>
 
-#include "common/ring_buffer.hpp"
+#include "common/rolling_window.hpp"
 
 
 template <typename TAlphabet = uint8_t>

@@ -4,7 +4,7 @@
 #include <kmer/kmer_boss.hpp>
 
 #include "common/chunked_wait_queue.hpp"
-#include "common/ring_buffer.hpp"
+#include "common/rolling_window.hpp"
 #include "utils/algorithms.hpp"
 #include "utils/serialization.hpp"
 #include "utils/template_utils.hpp"
