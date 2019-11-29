@@ -56,7 +56,7 @@ class RollingHash {
 
   private:
     CyclicHash<uint64_t, TAlphabet> hash_;
-    RingBuffer<TAlphabet> ring_buffer_;
+    RollingWindow<TAlphabet> ring_buffer_;
 };
 
 

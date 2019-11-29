@@ -153,7 +153,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
     static void set_w_and_remove_redundant_source_edges(uint64_t alph_size,
                                                         size_t k, /* remove*/
                                                         const KMER &kmer,
-                                                        const RingBuffer<uint8_t> &was_skipped,
+                                                        const RollingWindow<uint8_t> &was_skipped,
                                                         TAlphabet lastF,
                                                         vector<TAlphabet> *W,
                                                         vector<bool> *last,
@@ -252,7 +252,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
         size_t curpos = 1;
         TAlphabet lastF = 0;
-        RingBuffer<uint8_t> was_skipped(alph_size * alph_size);
+        RollingWindow<uint8_t> was_skipped(alph_size * alph_size);
         for (Iterator &it = begin; it != end; ++it) {
             const KMER &kmer = get_kmer(*it);
             TAlphabet curW = kmer[0];

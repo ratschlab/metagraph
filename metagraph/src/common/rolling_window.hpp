@@ -7,11 +7,11 @@
 
 
 template <typename T, class Storage = std::vector<T>>
-class RingBuffer {
+class RollingWindow {
   public:
     using const_iterator = const T*;
 
-    explicit RingBuffer(size_t size)
+    explicit RollingWindow(size_t size)
           : ring_buffer_(size ? (1llu << (sdsl::bits::hi(size - 1) + 1)) : 0),
             size_(size),
             buffer_it_mask_(ring_buffer_.size() - 1),
