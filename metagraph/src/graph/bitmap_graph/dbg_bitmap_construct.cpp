@@ -2,12 +2,15 @@
 
 #include <progress_bar.hpp>
 
-#include "kmer_collector.hpp"
+#include "utils/template_utils.hpp"
+#include "utils/algorithms.hpp"
+#include "common/sorted_set.hpp"
+#include "common/sorted_multiset.hpp"
+#include "kmer/kmer_collector.hpp"
 #include "node_weights.hpp"
-#include "utils.hpp"
 
 
-template <typename KmerStorage>
+template <typename KmerCollector>
 class BitmapChunkConstructor : public IBitmapChunkConstructor {
     friend IBitmapChunkConstructor;
 
@@ -35,7 +38,7 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
 
     sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8);
 
-    KmerStorage kmer_collector_;
+    KmerCollector kmer_collector_;
 };
 
 
@@ -55,8 +58,8 @@ encode_filter_suffix(const std::string &filter_suffix) {
     return filter_suffix_encoded;
 }
 
-template <typename KmerStorage>
-BitmapChunkConstructor<KmerStorage>
+template <typename KmerCollector>
+BitmapChunkConstructor<KmerCollector>
 ::BitmapChunkConstructor(size_t k,
                          bool canonical_mode,
                          const std::string &filter_suffix,
@@ -88,15 +91,15 @@ DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
         ),
         bits_per_count_(bits_per_count) {}
 
-template <typename KmerStorage>
+template <typename KmerCollector>
 sdsl::int_vector<>
-BitmapChunkConstructor<KmerStorage>::get_weights(uint8_t bits_per_count) {
-    if constexpr(utils::is_pair<typename KmerStorage::Value>::value) {
+BitmapChunkConstructor<KmerCollector>::get_weights(uint8_t bits_per_count) {
+    if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
         const auto &kmers = kmer_collector_.data();
 
         sdsl::int_vector<> weights(kmers.size() + 1, 0, bits_per_count);
 
-        const uint64_t max_count = utils::max_uint(weights.width());
+        const uint64_t max_count = utils::max_ull(weights.width());
 
         for (size_t i = 0; i < kmers.size(); ++i) {
             weights[i + 1] = std::min(static_cast<uint64_t>(kmers[i].second), max_count);
@@ -113,17 +116,17 @@ BitmapChunkConstructor<KmerStorage>::get_weights(uint8_t bits_per_count) {
 /**
  * Initialize graph chunk from a list of sorted kmers.
  */
-template <typename KmerStorage>
-DBGBitmap::Chunk* BitmapChunkConstructor<KmerStorage>
+template <typename KmerCollector>
+DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>
 ::build_chunk() {
-    using KMER = typename KmerStorage::Key;
+    using KMER = typename KmerCollector::Key;
 
     const auto &kmers = kmer_collector_.data();
     std::unique_ptr<DBGBitmap::Chunk> chunk {
         new DBGBitmap::Chunk(
             [&](const auto &index_callback) {
-                std::for_each(kmers.begin(), kmers.end(), [&](const typename KmerStorage::Value &kmer) {
-                    if constexpr(utils::is_pair<typename KmerStorage::Value>::value) {
+                std::for_each(kmers.begin(), kmers.end(), [&](const typename KmerCollector::Value &kmer) {
+                    if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
                         index_callback(typename KMER::WordType(1u) + kmer.first.data());
                     } else {
                         index_callback(typename KMER::WordType(1u) + kmer.data());
@@ -238,6 +241,17 @@ DBGBitmap* DBGBitmapConstructor
     );
 }
 
+template <typename KMER>
+using KmerSet = KmerCollector<KMER,
+                                  KmerExtractor2Bit,
+                                  SortedSet<KMER, Vector<KMER>>>;
+
+template <typename KMER,
+          typename KmerCount = uint8_t>
+using KmerMultset = KmerCollector<KMER,
+                                KmerExtractor2Bit,
+                                SortedMultiset<KMER, KmerCount, Vector<std::pair<KMER, KmerCount>>>>;
+
 IBitmapChunkConstructor*
 IBitmapChunkConstructor
 ::initialize(size_t k,
@@ -251,29 +265,29 @@ IBitmapChunkConstructor
 
     if (count_kmers) {
         if (k * Extractor::bits_per_char <= 64) {
-            return new BitmapChunkConstructor<KmerCounter<typename Extractor::Kmer64, KmerExtractor2Bit, uint8_t>>(
+            return new BitmapChunkConstructor<KmerMultset<typename Extractor::Kmer64, uint8_t>>(
                 k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
             );
         } else if (k * Extractor::bits_per_char <= 128) {
-            return new BitmapChunkConstructor<KmerCounter<typename Extractor::Kmer128, KmerExtractor2Bit, uint8_t>>(
+            return new BitmapChunkConstructor<KmerMultset<typename Extractor::Kmer128, uint8_t>>(
                 k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
             );
         } else {
-            return new BitmapChunkConstructor<KmerCounter<typename Extractor::Kmer256, KmerExtractor2Bit, uint8_t>>(
+            return new BitmapChunkConstructor<KmerMultset<typename Extractor::Kmer256, uint8_t>>(
                 k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
             );
         }
     } else {
         if (k * Extractor::bits_per_char <= 64) {
-            return new BitmapChunkConstructor<KmerCollector<typename Extractor::Kmer64, KmerExtractor2Bit>>(
+            return new BitmapChunkConstructor<KmerSet<typename Extractor::Kmer64>>(
                 k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
             );
         } else if (k * Extractor::bits_per_char <= 128) {
-            return new BitmapChunkConstructor<KmerCollector<typename Extractor::Kmer128, KmerExtractor2Bit>>(
+            return new BitmapChunkConstructor<KmerSet<typename Extractor::Kmer128>>(
                 k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
             );
         } else {
-            return new BitmapChunkConstructor<KmerCollector<typename Extractor::Kmer256, KmerExtractor2Bit>>(
+            return new BitmapChunkConstructor<KmerSet<typename Extractor::Kmer256>>(
                 k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
             );
         }

@@ -22,6 +22,17 @@ class DBGHashOrdered : public DeBruijnGraph {
         hash_dbg_->add_sequence(sequence, nodes_inserted);
     }
 
+    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
+    // is passed. If passed, |nodes_inserted| must have length equal
+    // to the number of nodes in graph.
+    // `skip` is called before adding each k-mer into the graph and the k-mer
+    // is skipped if `skip()` returns `false`.
+    void add_sequence(const std::string &sequence,
+                      const std::function<bool()> &skip,
+                      bit_vector_dyn *nodes_inserted = NULL) {
+        hash_dbg_->add_sequence(sequence, skip, nodes_inserted);
+    }
+
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     void map_to_nodes(const std::string &sequence,
@@ -130,6 +141,11 @@ class DBGHashOrdered : public DeBruijnGraph {
     class DBGHashOrderedInterface : public DeBruijnGraph {
       public:
         virtual ~DBGHashOrderedInterface() {}
+        virtual void add_sequence(const std::string &sequence,
+                                  bit_vector_dyn *nodes_inserted) = 0;
+        virtual void add_sequence(const std::string &sequence,
+                                  const std::function<bool()> &skip,
+                                  bit_vector_dyn *nodes_inserted) = 0;
         virtual void serialize(std::ostream &out) const = 0;
         virtual void serialize(const std::string &filename) const = 0;
         virtual bool load(std::istream &in) = 0;

@@ -19,6 +19,7 @@ database-cli
 *.DS_Store
 *._*
 metagraph/build*
+metagraph/**/build*
 .*.swp
 .ipynb_checkpoints
 *lsf.o*
@@ -26,4 +27,5 @@ metagraph/build*
 *.pyc
 *.un~
 tags
-
+**/cmake-build-debug
+.idea

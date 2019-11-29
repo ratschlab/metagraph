@@ -1,39 +1,52 @@
 #include "aligner_helper.hpp"
 
-#include "utils.hpp"
+#include "algorithms.hpp"
 #include "alphabets.hpp"
 
 
-std::pair<const char*, const char*>
-get_alphabet_boundaries(const std::string &alphabet) {
-    auto range = std::make_pair(&*alphabet.begin(), &*alphabet.end());
-
-    // TODO: fix graph alphabets and these hacks
-    if (*range.first == '$')
-        ++range.first;
-
-    // TODO: find a better solution for this hack
-    // The last character in these alphabets is a wildcard ('N' or 'X')
-    // make sure that wildcard-wildcard matches are counted as mismatches
-    if (!strcmp(range.first, alphabets::kAlphabetProtein)
-            || !strcmp(range.first, alphabets::kAlphabetDNA5))
-        --range.second;
-
-    return range;
+Cigar::Cigar(const std::string &cigar_str) {
+    std::string op_count;
+    for (auto c : cigar_str) {
+        switch (c) {
+            case '=':
+                cigar_.emplace_back(Cigar::Operator::MATCH, std::stol(op_count));
+                op_count.clear();
+                break;
+            case 'X':
+                cigar_.emplace_back(Cigar::Operator::MISMATCH, std::stol(op_count));
+                op_count.clear();
+                break;
+            case 'I':
+                cigar_.emplace_back(Cigar::Operator::INSERTION, std::stol(op_count));
+                op_count.clear();
+                break;
+            case 'D':
+                cigar_.emplace_back(Cigar::Operator::DELETION, std::stol(op_count));
+                op_count.clear();
+                break;
+            case 'S':
+                cigar_.emplace_back(Cigar::Operator::CLIPPED, std::stol(op_count));
+                op_count.clear();
+                break;
+            default:
+                op_count += c;
+        }
+    }
 }
 
 Cigar::OperatorTable Cigar::char_to_op;
 
-void Cigar::initialize_opt_table(const std::string &alphabet) {
+void Cigar::initialize_opt_table(const std::string &alphabet, const uint8_t *encoding) {
     for (auto& row : char_to_op) {
         row.fill(Cigar::Operator::MISMATCH);
     }
 
-    auto range = get_alphabet_boundaries(alphabet);
+    for (uint8_t c : alphabet) {
+        if (encoding[c] == encoding[0])
+            continue;
 
-    for (const char *it = range.first; it != range.second; ++it) {
-        char upper = toupper(*it);
-        char lower = tolower(*it);
+        char upper = toupper(c);
+        char lower = tolower(c);
 
         char_to_op[upper][upper]
             = char_to_op[upper][lower]
@@ -84,6 +97,123 @@ void Cigar::append(Cigar&& other) {
     cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
 }
 
+bool Cigar::is_valid(const char *reference_begin, const char *reference_end,
+                     const char *query_begin, const char *query_end) const {
+    const char *ref_it = reference_begin;
+    const char *alt_it = query_begin;
+
+    for (const auto &op : cigar_) {
+        switch (op.first) {
+            case Operator::CLIPPED: {
+                if (ref_it != reference_begin || alt_it != query_begin) {
+                    std::cerr << "Internal clipping found in CIGAR" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+            } break;
+            case Operator::MATCH: {
+                if (ref_it > reference_end - op.second) {
+                    std::cerr << "Reference too short" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+
+                if (alt_it > query_end - op.second) {
+                    std::cerr << "Query too short" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+
+                if (strncmp(ref_it, alt_it, op.second)) {
+                    std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+
+                ref_it += op.second;
+                alt_it += op.second;
+            } break;
+            case Operator::MISMATCH: {
+                if (ref_it > reference_end - op.second) {
+                    std::cerr << "Reference too short" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+
+                if (alt_it > query_end - op.second) {
+                    std::cerr << "Query too short" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+
+                if (std::mismatch(ref_it, ref_it + op.second,
+                                  alt_it, alt_it + op.second).first != ref_it) {
+                    std::cerr << "Match despite MISMATCH in CIGAR" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+
+                ref_it += op.second;
+                alt_it += op.second;
+            } break;
+            case Operator::INSERTION: {
+                if (alt_it > query_end - op.second) {
+                    std::cerr << "Query too short" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+
+                alt_it += op.second;
+            } break;
+            case Operator::DELETION: {
+                if (ref_it > reference_end - op.second) {
+                    std::cerr << "Reference too short" << std::endl
+                              << to_string() << std::endl
+                              << std::string(reference_begin, reference_end) << std::endl
+                              << std::string(query_begin, query_end) << std::endl;
+                    return false;
+                }
+
+                ref_it += op.second;
+            } break;
+        }
+    }
+
+    if (ref_it != reference_end) {
+        std::cerr << "Reference end not reached" << std::endl
+                  << to_string() << std::endl
+                  << std::string(reference_begin, reference_end) << std::endl
+                  << std::string(query_begin, query_end) << std::endl;
+        return false;
+    }
+
+    if (alt_it != query_end) {
+        std::cerr << "Query end not reached" << std::endl
+                  << to_string() << std::endl
+                  << std::string(reference_begin, reference_end) << std::endl
+                  << std::string(query_begin, query_end) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 
 DBGAlignerConfig::DBGAlignerConfig(const ScoreMatrix &score_matrix,
                                    int8_t gap_opening,
@@ -99,7 +229,7 @@ DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
         gap_extension_penalty(gap_extension),
         score_matrix_(std::move(score_matrix)) { }
 
-DBGAlignerConfig::DBGAlignerConfig(const Config &config, const DeBruijnGraph &graph)
+DBGAlignerConfig::DBGAlignerConfig(const Config &config)
       : queue_size(config.alignment_queue_size),
         bandwidth(config.alignment_vertical_bandwidth),
         num_alternative_paths(config.alignment_num_alternative_paths),
@@ -107,25 +237,98 @@ DBGAlignerConfig::DBGAlignerConfig(const Config &config, const DeBruijnGraph &gr
         max_seed_length(config.alignment_max_seed_length),
         max_num_seeds_per_locus(config.alignment_max_num_seeds_per_locus),
         min_cell_score(config.alignment_min_cell_score),
+        min_path_score(config.alignment_min_path_score),
         gap_opening_penalty(-config.alignment_gap_opening_penalty),
         gap_extension_penalty(-config.alignment_gap_extension_penalty),
-        score_matrix_(config.alignment_edit_distance
-                          ? unit_scoring_matrix(1, graph.alphabet())
-                          : scoring_matrix(config, graph)) { }
+        forward_and_reverse_complement(config.forward_and_reverse),
+        score_matrix_(scoring_matrix(config)) {}
+
+DBGAlignerConfig::score_t DBGAlignerConfig
+::score_cigar(const char *reference_begin, const char *reference_end,
+              const char *query_begin, const char *query_end,
+              const Cigar &cigar) const {
+    score_t score = 0;
+
+    assert(cigar.is_valid(reference_begin, reference_end, query_begin, query_end));
+    std::ignore = reference_end;
+    std::ignore = query_end;
+
+    for (const auto &op : cigar) {
+        switch (op.first) {
+            case Cigar::Operator::CLIPPED:
+                break;
+            case Cigar::Operator::MATCH: {
+                score += match_score(reference_begin, reference_begin + op.second);
+                reference_begin += op.second;
+                query_begin += op.second;
+            } break;
+            case Cigar::Operator::MISMATCH: {
+                score += score_sequences(reference_begin,
+                                         reference_begin + op.second,
+                                         query_begin);
+                reference_begin += op.second;
+                query_begin += op.second;
+            } break;
+            case Cigar::Operator::INSERTION: {
+                score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+                query_begin += op.second;
+            } break;
+            case Cigar::Operator::DELETION: {
+                score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+                reference_begin += op.second;
+            } break;
+        }
+    }
+
+    return score;
+}
 
 DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
-::scoring_matrix(const Config &config, const DeBruijnGraph &graph) {
-    auto range = get_alphabet_boundaries(graph.alphabet());
+::scoring_matrix(const Config &config) {
+    if (config.alignment_edit_distance) {
+        // TODO: REPLACE THIS
+        #if _PROTEIN_GRAPH
+            const auto *alphabet = alphabets::kAlphabetProtein;
+            const auto *alphabet_encoding = alphabets::kCharToProtein;
+        #elif _DNA_CASE_SENSITIVE_GRAPH
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
+        #elif _DNA5_GRAPH
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
+        #elif _DNA_GRAPH
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
+        #else
+            static_assert(false,
+                "Define an alphabet: either "
+                "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+            );
+        #endif
 
-    if (std::equal(range.first, range.second, alphabets::kAlphabetDNA)) {
+        return unit_scoring_matrix(1, alphabet, alphabet_encoding);
+    }
+
+    #if _PROTEIN_GRAPH
+        return score_matrix_blosum62;
+    #elif _DNA_CASE_SENSITIVE_GRAPH
         return dna_scoring_matrix(config.alignment_match_score,
                                   -config.alignment_mm_transition,
                                   -config.alignment_mm_transversion);
-    } else if (std::equal(range.first, range.second, alphabets::kAlphabetProtein)) {
-        return score_matrix_blosum62;
-    }
-
-    return unit_scoring_matrix(1, graph.alphabet());
+    #elif _DNA5_GRAPH
+        return dna_scoring_matrix(config.alignment_match_score,
+                                  -config.alignment_mm_transition,
+                                  -config.alignment_mm_transversion);
+    #elif _DNA_GRAPH
+        return dna_scoring_matrix(config.alignment_match_score,
+                                  -config.alignment_mm_transition,
+                                  -config.alignment_mm_transversion);
+    #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+    #endif
 }
 
 DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
@@ -150,17 +353,20 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
 }
 
 DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
-::unit_scoring_matrix(int8_t match_score, const std::string &alphabet) {
+::unit_scoring_matrix(int8_t match_score,
+                      const std::string &alphabet,
+                      const uint8_t *encoding) {
     ScoreMatrix score_matrix;
     for (auto& row : score_matrix) {
         row.fill(-match_score);
     }
 
-    auto range = get_alphabet_boundaries(alphabet);
+    for (uint8_t c : alphabet) {
+        if (encoding[c] == encoding[0])
+            continue;
 
-    for (const char *it = range.first; it != range.second; ++it) {
-        char upper = toupper(*it);
-        char lower = tolower(*it);
+        char upper = toupper(c);
+        char lower = tolower(c);
 
         score_matrix[upper][upper]
             = score_matrix[upper][lower]
@@ -280,17 +486,18 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
                                size_t start_pos,
                                score_t score,
                                const char* path_end,
-                               bool orientation)
+                               bool orientation,
+                               size_t offset)
       : query_begin_(NULL),
         query_end_(NULL),
         num_matches_(0),
         score_(score),
-        orientation_(orientation) {
-    assert(column != &*dp_table.end());
+        orientation_(orientation),
+        offset_(offset) {
+    assert(column);
 
     auto i = start_pos;
     const auto* step = &column->second.steps.at(i);
-    assert(step->cigar_op == Cigar::Operator::MATCH);
 
     if (!i && step->prev_node == DeBruijnGraph::npos)
         return;
@@ -308,8 +515,9 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         if (step->cigar_op == Cigar::Operator::MATCH)
             num_matches_++;
 
-        column = &*dp_table.find(step->prev_node);
-        assert(column != &*dp_table.end());
+        auto find = dp_table.find(step->prev_node);
+        assert(find != dp_table.end());
+        column = &*find;
 
         step = &column->second.steps.at(i);
     }
@@ -321,7 +529,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     cigar_.append(Cigar::Operator::CLIPPED, i);
     assert(cigar_.size());
 
-    query_begin_ = path_end;
+    query_begin_ = path_end + i;
     query_end_ = path_end + start_pos;
 
     std::reverse(cigar_.begin(), cigar_.end());
@@ -342,11 +550,10 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
 
 template <typename NodeType>
 void Alignment<NodeType>::append(Alignment&& other, size_t overlap, int8_t match_score) {
-    assert(query_end_ - overlap == other.query_begin_);
+    assert(query_end_ - overlap + other.get_clipping() == other.query_begin_);
     assert(orientation_ == other.orientation_);
 
-    if (!overlap && other.cigar_.size()
-            && other.cigar_.begin()->first == Cigar::Operator::CLIPPED) {
+    if (!overlap && other.cigar_.get_clipping()) {
         // remove the seed if the extension has clipping
         assert(query_begin_ <= other.query_begin_);
 
@@ -384,6 +591,21 @@ void Alignment<NodeType>::append(Alignment&& other, size_t overlap, int8_t match
 
     cigar_.append(std::move(other.cigar_));
     query_end_ = other.query_end_;
+}
+
+template <typename NodeType>
+void Alignment<NodeType>::recompute_score(const DBGAlignerConfig &config) {
+    auto new_score = config.score_cigar(sequence_.c_str(),
+                                        sequence_.c_str() + sequence_.size(),
+                                        query_begin_,
+                                        query_end_,
+                                        cigar_);
+
+    if (utils::get_verbose() && score_ != new_score)
+        std::cerr << "WARNING: changing score from "
+                  << score_ << " to " << new_score << std::endl;
+
+    score_ = new_score;
 }
 
 // derived from:
@@ -695,11 +917,16 @@ std::shared_ptr<const std::string> Alignment<NodeType>
         }
     }
 
+    if (alignment["annotation"]["cigar"]) {
+        assert(alignment["annotation"]["cigar"].asString() == cigar_.to_string());
+
+        if (cigar_ != Cigar(alignment["annotation"]["cigar"].asString()))
+            throw std::runtime_error("ERROR: CIGAR and mapping mismatch");
+    }
+
     sequence_ = sequence_.substr(0, path_steps);
     assert(!alignment["annotation"]["ref_sequence"]
-        || alignment["annotation"]["ref_sequence"] == sequence_);
-    assert(!alignment["annotation"]["cigar"]
-        || alignment["annotation"]["cigar"] == cigar_.to_string());
+        || alignment["annotation"]["ref_sequence"].asString() == sequence_);
 
     if (!is_valid(graph))
         throw std::runtime_error("ERROR: JSON reconstructs invalid alignment");
@@ -708,11 +935,26 @@ std::shared_ptr<const std::string> Alignment<NodeType>
 }
 
 template <typename NodeType>
-bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
-    // TODO: check score
-
+bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
+                                   const DBGAlignerConfig *config) const {
     if (query_begin_ > query_end_) {
         std::cerr << "ERROR: query begin after query end" << std::endl
+                  << *this << std::endl;
+        return false;
+    }
+
+    if (!cigar_.is_valid(sequence_.c_str(), sequence_.c_str() + sequence_.size(),
+                         query_begin_, query_end_)) {
+        std::cerr << "ERROR: CIGAR invalid" << std::endl;
+        return false;
+    }
+
+    if (config && score_ != config->score_cigar(sequence_.c_str(),
+                                                sequence_.c_str() + sequence_.size(),
+                                                query_begin_,
+                                                query_end_,
+                                                cigar_)) {
+        std::cerr << "ERROR: mismatch between CIGAR and score" << std::endl
                   << *this << std::endl;
         return false;
     }
@@ -733,8 +975,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
             std::cerr << "ERROR: end of query reached before end of CIGAR" << std::endl
                       << "Processed " << cigar_it - cigar_.begin()
                       << " of " << cigar_.size() << " operations" << std::endl
-                      << *this << std::endl
-                      << std::string(query_begin_, query_end_) << std::endl;
+                      << *this << std::endl;
             return false;
         }
 
@@ -742,8 +983,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
             std::cerr << "ERROR: end of nodes reached before end of CIGAR" << std::endl
                       << "Processed " << cigar_it - cigar_.begin()
                       << " of " << cigar_.size() << " operations" << std::endl
-                      << *this << std::endl
-                      << std::string(query_begin_, query_end_) << std::endl;
+                      << *this << std::endl;
             return false;
         }
 
@@ -789,8 +1029,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                                           << *node_it << std::endl
                                           << "Processed " << cigar_it - cigar_.begin()
                                           << " of " << cigar_.size() << " operations" << std::endl
-                                          << *this << std::endl
-                                          << std::string(query_begin_, query_end_) << std::endl;
+                                          << *this << std::endl;
                                 return false;
                             }
                         }
@@ -804,9 +1043,8 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                     std::cerr << "ERROR: mismatch found despite MATCH in CIGAR" << std::endl
                               << "Processed " << cigar_it - cigar_.begin()
                               << " of " << cigar_.size() << " operations" << std::endl
-                              << *this << std::endl
-                              << std::string(query_begin_, query_end_) << "\n\n"
-                              << std::string(cur_query_it, path_steps - cur_path_steps) << " "
+                              << *this << "\n\n"
+                              << std::string(cur_query_it, path_steps - cur_path_steps) << "\n"
                               << std::string(path.c_str() + cur_path_steps, path_steps - cur_path_steps) << std::endl;
                     return false;
                 } else if (cigar_it->first == Cigar::Operator::MISMATCH
@@ -817,9 +1055,8 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
                     std::cerr << "ERROR: match found despite MISMATCH in CIGAR" << std::endl
                               << "Processed " << cigar_it - cigar_.begin()
                               << " of " << cigar_.size() << " operations" << std::endl
-                              << *this << std::endl
-                              << std::string(query_begin_, query_end_) << std::endl
-                              << std::string(cur_query_it, path_steps - cur_path_steps) << " "
+                              << *this << "\n\n"
+                              << std::string(cur_query_it, path_steps - cur_path_steps) << "\n"
                               << std::string(path.c_str() + cur_path_steps, path_steps - cur_path_steps) << std::endl;
                     return false;
                 }
@@ -827,8 +1064,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
             case Cigar::Operator::INSERTION: query_it += cigar_it->second; break;
             case Cigar::Operator::CLIPPED: {
                 std::cerr << "ERROR: internal clipping in CIGAR" << std::endl
-                          << *this << std::endl
-                          << std::string(query_begin_, query_end_) << std::endl;
+                          << *this << std::endl;
                 return false;
             }
         }
@@ -838,16 +1074,14 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
 
     if (path_steps != sequence_.size()) {
         std::cerr << "ERROR: stored sequence is incorrect size" << std::endl
-                  << *this << std::endl
-                  << std::string(query_begin_, query_end_) << std::endl;
+                  << *this << std::endl;
         return false;
     }
 
     if (path.size() != sequence_.size()) {
         std::cerr << "ERROR: stored sequence is incorrect" << std::endl
                   << "Reconstructed sequence: " << path << std::endl
-                  << *this << std::endl
-                  << std::string(query_begin_, query_end_) << std::endl;
+                  << *this << std::endl;
         return false;
     }
 
@@ -855,8 +1089,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
         std::cerr << "ERROR: end of CIGAR reached before end of query" << std::endl
                   << "Processed " << query_it - query_begin_
                   << " of " << query_end_ - query_begin_ << " characters" << std::endl
-                  << *this << std::endl
-                  << std::string(query_begin_, query_end_) << std::endl;
+                  << *this << std::endl;
         return false;
     }
 
@@ -864,12 +1097,11 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph) const {
         std::cerr << "ERROR: end of CIGAR reached before end of path" << std::endl
                   << "Processed " << node_it - nodes_.begin()
                   << " of " << nodes_.size() << " nodes" << std::endl
-                  << *this << std::endl
-                  << std::string(query_begin_, query_end_) << std::endl;
+                  << *this << std::endl;
         return false;
     }
 
     return true;
 }
 
-template class Alignment<DeBruijnGraph::node_index>;
+template class Alignment<>;

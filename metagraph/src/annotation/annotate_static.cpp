@@ -1,7 +1,8 @@
 #include "annotate_static.hpp"
 
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "static_annotators_def.hpp"
+#include "serialization.hpp"
 
 using utils::remove_suffix;
 
@@ -56,18 +57,6 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
     }
     return std::includes(encoded_labels.begin(), encoded_labels.end(),
                          querying_codes.begin(), querying_codes.end());
-}
-
-template <class BinaryMatrixType, typename Label>
-auto StaticBinRelAnnotator<BinaryMatrixType, Label>::get_labels(Index i) const
--> VLabels {
-    assert(i < num_objects());
-
-    VLabels labels;
-    for (auto col : get_label_codes(i)) {
-        labels.push_back(label_encoder_.decode(col));
-    }
-    return labels;
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -143,7 +132,8 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
 }
 
 template <class BinaryMatrixType, typename Label>
-std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
+typename StaticBinRelAnnotator<BinaryMatrixType, Label>::SetBitPositions
+StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::get_label_codes(Index i) const {
     if (!cached_rows_.get())
         return matrix_->get_row(i);
@@ -155,6 +145,13 @@ std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
         cached_rows_->Put(i, row);
         return row;
     }
+}
+
+template <class BinaryMatrixType, typename Label>
+std::vector<typename StaticBinRelAnnotator<BinaryMatrixType, Label>::SetBitPositions>
+StaticBinRelAnnotator<BinaryMatrixType, Label>
+::get_label_codes(const std::vector<Index> &indices) const {
+    return matrix_->get_rows(indices);
 }
 
 template <class BinaryMatrixType, typename Label>

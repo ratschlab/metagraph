@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <functional>
 
-#include "utils.hpp"
 #include "serialization.hpp"
 
 
@@ -35,11 +34,11 @@ bool RowConcatenated<BitVector>::get(Row row, Column column) const {
 }
 
 template <typename BitVector>
-std::vector<typename RowConcatenated<BitVector>::Column>
+typename RowConcatenated<BitVector>::SetBitPositions
 RowConcatenated<BitVector>::get_row(Row row) const {
     assert(compressed_rows_.get());
     assert(row * num_columns_ < compressed_rows_->size());
-    std::vector<Column> columns;
+    SetBitPositions columns;
 
     uint64_t offset = row * num_columns_;
     uint64_t first = compressed_rows_->rank1(offset) + !(*compressed_rows_)[offset];

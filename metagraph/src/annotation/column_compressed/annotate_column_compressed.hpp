@@ -6,8 +6,9 @@
 #include <lru_cache_policy.hpp>
 #include <progress_bar.hpp>
 
-#include "annotate.hpp"
-#include "bit_vector.hpp"
+#include "annotation/annotate.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
+#include "utils/vectors.hpp"
 
 
 namespace annotate {
@@ -24,11 +25,13 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     friend std::unique_ptr<A> convert(ColumnCompressed<L>&&);
 
     template <class A, typename L, class P>
-    friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t);
+    friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t, size_t);
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
+    using IterateRows = typename MultiLabelEncoded<uint64_t, Label>::IterateRows;
+    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
 
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
@@ -41,7 +44,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     using MultiLabelEncoded<uint64_t, Label>::set;
     void set_labels(Index i, const VLabels &labels) override;
-    VLabels get_labels(Index i) const override;
 
     void add_label(Index i, const Label &label) override;
     void add_labels(Index i, const VLabels &labels) override;
@@ -73,6 +75,15 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
 
+    /**
+     * Return all labels for which counts are greater than or equal to |min_count|.
+     * Stop counting if count is greater than |count_cap|.
+     */
+    std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
+    count_labels(const std::unordered_map<Index, size_t> &index_counts,
+                 size_t min_count = 1,
+                 size_t count_cap = std::numeric_limits<size_t>::max()) const override;
+
     void convert_to_row_annotator(const std::string &outfbase) const;
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
                                   size_t num_threads = 1) const;
@@ -102,7 +113,9 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     bitmap_dyn& decompress(size_t j);
     const bitmap& get_column(size_t j) const;
 
-    std::vector<uint64_t> get_label_codes(Index i) const override;
+    SetBitPositions get_label_codes(Index i) const override;
+    std::vector<SetBitPositions>
+    get_label_codes(const std::vector<Index> &indices) const override;
 
     uint64_t num_rows_;
 

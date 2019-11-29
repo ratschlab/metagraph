@@ -2,11 +2,51 @@
 
 #include <ips4o.hpp>
 
-#include "unix_tools.hpp"
+#include "utils/template_utils.hpp"
+#include "common/sorted_set.hpp"
+#include "common/sorted_multiset.hpp"
+#include "common/sorted_set_disk.hpp"
+#include "common/unix_tools.hpp"
+#include "kmer/kmer_collector.hpp"
 #include "boss_chunk.hpp"
-#include "kmer_collector.hpp"
 
-const static bool kUseDeque = false;
+template <typename KMER>
+using KmerMultsetVector = KmerCollector<KMER,
+                                      KmerExtractorBOSS,
+                                      SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>;
+
+template <typename KMER>
+using KmerSetVector = KmerCollector<KMER,
+                                        KmerExtractorBOSS,
+                                        SortedSet<KMER, Vector<KMER>>>;
+
+template <typename KMER>
+using KmerSetDisk = KmerCollector<KMER,
+                                      KmerExtractorBOSS,
+                                      SortedSetDisk<KMER>>;
+
+template <typename KMER,
+          typename KmerCount = uint8_t,
+          class Container = Vector<std::pair<KMER, KmerCount>>>
+using KmerMultset = KmerCollector<KMER,
+                                KmerExtractorBOSS,
+                                SortedMultiset<KMER, KmerCount, Container>>;
+
+/**
+ * What type of data structure to use in the #KmerSet.
+ */
+enum class ExtractorContainer {
+    VECTOR,
+    /**
+     * Uses several vectors that are written to disk and then merged, as defined
+     * in #SortedSetDisk
+     */
+    VECTOR_DISK
+};
+
+constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR;
+
+const static uint8_t kBitsPerCount = 8;
 
 
 template <class Array>
@@ -14,11 +54,11 @@ void sort_and_remove_duplicates(Array *array,
                                 size_t num_threads,
                                 size_t offset) {
     ips4o::parallel::sort(array->begin() + offset, array->end(),
-                          utils::LessFirst<typename Array::value_type>(),
+                          utils::LessFirst(),
                           num_threads);
     // remove duplicates
     auto unique_end = std::unique(array->begin() + offset, array->end(),
-                                  utils::EqualFirst<typename Array::value_type>());
+                                  utils::EqualFirst());
     array->erase(unique_end, array->end());
 }
 
@@ -113,7 +153,7 @@ void recover_source_dummy_nodes(size_t k,
         }
     }
     ips4o::parallel::sort(kmers->begin(), kmers->end(),
-                          utils::LessFirst<typename Array::value_type>(),
+                          utils::LessFirst(),
                           num_threads);
 }
 
@@ -133,7 +173,7 @@ encode_filter_suffix_boss(const std::string &filter_suffix) {
     return filter_suffix_encoded;
 }
 
-template <typename KmerStorage>
+template <typename KmerCollector>
 class BOSSChunkConstructor : public IBOSSChunkConstructor {
     friend IBOSSChunkConstructor;
 
@@ -188,16 +228,23 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           << timer.elapsed() << "sec" << std::endl;
         }
 
-        if constexpr(std::is_same_v<typename KmerStorage::Data,
-                                    utils::DequeStorage<typename KmerStorage::Value>>) {
-            kmers.shrink_to_fit();
+        BOSS::Chunk *result;
+
+        if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
+            // kmer_collector stores (BOSS::k_ + 1)-mers
+            result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
+                                     kmer_storage_.get_k() - 1,
+                                     kmer_storage_.is_both_strands_mode(),
+                                     kmers,
+                                     kBitsPerCount);
+        } else {
+            // kmer_collector stores (BOSS::k_ + 1)-mers
+            result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
+                                     kmer_storage_.get_k() - 1,
+                                     kmer_storage_.is_both_strands_mode(),
+                                     kmers);
         }
 
-        // kmer_collector stores (BOSS::k_ + 1)-mers
-        BOSS::Chunk *result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
-                                              kmer_storage_.get_k() - 1,
-                                              kmer_storage_.is_both_strands_mode(),
-                                              kmers);
         kmer_storage_.clear();
 
         return result;
@@ -205,7 +252,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
     uint64_t get_k() const { return kmer_storage_.get_k() - 1; }
 
-    KmerStorage kmer_storage_;
+    KmerCollector kmer_storage_;
 };
 
 template <template <typename KMER> class KmerContainer, typename... Args>
@@ -226,40 +273,6 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
     }
 }
 
-template <typename KMER>
-using KmerCounterVector = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                      Vector<std::pair<KMER, uint8_t>>,
-                                      utils::NoCleanup>;
-template <typename KMER>
-using KmerCounterVectorClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                           Vector<std::pair<KMER, uint8_t>>,
-                                           utils::DummyKmersCleaner>;
-template <typename KMER>
-using KmerCollectorVector = KmerCollector<KMER, KmerExtractorBOSS,
-                                          Vector<KMER>,
-                                          utils::NoCleanup>;
-template <typename KMER>
-using KmerCollectorVectorClean = KmerCollector<KMER, KmerExtractorBOSS,
-                                               Vector<KMER>,
-                                               utils::DummyKmersCleaner>;
-
-template <typename KMER>
-using KmerCounterDeque = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                     utils::DequeStorage<std::pair<KMER, uint8_t>>,
-                                     utils::NoCleanup>;
-template <typename KMER>
-using KmerCounterDequeClean = KmerCounter<KMER, KmerExtractorBOSS, uint8_t,
-                                          utils::DequeStorage<std::pair<KMER, uint8_t>>,
-                                          utils::DummyKmersCleaner>;
-template <typename KMER>
-using KmerCollectorDeque = KmerCollector<KMER, KmerExtractorBOSS,
-                                         utils::DequeStorage<KMER>,
-                                         utils::NoCleanup>;
-template <typename KMER>
-using KmerCollectorDequeClean = KmerCollector<KMER, KmerExtractorBOSS,
-                                              utils::DequeStorage<KMER>,
-                                              utils::DummyKmersCleaner>;
-
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor
 ::initialize(size_t k,
@@ -273,36 +286,24 @@ IBOSSChunkConstructor
     #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
 
     if (count_kmers) {
-
-        if (filter_suffix.size()) {
-
-            if (!kUseDeque || memory_preallocated > 0) {
-                return initialize_boss_chunk_constructor<KmerCounterVector>(OTHER_ARGS);
-            } else {
-                return initialize_boss_chunk_constructor<KmerCounterDeque>(OTHER_ARGS);
-            }
-        } else {
-            if (!kUseDeque || memory_preallocated > 0) {
-                return initialize_boss_chunk_constructor<KmerCounterVectorClean>(OTHER_ARGS);
-            } else {
-                return initialize_boss_chunk_constructor<KmerCounterDequeClean>(OTHER_ARGS);
-            }
+        switch (kExtractorContainer) {
+            case ExtractorContainer::VECTOR:
+                return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
+            default:
+                throw std::logic_error(
+                        "Unsupported extractor container specified for "
+                        "counter. Only VECTOR is supported");
         }
     } else {
-
-        if (filter_suffix.size()) {
-
-            if (!kUseDeque || memory_preallocated > 0) {
-                return initialize_boss_chunk_constructor<KmerCollectorVector>(OTHER_ARGS);
-            } else {
-                return initialize_boss_chunk_constructor<KmerCollectorDeque>(OTHER_ARGS);
-            }
-        } else {
-            if (!kUseDeque || memory_preallocated > 0) {
-                return initialize_boss_chunk_constructor<KmerCollectorVectorClean>(OTHER_ARGS);
-            } else {
-                return initialize_boss_chunk_constructor<KmerCollectorDequeClean>(OTHER_ARGS);
-            }
+        switch (kExtractorContainer) {
+            case ExtractorContainer::VECTOR:
+                return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
+            case ExtractorContainer::VECTOR_DISK:
+                return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
+            default:
+                throw std::logic_error(
+                        "Unknown extractor container: " +
+                        to_string(static_cast<uint32_t>(kExtractorContainer)));
         }
     }
 }

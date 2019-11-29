@@ -2,7 +2,7 @@
 
 #include <kmc_file.h>
 
-#include "utils.hpp"
+#include "utils/string_utils.hpp"
 
 
 namespace kmc {

@@ -11,11 +11,10 @@
 #include <boost/multiprecision/integer.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
+#include "common/threading.hpp"
+#include "utils/serialization.hpp"
+#include "utils/algorithms.hpp"
 #include "boss_construct.hpp"
-#include "serialization.hpp"
-#include "reverse_complement.hpp"
-#include "utils.hpp"
-#include "threading.hpp"
 
 using utils::remove_suffix;
 using TAlphabet = BOSS::TAlphabet;
@@ -813,165 +812,73 @@ std::string BOSS::get_node_str(edge_index k_node) const {
 
 void BOSS::map_to_edges(const std::string &sequence,
                         const std::function<void(edge_index)> &callback,
-                        const std::function<bool()> &terminate) const {
-    auto seq_encoded = encode(sequence);
+                        const std::function<bool()> &terminate,
+                        const std::function<bool()> &skip) const {
+    map_to_edges(encode(sequence), callback, terminate, skip);
+}
 
+std::vector<edge_index> BOSS::map_to_edges(const std::string &sequence) const {
+    return map_to_edges(encode(sequence));
+}
+
+void BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded,
+                        const std::function<void(edge_index)> &callback,
+                        const std::function<bool()> &terminate,
+                        const std::function<bool()> &skip) const {
+    assert(std::all_of(seq_encoded.begin(), seq_encoded.end(),
+                       [this](TAlphabet c) { return c <= alph_size; }));
+
+    if (seq_encoded.size() <= k_)
+        return;
+
+    // Mark where (k+1)-mers with invalid characters end
+    // Example for (k+1)=3: [X]***[X]****[X]***
+    //              ---->   [111]0[111]00[111]0
+    auto invalid = utils::drag_and_mark_segments(seq_encoded, alph_size, k_ + 1);
+
+    // slide through all (k+1)-mers
     for (size_t i = 0; i + k_ + 1 <= seq_encoded.size() && !terminate(); ++i) {
+        if (skip())
+            continue;
+
+        if (invalid[i + k_]) {
+            // this (k+1)-mer contains at least one invalid character
+            callback(npos);
+            continue;
+        }
+
         auto edge = map_to_edge(seq_encoded.data() + i,
                                 seq_encoded.data() + i + k_ + 1);
         callback(edge);
 
-        while (edge && i + k_ + 1 < seq_encoded.size()) {
-            edge = fwd(edge);
-            edge = pick_edge(edge, seq_encoded[i + k_ + 1]);
-
+        while (edge && ++i + k_ < seq_encoded.size()) {
             if (terminate())
                 return;
 
-            callback(edge);
+            if (skip())
+                break;
 
-            i++;
+            if (invalid[i + k_]) {
+                // this (k+1)-mer contains at least one invalid character
+                callback(npos);
+                break;
+            }
+
+            edge = fwd(edge);
+            edge = pick_edge(edge, seq_encoded[i + k_]);
+
+            callback(edge);
         }
     }
 }
 
-std::vector<edge_index> BOSS::map_to_edges(const std::string &sequence) const {
+std::vector<edge_index>
+BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded) const {
     std::vector<edge_index> indices;
-    indices.reserve(sequence.size());
-    map_to_edges(sequence,
+    indices.reserve(seq_encoded.size());
+    map_to_edges(seq_encoded,
                  [&indices](edge_index i) { indices.push_back(i); });
     return indices;
-}
-
-bool BOSS::find(const std::string &sequence,
-                double kmer_discovery_fraction) const {
-    size_t kmer_size = k_ + 1;
-
-    if (sequence.length() < kmer_size)
-        return false;
-
-    const size_t num_kmers = sequence.length() - kmer_size + 1;
-    const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
-    const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
-    size_t num_kmers_discovered = 0;
-    size_t num_kmers_missing = 0;
-
-    map_to_edges(sequence,
-        [&](edge_index edge) {
-            if (edge) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-        },
-        [&]() { return num_kmers_missing > max_kmers_missing
-                        || num_kmers_discovered >= min_kmers_discovered; }
-    );
-    return num_kmers_missing <= max_kmers_missing;
-}
-
-bool BOSS::find(const std::string &sequence,
-                double kmer_discovery_fraction,
-                size_t kmer_mapping_mode) const {
-    if (!kmer_mapping_mode)
-        return find(sequence, kmer_discovery_fraction);
-
-    size_t kmer_size = k_ + 1;
-
-    if (sequence.length() < kmer_size)
-        return false;
-
-    const size_t num_kmers = sequence.length() - kmer_size + 1;
-    const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
-    const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
-    size_t num_kmers_discovered = 0;
-    size_t num_kmers_missing = 0;
-
-    auto seq_encoded = encode(sequence);
-
-    std::vector<size_t> skipped_kmers;
-    skipped_kmers.reserve(seq_encoded.size());
-
-    for (size_t i = 0; i < seq_encoded.size() - kmer_size + 1; ++i) {
-        auto edge = map_to_edge(seq_encoded.data() + i,
-                                seq_encoded.data() + i + kmer_size);
-        if (edge) {
-            num_kmers_discovered++;
-        } else {
-            num_kmers_missing++;
-        }
-
-        if (num_kmers_missing > max_kmers_missing
-                || num_kmers_discovered >= min_kmers_discovered)
-            return num_kmers_discovered >= min_kmers_discovered;
-
-        while (edge && i + kmer_size < seq_encoded.size()) {
-            edge = fwd(edge);
-            edge = pick_edge(edge, seq_encoded[i + kmer_size]);
-            if (edge) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-
-            if (num_kmers_missing > max_kmers_missing
-                    || num_kmers_discovered >= min_kmers_discovered)
-                return num_kmers_discovered >= min_kmers_discovered;
-
-            i++;
-        }
-
-        if (kmer_discovery_fraction < 1
-            && (kmer_mapping_mode == 1
-                || kmer_size * (max_kmers_missing - num_kmers_missing)
-                    > min_kmers_discovered - num_kmers_discovered)) {
-            size_t i_old = i;
-
-            // jump over the missing k-mer
-            i += kmer_size - 1;
-
-            // Save skipped kmers for the end
-            while (++i_old <= i && i_old < seq_encoded.size() - kmer_size + 1) {
-                skipped_kmers.push_back(i_old);
-            }
-        }
-    }
-
-    for (size_t j = 0; j < skipped_kmers.size(); ++j) {
-        size_t i = skipped_kmers[j];
-
-        auto edge = map_to_edge(seq_encoded.data() + i,
-                                seq_encoded.data() + i + kmer_size);
-        if (edge) {
-            num_kmers_discovered++;
-        } else {
-            num_kmers_missing++;
-        }
-
-        if (num_kmers_missing > max_kmers_missing
-                || num_kmers_discovered >= min_kmers_discovered)
-            return num_kmers_discovered >= min_kmers_discovered;
-
-        while (edge && j + 1 < skipped_kmers.size()
-                    && i + 1 == skipped_kmers[j + 1]) {
-            edge = fwd(edge);
-            edge = pick_edge(edge, seq_encoded[i + kmer_size]);
-            if (edge) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-
-            if (num_kmers_missing > max_kmers_missing
-                    || num_kmers_discovered >= min_kmers_discovered)
-                return num_kmers_discovered >= min_kmers_discovered;
-
-            i++;
-            j++;
-        }
-    }
-
-    return num_kmers_missing <= max_kmers_missing;
 }
 
 /**
@@ -1008,9 +915,9 @@ TAlphabet BOSS::encode(char s) const {
 }
 
 std::vector<TAlphabet> BOSS::encode(const std::string &sequence) const {
-    std::vector<TAlphabet> seq_encoded(sequence.size());
-    std::transform(sequence.begin(), sequence.end(),
-                   seq_encoded.begin(), [this](char c) { return this->encode(c); });
+    std::vector<TAlphabet> seq_encoded = kmer_extractor_.encode(sequence);
+    assert(std::all_of(seq_encoded.begin(), seq_encoded.end(),
+                       [this](TAlphabet c) { return c <= alph_size; }));
     return seq_encoded;
 }
 
@@ -1020,11 +927,11 @@ char BOSS::decode(TAlphabet c) const {
     return kmer_extractor_.decode(c);
 }
 
-std::string BOSS::decode(const std::vector<TAlphabet> &sequence) const {
-    std::string str(sequence.size(), 0);
-    std::transform(sequence.begin(), sequence.end(),
-                   str.begin(), [this](TAlphabet x) { return this->decode(x); });
-    return str;
+std::string BOSS::decode(const std::vector<TAlphabet> &seq_encoded) const {
+    assert(kmer_extractor_.encode(kSentinel) != kSentinelCode);
+    assert(std::all_of(seq_encoded.begin(), seq_encoded.end(),
+                       [this](TAlphabet c) { return c < alph_size; }));
+    return kmer_extractor_.decode(seq_encoded);
 }
 
 template <class WaveletTree, class BitVector>
@@ -1131,9 +1038,10 @@ void BOSS::add_sequence(const std::string &seq,
 
     while (begin_segm + k_ < end) {
 
-        end_segm = std::find_if(begin_segm, end,
-            [&](auto c) { return c >= alph_size; }
-        );
+        assert(std::all_of(begin_segm, end,
+                           [this](TAlphabet c) { return c <= alph_size; }));
+
+        end_segm = std::find(begin_segm, end, alph_size);
 
         if (begin_segm + k_ < end_segm) {
 
@@ -1672,7 +1580,7 @@ sdsl::bit_vector BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
  * This function is well suited to merge small graphs into large ones.
  */
 void BOSS::merge(const BOSS &other) {
-    other.call_sequences([&](const std::string &sequence) {
+    other.call_sequences([&](const std::string &sequence, auto&&) {
         add_sequence(sequence, true);
     });
 }
@@ -1800,10 +1708,11 @@ void call_paths(const BOSS &boss,
                 BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
                 bool split_to_unitigs,
+                bool kmers_in_single_form,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 ProgressBar &progress_bar,
-                bitmap *subgraph_mask);
+                const bitmap *subgraph_mask);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -1812,7 +1721,8 @@ void call_paths(const BOSS &boss,
 void BOSS::call_paths(Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
                       bool split_to_unitigs,
-                      bitmap *subgraph_mask) const {
+                      bool kmers_in_single_form,
+                      const bitmap *subgraph_mask) const {
     assert(!subgraph_mask || subgraph_mask->size() == W_->size());
 
     // keep track of reached edges
@@ -1836,7 +1746,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     if (!subgraph_mask) {
         for (uint64_t i = succ_last(1); i >= 1; --i) {
             if (!visited[i])
-                ::call_paths(*this, i, callback, split_to_unitigs,
+                ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                              &discovered, &visited, progress_bar, nullptr);
         }
 
@@ -1853,7 +1763,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
             do {
                 if (!visited[i])
-                    ::call_paths(*this, i, callback, split_to_unitigs,
+                    ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                                  &discovered, &visited, progress_bar, subgraph_mask);
             } while (--i > 0 && !get_last(i));
         });
@@ -1872,14 +1782,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         do {
             if (!visited[i])
-                ::call_paths(*this, i, callback, split_to_unitigs,
+                ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                              &discovered, &visited, progress_bar, subgraph_mask);
         } while (--i > 0 && !get_last(i));
     });
 
     // process all the cycles left that have not been traversed
     call_zeros(visited, [&](uint64_t i) {
-        ::call_paths(*this, i, callback, split_to_unitigs,
+        ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                      &discovered, &visited, progress_bar, subgraph_mask);
     });
 }
@@ -1894,10 +1804,11 @@ void call_paths(const BOSS &boss,
                 BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> callback,
                 bool split_to_unitigs,
+                bool kmers_in_single_form,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 ProgressBar &progress_bar,
-                bitmap *subgraph_mask) {
+                const bitmap *subgraph_mask) {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
@@ -1977,31 +1888,89 @@ void call_paths(const BOSS &boss,
             edge = next_edge;
         }
 
-        if (path.size())
+        if (!path.size())
+            continue;
+
+        if (!kmers_in_single_form) {
             callback(std::move(path), std::move(sequence));
+            continue;
+        }
+
+        // trim trailing sentinels '$'
+        if (sequence.back() == boss.kSentinelCode) {
+            sequence.pop_back();
+            path.pop_back();
+        }
+
+        auto first_valid_it
+            = std::find_if(sequence.begin(), sequence.end(),
+                           [&boss](auto c) { return c != boss.kSentinelCode; });
+
+        sequence.erase(sequence.begin(), first_valid_it);
+
+        if (sequence.size() <= boss.get_k())
+            continue;
+
+        path.erase(path.begin(),
+                   path.begin() + (first_valid_it - sequence.begin()));
+
+
+        // get dual path (mapping of the reverse complement sequence)
+        auto rev_comp_seq = sequence;
+        KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
+
+        auto dual_path = boss.map_to_edges(rev_comp_seq);
+        std::reverse(dual_path.begin(), dual_path.end());
+        size_t begin = 0;
+
+        assert(std::all_of(path.begin(), path.end(),
+                           [&](auto i) { return visited[i]; }));
+
+        progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
+                                      [&](auto node) { return node && !visited[node]; });
+
+        // Mark all nodes in path as unvisited and re-visit them while
+        // traversing the path (iterating through all nodes).
+        std::for_each(path.begin(), path.end(),
+                      [&](auto i) { visited[i] = false; });
+
+        // traverse the path with its dual and visit the nodes
+        for (size_t i = 0; i < path.size(); ++i) {
+            assert(path[i]);
+            visited[path[i]] = true;
+
+            if (!dual_path[i])
+                continue;
+
+            // check if reverse-complement k-mer has been traversed
+            if (!visited[dual_path[i]] || dual_path[i] == path[i]) {
+                visited[dual_path[i]] = discovered[dual_path[i]] = true;
+                continue;
+            }
+
+            // The reverse-complement k-mer had been visited
+            // -> Skip this k-mer and call the traversed path segment.
+            if (begin < i)
+                callback({ path.begin() + begin, path.begin() + i },
+                         { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
+
+            begin = i + 1;
+        }
+
+        // Call the path traversed
+        if (!begin) {
+            callback(std::move(path), std::move(sequence));
+
+        } else if (begin < path.size()) {
+            callback({ path.begin() + begin, path.end() },
+                     { sequence.begin() + begin, sequence.end() });
+        }
     }
 }
 
-void BOSS::call_sequences(Call<std::string&&> callback,
-                          bitmap *subgraph_mask) const {
-    call_paths([&](auto&&, auto&& path) {
-        std::string sequence;
-        sequence.reserve(path.size());
-
-        for (TAlphabet c : path) {
-            if (c != BOSS::kSentinelCode) {
-                sequence.push_back(BOSS::decode(c));
-            }
-        }
-
-        if (sequence.size())
-            callback(std::move(sequence));
-
-    }, false, subgraph_mask);
-}
-
 void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
-                          bitmap *subgraph_mask) const {
+                          bool kmers_in_single_form,
+                          const bitmap *subgraph_mask) const {
 
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
@@ -2013,7 +1982,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
         if (begin + k_ + 1 > end)
             return;
 
-        assert(std::all_of(begin, end, [](auto c) { return c != kSentinelCode; }));
+        assert(std::all_of(begin, end, [](TAlphabet c) { return c != kSentinelCode; }));
 
         std::string sequence(end - begin, '\0');
         std::transform(begin, end, sequence.begin(),
@@ -2030,22 +1999,13 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
 
         callback(std::move(sequence), std::move(edges));
 
-    }, false, subgraph_mask);
+    }, false, kmers_in_single_form, subgraph_mask);
 }
 
-void BOSS::call_unitigs(Call<std::string&&> callback,
-                        size_t max_pruned_dead_end_size,
-                        bitmap *subgraph_mask) const {
-    call_unitigs(
-        [&](std::string&& seq, auto&&) { callback(std::move(seq)); },
-        max_pruned_dead_end_size,
-        subgraph_mask
-    );
-}
-
-void BOSS::call_unitigs(Call<std::string&&, std::vector<uint64_t>&&> callback,
+void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t min_tip_size,
-                        bitmap *subgraph_mask) const {
+                        bool kmers_in_single_form,
+                        const bitmap *subgraph_mask) const {
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
 
@@ -2056,7 +2016,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<uint64_t>&&> callback,
         if (begin + k_ + 1 > end)
             return;
 
-        assert(std::all_of(begin, end, [](auto c) { return c != kSentinelCode; }));
+        assert(std::all_of(begin, end, [](TAlphabet c) { return c != kSentinelCode; }));
 
         std::string sequence(end - begin, '\0');
         std::transform(begin, end, sequence.begin(),
@@ -2150,19 +2110,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<uint64_t>&&> callback,
         // this is not a tip
         callback(std::move(sequence), std::move(edges));
 
-    }, true, subgraph_mask);
-}
-
-void BOSS::call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const {
-    call_paths([&](auto&& indices, auto&& path) {
-        assert(path.size() == indices.size() + k_);
-
-        for (size_t i = 0; i < indices.size(); ++i) {
-            callback(indices[i],
-                     std::vector<TAlphabet>(path.begin() + i,
-                                            path.begin() + i + k_ + 1));
-        }
-    });
+    }, true, kmers_in_single_form, subgraph_mask);
 }
 
 /**

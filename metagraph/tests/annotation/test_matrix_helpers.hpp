@@ -15,7 +15,7 @@ class BRWTOptimized : public BRWT {
   public:
     template <typename... Args>
     BRWTOptimized(Args&&... args)
-        : BRWT(std::forward<Args>(args)...) { BRWTOptimizer::relax(this); }
+          : BRWT(std::forward<Args>(args)...) { BRWTOptimizer::relax(this); }
 };
 
 template <int BufferSize>

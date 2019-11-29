@@ -167,7 +167,4 @@ TYPED_TEST_CASE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
 TYPED_TEST_CASE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
 TYPED_TEST_CASE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
 
-
-std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
-
 #endif // __TEST_ANNOTATION_HPP__

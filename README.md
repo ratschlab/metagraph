@@ -4,27 +4,33 @@
 
 ### Prerequisites
 - cmake 3.6.1
-- GNU GCC with C++17 (gcc-8 or higher) or LLVM Clang (clang-7 or higher)
+- GNU GCC with C++17 (gcc-8 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
 - HTSlib
 - boost
 - folly (optional)
 - Python 3 (for running integration tests)
 
-All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh)
+All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (requires no root)
 
 #### For compiling with GNU GCC:
 ```
 brew install gcc autoconf automake libtool cmake make htslib
-brew install --build-from-source boost
-(optional) brew install --build-from-source double-conversion gflags glog lz4 snappy zstd folly
-brew install gcc@8
+[[ "$OSTYPE" == "darwin"* ]] \
+    && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
+    && brew install --cc=gcc-7 boost folly \
+    && brew install gcc@9
+[[ "$OSTYPE" != "darwin"* ]] \
+    && brew install gcc@9 libomp \
+    && brew remove -f openssl@1.1 boost double-conversion gflags glog lz4 snappy zstd folly \
+    && brew install --cc=gcc-5 glog zstd \
+    && brew install --cc=gcc-9 openssl@1.1 boost folly
 ```
 Then set the environment variables accordingly:
 ```
 echo "\
 # Use gcc-8 with cmake
-export CC=\"\$(which gcc-8)\"
-export CXX=\"\$(which g++-8)\"
+export CC=\"\$(which gcc-9)\"
+export CXX=\"\$(which g++-9)\"
 " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
 ```
 
@@ -199,6 +205,29 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
                         -a <GRAPH_DIR>/annotation.column.annodbg \
                         --discovery-fraction 0.8 --labels-delimiter ", " \
                         query_seq.fa
+```
+
+### Align to graph
+```bash
+./metagraph align -v -i <GRAPH_DIR>/graph.dbg query_seq.fa
+```
+
+### Assemble sequences
+```bash
+./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
+                        -o assembled.fa \
+                        --unitigs
+```
+
+### Assemble differential sequences
+```bash
+./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
+                        --unitigs \
+                        -a <GRAPH_DIR>/annotation.column.annodbg \
+                        --label-mask-in LABEL_1 \
+                        --label-mask-in LABEL_2 \
+                        --label-mask-out LABEL_3 \
+                        -o diff_assembled.fa
 ```
 
 ### Get stats

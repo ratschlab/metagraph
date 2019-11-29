@@ -7,7 +7,7 @@
 
 #include "binary_matrix.hpp"
 #include "bit_vector.hpp"
-#include "utils.hpp"
+#include "range_partition.hpp"
 
 
 // Compress sparse binary matrix (binary relations)
@@ -17,6 +17,7 @@
 // Information and Computation 232 (2013): 19-37.
 class BRWT : public BinaryMatrix {
     friend class BRWTBuilder;
+    friend class BRWTBottomUpBuilder;
     friend class BRWTOptimizer;
 
     typedef uint32_t Child;
@@ -34,7 +35,8 @@ class BRWT : public BinaryMatrix {
     uint64_t num_rows() const { return nonzero_rows_.size(); }
 
     bool get(Row row, Column column) const;
-    std::vector<Column> get_row(Row row) const;
+    SetBitPositions get_row(Row row) const;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);
@@ -50,12 +52,14 @@ class BRWT : public BinaryMatrix {
     uint64_t total_column_size() const;
     uint64_t total_num_set_bits() const;
 
+    void print_tree_structure(std::ostream &os) const;
+
   private:
     // breadth-first traversal
     void BFT(std::function<void(const BRWT &node)> callback) const;
 
     // assigns columns to the child nodes
-    utils::RangePartition assignments_;
+    RangePartition assignments_;
     bit_vector_small nonzero_rows_;
     std::vector<std::unique_ptr<BinaryMatrix>> child_nodes_;
 };

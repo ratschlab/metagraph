@@ -7,7 +7,6 @@
 
 #include "annotate.hpp"
 #include "binary_matrix.hpp"
-#include "vector_row_binmat.hpp"
 
 
 namespace annotate {
@@ -27,23 +26,24 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     template <class A>
     friend std::unique_ptr<A> convert(const std::string&);
     template <class A, typename L>
-    friend void merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&,
+    friend void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, L>>>&&,
                       const std::vector<std::string>&,
                       const std::string&);
-    template <typename L>
-    friend void merge_rows(const std::vector<const LabelEncoder<L> *>&,
-                           std::function<const std::vector<uint64_t>(uint64_t)>,
-                           uint64_t,
-                           const std::string&);
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
+    using IterateRows = typename MultiLabelEncoded<uint64_t, Label>::IterateRows;
+    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
+    typedef std::function<void(Index, SetBitPositions&&)> CallRow;
+    RowCompressed(uint64_t num_rows,
+                  const std::vector<Label> &labels,
+                  std::function<void(CallRow)> call_rows);
+
     void set_labels(Index i, const VLabels &labels);
-    VLabels get_labels(Index i) const;
 
     void add_label(Index i, const Label &label);
     void add_labels(Index i, const VLabels &labels);
@@ -67,6 +67,10 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     std::string file_extension() const { return kExtension; }
 
+    static void write_rows(std::string filename,
+                           const LabelEncoder<Label> &label_encoder,
+                           const std::function<void(BinaryMatrix::RowCallback)> &call_rows);
+
   private:
     void reinitialize(uint64_t num_rows);
 
@@ -85,20 +89,19 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                               uint64_t *num_objects,
                               uint64_t *num_relations);
 
+    template <typename RowType = BinaryMatrix::SetBitPositions>
     class StreamRows {
       public:
         explicit StreamRows(std::string filename);
+
         // return null after all rows have been called
-        std::vector<VectorRowBinMat::Column>* next_row() { return sr_->next_row(); };
+        RowType* next_row() { return sr_->next_row(); }
+
       private:
-        std::unique_ptr<VectorRowBinMat::StreamRows> sr_;
+        std::unique_ptr<::StreamRows<RowType>> sr_;
     };
 
-    static void write_rows(std::string filename,
-                           const LabelEncoder<Label> &label_encoder,
-                           const std::function<void(BinaryMatrix::RowCallback&)> &call_rows);
-
-    std::vector<uint64_t> get_label_codes(Index i) const {
+    SetBitPositions get_label_codes(Index i) const {
         return matrix_->get_row(i);
     }
 

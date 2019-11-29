@@ -3,14 +3,15 @@
 
 #include <type_traits>
 
-#include "sequence_graph.hpp"
-#include "config.hpp"
-#include "wavelet_tree.hpp"
-#include "bit_vector.hpp"
-#include "kmer_extractor.hpp"
+#include "common/config.hpp"
+#include "graph/base/sequence_graph.hpp"
+#include "kmer/kmer_extractor.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
+#include "utils/bit_vectors/wavelet_tree.hpp"
 
 class BOSSConstructor;
 
+auto ALWAYS_FALSE = []() { return false; };
 
 /**
  * This class implements the BOSS table, a succinct representation
@@ -34,6 +35,9 @@ class BOSS {
     explicit BOSS(size_t k = 1);
     explicit BOSS(BOSSConstructor *builder);
     ~BOSS();
+
+    explicit BOSS(const BOSS &other) = delete;
+    bool operator=(const BOSS &other) = delete;
 
     /**
      * Check whether BOSS tables store the same data.
@@ -65,17 +69,20 @@ class BOSS {
     // Call npos if a k-mer can't be mapped to the graph edges
     void map_to_edges(const std::string &sequence,
                       const std::function<void(edge_index)> &callback,
-                      const std::function<bool()> &terminate = [](){ return false; }) const;
+                      const std::function<bool()> &terminate = ALWAYS_FALSE,
+                      const std::function<bool()> &skip = ALWAYS_FALSE) const;
 
     std::vector<edge_index> map_to_edges(const std::string &sequence) const;
 
-    // Check whether the graph contains a fraction of (k+1)-mers from the sequence
-    bool find(const std::string &sequence,
-              double kmer_discovery_fraction = 1) const;
+    // |seq_encoded| must have no sentinels (zeros)
+    void map_to_edges(const std::vector<TAlphabet> &seq_encoded,
+                      const std::function<void(edge_index)> &callback,
+                      const std::function<bool()> &terminate = ALWAYS_FALSE,
+                      const std::function<bool()> &skip = ALWAYS_FALSE) const;
 
-    bool find(const std::string &sequence,
-              double kmer_discovery_fraction,
-              size_t kmer_mapping_mode) const;
+    // |seq_encoded| must have no sentinels (zeros)
+    std::vector<edge_index>
+    map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
 
     template <class... T>
     using Call = typename std::function<void(T...)>;
@@ -89,28 +96,22 @@ class BOSS {
     // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;
 
-    void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;
-
-    // call paths (or simple paths if |split_to_contigs| is true) that cover
-    // exactly all edges in graph (or subgraph, if |subgraph_mask| is specified)
+    // call contigs (or unitigs if |unitigs| is true) that cover
+    // exactly all edges in graph (or subgraph, if |subgraph_mask| is passed)
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
-                    bool split_to_contigs = false,
-                    bitmap *subgraph_mask = NULL) const;
-
-    void call_sequences(Call<std::string&&> callback,
-                        bitmap *subgraph_mask = NULL) const;
+                    bool unitigs = false,
+                    bool kmers_in_single_form = false,
+                    const bitmap *subgraph_mask = NULL) const;
 
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
-                        bitmap *subgraph_mask = NULL) const;
-
-    void call_unitigs(Call<std::string&&> callback,
-                      size_t max_pruned_dead_end_size = 0,
-                      bitmap *subgraph_mask = NULL) const;
+                        bool kmers_in_single_form = false,
+                        const bitmap *subgraph_mask = NULL) const;
 
     void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                       size_t max_pruned_dead_end_size = 0,
-                      bitmap *subgraph_mask = NULL) const;
+                      bool kmers_in_single_form = false,
+                      const bitmap *subgraph_mask = NULL) const;
 
     // |edge| must be the first incoming edge
     void call_incoming_to_target(edge_index edge,
@@ -341,7 +342,7 @@ class BOSS {
 
     // Given the alphabet index return the corresponding symbol
     char decode(TAlphabet s) const;
-    std::string decode(const std::vector<TAlphabet> &sequence) const;
+    std::string decode(const std::vector<TAlphabet> &seq_encoded) const;
     // Given the alphabet character return its corresponding number
     TAlphabet encode(char s) const;
     std::vector<TAlphabet> encode(const std::string &sequence) const;
@@ -356,7 +357,8 @@ class BOSS {
     template <typename RandomAccessIt>
     std::tuple<edge_index, edge_index, RandomAccessIt>
     index_range(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
+        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
+                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
                       "Only encoded sequences can be queried");
 
         assert(end >= begin);
@@ -489,7 +491,8 @@ class BOSS {
      */
     template <typename RandomAccessIt>
     uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
+        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
+                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
                       "Only encoded sequences can be queried");
         assert(begin + k_ == end);
 

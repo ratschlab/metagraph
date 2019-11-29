@@ -33,7 +33,7 @@
 	url = https://github.com/greg7mdp/sparsepp.git
 [submodule "metagraph/external-libraries/tclap"]
 	path = metagraph/external-libraries/tclap
-	url = https://github.com/eile/tclap.git
+	url = https://github.com/mirror/tclap.git
 [submodule "metagraph/external-libraries/asio"]
 	path = metagraph/external-libraries/asio
 	url = https://github.com/chriskohlhoff/asio.git
@@ -49,3 +49,9 @@
 [submodule "metagraph/external-libraries/nvbio"]
 	path = metagraph/external-libraries/nvbio
 	url = https://github.com/NVlabs/nvbio
+[submodule "metagraph/external-libraries/fmt"]
+	path = metagraph/external-libraries/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "metagraph/external-libraries/rollinghashcpp"]
+	path = metagraph/external-libraries/rollinghashcpp
+	url = https://github.com/hmusta/rollinghashcpp

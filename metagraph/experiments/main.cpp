@@ -3,14 +3,27 @@
 #include <chrono>
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
+#include <ips4o.hpp>
+#include <libmaus2/util/NumberSerialisation.hpp>
+#include <boost/multiprecision/integer.hpp>
+#include <progress_bar.hpp>
 
 #include "method_constructors.hpp"
 #include "data_generation.hpp"
 #include "annotate_static.hpp"
 #include "annotate_column_compressed.hpp"
 #include "unix_tools.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
+#include "algorithms.hpp"
 #include "kmc_parser.hpp"
+#include "alphabets.hpp"
+#include "aligner_helper.hpp"
+#include "reverse_complement.hpp"
+#include "annotate_row_compressed.hpp"
+#include "static_annotators_def.hpp"
+#include "config.hpp"
+#include "serialization.hpp"
+#include "wavelet_tree.hpp"
 
 using namespace std::chrono_literals;
 
@@ -179,6 +192,81 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
                                  double *false_pos_ptr, double *false_neg_ptr);
 
 
+Config::AnnotationType parse_annotation_type(const std::string &filename) {
+    if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
+        return Config::AnnotationType::ColumnCompressed;
+
+    } else if (utils::ends_with(filename, annotate::kRowAnnotatorExtension)) {
+        return Config::AnnotationType::RowCompressed;
+
+    } else if (utils::ends_with(filename, annotate::kBRWTExtension)) {
+        return Config::AnnotationType::BRWT;
+
+    } else if (utils::ends_with(filename, annotate::kBinRelWT_sdslExtension)) {
+        return Config::AnnotationType::BinRelWT_sdsl;
+
+    } else if (utils::ends_with(filename, annotate::kBinRelWTExtension)) {
+        return Config::AnnotationType::BinRelWT;
+
+    } else if (utils::ends_with(filename, annotate::kRowPackedExtension)) {
+        return Config::AnnotationType::RowFlat;
+
+    } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
+        return Config::AnnotationType::RBFish;
+
+    } else {
+        std::cerr << "Error: unknown annotation format in "
+                  << filename << std::endl;
+        exit(1);
+    }
+}
+
+typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
+                                                 size_t cache_size = 0) {
+    std::unique_ptr<Annotator> annotation;
+
+    switch (parse_annotation_type(filename)) {
+        case Config::ColumnCompressed: {
+            annotation.reset(new annotate::ColumnCompressed<>(1));
+            break;
+        }
+        case Config::RowCompressed: {
+            annotation.reset(new annotate::RowCompressed<>(1));
+            break;
+        }
+        case Config::BRWT: {
+            annotation.reset(new annotate::BRWTCompressed<>(cache_size));
+            break;
+        }
+        case Config::BinRelWT_sdsl: {
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator(cache_size));
+            break;
+        }
+        case Config::BinRelWT: {
+            annotation.reset(new annotate::BinRelWTAnnotator(cache_size));
+            break;
+        }
+        case Config::RowFlat: {
+            annotation.reset(new annotate::RowFlatAnnotator(cache_size));
+            break;
+        }
+        case Config::RBFish: {
+            annotation.reset(new annotate::RainbowfishAnnotator(cache_size));
+            break;
+        }
+    }
+
+    if (annotation->load(filename))
+        return annotation;
+
+    std::cerr << "ERROR: can't load annotation "
+              << filename << std::endl;
+    exit(1);
+}
+
+
 int main(int argc, char *argv[]) {
     try {
         TCLAP::CmdLine cmd("Benchmarks and data generation for metagraph", ' ', "");
@@ -191,7 +279,10 @@ int main(int argc, char *argv[]) {
             "stats",
             "query",
             "slice",
-            "estimate_abundance_threshold"
+            "estimate_abundance_threshold",
+            "evaluate_alignment",
+            "query_annotation_rows",
+            "to_dna4"
         };
 
         ValuesConstraint<std::string> regime_constraint(regimes);
@@ -795,7 +886,347 @@ int main(int argc, char *argv[]) {
                     std::cerr << "Error: Can't parse file " << file << std::endl;
                 }
             }
+        } else if (regime == "evaluate_alignment") {
+            std::vector<std::string> align_regimes { "score_cigar", };
+            ValuesConstraint<std::string> align_regime_constraint(align_regimes);
+            UnlabeledValueArg<std::string> align_regime_arg(
+                "align_regime", "Align regime", true, "", &align_regime_constraint, cmd
+            );
+
+            std::vector<std::string> alphabet_types { "dna", "protein" };
+            ValuesConstraint<std::string> alphabet_constraint(alphabet_types);
+            UnlabeledValueArg<std::string> alphabet_arg(
+                "alphabet", "Alphabet", true, "", &alphabet_constraint, cmd
+            );
+
+            std::vector<std::string> modes { "unit", "non-unit" };
+            ValuesConstraint<std::string> mode_constraint(modes);
+            UnlabeledValueArg<std::string> mode_arg(
+                "matrix_type", "Score matrix type", true, "", &mode_constraint, cmd
+            );
+
+            UnlabeledValueArg<std::string> file_arg(
+                "input_file",
+                "Input file (one CIGAR, reference sequence, and alternative sequence per line)",
+                true,
+                "",
+                "string",
+                cmd
+            );
+
+            cmd.parse(std::min(argc, 6), argv);
+            std::string align_regime = align_regime_arg.getValue();
+            std::string cur_alphabet = alphabet_arg.getValue();
+            const char *alphabet = cur_alphabet == "dna"
+                ? alphabets::kAlphabetDNA
+                : alphabets::kAlphabetProtein;
+            const uint8_t *alphabet_encoding = cur_alphabet == "dna"
+                ? alphabets::kCharToDNA
+                : alphabets::kCharToProtein;
+            std::string mode = mode_arg.getValue();
+            std::string file = file_arg.getValue();
+            cmd.reset();
+
+            std::unique_ptr<DBGAlignerConfig> config;
+
+            if (mode != "unit" && alphabet_arg.getValue() == "protein") {
+                config.reset(new DBGAlignerConfig(
+                    DBGAlignerConfig::ScoreMatrix(DBGAlignerConfig::score_matrix_blosum62),
+                    -3,
+                    -1
+                ));
+            } else {
+                ValueArg<int> match_arg("",
+                                        "match",
+                                        "score for a single match",
+                                        false,
+                                        mode == "unit" ? 1 : 2,
+                                        "int",
+                                        cmd);
+
+                if (mode == "unit") {
+                    cmd.parse(argc, argv);
+                    config.reset(new DBGAlignerConfig(
+                        DBGAlignerConfig::unit_scoring_matrix(match_arg.getValue(),
+                                                              alphabet,
+                                                              alphabet_encoding),
+                        -1,
+                        -1
+                    ));
+                } else {
+                    ValueArg<int> gap_open_arg(
+                        "", "gap_open_penalty", "gap open penalty", false, 3, "int", cmd
+                    );
+                    ValueArg<int> gap_ext_arg(
+                        "", "gap_ext_penalty", "gap extension penalty", false, 1, "int", cmd
+                    );
+
+                    if (cur_alphabet == "dna") {
+                        ValueArg<int> mm_transition_arg(
+                            "", "transition_penalty", "transition penalty", false, 1, "int", cmd
+                        );
+                        ValueArg<int> mm_transversion_arg(
+                            "", "transversion_penalty", "transversion penalty", false, 2, "int", cmd
+                        );
+                        cmd.parse(argc, argv);
+
+                        config.reset(new DBGAlignerConfig(
+                            DBGAlignerConfig::dna_scoring_matrix(match_arg.getValue(),
+                                                                 -mm_transition_arg.getValue(),
+                                                                 -mm_transversion_arg.getValue()),
+                            -gap_open_arg.getValue(),
+                            -gap_ext_arg.getValue()
+                        ));
+                    } else {
+                        throw std::runtime_error("Not implemented for " + cur_alphabet);
+                    }
+                }
+            }
+
+            std::string cigar, strand, ref, alt;
+            std::ifstream fin(file);
+            while (fin >> strand >> cigar >> ref >> alt) {
+                if (strand == "-")
+                    reverse_complement(ref.begin(), ref.end());
+
+                Cigar cigar_ob(cigar);
+                if (!cigar_ob.is_valid(&*ref.begin(), &*ref.end(),
+                                       &*alt.begin(), &*alt.end())) {
+                    std::cerr << "ERROR: invalid CIGAR" << std::endl
+                              << cigar << std::endl
+                              << ref << std::endl
+                              << alt << std::endl;
+
+                    exit(1);
+                }
+
+                std::cout << config->score_cigar(&*ref.begin(), &*ref.end(),
+                                                 &*alt.begin(), &*alt.end(),
+                                                 cigar_ob) << std::endl;
+            }
+        } else if (regime == "query_annotation_rows") {
+            UnlabeledValueArg<std::string> annotation_arg("input_file", "Annotation", true, "", "string", cmd);
+            ValueArg<int> num_rows_arg("", "num_rows", "Rows to query", true, 0, "int", cmd);
+            ValueArg<int> cache_size_arg("", "cache_size", "Number of rows cached", false, 0, "int", cmd);
+            ValueArg<int> batch_size_arg("", "batch_size", "Number of rows in batch (task)", false, 100'000, "int", cmd);
+            ValueArg<int> num_threads_arg("", "num_threads", "Number threads", false, 1, "int", cmd);
+            cmd.parse(argc, argv);
+
+            size_t num_threads = num_threads_arg.getValue() > 0
+                                    ? num_threads_arg.getValue()
+                                    : 1;
+            const size_t batch_size = batch_size_arg.getValue();
+
+            Timer timer;
+
+            auto annotation = initialize_annotation(annotation_arg.getValue(),
+                                                    cache_size_arg.getValue());
+
+            std::cout << "Annotation loaded in " << timer.elapsed() << " sec" << std::endl;
+            timer.reset();
+
+            std::mt19937 gen;
+            gen.seed(17);
+
+            auto row_indexes = utils::sample_indexes(annotation->num_objects(),
+                                                     num_rows_arg.getValue(),
+                                                     gen);
+
+            std::vector<std::pair<uint64_t, uint64_t>> from_full_to_query;
+
+            for (uint64_t i = 0; i < row_indexes.size(); ++i) {
+                from_full_to_query.emplace_back(row_indexes[i], i);
+            }
+
+            ips4o::parallel::sort(from_full_to_query.begin(), from_full_to_query.end(),
+                [](const auto &first, const auto &second) { return first.first < second.first; },
+                num_threads
+            );
+
+            std::cout << "Indexes sampled in " << timer.elapsed() << " sec" << std::endl;
+            timer.reset();
+
+            // initialize fast query annotation
+            // copy annotations from the full graph to the query graph
+            auto row_annotation = std::make_unique<annotate::RowCompressed<>>(
+                num_rows_arg.getValue(),
+                annotation->get_label_encoder().get_labels(),
+                [&](annotate::RowCompressed<>::CallRow call_row) {
+
+                    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+                    for (uint64_t batch_begin = 0;
+                                        batch_begin < from_full_to_query.size();
+                                                        batch_begin += batch_size) {
+
+                        const uint64_t batch_end
+                            = std::min(batch_begin + batch_size_arg.getValue(),
+                                       static_cast<uint64_t>(from_full_to_query.size()));
+
+                        std::vector<uint64_t> row_indexes;
+                        row_indexes.reserve(batch_end - batch_begin);
+
+                        for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                            assert(from_full_to_query[i].first < annotation->num_objects());
+
+                            row_indexes.push_back(from_full_to_query[i].first);
+                        }
+
+                        auto rows = annotation->get_label_codes(row_indexes);
+
+                        assert(rows.size() == batch_end - batch_begin);
+
+                        for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                            call_row(from_full_to_query[i].second,
+                                     std::move(rows[i - batch_begin]));
+                        }
+                    }
+                }
+            );
+
+            std::cout << "Submatrix constructed in " << timer.elapsed() << " sec" << std::endl;
+            timer.reset();
+
+            std::cout << "Num rows in target annotation: " << row_annotation->num_objects() << std::endl;
+            std::cout << "Num columns in target annotation: " << row_annotation->num_labels() << std::endl;
+
+        } else if (regime == "to_dna4") {
+            // This converts BOSS table constructed for alphabet DNA5 {A,C,G,T,N}
+            // to DNA4 {A,C,G,T}. Only tables without any characters N are supported.
+
+            // alphabet: {$,A,C,G,T}, without N
+            const size_t alph_size = 5;
+
+            UnlabeledValueArg<std::string> in_graph_arg("input_file", "Graph in", true, "", "string", cmd);
+            UnlabeledValueArg<std::string> out_graph_arg("output_file", "Graph out", true, "", "string", cmd);
+            cmd.parse(argc, argv);
+
+            std::ifstream instream(in_graph_arg.getValue(), std::ios::binary);
+            if (!instream.good()) {
+                std::cerr << "ERROR: can't read from file "
+                          << in_graph_arg.getValue() << std::endl;
+                return 1;
+            }
+
+            // load F, k, and state
+            auto F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
+            auto k_ = load_number(instream);
+            auto state = static_cast<Config::StateType>(load_number(instream));
+
+            // old alphabet: {$,A,C,G,T,N}
+            if (F_.size() != alph_size + 1) {
+                std::cerr << "ERROR: conversion to DNA4 alphabet is implemented"
+                             " only for graphs over the DNA5 alphabet" << std::endl;
+                return 1;
+            }
+
+            F_.pop_back();
+
+            size_t bits_per_char_W = boost::multiprecision::msb(alph_size - 1) + 2;
+
+            wavelet_tree *W_;
+            bit_vector *last_;
+
+            // load W and last arrays
+            switch (state) {
+                case Config::DYN:
+                    W_ = new wavelet_tree_dyn(bits_per_char_W);
+                    last_ = new bit_vector_dyn();
+                    break;
+                case Config::STAT:
+                    W_ = new wavelet_tree_stat(bits_per_char_W);
+                    last_ = new bit_vector_stat();
+                    break;
+                case Config::FAST:
+                    W_ = new wavelet_tree_fast(bits_per_char_W);
+                    last_ = new bit_vector_stat();
+                    break;
+                case Config::SMALL:
+                    W_ = new wavelet_tree_small(bits_per_char_W);
+                    last_ = new bit_vector_small();
+                    break;
+                default:
+                    std::cerr << "ERROR: unknown state" << std::endl;
+                    return 1;
+            }
+            if (!W_->load(instream)) {
+                std::cerr << "ERROR: failed to load W vector" << std::endl;
+                return 1;
+            }
+
+            if (!last_->load(instream)) {
+                std::cerr << "ERROR: failed to load L vector" << std::endl;
+                return 1;
+            }
+
+            bool canonical_mode_;
+
+            try {
+                canonical_mode_ = load_number(instream);
+            } catch (...) {
+                canonical_mode_ = false;
+            }
+
+            instream.close();
+
+            sdsl::int_vector<> W = W_->to_vector();
+            delete W_;
+
+            ProgressBar progress_bar(W.size(), "Converting W[]", std::cerr);
+            for (uint64_t i = 0; i < W.size(); ++i) {
+                auto value = W[i];
+
+                if (value == alph_size || value == 2 * alph_size + 1) {
+                    std::cerr << "ERROR: detected 'N' character in W[" << i << "]" << std::endl;
+                    return 1;
+                }
+
+                if (value > alph_size)
+                    W[i]--;
+
+                ++progress_bar;
+            }
+            W.width(bits_per_char_W);
+
+            switch (state) {
+                case Config::DYN:
+                    W_ = new wavelet_tree_dyn(bits_per_char_W, std::move(W));
+                    break;
+                case Config::STAT:
+                    W_ = new wavelet_tree_stat(bits_per_char_W, std::move(W));
+                    break;
+                case Config::FAST:
+                    W_ = new wavelet_tree_fast(bits_per_char_W, std::move(W));
+                    break;
+                case Config::SMALL:
+                    W_ = new wavelet_tree_small(bits_per_char_W, std::move(W));
+                    break;
+                default:
+                    std::cerr << "ERROR: unknown state" << std::endl;
+                    return 1;
+            }
+
+            std::ofstream outstream(out_graph_arg.getValue(), std::ios::binary);
+            if (!outstream.good()) {
+                std::cerr << "ERROR: can't write to file "
+                          << out_graph_arg.getValue() << std::endl;
+                return 1;
+            }
+
+            // write F values, k, and state
+            libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
+            serialize_number(outstream, k_);
+            serialize_number(outstream, state);
+            // write Wavelet Tree
+            W_->serialize(outstream);
+            // write last array
+            last_->serialize(outstream);
+
+            serialize_number(outstream, canonical_mode_);
+
+            std::cout << "Converted graph to DNA4 alphabet and serialized to "
+                      << out_graph_arg.getValue() << std::endl;
         }
+
     } catch (const TCLAP::ArgException &e) {
         std::cerr << "ERROR: " << e.error()
                   << " for arg " << e.argId() << std::endl;

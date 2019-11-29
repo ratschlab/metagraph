@@ -3,7 +3,7 @@
 #include <thread>
 #include <mutex>
 
-#include "utils.hpp"
+#include "utils/algorithms.hpp"
 
 using TAlphabet = BOSS::TAlphabet;
 

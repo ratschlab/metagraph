@@ -1,11 +1,17 @@
 #include "kmer_collector.hpp"
 
 #include <type_traits>
+
 #include <ips4o.hpp>
 
+#include "utils/template_utils.hpp"
+#include "common/sorted_set.hpp"
+#include "common/sorted_multiset.hpp"
+#include "common/sorted_set_disk.hpp"
+#include "common/unix_tools.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "kmer.hpp"
-#include "unix_tools.hpp"
-#include "reverse_complement.hpp"
+#include "kmer_extractor.hpp"
 
 const size_t kMaxKmersChunkSize = 30'000'000;
 
@@ -18,7 +24,8 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
-    static_assert(utils::is_instance<Container, SortedSet>{});
+    static_assert(utils::is_instance<Container, SortedSet>{}
+                    || utils::is_instance<Container, SortedSetDisk>{});
     static_assert(std::is_same_v<KMER, typename Container::key_type>);
 
     Vector<KMER> temp_storage;
@@ -115,16 +122,83 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
 }
 
 
+// removes redundant dummy BOSS k-mers from a sorted list
+template <class Array>
+void cleanup_boss_kmers(Array *kmers) {
+    using KMER = std::remove_reference_t<decltype(utils::get_first(kmers->at(0)))>;
+
+    assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst()));
+    assert(std::unique(kmers->begin(), kmers->end(), utils::EqualFirst()) == kmers->end());
+
+    if (kmers->size() < 2)
+        return;
+
+    // last k-mer is never redundant. Start with the next one.
+    uint64_t last = kmers->size() - 1;
+
+    typename KMER::CharType edge_label, node_last_char;
+
+    std::vector<uint64_t> last_kmer(1llu << KMER::kBitsPerChar, kmers->size());
+
+    last_kmer[utils::get_first(kmers->at(last))[0]] = last;
+
+    for (int64_t i = last - 1; i >= 0; --i) {
+        const KMER &kmer = utils::get_first(kmers->at(i));
+        node_last_char = kmer[1];
+        edge_label = kmer[0];
+
+        // assert((edge_label || node_last_char)
+        //             && "dummy k-mer cannot be both source and sink dummy");
+
+        if (!edge_label) {
+            // sink dummy k-mer
+
+            // skip if redundant
+            if (node_last_char && KMER::compare_suffix(kmer, utils::get_first(kmers->at(last)), 0))
+                continue;
+
+        } else if (!node_last_char) {
+            // source dummy k-mer
+
+            // skip if redundant
+            if (last_kmer[edge_label] < kmers->size()
+                    && KMER::compare_suffix(kmer, utils::get_first(kmers->at(last_kmer[edge_label])), 1))
+                continue;
+        }
+
+        // the k-mer is either not dummy, or not redundant -> keep the k-mer
+        kmers->at(--last) = kmers->at(i);
+        last_kmer[edge_label] = last;
+    }
+
+    kmers->erase(kmers->begin(), kmers->begin() + last);
+}
+
+
+template <class KmerExtractor, class StorageType>
+std::function<void(StorageType*)> get_cleanup(bool clean_dummy_boss_kmers) {
+    if constexpr(std::is_same<KmerExtractor, KmerExtractorBOSS>::value) {
+        if (clean_dummy_boss_kmers) {
+            return cleanup_boss_kmers<StorageType>;
+        } else {
+            return [](StorageType *) {};
+        }
+    } else {
+        std::ignore = clean_dummy_boss_kmers;
+        return [](StorageType *) {};
+    }
+}
+
 template <typename KMER, class KmerExtractor, class Container>
-KmerStorage<KMER, KmerExtractor, Container>
-::KmerStorage(size_t k,
+KmerCollector<KMER, KmerExtractor, Container>
+::KmerCollector(size_t k,
               bool both_strands_mode,
               Sequence&& filter_suffix_encoded,
               size_t num_threads,
               double memory_preallocated,
               bool verbose)
       : k_(k),
-        kmers_(num_threads, verbose),
+        kmers_(get_cleanup<Extractor, typename Container::storage_type>(filter_suffix_encoded.empty())),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
@@ -145,7 +219,7 @@ KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
+void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequence(std::string&& sequence, uint64_t count) {
     if (sequence.size() < k_)
         return;
@@ -165,9 +239,10 @@ void KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
+void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
-    if constexpr(utils::is_instance<Container, SortedSet>{}) {
+    if constexpr(utils::is_instance<Container, SortedSet>{}
+                  || utils::is_instance<Container, SortedSetDisk>{}) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>, generate_sequences,
                              k_, both_strands_mode_, &kmers_,
                              filter_suffix_encoded_,
@@ -185,9 +260,10 @@ void KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
+void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-    if constexpr(utils::is_instance<Container, SortedSet>{}) {
+    if constexpr(utils::is_instance<Container, SortedSet>{}
+                  || utils::is_instance<Container, SortedSetDisk>{}) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallString callback) {
                                  generate_sequences([&](const std::string &seq, uint64_t) {
@@ -206,13 +282,13 @@ void KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
+void KmerCollector<KMER, KmerExtractor, Container>
 ::insert_dummy(const KMER &dummy_kmer) {
     kmers_.insert(&dummy_kmer, &dummy_kmer + 1);
 };
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>::release_task_to_pool() {
+void KmerCollector<KMER, KmerExtractor, Container>::release_task_to_pool() {
     auto *buffered_sequences = new std::vector<std::pair<std::string, uint64_t>>();
     buffered_sequences->swap(buffered_sequences_);
 
@@ -227,45 +303,36 @@ void KmerStorage<KMER, KmerExtractor, Container>::release_task_to_pool() {
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>::join() {
+void KmerCollector<KMER, KmerExtractor, Container>::join() {
     release_task_to_pool();
     thread_pool_.join();
 }
 
 
-#define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER, CONTAINER, CLEANUP) \
-    template class KmerStorage<KMER, \
+#define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER, CONTAINER) \
+    template class KmerCollector<KMER, \
                                KMER_EXTRACTOR, \
-                               SortedSet<KMER, CONTAINER<KMER>, CLEANUP>>; \
-    template class KmerStorage<KMER, \
+                               SortedSet<KMER, CONTAINER<KMER>>>; \
+    template class KmerCollector<KMER, \
                                KMER_EXTRACTOR, \
-                               SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>, CLEANUP>>; \
-    template class KmerStorage<KMER, \
+                               SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>>>; \
+    template class KmerCollector<KMER, \
                                KMER_EXTRACTOR, \
-                               SortedMultiset<KMER, uint32_t, CONTAINER<std::pair<KMER, uint32_t>>, CLEANUP>>;
+                               SortedMultiset<KMER, uint32_t, CONTAINER<std::pair<KMER, uint32_t>>>>;
 
 
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, Vector, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, Vector, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, Vector, utils::NoCleanup)
+INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, Vector)
+INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, Vector)
+INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, Vector)
 
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, Vector, utils::DummyKmersCleaner)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, Vector, utils::DummyKmersCleaner)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, Vector, utils::DummyKmersCleaner)
+template class KmerCollector<KmerExtractorBOSS::Kmer64, KmerExtractorBOSS,
+    SortedSetDisk<KmerExtractorBOSS::Kmer64>>;
+template class KmerCollector<KmerExtractorBOSS::Kmer128, KmerExtractorBOSS,
+    SortedSetDisk<KmerExtractorBOSS::Kmer128>>;
+template class KmerCollector<KmerExtractorBOSS::Kmer256, KmerExtractorBOSS,
+    SortedSetDisk<KmerExtractorBOSS::Kmer256>>;
 
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, Vector, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, Vector, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, Vector, utils::NoCleanup)
 
-
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, utils::DequeStorage, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, utils::DequeStorage, utils::NoCleanup)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, utils::DequeStorage, utils::NoCleanup)
-
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, utils::DequeStorage, utils::DummyKmersCleaner)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, utils::DequeStorage, utils::DummyKmersCleaner)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, utils::DequeStorage, utils::DummyKmersCleaner)
-
-// INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, utils::DequeStorage, utils::NoCleanup)
-// INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, utils::DequeStorage, utils::NoCleanup)
-// INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, utils::DequeStorage, utils::NoCleanup)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, Vector)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, Vector)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, Vector)

@@ -3,9 +3,9 @@
 #include <unordered_set>
 #include <string_view>
 
+#include "algorithms.hpp"
 #include "dbg_succinct.hpp"
 #include "bounded_priority_queue.hpp"
-#include "utils.hpp"
 
 
 template <typename NodeType>
@@ -68,33 +68,32 @@ bool early_cutoff(const DeBruijnGraph &graph,
 
 
 template <typename NodeType>
-std::vector<Alignment<NodeType>> exact_seeder(const DeBruijnGraph &graph,
-                                              const DBGAlignerConfig &config,
-                                              const char *seed_begin,
-                                              const char *seed_end,
-                                              size_t clipping,
-                                              bool orientation) {
+std::vector<Alignment<NodeType>> ExactSeeder<NodeType>
+::operator()(const char *seed_begin,
+             const char *seed_end,
+             size_t clipping,
+             bool orientation) const {
     assert(seed_end >= seed_begin);
 
-    if (early_cutoff(graph, config, seed_begin, seed_end)
-            || config.max_seed_length < graph.get_k()
-            || static_cast<size_t>(seed_end - seed_begin) < graph.get_k())
+    if (early_cutoff(graph_, config_, seed_begin, seed_end)
+            || config_.max_seed_length < graph_.get_k()
+            || static_cast<size_t>(seed_end - seed_begin) < graph_.get_k())
         return {};
 
-    auto exact = graph.kmer_to_node(std::string(seed_begin,
-                                                seed_begin + graph.get_k()));
+    auto exact = graph_.kmer_to_node(std::string(seed_begin,
+                                                 seed_begin + graph_.get_k()));
 
     if (exact == DeBruijnGraph::npos)
         return {};
 
-    auto match_score = config.match_score(seed_begin,
-                                          seed_begin + graph.get_k());
+    auto match_score = config_.match_score(seed_begin,
+                                           seed_begin + graph_.get_k());
 
-    if (match_score <= config.min_cell_score)
+    if (match_score <= config_.min_cell_score)
         return {};
 
     return { Alignment<NodeType>(seed_begin,
-                                 seed_begin + graph.get_k(),
+                                 seed_begin + graph_.get_k(),
                                  { exact },
                                  match_score,
                                  clipping,
@@ -102,34 +101,32 @@ std::vector<Alignment<NodeType>> exact_seeder(const DeBruijnGraph &graph,
 }
 
 template <typename NodeType>
-std::vector<Alignment<NodeType>> suffix_seeder(const DeBruijnGraph &graph,
-                                               const DBGAlignerConfig &config,
-                                               const char *seed_begin,
-                                               const char *seed_end,
-                                               size_t clipping,
-                                               bool orientation) {
+std::vector<Alignment<NodeType>> SuffixSeeder<NodeType>
+::operator()(const char *seed_begin,
+             const char *seed_end,
+             size_t clipping,
+             bool orientation) const {
+    if (!dynamic_cast<const DBGSuccinct*>(&get_graph()))
+        throw std::runtime_error("Only implemented for DBGSuccinct");
+
+    const auto &graph = get_graph();
+    const auto &config = get_config();
+
     assert(seed_end >= seed_begin);
 
     if (early_cutoff(graph, config, seed_begin, seed_end))
         return {};
 
-    auto seeds = exact_seeder<NodeType>(graph,
-                                        config,
-                                        seed_begin,
-                                        seed_end,
-                                        clipping,
-                                        orientation);
+    auto seeds = exact_seeder_(seed_begin, seed_end, clipping, orientation);
 
     if (seeds.size())
         return seeds;
 
-    const auto* dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
-    if (!dbg_succ)
-        return {};
-
     auto max_seed_length = std::min(static_cast<size_t>(seed_end - seed_begin),
                                     std::min(config.max_seed_length, graph.get_k()));
-    dbg_succ->call_nodes_with_suffix(
+
+    const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(graph);
+    dbg_succ.call_nodes_with_suffix(
         seed_begin,
         seed_begin + max_seed_length,
         [&](auto node, uint64_t seed_length) {
@@ -138,7 +135,7 @@ std::vector<Alignment<NodeType>> suffix_seeder(const DeBruijnGraph &graph,
             auto match_score = config.match_score(seed_begin,
                                                   seed_begin + seed_length);
 
-            if (match_score > config.min_cell_score)
+            if (match_score > get_config().min_cell_score)
                 seeds.emplace_back(seed_begin,
                                    seed_begin + seed_length,
                                    std::vector<NodeType>{ node },
@@ -151,48 +148,39 @@ std::vector<Alignment<NodeType>> suffix_seeder(const DeBruijnGraph &graph,
         config.max_num_seeds_per_locus
     );
 
+    assert(seeds.size() <= config.max_num_seeds_per_locus);
+
     return seeds;
 }
 
-
 template <typename NodeType, class Compare>
-void default_extender(const DeBruijnGraph &graph,
-                      const Alignment<NodeType> &path,
-                      std::vector<Alignment<NodeType>>* next_paths,
-                      const char* sequence_end,
-                      const DBGAlignerConfig &config,
-                      bool orientation,
-                      typename Alignment<NodeType>::score_t min_path_score) {
-    typedef Alignment<NodeType> DBGAlignment;
-    typedef typename DBGAlignment::node_index node_index;
-    typedef typename DBGAlignment::score_t score_t;
-    typedef typename DBGAlignment::DPTable DPTable;
-    typedef typename DBGAlignment::Step Step;
-    typedef typename DBGAlignment::Column Column;
-
+std::vector<typename DefaultColumnExtender<NodeType, Compare>::DBGAlignment>
+DefaultColumnExtender<NodeType, Compare>
+::operator()(const DBGAlignment &path,
+             const char* sequence_end,
+             bool orientation,
+             score_t min_path_score) const {
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query_begin());
+    assert(sequence_end >= path.get_query_end());
 
-    const auto align_start = &*path.get_query_end();
+    const auto *align_start = path.get_query_end();
     size_t size = sequence_end - align_start + 1;
 
-    // stop path early if it can't be better than the min_path_score
-    if (path.get_score() + config.match_score(align_start,
-                                              sequence_end) < min_path_score)
-        return;
-
+    // compute perfect match scores for all suffixes
     // used for branch and bound checks below
     std::vector<score_t> partial_sum(size);
-    std::string_view extension(align_start - 1, sequence_end - align_start + 1);
-    auto jt = extension.rbegin();
-    partial_sum.back() = config.get_row(*jt)[*jt++];
-    for (auto it = partial_sum.rbegin() + 1; it != partial_sum.rend(); ++it) {
-        assert(jt != extension.rend());
-        *it = *(it - 1) + config.get_row(*jt)[*jt++];
-    }
+    std::transform(align_start - 1, sequence_end,
+                   partial_sum.begin(),
+                   [&](char c) { return config_.get_row(c)[c]; });
 
-    assert(partial_sum.front() == config.match_score(align_start - 1, sequence_end));
-    assert(partial_sum.back() == config.get_row(extension.back())[extension.back()]);
+    std::partial_sum(partial_sum.rbegin(), partial_sum.rend(), partial_sum.rbegin());
+    assert(config_.match_score(align_start - 1, sequence_end) == partial_sum.front());
+    assert(config_.get_row(*(sequence_end - 1))[*(sequence_end - 1)] == partial_sum.back());
+
+    // stop path early if it can't be better than the min_path_score
+    if (path.get_score() + partial_sum.at(1) < min_path_score)
+        return {};
 
     // keep track of which columns to use next
     struct PriorityFunction {
@@ -206,152 +194,205 @@ void default_extender(const DeBruijnGraph &graph,
 
     BoundedPriorityQueue<typename DPTable::value_type*,
                          std::vector<typename DPTable::value_type*>,
-                         PriorityFunction> columns_to_update(
-        config.queue_size
-    );
+                         PriorityFunction> columns_to_update(config_.queue_size);
 
     auto dp_table = initialize_dp_table(path.back(),
                                         *(align_start - 1),
                                         path.get_score(),
-                                        config.min_cell_score,
+                                        config_.min_cell_score,
                                         size,
-                                        config.gap_opening_penalty,
-                                        config.gap_extension_penalty);
-    assert(dp_table.size());
-
-    // keep track of node and position in column to start backtracking
-    // store raw pointer since they are not invalidated by emplace
-    auto start_node = &*dp_table.begin();
+                                        config_.gap_opening_penalty,
+                                        config_.gap_extension_penalty);
+    assert(dp_table.size() == 1);
+    assert(dp_table.find(path.back()) != dp_table.end());
 
     // for storage of intermediate values
     std::vector<typename DPTable::value_type*> out_columns;
     std::vector<node_index> in_nodes;
-    std::vector<std::pair<Step, score_t>> updates(size);
-    std::vector<int8_t> char_scores(size);
-    std::vector<Cigar::Operator> match_ops(size);
-    std::vector<int8_t> gap_scores(size);
+    std::vector<std::pair<Step, score_t>> updates;
+    std::vector<int8_t> char_scores;
+    std::vector<Cigar::Operator> match_ops;
+    std::vector<int8_t> gap_scores;
 
     // dynamic programming
-    assert(dp_table.find(path.back()) != dp_table.end());
-    columns_to_update.emplace(&*dp_table.begin());
+    // keep track of node and position in column to start backtracking
+    // store raw pointer since they are not invalidated by emplace
+    auto *start_node = &*dp_table.begin();
+    columns_to_update.emplace(start_node);
     while (columns_to_update.size()) {
-        auto cur_node = columns_to_update.pop_top()->first;
+        const auto cur_col = columns_to_update.pop_top();
+        auto cur_node = cur_col->first;
         // get next columns
         out_columns.clear();
-        graph.call_outgoing_kmers(
+        graph_.call_outgoing_kmers(
             cur_node,
             [&](auto next_node, char c) {
                 auto emplace = dp_table.emplace(
                     next_node,
-                    Column { std::vector<score_t>(size, config.min_cell_score),
+                    Column { std::vector<score_t>(size, config_.min_cell_score),
                              std::vector<Step>(size),
                              c,
-                             0 }
+                             cur_col->second.best_pos + 1 != size
+                                ? cur_col->second.best_pos + 1
+                                : cur_col->second.best_pos }
                 );
 
                 // if the emplace didn't happen, correct the stored character
                 if (!emplace.second)
                     emplace.first->second.last_char = c;
 
+                assert(emplace.first != dp_table.end());
                 out_columns.emplace_back(&*emplace.first);
             }
         );
 
         // update columns
-        for (auto &iter : out_columns) {
+        for (auto iter : out_columns) {
             auto next_node = iter->first;
             auto& next_column = iter->second;
 
-            // for now, vertical banding is not done
-            assert(next_column.scores.size() == size);
-            assert(updates.size() == size);
-            std::transform(next_column.steps.begin(),
-                           next_column.steps.end(),
-                           next_column.scores.begin(),
-                           updates.begin(),
-                           [](const Step &step, score_t score) {
-                               return std::make_pair(step, score);
-                           });
-
             // speed hack for linear portions of the graph
-            if (LIKELY(graph.indegree(next_node) == 1)) {
+            if (LIKELY(graph_.indegree(next_node) == 1)) {
                 in_nodes.assign(1, cur_node);
             } else {
                 in_nodes.clear();
-                graph.adjacent_incoming_nodes(next_node,
-                                              [&](auto i) { in_nodes.push_back(i); });
+                graph_.adjacent_incoming_nodes(next_node,
+                                               [&](auto i) { in_nodes.push_back(i); });
+            }
+
+            size_t overall_begin = size;
+            size_t overall_end = 0;
+
+            // find incoming nodes to check for alignment extension
+            // set boundaries for vertical band
+            for (const auto &prev_node : in_nodes) {
+                const auto& best_pos = dp_table.emplace(
+                    prev_node,
+                    Column { std::vector<score_t>(size, config_.min_cell_score),
+                             std::vector<Step>(size),
+                             '\0',
+                             next_column.best_pos ? next_column.best_pos - 1 : 0 }
+                ).first->second.best_pos;
+
+                if (overall_begin)
+                    overall_begin = std::min(
+                        overall_begin,
+                        best_pos >= config_.bandwidth ? best_pos - config_.bandwidth : 0
+                    );
+
+                if (overall_end < size)
+                    overall_end = std::max(
+                        overall_end,
+                        config_.bandwidth <= size - best_pos
+                            ? best_pos + config_.bandwidth
+                            : size
+                    );
+            }
+
+            if (overall_begin)
+                overall_begin = std::min(
+                    overall_begin,
+                    next_column.best_pos >= config_.bandwidth
+                        ? next_column.best_pos - config_.bandwidth
+                        : 0
+                );
+
+            if (overall_end < size)
+                overall_end = std::max(
+                    overall_end,
+                    config_.bandwidth <= size - next_column.best_pos
+                        ? next_column.best_pos + config_.bandwidth
+                        : size
+                );
+
+            if (overall_begin >= overall_end)
+                return {};
+
+            assert(overall_begin <= next_column.best_pos);
+            assert(overall_end > next_column.best_pos);
+
+            updates.resize(overall_end - overall_begin);
+            for (auto &u : updates) {
+                u.first.prev_node = DeBruijnGraph::npos;
+                u.second = config_.min_cell_score;
             }
 
             // match and deletion scores
             for (const auto &prev_node : in_nodes) {
                 // the value of the node last character stored here is a
                 // placeholder which is later corrected by call_outgoing_kmers above
-                auto& incoming = dp_table.emplace(
-                    prev_node,
-                    Column { std::vector<score_t>(size, config.min_cell_score),
-                             std::vector<Step>(size),
-                             '\0',
-                             0 }
-                ).first->second;
+                const auto& incoming = dp_table[prev_node];
+
+                size_t begin = incoming.best_pos >= config_.bandwidth
+                    ? incoming.best_pos - config_.bandwidth : 0;
+                size_t end = config_.bandwidth <= size - incoming.best_pos
+                    ? incoming.best_pos + config_.bandwidth : size;
 
                 // match
-                std::transform(align_start,
-                               align_start + size - 1,
-                               std::next(char_scores.begin()),
-                               [row = config.get_row(next_column.last_char)](char c) {
-                                   return row[c];
-                               });
+                assert(end);
 
-                std::transform(align_start,
-                               align_start + size - 1,
-                               std::next(match_ops.begin()),
-                               [op_row = Cigar::get_op_row(next_column.last_char)](char c) {
-                                   return op_row[c];
-                               });
+                char_scores.resize(end - begin);
+                const auto &row = config_.get_row(next_column.last_char);
+                std::transform(align_start + begin,
+                               align_start + end - 1,
+                               char_scores.begin() + 1,
+                               [&row](char c) { return row[c]; });
 
-                for (size_t i = 1; i < size; ++i) {
+                match_ops.resize(end - begin);
+                const auto &op_row = Cigar::get_op_row(next_column.last_char);
+                std::transform(align_start + begin,
+                               align_start + end - 1,
+                               match_ops.begin() + 1,
+                               [&op_row](char c) { return op_row[c]; });
+
+                for (size_t i = begin + 1; i < end; ++i) {
                     // prevent underflow if min_cell_score == MIN_INT
-                    if (char_scores[i] < 0
-                            && incoming.scores[i - 1] == config.min_cell_score)
+                    if (char_scores[i - begin] < 0
+                            && incoming.scores[i - 1] == config_.min_cell_score)
                         continue;
 
-                    if (incoming.scores[i - 1] + char_scores[i] > std::get<1>(updates[i]))
-                        updates[i] = std::make_pair(
-                            Step { match_ops[i], prev_node },
-                            incoming.scores[i - 1] + char_scores[i]
+                    if (incoming.scores[i - 1] + char_scores[i - begin]
+                            > std::get<1>(updates[i - overall_begin]))
+                        updates[i - overall_begin] = std::make_pair(
+                            Step { match_ops[i - begin], prev_node },
+                            incoming.scores[i - 1] + char_scores[i - begin]
                         );
                 }
 
 
                 // delete
+                gap_scores.resize(end - begin);
                 std::transform(
-                    incoming.steps.begin(),
-                    incoming.steps.end(),
+                    incoming.steps.begin() + begin,
+                    incoming.steps.begin() + end,
                     gap_scores.begin(),
-                    [open = config.gap_opening_penalty,
-                     ext = config.gap_extension_penalty](const auto &cigar_tuple) {
+                    [this](const auto &cigar_tuple) {
                         return cigar_tuple.cigar_op == Cigar::Operator::DELETION
-                            ? ext : open;
+                            ? config_.gap_extension_penalty
+                            : config_.gap_opening_penalty;
                     }
                 );
 
-                for (size_t i = 0; i < size; ++i) {
+                for (size_t i = begin; i < end; ++i) {
                     // disabled check for deletion after insertion
                     // if (incoming.steps[i].cigar_op == Cigar::Operator::INSERTION)
                     //     continue;
-                    if (incoming.scores[i] == config.min_cell_score)
+                    if (incoming.scores[i] == config_.min_cell_score)
                         continue;
 
-                    if (incoming.scores[i] + gap_scores[i] > std::get<1>(updates[i]))
-                        updates[i] = std::make_pair(
-                            Step { Cigar::Operator::DELETION, prev_node },
-                            incoming.scores[i] + gap_scores[i]
-                        );
+                    if (incoming.scores[i] + gap_scores[i - begin]
+                            > std::get<1>(updates[i - overall_begin])) {
+                        updates[i - overall_begin].second
+                            = incoming.scores[i] + gap_scores[i - begin];
+                        updates[i - overall_begin].first.cigar_op
+                            = Cigar::Operator::DELETION;
+                        updates[i - overall_begin].first.prev_node = prev_node;
+                    }
                 }
             }
 
             // compute insert scores
-            for (size_t i = 1; i < size; ++i) {
+            for (size_t i = 1; i < overall_end - overall_begin; ++i) {
                 auto prev_op = std::get<0>(updates[i - 1]).cigar_op;
                 // disabled check for insertion after deletion
                 // if (prev_op == Cigar::Operator::DELETION)
@@ -359,25 +400,27 @@ void default_extender(const DeBruijnGraph &graph,
 
                 score_t insert_score = std::get<1>(updates[i - 1])
                     + (prev_op == Cigar::Operator::INSERTION
-                        ? config.gap_extension_penalty
-                        : config.gap_opening_penalty);
+                        ? config_.gap_extension_penalty
+                        : config_.gap_opening_penalty);
 
-                if (insert_score > std::get<1>(updates[i]))
-                    updates[i] = std::make_pair(
-                        Step { Cigar::Operator::INSERTION, next_node },
-                        insert_score
-                    );
+                if (insert_score > std::get<1>(updates[i])) {
+                    updates[i].second = insert_score;
+                    updates[i].first.cigar_op = Cigar::Operator::INSERTION;
+                    updates[i].first.prev_node = next_node;
+                }
             }
 
             // update scores
             bool updated = false;
             auto max_pos = next_column.scores.begin() + next_column.best_pos;
-            for (size_t i = 0; i < size; ++i) {
-                if (std::get<1>(updates[i]) <= next_column.scores[i])
+            for (size_t i = overall_begin; i < overall_end; ++i) {
+                if (std::get<1>(updates[i - overall_begin]) <= next_column.scores[i])
                     continue;
 
-                std::tie(next_column.steps[i], next_column.scores[i]) = updates[i];
+                std::tie(next_column.steps[i],
+                         next_column.scores[i]) = updates[i - overall_begin];
                 updated = true;
+
                 if (next_column.scores[i] > *max_pos)
                     max_pos = next_column.scores.begin() + i;
             }
@@ -387,56 +430,30 @@ void default_extender(const DeBruijnGraph &graph,
                 next_column.best_pos = max_pos - next_column.scores.begin();
 
                 if (*max_pos > start_node->second.best_score())
-                    start_node = &*iter;
+                    start_node = iter;
 
                 // branch and bound
+                // TODO: this cuts off too early (before the scores have converged)
+                //       so the code below has to be used to compute correct scores
+                auto best_score = std::max(start_node->second.best_score(),
+                                           min_path_score);
 
-                // starting from the position of the best score, check if each
-                // position can be extended to a better alignment than the best
-                // alignment
-                auto is_not_extendable =
-                    [best_score = std::max(start_node->second.best_score(),
-                                           min_path_score)](auto a, auto b) {
-                        return a + b < best_score;
-                    };
-
-                auto start_it = partial_sum.begin() + next_column.best_pos + 1;
-                auto next_column_start_it = next_column.scores.begin()
-                    + next_column.best_pos + 1;
-
-                // the first value of partial_sum includes the last character
-                // of the seed, so it should be excluded from this check
-                auto first_half_end_it = next_column.best_pos >= config.bandwidth
-                    ? std::make_reverse_iterator(start_it - config.bandwidth)
-                    : partial_sum.rend() - 1;
-
-                assert(first_half_end_it != partial_sum.rend());
-
-                auto second_half_end_it = size - next_column.best_pos > config.bandwidth
-                    ? start_it + config.bandwidth
-                    : partial_sum.end();
-
-
-                if (!std::equal(std::make_reverse_iterator(start_it),
-                                first_half_end_it,
-                                std::make_reverse_iterator(next_column_start_it),
-                                is_not_extendable)
-                        || !std::equal(start_it,
-                                       second_half_end_it,
-                                       next_column_start_it,
-                                       is_not_extendable))
-                    columns_to_update.emplace(&*iter);
+                if (!std::equal(partial_sum.begin() + overall_begin,
+                                partial_sum.begin() + overall_end,
+                                next_column.scores.begin() + overall_begin,
+                                [&](auto a, auto b) { return a + b < best_score; }))
+                    columns_to_update.emplace(iter);
             }
         }
     }
 
-    assert(start_node->second.best_score() > config.min_cell_score);
+    assert(start_node->second.best_score() > config_.min_cell_score);
 
     //no good path found
     if (UNLIKELY(start_node->first == DeBruijnGraph::npos
             || (start_node->first == path.back() && !start_node->second.best_pos)
             || start_node->second.best_score() < min_path_score))
-        return;
+        return {};
 
     // check to make sure that start_node stores the best starting point
     assert(start_node->second.best_score()
@@ -449,22 +466,30 @@ void default_extender(const DeBruijnGraph &graph,
     assert(start_node->second.best_step().cigar_op == Cigar::Operator::MATCH);
 
     // avoid sorting column iterators if we're only interested in the top path
-    if (config.num_alternative_paths == 1) {
-        next_paths->emplace_back(dp_table,
-                                 start_node,
-                                 start_node->second.best_pos,
-                                 start_node->second.best_score() - path.get_score(),
-                                 align_start,
-                                 orientation);
+    std::vector<DBGAlignment> next_paths;
+    if (config_.num_alternative_paths == 1) {
+        next_paths.emplace_back(dp_table,
+                                start_node,
+                                start_node->second.best_pos,
+                                start_node->second.best_score() - path.get_score(),
+                                align_start,
+                                orientation,
+                                graph_.get_k() - 1);
 
-        if (next_paths->back().empty() && !next_paths->back().get_query_begin()) {
-            next_paths->pop_back();
+        if (next_paths.back().empty() && !next_paths.back().get_query_begin()) {
+            next_paths.pop_back();
         } else {
-            assert(next_paths->back().get_score() + path.get_score()
+            assert(next_paths.back().get_score() + path.get_score()
                 == start_node->second.best_score());
+
+            // TODO: remove this when the branch and bound is set to only consider
+            //       converged scores
+            next_paths.back().recompute_score(config_);
+
+            assert(next_paths.back().is_valid(graph_, &config_));
         }
 
-        return;
+        return next_paths;
     }
 
     // get alternative alignments
@@ -481,7 +506,7 @@ void default_extender(const DeBruijnGraph &graph,
     }
 
     if (starts.empty())
-        return;
+        return {};
 
     std::sort(starts.begin(), starts.end(),
               [](const auto &a, const auto &b) {
@@ -490,150 +515,100 @@ void default_extender(const DeBruijnGraph &graph,
 
     assert(start_node == starts.front());
     for (const auto &column_it : starts) {
-        if (next_paths->size() >= config.num_alternative_paths)
+        if (next_paths.size() >= config_.num_alternative_paths)
             break;
 
         // ignore if the current point is a subalignment of one already visited
         if (visited_nodes.find(column_it->first) != visited_nodes.end())
             continue;
 
-        next_paths->emplace_back(dp_table,
-                                 column_it,
-                                 column_it->second.best_pos,
-                                 column_it->second.best_score() - path.get_score(),
-                                 align_start,
-                                 orientation);
+        next_paths.emplace_back(dp_table,
+                                column_it,
+                                column_it->second.best_pos,
+                                column_it->second.best_score() - path.get_score(),
+                                align_start,
+                                orientation,
+                                graph_.get_k() - 1);
 
-        if (next_paths->back().empty() && !next_paths->back().get_query_begin()) {
-            next_paths->pop_back();
+        if (next_paths.back().empty() && !next_paths.back().get_query_begin()) {
+            next_paths.pop_back();
         } else {
-            visited_nodes.insert(next_paths->back().begin(), next_paths->back().end());
+            visited_nodes.insert(next_paths.back().begin(), next_paths.back().end());
+
+            // TODO: remove this when the branch and bound is set to only consider
+            //       converged scores
+            next_paths.back().recompute_score(config_);
+
+            assert(next_paths.back().is_valid(graph_, &config_));
         }
     }
+
+    return next_paths;
 }
 
 template <typename NodeType>
-Seeder<NodeType>
-build_mem_seeder(const std::vector<NodeType> &nodes,
-                 std::function<bool(NodeType,
-                                    const DeBruijnGraph &)> stop_matching,
-                 const DeBruijnGraph &graph) {
-    typedef Alignment<NodeType> DBGAlignment;
+std::vector<Alignment<NodeType>> MEMSeeder<NodeType>
+::operator()(const char *seed_begin,
+             const char *seed_end,
+             size_t clipping,
+             bool orientation) const {
+    if (query_nodes_.empty())
+        throw std::runtime_error("MEMSeeder uninitialized");
 
-    auto stop_matching_mapped = [stop_matching, &graph](auto node) {
-        return node == DeBruijnGraph::npos || stop_matching(node, graph);
-    };
+    if (orientation != orientation_)
+        throw std::runtime_error("wrong orientation passed");
 
-    return [nodes,
-            stop_matching_mapped](const DeBruijnGraph &graph,
-                                  const DBGAlignerConfig &config,
-                                  const char* seed_begin,
-                                  const char* seed_end,
-                                  size_t clipping,
-                                  bool orientation) -> std::vector<DBGAlignment> {
-        assert(seed_end >= seed_begin);
+    assert(seed_end >= seed_begin);
 
-        if (seed_begin == seed_end)
-            return {};
+    if (seed_begin == seed_end)
+        return {};
 
-        assert(nodes.begin() + clipping < nodes.end());
-        assert(static_cast<size_t>(seed_end - seed_begin) + clipping
-                   == nodes.size() + graph.get_k() - 1);
+    assert(static_cast<size_t>(seed_end - seed_begin) + clipping
+               == query_nodes_.size() + graph_.get_k() - 1);
 
-        auto start = std::find_if(
-            nodes.begin() + clipping,
-            nodes.end(),
-            [](auto node) { return node != DeBruijnGraph::npos; }
-        );
-
-        if (start != nodes.begin() + clipping)
-            return {};
-
-        assert(*start != DeBruijnGraph::npos);
-        auto next = std::find_if(start, nodes.end(), stop_matching_mapped);
-
-        if (UNLIKELY(next != nodes.end() && *next != DeBruijnGraph::npos))
-            next++;
-
-        assert(next != start);
-
-        auto end_it = next == nodes.end()
-            ? seed_end
-            : seed_begin + (next - nodes.begin() - clipping) + graph.get_k() - 1;
-
-        assert(end_it >= seed_begin);
-        assert(end_it <= seed_end);
-        assert(static_cast<size_t>(end_it - seed_begin) >= graph.get_k());
-
-        auto match_score = config.match_score(seed_begin, end_it);
-
-        if (match_score <= config.min_cell_score)
-            return {};
-
-        return { DBGAlignment(seed_begin,
-                              end_it,
-                              std::vector<NodeType>(start, next),
-                              config.match_score(seed_begin, end_it),
-                              clipping,
-                              orientation) };
-    };
-}
-
-
-template <typename NodeType>
-Seeder<NodeType> build_unimem_seeder(const std::vector<NodeType> &nodes,
-                                     const DeBruijnGraph &graph) {
-    return build_mem_seeder<NodeType>(
-        nodes,
-        [](auto node, const DeBruijnGraph &graph) {
-            return graph.outdegree(node) > 1 || graph.indegree(node) > 1;
-        },
-        graph
+    auto start = std::find_if(
+        query_nodes_.begin() + clipping,
+        query_nodes_.end(),
+        [](auto node) { return node != DeBruijnGraph::npos; }
     );
+
+    if (start != query_nodes_.begin() + clipping)
+        return {};
+
+    assert(*start != DeBruijnGraph::npos);
+    auto next = std::find_if(start,
+                             query_nodes_.end(),
+                             [&](auto i) { return i == DeBruijnGraph::npos
+                                               || (*is_mem_terminus_)[i]; });
+
+    if (UNLIKELY(next != query_nodes_.end() && *next != DeBruijnGraph::npos))
+        next++;
+
+    assert(next != start);
+
+    auto end_it = next == query_nodes_.end()
+        ? seed_end
+        : seed_begin + (next - query_nodes_.begin() - clipping) + graph_.get_k() - 1;
+
+    assert(end_it >= seed_begin);
+    assert(end_it <= seed_end);
+    assert(static_cast<size_t>(end_it - seed_begin) >= graph_.get_k());
+
+    auto match_score = config_.match_score(seed_begin, end_it);
+
+    if (match_score <= config_.min_cell_score)
+        return {};
+
+    return { Alignment<NodeType>(seed_begin,
+                                 end_it,
+                                 std::vector<NodeType>(start, next),
+                                 config_.match_score(seed_begin, end_it),
+                                 clipping,
+                                 orientation) };
 }
 
-
-template std::vector<Alignment<DeBruijnGraph::node_index>>
-exact_seeder<DeBruijnGraph::node_index>(
-    const DeBruijnGraph&,
-    const DBGAlignerConfig&,
-    const char*,
-    const char*,
-    size_t,
-    bool
-);
-
-template std::vector<Alignment<DeBruijnGraph::node_index>>
-suffix_seeder<DeBruijnGraph::node_index>(
-    const DeBruijnGraph&,
-    const DBGAlignerConfig&,
-    const char*,
-    const char*,
-    size_t,
-    bool
-);
-
-template void
-default_extender<DeBruijnGraph::node_index>(
-    const DeBruijnGraph&,
-    const Alignment<DeBruijnGraph::node_index>&,
-    std::vector<Alignment<DeBruijnGraph::node_index>>*,
-    const char*,
-    const DBGAlignerConfig&,
-    bool,
-    typename Alignment<DeBruijnGraph::node_index>::score_t
-);
-
-template Seeder<DeBruijnGraph::node_index>
-build_mem_seeder(
-    const std::vector<DeBruijnGraph::node_index> &,
-    std::function<bool(DeBruijnGraph::node_index,
-                       const DeBruijnGraph &)>,
-    const DeBruijnGraph &
-);
-
-template Seeder<DeBruijnGraph::node_index>
-build_unimem_seeder(
-    const std::vector<DeBruijnGraph::node_index> &,
-    const DeBruijnGraph &
-);
+template class ExactSeeder<>;
+template class SuffixSeeder<>;
+template class MEMSeeder<>;
+template class UniMEMSeeder<>;
+template class DefaultColumnExtender<>;

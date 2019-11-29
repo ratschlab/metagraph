@@ -2,6 +2,7 @@
 
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
 #include "threading.hpp"

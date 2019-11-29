@@ -1,18 +1,14 @@
 #ifndef __KMER_COLLECTOR_HPP__
 #define __KMER_COLLECTOR_HPP__
 
-#include "kmer_extractor.hpp"
-#include "kmer_collector.hpp"
-#include "threading.hpp"
-#include "sorted_set.hpp"
-#include "sorted_multiset.hpp"
+#include "common/threading.hpp"
 
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
 
 
 template <typename KMER, class KmerExtractor, class Container>
-class KmerStorage {
+class KmerCollector {
     using Extractor = KmerExtractor;
     using Sequence = std::vector<typename Extractor::TAlphabet>;
     Extractor kmer_extractor_;
@@ -25,7 +21,7 @@ class KmerStorage {
     using Value = typename Container::value_type;
     using Data = typename Container::storage_type;
 
-    KmerStorage(size_t k,
+    KmerCollector(size_t k,
                 bool both_strands_mode = false,
                 Sequence&& filter_suffix_encoded = {},
                 size_t num_threads = 1,
@@ -71,24 +67,5 @@ class KmerStorage {
 
     bool both_strands_mode_;
 };
-
-
-template <typename KMER,
-          class KmerExtractor,
-          class Container = Vector<KMER>,
-          class Cleaner = utils::NoCleanup>
-using KmerCollector = KmerStorage<KMER,
-                                  KmerExtractor,
-                                  SortedSet<KMER, Container, Cleaner>>;
-
-template <typename KMER,
-          class KmerExtractor,
-          typename KmerCount = uint8_t,
-          class Container = Vector<std::pair<KMER, KmerCount>>,
-          class Cleaner = utils::NoCleanup>
-using KmerCounter = KmerStorage<KMER,
-                                KmerExtractor,
-                                SortedMultiset<KMER, KmerCount, Container, Cleaner>>;
-
 
 #endif // __KMER_COLLECTOR_HPP__

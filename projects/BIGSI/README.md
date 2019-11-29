@@ -128,6 +128,26 @@ for i in {1..20}; do
 done
 ```
 
+### Rename columns
+```bash
+./metagraph stats --print-col-names -a ~/metagenome/data/BIGSI/subsets/annotation_subset_15000.column.annodbg > ~/metagenome/data/BIGSI/subsets/rename_columns.txt
+tail -n +3 ~/metagenome/data/BIGSI/subsets/rename_columns.txt > ~/metagenome/data/BIGSI/subsets/rename_columns_.txt
+for x in $(cat ~/metagenome/data/BIGSI/subsets/rename_columns_.txt); do echo "$x $(basename ${x%.unitigs.fasta.gz})"; done > ~/metagenome/data/BIGSI/subsets/rename_columns.txt
+rm ~/metagenome/data/BIGSI/subsets/rename_columns_.txt
+
+for anno_type in {"column","flat","brwt","rbfish","row"}; do
+    extension=".${anno_type}.annodbg";
+    for annotation in $(find ~/metagenome/data/BIGSI/subsets/ -name "*${extension}"); do
+        old="${annotation%$extension}.path_labels${extension}";
+        mv $annotation $old;
+        ./metagraph transform_anno \
+            --rename-cols ~/metagenome/data/BIGSI/subsets/rename_columns.txt \
+            -o "${annotation%${extension}}" \
+            $old;
+    done
+done
+```
+
 ## Transform annotation
 ```bash
 for i in {1..20}; do
@@ -239,24 +259,29 @@ done
 ```bash
 for i in {1..20}; do
     N=$((750 * i));
-    mkdir -r "/cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/data/subset_${N}"
+    mkdir -p "/cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/data/subset_${N}"
     for f in $(cat subsets/files_${N}.txt); do
         filename="$(basename $f)";
         ln -s "$f" "/cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/data/subset_${N}/${filename}";
     done
 done
 
-
+num_hashes=3;
+fpr=10;
+# num_hashes=4;
+# fpr=5;
+# num_hashes=7;
+# fpr=1;
 for i in {1..20}; do
     N=$((750 * i));
     bsub -J "cobs_${N}" \
-         -oo ~/metagenome/data/BIGSI/subsets/cobs/build_cobs_compact_h7_fpr1_${N}.lsf \
+         -oo ~/metagenome/data/BIGSI/subsets/cobs/build_cobs_compact_h${num_hashes}_fpr${fpr}_${N}.lsf \
          -W 24:00 \
          -n 10 -R "rusage[mem=11000] span[hosts=1]" \
         "/usr/bin/time -v ~/stuff/cobs/build/src/cobs compact-construct \
-                -k 31 -c -f 0.01 -T 10 --num-hashes 7 \
+                -k 31 -c -f $(echo ${fpr}*0.01 | bc) -T 10 --num-hashes ${num_hashes} \
                 /cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/data/subset_${N}/ \
-                /cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/cobs_index_h7_fpr1_${N}.cobs_compact \
+                /cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/cobs_index_h${num_hashes}_fpr${fpr}_${N}.cobs_compact \
                 2>&1"; \
 done
 ```
