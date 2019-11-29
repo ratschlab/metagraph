@@ -9,6 +9,8 @@
 template <typename T, class Storage = std::vector<T>>
 class RingBuffer {
   public:
+    using const_iterator = const T*;
+
     explicit RingBuffer(size_t size)
           : ring_buffer_(size ? (1llu << (sdsl::bits::hi(size - 1) + 1)) : 0),
             size_(size),
@@ -50,6 +52,10 @@ class RingBuffer {
     T& front() { return ring_buffer_[get_front_index()]; }
 
     size_t capacity() const { return size_; }
+
+    const T& operator[](size_t i) const {
+        return ring_buffer_[i&buffer_it_mask_];
+    };
 
   private:
     size_t get_front_index() const {

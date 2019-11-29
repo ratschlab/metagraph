@@ -417,8 +417,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     }
 
   private:
-    size_type idx_ = 0;
     ChunkedWaitQueue *parent_;
+    size_type idx_ = 0;
     std::stack<size_type> saved_indexes_;
 
   private:

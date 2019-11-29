@@ -298,8 +298,8 @@ uint64_t BOSS::rank_W(uint64_t i, TAlphabet c) const {
  */
 uint64_t BOSS::select_W(uint64_t i, TAlphabet c) const {
     assert(i + (c == 0) <= W_->rank(c, W_->size() - 1));
-    return i == 0 ? 0 : W_->select(c, i + (c == 0));
 
+    return i == 0 ? 0 : W_->select(c, i + (c == 0));
 }
 
 // get prev character without optimizations (via rank/select calls)
@@ -986,7 +986,7 @@ void BOSS::print_internal_representation(std::ostream &os) const {
 }
 
 void BOSS::print(std::ostream &os) const {
-    assert(is_valid());
+    //assert(is_valid());
     auto vertex_header = std::string("Vertex");
     vertex_header.resize(k_, ' ');
 

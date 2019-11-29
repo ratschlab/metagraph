@@ -365,10 +365,10 @@ TEST(BOSS, MarkDummySourceEdgesTwoPathsParallel) {
 }
 
 TEST(BOSS, RemoveDummyEdgesForClearGraph) {
-    for (size_t k = 1; k < 10; ++k) {
+    for (size_t k = 1; k < 10; ++k) { // TODO: undo
+        std::cout << "Checkin k=" << k << std::endl;
         std::unique_ptr<BOSS> first_ptr;
         std::unique_ptr<BOSS> second_ptr;
-
         {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
@@ -389,10 +389,10 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
             second_ptr.reset(new BOSS(&constructor));
         }
 
-        auto &first = *first_ptr;
-        auto &second = *second_ptr;
+        BOSS &first = *first_ptr;
+        BOSS &second = *second_ptr;
 
-        ASSERT_TRUE(first.equals_internally(second)) << first;
+        ASSERT_TRUE(first.equals_internally(second)) << first << second;
 
         sdsl::bit_vector source_dummy_edges(second.num_edges() + 1, false);
         auto to_remove = second.erase_redundant_dummy_edges(&source_dummy_edges);

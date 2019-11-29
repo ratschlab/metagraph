@@ -37,6 +37,9 @@
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
 
+using namespace mg::bitmap_graph;
+using namespace mg::succinct;
+
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;

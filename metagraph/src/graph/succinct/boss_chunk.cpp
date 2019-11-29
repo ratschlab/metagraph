@@ -1,8 +1,10 @@
 #include "boss_chunk.hpp"
 
 #include <boost/multiprecision/integer.hpp>
+#include <kmer/kmer_boss.hpp>
 
 #include "common/chunked_wait_queue.hpp"
+#include "common/ring_buffer.hpp"
 #include "utils/algorithms.hpp"
 #include "utils/serialization.hpp"
 #include "utils/template_utils.hpp"
@@ -96,10 +98,10 @@ struct Init {
                 (*last)[curpos] = 0;
             }
             // set W
-            if (it != begin) {
+            if (it != begin && curW > 0) {
                 for (Iterator prev = it - 1;
                      KMER::compare_suffix(kmer, get_kmer(*prev), 1); --prev) {
-                    if (curW > 0 && get_kmer(*prev)[0] == curW) {
+                    if (get_kmer(*prev)[0] == curW) {
                         curW += alph_size;
                         break;
                     }
@@ -138,6 +140,78 @@ struct Init {
 // specialization of initialize_chunk for ChunkedWaitQueue
 template <typename T, typename TAlphabet>
 struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
+    using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
+
+    /**
+     * Iterate backwards and check if there is another incoming edge (an edge with
+     * identical prefix and label as the current one).
+     * If such an edge is found, then we either:
+     * 1. remove it, if its a dummy edge (because it's redundant), otherwise
+     * 2. mark the edge label with '-' (not the first incoming edge with that label)
+     */
+    template <typename KMER>
+    static void set_w_and_remove_redundant_source_edges(uint64_t alph_size,
+                                                        size_t k, /* remove*/
+                                                        const KMER &kmer,
+                                                        const RingBuffer<uint8_t> &was_skipped,
+                                                        TAlphabet lastF,
+                                                        vector<TAlphabet> *W,
+                                                        vector<bool> *last,
+                                                        vector<uint64_t> *F,
+                                                        sdsl::int_vector<> *weights,
+                                                        size_t &curpos,
+                                                        Iterator &it,
+                                                        TAlphabet &curW) {
+        if (it.at_begin() || curW == 0) {
+            return;
+        }
+        it.push_pos();
+        --it;
+        std::cout << "\n\nIs " << kmer.to_string(k + 1, "$ACGT") << " redundant?\n";
+        for (uint32_t i = 1,j=1; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it,++j) {
+            const KMER &prev_kmer = get_kmer(*it);
+            if (was_skipped[curpos - j]) {
+                std::cout << "Skipped " << prev_kmer.to_string(k + 1, "$ACGT") << std::endl;
+                continue; // skipped redundant sink k-mer, don't count it
+            }
+            std::cout << "Checking kmer " << prev_kmer.to_string(k + 1, "$ACGT") << std::endl;
+            if (prev_kmer[0] == curW) {
+                if (!prev_kmer[1]) { // redundant dummy source k-mer, remove
+                    std::cout << prev_kmer.to_string(k + 1, "$ACGT") << " is redundant! "
+                              << std::endl;
+                    // erase from W, last, F, weights
+                        W->erase(W->end() - i);
+                        if ((*last)[curpos-i] == 1 && curpos-i>0) {
+                            (*last)[curpos-i-1] = 1;
+                        }
+                        last->erase(last->end() - i - 1);
+                        if (weights) {
+                            for (uint32_t j = i; j > 0; j--) {
+                                weights[weights->size() - j]
+                                        = weights[weights->size() - j + 1];
+                            }
+                            weights->resize(weights->size() - 1);
+                        }
+                    for (uint32_t j = lastF; j > 0 && F->at(j) >= curpos - i; j--) {
+                        F->at(j)--;
+                    }
+                    curpos--;
+                } else { // not the first incoming edge to the node, mark with -
+                    curW += alph_size;
+                }
+                break;
+            }
+
+            if (it.at_begin())
+                break;
+            i++;
+        }
+        it.pop_pos();
+
+        assert(curW < (1llu << (alph_size + 1)));
+    }
+
+
     static void initialize_chunk(uint64_t alph_size,
                                  common::ChunkedWaitQueue<T> &container,
                                  size_t k,
@@ -145,13 +219,11 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                                  std::vector<bool> *last,
                                  std::vector<uint64_t> *F,
                                  sdsl::int_vector<> *weights = nullptr) {
-        using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
         container.set_out_file(""); // we don't need an output
         Iterator &begin = container.begin();
         Iterator &end = container.end();
 
         using KMER = std::remove_reference_t<decltype(get_kmer(*begin))>;
-        using Iterator = typename common::ChunkedWaitQueue<T>::Iterator;
 
         static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
 
@@ -180,6 +252,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
         size_t curpos = 1;
         TAlphabet lastF = 0;
+        RingBuffer<uint8_t> was_skipped(alph_size * alph_size);
         for (Iterator &it = begin; it != end; ++it) {
             const KMER &kmer = get_kmer(*it);
             TAlphabet curW = kmer[0];
@@ -187,12 +260,13 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
             assert(curW < alph_size);
 
-            // check redundancy and set last
+            // check dummy sink (not source) edge redundancy and set last
             ++it;
             if (it != end && KMER::compare_suffix(kmer, get_kmer(*it))) {
                 // skip redundant dummy sink edges
                 if (curW == 0 && curF > 0) {
                     --it;
+                    was_skipped.push_back(1);
                     continue;
                 }
 
@@ -200,22 +274,12 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             } else {
                 last->push_back(1);
             }
+            was_skipped.push_back(0);
             --it;
-            // set W
-            if (!it.at_begin()) {
-                it.push_pos();
-                --it;
-                for (;KMER::compare_suffix(kmer, get_kmer(*it), 1); --it) {
-                    if (curW > 0 && get_kmer(*it)[0] == curW) {
-                        curW += alph_size;
-                        break;
-                    }
-                    if (it.at_begin())
-                        break;
-                }
-                it.pop_pos();
-            }
-            assert(curW < (1llu << (alph_size + 1)));
+
+            set_w_and_remove_redundant_source_edges<KMER>(alph_size, k, kmer, was_skipped,
+                                                          lastF, W, last, F, weights,
+                                                          curpos, it, curW);
             W->push_back(curW);
 
             while (curF > lastF && lastF + 1 < static_cast<TAlphabet>(alph_size)) {
@@ -227,11 +291,13 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                     weights->resize(weights->capacity() * 1.5);
                 }
                 // set weights for non-dummy k-mers
-                if (weights && (*it).second && kmer[0] && kmer[1]) {
-                    (*weights)[curpos]
-                            = std::min(static_cast<uint64_t>((*it).second), max_count);
-                } else { // dummy k-mers have a weight of 0
-                    (*weights)[curpos] = 0;
+                if (weights) {
+                    if ((*it).second && kmer[0] && kmer[1]) {
+                        (*weights)[curpos]
+                                = std::min(static_cast<uint64_t>((*it).second), max_count);
+                    } else { // dummy k-mers have a weight of 0
+                        (*weights)[curpos] = 0;
+                    }
                 }
             }
 

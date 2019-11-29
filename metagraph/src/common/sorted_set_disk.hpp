@@ -54,14 +54,15 @@ class SortedSetDisk {
     /**
      * Constructs a SortedSetDisk instance and initializes its buffer to the value
      * specified in CONTAINER_SIZE_BYTES.
-     * @param _ unused cleanup, only present for compatibility with SortedSet's interface
+     * @param cleanup function to run each time a chunk is written to disk; typically
+     * performs cleanup operations, such as removing redundant dummy source k-mers
      * @param num_threads the number of threads to use by the sorting algorithm
      * @param verbose true if verbose logging is desired
      * @param container_size the size of the in-memory container that is written
      * to disk when full
      */
     SortedSetDisk(
-            std::function<void(storage_type *)> = [](storage_type *) {},
+            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
             size_t num_threads = 1,
             bool verbose = false,
             size_t container_size = CONTAINER_SIZE_BYTES,
@@ -69,7 +70,8 @@ class SortedSetDisk {
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
         : num_threads_(num_threads),
           verbose_(verbose),
-          merge_queue_(merge_queue_size, num_last_elements_cached) {
+          merge_queue_(merge_queue_size, num_last_elements_cached),
+          cleanup_(cleanup) {
         try {
             try_reserve(container_size);
         } catch (const std::bad_alloc &exception) {
@@ -170,9 +172,10 @@ class SortedSetDisk {
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
 
+        // cleanup_(vector); // typically removes source dummy k-mers
     }
 
-    void reserve(size_t size) {
+    void reserve(size_t) {
     }
 
     size_t capacity() {
@@ -313,6 +316,8 @@ class SortedSetDisk {
     std::future<void> write_to_disk_future_;
 
     ChunkedWaitQueue<T> merge_queue_;
+
+    std::function<void(storage_type *)> cleanup_;
 };
 
 } // namespace common

@@ -13,6 +13,7 @@
 
 namespace mg {
 namespace kmer {
+using namespace mg;
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 
@@ -207,7 +208,10 @@ KmerCollector<KMER, KmerExtractor, Container>::KmerCollector(size_t k,
       filter_suffix_encoded_(std::move(filter_suffix_encoded)),
       both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
-
+    if constexpr (utils::is_instance<Container, common::SortedSetDisk> {}) {
+        assert(filter_suffix_encoded_.empty()
+               && "SortedSetDisk does not support chunking");
+    }
     kmers_.reserve(memory_preallocated / sizeof(typename Container::value_type));
     if (verbose_) {
         std::cout << "Preallocated "
