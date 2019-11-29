@@ -33,6 +33,7 @@
 #include "aligner_methods.hpp"
 #include "server.hpp"
 #include "node_weights.hpp"
+#include "column_analysis.hpp"
 #include "masked_graph.hpp"
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
@@ -2106,6 +2107,12 @@ int main(int argc, const char *argv[]) {
             std::cout << "Graph loaded in "
                       << timer.elapsed() << "sec, current mem usage: "
                       << (get_curr_RSS() >> 20) << " MiB" << std::endl;
+
+            if (config->column_analysis) {
+                auto column_analysis_ext = std::make_shared<ColumnAnalysis>();
+                graph->add_extension(column_analysis_ext);
+                column_analysis_ext->load(config->infbase_annotators);
+            }
 
             std::unique_ptr<IDBGAligner> aligner;
             // TODO: make aligner work with batch querying

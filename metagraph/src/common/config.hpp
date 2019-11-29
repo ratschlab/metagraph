@@ -48,6 +48,7 @@ class Config {
     bool align_sequences = false;
     bool filter_by_kmer = false;
     bool output_json = false;
+    bool column_analysis = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
