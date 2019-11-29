@@ -11,7 +11,7 @@
 #include "utils/vectors.hpp"
 
 
-template <typename Label>
+template <typename Index, typename Label>
 class ColumnAnalysis;
 
 namespace annotate {
@@ -30,7 +30,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     template <class A, typename L, class P>
     friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t, size_t);
 
-    friend class ColumnAnalysis<Label>;
+    template <typename I, typename L>
+    friend bool ColumnAnalysis<I, L>::load(const std::string&);
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
