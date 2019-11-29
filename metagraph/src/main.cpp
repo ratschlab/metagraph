@@ -2109,10 +2109,10 @@ int main(int argc, const char *argv[]) {
                       << (get_curr_RSS() >> 20) << " MiB" << std::endl;
 
             if (config->column_analysis) {
-                graph->add_extension(std::make_shared<ColumnAnalysis<>>());
-                auto column_analysis_ext = graph->get_extension<ColumnAnalysis<>>();
+                anno_graph->add_extension(std::make_shared<ColumnAnalysis<>>());
+                auto column_analysis_ext = anno_graph->get_extension<ColumnAnalysis<>>();
                 column_analysis_ext->load(config->infbase_annotators);
-                assert(column_analysis_ext->is_compatible(*graph));
+                assert(column_analysis_ext->is_compatible(*anno_graph));
             }
 
             std::unique_ptr<IDBGAligner> aligner;

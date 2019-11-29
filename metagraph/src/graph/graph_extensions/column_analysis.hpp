@@ -9,7 +9,7 @@
 
 
 template <typename Index = uint64_t, typename Label = std::string>
-class ColumnAnalysis : public SequenceGraph::GraphExtension {
+class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
   public:
 
     ColumnAnalysis() {}
@@ -37,21 +37,17 @@ class ColumnAnalysis : public SequenceGraph::GraphExtension {
         std::ignore = filename_base;
     };
 
-    bool is_compatible(const SequenceGraph &graph, bool verbose = true) const {
+    bool is_compatible(const AnnotatedDBG &anno_graph, bool verbose = true) const {
         std::ignore = verbose;
 
-        if (auto anno_graph = dynamic_cast<const AnnotatedDBG*>(&graph)) {
-            for (auto &&label_encoder : label_encoders_) {
-                for (const Label &label : label_encoder->get_labels()) {
-                    if (!anno_graph->label_exists(label))
-                        return false;
-                }
+        for (auto &&label_encoder : label_encoders_) {
+            for (const Label &label : label_encoder->get_labels()) {
+                if (!anno_graph.label_exists(label))
+                    return false;
             }
-
-            return true;
-        } else {
-            throw std::runtime_error("must be annotated graph");
         }
+
+        return true;
     };
 
   private:

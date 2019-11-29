@@ -17,19 +17,6 @@ static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
 
 
-/*************** SequenceGraph ***************/
-
-void SequenceGraph::add_extension(std::shared_ptr<GraphExtension> extension) {
-    assert(extension.get());
-    extensions_.push_back(extension);
-}
-
-void SequenceGraph::serialize_extensions(const std::string &filename) const {
-    for (auto extension : extensions_) {
-        extension->serialize(utils::remove_suffix(filename, file_extension()) + file_extension());
-    }
-}
-
 /*************** DeBruijnGraph ***************/
 
 node_index DeBruijnGraph::kmer_to_node(const char *begin) const {

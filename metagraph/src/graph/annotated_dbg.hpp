@@ -8,8 +8,18 @@
 #include "threading.hpp"
 
 
+template <class T>
+class ExtendableAnnotatedGraph : public utils::Extendable<T> {
+  public:
+    class AnnotatedGraphExtension : public utils::Extendable<T>::Extension {};
+
+    std::string file_extension() const {
+        return this->extended_->get_graph().file_extension();
+    };
+};
+
 // TODO: rename to AnnotatedSequenceGraph
-class AnnotatedDBG {
+class AnnotatedDBG : public ExtendableAnnotatedGraph<AnnotatedDBG> {
   public:
     typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
     using node_index = SequenceGraph::node_index;
