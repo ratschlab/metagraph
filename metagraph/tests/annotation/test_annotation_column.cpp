@@ -2,6 +2,7 @@
 
 #include "gtest/gtest.h"
 
+#define private public
 #include "../test_helpers.hpp"
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
@@ -358,4 +359,20 @@ TEST(ColumnCompressed, ToRowAnnotatorStreamingParallel) {
         }
     }
     set_num_threads(1);
+}
+
+TEST(ColumnCompressed, load_label_encoder) {
+    {
+        annotate::ColumnCompressed<> annotation(5, false);
+        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+        annotation.set_labels(2, { "Label1", "Label2" });
+        annotation.set_labels(4, { "Label8" });
+
+        annotation.serialize(test_dump_basename_vec_good);
+    }
+    {
+        auto label_encoder = annotate::ColumnCompressed<>::load_label_encoder(test_dump_basename_vec_good);
+        ASSERT_TRUE(label_encoder.get());
+        EXPECT_EQ(4u, label_encoder->size());
+    }
 }

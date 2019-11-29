@@ -11,6 +11,9 @@
 #include "utils/vectors.hpp"
 
 
+template <typename Label>
+class ColumnAnalysis;
+
 namespace annotate {
 
 const char kColumnAnnotatorExtension[] = ".column.annodbg";
@@ -26,6 +29,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     template <class A, typename L, class P>
     friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t, size_t);
+
+    friend class ColumnAnalysis<Label>;
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
@@ -107,6 +112,12 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     void add_labels(uint64_t begin, uint64_t end,
                     RowCompressed<Label> *annotator,
                     ProgressBar *progress_bar) const;
+
+    static std::unique_ptr<LabelEncoder<Label>>
+    load_label_encoder(const std::string &filename);
+    static std::unique_ptr<LabelEncoder<Label>>
+    load_label_encoder(std::istream &instream);
+
     void release();
     void flush() const;
     void flush(size_t j, const bitmap &annotation_curr);

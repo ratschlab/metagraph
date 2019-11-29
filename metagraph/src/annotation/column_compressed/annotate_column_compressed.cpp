@@ -508,6 +508,37 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 }
 
 template <typename Label>
+std::unique_ptr<LabelEncoder<Label>>
+ColumnCompressed<Label>::load_label_encoder(const std::string &filebase) {
+    auto filename = remove_suffix(filebase, kExtension) + kExtension;
+
+    std::ifstream instream(filename, std::ios::binary);
+    if (!instream.good())
+        throw std::ifstream::failure("Cannot read from file " + filename);
+
+    try {
+        return load_label_encoder(instream);
+    } catch (...) {
+        throw std::ifstream::failure("Cannot load label encoder from file " + filename);
+    }
+}
+
+template <typename Label>
+std::unique_ptr<LabelEncoder<Label>>
+ColumnCompressed<Label>::load_label_encoder(std::istream &instream) {
+    if (!instream.good())
+        throw std::istream::failure("Bad stream");
+
+    load_number(instream); // ignore
+
+    auto label_encoder = std::make_unique<LabelEncoder<Label>>();
+    if (!label_encoder->load(instream))
+        throw std::istream::failure("Cannot load label encoder");
+
+    return label_encoder;
+}
+
+template <typename Label>
 void ColumnCompressed<Label>
 ::convert_to_row_annotator(const std::string &outfbase) const {
     flush();

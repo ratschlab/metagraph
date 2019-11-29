@@ -2109,7 +2109,7 @@ int main(int argc, const char *argv[]) {
                       << (get_curr_RSS() >> 20) << " MiB" << std::endl;
 
             if (config->column_analysis) {
-                auto column_analysis_ext = std::make_shared<ColumnAnalysis>();
+                auto column_analysis_ext = std::make_shared<ColumnAnalysis<>>();
                 graph->add_extension(column_analysis_ext);
                 column_analysis_ext->load(config->infbase_annotators);
             }

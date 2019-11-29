@@ -4,8 +4,10 @@
 #include "sequence_graph.hpp"
 #include "annotate_column_compressed.hpp"
 #include "utils/string_utils.hpp"
+#include "annotation/annotate.hpp"
 
 
+template <typename Label = std::string>
 class ColumnAnalysis : public SequenceGraph::GraphExtension {
   public:
 
@@ -14,7 +16,8 @@ class ColumnAnalysis : public SequenceGraph::GraphExtension {
     bool load(const std::string &filename_base) {
         auto filename = utils::remove_suffix(filename_base,
             annotate::kColumnAnnotatorExtension) + annotate::kColumnAnnotatorExtension;
-        std::cout << filename << std::endl;
+        auto label_encoder = annotate::ColumnCompressed<Label>::load_label_encoder(filename);
+        std::ignore = label_encoder;
         return true;
     };
 
@@ -25,7 +28,7 @@ class ColumnAnalysis : public SequenceGraph::GraphExtension {
         }
 
         return true;
-    }
+    };
 
     void serialize(const std::string &filename_base) const {
         std::ignore = filename_base;
