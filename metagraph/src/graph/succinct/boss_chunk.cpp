@@ -168,7 +168,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         }
         it.push_pos();
         --it;
-        std::cout << "\nIs " << kmer.to_string(k + 1, "$ACGT") << " redundant?\n";
+        std::cout << "\nChecking " << kmer.to_string(k + 1, "$ACGT") << " \n";
         auto skipped_it = was_skipped.rbegin();
         --skipped_it;
         for (uint32_t i = 1; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it,--skipped_it) {

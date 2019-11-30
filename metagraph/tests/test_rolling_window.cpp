@@ -3,10 +3,10 @@
 #include <vector>
 #include <deque>
 
-#include "ring_buffer.hpp"
+#include "rolling_window.hpp"
 
 
-void test_buffer_back(RingBuffer<int> &buffer, size_t size) {
+void test_buffer_back(RollingWindow<int> &buffer, size_t size) {
     EXPECT_EQ(size, buffer.capacity());
     std::deque<int> reference;
 
@@ -27,7 +27,7 @@ void test_buffer_back(RingBuffer<int> &buffer, size_t size) {
     }
 }
 
-void test_buffer_front(RingBuffer<int> &buffer, size_t size) {
+void test_buffer_front(RollingWindow<int> &buffer, size_t size) {
     EXPECT_EQ(size, buffer.capacity());
     std::deque<int> reference;
 
@@ -48,7 +48,7 @@ void test_buffer_front(RingBuffer<int> &buffer, size_t size) {
     }
 }
 
-void test_buffer_front_and_back(RingBuffer<int> &buffer, size_t size) {
+void test_buffer_front_and_back(RollingWindow<int> &buffer, size_t size) {
     EXPECT_EQ(size, buffer.capacity());
     std::deque<int> reference;
 
@@ -76,8 +76,8 @@ void test_buffer_front_and_back(RingBuffer<int> &buffer, size_t size) {
     }
 }
 
-TEST(RingBuffer, empty) {
-    RingBuffer<int> buffer(0);
+TEST(RollingWindow, empty) {
+    RollingWindow<int> buffer(0);
     EXPECT_EQ(0u, buffer.capacity());
 
     buffer.reset();
@@ -86,9 +86,9 @@ TEST(RingBuffer, empty) {
     ASSERT_DEATH(buffer.push_front(1), "");
 }
 
-TEST(RingBuffer, PushBack) {
+TEST(RollingWindow, PushBack) {
     for (size_t i = 1; i < 129; ++i) {
-        RingBuffer<int> buffer(i);
+        RollingWindow<int> buffer(i);
         EXPECT_EQ(i, buffer.capacity());
 
         test_buffer_back(buffer, i);
@@ -97,9 +97,9 @@ TEST(RingBuffer, PushBack) {
     }
 }
 
-TEST(RingBuffer, PushFront) {
+TEST(RollingWindow, PushFront) {
     for (size_t i = 1; i < 129; ++i) {
-        RingBuffer<int> buffer(i);
+        RollingWindow<int> buffer(i);
         EXPECT_EQ(i, buffer.capacity());
 
         test_buffer_front(buffer, i);
@@ -108,9 +108,9 @@ TEST(RingBuffer, PushFront) {
     }
 }
 
-TEST(RingBuffer, PushFrontAndBack) {
+TEST(RollingWindow, PushFrontAndBack) {
     for (size_t i = 1; i < 129; ++i) {
-        RingBuffer<int> buffer(i);
+        RollingWindow<int> buffer(i);
         EXPECT_EQ(i, buffer.capacity());
 
         test_buffer_front_and_back(buffer, i);
@@ -119,9 +119,9 @@ TEST(RingBuffer, PushFrontAndBack) {
     }
 }
 
-TEST(RingBuffer, PushAllCases) {
+TEST(RollingWindow, PushAllCases) {
     for (size_t i = 1; i < 129; ++i) {
-        RingBuffer<int> buffer(i);
+        RollingWindow<int> buffer(i);
         EXPECT_EQ(i, buffer.capacity());
 
         test_buffer_front_and_back(buffer, i);
