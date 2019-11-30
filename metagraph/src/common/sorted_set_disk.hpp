@@ -172,7 +172,7 @@ class SortedSetDisk {
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
 
-        // cleanup_(vector); // typically removes source dummy k-mers
+        cleanup_(vector); // typically removes source dummy k-mers
     }
 
     void reserve(size_t) {

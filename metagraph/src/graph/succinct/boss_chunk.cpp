@@ -4,7 +4,7 @@
 #include <kmer/kmer_boss.hpp>
 
 #include "common/chunked_wait_queue.hpp"
-#include "common/rolling_window.hpp"
+#include "common/circular_buffer.hpp"
 #include "utils/algorithms.hpp"
 #include "utils/serialization.hpp"
 #include "utils/template_utils.hpp"
@@ -144,60 +144,64 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
     /**
      * Iterate backwards and check if there is another incoming edge (an edge with
-     * identical prefix and label as the current one).
+     * identical prefix and label as the current one) into the same node.
      * If such an edge is found, then we either:
      * 1. remove it, if its a dummy edge (because it's redundant), otherwise
-     * 2. mark the edge label with '-' (not the first incoming edge with that label)
+     * 2. mark the current edge label with '-' (not the first incoming edge with that
+     * label)
      */
     template <typename KMER>
-    static void set_w_and_remove_redundant_source_edges(uint64_t alph_size,
-                                                        size_t k, /* remove*/
-                                                        const KMER &kmer,
-                                                        const RollingWindow<uint8_t> &was_skipped,
-                                                        TAlphabet lastF,
-                                                        vector<TAlphabet> *W,
-                                                        vector<bool> *last,
-                                                        vector<uint64_t> *F,
-                                                        sdsl::int_vector<> *weights,
-                                                        size_t &curpos,
-                                                        Iterator &it,
-                                                        TAlphabet &curW) {
-        if (it.at_begin() || curW == 0) {
+    static void check_w_and_redundant_edges(uint64_t alph_size,
+                                            size_t k, /* remove and clean params*/
+                                            Iterator &it,
+                                            const KMER &kmer,
+                                            common::CircularBuffer<bool> &was_skipped,
+                                            TAlphabet lastF,
+                                            vector<TAlphabet> *W,
+                                            vector<bool> *last,
+                                            vector<uint64_t> *F,
+                                            sdsl::int_vector<> *weights,
+                                            size_t *curpos,
+                                            TAlphabet *curW) {
+        if (it.at_begin() || *curW == 0) {
             return;
         }
         it.push_pos();
         --it;
-        std::cout << "\n\nIs " << kmer.to_string(k + 1, "$ACGT") << " redundant?\n";
-        for (uint32_t i = 1,j=1; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it,++j) {
+        std::cout << "\nIs " << kmer.to_string(k + 1, "$ACGT") << " redundant?\n";
+        auto skipped_it = was_skipped.rbegin();
+        --skipped_it;
+        for (uint32_t i = 1; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it,--skipped_it) {
             const KMER &prev_kmer = get_kmer(*it);
-            if (was_skipped[curpos - j]) {
+            if (*skipped_it) {
                 std::cout << "Skipped " << prev_kmer.to_string(k + 1, "$ACGT") << std::endl;
                 continue; // skipped redundant sink k-mer, don't count it
             }
-            std::cout << "Checking kmer " << prev_kmer.to_string(k + 1, "$ACGT") << std::endl;
-            if (prev_kmer[0] == curW) {
+            // std::cout << "Checking kmer " << prev_kmer.to_string(k + 1, "$ACGT") << std::endl;
+            if (prev_kmer[0] == *curW) {
                 if (!prev_kmer[1]) { // redundant dummy source k-mer, remove
+                    *skipped_it = true;
                     std::cout << prev_kmer.to_string(k + 1, "$ACGT") << " is redundant! "
                               << std::endl;
                     // erase from W, last, F, weights
-                        W->erase(W->end() - i);
-                        if ((*last)[curpos-i] == 1 && curpos-i>0) {
-                            (*last)[curpos-i-1] = 1;
+                    W->erase(W->end() - i);
+                    if ((*last)[*curpos - i] == 1 && *curpos - i > 0) {
+                        (*last)[*curpos - i - 1] = 1;
+                    }
+                    last->erase(last->end() - i - 1);
+                    if (weights) {
+                        for (uint32_t j = i; j > 0; j--) {
+                            weights[weights->size() - j]
+                                    = weights[weights->size() - j + 1];
                         }
-                        last->erase(last->end() - i - 1);
-                        if (weights) {
-                            for (uint32_t j = i; j > 0; j--) {
-                                weights[weights->size() - j]
-                                        = weights[weights->size() - j + 1];
-                            }
-                            weights->resize(weights->size() - 1);
-                        }
-                    for (uint32_t j = lastF; j > 0 && F->at(j) >= curpos - i; j--) {
+                        weights->resize(weights->size() - 1);
+                    }
+                    for (uint32_t j = lastF; j > 0 && F->at(j) > *curpos - i - 1; j--) {
                         F->at(j)--;
                     }
-                    curpos--;
+                    (*curpos)--;
                 } else { // not the first incoming edge to the node, mark with -
-                    curW += alph_size;
+                    *curW += alph_size;
                 }
                 break;
             }
@@ -208,7 +212,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         }
         it.pop_pos();
 
-        assert(curW < (1llu << (alph_size + 1)));
+        assert(*curW < (1llu << (alph_size + 1)));
     }
 
 
@@ -252,7 +256,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
         size_t curpos = 1;
         TAlphabet lastF = 0;
-        RollingWindow<uint8_t> was_skipped(alph_size * alph_size);
+        common::CircularBuffer<bool> was_skipped(alph_size * alph_size);
         for (Iterator &it = begin; it != end; ++it) {
             const KMER &kmer = get_kmer(*it);
             TAlphabet curW = kmer[0];
@@ -277,9 +281,8 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             was_skipped.push_back(0);
             --it;
 
-            set_w_and_remove_redundant_source_edges<KMER>(alph_size, k, kmer, was_skipped,
-                                                          lastF, W, last, F, weights,
-                                                          curpos, it, curW);
+            check_w_and_redundant_edges<KMER>(alph_size, k, it, kmer, was_skipped, lastF,
+                                              W, last, F, weights, &curpos, &curW);
             W->push_back(curW);
 
             while (curF > lastF && lastF + 1 < static_cast<TAlphabet>(alph_size)) {

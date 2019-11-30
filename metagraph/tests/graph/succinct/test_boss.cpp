@@ -365,7 +365,7 @@ TEST(BOSS, MarkDummySourceEdgesTwoPathsParallel) {
 }
 
 TEST(BOSS, RemoveDummyEdgesForClearGraph) {
-    for (size_t k = 1; k < 10; ++k) { // TODO: undo
+    for (size_t k = 2; k < 10; ++k) { // TODO: undo
         std::cout << "Checkin k=" << k << std::endl;
         std::unique_ptr<BOSS> first_ptr;
         std::unique_ptr<BOSS> second_ptr;
