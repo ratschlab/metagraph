@@ -50,12 +50,10 @@ template <typename T, typename Alloc = std::allocator<T>>
 class ChunkedWaitQueue {
   public:
     class Iterator;
-    class ConstIterator;
     // typedefs for STL compatibility
     typedef size_t size_type;
     typedef T value_type;
     typedef Iterator iterator;
-    typedef Iterator const_iterator;
 
     ChunkedWaitQueue(const ChunkedWaitQueue &other) = delete; // non construction-copyable
     ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete; // non copyable
@@ -151,7 +149,8 @@ class ChunkedWaitQueue {
     }
 
     /**
-     * Enqueues x by *moving* it into the queue, blocks when full.
+     * Enqueues x by *moving* it into the queue, blocks when full or when no output
+     * file has yet been set.
      * Note that this function receives its parameter by value, so make sure you
      * std::move it into the queue if the copy construction is expensive.
      */
@@ -171,8 +170,7 @@ class ChunkedWaitQueue {
                     std::exit(EXIT_FAILURE);
                 }
             };
-            write_to_file(queue_[last_]);
-            // file_write_pool_.enqueue(write_to_file, queue_[last_]);
+            file_write_pool_.enqueue(write_to_file, queue_[last_]);
         }
         if (was_all_read) { // queue was empty or all items were read
             not_empty_.notify_one();

@@ -5,7 +5,7 @@
 
 #include <cyclichash.h>
 
-#include "common/rolling_window.hpp"
+#include "common/ring_buffer.hpp"
 
 
 template <typename TAlphabet = uint8_t>
@@ -56,7 +56,7 @@ class RollingHash {
 
   private:
     CyclicHash<uint64_t, TAlphabet> hash_;
-    RollingWindow<TAlphabet> ring_buffer_;
+    RingBuffer<TAlphabet> ring_buffer_;
 };
 
 
