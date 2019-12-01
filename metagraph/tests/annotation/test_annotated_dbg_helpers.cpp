@@ -13,7 +13,7 @@ build_anno_graph(uint64_t k,
                  const std::vector<std::string> &labels) {
     assert(sequences.size() == labels.size());
     auto graph = build_graph_batch<Graph>(k, sequences);
-
+std::cout << "Built graph " << graph;
     uint64_t num_nodes = graph->num_nodes();
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(

@@ -4,7 +4,7 @@
 #include <kmer/kmer_boss.hpp>
 
 #include "common/chunked_wait_queue.hpp"
-#include "common/circular_buffer.hpp"
+#include "common/rolling_window.hpp"
 #include "utils/algorithms.hpp"
 #include "utils/serialization.hpp"
 #include "utils/template_utils.hpp"
@@ -155,7 +155,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                                             size_t k, /* remove and clean params*/
                                             Iterator &it,
                                             const KMER &kmer,
-                                            common::CircularBuffer<bool> &was_skipped,
+                                            RollingWindow<bool> &was_skipped,
                                             TAlphabet lastF,
                                             vector<TAlphabet> *W,
                                             vector<bool> *last,
@@ -168,7 +168,6 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         }
         it.push_pos();
         --it;
-        std::cout << "\nChecking " << kmer.to_string(k + 1, "$ACGT") << " \n";
         auto skipped_it = was_skipped.rbegin();
         --skipped_it;
         for (uint32_t i = 1; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it,--skipped_it) {
@@ -256,9 +255,11 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
         size_t curpos = 1;
         TAlphabet lastF = 0;
-        common::CircularBuffer<bool> was_skipped(alph_size * alph_size);
+        RollingWindow<bool> was_skipped(alph_size * alph_size);
         for (Iterator &it = begin; it != end; ++it) {
             const KMER &kmer = get_kmer(*it);
+            std::cout << "Kmer is: " << kmer << std::endl;
+            std::cout << "\nChecking " << kmer.to_string(k + 1, "$ACGT") << " \n";
             TAlphabet curW = kmer[0];
             TAlphabet curF = kmer[k];
 
