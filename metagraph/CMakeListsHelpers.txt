@@ -118,6 +118,8 @@ set(GTEST_BOTH_LIBRARIES
     "${EXTERNAL_LIB_DIR}/sdsl-lite/lib/libgtest.a" PARENT_SCOPE)
 endfunction()
 
+# Enables using ccache in order to speed up compilation. Make sure you
+# brew install ccache to benefit from it
 function (enableCCache)
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
