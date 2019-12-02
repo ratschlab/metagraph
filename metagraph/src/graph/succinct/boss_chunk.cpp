@@ -1,8 +1,5 @@
 #include "boss_chunk.hpp"
 
-#include <boost/multiprecision/integer.hpp>
-#include <kmer/kmer_boss.hpp>
-
 #include "common/chunked_wait_queue.hpp"
 #include "common/circular_buffer.hpp"
 #include "utils/algorithms.hpp"

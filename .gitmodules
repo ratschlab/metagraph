@@ -33,7 +33,7 @@
 	url = https://github.com/greg7mdp/sparsepp.git
 [submodule "metagraph/external-libraries/tclap"]
 	path = metagraph/external-libraries/tclap
-	url = https://github.com/eile/tclap.git
+	url = https://github.com/mirror/tclap.git
 [submodule "metagraph/external-libraries/asio"]
 	path = metagraph/external-libraries/asio
 	url = https://github.com/chriskohlhoff/asio.git

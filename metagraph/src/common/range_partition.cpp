@@ -1,5 +1,7 @@
 #include "range_partition.hpp"
 
+#include <cassert>
+
 #include "utils/serialization.hpp"
 
 
