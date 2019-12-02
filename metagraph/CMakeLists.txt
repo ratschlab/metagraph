@@ -5,6 +5,9 @@ project(Metagraph)
 
 include(CheckFunctionExists)
 include(CheckLibraryExists)
+include(CMakeListsHelpers.txt)
+
+enableCCache()
 
 enable_testing()
 
