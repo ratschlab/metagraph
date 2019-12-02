@@ -6,12 +6,13 @@
 
 #include "sequence_graph.hpp"
 #include "kmer_extractor.hpp"
-#include "utils.hpp"
 
 
 class DBGHashOrdered : public DeBruijnGraph {
   public:
-    explicit DBGHashOrdered(size_t k, bool canonical_mode = false);
+    explicit DBGHashOrdered(size_t k,
+                            bool canonical_mode = false,
+                            bool packed_serialization = false);
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -19,6 +20,17 @@ class DBGHashOrdered : public DeBruijnGraph {
     void add_sequence(const std::string &sequence,
                       bit_vector_dyn *nodes_inserted = NULL) {
         hash_dbg_->add_sequence(sequence, nodes_inserted);
+    }
+
+    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
+    // is passed. If passed, |nodes_inserted| must have length equal
+    // to the number of nodes in graph.
+    // `skip` is called before adding each k-mer into the graph and the k-mer
+    // is skipped if `skip()` returns `false`.
+    void add_sequence(const std::string &sequence,
+                      const std::function<bool()> &skip,
+                      bit_vector_dyn *nodes_inserted = NULL) {
+        hash_dbg_->add_sequence(sequence, skip, nodes_inserted);
     }
 
     // Traverse graph mapping sequence to the graph nodes
@@ -38,6 +50,18 @@ class DBGHashOrdered : public DeBruijnGraph {
                                    const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &terminate = [](){ return false; }) const {
         hash_dbg_->map_to_nodes_sequentially(begin, end, callback, terminate);
+    }
+
+    // Given a starting node, traverse the graph forward following the edge
+    // sequence delimited by begin and end. Terminate the traversal if terminate()
+    // returns true, or if the sequence is exhausted.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    void traverse(node_index start,
+                  const char* begin,
+                  const char* end,
+                  const std::function<void(node_index)> &callback,
+                  const std::function<bool()> &terminate = [](){ return false; }) const {
+        hash_dbg_->traverse(start, begin, end, callback, terminate);
     }
 
     void call_outgoing_kmers(node_index node,
@@ -60,23 +84,25 @@ class DBGHashOrdered : public DeBruijnGraph {
         return hash_dbg_->traverse_back(node, prev_char);
     }
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the outgoing edges and pushes back indices of their target nodes.
+    // Given a node index, call the target nodes of all edges outgoing from it.
     void adjacent_outgoing_nodes(node_index node,
-                                 std::vector<node_index> *target_nodes) const {
-        hash_dbg_->adjacent_outgoing_nodes(node, target_nodes);
+                                 const std::function<void(node_index)> &callback) const {
+        hash_dbg_->adjacent_outgoing_nodes(node, callback);
     }
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the incoming edges and pushes back indices of their source nodes.
+    // Given a node index, call the source nodes of all edges incoming to it.
     void adjacent_incoming_nodes(node_index node,
-                                 std::vector<node_index> *source_nodes) const {
-        hash_dbg_->adjacent_incoming_nodes(node, source_nodes);
+                                 const std::function<void(node_index)> &callback) const {
+        hash_dbg_->adjacent_incoming_nodes(node, callback);
     }
-
 
     size_t outdegree(node_index node) const { return hash_dbg_->outdegree(node); }
+    bool has_single_outgoing(node_index node) const { return hash_dbg_->has_single_outgoing(node); }
+    bool has_multiple_outgoing(node_index node) const { return hash_dbg_->has_multiple_outgoing(node); }
+
     size_t indegree(node_index node) const { return hash_dbg_->indegree(node); }
+    bool has_no_incoming(node_index node) const { return hash_dbg_->has_no_incoming(node); }
+    bool has_single_incoming(node_index node) const { return hash_dbg_->has_single_incoming(node); }
 
     node_index kmer_to_node(const std::string &kmer) const {
         return hash_dbg_->kmer_to_node(kmer);
@@ -100,21 +126,26 @@ class DBGHashOrdered : public DeBruijnGraph {
     std::string file_extension() const { return kExtension; }
 
     bool operator==(const DeBruijnGraph &other) const {
-        if (!dynamic_cast<const DBGHashOrdered*>(&other)) {
-            throw std::runtime_error("Not implemented");
-            return false;
-        }
+        if (this == &other)
+            return true;
 
-        return *hash_dbg_ == *dynamic_cast<const DBGHashOrdered*>(&other)->hash_dbg_;
+        return other == *hash_dbg_;
     }
 
     const std::string& alphabet() const { return hash_dbg_->alphabet(); }
+
+    bool in_graph(node_index node) const { return hash_dbg_->in_graph(node); }
 
     static constexpr auto kExtension = ".orhashdbg";
 
     class DBGHashOrderedInterface : public DeBruijnGraph {
       public:
         virtual ~DBGHashOrderedInterface() {}
+        virtual void add_sequence(const std::string &sequence,
+                                  bit_vector_dyn *nodes_inserted) = 0;
+        virtual void add_sequence(const std::string &sequence,
+                                  const std::function<bool()> &skip,
+                                  bit_vector_dyn *nodes_inserted) = 0;
         virtual void serialize(std::ostream &out) const = 0;
         virtual void serialize(const std::string &filename) const = 0;
         virtual bool load(std::istream &in) = 0;
@@ -124,7 +155,7 @@ class DBGHashOrdered : public DeBruijnGraph {
 
   private:
     static std::unique_ptr<DBGHashOrderedInterface>
-    initialize_graph(size_t k, bool canonical_mode);
+    initialize_graph(size_t k, bool canonical_mode, bool packed_serialization);
 
     std::unique_ptr<DBGHashOrderedInterface> hash_dbg_;
 };

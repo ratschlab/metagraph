@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <functional>
 
-#include "utils.hpp"
 #include "serialization.hpp"
 
 
@@ -14,7 +13,7 @@ RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
                 uint64_t num_rows,
                 uint64_t num_set_bits)
       : num_columns_(num_columns),
-        num_rows_(num_rows) {
+        num_rows_(num_columns ? num_rows : 0) {
     compressed_rows_.reset(new BitVector(
         [&](const std::function<void(uint64_t)> &callback) {
             uint64_t pos = 0;
@@ -24,7 +23,7 @@ RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
                 }
                 pos += num_columns_;
             });
-        }, num_columns_ * num_rows, num_set_bits)
+        }, num_columns_ * num_rows_, num_set_bits)
     );
 }
 
@@ -35,11 +34,11 @@ bool RowConcatenated<BitVector>::get(Row row, Column column) const {
 }
 
 template <typename BitVector>
-std::vector<typename RowConcatenated<BitVector>::Column>
+typename RowConcatenated<BitVector>::SetBitPositions
 RowConcatenated<BitVector>::get_row(Row row) const {
     assert(compressed_rows_.get());
     assert(row * num_columns_ < compressed_rows_->size());
-    std::vector<Column> columns;
+    SetBitPositions columns;
 
     uint64_t offset = row * num_columns_;
     uint64_t first = compressed_rows_->rank1(offset) + !(*compressed_rows_)[offset];

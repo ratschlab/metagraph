@@ -1,17 +1,14 @@
 #ifndef __KMER_COLLECTOR_HPP__
 #define __KMER_COLLECTOR_HPP__
 
-#include "kmer_extractor.hpp"
-#include "kmer_collector.hpp"
-#include "threading.hpp"
-#include "sorted_set.hpp"
-#include "sorted_multiset.hpp"
+#include "common/threading.hpp"
 
 typedef std::function<void(const std::string&)> CallString;
+typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
 
 
 template <typename KMER, class KmerExtractor, class Container>
-class KmerStorage {
+class KmerCollector {
     using Extractor = KmerExtractor;
     using Sequence = std::vector<typename Extractor::TAlphabet>;
     Extractor kmer_extractor_;
@@ -20,23 +17,27 @@ class KmerStorage {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
   public:
+    using Key = typename Container::key_type;
+    using Value = typename Container::value_type;
     using Data = typename Container::storage_type;
 
-    KmerStorage(size_t k,
+    KmerCollector(size_t k,
                 bool both_strands_mode = false,
                 Sequence&& filter_suffix_encoded = {},
                 size_t num_threads = 1,
                 double memory_preallocated = 0,
-                bool verbose = false,
-                std::function<void(Data*)> cleanup = [](Data*) {});
+                bool verbose = false);
 
     inline size_t get_k() const { return k_; }
 
     inline size_t suffix_length() const { return filter_suffix_encoded_.size(); }
 
-    void add_sequence(std::string&& sequence);
+    void add_sequence(std::string&& sequence, uint64_t count = 1);
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
+    void add_sequences(const std::function<void(CallStringCount)> &generate_sequences);
+
+    void insert_dummy(const KMER &dummy_kmer);
 
     inline Data& data() { join(); return kmers_.data(); }
 
@@ -57,7 +58,7 @@ class KmerStorage {
     size_t num_threads_;
     ThreadPool thread_pool_;
 
-    std::vector<std::string> sequences_storage_;
+    std::vector<std::pair<std::string, uint64_t>> buffered_sequences_;
     size_t stored_sequences_size_;
 
     bool verbose_;
@@ -66,13 +67,5 @@ class KmerStorage {
 
     bool both_strands_mode_;
 };
-
-
-template <typename KMER, class KmerExtractor>
-using KmerCollector = KmerStorage<KMER, KmerExtractor, SortedSet<KMER>>;
-
-template <typename KMER, class KmerExtractor, typename KmerCount = uint8_t>
-using KmerCounter = KmerStorage<KMER, KmerExtractor, SortedMultiset<KMER, KmerCount>>;
-
 
 #endif // __KMER_COLLECTOR_HPP__

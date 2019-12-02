@@ -4,10 +4,12 @@
 #include <vector>
 #include <algorithm>
 #include <string>
+#include <filesystem>
 
-#include "serialization.hpp"
-#include "reverse_complement.hpp"
-#include "utils.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "utils/serialization.hpp"
+#include "utils/string_utils.hpp"
+#include "utils/algorithms.hpp"
 
 using utils::remove_suffix;
 
@@ -29,71 +31,101 @@ size_t DBGSuccinct::get_k() const {
 // Check whether graph contains fraction of nodes from the sequence
 bool DBGSuccinct::find(const std::string &sequence,
                        double discovery_fraction) const {
-    return boss_graph_->find(sequence, discovery_fraction);
+    if (sequence.length() < get_k())
+        return false;
+
+    const size_t num_kmers = sequence.length() - get_k() + 1;
+    const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
+    const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
+    size_t num_kmers_discovered = 0;
+    size_t num_kmers_missing = 0;
+
+    auto is_invalid = get_missing_kmer_skipper(bloom_filter_.get(),
+                                               sequence.data(),
+                                               sequence.data() + sequence.size());
+
+    boss_graph_->map_to_edges(sequence,
+        [&](auto edge) {
+            if (edge) {
+                num_kmers_discovered++;
+            } else {
+                num_kmers_missing++;
+            }
+        },
+        [&]() { return num_kmers_missing > max_kmers_missing
+                        || num_kmers_discovered >= min_kmers_discovered; },
+        [&]() {
+            if (!is_invalid())
+                return false;
+
+            num_kmers_missing++;
+            return true;
+        }
+    );
+
+    return num_kmers_missing <= max_kmers_missing;
 }
 
 // Traverse the outgoing edge
 node_index DBGSuccinct::traverse(node_index node, char next_char) const {
-    assert(node);
+    assert(in_graph(node));
 
     // dbg node is a boss edge
     BOSS::edge_index edge = boss_graph_->fwd(kmer_to_boss_index(node));
     return boss_to_kmer_index(
-        boss_graph_->pick_edge(edge,
-                               boss_graph_->get_source_node(edge),
-                               boss_graph_->encode(next_char))
+        boss_graph_->pick_edge(edge, boss_graph_->encode(next_char))
     );
 }
 
 // Traverse the incoming edge
 node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
-    assert(node);
+    assert(in_graph(node));
 
-    // map dbg node, i.e. a boss edge, to a boss node
-    auto boss_edge = kmer_to_boss_index(node);
-
-    auto boss_node = boss_graph_->get_source_node(boss_edge);
-    auto source_node = boss_graph_->traverse_back(boss_node, prev_char);
-
-    if (!source_node)
-        return npos;
-
+    // dbg node is a boss edge
+    BOSS::edge_index edge = boss_graph_->bwd(kmer_to_boss_index(node));
     return boss_to_kmer_index(
-        boss_graph_->outgoing_edge_idx(source_node,
-                                       boss_graph_->get_node_last_value(boss_edge))
+        boss_graph_->pick_incoming_edge(edge, boss_graph_->encode(prev_char))
     );
+}
+
+template <class Callback>
+inline void call_outgoing(const BOSS &boss,
+                          uint64_t boss_edge,
+                          const Callback &callback) {
+    // no outgoing edges from the sink dummy nodes
+    if (boss_edge > 1 && !boss.get_W(boss_edge))
+        return;
+
+    auto last = boss.fwd(boss_edge);
+    auto first = boss.pred_last(last - 1) + 1;
+
+    for (auto i = std::max(uint64_t(2), first); i <= last; ++i) {
+        assert(boss.get_W(boss_edge) % boss.alph_size
+                == boss.get_node_last_value(i));
+
+        callback(i);
+    }
 }
 
 void DBGSuccinct::call_outgoing_kmers(node_index node,
                                       const OutgoingEdgeCallback &callback) const {
-    assert(node);
+    assert(in_graph(node));
 
-    auto boss_edge = kmer_to_boss_index(node);
-
-    // no outgoing edges from the sink dummy nodes
-    if (!boss_graph_->get_W(boss_edge))
-        return;
-
-    auto last = boss_graph_->fwd(boss_edge);
-    auto first = boss_graph_->pred_last(last - 1) + 1;
-
-    for (auto i = first; i <= last; ++i) {
-        assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
-                == boss_graph_->get_node_last_value(i));
-
+    call_outgoing(*boss_graph_, kmer_to_boss_index(node), [&](auto i) {
         auto next = boss_to_kmer_index(i);
         if (next != npos)
-            callback(next, boss_graph_->decode(boss_graph_->get_W(i) % boss_graph_->alph_size));
-    }
+            callback(next, boss_graph_->decode(boss_graph_->get_W(i)
+                                % boss_graph_->alph_size));
+    });
 }
 
 void DBGSuccinct::call_incoming_kmers(node_index node,
                                       const IncomingEdgeCallback &callback) const {
-    assert(node);
+    assert(in_graph(node));
 
     auto edge = kmer_to_boss_index(node);
 
-    boss_graph_->call_adjacent_incoming_edges(edge,
+    boss_graph_->call_incoming_to_target(boss_graph_->bwd(edge),
         [&](BOSS::edge_index incoming_boss_edge) {
             assert(boss_graph_->get_W(incoming_boss_edge) % boss_graph_->alph_size
                     == boss_graph_->get_node_last_value(edge));
@@ -107,44 +139,30 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
 }
 
 void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
-                                          std::vector<node_index> *target_nodes) const {
-    assert(node);
-    assert(target_nodes);
+                                          const std::function<void(node_index)> &callback) const {
+    assert(in_graph(node));
 
-    auto boss_edge = kmer_to_boss_index(node);
-
-    // no outgoing edges from the sink dummy nodes
-    if (!boss_graph_->get_W(boss_edge))
-        return;
-
-    auto last = boss_graph_->fwd(boss_edge);
-    auto first = boss_graph_->pred_last(last - 1) + 1;
-
-    for (auto i = first; i <= last; ++i) {
-        assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
-                == boss_graph_->get_node_last_value(i));
-
+    call_outgoing(*boss_graph_, kmer_to_boss_index(node), [&](auto i) {
         auto next = boss_to_kmer_index(i);
         if (next != npos)
-            target_nodes->emplace_back(next);
-    }
+            callback(next);
+    });
 }
 
 void DBGSuccinct::adjacent_incoming_nodes(node_index node,
-                                          std::vector<node_index> *source_nodes) const {
-    assert(node);
-    assert(source_nodes);
+                                          const std::function<void(node_index)> &callback) const {
+    assert(in_graph(node));
 
     auto edge = kmer_to_boss_index(node);
 
-    boss_graph_->call_adjacent_incoming_edges(edge,
+    boss_graph_->call_incoming_to_target(boss_graph_->bwd(edge),
         [&](BOSS::edge_index incoming_boss_edge) {
             assert(boss_graph_->get_W(incoming_boss_edge) % boss_graph_->alph_size
                     == boss_graph_->get_node_last_value(edge));
 
             auto prev = boss_to_kmer_index(incoming_boss_edge);
             if (prev != npos)
-                source_nodes->emplace_back(prev);
+                callback(prev);
         }
     );
 }
@@ -162,6 +180,9 @@ void DBGSuccinct::add_sequence(const std::string &sequence,
         reverse_complement(sequence_copy.begin(), sequence_copy.end());
         add_seq(sequence_copy, nodes_inserted);
     }
+
+    if (bloom_filter_)
+        bloom_filter_->add_sequence(sequence);
 }
 
 void DBGSuccinct::add_seq(const std::string &sequence,
@@ -177,8 +198,10 @@ void DBGSuccinct::add_seq(const std::string &sequence,
         for (auto i : inserted_indexes) {
             if (valid_edges_.get())
                 valid_edges_->insert_bit(i, true);
-            nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
+            if (nodes_inserted)
+                nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
         }
+
     } else {
         boss_graph_->add_sequence(sequence, true);
     }
@@ -187,8 +210,7 @@ void DBGSuccinct::add_seq(const std::string &sequence,
 }
 
 std::string DBGSuccinct::get_node_sequence(node_index node) const {
-    assert(node);
-    assert(node <= num_nodes());
+    assert(in_graph(node));
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -207,11 +229,171 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
     if (begin + get_k() > end)
         return;
 
+    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(),
+                                               &*begin, &*begin + (end - begin));
+
     boss_graph_->map_to_edges(
         std::string(begin, end),
         [&](BOSS::edge_index i) { callback(boss_to_kmer_index(i)); },
-        terminate
+        terminate,
+        [&]() {
+            if (!is_missing())
+                return false;
+
+            callback(npos);
+            return true;
+        }
     );
+}
+
+template <class StringIt>
+void DBGSuccinct
+::call_nodes_with_suffix(StringIt begin,
+                         StringIt end,
+                         const std::function<void(node_index, uint64_t /* match length */)>& callback,
+                         size_t min_match_length,
+                         size_t max_num_allowed_matches) const {
+    if (begin >= end || !max_num_allowed_matches)
+        return;
+
+    assert(get_k() >= static_cast<size_t>(end - begin));
+
+    if (static_cast<size_t>(end - begin) < min_match_length)
+        return;
+
+    auto encoded = boss_graph_->encode(std::string(begin, end));
+    auto index_range = boss_graph_->index_range(
+        encoded.begin(),
+        std::min(encoded.begin() + get_k() - 1, encoded.end())
+    );
+
+    if (std::get<0>(index_range) == 0 || std::get<1>(index_range) == 0)
+        return;
+
+    if (std::get<2>(index_range) == encoded.begin()) {
+        callback(std::get<0>(index_range), 0);
+        return;
+    }
+
+    // since we can only match up to get_k() - 1 in BOSS, check for this
+    // case and simply pick the appropriate BOSS edge
+    if (encoded.size() == get_k() && std::get<2>(index_range) + 1 == encoded.end()) {
+        assert(std::get<0>(index_range) == std::get<1>(index_range));
+        auto edge = boss_graph_->pick_edge(std::get<1>(index_range), encoded.back());
+        if (edge) {
+            auto kmer_index = boss_to_kmer_index(edge);
+            if (kmer_index != npos) {
+                assert(begin + get_k() == end);
+                assert(get_node_sequence(kmer_index) == std::string(begin, end));
+                callback(kmer_index, get_k());
+                return;
+            }
+        }
+    }
+
+    uint64_t match_size = std::get<2>(index_range) - encoded.begin();
+    if (match_size < min_match_length)
+        return;
+
+    auto rank_first = boss_graph_->rank_last(std::get<0>(index_range));
+    auto rank_last = boss_graph_->rank_last(std::get<1>(index_range));
+    if (max_num_allowed_matches < std::numeric_limits<size_t>::max()) {
+        std::vector<node_index> nodes;
+
+        for (auto i = rank_first; i <= rank_last && nodes.size() <= max_num_allowed_matches; ++i) {
+            boss_graph_->call_incoming_to_target(
+                boss_graph_->bwd(boss_graph_->select_last(i)),
+                [&](BOSS::edge_index incoming_edge_idx) {
+                    auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
+                    if (kmer_index != npos) {
+                        assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
+                            == std::string(begin, begin + match_size));
+                        nodes.emplace_back(kmer_index);
+                    }
+                }
+            );
+        }
+
+        if (nodes.size() > max_num_allowed_matches)
+            return;
+
+        for (auto node : nodes) {
+            callback(node, match_size);
+        }
+    } else {
+        for (auto i = rank_first; i <= rank_last; ++i) {
+            boss_graph_->call_incoming_to_target(
+                boss_graph_->bwd(boss_graph_->select_last(i)),
+                [&](BOSS::edge_index incoming_edge_idx) {
+                    auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
+                    if (kmer_index != npos) {
+                        assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
+                            == std::string(begin, begin + match_size));
+                        callback(kmer_index, match_size);
+                    }
+                }
+            );
+        }
+    }
+}
+
+template void DBGSuccinct
+::call_nodes_with_suffix<const char*>(const char*,
+                                      const char*,
+                                      const std::function<void(node_index, uint64_t)>&,
+                                      size_t,
+                                      size_t) const;
+
+template void DBGSuccinct
+::call_nodes_with_suffix<char*>(char*,
+                                char*,
+                                const std::function<void(node_index, uint64_t)>&,
+                                size_t,
+                                size_t) const;
+
+template void DBGSuccinct
+::call_nodes_with_suffix<std::string::const_iterator>(std::string::const_iterator,
+                                                      std::string::const_iterator,
+                                                      const std::function<void(node_index, uint64_t)>&,
+                                                      size_t,
+                                                      size_t) const;
+
+template void DBGSuccinct
+::call_nodes_with_suffix<std::string::iterator>(std::string::iterator,
+                                                std::string::iterator,
+                                                const std::function<void(node_index, uint64_t)>&,
+                                                size_t,
+                                                size_t) const;
+
+void DBGSuccinct::traverse(node_index start,
+                           const char *begin,
+                           const char *end,
+                           const std::function<void(node_index)> &callback,
+                           const std::function<bool()> &terminate) const {
+    assert(in_graph(start));
+    assert(end >= begin);
+
+    if (terminate())
+        return;
+
+    auto edge = kmer_to_boss_index(start);
+    assert(edge);
+
+    for (; begin != end && !terminate() && boss_graph_->get_W(edge); ++begin) {
+        edge = boss_graph_->fwd(edge);
+        edge = boss_graph_->pick_edge(edge, boss_graph_->encode(*begin));
+
+        if (!edge)
+            return;
+
+        start = boss_to_kmer_index(edge);
+
+        if (start != npos) {
+            callback(start);
+        } else {
+            return;
+        }
+    }
 }
 
 // Map sequence k-mers to the canonical graph nodes
@@ -222,80 +404,133 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
     if (sequence.size() < get_k())
         return;
 
-    if (canonical_mode_) {
-        auto forward = boss_graph_->map_to_edges(sequence);
+    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(),
+                                               sequence.data(),
+                                               sequence.data() + sequence.size());
 
+    if (canonical_mode_) {
         std::string sequence_rev_compl = sequence;
         reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
 
-        auto rev_compl = boss_graph_->map_to_edges(sequence_rev_compl);
+        std::vector<BOSS::edge_index> boss_edges;
+        boss_edges.resize(sequence.size() - get_k() + 1);
 
-        assert(forward.size() == sequence.size() - get_k() + 1);
-        assert(forward.size() == rev_compl.size());
+        auto jt = boss_edges.begin();
+        boss_graph_->map_to_edges(sequence,
+            [&](auto index) { *jt = index; ++jt; },
+            []() { return false; },
+            [&]() {
+                if (!is_missing())
+                    return false;
 
-        for (size_t i = 0; i < forward.size() && !terminate(); ++i) {
+                ++jt;
+                return true;
+            }
+        );
+
+        assert(jt == boss_edges.end());
+
+        auto it = boss_edges.rbegin();
+        boss_graph_->map_to_edges(sequence_rev_compl,
+            [&](auto rc_index) {
+                assert(it < boss_edges.rend());
+                *it = std::min(*it, rc_index);
+                ++it;
+            },
+            []() { return false; },
+            [&]() {
+                assert(it < boss_edges.rend());
+                // if a k-mer is missing, skip its reverse compliment, as it's missing too.
+                if (!*it) {
+                    ++it;
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+        );
+
+        for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
             // the definition of a canonical k-mer is redefined:
             //      use k-mer with smaller index in the BOSS table.
-            callback(boss_to_kmer_index(
-                std::min(forward[i], rev_compl[rev_compl.size() - 1 - i])
-            ));
+            callback(boss_to_kmer_index(boss_edges[i]));
         }
 
     } else {
         boss_graph_->map_to_edges(
             sequence,
             [&](BOSS::edge_index i) { callback(boss_to_kmer_index(i)); },
-            terminate
+            terminate,
+            [&]() {
+                if (!is_missing())
+                    return false;
+
+                callback(npos);
+                return true;
+            }
         );
     }
 }
 
-void DBGSuccinct
-::call_sequences(const std::function<void(const std::string&)> &callback) const {
+void DBGSuccinct::call_sequences(const CallPath &callback,
+                                 bool kmers_in_single_form) const {
     assert(boss_graph_.get());
-    boss_graph_->call_sequences(callback);
+    boss_graph_->call_sequences(
+        [&](std::string&& seq, auto&& path) {
+            for (auto &node : path) {
+                node = boss_to_kmer_index(node);
+            }
+            callback(std::move(seq), std::move(path));
+        },
+        kmers_in_single_form
+    );
 }
 
-void DBGSuccinct
-::call_unitigs(const std::function<void(const std::string&)> &callback,
-               size_t min_tip_size) const {
+void DBGSuccinct::call_unitigs(const CallPath &callback,
+                               size_t min_tip_size,
+                               bool kmers_in_single_form) const {
     assert(boss_graph_.get());
-    boss_graph_->call_unitigs(callback, min_tip_size);
+    boss_graph_->call_unitigs(
+        [&](std::string&& seq, auto&& path) {
+            for (auto &node : path) {
+                node = boss_to_kmer_index(node);
+            }
+            callback(std::move(seq), std::move(path));
+        },
+        min_tip_size,
+        kmers_in_single_form
+    );
 }
 
 void DBGSuccinct
 ::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
     assert(boss_graph_.get());
     boss_graph_->call_kmers([&](auto index, const std::string &seq) {
-        assert(boss_graph_->get_last(index));
-        do {
-            auto cur_W = boss_graph_->get_W(index);
-            if (!cur_W)
-                break;
-
-            auto node = boss_to_kmer_index(index);
-            if (node != npos)
-                callback(node, seq + boss_graph_->decode(cur_W % boss_graph_->alph_size));
-        } while (!boss_graph_->get_last(--index));
+        auto node = boss_to_kmer_index(index);
+        assert(node != npos);
+        callback(node, seq);
     });
 }
 
 void DBGSuccinct
 ::call_source_nodes(const std::function<void(node_index)> &callback) const {
     boss_graph_->call_start_edges([&](auto boss_edge) {
-        auto index = boss_to_kmer_index(boss_edge);
-        assert(index != npos);
-        assert(!indegree(index));
-        callback(index);
+        auto node = boss_to_kmer_index(boss_edge);
+        assert(node != npos);
+        assert(!indegree(node));
+        callback(node);
     });
 }
 
 size_t DBGSuccinct::outdegree(node_index node) const {
-    assert(node);
+    assert(in_graph(node));
 
     auto boss_edge = kmer_to_boss_index(node);
 
-    if (boss_edge > 1 && !boss_graph_->get_W(boss_edge)) {
+    if (boss_edge == 1)
+        return boss_graph_->succ_last(1) - 1;
+
+    if (!boss_graph_->get_W(boss_edge)) {
         // |node| is a sink dummy boss edge, hence has no outgoing edges
         return 0;
     }
@@ -303,27 +538,91 @@ size_t DBGSuccinct::outdegree(node_index node) const {
     auto last_target_kmer = boss_graph_->fwd(boss_edge);
 
     if (!boss_graph_->get_W(last_target_kmer)) {
-        // There is a sunk dummy target, hence this is the only outgoing edge
-        if (valid_edges_.get()) {
-            // if mask is defined, skip boss dummy sink edges
-            return 0;
-        } else {
-            return 1;
-        }
+        // There is a sink dummy target, hence this is the only outgoing edge
+        // skip boss dummy sink edges
+        return 0;
     }
 
     return last_target_kmer - boss_graph_->pred_last(last_target_kmer - 1);
 }
 
+bool DBGSuccinct::has_single_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return boss_graph_->succ_last(1) == 2;
+
+    if (!boss_graph_->get_W(boss_edge)) {
+        // |node| is a sink dummy boss edge, hence has no outgoing edges
+        return false;
+    }
+
+    auto last_target_kmer = boss_graph_->fwd(boss_edge);
+
+    if (!boss_graph_->get_W(last_target_kmer)) {
+        // There is a sink dummy target, hence this is the only outgoing edge
+        // skip boss dummy sink edges
+        return false;
+    }
+
+    return boss_graph_->is_single_outgoing(last_target_kmer);
+}
+
+bool DBGSuccinct::has_multiple_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return boss_graph_->succ_last(1) > 2;
+
+    if (!boss_graph_->get_W(boss_edge)) {
+        // |node| is a sink dummy boss edge, hence has no outgoing edges
+        return false;
+    }
+
+    return !boss_graph_->get_last(boss_graph_->fwd(boss_edge) - 1);
+}
+
 size_t DBGSuccinct::indegree(node_index node) const {
-    assert(node);
+    assert(in_graph(node));
 
     auto boss_edge = kmer_to_boss_index(node);
 
     if (boss_edge == 1)
         return 1;
 
-    auto d = boss_graph_->get_node_last_value(boss_edge);
+    auto x = boss_graph_->bwd(boss_edge);
+
+    size_t first_valid = !valid_edges_.get() || (*valid_edges_)[x];
+
+    return boss_graph_->num_incoming_to_target(x) - !first_valid;
+}
+
+bool DBGSuccinct::has_no_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return false;
+
+    auto x = boss_graph_->bwd(boss_edge);
+
+    size_t first_valid = !valid_edges_.get() || (*valid_edges_)[x];
+
+    return !first_valid && boss_graph_->is_single_incoming(x);
+}
+
+bool DBGSuccinct::has_single_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return false;
 
     auto x = boss_graph_->bwd(boss_edge);
 
@@ -332,9 +631,10 @@ size_t DBGSuccinct::indegree(node_index node) const {
     if (x + 1 == boss_graph_->get_W().size())
         return first_valid;
 
-    uint64_t y = boss_graph_->succ_W(x + 1, d);
-    return first_valid + boss_graph_->rank_W(y - 1, d + boss_graph_->alph_size)
-                        - boss_graph_->rank_W(x - 1, d + boss_graph_->alph_size);
+    if (first_valid)
+        return boss_graph_->is_single_incoming(x);
+
+    return boss_graph_->num_incoming_to_target(x) == 2;
 }
 
 uint64_t DBGSuccinct::num_nodes() const {
@@ -368,8 +668,9 @@ bool DBGSuccinct::load(const std::string &filename) {
     if (!load_without_mask(filename))
         return false;
 
-    std::ifstream instream(remove_suffix(filename, kExtension) + kDummyMaskExtension,
-                           std::ios::binary);
+    auto prefix = remove_suffix(filename, kExtension);
+
+    std::ifstream instream(prefix + kDummyMaskExtension, std::ios::binary);
     if (!instream.good())
         return true;
 
@@ -404,12 +705,50 @@ bool DBGSuccinct::load(const std::string &filename) {
         return false;
     }
 
+    if (std::filesystem::exists(prefix + kBloomFilterExtension)) {
+        std::ifstream bloom_instream(prefix + kBloomFilterExtension, std::ios::binary);
+        if (!bloom_filter_)
+            bloom_filter_ = std::make_unique<KmerBloomFilter<>>(get_k(), canonical_mode_);
+
+        if (!bloom_filter_->load(bloom_instream)) {
+            std::cerr << "Error: failed to load Bloom filter from " + prefix + kBloomFilterExtension << std::endl;
+            return false;
+        }
+
+        assert(bloom_filter_);
+
+        if (bloom_filter_->is_canonical_mode() != is_canonical_mode()) {
+            std::cerr << "Error: Bloom filter and graph in opposite canonical modes" << std::endl
+                      << "Bloom filter: " << (bloom_filter_->is_canonical_mode() ? "not " : "") << "canonical" << std::endl
+                      << "Graph: " << (is_canonical_mode() ? "not " : "") << "canonical" << std::endl;
+            return false;
+        }
+
+        if (bloom_filter_->get_k() != get_k()) {
+            std::cerr << "Error: mismatched k between Bloom filter and graph" << std::endl
+                      << "Bloom filter: " << bloom_filter_->get_k() << std::endl
+                      << "Graph: " << get_k() << std::endl;
+            return false;
+        }
+
+        if (utils::get_verbose()) {
+            std::cout << "Bloom filter loaded from "
+                      << prefix + kBloomFilterExtension
+                      << " successfully" << std::endl;
+        }
+    }
+
     return true;
 }
 
 void DBGSuccinct::serialize(const std::string &filename) const {
+    auto prefix = remove_suffix(filename, kExtension);
+
+    // Clear any existing Bloom filters
+    std::filesystem::remove(prefix + kBloomFilterExtension);
+
     {
-        const auto out_filename = remove_suffix(filename, kExtension) + kExtension;
+        const auto out_filename = prefix + kExtension;
         std::ofstream outstream(out_filename, std::ios::binary);
         boss_graph_->serialize(outstream);
         serialize_number(outstream, canonical_mode_);
@@ -430,12 +769,20 @@ void DBGSuccinct::serialize(const std::string &filename) const {
         || (boss_graph_->get_state() == Config::StateType::SMALL
                 && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
 
-    const auto out_filename = remove_suffix(filename, kExtension) + kDummyMaskExtension;
+    const auto out_filename = prefix + kDummyMaskExtension;
     std::ofstream outstream(out_filename, std::ios::binary);
     if (!outstream.good())
         throw std::ios_base::failure("Can't write to file " + out_filename);
 
     valid_edges_->serialize(outstream);
+
+    if (bloom_filter_) {
+        std::ofstream bloom_outstream(prefix + kBloomFilterExtension, std::ios::binary);
+        if (!bloom_outstream.good())
+            throw std::ios_base::failure("Can't write to file " + prefix + kBloomFilterExtension);
+
+        bloom_filter_->serialize(bloom_outstream);
+    }
 }
 
 void DBGSuccinct::switch_state(Config::StateType new_state) {
@@ -494,29 +841,27 @@ Config::StateType DBGSuccinct::get_state() const {
 void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     valid_edges_.reset();
 
-    //TODO: use sdsl::bit_vector as mask
     auto vector_mask = with_pruning
         ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
         : boss_graph_->mark_all_dummy_edges(num_threads);
 
-    auto vector = to_sdsl(std::move(vector_mask));
-    vector.flip();
+    vector_mask.flip();
 
     switch (get_state()) {
         case Config::STAT: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
             break;
         }
         case Config::FAST: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
             break;
         }
         case Config::DYN: {
-            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector_mask));
             break;
         }
         case Config::SMALL: {
-            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector));
+            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
             break;
         }
     }
@@ -526,8 +871,12 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     assert(!(*valid_edges_)[0]);
 }
 
+void DBGSuccinct::reset_mask() {
+    valid_edges_.reset();
+}
+
 uint64_t DBGSuccinct::kmer_to_boss_index(node_index kmer_index) const {
-    assert(kmer_index <= num_nodes());
+    assert(in_graph(kmer_index));
 
     if (!valid_edges_.get() || !kmer_index)
         return kmer_index;
@@ -548,14 +897,60 @@ DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) con
     return valid_edges_->rank1(boss_index);
 }
 
+void DBGSuccinct
+::initialize_bloom_filter_from_fpr(double false_positive_rate,
+                                   size_t max_num_hash_functions) {
+    bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
+        get_k(),
+        canonical_mode_,
+        BloomFilter::optim_size(false_positive_rate, num_nodes()),
+        num_nodes(),
+        std::min(max_num_hash_functions, BloomFilter::optim_h(false_positive_rate))
+    );
+
+    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); },
+                   canonical_mode_);
+}
+
+void DBGSuccinct
+::initialize_bloom_filter(double bits_per_kmer,
+                          size_t max_num_hash_functions) {
+    bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
+        get_k(),
+        canonical_mode_,
+        bits_per_kmer * num_nodes(),
+        num_nodes(),
+        max_num_hash_functions
+    );
+
+    call_sequences([&](const auto &sequence, auto&&) { bloom_filter_->add_sequence(sequence); },
+                   canonical_mode_);
+}
+
 bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
+    if (get_k() != other.get_k()
+            || num_nodes() != other.num_nodes()
+            || is_canonical_mode() != other.is_canonical_mode())
+        return false;
+
     if (dynamic_cast<const DBGSuccinct*>(&other)) {
-        const auto& other_succ = *dynamic_cast<const DBGSuccinct*>(&other);
-        if (boss_graph_.get() == other_succ.boss_graph_.get())
+        const auto &other_succ = *dynamic_cast<const DBGSuccinct*>(&other);
+
+        if (this == &other_succ)
             return true;
 
-        if (!boss_graph_.get() || !other_succ.boss_graph_.get())
+        // only one of the mask vectors is defined
+        if (bool(valid_edges_.get()) != bool(other_succ.valid_edges_.get()))
             return false;
+
+        // different mask vectors
+        if (valid_edges_.get() && *valid_edges_ != *other_succ.valid_edges_)
+            return false;
+
+        // TODO: what if graphs have same real nodes, different
+        // sets of dummy nodes but they all are masked out?
+
+        assert(boss_graph_.get() && other_succ.boss_graph_.get());
 
         return boss_graph_->equals_internally(*other_succ.boss_graph_, false);
     }
@@ -603,4 +998,10 @@ void DBGSuccinct::print(std::ostream &out) const {
 
         out << std::endl;
     }
+}
+
+bool DBGSuccinct::in_graph(node_index node) const {
+    assert(node > 0 && node <= num_nodes());
+    std::ignore = node;
+    return true;
 }

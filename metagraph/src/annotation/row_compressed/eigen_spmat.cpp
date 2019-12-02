@@ -1,7 +1,7 @@
 #include "eigen_spmat.hpp"
 
+#include "algorithms.hpp"
 #include "serialization.hpp"
-#include "utils.hpp"
 
 
 EigenSpMat::EigenSpMat(uint64_t num_rows, uint64_t max_num_cols) {
@@ -27,11 +27,11 @@ void EigenSpMat::set(Row row, Column column) {
         num_columns_ = column + 1;
 }
 
-std::vector<EigenSpMat::Column>
+EigenSpMat::SetBitPositions
 EigenSpMat::get_row(Row row) const {
     assert(row < num_rows());
 
-    std::vector<Column> result;
+    SetBitPositions result;
     for (decltype(mat_)::InnerIterator it(mat_, row); it; ++it) {
         result.push_back(it.index());
     }

@@ -1,8 +1,8 @@
 #ifndef __BOSS_CHUNK_CONSTRUCT_HPP__
 #define __BOSS_CHUNK_CONSTRUCT_HPP__
 
-#include "dbg_construct.hpp"
-#include "boss_chunk.hpp"
+#include "graph/succinct/boss_chunk.hpp"
+#include "graph/base/dbg_construct.hpp"
 
 
 class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
@@ -18,7 +18,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                double memory_preallocated = 0,
                bool verbose = false);
 
-    virtual void add_sequence(std::string&& sequence) = 0;
+    virtual void add_sequence(std::string&& sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual BOSS::Chunk* build_chunk() = 0;

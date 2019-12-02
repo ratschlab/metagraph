@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 #include "serialization.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "vector_row_binmat.hpp"
 #include "eigen_spmat.hpp"
 #include "binary_matrix.hpp"
@@ -21,7 +21,19 @@ RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse)  {
     if (sparse) {
         matrix_.reset(new EigenSpMat(num_rows));
     } else {
-        matrix_.reset(new VectorRowBinMat(num_rows));
+        matrix_.reset(new VectorRowBinMat<>(num_rows));
+    }
+}
+
+template <typename Label>
+RowCompressed<Label>::RowCompressed(uint64_t num_rows,
+                                    const std::vector<Label> &labels,
+                                    std::function<void(CallRow)> call_rows)
+      : matrix_(new VectorRowBinMat<SetBitPositions>(num_rows,
+                                                     labels.size(),
+                                                     call_rows)) {
+    for (const auto &label : labels) {
+        label_encoder_.insert_and_encode(label);
     }
 }
 
@@ -30,7 +42,7 @@ void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
     if (dynamic_cast<EigenSpMat*>(matrix_.get())) {
         matrix_.reset(new EigenSpMat(num_rows));
     } else {
-        matrix_.reset(new VectorRowBinMat(num_rows));
+        matrix_.reset(new VectorRowBinMat<>(num_rows));
     }
 
     label_encoder_.clear();
@@ -42,16 +54,6 @@ void RowCompressed<Label>::set_labels(Index i, const VLabels &labels) {
 
     matrix_->clear_row(i);
     add_labels(i, labels);
-}
-
-template <typename Label>
-typename RowCompressed<Label>::VLabels
-RowCompressed<Label>::get_labels(Index i) const {
-    VLabels labels;
-    for (auto col : matrix_->get_row(i)) {
-        labels.push_back(label_encoder_.decode(col));
-    }
-    return labels;
 }
 
 template <typename Label>
@@ -92,17 +94,9 @@ void RowCompressed<Label>::add_labels_fast(const std::vector<Index> &indices,
         unique_indices.end()
     );
 
-    if (dynamic_cast<VectorRowBinMat*>(matrix_.get())) {
-        for (Index i : unique_indices) {
-            for (auto j : col_ids) {
-                dynamic_cast<VectorRowBinMat&>(*matrix_).force_set(i, j);
-            }
-        }
-    } else {
-        for (Index i : unique_indices) {
-            for (auto j : col_ids) {
-                matrix_->set(i, j);
-            }
+    for (Index i : unique_indices) {
+        for (auto j : col_ids) {
+            matrix_->force_set(i, j);
         }
     }
 }
@@ -160,14 +154,14 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
 
         assert(filenames.size() > 1);
 
-        if (!dynamic_cast<VectorRowBinMat*>(matrix_.get())) {
+        if (!dynamic_cast<VectorRowBinMat<>*>(matrix_.get())) {
             std::cerr << "Error: loading from multiple row annotators is supported"
                       << " only for the VectorRowBinMat representation" << std::endl;
             exit(1);
         }
 
-        auto &matrix = dynamic_cast<VectorRowBinMat&>(*matrix_);
-        auto next_block = std::make_unique<VectorRowBinMat>(matrix_->num_rows());
+        auto &matrix = dynamic_cast<VectorRowBinMat<>&>(*matrix_);
+        auto next_block = std::make_unique<VectorRowBinMat<>>(matrix_->num_rows());
 
         for (auto filename : filenames) {
             if (filename == filenames[0])
@@ -292,32 +286,33 @@ void RowCompressed<Label>::stream_counts(const std::string &filename,
     uint64_t &num_relations = *num_relations_;
     num_objects = 0;
     num_relations = 0;
-    const std::vector<VectorRowBinMat::Row> *row;
 
-    StreamRows sr(filename);
+    StreamRows<> sr(filename);
 
-    while ((row = sr.next_row())) {
+    while (auto *row = sr.next_row()) {
         num_objects++;
         num_relations += row->size();
     }
 }
 
 template <typename Label>
-RowCompressed<Label>
-::StreamRows::StreamRows(std::string filename) {
+template <typename RowType>
+RowCompressed<Label>::StreamRows<RowType>::StreamRows(std::string filename) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ifstream instream(filename, std::ios::binary);
     // skip header
     load_label_encoder(instream);
     // rows
-    sr_ = std::make_unique<VectorRowBinMat::StreamRows>(filename, instream.tellg());
+    sr_ = std::make_unique<::StreamRows<RowType>>(filename, instream.tellg());
 }
+
+template class RowCompressed<std::string>::StreamRows<BinaryMatrix::SetBitPositions>;
 
 template <typename Label>
 void RowCompressed<Label>
 ::write_rows(std::string filename,
              const LabelEncoder<Label> &label_encoder,
-             const std::function<void(BinaryMatrix::RowCallback&)> &call_rows) {
+             const std::function<void(BinaryMatrix::RowCallback)> &call_rows) {
     filename = remove_suffix(filename, kExtension) + kExtension;
 
     std::ofstream outstream(filename, std::ios::binary);
@@ -327,7 +322,7 @@ void RowCompressed<Label>
     label_encoder.serialize(outstream);
     outstream.close();
 
-    VectorRowBinMat::append_matrix(filename, call_rows, label_encoder.size());
+    append_row_major(filename, call_rows, label_encoder.size());
 }
 
 template class RowCompressed<std::string>;

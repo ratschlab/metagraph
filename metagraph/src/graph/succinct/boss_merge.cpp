@@ -3,7 +3,7 @@
 #include <thread>
 #include <mutex>
 
-#include "utils.hpp"
+#include "utils/algorithms.hpp"
 
 using TAlphabet = BOSS::TAlphabet;
 
@@ -256,7 +256,8 @@ BOSS::Chunk* merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
         std::cout << "Collecting results" << std::endl;
 
     BOSS::Chunk *result = new BOSS::Chunk(graphs.at(0)->alph_size,
-                                          graphs.at(0)->get_k());
+                                          graphs.at(0)->get_k(),
+                                          false);
     concatenate_boss_chunks(blocks, result);
     return result;
 }
@@ -296,10 +297,7 @@ std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const
             continue;
 
         for (TAlphabet a = 0; a < alph_size; a++) {
-            uint64_t pred_pos = std::max(
-                Gv.at(i)->pred_W(kv.at(i) - 1, a),
-                Gv.at(i)->pred_W(kv.at(i) - 1, a + alph_size)
-            );
+            uint64_t pred_pos = Gv.at(i)->pred_W(kv.at(i) - 1, a, a + alph_size);
             if (pred_pos == 0)
                 continue;
 
@@ -320,7 +318,9 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
 
-    BOSS::Chunk *chunk = new BOSS::Chunk(Gv.at(0)->alph_size, Gv.at(0)->get_k());
+    BOSS::Chunk *chunk = new BOSS::Chunk(Gv.at(0)->alph_size,
+                                         Gv.at(0)->get_k(),
+                                         false);
 
     const size_t alph_size = Gv.at(0)->alph_size;
 

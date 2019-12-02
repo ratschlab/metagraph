@@ -3,6 +3,7 @@
 !metagraph/tests/data/*.fa
 !metagraph/tests/data/*.fai
 metagraph/tests/data/*dump_test*
+projects/*/temp
 visualization/geolocation/data/*
 .history
 */metagraph
@@ -18,6 +19,7 @@ database-cli
 *.DS_Store
 *._*
 metagraph/build*
+metagraph/**/build*
 .*.swp
 .ipynb_checkpoints
 *lsf.o*
@@ -31,3 +33,5 @@ metagraph/KMC/
 
 # CMake (by CLion)
 cmake-build-*/
+**/cmake-build-debug
+.idea

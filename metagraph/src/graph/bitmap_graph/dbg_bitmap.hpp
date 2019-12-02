@@ -53,18 +53,20 @@ class DBGBitmap : public DeBruijnGraph {
     // Traverse the incoming edge
     node_index traverse_back(node_index node, char prev_char) const;
 
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the outgoing edges and pushes back indices of their target nodes.
+    // Given a node index, call the target nodes of all edges outgoing from it.
     void adjacent_outgoing_nodes(node_index node,
-                                 std::vector<node_index> *target_nodes) const;
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the incoming edges and pushes back indices of their source nodes.
+                                 const std::function<void(node_index)> &callback) const;
+    // Given a node index, call the source nodes of all edges incoming to it.
     void adjacent_incoming_nodes(node_index node,
-                                 std::vector<node_index> *source_nodes) const;
+                                 const std::function<void(node_index)> &callback) const;
 
-    size_t outdegree(node_index node) const;
+    size_t outdegree(node_index) const;
+    bool has_single_outgoing(node_index) const;
+    bool has_multiple_outgoing(node_index) const;
 
-    size_t indegree(node_index node) const;
+    size_t indegree(node_index) const;
+    bool has_no_incoming(node_index) const;
+    bool has_single_incoming(node_index) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
 
@@ -75,6 +77,7 @@ class DBGBitmap : public DeBruijnGraph {
 
     uint64_t num_nodes() const;
 
+    bool in_graph(node_index node) const;
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -104,8 +107,8 @@ class DBGBitmap : public DeBruijnGraph {
   private:
     using Kmer = KmerExtractor2Bit::Kmer64;
 
-    Vector<Kmer> sequence_to_kmers(const std::string &sequence,
-                                   bool canonical = false) const;
+    Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
+                                                    bool canonical = false) const;
 
     uint64_t node_to_index(node_index node) const;
     Kmer node_to_kmer(node_index node) const;

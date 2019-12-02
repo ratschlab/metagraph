@@ -11,32 +11,37 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
 
     static IBitmapChunkConstructor* initialize(size_t k,
                                                bool canonical_mode = false,
+                                               bool count_kmers = false,
                                                const std::string &filter_suffix = "",
                                                size_t num_threads = 1,
                                                double memory_preallocated = 0,
                                                bool verbose = false);
 
-    virtual void add_sequence(std::string&& sequence) = 0;
+    virtual void add_sequence(std::string&& sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual DBGBitmap::Chunk* build_chunk() = 0;
 
     virtual size_t get_k() const = 0;
     virtual bool is_canonical_mode() const = 0;
+
+    virtual sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8) = 0;
 };
 
 
 class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
   public:
+    // Don't count k-mers if |bits_per_count| is zero.
     DBGBitmapConstructor(size_t k,
                          bool canonical_mode = false,
+                         uint8_t bits_per_count = 0,
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
                          double memory_preallocated = 0,
                          bool verbose = false);
 
-    void add_sequence(std::string&& sequence) {
-        constructor_->add_sequence(std::move(sequence));
+    void add_sequence(std::string&& sequence, uint64_t count = 1) {
+        constructor_->add_sequence(std::move(sequence), count);
     }
 
     void add_sequences(const std::vector<std::string> &sequences) {
@@ -65,6 +70,7 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
 
   private:
     std::unique_ptr<IBitmapChunkConstructor> constructor_;
+    uint8_t bits_per_count_;
 };
 
 #endif // __DBG_BITMAP_CONSTRUCT_HPP__

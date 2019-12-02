@@ -1,8 +1,8 @@
 #ifndef __BOSS_CONSTRUCT_HPP__
 #define __BOSS_CONSTRUCT_HPP__
 
-#include "dbg_construct.hpp"
-#include "boss_chunk_construct.hpp"
+#include "graph/succinct/boss_chunk_construct.hpp"
+#include "graph/base/dbg_construct.hpp"
 
 
 class BOSSConstructor : public IGraphConstructor<BOSS> {
@@ -12,8 +12,8 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     BOSSConstructor(const Args&... args)
       : constructor_(IBOSSChunkConstructor::initialize(args...)) {}
 
-    void add_sequence(std::string&& sequence) {
-        constructor_->add_sequence(std::move(sequence));
+    void add_sequence(std::string&& sequence, uint64_t count = 1) {
+        constructor_->add_sequence(std::move(sequence), count);
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {
@@ -45,7 +45,7 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     static BOSS* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                                          bool verbose = false,
                                          sdsl::int_vector<> *weights = nullptr) {
-        return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose, weights);
+        return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose, weights).first;
     }
 
   private:

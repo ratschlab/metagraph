@@ -4,9 +4,22 @@
 #include "bit_vector.hpp"
 #include "threading.hpp"
 
-
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
+
+
+template <typename Bitmap>
+class BitVectorTest : public ::testing::Test { };
+
+typedef ::testing::Types<bit_vector_stat,
+                         bit_vector_dyn,
+                         bit_vector_sd,
+                         bit_vector_rrr<>,
+                         bit_vector_small,
+                         bit_vector_smart>
+        BitVectorTypes;
+
+TYPED_TEST_CASE(BitVectorTest, BitVectorTypes);
 
 
 void test_next_subvector(const bit_vector &vector, uint64_t idx) {
@@ -37,6 +50,11 @@ void test_next(const bit_vector &vector) {
     ASSERT_DEATH(vector.next1(vector.size() * 2), "");
 
     test_next_subvector(vector, 0);
+    test_next_subvector(vector, 0);
+    if (vector.size() >= 64)
+        test_next_subvector(vector, 63);
+    if (vector.size() >= 128)
+        test_next_subvector(vector, 127);
     test_next_subvector(vector, vector.size() / 5);
     test_next_subvector(vector, vector.size() / 2);
     test_next_subvector(vector, vector.size() * 2 / 3);
@@ -74,6 +92,10 @@ void test_prev(const bit_vector &vector) {
     ASSERT_DEATH(vector.prev1(vector.size() * 2), "");
 
     test_prev_subvector(vector, 0);
+    if (vector.size() >= 64)
+        test_prev_subvector(vector, 63);
+    if (vector.size() >= 128)
+        test_prev_subvector(vector, 127);
     test_prev_subvector(vector, vector.size() / 5);
     test_prev_subvector(vector, vector.size() / 2);
     test_prev_subvector(vector, vector.size() * 2 / 3);
@@ -180,28 +202,8 @@ void test_bit_vector_queries() {
 }
 
 
-TEST(bit_vector_dyn, queries) {
-    test_bit_vector_queries<bit_vector_dyn>();
-}
-
-TEST(bit_vector_stat, queries) {
-    test_bit_vector_queries<bit_vector_stat>();
-}
-
-TEST(bit_vector_sd, queries) {
-    test_bit_vector_queries<bit_vector_sd>();
-}
-
-TEST(bit_vector_rrr, queries) {
-    test_bit_vector_queries<bit_vector_rrr<>>();
-}
-
-TEST(bit_vector_small, queries) {
-    test_bit_vector_queries<bit_vector_small>();
-}
-
-TEST(bit_vector_smart, queries) {
-    test_bit_vector_queries<bit_vector_smart>();
+TYPED_TEST(BitVectorTest, queries) {
+    test_bit_vector_queries<TypeParam>();
 }
 
 TEST(bit_vector_rrr, nonCommonQueries) {
@@ -465,7 +467,7 @@ TEST(bit_vector_dyn, Serialization) {
     }
 }
 
-TEST(bit_vector_stat, Serialization) {
+TYPED_TEST(BitVectorTest, Serialization) {
     std::vector<std::initializer_list<bool>> init_lists = {
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
@@ -476,13 +478,13 @@ TEST(bit_vector_stat, Serialization) {
     };
     for (auto init_list : init_lists) {
         sdsl::bit_vector numbers(init_list);
-        std::unique_ptr<bit_vector> vector { new bit_vector_stat(numbers) };
+        std::unique_ptr<bit_vector> vector { new TypeParam(numbers) };
         ASSERT_TRUE(vector);
         std::ofstream outstream(test_dump_basename, std::ios::binary);
         vector->serialize(outstream);
         outstream.close();
 
-        vector.reset(new bit_vector_stat());
+        vector.reset(new TypeParam());
         ASSERT_TRUE(vector);
         std::ifstream instream(test_dump_basename, std::ios::binary);
         ASSERT_TRUE(vector->load(instream));
@@ -490,123 +492,6 @@ TEST(bit_vector_stat, Serialization) {
         reference_based_test(*vector, numbers);
     }
 }
-
-TEST(bit_vector_sd, Serialization) {
-    std::vector<std::initializer_list<bool>> init_lists = {
-        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
-    };
-    for (auto init_list : init_lists) {
-        sdsl::bit_vector numbers(init_list);
-        bit_vector *vector = new bit_vector_sd(numbers);
-        ASSERT_EQ(16u, numbers.size());
-        ASSERT_TRUE(vector);
-        std::ofstream outstream(test_dump_basename, std::ios::binary);
-        vector->serialize(outstream);
-        outstream.close();
-        delete vector;
-
-        vector = new bit_vector_sd;
-        ASSERT_TRUE(vector);
-        std::ifstream instream(test_dump_basename, std::ios::binary);
-        ASSERT_TRUE(vector->load(instream));
-
-        reference_based_test(*vector, numbers);
-
-        delete vector;
-    }
-}
-
-TEST(bit_vector_rrr, Serialization) {
-    std::vector<std::initializer_list<bool>> init_lists = {
-        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
-    };
-    for (auto init_list : init_lists) {
-        sdsl::bit_vector numbers(init_list);
-        bit_vector *vector = new bit_vector_rrr<>(numbers);
-        ASSERT_EQ(16u, numbers.size());
-        ASSERT_TRUE(vector);
-        std::ofstream outstream(test_dump_basename, std::ios::binary);
-        vector->serialize(outstream);
-        outstream.close();
-        delete vector;
-
-        vector = new bit_vector_rrr<>;
-        ASSERT_TRUE(vector);
-        std::ifstream instream(test_dump_basename, std::ios::binary);
-        ASSERT_TRUE(vector->load(instream));
-
-        reference_based_test(*vector, numbers);
-
-        delete vector;
-    }
-}
-
-TEST(bit_vector_small, Serialization) {
-    std::vector<std::initializer_list<bool>> init_lists = {
-        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
-    };
-    for (auto init_list : init_lists) {
-        sdsl::bit_vector numbers(init_list);
-        bit_vector *vector = new bit_vector_small(numbers);
-        ASSERT_EQ(16u, numbers.size());
-        ASSERT_TRUE(vector);
-        std::ofstream outstream(test_dump_basename, std::ios::binary);
-        vector->serialize(outstream);
-        outstream.close();
-        delete vector;
-
-        vector = new bit_vector_small;
-        ASSERT_TRUE(vector);
-        std::ifstream instream(test_dump_basename, std::ios::binary);
-        ASSERT_TRUE(vector->load(instream));
-
-        reference_based_test(*vector, numbers);
-
-        delete vector;
-    }
-}
-
-TEST(bit_vector_smart, Serialization) {
-    std::vector<std::initializer_list<bool>> init_lists = {
-        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
-    };
-    for (auto init_list : init_lists) {
-        sdsl::bit_vector numbers(init_list);
-        bit_vector *vector = new bit_vector_smart(numbers);
-        ASSERT_EQ(16u, numbers.size());
-        ASSERT_TRUE(vector);
-        std::ofstream outstream(test_dump_basename, std::ios::binary);
-        vector->serialize(outstream);
-        outstream.close();
-        delete vector;
-
-        vector = new bit_vector_smart;
-        ASSERT_TRUE(vector);
-        std::ifstream instream(test_dump_basename, std::ios::binary);
-        ASSERT_TRUE(vector->load(instream));
-
-        reference_based_test(*vector, numbers);
-
-        delete vector;
-    }
-}
-
 
 TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
     std::vector<std::initializer_list<bool>> init_lists = {
@@ -640,111 +525,22 @@ TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
 }
 
 
-TEST(bit_vector_stat, MoveConstructor) {
+TYPED_TEST(BitVectorTest, MoveConstructor) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     sdsl::bit_vector numbers(init_list);
-    bit_vector_stat vector(numbers);
-    reference_based_test(vector, numbers);
-}
-
-TEST(bit_vector_dyn, MoveConstructor) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_dyn vector(numbers);
-    reference_based_test(vector, numbers);
-}
-
-TEST(bit_vector_sd, MoveConstructor) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_sd vector(numbers);
-    reference_based_test(vector, numbers);
-}
-
-TEST(bit_vector_rrr, MoveConstructor) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_rrr<> vector(numbers);
-    reference_based_test(vector, numbers);
-}
-
-TEST(bit_vector_small, MoveConstructor) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_small vector(numbers);
-    reference_based_test(vector, numbers);
-}
-
-TEST(bit_vector_smart, MoveConstructor) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_smart vector(numbers);
-    reference_based_test(vector, numbers);
-}
-
-
-TEST(bit_vector_stat, MoveAssignment) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_stat first(numbers);
-    bit_vector_stat second;
-    second = std::move(first);
+    TypeParam first(numbers);
+    TypeParam second(std::move(first));
     reference_based_test(second, numbers);
 }
 
-TEST(bit_vector_dyn, MoveAssignment) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_dyn first(numbers);
-    bit_vector_dyn second;
-    second = std::move(first);
-    reference_based_test(second, numbers);
-}
 
-TEST(bit_vector_sd, MoveAssignment) {
+TYPED_TEST(BitVectorTest, MoveAssignment) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     sdsl::bit_vector numbers(init_list);
-    bit_vector_sd first(numbers);
-    bit_vector_sd second;
-    second = std::move(first);
-    reference_based_test(second, numbers);
-}
-
-TEST(bit_vector_rrr, MoveAssignment) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_rrr<> first(numbers);
-    bit_vector_rrr<> second;
-    second = std::move(first);
-    reference_based_test(second, numbers);
-}
-
-TEST(bit_vector_small, MoveAssignment) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_small first(numbers);
-    bit_vector_small second;
-    second = std::move(first);
-    reference_based_test(second, numbers);
-}
-
-TEST(bit_vector_smart, MoveAssignment) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_smart first(numbers);
-    bit_vector_smart second;
+    TypeParam first(numbers);
+    TypeParam second;
     second = std::move(first);
     reference_based_test(second, numbers);
 }
@@ -888,147 +684,42 @@ TEST(bit_vector_sd, CheckIfInverts) {
     }
 }
 
-TEST(bit_vector_sd, to_vector_dense) {
+TYPED_TEST(BitVectorTest, to_vector_dense) {
     sdsl::bit_vector vector(10, true);
     for (uint64_t i = 0; i < 10; ++i) {
         vector[i] = i % 3;
-        bit_vector_sd bvs(vector);
-        ASSERT_TRUE(bvs.is_inverted());
+        TypeParam bvs(vector);
+        if constexpr(std::is_same_v<TypeParam, bit_vector_sd>) {
+            ASSERT_TRUE(bvs.is_inverted());
+        }
         auto copy = bvs.to_vector();
         // check if the it inverts when more than half of the bits are set
         ASSERT_EQ(copy, vector);
     }
 }
 
-TEST(bit_vector_sd, to_vector_sparse) {
+TYPED_TEST(BitVectorTest, to_vector_sparse) {
     sdsl::bit_vector vector(10);
     for (uint64_t i = 0; i < 10; ++i) {
         vector[i] = (i % 3) == 0;
-        bit_vector_sd bvs(vector);
-        ASSERT_FALSE(bvs.is_inverted());
+        TypeParam bvs(vector);
+        if constexpr(std::is_same_v<TypeParam, bit_vector_sd>) {
+            ASSERT_FALSE(bvs.is_inverted());
+        }
         auto copy = bvs.to_vector();
         // check if the it inverts when more than half of the bits are set
         ASSERT_EQ(copy, vector);
     }
 }
 
-TEST(bit_vector_small, to_vector_dense) {
-    sdsl::bit_vector vector(10, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_small bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_small, to_vector_sparse) {
-    sdsl::bit_vector vector(10);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = (i % 3) == 0;
-        bit_vector_small bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_smart, to_vector_dense) {
-    sdsl::bit_vector vector(10, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_smart bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_smart, to_vector_sparse) {
-    sdsl::bit_vector vector(10);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = (i % 3) == 0;
-        bit_vector_smart bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-
-TEST(bit_vector_rrr, to_vector_dense) {
-    sdsl::bit_vector vector(10, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_rrr<> bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_rrr, to_vector_sparse) {
-    sdsl::bit_vector vector(10);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = (i % 3) == 0;
-        bit_vector_rrr<> bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_stat, to_vector_dense) {
-    sdsl::bit_vector vector(10, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_stat bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_stat, to_vector_sparse) {
-    sdsl::bit_vector vector(10);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = (i % 3) == 0;
-        bit_vector_stat bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_dyn, to_vector_dense) {
-    sdsl::bit_vector vector(10, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_dyn bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_dyn, to_vector_sparse) {
-    sdsl::bit_vector vector(10);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = (i % 3) == 0;
-        bit_vector_dyn bvs(vector);
-        auto copy = bvs.to_vector();
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-
-TEST(bit_vector_small, call_ones_dense) {
+TYPED_TEST(BitVectorTest, call_ones_dense) {
     sdsl::bit_vector vector(50, true);
     for (uint64_t i = 0; i < 10; ++i) {
         vector[i] = i % 3;
-        bit_vector_small bvs(vector);
+        TypeParam bvs(vector);
+        if constexpr(std::is_same_v<TypeParam, bit_vector_sd>) {
+            ASSERT_TRUE(bvs.is_inverted());
+        }
         sdsl::bit_vector copy(vector.size(), false);
         bvs.call_ones([&copy](auto i) { copy[i] = true; });
         // check if the it inverts when more than half of the bits are set
@@ -1036,11 +727,14 @@ TEST(bit_vector_small, call_ones_dense) {
     }
 }
 
-TEST(bit_vector_small, call_ones_sparse) {
+TYPED_TEST(BitVectorTest, call_ones_sparse) {
     sdsl::bit_vector vector(50);
     for (uint64_t i = 0; i < 10; ++i) {
         vector[i] = i % 3 == 0;
-        bit_vector_small bvs(vector);
+        TypeParam bvs(vector);
+        if constexpr(std::is_same_v<TypeParam, bit_vector_sd>) {
+            ASSERT_FALSE(bvs.is_inverted());
+        }
         sdsl::bit_vector copy(vector.size(), false);
         bvs.call_ones([&copy](auto i) { copy[i] = true; });
         // check if the it inverts when more than half of the bits are set
@@ -1048,148 +742,14 @@ TEST(bit_vector_small, call_ones_sparse) {
     }
 }
 
-TEST(bit_vector_smart, call_ones_dense) {
-    sdsl::bit_vector vector(50, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_smart bvs(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_smart, call_ones_sparse) {
-    sdsl::bit_vector vector(50);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3 == 0;
-        bit_vector_smart bvs(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_sd, call_ones_dense) {
-    sdsl::bit_vector vector(50, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_sd bvs(vector);
-        ASSERT_TRUE(bvs.is_inverted());
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_sd, call_ones_sparse) {
-    sdsl::bit_vector vector(50);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3 == 0;
-        bit_vector_sd bvs(vector);
-        ASSERT_FALSE(bvs.is_inverted());
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_rrr, call_ones_dense) {
-    sdsl::bit_vector vector(50, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_rrr<> bvs(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_rrr, call_ones_sparse) {
-    sdsl::bit_vector vector(50);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3 == 0;
-        bit_vector_rrr<> bvs(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_dyn, call_ones_dense) {
-    sdsl::bit_vector vector(50, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_dyn bvs(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_dyn, call_ones_sparse) {
-    sdsl::bit_vector vector(50);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3 == 0;
-        bit_vector_dyn bvs(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_stat, call_ones_dense) {
-    sdsl::bit_vector vector(50, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bit_vector_stat bvs(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bit_vector_stat, call_ones_sparse) {
-    sdsl::bit_vector vector(50);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3 == 0;
-        bit_vector_stat bvs(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bvs.call_ones([&copy](auto i) { copy[i] = true; });
-        // check if the it inverts when more than half of the bits are set
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-template <class BitVector>
-void test_deep_copy() {
-    auto bv_ptr = std::make_unique<BitVector>(sdsl::bit_vector(10, 1));
+TYPED_TEST(BitVectorTest, copy) {
+    auto bv_ptr = std::make_unique<TypeParam>(sdsl::bit_vector(10, 1));
 
     auto bv_copy = bv_ptr->copy();
 
-    ASSERT_TRUE(dynamic_cast<BitVector*>(bv_copy.get()));
+    ASSERT_TRUE(dynamic_cast<TypeParam*>(bv_copy.get()));
     ASSERT_EQ(10u, bv_copy->rank1(9));
     ASSERT_EQ(0u, bv_copy->rank0(9));
-}
-
-TEST(bit_vector, copy) {
-    std::unique_ptr<bit_vector> bv_copy;
-
-    test_deep_copy<bit_vector_stat>();
-    test_deep_copy<bit_vector_dyn>();
-    test_deep_copy<bit_vector_sd>();
-    test_deep_copy<bit_vector_rrr<>>();
-    test_deep_copy<bit_vector_small>();
-    test_deep_copy<bit_vector_smart>();
 }
 
 template <class BitVectorFrom, class BitVectorTo>
@@ -1214,50 +774,13 @@ void test_copy_convert_to() {
     }
 }
 
-TEST(bit_vector, copy_to) {
-    std::unique_ptr<bit_vector> bv_copy;
-
-    test_copy_convert_to< bit_vector_stat, bit_vector_stat >();
-    test_copy_convert_to< bit_vector_stat, bit_vector_dyn >();
-    test_copy_convert_to< bit_vector_stat, bit_vector_sd >();
-    test_copy_convert_to< bit_vector_stat, bit_vector_rrr<> >();
-    test_copy_convert_to< bit_vector_stat, bit_vector_small >();
-    test_copy_convert_to< bit_vector_stat, bit_vector_smart >();
-
-    test_copy_convert_to< bit_vector_dyn, bit_vector_stat >();
-    test_copy_convert_to< bit_vector_dyn, bit_vector_dyn >();
-    test_copy_convert_to< bit_vector_dyn, bit_vector_sd >();
-    test_copy_convert_to< bit_vector_dyn, bit_vector_rrr<> >();
-    test_copy_convert_to< bit_vector_dyn, bit_vector_small >();
-    test_copy_convert_to< bit_vector_dyn, bit_vector_smart >();
-
-    test_copy_convert_to< bit_vector_sd, bit_vector_stat >();
-    test_copy_convert_to< bit_vector_sd, bit_vector_dyn >();
-    test_copy_convert_to< bit_vector_sd, bit_vector_sd >();
-    test_copy_convert_to< bit_vector_sd, bit_vector_rrr<> >();
-    test_copy_convert_to< bit_vector_sd, bit_vector_small >();
-    test_copy_convert_to< bit_vector_sd, bit_vector_smart >();
-
-    test_copy_convert_to< bit_vector_rrr<>, bit_vector_stat >();
-    test_copy_convert_to< bit_vector_rrr<>, bit_vector_dyn >();
-    test_copy_convert_to< bit_vector_rrr<>, bit_vector_sd >();
-    test_copy_convert_to< bit_vector_rrr<>, bit_vector_rrr<> >();
-    test_copy_convert_to< bit_vector_rrr<>, bit_vector_small >();
-    test_copy_convert_to< bit_vector_rrr<>, bit_vector_smart >();
-
-    test_copy_convert_to< bit_vector_small, bit_vector_stat >();
-    test_copy_convert_to< bit_vector_small, bit_vector_dyn >();
-    test_copy_convert_to< bit_vector_small, bit_vector_sd >();
-    test_copy_convert_to< bit_vector_small, bit_vector_rrr<> >();
-    test_copy_convert_to< bit_vector_small, bit_vector_small >();
-    test_copy_convert_to< bit_vector_small, bit_vector_smart >();
-
-    test_copy_convert_to< bit_vector_smart, bit_vector_stat >();
-    test_copy_convert_to< bit_vector_smart, bit_vector_dyn >();
-    test_copy_convert_to< bit_vector_smart, bit_vector_sd >();
-    test_copy_convert_to< bit_vector_smart, bit_vector_rrr<> >();
-    test_copy_convert_to< bit_vector_smart, bit_vector_small >();
-    test_copy_convert_to< bit_vector_smart, bit_vector_smart >();
+TYPED_TEST(BitVectorTest, copy_to) {
+    test_copy_convert_to< TypeParam, bit_vector_stat >();
+    test_copy_convert_to< TypeParam, bit_vector_dyn >();
+    test_copy_convert_to< TypeParam, bit_vector_sd >();
+    test_copy_convert_to< TypeParam, bit_vector_rrr<> >();
+    test_copy_convert_to< TypeParam, bit_vector_small >();
+    test_copy_convert_to< TypeParam, bit_vector_smart >();
 }
 
 TEST(bit_vector, inner_prod_empty) {
@@ -1513,5 +1036,77 @@ TEST(bit_vector, inner_prod_disjoint) {
             second.data()[i] = ~val;
         }
         EXPECT_EQ(0u, inner_prod(first, second));
+    }
+}
+
+TYPED_TEST(BitVectorTest, operator_eq) {
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 100000 }) {
+        for (bool value : { false, true }) {
+            const TypeParam bit_vector(size, value);
+
+            EXPECT_EQ(bit_vector, bitmap_vector(size, value));
+            EXPECT_EQ(bit_vector, bitmap_set(size, value));
+            EXPECT_EQ(bit_vector, bitmap_adaptive(size, value));
+            EXPECT_EQ(bit_vector, bitmap_lazy([value](uint64_t) { return value; }, size, size * value));
+            EXPECT_EQ(bit_vector, bit_vector_stat(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_dyn(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_sd(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_rrr<>(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_small(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_smart(size, value));
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, operator_neq) {
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 100000 }) {
+        bool value = false;
+
+        const TypeParam bit_vector(size + 1, false);
+
+        EXPECT_NE(bit_vector, bitmap_vector(size, value));
+        EXPECT_NE(bit_vector, bitmap_set(size, value));
+        EXPECT_NE(bit_vector, bitmap_adaptive(size, value));
+        EXPECT_NE(bit_vector, bitmap_lazy([value](uint64_t) { return value; }, size, size * value));
+        EXPECT_NE(bit_vector, bit_vector_stat(size, value));
+        EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
+        EXPECT_NE(bit_vector, bit_vector_sd(size, value));
+        EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+        EXPECT_NE(bit_vector, bit_vector_small(size, value));
+        EXPECT_NE(bit_vector, bit_vector_smart(size, value));
+    }
+
+    for (uint64_t size : { 0, 10, 64, 120, 128, 1000, 10000, 100000 }) {
+        bool value = false;
+
+        const TypeParam bit_vector(size + 1, true);
+
+        EXPECT_NE(bit_vector, bitmap_vector(size, value));
+        EXPECT_NE(bit_vector, bitmap_set(size, value));
+        EXPECT_NE(bit_vector, bitmap_adaptive(size, value));
+        EXPECT_NE(bit_vector, bitmap_lazy([value](uint64_t) { return value; }, size, size * value));
+        EXPECT_NE(bit_vector, bit_vector_stat(size, value));
+        EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
+        EXPECT_NE(bit_vector, bit_vector_sd(size, value));
+        EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+        EXPECT_NE(bit_vector, bit_vector_small(size, value));
+        EXPECT_NE(bit_vector, bit_vector_smart(size, value));
+    }
+
+    for (uint64_t size : { 10, 64, 120, 128, 1000, 10000, 100000 }) {
+        for (bool value : { false, true }) {
+            const TypeParam bit_vector(size, !value);
+
+            EXPECT_NE(bit_vector, bitmap_vector(size, value));
+            EXPECT_NE(bit_vector, bitmap_set(size, value));
+            EXPECT_NE(bit_vector, bitmap_adaptive(size, value));
+            EXPECT_NE(bit_vector, bitmap_lazy([value](uint64_t) { return value; }, size, size * value));
+            EXPECT_NE(bit_vector, bit_vector_stat(size, value));
+            EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
+            EXPECT_NE(bit_vector, bit_vector_sd(size, value));
+            EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+            EXPECT_NE(bit_vector, bit_vector_small(size, value));
+            EXPECT_NE(bit_vector, bit_vector_smart(size, value));
+        }
     }
 }

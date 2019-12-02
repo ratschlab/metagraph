@@ -65,11 +65,20 @@ template <typename IndexType, typename LabelType>
 void MultiLabelEncoded<IndexType, LabelType>
 ::rename_labels(const std::unordered_map<Label, Label> &dict) {
     std::vector<Label> index_to_label(label_encoder_.size());
+    // old labels
     for (size_t i = 0; i < index_to_label.size(); ++i) {
         index_to_label[i] = label_encoder_.decode(i);
     }
+    // new labels
     for (const auto &pair : dict) {
-        index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+        try {
+            index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+        } catch (const std::runtime_error&) {
+            std::cerr << "Warning: label '" << pair.first << "' not"
+                      << " found in annotation. Skipping instruction"
+                      << " '" << pair.first << " -> " << pair.second << "'."
+                      << std::endl;
+        }
     }
 
     label_encoder_.clear();
@@ -95,7 +104,7 @@ void MultiLabelEncoded<IndexType, LabelType>
 template <typename IndexType, typename LabelType>
 void MultiLabelEncoded<IndexType, LabelType>
 ::call_rows(const std::vector<Index> &indices,
-            const std::function<void(std::vector<uint64_t>&&)> &row_callback,
+            const std::function<void(SetBitPositions&&)> &row_callback,
             const std::function<bool()> &terminate) const {
     for (Index i : indices) {
         if (terminate())
@@ -105,13 +114,12 @@ void MultiLabelEncoded<IndexType, LabelType>
     }
 }
 
-template <typename Annotator>
-class IterateRowsByIndex : public IterateRows {
+template <class Annotator>
+class IterateRowsByIndex : public Annotator::IterateRows {
   public:
-    IterateRowsByIndex(const Annotator &annotator)
-          : annotator_(annotator) {};
+    IterateRowsByIndex(const Annotator &annotator) : annotator_(annotator) {};
 
-    std::vector<uint64_t> next_row() override final {
+    typename Annotator::SetBitPositions next_row() override final {
         return annotator_.get_label_codes(i_++);
     };
 
@@ -121,10 +129,127 @@ class IterateRowsByIndex : public IterateRows {
 };
 
 template <typename IndexType, typename LabelType>
-std::unique_ptr<IterateRows>
+std::unique_ptr<typename MultiLabelEncoded<IndexType, LabelType>::IterateRows>
 MultiLabelEncoded<IndexType, LabelType>::iterator() const {
     return std::make_unique<IterateRowsByIndex<MultiLabelEncoded<IndexType, LabelType>>>(*this);
-};
+}
+
+// calls get_label_codes(i)
+template <typename IndexType, typename LabelType>
+typename MultiLabelEncoded<IndexType, LabelType>::VLabels
+MultiLabelEncoded<IndexType, LabelType>::get_labels(Index i) const {
+    assert(i < this->num_objects());
+
+    const auto &label_codes = get_label_codes(i);
+
+    VLabels labels(label_codes.size());
+
+    for (size_t j = 0; j < label_codes.size(); ++j) {
+        labels[j] = label_encoder_.decode(label_codes[j]);
+    }
+
+    return labels;
+}
+
+// calls get_label_codes(indices)
+template <typename IndexType, typename LabelType>
+std::vector<typename MultiLabelEncoded<IndexType, LabelType>::VLabels>
+MultiLabelEncoded<IndexType, LabelType>
+::get_labels(const std::vector<Index> &indices) const {
+    auto rows = get_label_codes(indices);
+
+    std::vector<VLabels> annotation(rows.size());
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        auto row = std::move(rows[i]);
+
+        annotation[i].reserve(row.size());
+        for (auto label_code : row) {
+            annotation[i].push_back(label_encoder_.decode(label_code));
+        }
+    }
+
+    return annotation;
+}
+
+template <typename IndexType, typename LabelType>
+std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
+MultiLabelEncoded<IndexType, LabelType>
+::count_labels(const std::unordered_map<Index, size_t> &index_counts,
+               size_t min_count,
+               size_t count_cap) const {
+
+    min_count = std::max(min_count, size_t(1));
+
+    assert(count_cap >= min_count);
+
+    size_t total_sum_count = 0;
+    for (const auto &pair : index_counts) {
+        total_sum_count += pair.second;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
+
+    std::vector<uint64_t> indices(index_counts.size());
+    std::transform(index_counts.begin(), index_counts.end(), indices.begin(),
+                   [](const auto &pair) { return pair.first; });
+
+    std::vector<size_t> code_counts(this->num_labels(), 0);
+    size_t max_matched = 0;
+    size_t total_checked = 0;
+
+    auto it = index_counts.begin();
+    call_rows(
+        indices,
+        [&](const auto &row) {
+            assert(it != index_counts.end());
+
+            for (size_t label_code : row) {
+                assert(label_code < code_counts.size());
+
+                code_counts[label_code] += it->second;
+                max_matched = std::max(max_matched, code_counts[label_code]);
+            }
+
+            total_checked += it->second;
+
+            ++it;
+        },
+        [&]() { return max_matched + (total_sum_count - total_checked) < min_count; }
+    );
+
+    if (max_matched < min_count)
+        return {};
+
+    std::vector<std::pair<uint64_t, size_t>> label_counts;
+    label_counts.reserve(code_counts.size());
+
+    for (size_t label_code = 0; label_code < code_counts.size(); ++label_code) {
+        if (code_counts[label_code] >= min_count) {
+            label_counts.emplace_back(label_code,
+                                      std::min(code_counts[label_code], count_cap));
+        }
+    }
+
+    return label_counts;
+}
+
+// calls get_label_codes(i)
+template <typename IndexType, typename LabelType>
+std::vector<typename MultiLabelEncoded<IndexType, LabelType>::SetBitPositions>
+MultiLabelEncoded<IndexType, LabelType>
+::get_label_codes(const std::vector<Index> &indices) const {
+    std::vector<SetBitPositions> rows(indices.size());
+
+    for (size_t i = 0; i < indices.size(); ++i) {
+        assert(indices[i] < this->num_objects());
+
+        rows[i] = get_label_codes(indices[i]);
+    }
+
+    return rows;
+}
 
 template class MultiLabelEncoded<uint64_t, std::string>;
 

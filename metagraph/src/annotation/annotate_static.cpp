@@ -1,7 +1,8 @@
 #include "annotate_static.hpp"
 
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "static_annotators_def.hpp"
+#include "serialization.hpp"
 
 using utils::remove_suffix;
 
@@ -56,18 +57,6 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
     }
     return std::includes(encoded_labels.begin(), encoded_labels.end(),
                          querying_codes.begin(), querying_codes.end());
-}
-
-template <class BinaryMatrixType, typename Label>
-auto StaticBinRelAnnotator<BinaryMatrixType, Label>::get_labels(Index i) const
--> VLabels {
-    assert(i < num_objects());
-
-    VLabels labels;
-    for (auto col : get_label_codes(i)) {
-        labels.push_back(label_encoder_.decode(col));
-    }
-    return labels;
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -143,7 +132,8 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
 }
 
 template <class BinaryMatrixType, typename Label>
-std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
+typename StaticBinRelAnnotator<BinaryMatrixType, Label>::SetBitPositions
+StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::get_label_codes(Index i) const {
     if (!cached_rows_.get())
         return matrix_->get_row(i);
@@ -158,53 +148,49 @@ std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
+std::vector<typename StaticBinRelAnnotator<BinaryMatrixType, Label>::SetBitPositions>
+StaticBinRelAnnotator<BinaryMatrixType, Label>
+::get_label_codes(const std::vector<Index> &indices) const {
+    return matrix_->get_rows(indices);
+}
+
+template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::reset_row_cache(size_t size) {
     cached_rows_.reset(size ? new RowCacheType(size) : nullptr);
 }
 
 template <class BinaryMatrixType, typename Label>
-void StaticBinRelAnnotator<BinaryMatrixType, Label>
-::dump_columns(const std::string &prefix, bool binary) const {
+bool StaticBinRelAnnotator<BinaryMatrixType, Label>
+::dump_columns(const std::string &prefix, uint64_t num_threads) const {
     size_t m = num_labels();
-    if (binary) {
-        for (uint64_t i = 0; i < m; ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".raw.annodbg",
-                std::ios::binary
-            );
+    bool success = true;
 
-            if (!outstream.good())
-                throw std::ofstream::failure("Bad stream");
+    #pragma omp parallel for num_threads(num_threads)
+    for (uint64_t i = 0; i < m; ++i) {
+        std::ofstream outstream(
+            remove_suffix(prefix, kExtension)
+                + "." + std::to_string(i)
+                + ".text.annodbg"
+        );
 
-            auto column = matrix_->get_column(i);
-
-            serialize_number(outstream, column.size());
-            for (auto pos : column) {
-                serialize_number(outstream, pos);
-            }
+        if (!outstream.good()) {
+            std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
+            success = false;
+            continue;
         }
-    } else {
-        for (uint64_t i = 0; i < m; ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".text.annodbg"
-            );
 
-            if (!outstream.good())
-                throw std::ofstream::failure("Bad stream");
+        outstream << num_objects() << " ";
 
-            auto column = matrix_->get_column(i);
+        auto column = matrix_->get_column(i);
 
-            outstream << column.size() << std::endl;
-            for (auto pos : column) {
-                outstream << pos << std::endl;
-            }
+        outstream << column.size() << "\n";
+        for (auto pos : column) {
+            outstream << pos << "\n";
         }
     }
+
+    return success;
 }
 
 template <class BinaryMatrixType, typename Label>

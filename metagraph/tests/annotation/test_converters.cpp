@@ -2,13 +2,12 @@
 
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
-#include "utils.hpp"
 #include "binary_matrix.hpp"
-
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -341,7 +340,7 @@ TEST_F(MergeAnnotators, RowCompressed) {
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
     }
 
-    annotate::merge<annotate::RowCompressed<>>(
+    annotate::merge<annotate::RowCompressed<>, std::string>(
         {}, filenames, test_dump_basename_row_compressed_merge + "_merged"
     );
 
@@ -364,7 +363,7 @@ TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
     }
 
     const auto filename = test_dump_basename_rowflat_merge + "_to_rowcompressed";
-    annotate::merge<annotate::RowFlatAnnotator>(row_flat_annotators, {}, filename);
+    annotate::merge<annotate::RowFlatAnnotator, std::string>(std::move(row_flat_annotators), {}, filename);
 
     merged_annotation = new annotate::RowCompressed<>(num_rows);
     merged_annotation->merge_load({ filename });
@@ -385,7 +384,7 @@ TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
     }
 
     const auto filename = test_dump_basename_rowflat_merge + "_to_rowflat";
-    annotate::merge<annotate::RowFlatAnnotator>(row_flat_annotators, {}, filename);
+    annotate::merge<annotate::RowFlatAnnotator, std::string>(std::move(row_flat_annotators), {}, filename);
 
     merged_annotation = new annotate::RowFlatAnnotator();
     merged_annotation->merge_load({ filename });
@@ -429,7 +428,7 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
     }
 
     const auto outfile = test_dump_basename_rowflat_merge + "_mixed_to_rowflat";
-    annotate::merge<annotate::RowFlatAnnotator>(annotators, filenames, outfile);
+    annotate::merge<annotate::RowFlatAnnotator, std::string>(std::move(annotators), filenames, outfile);
 
     merged_annotation = new annotate::RowFlatAnnotator();
     merged_annotation->merge_load({ outfile });

@@ -3,22 +3,22 @@
 
 #include <vector>
 
+#include "utils/vectors.hpp"
 #include "binary_matrix.hpp"
-#include "utils.hpp"
 
 
-namespace annotate {
-template <typename Label>
-class RowCompressed;
-}
-
-
+template <typename RowType = SmallVector<uint32_t>>
 class VectorRowBinMat : public BinaryMatrixRowDynamic {
-    template <typename Label>
-    friend class annotate::RowCompressed;
-
   public:
+    typedef RowType row_type;
+
     VectorRowBinMat(uint64_t num_rows = 0) : vector_(num_rows) {}
+
+    typedef std::function<void(uint64_t /* index */,
+                               RowType&& /* row */)> CallRow;
+    VectorRowBinMat(uint64_t num_rows,
+                    uint64_t num_columns,
+                    std::function<void(CallRow)> call_rows);
 
     VectorRowBinMat(const VectorRowBinMat &other) = default;
     VectorRowBinMat& operator=(const VectorRowBinMat &other) = default;
@@ -30,7 +30,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     uint64_t num_rows() const { return vector_.size(); }
 
     bool get(Row row, Column column) const;
-    std::vector<Column> get_row(Row row) const;
+    SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
 
     void set(Row row, Column column);
@@ -53,23 +53,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 
   private:
     uint64_t num_columns_ = 0;
-    std::vector<SmallVector> vector_;
-
-    class StreamRows {
-      public:
-        StreamRows(const std::string &filename, size_t offset = 0);
-        // return null after all rows have been called
-        std::vector<Column>* next_row();
-
-      private:
-        std::vector<Column> row_;
-        sdsl::int_vector_buffer<> inbuf_;
-        uint64_t i_ = 0;
-    };
-
-    static void append_matrix(const std::string &filename,
-                              const std::function<void (BinaryMatrix::RowCallback&)> &callback,
-                              uint64_t num_cols);
+    std::vector<RowType> vector_;
 };
 
 #endif // __VECTOR_ROW_BINMAT_HPP__

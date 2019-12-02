@@ -3,27 +3,34 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <iostream>
+#include <vector>
+#include <cassert>
 
 #include <ips4o.hpp>
 
-#include "utils.hpp"
-
 
 // Thread safe data storage for counting
-template <typename T, typename C = uint8_t>
+template <typename T,
+          typename C = uint8_t,
+          class Container = std::vector<std::pair<T, C>>>
 class SortedMultiset {
   public:
+    static_assert(std::is_same_v<std::pair<T, C>, typename Container::value_type>);
+
     typedef T key_type;
     typedef C count_type;
     typedef std::pair<T, C> value_type;
-    typedef Vector<std::pair<T, C>> storage_type;
+    typedef Container storage_type;
 
-    SortedMultiset(size_t num_threads = 1,
-                   bool verbose = false,
-                   std::function<void(storage_type*)> cleanup = [](storage_type*) {})
+    SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
+                   size_t num_threads = 1,
+                   bool verbose = false)
       : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
 
     ~SortedMultiset() {}
+
+    static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 
     template <class Iterator>
     void insert(Iterator begin, Iterator end) {
@@ -58,13 +65,13 @@ class SortedMultiset {
 
         resize_lock.unlock();
 
-        while (begin != end) {
-            if constexpr(std::is_base_of<value_type, decltype(*begin)>::value) {
-                data_[offset++] = *begin;
-            } else {
-                data_[offset++] = { *begin, 1 };
-            }
-            ++begin;
+        if constexpr(std::is_same<T, std::remove_cv_t<
+                                     std::remove_reference_t<
+                                        decltype(*begin)>>>::value) {
+            std::transform(begin, end, data_.begin() + offset,
+                [](const T &value) { return std::make_pair(value, C(1)); });
+        } else {
+            std::copy(begin, end, data_.begin() + offset);
         }
     }
 
@@ -132,10 +139,10 @@ class SortedMultiset {
 
         while (++first != last) {
             if (first->first == dest->first) {
-                if (first->second < std::numeric_limits<count_type>::max() - dest->second) {
+                if (first->second < max_count() - dest->second) {
                     dest->second += first->second;
                 } else {
-                    dest->second = std::numeric_limits<count_type>::max();
+                    dest->second = max_count();
                 }
             } else {
                 *++dest = std::move(*first);;
@@ -164,6 +171,7 @@ class SortedMultiset {
     storage_type data_;
     size_t num_threads_;
     bool verbose_;
+
     std::function<void(storage_type*)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values

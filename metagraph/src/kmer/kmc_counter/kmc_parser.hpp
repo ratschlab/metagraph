@@ -7,13 +7,27 @@
 
 namespace kmc {
 
-// Read k-mers from KMC database
-// Retrieve both strands if KMC database stores only canonical k-mers
-// Otherwise, retrieve exactly all k-mers stored in the database
-//  |min_count| -- minimum k-mer abundance (including the value passed)
-//  |max_count| -- maximum k-mer abundance (excluding the value passed)
+// Read k-mers from KMC database.
+// This retrieves only canonical k-mers from canonical
+// KMC databases (those constructed by KMC without flag '-b' passed).
+//
+// - If |call_both_from_canonical| = true and the KMC database is canonical
+//   (stores only canonical k-mers with counts), call k-mers with their
+//   reverse-complement (non-canonical) ones.
+//   This flag does not change the behavior for reading from non-canonical
+//   KMC databases (those consructed by KMC with flag '-b' passed).
+//
+// - |min_count| -- minimum k-mer abundance (including the value passed)
+// - |max_count| -- maximum k-mer abundance (excluding the value passed)
 void read_kmers(const std::string &kmc_base_filename,
+                const std::function<void(std::string&&, uint64_t count)> &callback,
+                bool call_both_from_canonical,
+                uint64_t min_count = 1,
+                uint64_t max_count = -1);
+
+void read_kmers(const std::string &kmc_filename,
                 const std::function<void(std::string&&)> &callback,
+                bool call_both_from_canonical,
                 uint64_t min_count = 1,
                 uint64_t max_count = -1);
 

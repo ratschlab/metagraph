@@ -18,8 +18,10 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     typedef BinaryMatrixType binary_matrix_type;
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
+    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
 
-    StaticBinRelAnnotator(size_t row_cache_size = 0);
+    explicit StaticBinRelAnnotator(size_t row_cache_size = 0);
+
     StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
                           const LabelEncoder<Label> &label_encoder,
                           size_t row_cache_size = 0);
@@ -27,11 +29,9 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 
-    VLabels get_labels(Index i) const override;
-
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
-    void dump_columns(const std::string &prefix, bool binary = false) const;
+    bool dump_columns(const std::string &prefix, uint64_t num_threads = 1) const;
 
     uint64_t num_objects() const override;
     size_t num_labels() const override;
@@ -61,10 +61,12 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    std::vector<uint64_t> get_label_codes(Index i) const override;
+    SetBitPositions get_label_codes(Index i) const override;
+    std::vector<SetBitPositions>
+    get_label_codes(const std::vector<Index> &indices) const override;
 
     typedef caches::fixed_sized_cache<Index,
-                                      std::vector<uint64_t>,
+                                      SetBitPositions,
                                       caches::LRUCachePolicy<Index>> RowCacheType;
     mutable std::unique_ptr<RowCacheType> cached_rows_;
 

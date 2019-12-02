@@ -4,7 +4,10 @@
 #include <iterator>
 #include <cmath>
 
-#include "utils.hpp"
+#include <sdsl/construct.hpp>
+
+#include "algorithms.hpp"
+#include "serialization.hpp"
 
 
 BinRelWT_sdsl
@@ -49,7 +52,7 @@ uint64_t BinRelWT_sdsl::num_rows() const {
     return delimiters_.num_set_bits() - 1;
 }
 
-std::vector<BinRelWT_sdsl::Column> BinRelWT_sdsl::get_row(Row row) const {
+BinRelWT_sdsl::SetBitPositions BinRelWT_sdsl::get_row(Row row) const {
     // delimiters_ starts with a 1 indicating the
     // beginning of first row and ends with a 1,
     // indicating the end of last line.
@@ -80,7 +83,7 @@ std::vector<BinRelWT_sdsl::Column> BinRelWT_sdsl::get_row(Row row) const {
                          rank_c_i,
                          rank_c_j);
 
-    return label_indices;
+    return SetBitPositions(label_indices.begin(), label_indices.end());
 }
 
 std::vector<BinRelWT_sdsl::Row> BinRelWT_sdsl::get_column(Column column) const {

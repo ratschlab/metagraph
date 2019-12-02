@@ -4,18 +4,17 @@
 
 #include "gtest/gtest.h"
 
+#include "../test_helpers.hpp"
 #include "BRWT.hpp"
 #include "BRWT_builders.hpp"
 #include "bin_rel_wt.hpp"
-#include "column_major.hpp"
 #include "bin_rel_wt_sdsl.hpp"
-#include "utils.hpp"
-#include "bit_vector.hpp"
-#include "annotate_column_compressed.hpp"
+#include "column_major.hpp"
+#include "bitmap_mergers.hpp"
 
-
-typedef std::vector<BinaryMatrix::Column> RowSetBits;
+typedef BinaryMatrix::SetBitPositions RowSetBits;
 typedef std::function<void(const RowSetBits &)> RowCallback;
+
 
 // Used to generate a set of columns from a row generator
 template <typename BinMat>
@@ -95,6 +94,25 @@ ColMajorCompressed build_matrix_from_columns<ColMajorCompressed>(BitVectorPtrArr
     }
     return ColMajorCompressed(std::move(columns_sd));
 }
+
+
+template <typename BinMat>
+BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t) {
+    return BinMat(columns);
+}
+
+#define RBFBufferColConst(n) \
+template <> \
+RainbowfishBuffer<n> build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_rows) { \
+    return build_matrix_from_rows<RainbowfishBuffer<n>>(columns, num_rows); \
+}
+RBFBufferColConst(1)
+RBFBufferColConst(2)
+RBFBufferColConst(3)
+RBFBufferColConst(4)
+RBFBufferColConst(5)
+RBFBufferColConst(6)
+
 
 
 template <typename BinMat>
@@ -197,7 +215,7 @@ BinMat build_matrix_from_rows(BitVectorPtrArray&& columns, uint64_t num_rows) {
 
     return build_matrix_from_rows<BinMat>(
         [&](auto row_callback) {
-            utils::call_rows(row_callback, std::move(columns));
+            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
         },
         num_columns, num_rows, num_set_bits
     );
@@ -215,6 +233,29 @@ template RainbowfishBuffer<3> build_matrix_from_rows<RainbowfishBuffer<3>>(BitVe
 template RainbowfishBuffer<4> build_matrix_from_rows<RainbowfishBuffer<4>>(BitVectorPtrArray&&, uint64_t);
 template RainbowfishBuffer<5> build_matrix_from_rows<RainbowfishBuffer<5>>(BitVectorPtrArray&&, uint64_t);
 template RainbowfishBuffer<6> build_matrix_from_rows<RainbowfishBuffer<6>>(BitVectorPtrArray&&, uint64_t);
+
+template <typename BinMat>
+BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_rows) {
+    auto num_columns = columns.size();
+    auto num_set_bits = 0;
+    for (const auto &column : columns) {
+        num_set_bits += column->num_set_bits();
+    }
+
+    return build_matrix_from_rows<BinMat>(
+        [&](auto row_callback) {
+            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
+        },
+        num_columns, num_rows, num_set_bits
+    );
+}
+template Rainbowfish build_matrix_from_rows<Rainbowfish>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<1> build_matrix_from_rows<RainbowfishBuffer<1>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<2> build_matrix_from_rows<RainbowfishBuffer<2>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<3> build_matrix_from_rows<RainbowfishBuffer<3>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<4> build_matrix_from_rows<RainbowfishBuffer<4>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<5> build_matrix_from_rows<RainbowfishBuffer<5>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<6> build_matrix_from_rows<RainbowfishBuffer<6>>(const BitVectorPtrArray&, uint64_t);
 
 
 template <typename TypeParam>
@@ -296,6 +337,35 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         auto set_bits = convert_to_set(row_set_bits);
         for (size_t j = 0; j < columns.size(); ++j) {
             EXPECT_EQ((*columns[j])[i], set_bits.count(j));
+        }
+    }
+
+    // check get_rows, query first |n| rows
+    for (size_t n : { size_t(0),
+                      size_t(matrix.num_rows() / 2),
+                      size_t(matrix.num_rows()) }) {
+        std::vector<uint64_t> indices(n);
+        std::iota(indices.begin(), indices.end(), 0);
+
+        auto rows = matrix.get_rows(indices);
+
+        ASSERT_EQ(n, rows.size());
+
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const auto &row_set_bits = rows[i];
+
+            // make sure all returned indexes are unique
+            ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
+
+            for (auto j : row_set_bits) {
+                ASSERT_TRUE(j < matrix.num_columns());
+                EXPECT_TRUE((*columns[j])[i]);
+            }
+
+            auto set_bits = convert_to_set(row_set_bits);
+            for (size_t j = 0; j < columns.size(); ++j) {
+                EXPECT_EQ((*columns[j])[i], set_bits.count(j));
+            }
         }
     }
 

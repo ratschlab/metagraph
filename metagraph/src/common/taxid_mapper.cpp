@@ -5,10 +5,11 @@
 
 #include <zlib.h>
 
-#include "utils.hpp"
+#include "utils/string_utils.hpp"
+#include "utils/serialization.hpp"
 
 
-std::string parse_label(const std::string &gb) {
+std::string TaxIDMapper::parse_label(const std::string &gb) {
     auto split = utils::split_string(gb, "|");
     if (split.size() > 1) {
         auto version_split = utils::split_string(split[1], ".");
@@ -36,9 +37,9 @@ bool TaxIDMapper::parse_accession2taxid(const std::string &accession2taxid) {
 
     char buf[1024];
     char *line;
-    std::string block;
-    uint64_t taxid;
-    uint64_t gi;
+
+    std::string accession, ignore;
+    taxid_t taxid;
 
     // check if reading header works
     if ((line = gzgets(input_p, buf, sizeof(buf))) == NULL)
@@ -46,12 +47,13 @@ bool TaxIDMapper::parse_accession2taxid(const std::string &accession2taxid) {
 
     while ((line = gzgets(input_p, buf, sizeof(buf))) != NULL) {
         std::istringstream sin(line);
-        if (!(sin >> block >> block >> taxid >> gi))
+
+        if (!(sin >> accession >> ignore >> taxid))
             return false;
 
-        auto insert = gb_to_taxid_.emplace(parse_label(block), taxid);
+        auto insert = gb_to_taxid_.emplace(accession, taxid);
         if (!insert.second)
-            std::cerr << "Warning: duplicate entry " << block << std::endl;
+            std::cerr << "Warning: duplicate accession ID " << accession << std::endl;
     }
 
     gzclose(input_p);
@@ -71,6 +73,7 @@ bool TaxIDMapper::parse_nodes(const std::string &nodes) {
 
     while ((line = gzgets(input_p, buf, sizeof(buf))) != NULL) {
         std::istringstream sin(line);
+
         if (!(sin >> taxid >> block1 >> parentid >> block1 >> block1 >> block2))
             return false;
 
@@ -79,13 +82,13 @@ bool TaxIDMapper::parse_nodes(const std::string &nodes) {
 
         auto insert_tree = taxid_to_parent_.emplace(taxid, parentid);
         if (!insert_tree.second)
-            std::cerr << "Warning: duplicate entry "
+            std::cerr << "Warning: duplicate taxid in taxonomy tree "
                       << taxid << " " << insert_tree.first->second
                       << std::endl;
 
         auto insert_rank = taxid_to_rank_label_.emplace(taxid, block1);
         if (!insert_rank.second)
-            std::cerr << "Warning: duplicate entry "
+            std::cerr << "Warning: duplicate taxid in rank map "
                       << taxid << " " << block1
                       << std::endl;
     }

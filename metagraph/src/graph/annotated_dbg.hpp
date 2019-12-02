@@ -51,17 +51,35 @@ class AnnotatedDBG {
     // return labels that occur at least in |presence_ratio| k-mers
     std::vector<std::string> get_labels(const std::string &sequence,
                                         double presence_ratio) const;
+    // Weights don't need to sum to 1
+    std::vector<std::string> get_labels(const std::vector<std::string> &sequences,
+                                        const std::vector<double> &weights,
+                                        double presence_ratio) const;
+    std::vector<std::string> get_labels(const std::unordered_map<row_index, size_t> &index_counts,
+                                        size_t min_count) const;
 
     // return top |num_top_labels| labels with their counts
     std::vector<std::pair<std::string, size_t>>
     get_top_labels(const std::string &sequence,
                    size_t num_top_labels,
+                   double presence_ratio = 0.0) const;
+
+    // Weights don't need to sum to 1
+    std::vector<std::pair<std::string, size_t>>
+    get_top_labels(const std::vector<std::string> &sequences,
+                   const std::vector<double> &weights,
+                   size_t num_top_labels,
                    double min_label_frequency = 0.0) const;
 
-  private:
+    std::vector<std::pair<std::string, size_t>>
+    get_top_labels(const std::unordered_map<row_index, size_t> &index_counts,
+                   size_t num_top_labels,
+                   size_t min_count = 0) const;
+
     static row_index graph_to_anno_index(node_index kmer_index);
     static node_index anno_to_graph_index(row_index anno_index);
 
+  private:
     void annotate_sequence_thread_safe(const std::string &sequence,
                                        const std::vector<std::string> &labels);
 

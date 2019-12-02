@@ -5,7 +5,9 @@
 #include <stdexcept>
 
 #include "serialization.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
+#include "algorithms.hpp"
+#include "bitmap_mergers.hpp"
 #include "threading.hpp"
 #include "annotate_row_compressed.hpp"
 
@@ -21,21 +23,21 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           bool verbose)
       : num_rows_(num_rows),
-        cached_columns_(
-            num_columns_cached,
-            caches::LRUCachePolicy<size_t>(),
-            [this](size_t j, bitmap *col_uncompressed) {
-                assert(col_uncompressed);
-                this->flush(j, *col_uncompressed);
-                delete col_uncompressed;
-            }
-        ),
+        cached_columns_(num_columns_cached,
+                        caches::LRUCachePolicy<size_t>(),
+                        [this](size_t j, bitmap *col_uncompressed) {
+                            assert(col_uncompressed);
+                            this->flush(j, *col_uncompressed);
+                            delete col_uncompressed;
+                        }),
         verbose_(verbose) {
     assert(num_columns_cached > 0);
 }
 
 template <typename Label>
 ColumnCompressed<Label>::~ColumnCompressed() {
+    // Note: this is needed to make sure that everything is flushed to bitmatrix_
+    //       BEFORE bitmatrix_ is destroyed
     cached_columns_.Clear();
 }
 
@@ -58,27 +60,33 @@ void ColumnCompressed<Label>::set_labels(Index i, const VLabels &labels) {
 }
 
 template <typename Label>
-typename ColumnCompressed<Label>::VLabels
-ColumnCompressed<Label>::get_labels(Index i) const {
+typename ColumnCompressed<Label>::SetBitPositions
+ColumnCompressed<Label>::get_label_codes(Index i) const {
     assert(i < num_rows_);
 
-    VLabels labels;
-    for (auto label_index : get_label_codes(i)) {
-        labels.push_back(label_encoder_.decode(label_index));
-    }
-    return labels;
-}
-
-template <typename Label>
-std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
-    assert(i < num_rows_);
-
-    std::vector<uint64_t> label_indices;
+    SetBitPositions label_indices;
     for (size_t j = 0; j < num_labels(); ++j) {
         if (is_set(i, j))
             label_indices.push_back(j);
     }
     return label_indices;
+}
+
+template <typename Label>
+std::vector<typename ColumnCompressed<Label>::SetBitPositions>
+ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) const {
+    std::vector<SetBitPositions> rows(indices.size());
+
+    for (size_t j = 0; j < num_labels(); ++j) {
+        for (size_t i = 0; i < indices.size(); ++i) {
+            assert(indices[i] < num_rows_);
+
+            if (is_set(indices[i], j))
+                rows[i].push_back(j);
+        }
+    }
+
+    return rows;
 }
 
 template <typename Label>
@@ -292,36 +300,94 @@ void ColumnCompressed<Label>
     get_column(col).call_ones(callback);
 }
 
+template <typename Label>
+std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
+ColumnCompressed<Label>
+::count_labels(const std::unordered_map<Index, size_t> &index_counts,
+               size_t min_count,
+               size_t count_cap) const {
+
+    min_count = std::max(min_count, size_t(1));
+
+    assert(count_cap >= min_count);
+
+    size_t total_sum_count = 0;
+    for (const auto &pair : index_counts) {
+        total_sum_count += pair.second;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
+
+    std::vector<uint64_t> indices(index_counts.size());
+    std::transform(index_counts.begin(), index_counts.end(), indices.begin(),
+                   [](const auto &pair) { return pair.first; });
+
+    std::vector<std::pair<uint64_t, size_t>> label_counts;
+    label_counts.reserve(num_labels());
+
+    // TODO: get rid of label encoder from here
+    for (const auto &label : this->get_all_labels()) {
+        size_t total_checked = 0;
+        size_t total_matched = 0;
+        call_relations(
+            indices,
+            label,
+            [&](auto i, bool matched) {
+                auto count = index_counts.at(i);
+                total_checked += count;
+                total_matched += count * matched;
+            },
+            [&]() { return total_matched >= count_cap
+                        || total_matched + (total_sum_count - total_checked) < min_count; }
+        );
+
+        if (total_matched >= min_count)
+            label_counts.emplace_back(label_encoder_.encode(label),
+                                      std::min(total_matched, count_cap));
+    }
+
+    return label_counts;
+}
+
 // For each pair (first, second) in the dictionary, renames
 // column |first| with |second| and merges the columns with matching names.
 template <typename Label>
 void ColumnCompressed<Label>
 ::rename_labels(const std::unordered_map<Label, Label> &dict) {
-    cached_columns_.Clear();
-
-    std::vector<Label> old_index_to_label(label_encoder_.size());
-    for (size_t i = 0; i < old_index_to_label.size(); ++i) {
-        old_index_to_label[i] = label_encoder_.decode(i);
+    std::vector<Label> index_to_label(label_encoder_.size());
+    // old labels
+    for (size_t i = 0; i < index_to_label.size(); ++i) {
+        index_to_label[i] = label_encoder_.decode(i);
     }
+    // new labels
     for (const auto &pair : dict) {
-        old_index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+        try {
+            index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+        } catch (const std::runtime_error&) {
+            std::cerr << "Warning: label '" << pair.first << "' not"
+                      << " found in annotation. Skipping instruction"
+                      << " '" << pair.first << " -> " << pair.second << "'."
+                      << std::endl;
+        }
     }
 
-    std::vector<Label> index_to_label;
+    std::vector<Label> new_index_to_label;
     std::unordered_map<Label, std::set<size_t>> old_columns;
-    for (size_t i = 0; i < old_index_to_label.size(); ++i) {
-        if (!old_columns.count(old_index_to_label[i]))
-            index_to_label.push_back(old_index_to_label[i]);
+    for (size_t i = 0; i < index_to_label.size(); ++i) {
+        if (!old_columns.count(index_to_label[i]))
+            new_index_to_label.push_back(index_to_label[i]);
 
-        old_columns[old_index_to_label[i]].insert(i);
+        old_columns[index_to_label[i]].insert(i);
     }
 
+    cached_columns_.Clear();
     std::vector<std::unique_ptr<bit_vector>> old_bitmatrix;
     old_bitmatrix.swap(bitmatrix_);
 
     label_encoder_.clear();
 
-    for (const auto &label : index_to_label) {
+    for (const auto &label : new_index_to_label) {
         label_encoder_.insert_and_encode(label);
 
         const auto &cols = old_columns[label];
@@ -385,7 +451,11 @@ void ColumnCompressed<Label>::flush() const {
 template <typename Label>
 void ColumnCompressed<Label>::flush(size_t j, const bitmap &vector) {
     assert(j < bitmatrix_.size());
-    assert(cached_columns_.Cached(j));
+
+    // Note: asserting that j is cached cannot be done here when this function
+    //       is invovled as part of the OnEraseCallback, since the mutex locking
+    //       in the caches library would cause the check to be done after it has
+    //       been erased.
 
     bitmatrix_[j].reset();
     bitmatrix_[j].reset(new bit_vector_smart(
@@ -455,7 +525,7 @@ void ColumnCompressed<Label>
                 uint64_t begin = i;
                 uint64_t end = std::min(i + kNumRowsInBlock, num_rows_);
 
-                std::vector<std::vector<uint64_t>> rows(end - begin);
+                std::vector<SetBitPositions> rows(end - begin);
 
                 assert(begin <= end);
                 assert(end <= num_rows_);
@@ -527,66 +597,59 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
 }
 
 template <typename Label>
-void ColumnCompressed<Label>
-::dump_columns(const std::string &prefix, bool binary) const {
-    if (binary) {
-        for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".raw.annodbg",
-                std::ios::binary
-            );
+bool ColumnCompressed<Label>
+::dump_columns(const std::string &prefix, size_t num_threads) const {
+    bool success = true;
 
-            if (!outstream.good())
-                throw std::ofstream::failure("Bad stream");
+    #pragma omp parallel for num_threads(num_threads)
+    for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
+        std::ofstream outstream(
+            remove_suffix(prefix, kExtension)
+                + "." + std::to_string(i)
+                + ".text.annodbg"
+        );
 
-            const auto &column = get_column(i);
-
-            serialize_number(outstream, column.num_set_bits());
-            column.call_ones([&](const auto &pos) { serialize_number(outstream, pos); });
+        if (!outstream.good()) {
+            std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
+            success = false;
+            continue;
         }
-    } else {
-        for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".text.annodbg"
-            );
 
-            if (!outstream.good())
-                throw std::ofstream::failure("Bad stream");
+        outstream << num_objects() << " ";
 
-            const auto &column = get_column(i);
+        const auto &column = get_column(i);
 
-            outstream << column.num_set_bits() << std::endl;
-            column.call_ones([&](const auto &pos) { outstream << pos << std::endl; });
-        }
+        outstream << column.num_set_bits() << "\n";
+        column.call_ones([&](const auto &pos) {
+            outstream << pos << "\n";
+        });
     }
+
+    return success;
 }
 
-template <class RowIterator>
-class IterateRowsByRowIterator : public IterateRows {
+template <class Annotator>
+class IterateTransposed : public Annotator::IterateRows {
   public:
-    IterateRowsByRowIterator(std::unique_ptr<RowIterator> row_iterator)
-          : row_iterator_(std::move(row_iterator)) {};
+    IterateTransposed(std::unique_ptr<utils::RowsFromColumnsTransformer> transformer)
+          : row_iterator_(std::move(transformer)) {}
 
-    std::vector<uint64_t> next_row() override final {
-        return row_iterator_->next_row();
+    typename Annotator::SetBitPositions next_row() override final {
+        return row_iterator_.next_row<typename Annotator::SetBitPositions>();
     }
 
   private:
-    std::unique_ptr<RowIterator> row_iterator_;
+    utils::RowsFromColumnsIterator row_iterator_;
 };
 
 template <typename Label>
-std::unique_ptr<IterateRows>
+std::unique_ptr<typename ColumnCompressed<Label>::IterateRows>
 ColumnCompressed<Label>::iterator() const {
     flush();
-    auto transformer = std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_);
-    auto row_iter = std::make_unique<utils::RowsFromColumnsIterator>(std::move(transformer));
-    using iter_type = IterateRowsByRowIterator<utils::RowsFromColumnsIterator>;
-    return std::make_unique<iter_type>(std::move(row_iter));
+
+    return std::make_unique<IterateTransposed<ColumnCompressed<Label>>>(
+        std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_)
+    );
 };
 
 template class ColumnCompressed<std::string>;

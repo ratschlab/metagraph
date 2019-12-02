@@ -2,8 +2,7 @@
 
 #include "gtest/gtest.h"
 
-#include "utils.hpp"
-
+#include "../test_helpers.hpp"
 #define private public
 #include "annotate_row_compressed.hpp"
 

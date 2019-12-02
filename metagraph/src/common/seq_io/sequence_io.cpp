@@ -3,11 +3,36 @@
 #include <iostream>
 #include <fstream>
 
+#include "common/seq_tools/reverse_complement.hpp"
 #include "vcf_parser.hpp"
-#include "serialization.hpp"
-#include "reverse_complement.hpp"
 
 const char kDefaultFastQualityChar = 'I';
+
+
+FastaWriter::FastaWriter(const std::string &filename,
+                         const std::string &header,
+                         bool write_counts) : header_(header),
+                                              write_counts_(write_counts) {
+    gz_out_ = gzopen(filename.c_str(), "w");
+    if (gz_out_ == Z_NULL) {
+        std::cerr << "ERROR: Can't write to " << filename << std::endl;
+        exit(1);
+    }
+}
+
+FastaWriter::~FastaWriter() {
+    gzclose(gz_out_);
+}
+
+void FastaWriter::write(const std::string &sequence) {
+    if (!write_fasta(gz_out_,
+                     write_counts_ ? header_ + std::to_string(++count_)
+                                   : header_,
+                     sequence)) {
+        std::cerr << "ERROR: FastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
+        exit(1);
+    }
+}
 
 
 bool write_fasta(gzFile gz_out, const kseq_t &kseq) {

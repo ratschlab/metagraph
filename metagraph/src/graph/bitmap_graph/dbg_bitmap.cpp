@@ -4,7 +4,6 @@
 #include <cmath>
 
 #include "serialization.hpp"
-#include "utils.hpp"
 #include "dbg_bitmap_construct.hpp"
 
 
@@ -36,18 +35,12 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 void DBGBitmap::map_to_nodes(const std::string &sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    const auto &kmers = sequence_to_kmers(sequence, canonical_mode_);
-    auto it = kmers.begin();
-    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
-
-        assert(it != kmers.end() || !is_valid);
-
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
         if (terminate())
             return;
 
-        callback(is_valid ? to_node(*it++) : npos);
+        callback(is_valid ? to_node(kmer) : npos);
     }
-    assert(it == kmers.end());
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -58,24 +51,17 @@ void DBGBitmap::map_to_nodes_sequentially(std::string::const_iterator begin,
                                           std::string::const_iterator end,
                                           const std::function<void(node_index)> &callback,
                                           const std::function<bool()> &terminate) const {
-    std::string sequence(begin, end);
-    const auto &kmers = sequence_to_kmers(sequence);
-    auto it = kmers.begin();
-    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
-
-        assert(it != kmers.end() || !is_valid);
-
+    for (const auto &[kmer, is_valid] : sequence_to_kmers({ begin, end })) {
         if (terminate())
             return;
 
-        callback(is_valid ? to_node(*it++) : npos);
+        callback(is_valid ? to_node(kmer) : npos);
     }
-    assert(it == kmers.end());
 }
 
 DBGBitmap::node_index
 DBGBitmap::traverse(node_index node, char next_char) const {
-    assert(node);
+    assert(in_graph(node));
 
     auto kmer = node_to_kmer(node);
     kmer.to_next(k_, seq_encoder_.encode(next_char));
@@ -84,7 +70,7 @@ DBGBitmap::traverse(node_index node, char next_char) const {
 
 DBGBitmap::node_index
 DBGBitmap::traverse_back(node_index node, char prev_char) const {
-    assert(node);
+    assert(in_graph(node));
 
     auto kmer = node_to_kmer(node);
     kmer.to_prev(k_, seq_encoder_.encode(prev_char));
@@ -93,6 +79,8 @@ DBGBitmap::traverse_back(node_index node, char prev_char) const {
 
 void DBGBitmap::call_outgoing_kmers(node_index node,
                                     const OutgoingEdgeCallback &callback) const {
+    assert(in_graph(node));
+
     const auto &kmer = node_to_kmer(node);
 
     for (char c : alphabet()) {
@@ -106,67 +94,151 @@ void DBGBitmap::call_outgoing_kmers(node_index node,
 }
 
 size_t DBGBitmap::outdegree(node_index node) const {
+    assert(in_graph(node));
+
     size_t outdegree = 0;
+
     const auto &kmer = node_to_kmer(node);
 
     for (char c : alphabet()) {
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
 
-        auto next_index = to_node(next_kmer);
-        if (next_index != npos)
+        if (to_node(next_kmer) != npos)
             outdegree++;
     }
 
     return outdegree;
 }
 
-void DBGBitmap::call_incoming_kmers(node_index node,
-                                    const OutgoingEdgeCallback &callback) const {
+bool DBGBitmap::has_single_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    bool outgoing_edge_detected = false;
+
     const auto &kmer = node_to_kmer(node);
 
     for (char c : alphabet()) {
         auto next_kmer = kmer;
-        next_kmer.to_prev(k_, seq_encoder_.encode(c));
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
 
-        auto next_index = to_node(next_kmer);
+        if (to_node(next_kmer) != npos) {
+            if (outgoing_edge_detected)
+                return false;
+
+            outgoing_edge_detected = true;
+        }
+    }
+
+    return outgoing_edge_detected;
+}
+
+bool DBGBitmap::has_multiple_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    bool outgoing_edge_detected = false;
+
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet()) {
+        auto next_kmer = kmer;
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
+
+        if (to_node(next_kmer) != npos) {
+            if (outgoing_edge_detected)
+                return true;
+
+            outgoing_edge_detected = true;
+        }
+    }
+
+    return false;
+}
+
+void DBGBitmap::call_incoming_kmers(node_index node,
+                                    const OutgoingEdgeCallback &callback) const {
+    assert(in_graph(node));
+
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet()) {
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        auto next_index = to_node(prev_kmer);
         if (next_index != npos)
             callback(next_index, c);
     }
 }
 
 size_t DBGBitmap::indegree(node_index node) const {
+    assert(in_graph(node));
+
     size_t indegree = 0;
+
     const auto &kmer = node_to_kmer(node);
 
     for (char c : alphabet()) {
-        auto next_kmer = kmer;
-        next_kmer.to_prev(k_, seq_encoder_.encode(c));
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
 
-        auto next_index = to_node(next_kmer);
-        if (next_index != npos)
+        if (to_node(prev_kmer) != npos)
             indegree++;
     }
 
     return indegree;
 }
 
-void DBGBitmap::adjacent_outgoing_nodes(node_index node,
-                                        std::vector<node_index> *target_nodes) const {
-    assert(target_nodes);
+bool DBGBitmap::has_no_incoming(node_index node) const {
+    assert(in_graph(node));
 
-    call_outgoing_kmers(node, [target_nodes](node_index target, char) {
-        target_nodes->push_back(target);
-    });
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet()) {
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        if (to_node(prev_kmer) != npos)
+            return false;
+    }
+
+    return true;
+}
+
+bool DBGBitmap::has_single_incoming(node_index node) const {
+    assert(in_graph(node));
+
+    bool incoming_edge_detected = false;
+
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet()) {
+        auto prev_kmer = kmer;
+        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        if (to_node(prev_kmer) != npos) {
+            if (incoming_edge_detected)
+                return false;
+
+            incoming_edge_detected = true;
+        }
+    }
+
+    return incoming_edge_detected;
+}
+
+void DBGBitmap::adjacent_outgoing_nodes(node_index node,
+                                        const std::function<void(node_index)> &callback) const {
+    assert(in_graph(node));
+
+    call_outgoing_kmers(node, [&](node_index child, char) { callback(child); });
 }
 
 void DBGBitmap::adjacent_incoming_nodes(node_index node,
-                                        std::vector<node_index> *source_nodes) const {
-    assert(source_nodes);
+                                        const std::function<void(node_index)> &callback) const {
+    assert(in_graph(node));
 
-    call_incoming_kmers(node, [source_nodes](node_index source, char) {
-        source_nodes->push_back(source);
-    });
+    call_incoming_kmers(node, [&](node_index parent, char) { callback(parent); });
 }
 
 DBGBitmap::node_index
@@ -187,25 +259,23 @@ DBGBitmap::kmer_to_node(const std::string &kmer) const {
 }
 
 uint64_t DBGBitmap::node_to_index(node_index node) const {
-    assert(node);
-    assert(node < kmers_.num_set_bits());
+    assert(in_graph(node));
 
     return complete_ ? node : kmers_.select1(node + 1);
 }
 
 DBGBitmap::Kmer DBGBitmap::node_to_kmer(node_index node) const {
-    assert(node);
-    assert(node < kmers_.num_set_bits());
+    assert(in_graph(node));
 
     return Kmer { complete_ ? node - 1 : kmers_.select1(node + 1) - 1 };
 }
 
 std::string DBGBitmap::get_node_sequence(node_index node) const {
-    assert(node);
+    assert(in_graph(node));
     assert(sequence_to_kmers(seq_encoder_.kmer_to_sequence(
         node_to_kmer(node), k_)).size() == 1);
     assert(node == to_node(sequence_to_kmers(seq_encoder_.kmer_to_sequence(
-        node_to_kmer(node), k_))[0]));
+        node_to_kmer(node), k_))[0].first));
 
     return seq_encoder_.kmer_to_sequence(node_to_kmer(node), k_);
 }
@@ -275,12 +345,17 @@ bool DBGBitmap::load(const std::string &filename) {
     return load(in);
 }
 
-Vector<DBGBitmap::Kmer> DBGBitmap::sequence_to_kmers(const std::string &sequence,
-                                                     bool to_canonical) const {
+Vector<std::pair<DBGBitmap::Kmer, bool>>
+DBGBitmap::sequence_to_kmers(const std::string &sequence, bool to_canonical) const {
     return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, to_canonical);
 }
 
 bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
+    if (get_k() != other.get_k()
+            || is_canonical_mode() != other.is_canonical_mode()
+            || num_nodes() != other.num_nodes())
+        return false;
+
     if (dynamic_cast<const DBGBitmap*>(&other))
         return equals(*dynamic_cast<const DBGBitmap*>(&other), false);
 
@@ -288,48 +363,30 @@ bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
 }
 
 bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
-    if (verbose) {
-        if (k_ != other.k_) {
-            std::cerr << "k: " << k_ << " != " << other.k_ << std::endl;
-            return false;
-        }
-
-        if (canonical_mode_ != other.canonical_mode_) {
-            std::cerr << "canonical: " << canonical_mode_
-                      << " != " << other.canonical_mode_ << std::endl;
-            return false;
-        }
-
-        if (kmers_.num_set_bits() != other.kmers_.num_set_bits()) {
-            std::cerr << "setbits: " << kmers_.num_set_bits()
-                      << " != " << other.kmers_.num_set_bits() << std::endl;
-            return false;
-        }
-
-        uint64_t cur_one = 1;
-        uint64_t mismatch = 0;
-        kmers_.call_ones(
-            [&](const auto &pos) {
-                mismatch += (pos != other.kmers_.select1(cur_one++));
-            }
-        );
-        return cur_one == other.kmers_.num_set_bits() + 1 && !mismatch;
+    if (!verbose) {
+        return k_ == other.k_
+                && canonical_mode_ == other.canonical_mode_
+                && kmers_ == other.kmers_;
     }
 
-    if (k_ == other.k_
-            && canonical_mode_ == other.canonical_mode_
-            && kmers_.num_set_bits() == other.kmers_.num_set_bits()) {
-        uint64_t cur_one = 1;
-        uint64_t mismatch = 0;
-        kmers_.call_ones(
-            [&](const auto &pos) {
-                mismatch += (pos != other.kmers_.select1(cur_one++));
-            }
-        );
-        return cur_one == other.kmers_.num_set_bits() + 1 && !mismatch;
+    if (k_ != other.k_) {
+        std::cerr << "k: " << k_ << " != " << other.k_ << std::endl;
+        return false;
     }
 
-    return false;
+    if (canonical_mode_ != other.canonical_mode_) {
+        std::cerr << "canonical: " << canonical_mode_
+                  << " != " << other.canonical_mode_ << std::endl;
+        return false;
+    }
+
+    if (kmers_.num_set_bits() != other.kmers_.num_set_bits()) {
+        std::cerr << "setbits: " << kmers_.num_set_bits()
+                  << " != " << other.kmers_.num_set_bits() << std::endl;
+        return false;
+    }
+
+    return kmers_ == other.kmers_;
 }
 
 void DBGBitmap::print(std::ostream &out) const {
@@ -352,4 +409,10 @@ void DBGBitmap::print(std::ostream &out) const {
             << node_to_index(node) << "\t"
             << get_node_sequence(node) << std::endl;
     }
+}
+
+bool DBGBitmap::in_graph(node_index node) const {
+    assert(node > 0 && node < kmers_.num_set_bits());
+    std::ignore = node;
+    return true;
 }

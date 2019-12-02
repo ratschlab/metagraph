@@ -3,6 +3,8 @@
 #include <ips4o.hpp>
 #include <progress_bar.hpp>
 
+#include "algorithms.hpp"
+
 const uint64_t kNumRowsSampled = 1'000'000;
 
 
@@ -24,7 +26,7 @@ get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < columns.size(); ++i) {
-        submatrix[i] = utils::subvector(*columns[i], row_indexes);
+        submatrix[i] = subvector(*columns[i], row_indexes);
 
 #ifndef NDEBUG
         for (size_t j = 0; j < row_indexes.size(); ++j) {
@@ -80,7 +82,6 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
                        size_t num_threads) {
     std::vector<std::vector<double>> similarities(cols.size());
 
-    #pragma omp parallel for num_threads(num_threads)
     for (size_t j = 1; j < cols.size(); ++j) {
         similarities[j] = std::vector<double>(j, 0.);
     }
@@ -88,7 +89,7 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
     ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Computing correlations",
                              std::cerr, !utils::get_verbose());
 
-    #pragma omp parallel for num_threads(num_threads) collapse(2)
+    #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)
     for (size_t j = 1; j < cols.size(); ++j) {
         for (size_t k = 0; k < cols.size(); ++k) {
             if (k >= j)
@@ -114,7 +115,7 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols,
 
     auto similarities = correlation_similarity(cols, num_threads);
 
-    #pragma omp parallel for num_threads(num_threads) collapse(2)
+    #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)
     for (size_t j = 0; j < cols.size(); ++j) {
         for (size_t k = 0; k < cols.size(); ++k) {
             if (k >= j)

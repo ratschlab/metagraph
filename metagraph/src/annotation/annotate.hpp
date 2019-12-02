@@ -8,6 +8,8 @@
 #include <memory>
 #include <functional>
 
+#include "utils/vectors.hpp"
+
 
 namespace annotate {
 
@@ -73,6 +75,8 @@ class MultiLabelAnnotation
 
     virtual void set_labels(Index i, const VLabels &labels) = 0;
     virtual VLabels get_labels(Index i) const = 0;
+    virtual std::vector<VLabels>
+    get_labels(const std::vector<Index> &indices) const = 0;
 
     virtual void add_label(Index i, const Label &label) = 0;
     virtual void add_labels(Index i, const VLabels &labels) = 0;
@@ -149,13 +153,6 @@ class LabelEncoder {
 };
 
 
-class IterateRows {
-  public:
-    virtual ~IterateRows() {}
-    virtual std::vector<uint64_t> next_row() = 0;
-};
-
-
 template <typename IndexType, typename LabelType>
 class MultiLabelEncoded
       : public MultiLabelAnnotation<IndexType, LabelType> {
@@ -163,11 +160,33 @@ class MultiLabelEncoded
     using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<IndexType, LabelType>::Label;
     using VLabels = typename MultiLabelAnnotation<IndexType, LabelType>::VLabels;
+    typedef Vector<uint64_t> SetBitPositions;
+
+    class IterateRows {
+      public:
+        virtual ~IterateRows() {}
+        virtual SetBitPositions next_row() = 0;
+    };
 
     virtual ~MultiLabelEncoded() {}
 
+    virtual VLabels get_labels(Index i) const override final;
+    virtual std::vector<VLabels>
+    get_labels(const std::vector<Index> &indices) const override final;
+
     virtual std::unique_ptr<IterateRows> iterator() const;
-    virtual std::vector<uint64_t> get_label_codes(Index i) const = 0;
+    virtual SetBitPositions get_label_codes(Index i) const = 0;
+    virtual std::vector<SetBitPositions>
+    get_label_codes(const std::vector<Index> &indices) const;
+
+    /**
+     * Return all labels for which counts are greater than or equal to |min_count|.
+     * Stop counting if count is greater than |count_cap|.
+     */
+    virtual std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
+    count_labels(const std::unordered_map<Index, size_t> &index_counts,
+                 size_t min_count = 1,
+                 size_t count_cap = std::numeric_limits<size_t>::max()) const;
 
     virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
 
@@ -180,7 +199,7 @@ class MultiLabelEncoded
     // For each Index in indices, call row_callback on the vector of its
     // corresponding label indices. Terminate early if terminate returns true.
     virtual void call_rows(const std::vector<Index> &indices,
-                           const std::function<void(std::vector<uint64_t>&&)> &row_callback,
+                           const std::function<void(SetBitPositions&&)> &row_callback,
                            const std::function<bool()> &terminate = []() { return false; }) const;
 
     virtual bool label_exists(const Label &label) const override final {

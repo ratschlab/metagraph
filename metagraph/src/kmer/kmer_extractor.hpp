@@ -8,13 +8,14 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
-#include "utils.hpp"
+#include "utils/string_utils.hpp"
+#include "utils/vectors.hpp"
 #include "kmer.hpp"
 #include "kmer_boss.hpp"
 #include "alphabets.hpp"
 
 
-class KmerExtractor {
+class KmerExtractorBOSS {
   public:
 
     #if _PROTEIN_GRAPH
@@ -39,10 +40,11 @@ class KmerExtractor {
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
 
-    KmerExtractor();
+    KmerExtractorBOSS();
 
     /**
      * Break the sequence into kmers and add them to the kmer storage.
+     * Adds only valid k-mers.
      */
     template <class KMER>
     static void sequence_to_kmers(const std::string &sequence,
@@ -50,14 +52,6 @@ class KmerExtractor {
                                   const std::vector<TAlphabet> &suffix,
                                   Vector<KMER> *kmers,
                                   bool canonical_mode = false);
-
-    template <class KMER>
-    static Vector<KMER> sequence_to_kmers(const std::string &sequence,
-                                          size_t k,
-                                          bool canonical_mode = false,
-                                          const std::vector<TAlphabet> &suffix = {});
-
-    static sdsl::bit_vector valid_kmers(const std::string &sequence, size_t k);
 
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k) {
@@ -71,6 +65,9 @@ class KmerExtractor {
     static char decode(TAlphabet c);
     static std::string decode(const std::vector<TAlphabet> &sequence);
 
+    static void reverse_complement(std::vector<TAlphabet> *sequence);
+    static TAlphabet complement(TAlphabet c);
+
     /**
      * Generate all valid suffixes of the given length
      * ACGT, ACG$, ..., $$$$ -- valid
@@ -82,6 +79,7 @@ class KmerExtractor {
 
   private:
     static const TAlphabet *kCharToNucleotide;
+    static const std::vector<TAlphabet> kComplementCode;
 };
 
 
@@ -104,10 +102,11 @@ class KmerExtractor2BitT {
 
     KmerExtractor2BitT(const char Alphabet[] = alphabets::kAlphabetDNA,
                        const uint8_t CharToCode[128] = alphabets::kCharToDNA,
-                       const std::vector<uint8_t> &complement_code = alphabets::kCanonicalMapDNA);
+                       const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
 
     /**
      * Break the sequence into kmers and add them to the kmer storage.
+     * Adds only valid k-mers.
      */
     template <class T>
     void sequence_to_kmers(const std::string &sequence,
@@ -115,20 +114,23 @@ class KmerExtractor2BitT {
                            const std::vector<TAlphabet> &suffix,
                            Vector<Kmer<T>> *kmers,
                            bool canonical_mode = false) const;
-    template <class KMER>
-    Vector<KMER> sequence_to_kmers(const std::string &sequence,
-                                   size_t k,
-                                   bool canonical_mode = false,
-                                   const std::vector<TAlphabet> &suffix = {}) const;
 
-    sdsl::bit_vector valid_kmers(const std::string &sequence, size_t k) const;
+    /**
+     * Extract all k-mers from sequence.
+     * Returned pairs are k-mers and flags: `true` for the valid k-mers
+     * and `false` for invalid ones.
+     */
+    template <class KMER>
+    Vector<std::pair<KMER, bool>>
+    sequence_to_kmers(const std::string &sequence,
+                      size_t k,
+                      bool canonical_mode = false,
+                      const std::vector<TAlphabet> &suffix = {}) const;
 
     template <class T>
     std::string kmer_to_sequence(const Kmer<T> &kmer, size_t k) const {
         return kmer.to_string(k, alphabet);
     }
-
-    std::string reverse_complement(const std::string &sequence) const;
 
     // map input character to k-mer character
     TAlphabet encode(char s) const;

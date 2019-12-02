@@ -3,23 +3,26 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <iostream>
+#include <vector>
+#include <cassert>
 
 #include <ips4o.hpp>
 
-#include "utils.hpp"
-
 
 // Thread safe data storage to extract distinct elements
-template <typename T>
+template <typename T, class Container = std::vector<T>>
 class SortedSet {
   public:
+    static_assert(std::is_same_v<T, typename Container::value_type>);
+
     typedef T key_type;
     typedef T value_type;
-    typedef Vector<T> storage_type;
+    typedef Container storage_type;
 
-    SortedSet(size_t num_threads = 1,
-              bool verbose = false,
-              std::function<void(storage_type*)> cleanup = [](storage_type*) {})
+    SortedSet(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
+              size_t num_threads = 1,
+              bool verbose = false)
       : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
 
     ~SortedSet() {}
@@ -84,11 +87,13 @@ class SortedSet {
         sorted_end_ = 0;
     }
 
-    void sort_and_remove_duplicates(storage_type *vector, size_t num_threads) const {
+    template <class Array>
+    void sort_and_remove_duplicates(Array *vector, size_t num_threads) const {
         assert(vector);
 
-        ips4o::parallel::sort(vector->begin(), vector->end(), std::less<T>(), num_threads);
-
+        ips4o::parallel::sort(vector->begin(), vector->end(),
+                              std::less<typename Array::value_type>(),
+                              num_threads);
         // remove duplicates
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
@@ -132,6 +137,7 @@ class SortedSet {
     storage_type data_;
     size_t num_threads_;
     bool verbose_;
+
     std::function<void(storage_type*)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values

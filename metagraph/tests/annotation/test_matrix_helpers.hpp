@@ -5,7 +5,6 @@
 #include <string>
 #include <memory>
 
-#include "binary_matrix.hpp"
 #include "BRWT.hpp"
 #include "BRWT_builders.hpp"
 #include "rainbowfish.hpp"
@@ -16,7 +15,7 @@ class BRWTOptimized : public BRWT {
   public:
     template <typename... Args>
     BRWTOptimized(Args&&... args)
-        : BRWT(std::forward<Args>(args)...) { BRWTOptimizer::relax(this); }
+          : BRWT(std::forward<Args>(args)...) { BRWTOptimizer::relax(this); }
 };
 
 template <int BufferSize>
@@ -41,6 +40,12 @@ BinMat build_matrix_from_columns(BitVectorPtrArray&& columns = {}, uint64_t num_
 
 template <typename BinMat>
 BinMat build_matrix_from_rows(BitVectorPtrArray&& columns = {}, uint64_t num_rows = 0);
+
+template <typename BinMat>
+BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_rows = 0);
+
+template <typename BinMat>
+BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_rows = 0);
 
 
 template <typename TypeParam>

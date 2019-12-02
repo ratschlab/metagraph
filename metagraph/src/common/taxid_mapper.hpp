@@ -1,11 +1,11 @@
 #ifndef __TAXID_MAPPER_HPP__
 #define __TAXID_MAPPER_HPP__
 
-
 #include <fstream>
 #include <string>
 #include <unordered_map>
 #include <tsl/hopscotch_map.h>
+
 
 class TaxIDMapper {
   public:
@@ -13,6 +13,7 @@ class TaxIDMapper {
 
     bool parse_accession2taxid(const std::string &accession2taxid);
     bool parse_nodes(const std::string &nodes);
+    static std::string parse_label(const std::string &gb);
 
     taxid_t gb_to_taxid(const std::string &gb) const;
 

@@ -3,11 +3,12 @@
 #include <cassert>
 #include <iterator>
 
-#include "utils.hpp"
-#include "serialization.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
+#include "utils/serialization.hpp"
 
 typedef brwt::binary_relation::object_id object_id;
 typedef brwt::binary_relation::label_id label_id;
+
 
 label_id to_label_id(uint64_t x) {
     return static_cast<label_id>(x + 1);
@@ -108,7 +109,7 @@ uint64_t BinRelWT::num_rows() const {
     return num_objects;
 }
 
-std::vector<BinRelWT::Column> BinRelWT::get_row(Row row) const {
+BinRelWT::SetBitPositions BinRelWT::get_row(Row row) const {
     assert(row < num_objects);
     if (is_zero_row(row)) {
         return {};
@@ -124,7 +125,7 @@ std::vector<BinRelWT::Column> BinRelWT::get_row(Row row) const {
                                                last_label)
     );
 
-    std::vector<Column> relations_in_row;
+    SetBitPositions relations_in_row;
     relations_in_row.reserve(num_relations_in_row);
     for (uint64_t relation_it = 1; relation_it <= num_relations_in_row; ++relation_it) {
         auto element =

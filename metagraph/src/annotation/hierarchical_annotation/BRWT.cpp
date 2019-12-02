@@ -3,6 +3,7 @@
 #include <queue>
 #include <numeric>
 
+#include "algorithms.hpp"
 #include "serialization.hpp"
 
 
@@ -23,7 +24,7 @@ bool BRWT::get(Row row, Column column) const {
                                          assignments_.rank(column));
 }
 
-std::vector<BRWT::Column> BRWT::get_row(Row row) const {
+BRWT::SetBitPositions BRWT::get_row(Row row) const {
     assert(row < num_rows());
 
     // check if the row is empty
@@ -35,11 +36,11 @@ std::vector<BRWT::Column> BRWT::get_row(Row row) const {
         assert(assignments_.size() == 1);
 
         // the bit is set
-        return utils::arange<Column>(0, assignments_.size());
+        return utils::arange<Column, SetBitPositions>(0, assignments_.size());
     }
 
     // check all child nodes
-    std::vector<Column> row_set_bits;
+    SetBitPositions row_set_bits;
     uint64_t index_in_child = nonzero_rows_.rank1(row) - 1;
 
     for (size_t i = 0; i < child_nodes_.size(); ++i) {
@@ -50,6 +51,91 @@ std::vector<BRWT::Column> BRWT::get_row(Row row) const {
         }
     }
     return row_set_bits;
+}
+
+std::vector<BRWT::SetBitPositions>
+BRWT::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+
+    // check whether it is a leaf
+    if (!child_nodes_.size()) {
+        assert(assignments_.size() == 1);
+
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            assert(row_ids[i] < num_rows());
+
+            if (nonzero_rows_[row_ids[i]])
+                rows[i] = utils::arange<Column, SetBitPositions>(0, assignments_.size());
+        }
+
+        return rows;
+    }
+
+    // construct indexing for children and the inverse mapping
+    std::vector<Row> child_row_ids;
+    child_row_ids.reserve(row_ids.size());
+
+    std::vector<Row> from_child_to_parent;
+    from_child_to_parent.reserve(row_ids.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        assert(row_ids[i] < num_rows());
+
+        uint64_t global_offset = row_ids[i];
+
+        // if next word containes three or more positions, query the whole word
+        if (i + 2 < row_ids.size()
+                && row_ids[i + 2] < global_offset + 64
+                && row_ids[i + 2] >= global_offset
+                && global_offset + 64 <= nonzero_rows_.size()) {
+            // get the word
+            uint64_t word = nonzero_rows_.get_int(global_offset, 64);
+            uint64_t rank = -1ULL;
+
+            do {
+                // check index
+                uint8_t offset = row_ids[i] - global_offset;
+                if (word & (1ULL << offset)) {
+                    if (rank == -1ULL)
+                        rank = global_offset > 0
+                                ? nonzero_rows_.rank1(global_offset - 1)
+                                : 0;
+
+                    // map index from parent's to children's coordinate system
+                    child_row_ids.push_back(rank + sdsl::bits::cnt(word & sdsl::bits::lo_set[offset + 1]) - 1);
+                    from_child_to_parent.push_back(i);
+                }
+            } while (++i < row_ids.size()
+                        && row_ids[i] < global_offset + 64
+                        && row_ids[i] >= global_offset);
+            --i;
+
+        } else {
+            // check index
+            if (nonzero_rows_[global_offset]) {
+                // map index from parent's to children's coordinate system
+                child_row_ids.push_back(nonzero_rows_.rank1(global_offset) - 1);
+                from_child_to_parent.push_back(i);
+            }
+        }
+    }
+
+    // query all children subtrees
+    for (size_t j = 0; j < child_nodes_.size(); ++j) {
+        auto child_rows = child_nodes_[j]->get_rows(child_row_ids);
+
+        // push rows from children back to |rows|
+        for (size_t i = 0; i < child_rows.size(); ++i) {
+            auto &row = rows[from_child_to_parent[i]];
+            auto &child_row = child_rows[i];
+
+            for (auto child_col_id : child_row) {
+                row.push_back(assignments_.get(j, child_col_id));
+            }
+        }
+    }
+
+    return rows;
 }
 
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {
@@ -199,6 +285,19 @@ uint64_t BRWT::total_num_set_bits() const {
     });
 
     return total_num_set_bits;
+}
+
+void BRWT::print_tree_structure(std::ostream &os) const {
+    BFT([&os](const BRWT &node) {
+        // print node and its stats
+        os << &node << "," << node.nonzero_rows_.size()
+                    << "," << node.nonzero_rows_.num_set_bits();
+        // print all its children
+        for (const auto &child : node.child_nodes_) {
+            os << "," << child.get();
+        }
+        os << std::endl;
+    });
 }
 
 void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {

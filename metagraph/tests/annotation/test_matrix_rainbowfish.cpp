@@ -2,7 +2,6 @@
 
 #include "test_matrix_helpers.hpp"
 #include "rainbowfish.hpp"
-#include "bit_vector.hpp"
 
 
 template <int BufferSize>
@@ -24,11 +23,11 @@ void test_rainbowfish_buffer(const uint64_t num_rows) {
     }
 
     test_matrix(
-        build_matrix_from_columns<RainbowfishBuffer<BufferSize>>(std::move(copy), num_rows),
+        build_matrix_from_columns<RainbowfishBuffer<BufferSize>>(copy, num_rows),
         columns
     );
     test_matrix(
-        build_matrix_from_rows<RainbowfishBuffer<BufferSize>>(std::move(copy), num_rows),
+        build_matrix_from_rows<RainbowfishBuffer<BufferSize>>(copy, num_rows),
         columns
     );
 }

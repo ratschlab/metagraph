@@ -15,7 +15,7 @@
 
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
-#include "utils.hpp"
+#include "string_utils.hpp"
 #include "reverse_complement.hpp"
 #include "sorted_set.hpp"
 
@@ -158,7 +158,7 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
 
                 //one pass per suffix
                 for (const std::string &suffix : KmerExtractor2Bit().generate_suffixes(suffix_len)) {
-                    constructor.reset(new DBGBitmapConstructor(k, canonical, suffix));
+                    constructor.reset(new DBGBitmapConstructor(k, canonical, 0, suffix));
 
                     for (const auto &seq : input_data) {
                         constructor->add_sequence(std::string(seq));
@@ -194,23 +194,23 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
 
 typedef std::function<void(const std::string&)> CallbackString;
 
-template <typename KMER, class KmerExtractor>
-void extract_kmers(std::function<void(CallbackString)> generate_reads,
+template <typename KMER, class KmerExtractor, class Container>
+void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
-                   bool canonical_mode,
-                   SortedSet<KMER> *kmers,
+                   bool both_strands_mode,
+                   Container *kmers,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true);
 
 // TODO: k is node length
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        SortedSet<KMER> *kmers,
+                                        SortedSet<KMER, Vector<KMER>> *kmers,
                                         const std::vector<KmerExtractor2Bit::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    extract_kmers<KMER, KmerExtractor2Bit>(
+    extract_kmers<KMER, KmerExtractor2Bit, SortedSet<KMER, Vector<KMER>>>(
         [reads](CallbackString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
@@ -220,7 +220,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
-    SortedSet<KMER> result;
+    SortedSet<KMER, Vector<KMER>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -267,7 +267,7 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
-    SortedSet<KMER> result;
+    SortedSet<KMER, Vector<KMER>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -311,7 +311,7 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
-    SortedSet<KMER> result;
+    SortedSet<KMER, Vector<KMER>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -357,7 +357,7 @@ TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
-    SortedSet<KMER> result;
+    SortedSet<KMER, Vector<KMER>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -405,10 +405,10 @@ TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
 TEST(DBGBitmapMergeChunks, DumpedChunked) {
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "A"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "C"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "G"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "T"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -463,10 +463,10 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
 TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "A"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "C"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "G"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "T"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -523,10 +523,10 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
 
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "A", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "C", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "G", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "T", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "A", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "C", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "G", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "T", num_threads));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -586,10 +586,10 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
 
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "A", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "C", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "G", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "T", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "A", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "C", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "G", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "T", num_threads));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");

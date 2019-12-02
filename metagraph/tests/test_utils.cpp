@@ -2,10 +2,13 @@
 #include "test_helpers.hpp"
 
 #include "annotate_column_compressed.hpp"
-#include "utils.hpp"
+#include "vectors.hpp"
+#include "string_utils.hpp"
+#include "file_utils.hpp"
+#include "algorithms.hpp"
+#include "bitmap_mergers.hpp"
 #include "threading.hpp"
 #include "bit_vector.hpp"
-
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -33,24 +36,6 @@ const std::vector<std::vector<uint64_t>> indices {
     { 5, 0 }, { 5, 1 }
 };
 
-utils::RowsFromColumnsTransformer generate_rct_file() {
-    annotate::ColumnCompressed<> annotation(6);
-
-    annotation.set_labels(1, { "Label0", "Label1" });
-    annotation.set_labels(2, { "Label0", "Label1" });
-    annotation.set_labels(3, { "Label1" });
-    annotation.set_labels(4, { "Label1" });
-    annotation.set_labels(5, { "Label0", "Label1" });
-
-    annotation.dump_columns(test_dump_basename);
-
-    utils::RowsFromColumnsTransformer rct(7, {
-        test_dump_basename + ".0.raw.column.annodbg",
-        test_dump_basename + ".1.raw.column.annodbg"
-    });
-
-    return rct;
-}
 
 std::vector<bit_vector_small> generate_rows() {
     std::vector<bit_vector_small> rows;
@@ -62,17 +47,6 @@ std::vector<bit_vector_small> generate_rows() {
     return rows;
 }
 
-std::vector<bit_vector_small const*>
-generate_ptrs(const std::vector<bit_vector_small> &rows) {
-    std::vector<bit_vector_small const*> rows_ptr;
-    std::transform(rows.begin(), rows.end(), std::back_inserter(rows_ptr),
-        [](auto &a) {
-            return &a;
-        });
-
-    return rows_ptr;
-}
-
 void check_rows(utils::RowsFromColumnsTransformer&& rct) {
     ASSERT_EQ(2u, rct.columns());
     ASSERT_EQ(7u, rct.rows());
@@ -80,16 +54,15 @@ void check_rows(utils::RowsFromColumnsTransformer&& rct) {
     // ASSERT_EQ(std::vector<uint64_t>({ 3, 5 }), rct.num_set_bits());
 
     uint64_t i = 0;
-    utils::call_rows([&](auto&& row_indices) {
+    rct.call_rows<Vector<uint64_t>>([&](const auto &row_indices) {
         sdsl::bit_vector bv(rct.columns());
         for (auto j : row_indices) {
             bv[j] = 1;
         }
         EXPECT_EQ(matrix[i++], bv) << i;
-    }, std::move(rct));
+    });
 
     ASSERT_EQ(7u, i);
-    EXPECT_EQ(0u, rct.values_left());
 }
 
 void check_indices(utils::RowsFromColumnsTransformer&& rct) {
@@ -111,25 +84,15 @@ void check_indices(utils::RowsFromColumnsTransformer&& rct) {
     EXPECT_EQ(0u, rct.values_left());
 }
 
-TEST(Utils, RowsFromColumnsTransformerCallRowsFile) {
-    auto rct = generate_rct_file();
-    check_rows(std::move(rct));
-}
-
-TEST(Utils, RowsFromColumnsTransformerCallIndicesFile) {
-    auto rct = generate_rct_file();
-    check_indices(std::move(rct));
-}
-
 TEST(Utils, RowsFromColumnsTransformerCallRowsColumns) {
     auto rows = generate_rows();
-    utils::RowsFromColumnsTransformer rct(generate_ptrs(rows));
+    utils::RowsFromColumnsTransformer rct(rows);
     check_rows(std::move(rct));
 }
 
 TEST(Utils, RowsFromColumnsTransformerCallIndicesColumns) {
     auto rows = generate_rows();
-    utils::RowsFromColumnsTransformer rct(generate_ptrs(rows));
+    utils::RowsFromColumnsTransformer rct(rows);
     check_indices(std::move(rct));
 }
 
@@ -795,4 +758,190 @@ TEST(Vector, ReserveInfinityCheckThrow) {
 TEST(Vector, ResizeInfinityCheckThrow) {
     Vector<int> vector;
     EXPECT_THROW(vector.resize(1llu << 59), std::bad_alloc);
+}
+
+TEST(Deque, ResizeInfinityCheckThrow) {
+    std::deque<int> array;
+    EXPECT_THROW(array.resize(1llu << 60), std::bad_alloc);
+}
+
+TEST(Misc, get_quantile) {
+    EXPECT_EQ(1, utils::get_quantile<int>({ {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1} }, 0.0));
+    EXPECT_EQ(5, utils::get_quantile<int>({ {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1} }, 1.0));
+    EXPECT_EQ(3, utils::get_quantile<int>({ {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1} }, 0.5));
+    EXPECT_EQ(2, utils::get_quantile<int>({ {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1} }, 0.25));
+    EXPECT_EQ(4, utils::get_quantile<int>({ {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1} }, 0.75));
+
+    EXPECT_EQ(1, utils::get_quantile<int>({ {1, 2}, {2, 2}, {3, 2}, {4, 2}, {5, 2} }, 0.0));
+    EXPECT_EQ(5, utils::get_quantile<int>({ {1, 2}, {2, 2}, {3, 2}, {4, 2}, {5, 2} }, 1.0));
+    EXPECT_EQ(3, utils::get_quantile<int>({ {1, 2}, {2, 2}, {3, 2}, {4, 2}, {5, 2} }, 0.5));
+    EXPECT_EQ(2, utils::get_quantile<int>({ {1, 2}, {2, 2}, {3, 2}, {4, 2}, {5, 2} }, 0.25));
+    EXPECT_EQ(4, utils::get_quantile<int>({ {1, 2}, {2, 2}, {3, 2}, {4, 2}, {5, 2} }, 0.75));
+
+    EXPECT_EQ(1, utils::get_quantile<int>({ {1, 2}, {2, 3}, {3, 5}, {4, 5}, {5, 5} }, 0.0));
+    EXPECT_EQ(5, utils::get_quantile<int>({ {1, 2}, {2, 3}, {3, 5}, {4, 5}, {5, 5} }, 1.0));
+    EXPECT_EQ(3, utils::get_quantile<int>({ {1, 2}, {2, 3}, {3, 5}, {4, 5}, {5, 5} }, 0.5));
+    EXPECT_EQ(2, utils::get_quantile<int>({ {1, 2}, {2, 3}, {3, 5}, {4, 5}, {5, 5} }, 0.25));
+    EXPECT_EQ(4, utils::get_quantile<int>({ {1, 2}, {2, 3}, {3, 5}, {4, 5}, {5, 5} }, 0.75));
+}
+
+
+template <typename T>
+std::vector<T> insert_reference_impl(std::vector<T> vector,
+                                     const std::vector<uint64_t> &new_pos,
+                                     T value) {
+    assert(std::is_sorted(new_pos.begin(), new_pos.end()));
+    for (auto i : new_pos) {
+        vector.insert(vector.begin() + i, value);
+    }
+    return vector;
+}
+
+bitmap_vector to_bitmap(size_t size, const std::vector<uint64_t> &set_bits_pos) {
+    assert(std::is_sorted(set_bits_pos.begin(), set_bits_pos.end()));
+    sdsl::bit_vector mask(size, false);
+    for (auto i : set_bits_pos) {
+        mask[i] = true;
+    }
+    return bitmap_vector(std::move(mask));
+}
+
+TEST(Misc, insert_zeros_to_empty) {
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, 4, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, 3, 4, 5, }) }) {
+        std::vector<int> first;
+        std::vector<int> second = first;
+        auto expected = insert_reference_impl(first, new_pos, 0);
+        utils::insert(&first, new_pos, 0);
+        utils::insert(&second, to_bitmap(second.size() + new_pos.size(), new_pos), 0);
+
+        EXPECT_EQ(expected, first);
+        EXPECT_EQ(expected, second);
+    }
+}
+
+TEST(Misc, insert_zeros_to_all_zeros) {
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 50, }),
+                                 std::vector<uint64_t>({ 50, 51, }),
+                                 std::vector<uint64_t>({ 50, 51, 52, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, 51, 52, 53, 54, 55, }) }) {
+        std::vector<int> first(50, 0);
+        std::vector<int> second = first;
+        auto expected = insert_reference_impl(first, new_pos, 0);
+        utils::insert(&first, new_pos, 0);
+        utils::insert(&second, to_bitmap(second.size() + new_pos.size(), new_pos), 0);
+
+        EXPECT_EQ(expected, first);
+        EXPECT_EQ(expected, second);
+    }
+}
+
+TEST(Misc, insert_zeros_to_all_ones) {
+    for (const auto &new_pos : { std::vector<uint64_t>({}),
+                                 std::vector<uint64_t>({ 0, }),
+                                 std::vector<uint64_t>({ 0, 1, }),
+                                 std::vector<uint64_t>({ 0, 1, 2, }),
+                                 std::vector<uint64_t>({ 50, }),
+                                 std::vector<uint64_t>({ 50, 51, }),
+                                 std::vector<uint64_t>({ 50, 51, 52, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, }),
+                                 std::vector<uint64_t>({ 0, 10, 20, 30, 40, 50, 51, 52, 53, 54, 55, }) }) {
+        std::vector<int> first(50, 1);
+        std::vector<int> second = first;
+        auto expected = insert_reference_impl(first, new_pos, 0);
+        utils::insert(&first, new_pos, 0);
+        utils::insert(&second, to_bitmap(second.size() + new_pos.size(), new_pos), 0);
+
+        EXPECT_EQ(expected, first);
+        EXPECT_EQ(expected, second);
+    }
+}
+
+TEST(Misc, drag_and_mark_segments) {
+    EXPECT_EQ(std::vector<bool> {},
+              utils::drag_and_mark_segments(std::vector<uint64_t> {}, 1, 0));
+    EXPECT_EQ(std::vector<bool> {},
+              utils::drag_and_mark_segments(std::vector<uint64_t> {}, 1, 1));
+    EXPECT_EQ(std::vector<bool> {},
+              utils::drag_and_mark_segments(std::vector<uint64_t> {}, 1, 100));
+
+    EXPECT_EQ(std::vector<bool>({ 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 2, 0));
+    EXPECT_EQ(std::vector<bool>({ 1 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 2, 1));
+    EXPECT_EQ(std::vector<bool>({ 1 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 2, 100));
+
+    EXPECT_EQ(std::vector<bool>({ 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 1, 0));
+    EXPECT_EQ(std::vector<bool>({ 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 1, 1));
+    EXPECT_EQ(std::vector<bool>({ 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 2 }), 1, 100));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 0));
+    EXPECT_EQ(std::vector<bool>({ 1, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 1));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 1, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 4));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 5));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 0, 1, 4, 6 }), 0, 0));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 0, 1, 4, 6 }), 0, 1));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 0, 1, 4, 6 }), 0, 2));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<uint64_t>({ 0, 1, 1, 4, 6 }), 0, 5));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 10, 0));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 1, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 10, 1));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 1, 1, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 10, 2));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 1, 10, 4, 6 }), 10, 5));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 6, 0));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 6, 1));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 0, 10, 4, 6 }), 6, 2));
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 1, 10, 4, 6 }), 6, 50));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 6, 0, 10, 6, 4 }), 6, 0));
+    EXPECT_EQ(std::vector<bool>({ 1, 0, 0, 1, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 6, 0, 10, 6, 4 }), 6, 1));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 0, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 6, 0, 10, 6, 4 }), 6, 2));
+    EXPECT_EQ(std::vector<bool>({ 1, 1, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 6, 1, 10, 6, 4 }), 6, 50));
+
+    EXPECT_EQ(std::vector<bool>({ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 0));
+    EXPECT_EQ(std::vector<bool>({ 0, 1, 0, 0, 1, 0, 0, 0, 1, 0 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 1));
+    EXPECT_EQ(std::vector<bool>({ 0, 1, 1, 0, 1, 1, 0, 0, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 2));
+    EXPECT_EQ(std::vector<bool>({ 0, 1, 1, 1, 1, 1, 1, 0, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 3));
+    EXPECT_EQ(std::vector<bool>({ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 }),
+              utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 100));
 }

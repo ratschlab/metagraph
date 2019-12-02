@@ -2,38 +2,25 @@
 
 #include <cmath>
 
-#include "utils.hpp"
 
-
-bool is_unreliable_unitig(const std::string &sequence,
-                          const DeBruijnGraph &graph,
-                          const IWeighted<DeBruijnGraph::node_index> &node_weights,
+bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
+                          const NodeWeights &node_weights,
                           uint64_t min_median_abundance) {
-    assert(sequence.size() >= graph.get_k());
+    assert(path.size());
 
     if (min_median_abundance <= 1)
         return false;
 
-    const uint64_t num_kmers = sequence.size() - graph.get_k() + 1;
     uint64_t num_weak_kmers = 0;
-    uint64_t num_reliable_kmers = 0;
 
-    graph.map_to_nodes(sequence,
-        [&](auto node) {
-            if (node_weights.get_weight(node) < min_median_abundance) {
-                num_weak_kmers++;
-            } else {
-                num_reliable_kmers++;
-            }
-        },
-        [&]() { return num_weak_kmers * 2 > num_kmers
-                        || num_reliable_kmers * 2 >= num_kmers; }
-    );
+    for (auto node : path) {
+        num_weak_kmers += node_weights[node] < min_median_abundance;
+    }
 
-    assert(num_weak_kmers + num_reliable_kmers <= num_kmers);
+    assert(num_weak_kmers <= path.size());
 
     // check if median is smaller than the threshold
-    return num_weak_kmers * 2 > num_kmers;
+    return num_weak_kmers * 2 > path.size();
 }
 
 
@@ -41,17 +28,20 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
                                  double *alpha_est_ptr, double *beta_est_ptr,
                                  double *false_pos_ptr, double *false_neg_ptr);
 
-uint64_t estimate_min_kmer_abundance(const bitmap &node_mask,
-                                     const IWeighted<DeBruijnGraph::node_index> &node_weights,
+uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
+                                     const NodeWeights &node_weights,
                                      uint64_t fallback_cutoff) {
     std::vector<uint64_t> hist;
-    node_mask.call_ones([&](auto i) {
-        uint64_t kmer_count = node_weights.get_weight(i);
+    graph.call_nodes([&](auto i) {
+        uint64_t kmer_count = node_weights[i];
+        assert(kmer_count && "All k-mers in graph must have non-zero counts");
         while (kmer_count >= hist.size()) {
             hist.push_back(0);
         }
         hist[kmer_count]++;
     });
+
+    hist.resize(std::max(uint64_t(hist.size()), uint64_t(10)), 0);
 
     double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
     auto cutoff = cleaning_pick_kmer_threshold(hist.data(), hist.size(),
@@ -61,7 +51,7 @@ uint64_t estimate_min_kmer_abundance(const bitmap &node_mask,
     if (cutoff != -1)
         return cutoff;
 
-    std::cerr << "Warning: Cannot estimate minimum k-mer abundance."
+    std::cerr << "Warning: Cannot estimate expected minimum k-mer abundance."
               << " Use fallback value." << std::endl;
 
     return fallback_cutoff;

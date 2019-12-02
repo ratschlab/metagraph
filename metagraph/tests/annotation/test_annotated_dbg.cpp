@@ -1,18 +1,12 @@
 #include <stdio.h>
 
+#include <set>
 #include "gtest/gtest.h"
 
-#define protected public
-#define private public
-
-#include <set>
-
-#include "dbg_succinct.hpp"
-#include "annotated_dbg.hpp"
-#include "annotate_column_compressed.hpp"
-#include "annotation_converters.hpp"
-#include "static_annotators_def.hpp"
+#include "../test_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
+
+#include "annotation_converters.hpp"
 
 
 void check_labels(const AnnotatedDBG &anno_graph,
@@ -1001,6 +995,123 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_labels) {
     }
 }
 
+TYPED_TEST(AnnotatedDBGWithNTest, get_labels_equal_weights) {
+    for (size_t k = 1; k < 10; ++k) {
+        const std::vector<std::string> sequences {
+            std::string(100, 'A') + std::string(k, 'C'),
+            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
+            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+        };
+        const auto& seq_first = sequences[0];
+        const auto& seq_second = sequences[1];
+        const auto& seq_third = sequences[2];
+
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            k + 1, sequences, { "First", "Second" , "Third" }
+        );
+
+        EXPECT_TRUE(anno_graph->label_exists("First"));
+        EXPECT_TRUE(anno_graph->label_exists("Second"));
+        EXPECT_TRUE(anno_graph->label_exists("Third"));
+        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
+
+        for (size_t i = 1; i < 4; ++i) {
+            std::vector<std::string> seqs_first(i, seq_first);
+            std::vector<std::string> seqs_second(i, seq_second);
+            std::vector<std::string> seqs_third(i, seq_third);
+            std::vector<double> weights(i, 1.0);
+
+            EXPECT_EQ(std::vector<std::string> { "First" },
+                      anno_graph->get_labels(seqs_first, weights, 1))
+                << i;
+
+#if _DNA_GRAPH
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                           / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                           / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                          / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                          / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+#else
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+#endif
+        }
+    }
+}
+
+TYPED_TEST(AnnotatedDBGWithNTest, get_labels_unequal_weights) {
+    for (size_t k = 1; k < 10; ++k) {
+        const std::vector<std::string> sequences {
+            std::string(100, 'A') + std::string(k, 'C'),
+            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
+            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+        };
+        const auto& seq_first = sequences[0];
+        const auto& seq_second = sequences[1];
+        const auto& seq_third = sequences[2];
+
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            k + 1, sequences, { "First", "Second" , "Third" }
+        );
+
+        EXPECT_TRUE(anno_graph->label_exists("First"));
+        EXPECT_TRUE(anno_graph->label_exists("Second"));
+        EXPECT_TRUE(anno_graph->label_exists("Third"));
+        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
+
+        for (size_t i = 1; i < 4; ++i) {
+            std::vector<std::string> seqs_first(i, seq_first);
+            std::vector<std::string> seqs_second(i, seq_second);
+            std::vector<std::string> seqs_third(i, seq_third);
+            std::vector<double> weights(i);
+            std::iota(weights.begin(), weights.end(), 1.0);
+
+            EXPECT_EQ(std::vector<std::string> { "First" },
+                      anno_graph->get_labels(seqs_first, weights, 1))
+                << i;
+
+#if _DNA_GRAPH
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                           / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                           / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                          / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                          / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+#else
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+#endif
+        }
+    }
+}
+
 TYPED_TEST(AnnotatedDBGNoNTest, get_labels) {
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1041,6 +1152,107 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_labels) {
         EXPECT_EQ(std::vector<std::string> { "Third" },
                   anno_graph->get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
                                                             / (seq_third.size() - (k + 1) + 1) - 1e-9));
+    }
+}
+
+TYPED_TEST(AnnotatedDBGNoNTest, get_labels_equal_weights) {
+    for (size_t k = 1; k < 10; ++k) {
+        const std::vector<std::string> sequences {
+            std::string(100, 'A') + std::string(k, 'C'),
+            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
+            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+        };
+        const auto& seq_first = sequences[0];
+        const auto& seq_second = sequences[1];
+        const auto& seq_third = sequences[2];
+
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            k + 1, sequences, { "First", "Second" , "Third" }
+        );
+
+        EXPECT_TRUE(anno_graph->label_exists("First"));
+        EXPECT_TRUE(anno_graph->label_exists("Second"));
+        EXPECT_TRUE(anno_graph->label_exists("Third"));
+        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
+
+        for (size_t i = 1; i < 4; ++i) {
+            std::vector<std::string> seqs_first(i, seq_first);
+            std::vector<std::string> seqs_second(i, seq_second);
+            std::vector<std::string> seqs_third(i, seq_third);
+            std::vector<double> weights(i, 1.0);
+
+            EXPECT_EQ(std::vector<std::string> { "First" },
+                      anno_graph->get_labels(seqs_first, weights, 1)) << i;
+
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights,  1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+        }
+    }
+}
+
+TYPED_TEST(AnnotatedDBGNoNTest, get_labels_unequal_weights) {
+    for (size_t k = 1; k < 10; ++k) {
+        const std::vector<std::string> sequences {
+            std::string(100, 'A') + std::string(k, 'C'),
+            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
+            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+        };
+        const auto& seq_first = sequences[0];
+        const auto& seq_second = sequences[1];
+        const auto& seq_third = sequences[2];
+
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            k + 1, sequences, { "First", "Second" , "Third" }
+        );
+
+        EXPECT_TRUE(anno_graph->label_exists("First"));
+        EXPECT_TRUE(anno_graph->label_exists("Second"));
+        EXPECT_TRUE(anno_graph->label_exists("Third"));
+        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
+
+        for (size_t i = 1; i < 4; ++i) {
+            std::vector<std::string> seqs_first(i, seq_first);
+            std::vector<std::string> seqs_second(i, seq_second);
+            std::vector<std::string> seqs_third(i, seq_third);
+            std::vector<double> weights(i);
+            std::iota(weights.begin(), weights.end(), 1.0);
+
+            EXPECT_EQ(std::vector<std::string> { "First" },
+                      anno_graph->get_labels(seqs_first, weights, 1)) << i;
+
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights,  1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+        }
     }
 }
 
