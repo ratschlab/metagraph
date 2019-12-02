@@ -936,6 +936,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         sdsl::bit_vector mask(graph->num_nodes() + 1, false);
 
         call_sequences([&](const std::string &sequence) {
+            if (sequence.length() < graph->get_k())
+                return;
+
             const size_t num_kmers = sequence.length() - graph->get_k() + 1;
             const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
             const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
