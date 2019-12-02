@@ -47,7 +47,7 @@ enum class ExtractorContainer {
     VECTOR_DISK
 };
 
-constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR_DISK;
+constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR;
 
 const static uint8_t kBitsPerCount = 8;
 
@@ -207,8 +207,8 @@ void recover_source_dummy_nodes(size_t k,
         const KMER &kmer = utils::get_first(el);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
-        const auto node_last_char = kmer[1];
-        const auto edge_label = kmer[0];
+        const typename T::CharType node_last_char = kmer[1];
+        const typename T::CharType edge_label = kmer[0];
         // nothing to do if it's not a source dummy kmer
         if (node_last_char || !edge_label)
             continue;
@@ -266,10 +266,10 @@ void recover_source_dummy_nodes(size_t k,
         // we iterate to merge the data and write it to disk
     }
 
-    // at this point, we have the dummy kmers with dummy prefix of length x in
-    // /tmp/dummy{x}, and we'll merge them all into a single stream
+    // at this point, we have the origial k-mers plus the  dummy k-mers with prefix
+    // length x in /tmp/dummy{x}, and we'll merge them all into a single stream
     kmers->reset();
-    kmers->set_out_file("/tmp/alldummy");
+    kmers->set_out_file("");
     common::merge_files(files_to_merge, kmers);
 }
 

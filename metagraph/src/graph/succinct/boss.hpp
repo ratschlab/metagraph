@@ -164,7 +164,7 @@ class BOSS {
 
     /**
      * Mark sink dummy edges into mask. Does not include the main dummy edge (with
-     * edge_index = 1).A sink dummy edge is an outgoing edge marked with the $ symbol.
+     * edge_index = 1). A sink dummy edge is an outgoing edge labeled with $.
      * @param[out] mask a bit mask where sink dummy edges are marked. Must have the same
      * size as #W_ or must be nullptr.
      * @return the number of sink dummy edges

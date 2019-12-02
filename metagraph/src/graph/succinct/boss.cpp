@@ -985,7 +985,7 @@ void BOSS::print_internal_representation(std::ostream &os) const {
 }
 
 void BOSS::print(std::ostream &os) const {
-    //assert(is_valid());
+    assert(is_valid());
     auto vertex_header = std::string("Vertex");
     vertex_header.resize(k_, ' ');
 

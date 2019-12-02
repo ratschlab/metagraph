@@ -6,7 +6,7 @@
 #include "boss.hpp"
 
 /**
- * Represents a chunk of a the BOSS representation of a deBrujin graph, i.e. the BOSS
+ * Represents a chunk of the BOSS representation of a deBrujin graph, i.e. the BOSS
  * table resulting from processing a subset of sorted kmers. Multiple Chunks can be
  * unified to form a BOSS table.
  * Unlike #BOSS, which supports rank and select operations on its #W_, #F_, last_
@@ -19,9 +19,9 @@ class BOSS::Chunk {
     /**
      * Creates an empty BOSS chunk with the given parameters
      * @param alph_size the alphabet size, without extra characters (i.e. sentinel).
-     * For DNA this will be 4.
+     *        For DNA this will be 4.
      * @param k k-mer size
-     * @param canonical
+     * @param canonical if true, build the chunk from canonicalized k-mers
      */
     Chunk(uint64_t alph_size, size_t k, bool canonical);
 
@@ -31,7 +31,7 @@ class BOSS::Chunk {
      * @param alph_size the alphabet size, without extra characters (i.e. sentinel).
      * For DNA this will be 4.
      * @param k k-mer size
-     * @param canonical
+     * @param canonical if true, build the chunk from canonicalized k-mers
      * @param kmers_with_counts the kmers to construct the chunk from
      * @param bits_per_count for weighted graphs, the number of bits used to store the
      * weight
@@ -54,7 +54,7 @@ class BOSS::Chunk {
      * Adds an entry into the BOSS table.
      * @param W the edge label
      * @param F the node label
-     * @param last true if this is the last outgoing edge from W
+     * @param last true if this is the last outgoing edge from F
      */
     void push_back(TAlphabet W, TAlphabet F, bool last);
 
@@ -88,6 +88,7 @@ class BOSS::Chunk {
 
     size_t alph_size_;
     size_t k_;
+    // see https://academic.oup.com/bioinformatics/article/34/13/i169/5045749
     bool canonical_;
     // see the BOSS paper for the meaning of W_, last_ and F_
     std::vector<TAlphabet> W_;

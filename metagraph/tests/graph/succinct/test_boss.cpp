@@ -391,7 +391,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
 
         BOSS &first = *first_ptr;
         BOSS &second = *second_ptr;
-std::cout << first << second;
+
         ASSERT_TRUE(first.equals_internally(second)) << first << second;
 
         sdsl::bit_vector source_dummy_edges(second.num_edges() + 1, false);
@@ -400,7 +400,7 @@ std::cout << first << second;
         sdsl::bit_vector source_dummy_edges_result(second.num_edges() + 1, false);
         second.mark_source_dummy_edges(&source_dummy_edges_result, 1);
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
-std::cout << first << second;
+
         EXPECT_EQ(0u, std::count(to_remove.begin(), to_remove.end(), true));
         EXPECT_TRUE(first.equals_internally(second)) << first << second;
     }

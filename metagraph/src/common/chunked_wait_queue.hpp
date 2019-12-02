@@ -41,8 +41,8 @@ namespace common {
  * shut down (if not already shut down) and the destructor will wait until all elements
  * were read (i.e. the iterator reaches past the last available element).
  *
- * The class will write all enqueued elements to a file specified via #set_out_file.
- * The #push_front operation will block until an output file is specified.
+ * The class will optionally write all enqueued elements to a file specified via
+ * #set_out_file. The #push_front operation will block until an output file is specified.
  *
  * The class is not copyable or copy constructible.
  */
@@ -89,7 +89,7 @@ class ChunkedWaitQueue {
 
     /**
      * Resets the queue to an empty state.
-     * Undefined behavior is the queue is reset while iterating over it.
+     * Undefined behavior if the queue is reset while iterating over it.
      */
     void reset() {
         shutdown();

@@ -23,11 +23,10 @@ class SortedSet {
     typedef Container storage_type;
     typedef Container result_type;
 
-    SortedSet(
-            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-            size_t num_threads = 1,
-            bool verbose = false)
-        : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
+    SortedSet(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
+              size_t num_threads = 1,
+              bool verbose = false)
+      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
 
     ~SortedSet() {}
 

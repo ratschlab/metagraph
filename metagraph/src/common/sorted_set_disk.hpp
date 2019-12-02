@@ -39,10 +39,10 @@ class SortedSetDisk {
      * guaranteed to flush to disk when the newly added data would exceed this
      * size.
      */
-    static constexpr size_t CONTAINER_SIZE_BYTES = 1e4; // 1 GB
+    static constexpr size_t CONTAINER_SIZE_BYTES = 1e9; // 1 GB
 
     /** Size of the merge queue's underlying circular buffer */
-    static constexpr size_t MERGE_QUEUE_SIZE = 1e4; // 1GB
+    static constexpr size_t MERGE_QUEUE_SIZE = 1e9; // 1GB
     /** Number of elements that can be iterated backwards in the merge queue */
     static constexpr size_t NUM_LAST_ELEMENTS_CACHED = 100;
 
@@ -172,7 +172,7 @@ class SortedSetDisk {
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
 
-        //cleanup_(vector); // typically removes source dummy k-mers
+        cleanup_(vector); // typically removes source dummy k-mers
     }
 
     void reserve(size_t) {
@@ -223,11 +223,6 @@ class SortedSetDisk {
             std::exit(EXIT_FAILURE);
         }
         binary_file.close();
-        if (!std::filesystem::exists(file_name)) {
-            std::cerr << "OOPs again!\n";
-            std::exit(EXIT_FAILURE);
-        }
-
         data->resize(0);
     }
 

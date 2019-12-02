@@ -12,6 +12,12 @@
 namespace mg {
 namespace common {
 
+/**
+ * Given a list of n source files, containing ordered elements of type T, merge the n
+ * sources into a single *ordered) wait queue.
+ * Since the merging happens in a wait queue, it's okay to merge data that doesn't fit
+ * in memory - the merging will block until some of the merged data is read.
+ */
 template <typename T>
 void merge_files(const std::vector<std::string> sources,
                  ChunkedWaitQueue<T> *merge_queue) {

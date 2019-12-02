@@ -10,7 +10,7 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
   public:
     virtual ~IBitmapChunkConstructor() {}
 
-    static IBitmapChunkConstructor *initialize(size_t k,
+    static IBitmapChunkConstructor* initialize(size_t k,
                                                bool canonical_mode = false,
                                                bool count_kmers = false,
                                                const std::string &filter_suffix = "",
@@ -18,10 +18,10 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
                                                double memory_preallocated = 0,
                                                bool verbose = false);
 
-    virtual void add_sequence(std::string &&sequence, uint64_t count = 1) = 0;
+    virtual void add_sequence(std::string&& sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
-    virtual DBGBitmap::Chunk *build_chunk() = 0;
+    virtual DBGBitmap::Chunk* build_chunk() = 0;
 
     virtual size_t get_k() const = 0;
     virtual bool is_canonical_mode() const = 0;
@@ -41,7 +41,7 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
                          double memory_preallocated = 0,
                          bool verbose = false);
 
-    void add_sequence(std::string &&sequence, uint64_t count = 1) {
+    void add_sequence(std::string&& sequence, uint64_t count = 1) {
         constructor_->add_sequence(std::move(sequence), count);
     }
 
@@ -56,19 +56,18 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
     }
 
     void build_graph(DBGBitmap *graph);
-    DBGBitmap::Chunk *build_chunk() { return constructor_->build_chunk(); }
+    DBGBitmap::Chunk* build_chunk() { return constructor_->build_chunk(); }
 
     uint64_t get_k() const { return constructor_->get_k(); }
 
-    static DBGBitmap *build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
+    static DBGBitmap* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                                               bool canonical_mode = false,
                                               bool verbose = false);
 
-    static DBGBitmap *
-    build_graph_from_chunks(uint64_t size,
-                            uint64_t num_kmers,
-                            const std::function<DBGBitmap::Chunk(void)> &next_chunk,
-                            bool canonical_mode = false);
+    static DBGBitmap* build_graph_from_chunks(uint64_t size,
+                                              uint64_t num_kmers,
+                                              const std::function<DBGBitmap::Chunk(void)> &next_chunk,
+                                              bool canonical_mode = false);
 
   private:
     std::unique_ptr<IBitmapChunkConstructor> constructor_;

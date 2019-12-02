@@ -19,7 +19,7 @@ checkFileSystem() # check for std::filesystem::temp_directory_path
 
 file(GLOB src_files "*.cpp" "*/*.cpp")
 
-add_library(metagraph_common STATIC ${src_files} circular_buffer.hpp)
+add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 
 # ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue

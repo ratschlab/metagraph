@@ -22,7 +22,7 @@ class CircularBuffer {
     void push_back(T item) {
         buf_[back_] = item;
 
-        if (full_) {
+        if (full_) { // throw away oldest element
             front_ = (front_ + 1) % size_;
         }
 
@@ -31,12 +31,11 @@ class CircularBuffer {
         full_ = back_ == front_;
     }
 
-    T front() {
+    T pop_front() {
         if (empty()) {
             return T();
         }
 
-        // Read data and advance the tail (we now have a free space)
         T val = buf_[front_];
         full_ = false;
         front_ = (front_ + 1) % size_;

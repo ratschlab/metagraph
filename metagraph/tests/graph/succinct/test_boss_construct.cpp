@@ -52,11 +52,10 @@ const bool BOSSConfigurationType<KMER, Weighted>::kWeighted;
 
 typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, false>,
                          BOSSConfigurationType<KmerExtractorBOSS::Kmer128, false>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, false>/*
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, false>,
                          BOSSConfigurationType<KmerExtractorBOSS::Kmer64, true>,
                          BOSSConfigurationType<KmerExtractorBOSS::Kmer128, true>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, true>*/>
-                          KmerAndWeightedTypes;
+                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, true>> KmerAndWeightedTypes;
 
 typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, true>,
                          BOSSConfigurationType<KmerExtractorBOSS::Kmer128, true>,
@@ -83,6 +82,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {
 
         BOSS appended(k);
         appended.add_sequence(std::string(100, 'A'));
+
         EXPECT_EQ(constructed, appended);
     }
 }
@@ -371,7 +371,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
     kmer::extract_kmers<KMER, KmerExtractorBOSS, common::SortedSet<KMER, Vector<KMER>>>(
-        [reads](mg::kmer::CallString callback) {
+        [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
         k, false, kmers, suffix, remove_redundant
@@ -572,7 +572,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                 common::SortedMultiset<TypeParam,
                                KmerCount,
                                Vector<std::pair<TypeParam, KmerCount>>>>(
-        [reads](mg::kmer::CallStringCount callback) {
+        [reads](kmer::CallStringCount callback) {
             for (const auto &read : *reads) {
                 callback(read, 1);
             }
