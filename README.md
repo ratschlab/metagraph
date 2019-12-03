@@ -10,7 +10,7 @@
 - folly (optional)
 - Python 3 (for running integration tests)
 
-All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (requires no root)
+All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (does not require root)
 
 #### For compiling with GNU GCC:
 ```
@@ -28,7 +28,7 @@ brew install gcc autoconf automake libtool cmake make htslib
 Then set the environment variables accordingly:
 ```
 echo "\
-# Use gcc-8 with cmake
+# Use gcc-9 with cmake
 export CC=\"\$(which gcc-9)\"
 export CXX=\"\$(which g++-9)\"
 " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
