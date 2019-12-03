@@ -4,13 +4,14 @@
 #include <vector>
 #include <functional>
 
-#include "annotated_dbg.hpp"
-#include "bitmap.hpp"
-#include "threading.hpp"
-#include "aligner_helper.hpp"
+#include "common/threading.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "utils/bit_vectors/bitmap.hpp"
 
 typedef std::function<size_t()> LabelCountCallback;
 
+template <typename NodeType>
+class Alignment;
 
 namespace annotated_graph_algorithm {
 
@@ -61,13 +62,11 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                             LabelCountCallback /* get_num_labels_out */)> is_node_in_mask,
                          double min_frequency_for_frequent_label = 0.05);
 
-
 template <class Index, typename... Args>
 using VariantCallback = std::function<void(Alignment<Index>&&,
                                            const std::string&, // query sequence
                                            Args&&...)>;
 
-typedef Alignment<DeBruijnGraph::node_index> DBGAlignment;
 typedef VariantCallback<DeBruijnGraph::node_index,
                         std::vector<AnnotatedDBG::Annotator::Label>&&> VariantLabelCallback;
 

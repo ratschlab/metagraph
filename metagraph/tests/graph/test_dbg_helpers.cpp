@@ -3,11 +3,6 @@
 #include "gtest/gtest.h"
 #include "boss.hpp"
 #include "boss_construct.hpp"
-#include "dbg_succinct.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_hash_fast.hpp"
-#include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 
 

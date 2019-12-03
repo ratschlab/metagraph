@@ -1,9 +1,8 @@
 #ifndef __DBG_ALIGNER_METHODS_HPP__
 #define __DBG_ALIGNER_METHODS_HPP__
 
-
 #include "aligner_helper.hpp"
-#include "bitmap.hpp"
+#include "utils/bit_vectors/bitmap.hpp"
 
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
@@ -134,15 +133,15 @@ class Extender {
 
 
 template <typename NodeType = typename DeBruijnGraph::node_index,
-          class Compare = std::less<typename Alignment<NodeType>::Column>>
+          class Compare = std::less<typename DPTable<NodeType>::Column>>
 class DefaultColumnExtender : public Extender<NodeType> {
   public:
     typedef typename Extender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename Extender<NodeType>::node_index node_index;
     typedef typename Extender<NodeType>::score_t score_t;
-    typedef typename DBGAlignment::DPTable DPTable;
-    typedef typename DBGAlignment::Step Step;
-    typedef typename DBGAlignment::Column Column;
+    typedef typename ::DPTable<NodeType> DPTable;
+    typedef typename DPTable::Step Step;
+    typedef typename DPTable::Column Column;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) {}

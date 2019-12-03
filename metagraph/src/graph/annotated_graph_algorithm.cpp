@@ -2,17 +2,19 @@
 
 #include <unordered_set>
 
-#include "alphabets.hpp"
-#include "annotate_column_compressed.hpp"
-#include "algorithms.hpp"
-#include "int_vector.hpp"
-#include "masked_graph.hpp"
+#include "annotation/column_compressed/annotate_column_compressed.hpp"
+#include "kmer/alphabets.hpp"
+#include "graph/aligner/aligner_helper.hpp"
+#include "graph/succinct/masked_graph.hpp"
+#include "utils/algorithms.hpp"
+#include "utils/bit_vectors/int_vector.hpp"
 
 namespace annotated_graph_algorithm {
 
 typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::row_index row_index;
 typedef AnnotatedDBG::Annotator::Label Label;
+typedef Alignment<DeBruijnGraph::node_index> DBGAlignment;
 
 
 std::unique_ptr<bitmap_vector>

@@ -382,20 +382,17 @@ void execute_query(const std::string &seq_name,
                    std::ostream &output_stream,
                    IDBGAligner *aligner = nullptr) {
     std::vector<std::string> sequences;
-
     std::vector<double> weights;
 
     if (aligner) {
         auto alignments = aligner->align(sequence);
         sequences.reserve(alignments.size());
-        weights.reserve(alignments.size());
 
-        for (const auto &alignment : alignments) {
-            sequences.emplace_back(alignment.get_sequence());
-            weights.emplace_back(std::exp(alignment.get_score()
-                - aligner->get_config().match_score(sequences.back().begin(),
-                                                    sequences.back().end())));
-        }
+        std::transform(alignments.begin(), alignments.end(),
+                       std::back_inserter(sequences),
+                       [](const auto &alignment) { return alignment.get_sequence(); });
+
+        weights = alignments.get_alignment_weights(aligner->get_config());
     }
 
     assert(sequences.size() == weights.size());

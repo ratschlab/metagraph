@@ -1,10 +1,11 @@
 #include "gtest/gtest.h"
 
 #include "../graph/test_dbg_helpers.hpp"
+#include "../graph/test_dbg_aligner_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
-#include "threading.hpp"
-#include "annotated_graph_algorithm.hpp"
+#include "common/threading.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 
 
 template <typename GraphAnnotationPair>

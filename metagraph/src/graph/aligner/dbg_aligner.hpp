@@ -4,11 +4,10 @@
 #include <vector>
 #include <functional>
 
-#include "sequence_graph.hpp"
 #include "aligner_helper.hpp"
 #include "aligner_methods.hpp"
-#include "bounded_priority_queue.hpp"
-#include "reverse_complement.hpp"
+#include "common/bounded_priority_queue.hpp"
+#include "graph/base/sequence_graph.hpp"
 
 
 class IDBGAligner {
@@ -52,9 +51,10 @@ class DBGAligner : public IDBGAligner {
                                           Seeder &seeder) const {
         DBGQueryAlignment paths(query);
 
-        if (orientation)
+        if (orientation) {
             std::swap(const_cast<std::string&>(paths.get_query()),
                       const_cast<std::string&>(paths.get_query_reverse_complement()));
+        }
 
         const auto& query_alignment = orientation ? paths.get_query_reverse_complement()
                                                   : paths.get_query();
@@ -232,11 +232,13 @@ class DBGAligner : public IDBGAligner {
                     if (full_seed)
                         it = partial_path.get_query_end() - 1;
 
+                    partial_path.extend_query_end(query_end);
                     path_queue.emplace(std::move(partial_path));
 
-                    if (path_queue.size() == config_.num_alternative_paths)
+                    if (path_queue.size() == config_.num_alternative_paths) {
                         min_path_score = std::max(min_path_score,
                                                   path_queue.bottom().get_score());
+                    }
                 }
 
                 bool picked = false;
