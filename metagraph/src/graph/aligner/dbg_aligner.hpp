@@ -230,7 +230,7 @@ class DBGAligner : public IDBGAligner {
 
                 if (next_paths.empty() && partial_path.get_score() >= min_path_score) {
                     if (full_seed)
-                        it = partial_path.get_query_end() - 1;
+                        ++it;
 
                     partial_path.extend_query_end(query_end);
                     path_queue.emplace(std::move(partial_path));
@@ -253,7 +253,7 @@ class DBGAligner : public IDBGAligner {
 
                     if (path_extend.get_query_end() == query_end) {
                         if (full_seed)
-                            it = path_extend.get_query_end() - 1;
+                            ++it;
 
                         path_queue.emplace(std::move(path_extend));
 
