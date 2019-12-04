@@ -13,8 +13,9 @@ class ExtendableAnnotatedGraph : public utils::Extendable<T> {
   public:
     class AnnotatedGraphExtension : public utils::Extendable<T>::Extension {};
 
-    std::string file_extension() const {
-        return this->extended_->get_graph().file_extension();
+    virtual std::string file_extension() const {
+        throw std::runtime_error("not implemented");
+        return "";
     };
 };
 

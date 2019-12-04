@@ -23,8 +23,6 @@ class Extendable {
 
   public:
 
-    Extendable() { extended_ = reinterpret_cast<const T*>(this); };
-
     // TODO: improve interface: either prohibit or support
     //       properly multiple extensions of the same type.
     //       Use Extension::file_extension() or enum.
@@ -84,12 +82,9 @@ class Extendable {
         }
     }
 
-    std::string file_extension() const {
-        return extended_->file_extension();
-    };
+    virtual std::string file_extension() const = 0;
 
   protected:
-    const T* extended_;
     std::vector<std::shared_ptr<Extension>> extensions_;
 };
 
