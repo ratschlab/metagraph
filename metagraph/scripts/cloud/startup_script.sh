@@ -1,3 +1,3 @@
 #!/bin/bash
 
-echo "Boo!"
+echo "Boo!" > /tmp/boo
