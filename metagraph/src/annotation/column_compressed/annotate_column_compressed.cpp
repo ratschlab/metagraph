@@ -178,6 +178,24 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 }
 
 template <typename Label>
+std::unique_ptr<bit_vector>
+ColumnCompressed<Label>::load_column_from_stream(std::ifstream &instream) {
+    std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
+
+    auto pos = instream.tellg();
+
+    if (!new_column->load(instream)) {
+        instream.seekg(pos, instream.beg);
+
+        new_column = std::make_unique<bit_vector_sd>();
+        if (!new_column->load(instream))
+            throw std::ifstream::failure("can't load next column");
+    }
+
+    return new_column;
+}
+
+template <typename Label>
 bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
     // release the columns stored
     cached_columns_.Clear();
@@ -214,17 +232,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
-                std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
-
-                auto pos = instream.tellg();
-
-                if (!new_column->load(instream)) {
-                    instream.seekg(pos, instream.beg);
-
-                    new_column = std::make_unique<bit_vector_sd>();
-                    if (!new_column->load(instream))
-                        throw std::ifstream::failure("can't load next column");
-                }
+                std::unique_ptr<bit_vector> new_column = load_column_from_stream(instream);
 
                 if (new_column->size() != num_rows)
                     throw std::ifstream::failure("inconsistent column size");

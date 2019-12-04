@@ -27,17 +27,8 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
             const auto num_rows = load_number(instream);
             instream.seekg(offset, instream.beg);
 
-            std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
-
-            auto pos = instream.tellg();
-
-            if (!new_column->load(instream)) {
-                instream.seekg(pos, instream.beg);
-
-                new_column = std::make_unique<bit_vector_sd>();
-                if (!new_column->load(instream))
-                    throw std::ifstream::failure("can't load next column");
-            }
+            std::unique_ptr<bit_vector> new_column =
+                annotate::ColumnCompressed<Label>::load_column_from_stream(instream);
 
             result.push_back(new_column->num_set_bits() / static_cast<double>(num_rows));
         }
@@ -64,17 +55,11 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
         }
 
         for (size_t c = 0; c < label_encoder_load->size(); ++c) {
-            std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
 
             auto pos = instream.tellg();
 
-            if (!new_column->load(instream)) {
-                instream.seekg(pos, instream.beg);
-
-                new_column = std::make_unique<bit_vector_sd>();
-                if (!new_column->load(instream))
-                    throw std::ifstream::failure("can't load next column");
-            }
+            std::unique_ptr<bit_vector> new_column =
+                annotate::ColumnCompressed<Label>::load_column_from_stream(instream);
 
             if (new_column->size() != num_rows)
                 throw std::ifstream::failure("inconsistent column size");

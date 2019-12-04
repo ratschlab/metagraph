@@ -30,9 +30,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     template <class A, typename L, class P>
     friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t, size_t);
 
-    template <typename I, typename L>
-    friend bool ColumnAnalysis<I, L>::load(const std::string&);
-
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
@@ -105,6 +102,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     const bitmap& get_column(const Label &label) const;
 
     std::string file_extension() const override { return kExtension; }
+
+    static std::unique_ptr<bit_vector> load_column_from_stream(std::ifstream &instream);
 
   private:
     void set(Index i, size_t j, bool value);
