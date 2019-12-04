@@ -17,6 +17,33 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
 
     ColumnAnalysis() {}
 
+    std::vector<double> densities() {
+        std::vector<double> result;
+
+        for (const auto &[label, location] : column_locations_) {
+            const auto &[filename, offset] = location;
+
+            std::ifstream instream(filename, std::ios::binary);
+            const auto num_rows = load_number(instream);
+            instream.seekg(offset, instream.beg);
+
+            std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
+
+            auto pos = instream.tellg();
+
+            if (!new_column->load(instream)) {
+                instream.seekg(pos, instream.beg);
+
+                new_column = std::make_unique<bit_vector_sd>();
+                if (!new_column->load(instream))
+                    throw std::ifstream::failure("can't load next column");
+            }
+
+            result.push_back(new_column->num_set_bits() / static_cast<double>(num_rows));
+        }
+        return result;
+    }
+
     bool load(const std::string &filename_base) {
         auto filename = utils::remove_suffix(filename_base,
             annotate::kColumnAnnotatorExtension) + annotate::kColumnAnnotatorExtension;
