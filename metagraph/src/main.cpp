@@ -100,6 +100,17 @@ std::string remove_graph_extension(const std::string &filename) {
                                           ".bitmapdbg");
 }
 
+std::string remove_annotation_extension(const std::string &filename) {
+    return utils::remove_suffix(filename, annotate::kColumnAnnotatorExtension,
+                                          annotate::kRowAnnotatorExtension,
+                                          annotate::kBRWTExtension,
+                                          annotate::kBinRelWT_sdslExtension,
+                                          annotate::kBinRelWTExtension,
+                                          annotate::kRowPackedExtension,
+                                          annotate::kRainbowfishExtension);
+}
+
+
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     auto graph = std::make_shared<Graph>(2);
@@ -2111,7 +2122,15 @@ int main(int argc, const char *argv[]) {
             if (config->column_analysis) {
                 anno_graph->add_extension(std::make_shared<ColumnAnalysis<>>());
                 auto column_analysis_ext = anno_graph->get_extension<ColumnAnalysis<>>();
-                column_analysis_ext->load(config->infbase_annotators);
+
+                std::vector<std::string> anno_file_basenames;
+                std::transform(config->infbase_annotators.begin(),
+                               config->infbase_annotators.end(),
+                               std::back_inserter(anno_file_basenames),
+                               remove_annotation_extension);
+
+                column_analysis_ext->load(anno_file_basenames);
+
                 assert(column_analysis_ext->is_compatible(*anno_graph));
             }
 

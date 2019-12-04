@@ -24,8 +24,8 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
         return true;
     };
 
-    bool load(const std::vector<std::string> &anno_files) {
-        for (const auto &filename_base : anno_files) {
+    bool load(const std::vector<std::string> &anno_file_basenames) {
+        for (const auto &filename_base : anno_file_basenames) {
             if(!load(filename_base))
                 return false;
         }
