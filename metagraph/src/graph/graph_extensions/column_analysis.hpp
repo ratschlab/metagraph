@@ -17,20 +17,21 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
 
     ColumnAnalysis() {}
 
-    std::vector<double> densities() {
-        std::vector<double> result;
+    std::unordered_map<Label, double> densities() {
+        std::unordered_map<Label, double> result;
 
         for (const auto &[label, location] : column_locations_) {
             const auto &[filename, offset] = location;
 
             std::ifstream instream(filename, std::ios::binary);
-            const auto num_rows = load_number(instream);
+            load_number(instream);
             instream.seekg(offset, instream.beg);
 
             std::unique_ptr<bit_vector> new_column =
                 annotate::ColumnCompressed<Label>::load_column_from_stream(instream);
 
-            result.push_back(new_column->num_set_bits() / static_cast<double>(num_rows));
+            result.insert({label, new_column->num_set_bits()
+                    / static_cast<double>(get_base_object()->get_graph().num_nodes())});
         }
         return result;
     }
