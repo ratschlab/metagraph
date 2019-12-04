@@ -16,9 +16,14 @@ class Extendable {
     class Extension {
       public:
         virtual ~Extension() {}
+        virtual void set_base_object(const Extendable<T> *extended) { extended_ = extended; }
+        virtual const T* get_base_object() const { return dynamic_cast<const T*>(extended_); }
+
         virtual bool load(const std::string &filename_base) = 0;
         virtual void serialize(const std::string &filename_base) const = 0;
         virtual bool is_compatible(const T &obj, bool verbose = true) const = 0;
+      private:
+        const Extendable<T> *extended_;
     };
 
   public:
@@ -28,6 +33,7 @@ class Extendable {
     //       Use Extension::file_extension() or enum.
     void add_extension(std::shared_ptr<Extension> extension) {
         assert(extension.get());
+        extension->set_base_object(this);
         extensions_.push_back(extension);
     }
 
@@ -66,6 +72,7 @@ class Extendable {
         static_assert(std::is_base_of<Extension, ExtensionSubtype>::value);
         remove_extension<ExtensionSubtype>();
         auto extension = std::make_shared<ExtensionSubtype>();
+        extension->set_base_object(this);
 
         auto filename_base = utils::remove_suffix(filename, file_extension());
 

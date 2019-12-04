@@ -16,7 +16,7 @@ class ExtendableAnnotatedGraph : public utils::Extendable<T> {
     virtual std::string file_extension() const {
         throw std::runtime_error("not implemented");
         return "";
-    };
+    }
 };
 
 // TODO: rename to AnnotatedSequenceGraph
