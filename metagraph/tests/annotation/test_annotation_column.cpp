@@ -363,7 +363,7 @@ TEST(ColumnCompressed, ToRowAnnotatorStreamingParallel) {
 
 TEST(ColumnCompressed, load_label_encoder) {
     {
-        annotate::ColumnCompressed<> annotation(5, false);
+        annotate::ColumnCompressed<> annotation(5);
         annotation.set_labels(0, { "Label0", "Label2", "Label8" });
         annotation.set_labels(2, { "Label1", "Label2" });
         annotation.set_labels(4, { "Label8" });
