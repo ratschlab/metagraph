@@ -6,6 +6,9 @@
 #include "utils/string_utils.hpp"
 #include "annotation/annotate.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "serialization.hpp"
+
+#include <fstream>
 
 
 template <typename Index = uint64_t, typename Label = std::string>
@@ -18,8 +21,42 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
         auto filename = utils::remove_suffix(filename_base,
             annotate::kColumnAnnotatorExtension) + annotate::kColumnAnnotatorExtension;
 
-        auto label_encoder = annotate::ColumnCompressed<Label>::load_label_encoder(filename);
-        label_encoders_.push_back(std::move(label_encoder));
+        std::ifstream instream(filename, std::ios::binary);
+            if (!instream.good())
+                throw std::ifstream::failure("can't open stream");
+
+        const auto num_rows = load_number(instream);
+
+        auto label_encoder_load = std::make_unique<annotate::LabelEncoder<Label>>();
+        if (!label_encoder_load->load(instream))
+            throw std::ifstream::failure("can't load label encoder");
+
+        if (!label_encoder_load->size()) {
+            std::cerr << "No labels in " << filename << "\n" << std::flush;
+            throw std::ifstream::failure("label encoder is empty: " + filename);
+        }
+
+        for (size_t c = 0; c < label_encoder_load->size(); ++c) {
+            std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
+
+            auto pos = instream.tellg();
+
+            if (!new_column->load(instream)) {
+                instream.seekg(pos, instream.beg);
+
+                new_column = std::make_unique<bit_vector_sd>();
+                if (!new_column->load(instream))
+                    throw std::ifstream::failure("can't load next column");
+            }
+
+            if (new_column->size() != num_rows)
+                throw std::ifstream::failure("inconsistent column size");
+
+            column_locations_.emplace(label_encoder_load->decode(c),
+                std::make_pair(filename, pos));
+        }
+
+        label_encoders_.push_back(std::move(label_encoder_load));
 
         return true;
     };
@@ -52,6 +89,9 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
 
   private:
     std::vector<std::unique_ptr<annotate::LabelEncoder<Label>>> label_encoders_;
+
+    // Label -> (columncompressed filename, offset to column)
+    std::map<Label, std::pair<std::string, std::streampos>> column_locations_;
 
 };
 
