@@ -2,9 +2,25 @@
 
 import argparse
 import os
+import subprocess
 import time
 
 import googleapiclient.discovery
+
+
+def count_pending_operations(compute, project, zone, operation_ids):
+    id_filter = ''
+    for id in operation_ids:
+        id_filter = id_filter + '(id=' + id + ') OR '
+    if len(id_filter) > 0:
+        id_filter = id_filter[:-3]
+    result = compute.zoneOperations().list(
+        project=project,
+        zone=zone,
+        filter='(status!=DONE) AND ' + id_filter).execute()
+
+    items = result.get('items')
+    return items.count if items else 0
 
 
 def wait_for_all_operations(compute, project, zone, ids):
@@ -38,10 +54,16 @@ def wait_for_operation(compute, project, zone, operation):
         time.sleep(1)
 
 
-def list_instances(compute, project, zone):
+def list_instances(compute, project, zone, name):
     """ Lists the currently available instance """
-    result = compute.instances().list(project=project, zone=zone).execute()
+    name_filter = ''
+    if name != '':
+        name_filter = 'name=' + name
+    result = compute.instances().list(project=project, zone=zone, filter=name_filter).execute()
     instances = result['items'] if 'items' in result else None
+    if not instances:
+        print('No instances found.')
+        return
     print('Instances in project %s and zone %s:' % (project, zone))
     for instance in instances:
         print(' - ' + instance['name'])
@@ -145,7 +167,7 @@ def send_create_request(compute, project, zone, name, startup_script_name):
             ]
         }],
 
-        # Allow the instance to access cloud storage and logging.
+        # Allow the instance to access cloud storage, logging and all compute engine methods
         'serviceAccounts': [{
             'email': 'default',
             'scopes': [
@@ -177,19 +199,14 @@ def create_instances(compute, project, zone, name, count, startup_script):
     wait_for_all_operations(compute, project, zone, ids)
 
 
-def count_pending_operations(compute, project, zone, operation_ids):
-    id_filter = ''
-    for id in operation_ids:
-        id_filter = id_filter + '(id=' + id + ') OR '
-    if len(id_filter) > 0:
-        id_filter = id_filter[:-3]
-    result = compute.zoneOperations().list(
-        project=project,
-        zone=zone,
-        filter='(status!=DONE) AND ' + id_filter).execute()
-
-    items = result.get('items')
-    return items.count if items else 0
+def run_command(compute, project, zone, name, count, startup_script_name):
+    startup_script = open(startup_script_name, 'r').read()[:-1].replace("'", "\'")
+    for i in range(count):
+        instance = name + "-" + str(i)
+        command = ['gcloud', 'compute',  'ssh', instance, '--zone', zone, '--command', startup_script]
+        print('Running command\n%s' % command)
+        out_file = open('/tmp/log-' + instance, 'w')
+        subprocess.run(command, stdout=out_file, stderr=subprocess.STDOUT)
 
 
 if __name__ == '__main__':
@@ -203,7 +220,7 @@ if __name__ == '__main__':
         default='europe-west6-c',
         help='Compute Engine zone to deploy to.')
     parser.add_argument(
-        '--name', default='metagraph', help='Name (or prefix) of instances to perform the action on')
+        '--name', default='', help='Name (or prefix) of instances to perform the action on')
     parser.add_argument('-n', '--num_instances', default=1, type=int, choices=range(1, 50),
                         help='Number of instances to create/start')
     parser.add_argument('--script', default='',
@@ -217,10 +234,12 @@ if __name__ == '__main__':
     elif args.action == 'delete' or args.action == 'd':
         delete_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
     elif args.action == 'list' or args.action == 'l':
-        list_instances(compute, args.project_id, args.zone)
+        list_instances(compute, args.project_id, args.zone, args.name)
     elif args.action == 'stop':
         stop_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
     elif args.action == 'start':
         start_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
+    elif args.action == 'run':
+        run_command(compute, args.project_id, args.zone, args.name, args.num_instances, args.script)
     else:
         print('Invalid action %s' % args.action)
