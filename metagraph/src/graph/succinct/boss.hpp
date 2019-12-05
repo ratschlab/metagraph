@@ -433,8 +433,8 @@ class BOSS {
     }
 
     /**
-     * The size of the alphabet for kmers that this graph encodes. For DNA, this value is
-     * 5 (A,C,G,T and $)
+     * The size of the alphabet for kmers that this graph encodes.
+     * For DNA, this value is 5 ($,A,C,G,T).
      */
     const TAlphabet alph_size;
     /**

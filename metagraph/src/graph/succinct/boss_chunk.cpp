@@ -321,7 +321,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
         if (weights)
             weights->resize(curpos);
-        }
+    }
 };
 
 

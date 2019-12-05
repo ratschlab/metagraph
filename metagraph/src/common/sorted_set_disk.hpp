@@ -147,7 +147,7 @@ class SortedSetDisk {
 
     std::future<void> start_merging() {
         std::vector<std::string> file_names(chunk_count_);
-        for (uint32_t i = 0; i<chunk_count_;++i) {
+        for (size_t i = 0; i < chunk_count_; ++i) {
             file_names[i] = file_name_for_chunk(i);
         }
         return thread_pool_.enqueue(merge_files<T>, file_names, &merge_queue_);
