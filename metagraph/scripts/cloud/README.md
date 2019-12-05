@@ -17,7 +17,7 @@ binaries and deps needed to run `metagraph`.
 
 At startup, each instance will run the shell script optionally passed in via the `--script` parameter (as root!).
 
-`c` is accepted as a shortcut for the `create` positional parameter, and `--num_instances` can be used instead of `-n`.
+`c` is accepted as an abbreviation for the `create` positional parameter, and `--num_instances` can be used instead of `-n`.
 
 #### Starting instances
 Note that creating an instance automatically starts it up, too. You only need to start an instance after explicitly stopping it.
@@ -38,4 +38,21 @@ Deleted instances are lost forever.
 python ./main.py delete --name=mg-test -n=2
 ```
 
-`d` is accepted as a shortcut for the `delete` positional parameter.
+`d` is accepted as an abbreviation for the `delete` positional parameter.
+
+#### Listing instances
+```
+python ./main.py list --name=mg-test*
+```
+
+Lists all instances that match the given name pattern. Prefix matching is supported as in the example above.
+
+`l` is accepted an abbreviation for `list`.
+
+#### Executing a script
+```
+python ./main.py run --script=[path_to_script] --name=mg-test -n=2
+```
+
+Runs the given script on n instances with the given name prefix. The output (stderr and stdout) of the executed script
+for each machine is written locally to `/tmp/log-<instance_name>`. 
