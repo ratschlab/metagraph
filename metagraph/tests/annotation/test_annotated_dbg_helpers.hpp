@@ -63,4 +63,5 @@ typedef ::testing::Types<std::pair<DBGHashString, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashString, annotate::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annotate::RowFlatAnnotator>
                         > GraphWithNAnnotationPairTypes;
+
 #endif // __TEST_ANNOTATED_DBG_HELPERS_HPP__

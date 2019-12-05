@@ -8,6 +8,7 @@
 
 namespace {
 using namespace mg;
+
 template <typename T>
 class SortedSetDiskTest : public ::testing::Test {};
 
@@ -16,6 +17,7 @@ typedef ::testing::Types<uint64_t, int32_t> SortedDiskElementTypes;
 TYPED_TEST_CASE(SortedSetDiskTest, SortedDiskElementTypes);
 
 const std::string out_file = "/tmp/out";
+
 
 template <typename TypeParam>
 void expect_equals(common::SortedSetDisk<TypeParam> &underTest,
@@ -211,4 +213,5 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
     expect_disk_data(out_file, expected_result);
     std::filesystem::remove("/tmp/out");
 }
+
 } // namespace

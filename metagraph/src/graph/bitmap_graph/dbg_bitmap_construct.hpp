@@ -6,6 +6,8 @@
 
 namespace mg {
 namespace bitmap_graph {
+
+
 class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> {
   public:
     virtual ~IBitmapChunkConstructor() {}
@@ -76,4 +78,5 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
 
 } // namespace bitmap_graph
 } // namespace mg
+
 #endif // __DBG_BITMAP_CONSTRUCT_HPP__

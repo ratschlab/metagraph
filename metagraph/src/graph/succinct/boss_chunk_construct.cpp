@@ -13,7 +13,10 @@
 
 namespace mg {
 namespace succinct {
+
 using namespace mg;
+
+
 template <typename KMER>
 using KmerMultsetVector = kmer::KmerCollector<
         KMER,
@@ -416,7 +419,6 @@ IBOSSChunkConstructor
         }
     }
 }
-
 
 } // namespace succinct
 } // namespace mg

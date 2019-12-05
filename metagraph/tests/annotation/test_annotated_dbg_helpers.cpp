@@ -6,6 +6,8 @@
 #include "annotated_graph_algorithm.hpp"
 
 using namespace mg::bitmap_graph;
+
+
 template <class Graph, class Annotation>
 std::unique_ptr<AnnotatedDBG>
 build_anno_graph(uint64_t k,

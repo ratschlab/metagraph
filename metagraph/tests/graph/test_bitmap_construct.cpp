@@ -20,10 +20,10 @@
 #include "sorted_set.hpp"
 #include "kmer/kmer_collector.hpp"
 
-
 namespace {
 using namespace mg::bitmap_graph;
 using namespace mg;
+
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -639,4 +639,5 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
         ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
 }
+
 } // namespace

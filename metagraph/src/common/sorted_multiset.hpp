@@ -11,6 +11,7 @@
 
 namespace mg {
 namespace common {
+
 // Thread safe data storage for counting
 template <typename T,
           typename C = uint8_t,
@@ -182,6 +183,8 @@ class SortedMultiset {
     mutable std::mutex mutex_resize_;
     mutable std::shared_timed_mutex mutex_copy_;
 };
+
 } // namespace common
 } // namespace mg
+
 #endif // __SORTED_MULTISET_HPP__

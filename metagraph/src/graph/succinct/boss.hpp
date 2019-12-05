@@ -16,7 +16,7 @@ auto ALWAYS_FALSE = []() { return false; };
 /**
  * This class implements the BOSS table, a succinct representation
  * of the de Bruijn graph following ideas and suggestions presented here:
- * https://www.researchgate.net/publication/262273032_Succinct_de_Bruijn_Graphs
+ * http://link.springer.com/chapter/10.1007/978-3-642-33122-0_18
  *
  * There is also conceptual code available at
  * https://code.google.com/p/csalib/downloads/list

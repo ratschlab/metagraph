@@ -88,7 +88,6 @@ class BOSS::Chunk {
 
     size_t alph_size_;
     size_t k_;
-    // see https://academic.oup.com/bioinformatics/article/34/13/i169/5045749
     bool canonical_;
     // see the BOSS paper for the meaning of W_, last_ and F_
     std::vector<TAlphabet> W_;

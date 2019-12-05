@@ -13,7 +13,9 @@
 
 namespace mg {
 namespace kmer {
+
 using namespace mg;
+
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 

@@ -9,6 +9,7 @@
 
 using namespace mg;
 
+
 template <typename KMER, typename COUNT>
 inline const KMER& get_kmer(const std::pair<KMER, COUNT> &pair) {
     return pair.first;

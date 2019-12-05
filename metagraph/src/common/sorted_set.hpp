@@ -12,6 +12,7 @@
 
 namespace mg {
 namespace common {
+
 // Thread safe data storage to extract distinct elements
 template <typename T, class Container = std::vector<T>>
 class SortedSet {
@@ -45,7 +46,8 @@ class SortedSet {
             shrink_data();
 
             try {
-                try_reserve(data_.size() + data_.size() / 2, data_.size() + batch_size);
+                try_reserve(data_.size() + data_.size() / 2,
+                            data_.size() + batch_size);
             } catch (const std::bad_alloc &exception) {
                 std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
                 exit(1);
@@ -94,7 +96,8 @@ class SortedSet {
         assert(vector);
 
         ips4o::parallel::sort(vector->begin(), vector->end(),
-                              std::less<typename Array::value_type>(), num_threads);
+                              std::less<typename Array::value_type>(),
+                              num_threads);
         // remove duplicates
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
@@ -145,6 +148,8 @@ class SortedSet {
     mutable std::mutex mutex_resize_;
     mutable std::shared_timed_mutex mutex_copy_;
 };
+
 } // namespace common
 } // namespace mg
+
 #endif // __SORTED_SET_HPP__

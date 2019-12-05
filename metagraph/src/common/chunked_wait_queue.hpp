@@ -428,6 +428,5 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     bool no_more_elements() { return parent_->empty() || idx_ == parent_->last_; }
 };
 
-
 } // namespace common
 } // namespace mg

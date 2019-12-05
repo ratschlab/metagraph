@@ -6,9 +6,9 @@
 namespace mg {
 namespace kmer {
 
-
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
+
 
 /**
  * Collects k-mers extracted by a KmerExtractor into Container. K-mers are constructed

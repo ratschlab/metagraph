@@ -8,6 +8,7 @@
 
 namespace mg {
 namespace bitmap_graph {
+
 // Assume all k-mers present
 DBGBitmap::DBGBitmap(size_t k, bool canonical_mode)
       : k_(k),
@@ -417,5 +418,6 @@ bool DBGBitmap::in_graph(node_index node) const {
     std::ignore = node;
     return true;
 }
+
 } // namespace bitmap_graph
 } // namespace mg

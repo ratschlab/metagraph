@@ -6,6 +6,8 @@
 
 namespace mg {
 namespace succinct {
+
+
 class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
   public:
     virtual ~IBOSSChunkConstructor() {}
@@ -27,7 +29,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
     virtual uint64_t get_k() const = 0;
 };
 
-}
-}
+} // namespace succinct
+} // namespace mg
 
 #endif // __BOSS_CHUNK_CONSTRUCT_HPP__

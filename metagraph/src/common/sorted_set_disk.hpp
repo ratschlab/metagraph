@@ -18,7 +18,9 @@
 
 namespace mg {
 namespace common {
+
 const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
+
 
 /**
  * Thread safe data storage that is able to sort and extract distinct elements

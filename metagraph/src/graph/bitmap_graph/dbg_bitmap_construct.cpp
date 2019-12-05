@@ -11,7 +11,9 @@
 
 namespace mg {
 namespace bitmap_graph {
+
 using namespace mg;
+
 
 template <typename KmerCollector>
 class BitmapChunkConstructor : public IBitmapChunkConstructor {
@@ -317,5 +319,6 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
         );
     }
 }
+
 } // namespace bitmap_graph
 } // namespace mg

@@ -29,6 +29,7 @@ const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
+
 template <typename Kmer>
 class BOSSConstruct : public ::testing::Test { };
 
@@ -568,11 +569,11 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
     kmer::count_kmers<TypeParam,
-                KmerExtractorBOSS,
-                common::SortedMultiset<TypeParam,
-                               KmerCount,
-                               Vector<std::pair<TypeParam, KmerCount>>>>(
-        [reads](kmer::CallStringCount callback) {
+                      KmerExtractorBOSS,
+                      common::SortedMultiset<TypeParam,
+                                             KmerCount,
+                                             Vector<std::pair<TypeParam, KmerCount>>>>(
+            [reads](kmer::CallStringCount callback) {
             for (const auto &read : *reads) {
                 callback(read, 1);
             }
@@ -765,4 +766,5 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
     ASSERT_EQ(6u, result.data().size());
 #endif
 }
+
 }  // namespace

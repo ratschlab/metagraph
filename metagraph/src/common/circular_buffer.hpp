@@ -4,6 +4,7 @@
 
 namespace mg {
 namespace common {
+
 /**
  * A circular buffer of given size. When full, the oldest element gets overwritten.
  *
