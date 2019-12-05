@@ -20,17 +20,12 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
     std::unordered_map<Label, double> densities() {
         std::unordered_map<Label, double> result;
 
-        for (const auto &[label, location] : column_locations_) {
-            const auto &[filename, offset] = location;
+        for (const auto &element : column_locations_) {
+            const Label &label = element.first;
 
-            std::ifstream instream(filename, std::ios::binary);
-            load_number(instream);
-            instream.seekg(offset, instream.beg);
+            std::unique_ptr<bit_vector> column = load_column_by_label(label);
 
-            std::unique_ptr<bit_vector> new_column =
-                annotate::ColumnCompressed<Label>::load_column_from_stream(instream);
-
-            result.insert({label, new_column->num_set_bits()
+            result.insert({label, column->num_set_bits()
                     / static_cast<double>(get_base_object()->get_graph().num_nodes())});
         }
         return result;
@@ -101,6 +96,20 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
     };
 
   private:
+
+    std::unique_ptr<bit_vector> load_column_by_label(const Label &label) {
+        const auto &[filename, offset] = column_locations_[label];
+
+        std::ifstream instream(filename, std::ios::binary);
+        load_number(instream);
+        instream.seekg(offset, instream.beg);
+
+        std::unique_ptr<bit_vector> column =
+            annotate::ColumnCompressed<Label>::load_column_from_stream(instream);
+
+        return column;
+    }
+
     std::vector<std::unique_ptr<annotate::LabelEncoder<Label>>> label_encoders_;
 
     // Label -> (columncompressed filename, offset to column)
