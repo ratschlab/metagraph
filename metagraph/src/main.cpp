@@ -5,6 +5,7 @@
 #include <gflags/gflags.h>
 #include <ips4o.hpp>
 #include <json/json.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 #include "common/logger.hpp"
 
@@ -95,8 +96,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
         return Config::AnnotationType::RBFish;
 
     } else {
-        std::cerr << "Error: unknown annotation format in "
-                  << filename << std::endl;
+        logger->error("Error: unknown annotation format in {}", filename);
         exit(1);
     }
 }
@@ -112,7 +112,7 @@ template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     auto graph = std::make_shared<Graph>(2);
     if (!graph->load(filename)) {
-        std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
+        logger->error("ERROR: can't load graph from file {}", filename);
         exit(1);
     }
     return graph;
@@ -137,9 +137,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGBitmap>(filename);
 
         case Config::GraphType::INVALID:
-            std::cerr << "ERROR: can't load graph from file '"
-                      << filename
-                      << "', needs valid file extension" << std::endl;
+            logger->error(
+                    "ERROR: can't load graph from file '{}', needs valid file extension",
+                    filename);
             exit(1);
     }
     assert(false);
@@ -493,9 +493,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
     if (config.infbase_annotators.size()
             && !annotation_temp->load(config.infbase_annotators.at(0))) {
-        std::cerr << "ERROR: can't load annotations for graph "
-                  << config.infbase
-                  << ", file corrupted" << std::endl;
+        logger->error("ERROR: can't load annotations for graph {}, file corrupted",
+                      config.infbase);
         exit(1);
     }
 
@@ -505,8 +504,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                                                      config.parallel);
 
     if (!anno_graph->check_compatibility()) {
-        std::cerr << "Error: graph and annotation are not compatible."
-                  << std::endl;
+        logger->error("Error: graph and annotation are not compatible.");
         exit(1);
     }
 
@@ -530,11 +528,11 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
                        config->label_mask_in.end(),
                        [&](const auto &label) {
                            bool exists = anno_graph.label_exists(label);
-                               if (!exists)
-                                   logger->trace("Removing mask-in label {}", label);
+                           if (!exists)
+                               logger->trace("Removing mask-in label {}", label);
 
-                               return !exists;
-                           }),
+                           return !exists;
+                       }),
         config->label_mask_in.end()
     );
 
@@ -543,11 +541,11 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
                        config->label_mask_out.end(),
                        [&](const auto &label) {
                            bool exists = anno_graph.label_exists(label);
-                               if (!exists)
-                                   logger->trace("Removing mask-out label {}", label);
+                           if (!exists)
+                               logger->trace("Removing mask-out label {}", label);
 
-                               return !exists;
-                           }),
+                           return !exists;
+                       }),
         config->label_mask_out.end()
     );
 
@@ -693,8 +691,9 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &c
 
     } else if (config.alignment_min_seed_length < graph.get_k()) {
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            std::cerr << "ERROR: SuffixSeeder can be used only with succinct graph representation"
-                      << std::endl;
+            logger->error(
+                    "ERROR: SuffixSeeder can be used only with succinct graph "
+                    "representation");
             exit(1);
         }
 
@@ -719,57 +718,59 @@ void map_sequences_in_file(const std::string &file,
     Timer data_reading_timer;
 
     read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                logger->trace("Sequence: {}", read_stream->seq.s);
+        logger->trace("Sequence: {}", read_stream->seq.s);
 
-                if (config.query_presence && config.alignment_length == graph.get_k()) {
-                    bool found = graph.find(read_stream->seq.s, config.discovery_fraction);
+        if (config.query_presence && config.alignment_length == graph.get_k()) {
+            bool found = graph.find(read_stream->seq.s, config.discovery_fraction);
 
-                    if (!config.filter_present) {
-                        logger->info(found);
+            if (!config.filter_present) {
+                logger->info(found);
 
-                    } else if (found) {
-                        logger->info(">{}\n{}", read_stream->name.s, read_stream->seq.s);
-                    }
+            } else if (found) {
+                logger->info(">{}\n{}", read_stream->name.s, read_stream->seq.s);
+            }
 
-                    return;
-                }
+            return;
+        }
 
-                assert(config.alignment_length <= graph.get_k());
+        assert(config.alignment_length <= graph.get_k());
 
-                std::vector<DeBruijnGraph::node_index> graphindices;
-                if (config.alignment_length == graph.get_k()) {
-                    graph.map_to_nodes(read_stream->seq.s, [&](const auto &node) {
-                        graphindices.emplace_back(node);
-                    });
-                } else if (config.query_presence || config.count_kmers) {
-                    // TODO: make more efficient
-                    for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                        dbg->call_nodes_with_suffix(
-                                read_stream->seq.s + i,
-                                read_stream->seq.s + i + config.alignment_length,
-                                [&](auto node, auto) {
-                                    if (graphindices.empty())
-                                        graphindices.emplace_back(node);
-                                },
-                                config.alignment_length);
-                    }
-                }
+        std::vector<DeBruijnGraph::node_index> graphindices;
+        if (config.alignment_length == graph.get_k()) {
+            graph.map_to_nodes(read_stream->seq.s,
+                               [&](const auto &node) {
+                                   graphindices.emplace_back(node);
+                               });
+        } else if (config.query_presence || config.count_kmers) {
+            // TODO: make more efficient
+            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
+                dbg->call_nodes_with_suffix(
+                    read_stream->seq.s + i,
+                    read_stream->seq.s + i + config.alignment_length,
+                    [&](auto node, auto) {
+                        if (graphindices.empty())
+                            graphindices.emplace_back(node);
+                    },
+                    config.alignment_length
+                );
+            }
+        }
 
-                size_t num_discovered
-                        = std::count_if(graphindices.begin(), graphindices.end(),
-                                        [](const auto &x) { return x > 0; });
+        size_t num_discovered = std::count_if(graphindices.begin(),
+                                              graphindices.end(),
+                                              [](const auto &x) { return x > 0; });
 
-                const size_t num_kmers = graphindices.size();
+        const size_t num_kmers = graphindices.size();
 
-                if (config.query_presence) {
-                    const size_t min_kmers_discovered
-                            = num_kmers - num_kmers * (1 - config.discovery_fraction);
-                    if (config.filter_present) {
+        if (config.query_presence) {
+            const size_t min_kmers_discovered =
+                num_kmers - num_kmers * (1 - config.discovery_fraction);
+            if (config.filter_present) {
                 if (num_discovered >= min_kmers_discovered)
-                            logger->info(">{}\n{}", read_stream->name.s, read_stream->seq.s);
-                    } else {
-                        logger->info("{}", (num_discovered >= min_kmers_discovered));
-                    }
+                    logger->info(">{}\n{}", read_stream->name.s, read_stream->seq.s);
+            } else {
+                logger->info("{}", (num_discovered >= min_kmers_discovered));
+            }
             return;
         }
 
@@ -1368,10 +1369,15 @@ std::string form_client_reply(const std::string &received_message,
 }
 
 
-int main(int argc, const char *argv[]) {
+int main(int argc, char *argv[]) {
     auto config = std::make_unique<Config>(argc, argv);
 
+    gflags::AllowCommandLineReparsing(); // allows undefined flags
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+
     logger->set_level(spdlog::level::from_str(FLAGS_log_level));
+    //logger->set_pattern("%^date %x....%$  %v");
+    //console_sink->set_color(spdlog::level::trace, "\033[37m");
 
     logger->trace(
             "\n#############################\n"
@@ -1396,8 +1402,8 @@ int main(int argc, const char *argv[]) {
 
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
-                    std::cerr << "Error: Only bitmap-graph can be built"
-                              << " in complete mode" << std::endl;
+                    logger->error(
+                            "Error: Only bitmap-graph can be built in complete mode");
                     exit(1);
                 }
 
@@ -1572,17 +1578,19 @@ int main(int argc, const char *argv[]) {
 
                     case Config::GraphType::HASH_STR:
                         if (config->canonical) {
-                            std::cerr << "Warning: string hash-based de Bruijn graph"
-                                      << " does not support canonical mode."
-                                      << " Normal mode will be used instead." << std::endl;
+                            logger->warn(
+                                    "Warning: string hash-based de Bruijn graph"
+                                    " does not support canonical mode."
+                                    " Normal mode will be used instead.");
                         }
                         // TODO: implement canonical mode
                         graph.reset(new DBGHashString(config->k/*, config->canonical*/));
                         break;
 
                     case Config::GraphType::BITMAP:
-                        std::cerr << "Error: Bitmap-graph construction"
-                                  << " in dynamic regime is not supported" << std::endl;
+                        logger->error(
+                                "Error: Bitmap-graph construction"
+                                " in dynamic regime is not supported");
                         exit(1);
 
                     case Config::GraphType::INVALID:

@@ -11,7 +11,7 @@
 #include "common/threading.hpp"
 
 
-Config::Config(int argc, const char *argv[]) {
+Config::Config(int argc, char *argv[]) {
     // provide help overview if no identity was given
     if (argc == 1) {
         print_usage(argv[0]);
@@ -308,6 +308,8 @@ Config::Config(int argc, const char *argv[]) {
             taxonomy_nodes = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy-map")) {
             taxonomy_map = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--log_level")) {
+            i++; // TODO(ddanciu): migrate to GFlags and remove
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
