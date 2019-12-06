@@ -31,6 +31,8 @@ class AnnotatedDBG : public ExtendableAnnotatedGraph<AnnotatedDBG> {
                  size_t num_threads = 0,
                  bool force_fast = false);
 
+    virtual ~AnnotatedDBG() {};
+
     std::vector<std::string> get_labels(node_index index) const;
 
     bool has_label(node_index index,
