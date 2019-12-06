@@ -9,11 +9,7 @@ import googleapiclient.discovery
 
 
 def count_pending_operations(compute, project, zone, operation_ids):
-    id_filter = ''
-    for id in operation_ids:
-        id_filter = id_filter + '(id=' + id + ') OR '
-    if len(id_filter) > 0:
-        id_filter = id_filter[:-3]
+    id_filter = ' OR '.join(f'(id={id})' for id in operation_ids)
     result = compute.zoneOperations().list(
         project=project,
         zone=zone,
@@ -64,14 +60,14 @@ def list_instances(compute, project, zone, name):
     if not instances:
         print('No instances found.')
         return
-    print('Instances in project %s and zone %s:' % (project, zone))
+    print(f'Instances in project {project} and zone {zone}:');
     for instance in instances:
         print(' - ' + instance['name'])
 
 
 def send_delete_request(compute, project, zone, name):
     """ Sends a request to delete the instance with the given name """
-    print('Deleting instance %s ...' % name)
+    print(f'Deleting instance {name} ...')
     return compute.instances().delete(
         project=project,
         zone=zone,
@@ -89,7 +85,7 @@ def delete_instances(compute, project, zone, name, count):
 
 def send_start_request(compute, project, zone, name):
     """ Sends a request to start the instance with the given name """
-    print('Starting instance %s ...' % name)
+    print(f'Starting instance {name} ...')
     return compute.instances().start(
         project=project,
         zone=zone,
@@ -107,7 +103,7 @@ def start_instances(compute, project, zone, name, count):
 
 def send_stop_request(compute, project, zone, name):
     """ Sends a request to stop  the instance with the given name """
-    print('Stopping instance %s ...' % name)
+    print(f'Stopping instance {name} ...')
     return compute.instances().stop(
         project=project,
         zone=zone,
@@ -125,14 +121,14 @@ def stop_instances(compute, project, zone, name, count):
 
 def send_create_request(compute, project, zone, name, startup_script_name):
     """ Send a request to creates a new instance with the given parameters """
-    print('Creating instance %s ...' % name)
+    print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
     image_response = compute.images().getFromFamily(
         project='metagraph', family='metagraph').execute()
     source_disk_image = image_response['selfLink']
 
     # Configure the machine
-    machine_type = "zones/%s/machineTypes/n1-standard-1" % zone
+    machine_type = f"zones/{zone}/machineTypes/n1-standard-1"
     metadata = [{
         'key': 'instance_id',
         'value': name.split('-')[-1]}]
@@ -204,7 +200,7 @@ def run_command(compute, project, zone, name, count, startup_script_name):
     for i in range(count):
         instance = name + "-" + str(i)
         command = ['gcloud', 'compute',  'ssh', instance, '--zone', zone, '--command', startup_script]
-        print('Running command\n%s' % command)
+        print(f'Running command\n{command}')
         out_file = open('/tmp/log-' + instance, 'w')
         subprocess.run(command, stdout=out_file, stderr=subprocess.STDOUT)
 
@@ -242,4 +238,4 @@ if __name__ == '__main__':
     elif args.action == 'run':
         run_command(compute, args.project_id, args.zone, args.name, args.num_instances, args.script)
     else:
-        print('Invalid action %s' % args.action)
+        print(f'Invalid action {args.action}')
