@@ -23,12 +23,16 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
         for (const auto &element : column_locations_) {
             const Label &label = element.first;
 
-            std::unique_ptr<bit_vector> column = load_column_by_label(label);
-
-            result.insert({label, column->num_set_bits()
-                    / static_cast<double>(get_base_object()->get_graph().num_nodes())});
+            result.insert({label, density(label)});
         }
         return result;
+    }
+
+    double density(const Label &label) {
+        std::unique_ptr<bit_vector> column = load_column_by_label(label);
+
+        return column->num_set_bits()
+            / static_cast<double>(get_base_object()->get_graph().num_nodes());
     }
 
     bool load(const std::string &filename_base) {
