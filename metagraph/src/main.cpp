@@ -2137,8 +2137,6 @@ int main(int argc, const char *argv[]) {
 
                 column_analysis_ext->load(anno_file_basenames);
 
-                std::ignore = column_analysis_ext->densities();
-
                 assert(column_analysis_ext->is_compatible(*anno_graph));
             }
 
