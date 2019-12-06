@@ -189,7 +189,7 @@ if(${CMAKE_BUILD_TYPE} MATCHES GPROFILE)
   if(PROFILER_LIBRARIES)
     set(METALIBS ${METALIBS} -lprofiler)
   else()
-    message(FATAL_ERROR "Could not find -lprofiler installed")
+    message(WARNING "Could not find -lprofiler installed")
   endif()
 endif()
 

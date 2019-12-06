@@ -310,5 +310,5 @@ AnnotatedDBG::anno_to_graph_index(row_index anno_index) {
 }
 
 bool AnnotatedDBG::check_compatibility() const {
-    return graph_->num_nodes() == annotator_->num_objects();
+    return graph_->max_index() == annotator_->num_objects();
 }

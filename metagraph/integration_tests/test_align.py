@@ -14,6 +14,7 @@ TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
                         'hash': '.orhashdbg',
+                        'hashfast': '.hashfastdbg',
                         'hashstr': '.hashstrdbg'}
 
 
@@ -26,7 +27,7 @@ class TestAlign(unittest.TestCase):
         Simple build and align
         """
 
-        for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
+        for representation in ['succinct', 'bitmap', 'hash', 'hashstr', 'hashfast']:
 
             construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
@@ -68,7 +69,7 @@ class TestAlign(unittest.TestCase):
         Simple build and align
         """
 
-        for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
+        for representation in ['succinct', 'bitmap', 'hash', 'hashstr', 'hashfast']:
 
             construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,
@@ -147,7 +148,7 @@ class TestAlign(unittest.TestCase):
         Simple build and align
         """
 
-        for representation in ['succinct', 'bitmap', 'hash', 'hashstr']:
+        for representation in ['succinct', 'bitmap', 'hash', 'hashstr', 'hashfast']:
 
             construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
                 exe=METAGRAPH,

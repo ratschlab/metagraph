@@ -103,7 +103,7 @@ void test_graph_serialization(size_t k_max) {
         {
             Graph graph(2);
 
-            ASSERT_TRUE(graph.load(test_dump_basename));
+            ASSERT_TRUE(graph.load(test_dump_basename)) << "k: " << k;
 
             EXPECT_EQ(k, graph.get_k());
 
@@ -125,6 +125,10 @@ TEST(DBGHashString, SerializeAnyK) {
 
 TEST(DBGHashOrdered, SerializeAnyK) {
     test_graph_serialization<DBGHashOrdered>(256 / KmerExtractor2Bit::bits_per_char);
+}
+
+TEST(DBGHashFast, SerializeAnyK) {
+    test_graph_serialization<DBGHashFast>(256 / KmerExtractor2Bit::bits_per_char);
 }
 
 TEST(DBGSuccinct, SerializeAnyK) {
@@ -151,7 +155,7 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         };
         auto graph = build_graph<TypeParam>(k, sequences, false);
 
-        graph->add_extension(std::make_shared<NodeWeights>(graph->num_nodes() + 1, kBitsPerCount));
+        graph->add_extension(std::make_shared<NodeWeights>(graph->max_index() + 1, kBitsPerCount));
         auto &weights = *graph->template get_extension<NodeWeights>();
 
         for (const auto &sequence : sequences) {
@@ -168,7 +172,7 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         EXPECT_EQ(1u, weights[node_idx]);
 
         //TODO should throw if weights extension is present
-        //bit_vector_dyn nodes_inserted(graph->num_nodes() + 1, 0);
+        //bit_vector_dyn nodes_inserted(graph->max_index() + 1, 0);
         //graph->add_sequence(std::string(25, 'T'), &nodes_inserted);
     }
 }
@@ -1625,7 +1629,7 @@ TYPED_TEST(DeBruijnGraphTest, get_outdegree_single_node) {
     for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(k - 1, 'A') + 'C' });
         EXPECT_EQ(1ull, graph->num_nodes());
-        EXPECT_EQ(0ull, graph->outdegree(1));
+        EXPECT_EQ(0ull, graph->outdegree(graph->kmer_to_node(std::string(k - 1, 'A') + 'C')));
     }
 }
 
@@ -1641,13 +1645,13 @@ TYPED_TEST(DeBruijnGraphTest, get_maximum_outdegree) {
         auto max_outdegree_node_index = graph->kmer_to_node(std::string(k, 'A'));
 
         ASSERT_EQ(4ull, graph->num_nodes());
-        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+        graph->call_nodes([&](auto i) {
             if (i == max_outdegree_node_index) {
                 EXPECT_EQ(4ull, graph->outdegree(i));
             } else {
                 EXPECT_EQ(0ull, graph->outdegree(i));
             }
-        }
+        });
     }
 }
 
@@ -1696,13 +1700,13 @@ TYPED_TEST(DeBruijnGraphTest, get_outdegree_loop) {
         auto loop_node_index = graph->kmer_to_node(std::string(k, 'A'));
 
         ASSERT_TRUE(graph->num_nodes() > 1);
-        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+        graph->call_nodes([&](auto i) {
             if (i == loop_node_index) {
                 EXPECT_EQ(2ull, graph->outdegree(i));
             } else {
                 EXPECT_EQ(1ull, graph->outdegree(i));
             }
-        }
+        });
 
         check_degree_functions(*graph);
     }
@@ -1713,7 +1717,7 @@ TYPED_TEST(DeBruijnGraphTest, get_indegree_single_node) {
         auto graph = build_graph<TypeParam>(k, { std::string(k - 1, 'A') + 'C' });
 
         EXPECT_EQ(1ull, graph->num_nodes());
-        EXPECT_EQ(0ull, graph->indegree(1));
+        EXPECT_EQ(0ull, graph->indegree(graph->kmer_to_node(std::string(k - 1, 'A') + 'C')));
 
         check_degree_functions(*graph);
     }
@@ -1731,13 +1735,13 @@ TYPED_TEST(DeBruijnGraphTest, get_maximum_indegree) {
         auto max_indegree_node_index = graph->kmer_to_node(std::string(k, 'A'));
 
         ASSERT_EQ(4ull, graph->num_nodes());
-        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+        graph->call_nodes([&](auto i) {
             if (i == max_indegree_node_index) {
                 EXPECT_EQ(4ull, graph->indegree(i));
             } else {
                 EXPECT_EQ(0ull, graph->indegree(i));
             }
-        }
+        });
 
         check_degree_functions(*graph);
     }
@@ -1755,13 +1759,13 @@ TYPED_TEST(DeBruijnGraphTest, get_indegree_loop) {
         auto loop_node_index = graph->kmer_to_node(std::string(k, 'T'));
 
         ASSERT_TRUE(graph->num_nodes() > 1);
-        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+        graph->call_nodes([&](auto i) {
             if (i == loop_node_index) {
                 EXPECT_EQ(2ull, graph->indegree(i));
             } else {
                 EXPECT_EQ(1ull, graph->indegree(i));
             }
-        }
+        });
 
         check_degree_functions(*graph);
     }
@@ -1839,12 +1843,12 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_incoming_indegree) {
             "ACTGACGAGACACAGATGC"
         });
 
-        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+        graph->call_nodes([&](auto node) {
             std::vector<DeBruijnGraph::node_index> incoming_nodes;
             graph->adjacent_incoming_nodes(node, [&](auto i) { incoming_nodes.push_back(i); });
             EXPECT_EQ(graph->indegree(node), incoming_nodes.size())
                 << "adjacent_incoming_nodes and indegree are inconsistent for node: " << node;
-        }
+        });
 
         check_degree_functions(*graph);
     }
@@ -1859,7 +1863,7 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_indegree_traverse_back) {
             "ACTGACGAGACACAGATGC"
         });
 
-        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+        graph->call_nodes([&](auto node) {
             size_t num_incoming_edges = 0;
             for (auto c : graph->alphabet()) {
                 if (graph->traverse_back(node, c))
@@ -1867,7 +1871,7 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_indegree_traverse_back) {
             }
             EXPECT_EQ(graph->indegree(node), num_incoming_edges)
                 << "traverse_back and indegree are inconsistent for node: " << node;
-        }
+        });
 
         check_degree_functions(*graph);
     }
@@ -1882,7 +1886,7 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
             "ACTGACGAGACACAGATGC"
         });
 
-        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+        graph->call_nodes([&](auto node) {
             size_t num_incoming_edges = 0;
             for (auto c : graph->alphabet()) {
                 if (graph->traverse_back(node, c))
@@ -1892,7 +1896,7 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
             graph->adjacent_incoming_nodes(node, [&](auto i) { incoming_nodes.push_back(i); });
             EXPECT_EQ(num_incoming_edges, incoming_nodes.size())
                 << "adjacent_incoming_nodes and traverse_back are inconsistent for node: " << node;
-        }
+        });
 
         check_degree_functions(*graph);
     }
@@ -1946,10 +1950,10 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_simple) {
     auto graph = build_graph<TypeParam>(k, { reference });
 
     uint64_t single_outgoing_counter = 0;
-    for (DeBruijnGraph::node_index i = 1; i <= graph->num_nodes(); ++i) {
+    graph->call_nodes([&](auto i) {
         if (graph->outdegree(i) == 1)
             single_outgoing_counter++;
-    }
+    });
 
     EXPECT_EQ(0u, single_outgoing_counter);
 }
@@ -1961,10 +1965,10 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_for_multiple_valid_edges) {
     auto graph = build_graph<TypeParam>(k, { reference });
 
     uint64_t single_outgoing_counter = 0;
-    for (DeBruijnGraph::node_index i = 1; i <= graph->num_nodes(); ++i) {
+    graph->call_nodes([&](auto i) {
         if (graph->outdegree(i) == 1)
             single_outgoing_counter++;
-    }
+    });
 
     EXPECT_EQ(1u, single_outgoing_counter);
 }

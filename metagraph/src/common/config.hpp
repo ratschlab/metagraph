@@ -170,6 +170,7 @@ class Config {
         HASH,
         HASH_PACKED,
         HASH_STR,
+        HASH_FAST,
         BITMAP,
     };
 

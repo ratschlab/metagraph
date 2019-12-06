@@ -16,7 +16,8 @@ namespace utils {
 
 class SequenceGraph {
   public:
-    // node indexes [1,...,num_nodes]
+    // Node indexes [1,...,max_index], but only num_nodes of them are real.
+    // For iteration, call `call_nodes`
     typedef uint64_t node_index;
     static constexpr uint64_t npos = 0;
 
@@ -50,6 +51,7 @@ class SequenceGraph {
                                          const std::function<void(node_index)> &callback) const = 0;
 
     virtual uint64_t num_nodes() const = 0;
+    virtual uint64_t max_index() const { return num_nodes(); };
 
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;
@@ -176,7 +178,7 @@ class DeBruijnGraph : public SequenceGraph {
     /**
      * Call all unitigs except short tips, where tips are
      * the unitigs with InDegree(first) + OutDegree(last) < 2.
-     * If |kmers_in_single_form| is true, output each k-mer only in one if its
+     * If |kmers_in_single_form| is true, output each k-mer only in one of its
      * forms (canonical/non-canonical). That is, skip a k-mer if its
      * reverse-complement has been extracted.
      */
