@@ -421,13 +421,19 @@ void execute_query(const std::string &seq_name,
 
         Json::Value response;
         response["top_labels"] = Json::arrayValue;
+        response["seq_name"] = seq_name;
 
-        output += seq_name;
+        auto column_analysis_ext = anno_graph.get_extension<ColumnAnalysis<>>();
+        std::unordered_map<std::string, double> densities;
+        if (column_analysis_ext)
+            densities = column_analysis_ext->densities();
 
         for (const auto &[label, count] : top_labels) {
             Json::Value match;
             match["label"] = label;
-            match["count"] = Json::Value::UInt64(count);
+            if (densities.size())
+                match["density"] = densities[label];
+            match["score"] = Json::Value::UInt64(count);
             response["top_labels"].append(match);
         }
 
