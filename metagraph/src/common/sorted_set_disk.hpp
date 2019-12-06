@@ -2,7 +2,7 @@
 #define __SORTED_SET_DISK_HPP__
 
 #include "common/chunked_wait_queue.hpp"
-#include "common/file_merger.hh"
+#include "common/file_merger.hpp"
 #include "common/threading.hpp"
 #include "utils/vectors.hpp"
 
@@ -133,7 +133,7 @@ class SortedSetDisk {
             if (write_to_disk_future_.valid()) {
                 write_to_disk_future_.get(); // make sure all pending data was written
             }
-                start_merging();
+            start_merging();
         }
         return merge_queue_;
     }
@@ -145,12 +145,12 @@ class SortedSetDisk {
         merge_queue_.set_out_file(out_file);
     }
 
-    std::future<void> start_merging() {
+    void start_merging() {
         std::vector<std::string> file_names(chunk_count_);
         for (size_t i = 0; i < chunk_count_; ++i) {
             file_names[i] = file_name_for_chunk(i);
         }
-        return thread_pool_.enqueue(merge_files<T>, file_names, &merge_queue_);
+        thread_pool_.enqueue(merge_files<T>, file_names, &merge_queue_);
     }
 
     void clear() {

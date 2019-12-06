@@ -21,7 +21,8 @@ class BOSS::Chunk {
      * @param alph_size the alphabet size, without extra characters (i.e. sentinel).
      *        For DNA this will be 4.
      * @param k k-mer size
-     * @param canonical if true, build the chunk from canonicalized k-mers
+     * @param canonical if true, the BOSS table will be constructed with both a k-mer
+     *        and its reverse complement
      */
     Chunk(uint64_t alph_size, size_t k, bool canonical);
 

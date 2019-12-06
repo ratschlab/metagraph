@@ -2,14 +2,14 @@
 
 #include <ips4o.hpp>
 
-#include "utils/template_utils.hpp"
-#include "common/file_merger.hh"
-#include "common/sorted_set.hpp"
+#include "boss_chunk.hpp"
+#include "common/file_merger.hpp"
 #include "common/sorted_multiset.hpp"
+#include "common/sorted_set.hpp"
 #include "common/sorted_set_disk.hpp"
 #include "common/unix_tools.hpp"
 #include "kmer/kmer_collector.hpp"
-#include "boss_chunk.hpp"
+#include "utils/template_utils.hpp"
 
 namespace mg {
 namespace succinct {

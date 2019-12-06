@@ -55,8 +55,8 @@ class ChunkedWaitQueue {
     typedef T value_type;
     typedef Iterator iterator;
 
-    ChunkedWaitQueue(const ChunkedWaitQueue &other) = delete; // non construction-copyable
-    ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete; // non copyable
+    ChunkedWaitQueue(const ChunkedWaitQueue &other) = delete;
+    ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete;
 
     /**
      * Constructs a WaitQueue with the given size parameters.

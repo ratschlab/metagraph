@@ -36,7 +36,7 @@ class BOSS {
     typedef uint8_t TAlphabet;
 
     /**
-     * Construct a boos table with the given kmer size.
+     * Construct a BOSS table with the given node (k-mer) size.
      */
     explicit BOSS(size_t k = 1);
     explicit BOSS(BOSSConstructor *builder);
