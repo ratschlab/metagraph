@@ -260,6 +260,9 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
 
             auto [iter, inserted] = kmers_.insert(key);
 
+            // TODO: if previous k-mer wasn't inserted (and hence, had
+            // been inserted earlier), compare the current k-mer with get_next.
+
             Flags *val;
             if (inserted) {
                 bits_.push_back(0);
