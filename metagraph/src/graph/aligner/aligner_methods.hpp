@@ -122,6 +122,7 @@ class Extender {
     virtual std::vector<DBGAlignment>
     operator()(const DBGAlignment &path,
                const char *sequence_end_iterator,
+               const score_t *match_score_begin,
                bool orientation,
                score_t min_path_score = std::numeric_limits<score_t>::min()) const = 0;
 
@@ -149,6 +150,7 @@ class DefaultColumnExtender : public Extender<NodeType> {
     std::vector<DBGAlignment>
     operator()(const DBGAlignment &path,
                const char *sequence_end_iterator,
+               const score_t *match_score_begin,
                bool orientation,
                score_t min_path_score = std::numeric_limits<score_t>::min()) const;
 
@@ -160,6 +162,16 @@ class DefaultColumnExtender : public Extender<NodeType> {
   private:
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
+
+    struct ColumnPriorityFunction {
+        bool operator()(typename DPTable::value_type* a,
+                        typename DPTable::value_type* b) const {
+            return compare_(a->second, b->second);
+        }
+
+        static constexpr Compare compare_ = Compare();
+    };
 };
+
 
 #endif // __DBG_ALIGNER_METHODS_HPP__

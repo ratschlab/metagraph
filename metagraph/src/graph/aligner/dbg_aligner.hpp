@@ -1,8 +1,10 @@
 #ifndef __DBG_ALIGNER_HPP__
 #define __DBG_ALIGNER_HPP__
 
-#include <vector>
+#include <algorithm>
 #include <functional>
+#include <numeric>
+#include <vector>
 
 #include "aligner_helper.hpp"
 #include "aligner_methods.hpp"
@@ -138,8 +140,22 @@ class DBGAligner : public IDBGAligner {
 
         Extender extend(graph_, config_);
 
+        // compute perfect match scores for all suffixes
+        // used for branch and bound checks below
+        std::vector<score_t> partial_sum(query_end - query_begin);
+        std::transform(query_begin, query_end,
+                       partial_sum.begin(),
+                       [&](char c) { return config_.get_row(c)[c]; });
+
+        std::partial_sum(partial_sum.rbegin(), partial_sum.rend(), partial_sum.rbegin());
+        assert(config_.match_score(query_begin, query_end) == partial_sum.front());
+        assert(config_.get_row(*(query_end - 1))[*(query_end - 1)] == partial_sum.back());
+
         std::vector<DBGAlignment> next_paths;
         for (auto it = query_begin; it + graph_.get_k() <= query_end; ++it) {
+            if (partial_sum[it - query_begin] < min_path_score)
+                break;
+
             bool full_seed = false;
 
             auto seeds = seeder(it, query_end, it - query_begin, orientation);
@@ -186,10 +202,14 @@ class DBGAligner : public IDBGAligner {
 
                 // continue extending until the path is depleted
                 while (partial_path.get_query_end() < query_end) {
-                    auto cur_paths = extend(partial_path,
-                                            query_end,
-                                            orientation,
-                                            min_path_score);
+                    auto cur_paths = extend(
+                        partial_path,
+                        query_end,
+                        partial_sum.data()
+                            + (partial_path.get_query_end() - 1 - query_begin),
+                        orientation,
+                        min_path_score
+                    );
 
                     // The graph stored in extend may differ from the one stored
                     // in the DBGAligner and Seeder
