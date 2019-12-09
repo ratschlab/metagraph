@@ -154,7 +154,7 @@ class ChunkedWaitQueue {
      * Note that this function receives its parameter by value, so make sure you
      * std::move it into the queue if the copy construction is expensive.
      */
-    void push_front(value_type x) {
+    void push(value_type x) {
         std::unique_lock<std::mutex> lock(mutex_);
         not_full_.wait(lock, [this] {
             return !full() && output_file_.status != OutputFile::Status::NotSet;

@@ -167,7 +167,8 @@ class BOSS {
      * edge_index = 1). A sink dummy edge is an outgoing edge labeled with $.
      * @param[out] mask a bit mask where sink dummy edges are marked. Must have the same
      * size as #W_ or must be nullptr.
-     * @return the number of sink dummy edges
+     * @return the number of sink dummy edges (i.e. the number of bits that would be set
+     * in #mask, if provided)
      */
     uint64_t mark_sink_dummy_edges(sdsl::bit_vector *mask = NULL) const;
 

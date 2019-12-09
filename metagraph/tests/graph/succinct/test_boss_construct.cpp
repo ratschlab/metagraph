@@ -563,8 +563,8 @@ template <typename TypeParam, typename KmerCount>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         common::SortedMultiset<TypeParam,
-                                                       KmerCount,
-                                                       Vector<std::pair<TypeParam, KmerCount>>> *kmers,
+                                                               KmerCount,
+                                                               Vector<std::pair<TypeParam, KmerCount>>> *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);

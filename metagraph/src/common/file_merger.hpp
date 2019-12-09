@@ -14,7 +14,7 @@ namespace common {
 
 /**
  * Given a list of n source files, containing ordered elements of type T, merge the n
- * sources into a single *ordered) wait queue.
+ * sources into a single (ordered) wait queue.
  * Since the merging happens in a wait queue, it's okay to merge data that doesn't fit
  * in memory - the merging will block until some of the merged data is read.
  */
@@ -51,7 +51,7 @@ void merge_files(const std::vector<std::string> sources,
         merge_heap.pop();
         if (!has_written || smallest.first != last_written) {
             has_written = true;
-            merge_queue->push_front(smallest.first);
+            merge_queue->push(smallest.first);
             last_written = smallest.first;
             totalSize++;
         }

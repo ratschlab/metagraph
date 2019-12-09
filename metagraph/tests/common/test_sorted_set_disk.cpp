@@ -16,7 +16,7 @@ typedef ::testing::Types<uint64_t, int32_t> SortedDiskElementTypes;
 
 TYPED_TEST_CASE(SortedSetDiskTest, SortedDiskElementTypes);
 
-const std::string out_file = "/tmp/out";
+const std::string out_file = "/tmp/test_sorted_set_disk.out";
 
 
 template <typename TypeParam>
@@ -211,7 +211,7 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
         size++;
     }
     expect_disk_data(out_file, expected_result);
-    std::filesystem::remove("/tmp/out");
+    std::filesystem::remove(out_file);
 }
 
 } // namespace

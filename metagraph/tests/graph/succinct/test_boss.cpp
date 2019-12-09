@@ -365,10 +365,10 @@ TEST(BOSS, MarkDummySourceEdgesTwoPathsParallel) {
 }
 
 TEST(BOSS, RemoveDummyEdgesForClearGraph) {
-    for (size_t k = 2; k < 10; ++k) { // TODO: undo
-        std::cout << "Checkin k=" << k << std::endl;
+    for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> first_ptr;
         std::unique_ptr<BOSS> second_ptr;
+
         {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),

@@ -17,6 +17,7 @@ template <typename T>
 class CircularBuffer {
   public:
     class Iterator;
+    using iterator = Iterator;
     explicit CircularBuffer(size_t size)
         : buf_(std::unique_ptr<T[]>(new T[size])), size_(size) {}
 
@@ -93,6 +94,10 @@ class CircularBuffer<T>::Iterator {
     Iterator& operator--() {
         idx_ = idx_ > 0 ? idx_ - 1 : parent_->size() - 1;
         return *this;
+    }
+
+    bool at_begin() {
+        return idx_ == parent_->_begin;
     }
 
   private:

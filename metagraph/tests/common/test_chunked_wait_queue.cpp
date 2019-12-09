@@ -21,12 +21,12 @@ TEST(WaitQueue, Empty) {
 
 TEST(WaitQueue, PushPop) {
     ChunkedWaitQueue<int32_t> under_test(3, 1);
-    under_test.set_out_file("/tmp/out");
-    under_test.push_front(1);
+    under_test.set_out_file("/tmp/test_chunked_wait_queue");
+    under_test.push(1);
     EXPECT_FALSE(under_test.full());
-    under_test.push_front(2);
+    under_test.push(2);
     EXPECT_FALSE(under_test.full());
-    under_test.push_front(3);
+    under_test.push(3);
     EXPECT_TRUE(under_test.full());
     ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.begin();
     EXPECT_EQ(1, *iterator);
@@ -38,13 +38,13 @@ TEST(WaitQueue, PushPop) {
     // at this point the first chunk was cleaned up, so the queue is not full any longer
     EXPECT_FALSE(under_test.full());
 
-    under_test.push_front(4);
+    under_test.push(4);
     EXPECT_EQ(4, *(++iterator));
 
     under_test.shutdown();
     ++iterator;
     EXPECT_TRUE(iterator == under_test.end());
-    std::filesystem::remove("/tmp/out");
+    std::filesystem::remove("/tmp/test_chunked_wait_queue");
 }
 
 TEST(WaitQueue, Shutdown) {
@@ -56,7 +56,7 @@ TEST(WaitQueue, Shutdown) {
 
 void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
     ChunkedWaitQueue<int32_t> under_test(20, 2);
-    under_test.set_out_file("/tmp/out");
+    under_test.set_out_file("/tmp/test_chunked_wait_queue_rw");
     struct Receiver {
         ChunkedWaitQueue<int32_t> *const under_test;
         uint32_t delay_read_ms;
@@ -83,7 +83,7 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
             if (delay_write_ms > 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(delay_write_ms));
             }
-            under_test.push_front(i);
+            under_test.push(i);
         }
         under_test.shutdown();
     });
@@ -95,7 +95,7 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
     for (int32_t i = 0; i < 100; ++i) {
         EXPECT_EQ(i, receiver.pop_result[i]);
     }
-    std::filesystem::remove("/tmp/out");
+    std::filesystem::remove("/tmp/test_chunked_wait_queue_rw");
 }
 
 TEST(WaitQueue, OneWriterOneReader) {

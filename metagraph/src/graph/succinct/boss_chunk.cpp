@@ -150,75 +150,32 @@ template <typename T, typename TAlphabet>
 struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
     using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
 
-    /**
-     * Removes element at position post from v. //TODO: place in a util file?
-     */
-    static void erase(sdsl::int_vector<> *v, uint32_t pos) {
-        for (uint32_t j = pos; j < v->size() - 1; ++j) {
-            v[pos] = v[pos + 1];
-        }
-        v->resize(v->size() - 1);
-    }
 
     /**
      * Iterate backwards and check if there is another incoming edge (an edge with
      * identical suffix and label as the current one) into the same node.
-     * If such an edge is found, then we either:
-     * 1. remove it, if its a dummy edge (because it's redundant), otherwise
-     * 2. mark the current edge label with '-' (not the first incoming edge with that
-     * label)
+     * If such an edge is found, then we  mark the current edge label with '-' (not the
+     * first incoming edge with that label)
      */
     template <typename KMER>
-    static void check_w_and_redundant_edges(uint64_t alph_size,
+    static void check_incoming_edges(uint64_t alph_size,
                                             Iterator &it,
                                             const KMER &kmer,
-                                            common::CircularBuffer<bool> &was_skipped,
-                                            TAlphabet lastF,
-                                            vector<TAlphabet> *W,
-                                            vector<bool> *last,
-                                            vector<uint64_t> *F,
-                                            sdsl::int_vector<> *weights,
-                                            size_t *curpos,
                                             TAlphabet *curW) {
         if (it.at_begin() || *curW == 0) {
             return;
         }
         it.push_pos();
         --it;
-        auto skipped_it = was_skipped.rbegin();
-        --skipped_it;
-        for (uint32_t i = 1; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it,--skipped_it) {
+        for (; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it) {
             const KMER prev_kmer = get_kmer(*it);
-            if (*skipped_it) {
-                continue; // this k-mer was skipped, don't count it
-            }
             if (prev_kmer[0] == *curW) {
-                if (!prev_kmer[1]) { // redundant dummy source k-mer, remove
-                    *skipped_it = true;
-                    // erase from W, last, F, weights
-                    W->erase(W->end() - i);
-                    if ((*last)[*curpos - i] == true && *curpos - i > 0) {
-                        // if we removed a last exiting edge, the previous will be last
-                        // (this is true even if this was the only exiting edge!)
-                        (*last)[*curpos - i - 1] = true;
-                    }
-                    // last has already been appended to in the caller, hence the -1
-                    last->erase(last->end() - i - 1);
-                    if (weights) {
-                        erase(weights, *curpos - i);
-                    }
-                    for (uint32_t j = lastF; j > 0 && F->at(j) > *curpos - i - 1; j--) {
-                        F->at(j)--;
-                    }
-                    (*curpos)--;
-                } else { // not the first incoming edge to the node, mark with -
-                    *curW += alph_size;
-                }
+                // not the first incoming edge to the node, mark with -
+                *curW += alph_size;
                 break;
             }
             if (it.at_begin())
                 break;
-            i++;
         }
         it.pop_pos();
 
@@ -235,8 +192,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             if (weights->capacity() == curpos) {
                 weights->resize(weights->capacity() * 1.5);
             }
-            // set weights for non-dummy k-mers
-            if (weights) {
+            if (weights) { // set weights for non-dummy k-mers
                 if ((*it).second && kmer[0] && kmer[1]) {
                     (*weights)[curpos]
                             = std::min(static_cast<uint64_t>((*it).second), max_count);
@@ -310,8 +266,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             was_skipped.push_back(0);
             --it;
 
-            check_w_and_redundant_edges<KMER>(alph_size, it, kmer, was_skipped, lastF, W,
-                                              last, F, weights, &curpos, &curW);
+            check_incoming_edges<KMER>(alph_size, it, kmer, &curW);
             W->push_back(curW);
 
             while (curF > lastF && lastF + 1 < static_cast<TAlphabet>(alph_size)) {

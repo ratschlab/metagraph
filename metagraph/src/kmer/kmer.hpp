@@ -9,7 +9,7 @@
 
 /**
  * Models a kmer (https://en.wikipedia.org/wiki/K-mer). Each character in the k-mer
- * uses L bits of the internal representation type G (typically a 64,128 or 256 bit
+ * uses L bits of the internal representation type G (typically a 64, 128 or 256 bit
  * integer). The last character of the k-mer uses the most significant bits of
  * G, while the first will use the least significant ones. In other words, the memory
  * layout of the k-mer "ACGT" is "TGCA". This way, ordering k-mers in co-lex order can be
@@ -28,21 +28,21 @@ class KMer {
     typedef uint64_t CharType;
     static constexpr int kBitsPerChar = L;
 
-    /** Construct an empty k-mer. */
+    /** Construct a default (uninitialized) k-mer. */
     KMer() {}
 
     /**
      * Construct a k-mer with the given size from the given array
-     * @tparam V an indexed data structure (e.g. std::vector)
-     * @param arr the k-mer characters
-     * @param k the length of the k-mer
+     * @tparam V an indexed data structure (e.g. std::vector or L[])
+     * @param arr unpacked k-mer
+     * @param k k-mer length
      */
     template <typename V>
     KMer(const V &arr, size_t k);
     /**
      * Construct a k-mer from the given vector
-     * @tparam T type for a character in a kmer
-     * @param arr vector containing the characters in the kmer
+     * @tparam T k-mer character type
+     * @param arr unpacked k-mer
      */
     template <typename T>
     KMer(const std::vector<T> &arr) : KMer(arr, arr.size()) {}
@@ -58,12 +58,12 @@ class KMer {
     bool operator==(const KMer &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMer &other) const { return seq_ != other.seq_; }
 
-    /** Return the character at position i in the kmer. Undefined behavior if i is
+    /** Return the character at position #i in the kmer. Undefined behavior if #i is
      * out of range. */
     inline CharType operator[](size_t i) const;
 
     /**
-     * Return a human-readable representation of the kmer using the given alphabet.
+     * Return the human-readable representation of the kmer using the given alphabet.
      */
     std::string to_string(size_t k, const std::string &alphabet) const;
 
@@ -72,7 +72,7 @@ class KMer {
      * next = s[8]s[7]s[6]s[5]s[4]s[3]s[2]
      *      = ( s[8] << k ) + ( kmer >> 1 ).
      * @param k the k-mer size
-     * @param edge_label the suffix to append to the current k-mer
+     * @param edge_label the new last character
      */
     inline void to_next(size_t k, CharType edge_label);
     /**
@@ -94,9 +94,9 @@ class KMer {
     }
 
   private:
-    /** Bit mask for extracting the first character in the kmer. */
+    /** Bit mask for extracting the first character in packed kmers. */
     static const CharType kFirstCharMask;
-    /** The actual kmer sequence */
+    /** Packed k-mer representation */
     WordType seq_;
 };
 

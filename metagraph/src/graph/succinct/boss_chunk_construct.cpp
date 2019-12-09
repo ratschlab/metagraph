@@ -3,6 +3,7 @@
 #include <ips4o.hpp>
 
 #include "boss_chunk.hpp"
+#include "common/circular_buffer.hpp"
 #include "common/file_merger.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_set.hpp"
@@ -39,7 +40,7 @@ using KmerMultset
 
 /**
  * What type of data structure to use in the #KmerSet for k-mer storage.
- * Note: does not apply for k-mer counting, where only VECTOR is supported.
+ * Note: for k-mer counting, only VECTOR is supported.
  */
 enum class ExtractorContainer {
     VECTOR,
@@ -104,9 +105,9 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
 // k is node length
 /**
  * Adds dummy source nodes for the given kmers.
- * The assumption is that only dummy sources with sentinels of of length 1 were added in
+ * The assumption is that only dummy sources with sentinels of length 1 were added in
  * the  previous phases and this method will gradually add dummy sources with sentinels
- * of length 2,3,... up to k-1.
+ * of length 2, 3, ... up to k-1.
  * For example, if the input k-mers are {ACG, $TA, $CG}, the first k-mer will be
  * ignored (not a dummy source) and the last 2 k-mers will be expanded to sentinels of
  * length 2, by appending {$$T, $$C}
@@ -114,7 +115,11 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
 template <typename Container>
-void recover_source_dummy_nodes(size_t k, Container *kmers, size_t num_threads, bool verbose) {
+void recover_source_dummy_nodes(size_t k,
+                                Container *kmers,
+                                size_t num_threads,
+                                size_t /* alphabet size */,
+                                bool verbose) {
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
@@ -172,8 +177,7 @@ void recover_source_dummy_nodes(size_t k, Container *kmers, size_t num_threads, 
 }
 
 template <typename T>
-using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
-
+using BackQueue = common::CircularBuffer<std::pair<T, bool>>;
 /**
   * Iterate backwards and check if there is another incoming edge (an edge with
   * identical suffix and label as the current one) into the same node.
@@ -183,35 +187,23 @@ using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
   * label)
   */
 template < typename T,typename TAlphabet>
-static bool is_redundant_dummy_source_kmer(uint64_t alph_size,
-                                        Iterator<T> &it,
-                                        TAlphabet curW) {
-    if (it.at_begin() || curW == 0) {
-        return false;
+static void remove_redundant_dummy_source(const T &kmer, BackQueue<T> *buffer) {
+    TAlphabet curW = kmer[0];
+    if (buffer->size() < 2 || curW == 0) {
+        return;
     }
-    const T kmer = get_kmer(*it);
-    it.push_pos();
+    using Iterator = typename BackQueue<T>::iterator;
+    Iterator it = buffer->rbegin();
     --it;
-    for (; T::compare_suffix(kmer, get_kmer(*it), 1); --it) {
-        const T prev_kmer = get_kmer(*it);
+    for (; T::compare_suffix(kmer, utils::get_first((*it).first), 1); --it) {
+        const T prev_kmer = utils::get_first((*it).first);
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
-                return true;
+            (*it).second = false;
+            return;
         }
         if (it.at_begin())
             break;
     }
-    it.pop_pos();
-
-}
-//TODO(ddanciu) - move these to utils to avoid duplication with boss_chunk.cpp
-template <typename KMER, typename COUNT>
-inline const KMER& get_kmer(const std::pair<KMER, COUNT> &pair) {
-    return pair.first;
-}
-
-template <typename KMER>
-inline const KMER& get_kmer(const KMER &kmer) {
-    return kmer;
 }
 
 /**
@@ -226,30 +218,25 @@ template <typename T>
 void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
                                 size_t, /* num_threads unused */
+                                size_t alphabet_size,
                                 bool verbose) {
-    // remove redundant dummy source k-mers of prefix length 1 first ($...)
+    std::vector<std::string> files_to_merge;
+    files_to_merge.push_back("/tmp/original_kmers");
+
     using TAlphabet = typename T::CharType;
-    for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
-        const T kmer = get_kmer(*it);
-        TAlphabet curW = kmer[0];
-        TAlphabet curF = kmer[k];
-        check_w_and_redundant_edges<KMER>(alph_size, it, kmer, was_skipped, lastF, W,
-                                          last, F, weights, &curpos, &curW);
-    }
+    BackQueue<T> back_buffer(alphabet_size * alphabet_size);
+
+    const auto write_to_file = [](std::fstream &f, const T v) {
+        if (!f.write(reinterpret_cast<const char *>(&v), sizeof(T))) {
+            std::cerr << "Error: Writing of merged data failed." << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    };
 
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name
             = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
 
-    std::vector<std::string> files_to_merge;
-    files_to_merge.push_back("/tmp/original_kmers");
-    kmers->set_out_file(files_to_merge.back());
-
-    // First generate dummy k-mers of prefix length 2. This needs to be special-cased,
-    // as the source contains both dummy and non-dummy kmers.
-    const T first = *(kmers->begin());
-    using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
-    size_t num_dummy_parent_kmers = 0;
     auto cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
 
     // this will contain dummy k-mers of prefix length 2
@@ -258,26 +245,49 @@ void recover_source_dummy_nodes(size_t k,
     sorted_dummy_kmers.set_out_file(files_to_merge.back());
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.capacity());
+
+    ThreadPool file_write_pool_ = ThreadPool(1, 100);
+    std::fstream f(files_to_merge.back());
+
+    // remove redundant dummy source k-mers of prefix length 1 and write them to a file
+    // While traversing and removing redundant dummy sourc k-mers of prefix length 1,
+    // we also  generate dummy k-mers of prefix length 2.
+    const T first = *(kmers->begin());
+    using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
+    size_t num_dummy_parent_kmers = 0;
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
-        const T el = *it;
+        const T el = utils::get_first(*it);
         const KMER &kmer = utils::get_first(el);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
-        const typename T::CharType node_last_char = kmer[1];
-        const typename T::CharType edge_label = kmer[0];
-        // nothing to do if it's not a source dummy kmer
-        if (node_last_char || !edge_label)
-            continue;
+        back_buffer.push_back({ el, true });
+        remove_redundant_dummy_source<T, TAlphabet>(el, &back_buffer);
+        if (back_buffer.full()) {
+            const std::pair<T, bool> to_write = back_buffer.pop_front();
+            if (!to_write.second) { // redundant dummy k-mer
+                continue;
+            }
+            const KMER &kmer_to_write = utils::get_first(to_write.first);
 
-        num_dummy_parent_kmers++;
+            file_write_pool_.enqueue(write_to_file, f, kmer_to_write);
 
-        if (dummy_kmers.size() == dummy_kmers.capacity()) {
-            sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
-            dummy_kmers.resize(0);
+            const TAlphabet node_last_char = kmer_to_write[1];
+            const TAlphabet edge_label = kmer_to_write[0];
+            if (node_last_char || !edge_label) { // not a dummy source kmer
+                continue;
+            }
+
+            num_dummy_parent_kmers++;
+
+            if (dummy_kmers.size() == dummy_kmers.capacity()) {
+                sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
+                dummy_kmers.resize(0);
+            }
+
+            push_back(dummy_kmers, kmer_to_write).to_prev(k + 1, BOSS::kSentinelCode);
         }
-
-        push_back(dummy_kmers, kmer).to_prev(k + 1, BOSS::kSentinelCode);
     }
+
     // push out the leftover dummy kmers
     sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
 
@@ -393,6 +403,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
             recover_source_dummy_nodes(kmer_storage_.get_k() - 1,
                                        &kmers,
                                        kmer_storage_.num_threads(),
+                                       kmer_storage_.alphabet_size(),
                                        kmer_storage_.verbose());
 
             if (kmer_storage_.verbose())
