@@ -43,7 +43,7 @@ typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
 static const size_t kRowBatchSize = 100'000;
-const bool kPrefilterWithBloom = false;
+const bool kPrefilterWithBloom = true;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -872,6 +872,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                   << timer.elapsed() << " sec" << std::endl;
         timer.reset();
     }
+
+    exit(1);
 
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;

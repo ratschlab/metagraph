@@ -2,6 +2,7 @@
 #define __BLOOM_FILTER_HPP__
 
 #include <iostream>
+#include <vector>
 #include <cmath>
 
 #include <sdsl/int_vector.hpp>
@@ -19,7 +20,8 @@ class BloomFilter {
     void batch_insert(const uint64_t hashes[], size_t len);
 
     bool check(uint64_t hash) const;
-    sdsl::bit_vector batch_check(const uint64_t hashes[], size_t len) const;
+    sdsl::bit_vector batch_check(const std::vector<std::pair<uint64_t, size_t>> &hashes,
+                                 size_t length) const;
 
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);

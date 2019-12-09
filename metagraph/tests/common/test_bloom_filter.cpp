@@ -145,8 +145,10 @@ TEST(BloomFilter, check_set_bits_batch_check) {
             sdsl::bit_vector check(filter.size());
 
             std::vector<uint64_t> hashes(num_elements);
+            std::vector<std::pair<uint64_t, size_t>> hash_index(num_elements);
             for (size_t i = 0; i < num_elements; ++i) {
                 hashes[i] = hasher(i);
+                hash_index[i] = std::make_pair(hashes[i], i);
                 insert(check, hashes[i], filter.num_hash_functions());
             }
 
@@ -155,7 +157,7 @@ TEST(BloomFilter, check_set_bits_batch_check) {
 
             EXPECT_EQ(
                 num_elements,
-                sdsl::util::cnt_one_bits(filter.batch_check(hashes.data(), num_elements))
+                sdsl::util::cnt_one_bits(filter.batch_check(hash_index, num_elements))
             );
 
             uint64_t false_positives = 0;
