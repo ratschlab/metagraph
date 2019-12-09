@@ -2279,8 +2279,7 @@ int main(int argc, char *argv[]) {
             }
 
             Timer timer;
-            if (config->verbose)
-                logger->info("Graph loading...");
+            logger->trace("Graph loading...");
 
             auto graph = load_critical_dbg(files.at(0));
 
@@ -2346,12 +2345,12 @@ int main(int argc, char *argv[]) {
                     auto node_weights = graph->get_extension<NodeWeights>();
                     assert(node_weights);
                     if (!node_weights->is_compatible(*graph)) {
-                        logger->trace(
+                        logger->error(
                                 "Error: k-mer counts are not compatible with subgraph");
                         exit(1);
                     }
 
-                    logger->trace("Threshold for median k-mer abundance in unitigs: {}",
+                    logger->info("Threshold for median k-mer abundance in unitigs: {}",
                                   config->min_unitig_median_kmer_abundance);
 
                     graph->call_unitigs([&](const std::string &unitig, const auto &path) {
