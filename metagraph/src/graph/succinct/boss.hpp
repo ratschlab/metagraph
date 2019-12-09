@@ -156,7 +156,7 @@ class BOSS {
      * size as #W_ or must be nullptr.
      * @param[in] num_threads number of threads to use in the traversal (1 thread if <=1).
      * @param[in] verbose logging verbosity
-     * @return the number of sink dummy edges
+     * @return the number of source dummy edges
      */
     uint64_t mark_source_dummy_edges(sdsl::bit_vector *mask = NULL,
                                      size_t num_threads = 0,

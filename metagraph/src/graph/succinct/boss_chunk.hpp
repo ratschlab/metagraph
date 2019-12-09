@@ -6,11 +6,8 @@
 #include "boss.hpp"
 
 /**
- * Represents a chunk of the BOSS representation of a deBrujin graph, i.e. the BOSS
- * table resulting from processing a subset of sorted kmers. Multiple Chunks can be
- * unified to form a BOSS table.
- * Unlike #BOSS, which supports rank and select operations on its #W_, #F_, last_
- * members, BOSS::Chunk simply stores #W_, #F_, last_ in an std::vector.
+ * Structure storing data for the BOSS table (or part of it), without support for
+ * 'rank' and 'select' operations.
  */
 class BOSS::Chunk {
   public:
@@ -18,8 +15,7 @@ class BOSS::Chunk {
 
     /**
      * Creates an empty BOSS chunk with the given parameters
-     * @param alph_size the alphabet size, without extra characters (i.e. sentinel).
-     *        For DNA this will be 4.
+     * @param alph_size the alphabet size. For DNA this will be 5 (A,C,G,T,$).
      * @param k k-mer size
      * @param canonical if true, the BOSS table will be constructed with both a k-mer
      *        and its reverse complement
@@ -27,15 +23,15 @@ class BOSS::Chunk {
     Chunk(uint64_t alph_size, size_t k, bool canonical);
 
     /**
-     * Creates a BOSS Chunk with weights from the given kmers. Assumes that kmers are
+     * Creates a BOSS Chunk with k-mer chunks. Assumes that k-mers are
      * distinct and sorted.
-     * @param alph_size the alphabet size, without extra characters (i.e. sentinel).
-     * For DNA this will be 4.
+     * @param alph_size the alphabet size. For DNA this will be 5 ($,A,C,G,T).
      * @param k k-mer size
-     * @param canonical if true, build the chunk from canonicalized k-mers
-     * @param kmers_with_counts the kmers to construct the chunk from
+     * @param canonical if true, the BOSS table will be constructed with both a k-mer
+     *        and its reverse complement
+     * @param kmers_with_counts the k-mers and their counts to construct the chunk from
      * @param bits_per_count for weighted graphs, the number of bits used to store the
-     * weight
+     * weight counts
      */
     template <typename Array>
     Chunk(uint64_t alph_size,
@@ -53,9 +49,9 @@ class BOSS::Chunk {
 
     /**
      * Adds an entry into the BOSS table.
-     * @param W the edge label
-     * @param F the node label
-     * @param last true if this is the last outgoing edge from F
+     * @param W edge label
+     * @param F last character
+     * @param last true if this is the last outgoing edge from that node
      */
     void push_back(TAlphabet W, TAlphabet F, bool last);
 
@@ -74,8 +70,8 @@ class BOSS::Chunk {
     void initialize_boss(BOSS *graph, sdsl::int_vector<> *weights = nullptr);
 
     /**
-     * Merge BOSS chunks loaded from the files passed in #chunk_filenames into a DeBrujin
-     * graph represented as a BOSS table.
+     * Merge BOSS chunks loaded from the files passed in #chunk_filenames and construct
+     * the full BOSS table.
      */
     static std::pair<BOSS* /* boss */, bool /* is_canonical */>
     build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,

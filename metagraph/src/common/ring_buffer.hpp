@@ -5,7 +5,8 @@
 
 #include <sdsl/bits.hpp>
 
-
+//TODO(ddanciu) - change this to operate on values rather than references and merge in
+// functionality from circular_buffer
 template <typename T, class Storage = std::vector<T>>
 class RingBuffer {
   public:

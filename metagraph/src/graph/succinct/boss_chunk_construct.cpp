@@ -171,6 +171,49 @@ void recover_source_dummy_nodes(size_t k, Container *kmers, size_t num_threads, 
                           num_threads);
 }
 
+template <typename T>
+using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
+
+/**
+  * Iterate backwards and check if there is another incoming edge (an edge with
+  * identical suffix and label as the current one) into the same node.
+  * If such an edge is found, then we either:
+  * 1. remove it, if its a dummy edge (because it's redundant), otherwise
+  * 2. mark the current edge label with '-' (not the first incoming edge with that
+  * label)
+  */
+template < typename T,typename TAlphabet>
+static bool is_redundant_dummy_source_kmer(uint64_t alph_size,
+                                        Iterator<T> &it,
+                                        TAlphabet curW) {
+    if (it.at_begin() || curW == 0) {
+        return false;
+    }
+    const T kmer = get_kmer(*it);
+    it.push_pos();
+    --it;
+    for (; T::compare_suffix(kmer, get_kmer(*it), 1); --it) {
+        const T prev_kmer = get_kmer(*it);
+        if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
+                return true;
+        }
+        if (it.at_begin())
+            break;
+    }
+    it.pop_pos();
+
+}
+//TODO(ddanciu) - move these to utils to avoid duplication with boss_chunk.cpp
+template <typename KMER, typename COUNT>
+inline const KMER& get_kmer(const std::pair<KMER, COUNT> &pair) {
+    return pair.first;
+}
+
+template <typename KMER>
+inline const KMER& get_kmer(const KMER &kmer) {
+    return kmer;
+}
+
 /**
  * Specialization of recover_dummy_nodes for a #common::ChunkedWaitQueue container
  * (used by #common::SortedSetDisk).
@@ -184,8 +227,18 @@ void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
                                 size_t, /* num_threads unused */
                                 bool verbose) {
+    // remove redundant dummy source k-mers of prefix length 1 first ($...)
+    using TAlphabet = typename T::CharType;
+    for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
+        const T kmer = get_kmer(*it);
+        TAlphabet curW = kmer[0];
+        TAlphabet curF = kmer[k];
+        check_w_and_redundant_edges<KMER>(alph_size, it, kmer, was_skipped, lastF, W,
+                                          last, F, weights, &curpos, &curW);
+    }
+
     // name of the file containing dummy k-mers of given prefix length
-    auto get_file_name
+    const auto get_file_name
             = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
 
     std::vector<std::string> files_to_merge;

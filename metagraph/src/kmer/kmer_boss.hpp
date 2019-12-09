@@ -10,7 +10,7 @@
 /**
  * Models a kmer (https://en.wikipedia.org/wiki/K-mer) that is stored in a BOSS table.
  * Just like #KMer, each character in the k-mer uses L bits of the internal representation
- * type G (typically a 64,128 or 256 bit integer) and characters ares stored in reverse
+ * type G (typically a 64, 128 or 256 bit integer) and characters ares stored in reverse
  * order.
  * The  only  difference from #KMer is that #KmerBoss leaves the last character in the
  * least significant bits of G. For example, the k-mer "ACGT" is stored in memory as
@@ -29,20 +29,20 @@ class KMerBOSS {
     typedef uint64_t CharType;
     static constexpr int kBitsPerChar = L;
 
-    /** Construct an empty BOSS k-mer. */
+    /** Construct a default, uninitialized, BOSS k-mer. */
     KMerBOSS() {}
     /**
      * Construct a BOSS k-mer with the given size from the given array
-     * @tparam V an indexed data structure (e.g. std::vector)
+     * @tparam V an indexed data structure (e.g. std::vector or L[])
      * @param arr the k-mer characters
-     * @param k the length of the k-mer
+     * @param k k-mer length
      */
     template <typename V>
     KMerBOSS(const V &arr, size_t k);
     /**
      * Construct a BOSS k-mer from the given vector
-     * @tparam T type for a character in a kmer
-     * @param arr vector containing the characters in the kmer
+     * @tparam T k-mer character type
+     * @param arr unpacked k-mer (e.g. 'ACATGGAA')
      */
     template <typename T>
     KMerBOSS(const std::vector<T> &arr) : KMerBOSS(arr, arr.size()) {}
