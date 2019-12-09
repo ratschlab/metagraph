@@ -19,7 +19,7 @@ class RollingHash {
           : hash_(new Hasher(k, seed1, seed2, 64)),
             ring_buffer_(k) { assert(hash_); }
 
-    explicit RollingHash(const RollingHash &other)
+    RollingHash(const RollingHash &other)
           : hash_(new Hasher(*other.hash_)),
             ring_buffer_(other.ring_buffer_) {}
 
@@ -30,7 +30,8 @@ class RollingHash {
         return *this;
     }
 
-    void reset(const TAlphabet *it) {
+    template <typename Iterator>
+    void reset(Iterator it) {
         hash_->reset();
         ring_buffer_.reset(it);
         for (int i = 0; i < hash_->n; ++i) {

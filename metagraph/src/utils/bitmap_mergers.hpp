@@ -1,6 +1,7 @@
 #ifndef __BIT_VECTOR_UTILS_HPP__
 #define __BIT_VECTOR_UTILS_HPP__
 
+#include <queue>
 #include <vector>
 #include <string>
 #include <memory>
@@ -15,10 +16,6 @@ namespace utils {
 // Read indices of set bits from a vector of VectorStreams
 class RowsFromColumnsTransformer {
   public:
-    // Files store serialized vectors as plain indexes of the set bits
-    RowsFromColumnsTransformer(uint64_t num_rows,
-                               const std::vector<std::string> &files);
-
     explicit RowsFromColumnsTransformer(const std::vector<const bit_vector*> &columns);
     explicit RowsFromColumnsTransformer(const std::vector<std::unique_ptr<bit_vector>> &columns);
     explicit RowsFromColumnsTransformer(const std::vector<std::shared_ptr<bit_vector>> &columns);
@@ -51,10 +48,26 @@ class RowsFromColumnsTransformer {
     void call_rows(const std::function<void(const Vector &)> &callback);
 
   private:
+    class VectorBitStream {
+      public:
+        VectorBitStream(const bit_vector &vector,
+                        uint64_t begin = 0,
+                        uint64_t end = static_cast<uint64_t>(-1));
+
+        uint64_t next_value();
+        uint64_t values_left() const { return max_rank_ - current_rank_; }
+
+      private:
+        const bit_vector &vector_;
+        uint64_t begin_;
+        uint64_t current_rank_;
+        uint64_t max_rank_;
+    };
+
     void initialize(const std::vector<const bit_vector*> &columns);
     void init_heap();
 
-    std::vector<std::unique_ptr<VectorStream>> streams_;
+    std::vector<std::unique_ptr<VectorBitStream>> streams_;
     uint64_t num_set_bits_left_ = 0;
     uint64_t num_rows_;
 

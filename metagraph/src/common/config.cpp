@@ -151,8 +151,6 @@ Config::Config(int argc, const char *argv[]) {
             }
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--dump-raw-anno")) {
-            dump_raw_anno = true;
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
@@ -213,8 +211,6 @@ Config::Config(int argc, const char *argv[]) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
-        } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
-            kmer_mapping_mode = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -441,6 +437,7 @@ Config::Config(int argc, const char *argv[]) {
         outfbase = utils::remove_suffix(infbase, ".dbg",
                                                  ".orhashdbg",
                                                  ".hashstrdbg",
+                                                 ".hashfastdbg",
                                                  ".bitmapdbg");
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
@@ -607,6 +604,9 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
     } else if (string == "hashstr") {
         return GraphType::HASH_STR;
 
+    } else if (string == "hashfast") {
+        return GraphType::HASH_FAST;
+
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
 
@@ -690,7 +690,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashpacked / hashstr [succinct]\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
@@ -751,7 +751,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of k-mers required to count sequence [1.0]\n");
-            fprintf(stderr, "\t   --kmer-mapping-mode \t\tlevel of heuristics to use for mapping k-mers (0, 1, or 2) [0]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
@@ -916,7 +915,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
-            fprintf(stderr, "\t   --dump-raw-anno \tdump the columns of the annotator as separate binary files [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");

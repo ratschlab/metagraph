@@ -3,10 +3,6 @@
 #include "gtest/gtest.h"
 #include "boss.hpp"
 #include "boss_construct.hpp"
-#include "dbg_succinct.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 
 
@@ -25,6 +21,10 @@ build_graph(uint64_t k,
 template
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGHashFast>(uint64_t, const std::vector<std::string> &, bool);
 
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -120,6 +120,10 @@ template
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
 
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGHashFast>(uint64_t, const std::vector<std::string> &, bool);
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGHashString>(uint64_t k,
@@ -212,6 +216,10 @@ build_graph_iterative<DBGHashOrdered>(uint64_t, std::function<void(std::function
 
 template
 std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGHashFast>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
 build_graph_iterative<DBGHashString>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
 
 template
@@ -254,11 +262,13 @@ bool check_graph(const std::string &alphabet, bool canonical, bool check_sequenc
 
     auto graph = build_graph<Graph>(20, sequences, canonical);
 
-    const auto nnodes = graph->num_nodes();
-    for (DeBruijnGraph::node_index i = 1; i <= nnodes; ++i) {
+    bool node_remap_failed = false;
+    graph->call_nodes([&graph, &node_remap_failed](DeBruijnGraph::node_index i) {
         if (graph->kmer_to_node(graph->get_node_sequence(i)) != i)
-            return false;
-    }
+            node_remap_failed = true;
+    }, [&node_remap_failed](){ return node_remap_failed; });
+    if (node_remap_failed)
+        return false;
 
     if (!check_sequence)
         return true;
@@ -287,4 +297,5 @@ template bool check_graph<DBGSuccinctBloom<4, 1>>(const std::string &, bool, boo
 template bool check_graph<DBGSuccinctBloom<4, 50>>(const std::string &, bool, bool);
 template bool check_graph<DBGBitmap>(const std::string &, bool, bool);
 template bool check_graph<DBGHashOrdered>(const std::string &, bool, bool);
+template bool check_graph<DBGHashFast>(const std::string &, bool, bool);
 template bool check_graph<DBGHashString>(const std::string &, bool, bool);

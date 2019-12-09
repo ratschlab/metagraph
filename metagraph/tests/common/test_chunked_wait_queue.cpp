@@ -23,6 +23,7 @@ TEST(WaitQueue, PushPop) {
     under_test.push_front(1);
     EXPECT_FALSE(under_test.full());
     under_test.push_front(2);
+    EXPECT_FALSE(under_test.full());
     under_test.push_front(3);
     EXPECT_TRUE(under_test.full());
     ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.iterator();

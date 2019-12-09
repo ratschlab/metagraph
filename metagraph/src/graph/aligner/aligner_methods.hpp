@@ -1,9 +1,8 @@
 #ifndef __DBG_ALIGNER_METHODS_HPP__
 #define __DBG_ALIGNER_METHODS_HPP__
 
-
 #include "aligner_helper.hpp"
-#include "bitmap.hpp"
+#include "utils/bit_vectors/bitmap.hpp"
 
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
@@ -85,7 +84,7 @@ class MEMSeeder : public Seeder<NodeType> {
             config_(config),
             orientation_(false),
             is_mem_terminus_(std::move(is_mem_terminus)) {
-        assert(is_mem_terminus_->size() == graph.num_nodes() + 1);
+        assert(is_mem_terminus_->size() == graph.max_index() + 1);
     }
 
   private:
@@ -100,12 +99,14 @@ template <typename NodeType = typename DeBruijnGraph::node_index>
 class UniMEMSeeder : public MEMSeeder<NodeType> {
   public:
     UniMEMSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : MEMSeeder<NodeType>(graph,
-                                config,
-                                std::make_unique<bitmap_lazy>([&](auto i) {
-                                    return graph.outdegree(i) > 1 || graph.indegree(i) > 1;
-                                },
-                                graph.num_nodes() + 1)) {}
+        : MEMSeeder<NodeType>(graph,
+                              config,
+                              std::make_unique<bitmap_lazy>(
+                                      [&](auto i) {
+                                          return graph.outdegree(i) > 1
+                                                  || graph.indegree(i) > 1;
+                                      },
+                                      graph.max_index() + 1)) {}
 };
 
 
@@ -132,15 +133,15 @@ class Extender {
 
 
 template <typename NodeType = typename DeBruijnGraph::node_index,
-          class Compare = std::less<typename Alignment<NodeType>::Column>>
+          class Compare = std::less<typename DPTable<NodeType>::Column>>
 class DefaultColumnExtender : public Extender<NodeType> {
   public:
     typedef typename Extender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename Extender<NodeType>::node_index node_index;
     typedef typename Extender<NodeType>::score_t score_t;
-    typedef typename DBGAlignment::DPTable DPTable;
-    typedef typename DBGAlignment::Step Step;
-    typedef typename DBGAlignment::Column Column;
+    typedef typename ::DPTable<NodeType> DPTable;
+    typedef typename DPTable::Step Step;
+    typedef typename DPTable::Column Column;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) {}

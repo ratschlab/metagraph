@@ -53,26 +53,25 @@ class KmerBloomFilter {
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
 
-    void print_stats() const;
+    KmerHasher get_hasher() const { return hasher_; }
+
+    const BloomFilter& get_filter() const { return filter_; }
 
   private:
-    void call_kmers(const char *begin, const char *end,
-                    const std::function<void(size_t /* position */,
-                                             uint64_t /* hash */)> &callback,
-                    const std::function<bool()> &terminate
-                        = []() { return false; }) const;
-
-    void call_kmer_presence(const char *begin,
-                            const char *end,
-                            const std::function<void(bool)> &callback,
-                            const std::function<bool()> &terminate
-                                = []() { return false; }) const;
-
     BloomFilter filter_;
     bool canonical_mode_;
     size_t k_;
-    const KmerHasherType hasher_;
+    const KmerHasher hasher_;
 };
 
+
+/**
+ * Construct a callback which can be called `end`-`begin`+1 times, where
+ * the i-th call returns `true` if the i-th k-mer in sequence is invalid
+ * and `false` otherwise.
+ */
+std::function<bool()> get_missing_kmer_skipper(const KmerBloomFilter<> *bloom_filter,
+                                               const char *begin,
+                                               const char *end);
 
 #endif // __KMER_BLOOM_FILTER_HPP__

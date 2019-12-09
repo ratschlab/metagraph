@@ -1,5 +1,6 @@
 #include "annotated_dbg.hpp"
 
+#include "utils/bit_vectors/bit_vector.hpp"
 #include "annotate_row_compressed.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
@@ -309,5 +310,5 @@ AnnotatedDBG::anno_to_graph_index(row_index anno_index) {
 }
 
 bool AnnotatedDBG::check_compatibility() const {
-    return graph_->num_nodes() == annotator_->num_objects();
+    return graph_->max_index() == annotator_->num_objects();
 }

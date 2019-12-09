@@ -31,7 +31,6 @@ class Config {
     bool count_kmers = false;
     bool query_presence = false;
     bool filter_present = false;
-    bool dump_raw_anno = false;
     bool dump_text_anno = false;
     bool sparse = false;
     bool fast = false;
@@ -64,7 +63,6 @@ class Config {
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 1000;
-    unsigned int kmer_mapping_mode = 0;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
     unsigned int row_cache_size = 0;
@@ -172,6 +170,7 @@ class Config {
         HASH,
         HASH_PACKED,
         HASH_STR,
+        HASH_FAST,
         BITMAP,
     };
 

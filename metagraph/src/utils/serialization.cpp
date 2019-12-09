@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <map>
+#include <string>
 #include <unordered_map>
 
 #include <tsl/hopscotch_map.h>
@@ -411,36 +412,3 @@ bool load_set(std::istream &in, Set *set) {
 }
 
 template bool load_set(std::istream &in, OrderedSet<std::string> *set);
-
-
-VectorFileStream::VectorFileStream(const std::string &file)
-      : istream_(MappedFile(file)) {
-    if (!istream_.good())
-        throw std::ifstream::failure(std::string("Bad stream file ") + file);
-
-    values_left_ = load_number(istream_);
-}
-
-uint64_t VectorFileStream::next_value() {
-    assert(values_left_ > 0);
-    values_left_--;
-    return load_number(istream_);
-}
-
-VectorBitStream::VectorBitStream(const bit_vector &vec,
-                                 uint64_t begin,
-                                 uint64_t end)
-      : vector_(vec),
-        begin_(begin),
-        current_rank_(begin ? vector_.rank1(begin - 1) : 0) {
-    assert(begin <= end);
-    assert(current_rank_ <= begin);
-    max_rank_ = (end == static_cast<uint64_t>(-1)
-                    ? vector_.num_set_bits()
-                    : (end ? vector_.rank1(end - 1) : 0));
-}
-
-uint64_t VectorBitStream::next_value() {
-    assert(current_rank_ < max_rank_);
-    return vector_.select1(++current_rank_) - begin_;
-}

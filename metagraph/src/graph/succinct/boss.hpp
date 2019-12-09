@@ -84,15 +84,6 @@ class BOSS {
     std::vector<edge_index>
     map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
 
-    // Check whether the graph contains a fraction of (k+1)-mers from the sequence
-    bool find(const std::string &sequence,
-              double kmer_discovery_fraction = 1,
-              const std::function<bool()> &is_invalid = ALWAYS_FALSE) const;
-
-    bool find(const std::string &sequence,
-              double kmer_discovery_fraction,
-              size_t kmer_mapping_mode) const;
-
     template <class... T>
     using Call = typename std::function<void(T...)>;
 

@@ -2,23 +2,25 @@
 
 #include <unordered_set>
 
-#include "alphabets.hpp"
-#include "annotate_column_compressed.hpp"
-#include "algorithms.hpp"
-#include "int_vector.hpp"
-#include "masked_graph.hpp"
+#include "annotation/column_compressed/annotate_column_compressed.hpp"
+#include "kmer/alphabets.hpp"
+#include "graph/aligner/aligner_helper.hpp"
+#include "graph/succinct/masked_graph.hpp"
+#include "utils/algorithms.hpp"
+#include "utils/bit_vectors/int_vector.hpp"
 
 namespace annotated_graph_algorithm {
 
 typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::row_index row_index;
 typedef AnnotatedDBG::Annotator::Label Label;
+typedef Alignment<DeBruijnGraph::node_index> DBGAlignment;
 
 
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
                      const KeepUnitigPath &keep_unitig) {
-    sdsl::bit_vector unitig_mask(graph.num_nodes() + 1, false);
+    sdsl::bit_vector unitig_mask(graph.max_index() + 1, false);
 
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
@@ -98,7 +100,7 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
     // the intention is to store the in label and out label counts interleaved
     // in the beginning, it's the correct size, but double width
     size_t width = utils::code_length(std::max(labels_in.size(), labels_out.size()));
-    sdsl::int_vector<> counts(anno_graph.get_graph().num_nodes() + 1, 0, width << 1);
+    sdsl::int_vector<> counts(anno_graph.get_graph().max_index() + 1, 0, width << 1);
 
     for (const auto &label_in : labels_in) {
         anno_graph.call_annotated_nodes(label_in, [&](auto i) { counts[i]++; });
@@ -142,13 +144,14 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          double min_frequency_for_frequent_label) {
     if (!anno_graph.get_graph().num_nodes())
         return std::make_unique<bitmap_lazy>([](auto) { return false; },
-                                             anno_graph.get_graph().num_nodes() + 1,
+                                             anno_graph.get_graph().max_index() + 1,
                                              0);
 
     const auto *columns = dynamic_cast<const annotate::ColumnCompressed<>*>(
         &anno_graph.get_annotation()
     );
 
+    //TODO: why do we have num_nodes + 1 here and not just num_nodes?
     if (columns) {
         size_t frequent_column_label_min_count
             = (anno_graph.get_graph().num_nodes() + 1)
@@ -191,7 +194,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
 
             // Flatten count vector to bitmap if all labels were infrequent
             if (labels_in_frequent.empty() && labels_out_frequent.empty()) {
-                sdsl::bit_vector mask(anno_graph.get_graph().num_nodes() + 1, false);
+                sdsl::bit_vector mask(anno_graph.get_graph().max_index() + 1, false);
 
                 call_nonzeros(counts,
                     [&](auto i, auto count) {
@@ -233,7 +236,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                 && is_node_in_mask(i,
                         [&]() { return count_frequent_in_labels(i); },
                         [&]() { return count_frequent_out_labels(i); });
-    }, anno_graph.get_graph().num_nodes() + 1);
+    }, anno_graph.get_graph().max_index() + 1);
 }
 
 void
@@ -244,7 +247,7 @@ call_paths_from_branch(const DeBruijnGraph &graph,
                        const std::function<bool()> &terminate = []() { return false; }) {
     assert(&graph != &full_graph);
 
-    sdsl::bit_vector visited(graph.num_nodes() + 1, false);
+    sdsl::bit_vector visited(graph.max_index() + 1, false);
 
     bool stop = false;
     graph.call_nodes(

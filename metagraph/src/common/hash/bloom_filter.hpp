@@ -16,9 +16,9 @@ class BloomFilter {
                 uint32_t max_num_hash_functions);
 
     void insert(uint64_t hash);
-    bool check(uint64_t hash) const;
-
     void batch_insert(const uint64_t hashes[], size_t len);
+
+    bool check(uint64_t hash) const;
 
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
