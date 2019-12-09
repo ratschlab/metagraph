@@ -11,7 +11,7 @@
 template <typename TAlphabet = uint8_t>
 class RollingHash {
   public:
-    typedef CyclicHash<uint64_t, TAlphabet> Hasher;
+    using Hasher = CyclicHash<uint64_t, TAlphabet>;
 
     // Note: this constructor is expensive. Try to construct it once and
     // make copies of the object.
