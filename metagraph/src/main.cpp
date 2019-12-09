@@ -554,13 +554,13 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
         for (const auto &in : config->label_mask_in) {
             out_str << " " << in;
         }
-        logger->trace("Masked in: {}", out_str.str());
+        logger->trace("Masked in:{}", out_str.str());
 
         out_str = std::stringstream();
         for (const auto &out : config->label_mask_out) {
             out_str << " " << out;
         }
-        logger->trace("Masked out: {}", out_str.str());
+        logger->trace("Masked out:{}", out_str.str());
     }
 
     if (!config->filter_by_kmer) {
@@ -2754,7 +2754,6 @@ int main(int argc, char *argv[]) {
                             annotator.reset();
 
                             logger->trace("Annotation converted in {} sec", timer.elapsed());
-                            timer.reset();
                             logger->trace("Serializing to {} ...", config->outfbase);
 
                             row_annotator.serialize(config->outfbase);
@@ -3067,7 +3066,7 @@ int main(int argc, char *argv[]) {
             auto aligner = build_aligner(*graph, *config);
 
             for (const auto &file : files) {
-                logger->trace("Align sequences from file {}", file);
+                logger->info("Align sequences from file {}", file);
 
                 Timer data_reading_timer;
 
