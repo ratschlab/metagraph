@@ -103,7 +103,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     std::string file_extension() const override { return kExtension; }
 
-    static std::unique_ptr<bit_vector> load_column_from_stream(std::ifstream &instream);
+    static std::unique_ptr<bit_vector> load_next_column(std::ifstream &instream);
 
   private:
     void set(Index i, size_t j, bool value);

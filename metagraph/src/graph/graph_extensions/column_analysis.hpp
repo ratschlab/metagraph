@@ -67,7 +67,7 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
             auto pos = instream.tellg();
 
             std::unique_ptr<bit_vector> new_column =
-                annotate::ColumnCompressed<Label>::load_column_from_stream(instream);
+                annotate::ColumnCompressed<Label>::load_next_column(instream);
 
             if (new_column->size() != num_rows)
                 throw std::ifstream::failure("inconsistent column size");
@@ -117,7 +117,7 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
         instream.seekg(offset, instream.beg);
 
         std::unique_ptr<bit_vector> column =
-            annotate::ColumnCompressed<Label>::load_column_from_stream(instream);
+            annotate::ColumnCompressed<Label>::load_next_column(instream);
 
         return column;
     }

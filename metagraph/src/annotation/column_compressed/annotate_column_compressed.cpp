@@ -179,7 +179,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
 template <typename Label>
 std::unique_ptr<bit_vector>
-ColumnCompressed<Label>::load_column_from_stream(std::ifstream &instream) {
+ColumnCompressed<Label>::load_next_column(std::ifstream &instream) {
     std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
 
     auto pos = instream.tellg();
@@ -232,7 +232,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
-                std::unique_ptr<bit_vector> new_column = load_column_from_stream(instream);
+                std::unique_ptr<bit_vector> new_column = load_next_column(instream);
 
                 if (new_column->size() != num_rows)
                     throw std::ifstream::failure("inconsistent column size");
