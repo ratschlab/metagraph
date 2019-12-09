@@ -56,9 +56,13 @@ double expected_fpr(const BloomFilter &filter, size_t num_elements) {
 }
 
 TEST(BloomFilter, check_set_bits) {
+    constexpr uint64_t max_num_hash_functions = 10;
+
     for (double bits_per_element : { 0.1, 1.0, 5.0 }) {
         for (uint64_t num_elements : { 10000, 50000, 100000 }) {
-            BloomFilter filter(std::ceil(bits_per_element * num_elements), num_elements, 10);
+            BloomFilter filter(std::ceil(bits_per_element * num_elements),
+                               num_elements,
+                               max_num_hash_functions);
             sdsl::bit_vector check(filter.size());
 
             for (size_t i = 0; i < num_elements; ++i) {
@@ -90,9 +94,13 @@ TEST(BloomFilter, check_set_bits) {
 }
 
 TEST(BloomFilter, check_set_bits_batch) {
+    constexpr uint64_t max_num_hash_functions = 10;
+
     for (double bits_per_element : { 0.1, 1.0, 5.0 }) {
         for (uint64_t num_elements : { 10000, 50000, 100000 }) {
-            BloomFilter filter(std::ceil(bits_per_element * num_elements), num_elements, 10);
+            BloomFilter filter(std::ceil(bits_per_element * num_elements),
+                               num_elements,
+                               max_num_hash_functions);
             sdsl::bit_vector check(filter.size());
 
             std::vector<uint64_t> hashes(num_elements);
