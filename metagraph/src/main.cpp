@@ -718,16 +718,21 @@ void map_sequences_in_file(const std::string &file,
     Timer data_reading_timer;
 
     read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-        logger->trace("Sequence: {}", read_stream->seq.s);
+        if (config.verbose)
+            std::cout << "Sequence: " << read_stream->seq.s << "\n";
 
-        if (config.query_presence && config.alignment_length == graph.get_k()) {
-            bool found = graph.find(read_stream->seq.s, config.discovery_fraction);
+        if (config.query_presence
+                && config.alignment_length == graph.get_k()) {
+
+            bool found = graph.find(read_stream->seq.s,
+                                    config.discovery_fraction);
 
             if (!config.filter_present) {
-                logger->info(found);
+                std::cout << found << "\n";
 
             } else if (found) {
-                logger->info(">{}\n{}", read_stream->name.s, read_stream->seq.s);
+                std::cout << ">" << read_stream->name.s << "\n"
+                                 << read_stream->seq.s << "\n";
             }
 
             return;
@@ -767,25 +772,26 @@ void map_sequences_in_file(const std::string &file,
                 num_kmers - num_kmers * (1 - config.discovery_fraction);
             if (config.filter_present) {
                 if (num_discovered >= min_kmers_discovered)
-                    logger->info(">{}\n{}", read_stream->name.s, read_stream->seq.s);
+                    std::cout << ">" << read_stream->name.s << "\n"
+                                     << read_stream->seq.s << "\n";
             } else {
-                logger->info("{}", (num_discovered >= min_kmers_discovered));
+                std::cout << (num_discovered >= min_kmers_discovered) << "\n";
             }
             return;
         }
 
         if (config.count_kmers) {
-            logger->info("Kmers matched (discovered/total): {}/{}", num_discovered,
-                         num_kmers);
+            std::cout << "Kmers matched (discovered/total): "
+                      << num_discovered << "/"
+                      << num_kmers << "\n";
             return;
         }
 
         if (config.alignment_length == graph.get_k()) {
             for (size_t i = 0; i < graphindices.size(); ++i) {
                 assert(i + config.alignment_length <= read_stream->seq.l);
-                logger->info("{}: {}",
-                             std::string(read_stream->seq.s + i, config.alignment_length),
-                             graphindices[i]);
+                std::cout << std::string(read_stream->seq.s + i, config.alignment_length)
+                          << ": " << graphindices[i] << "\n";
             }
         } else {
             // map input subsequences to multiple nodes
@@ -796,8 +802,12 @@ void map_sequences_in_file(const std::string &file,
 
                 dbg->call_nodes_with_suffix(subseq.begin(),
                                             subseq.end(),
-                        [&](auto node, auto) { logger->info("{}: {}", subseq, node); },
-                        config.alignment_length);
+                                            [&](auto node, auto) {
+                                                std::cout << subseq << ": "
+                                                          << node
+                                                          << "\n";
+                                            },
+                                            config.alignment_length);
             }
         }
 
@@ -1025,49 +1035,49 @@ void print_boss_stats(const BOSS &boss_graph,
                       bool count_dummy = false,
                       size_t num_threads = 0,
                       bool verbose = false) {
-    logger->trace("====================== BOSS STATS ======================");
-    logger->trace("k: {}", boss_graph.get_k() + 1);
-    logger->trace("nodes (k-1): {}", boss_graph.num_nodes());
-    logger->trace("edges ( k ): {}", boss_graph.num_edges());
-    logger->trace("state: {}", Config::state_to_string(boss_graph.get_state()));
+    std::cout << "====================== BOSS STATS ======================" << std::endl;
+    std::cout << "k: " << boss_graph.get_k() + 1 << std::endl;
+    std::cout << "nodes (k-1): " << boss_graph.num_nodes() << std::endl;
+    std::cout << "edges ( k ): " << boss_graph.num_edges() << std::endl;
+    std::cout << "state: " << Config::state_to_string(boss_graph.get_state()) << std::endl;
 
     assert(boss_graph.rank_W(boss_graph.num_edges(), boss_graph.alph_size) == 0);
-    std::stringstream out;
-    out << "W stats: {'" << boss_graph.decode(0)
-        << "': " << boss_graph.rank_W(boss_graph.num_edges(), 0);
+    std::cout << "W stats: {'" << boss_graph.decode(0) << "': "
+              << boss_graph.rank_W(boss_graph.num_edges(), 0);
     for (int i = 1; i < boss_graph.alph_size; ++i) {
-        out << ", '" << boss_graph.decode(i) << "': "
-            << boss_graph.rank_W(boss_graph.num_edges(), i)
+        std::cout << ", '" << boss_graph.decode(i) << "': "
+                  << boss_graph.rank_W(boss_graph.num_edges(), i)
                         + boss_graph.rank_W(boss_graph.num_edges(), i + boss_graph.alph_size);
     }
-    out << "}";
-    logger->trace("{}", out.str());
+    std::cout << "}" << std::endl;
 
     assert(boss_graph.get_F(0) == 0);
-    out = std::stringstream();
-    out << "F stats: {'";
+    std::cout << "F stats: {'";
     for (int i = 1; i < boss_graph.alph_size; ++i) {
-        out << boss_graph.decode(i - 1)
-            << "': " << boss_graph.get_F(i) - boss_graph.get_F(i - 1) << ", '";
+        std::cout << boss_graph.decode(i - 1) << "': "
+                  << boss_graph.get_F(i) - boss_graph.get_F(i - 1)
+                  << ", '";
     }
-    out << boss_graph.decode(boss_graph.alph_size - 1)
-        << "': " << boss_graph.num_edges() - boss_graph.get_F(boss_graph.alph_size - 1)
-        << "}" << std::endl;
-    logger->trace("{}", out.str());
+    std::cout << boss_graph.decode(boss_graph.alph_size - 1) << "': "
+              << boss_graph.num_edges() - boss_graph.get_F(boss_graph.alph_size - 1)
+              << "}" << std::endl;
 
     if (count_dummy) {
-        logger->trace("dummy source edges: {}",
-                      boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose));
-        logger->trace("dummy sink edges: {}", boss_graph.mark_sink_dummy_edges());
+        std::cout << "dummy source edges: "
+                  << boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose)
+                  << std::endl;
+        std::cout << "dummy sink edges: "
+                  << boss_graph.mark_sink_dummy_edges()
+                  << std::endl;
     }
-    logger->trace("========================================================");
+    std::cout << "========================================================" << std::endl;
 }
 
 void print_stats(const DeBruijnGraph &graph) {
-    logger->trace("====================== GRAPH STATS =====================");
-    logger->trace("k: {}", graph.get_k());
-    logger->trace("nodes (k): {}", graph.num_nodes());
-    logger->trace("canonical mode: {}", (graph.is_canonical_mode() ? "yes" : "no"));
+    std::cout << "====================== GRAPH STATS =====================" << std::endl;
+    std::cout << "k: " << graph.get_k() << std::endl;
+    std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
+    std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
     if (auto weights = graph.get_extension<NodeWeights>()) {
         double sum_weights = 0;
@@ -1094,28 +1104,26 @@ void print_stats(const DeBruijnGraph &graph) {
                 }
             });
         }
-        logger->trace("nnz weights: {}", num_non_zero_weights);
-        logger->trace("avg weight: {}",
-                      static_cast<double>(sum_weights) / num_non_zero_weights);
+        std::cout << "nnz weights: " << num_non_zero_weights << std::endl;
+        std::cout << "avg weight: " << static_cast<double>(sum_weights) / num_non_zero_weights << std::endl;
 
         if (utils::get_verbose()) {
-            std::stringstream out_str;
             if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph)) {
                 // In DBGSuccinct some of the nodes may be masked out
                 // TODO: Fix this by using non-contiguous indexing in graph
                 //       so that mask of dummy edges does not change indexes.
                 for (uint64_t i = 1; i <= dbg_succ->get_boss().num_edges(); ++i) {
                     if (uint64_t weight = (*weights)[i])
-                        out_str << weight << " ";
+                        std::cout << weight << " ";
                 }
             } else {
-                graph.call_nodes([&](auto i) { out_str << (*weights)[i] << " "; });
+                graph.call_nodes([&](auto i) { std::cout << (*weights)[i] << " "; });
             }
-            logger->trace("Weights: {}", out_str.str());
+            std::cout << std::endl;
         }
     }
 
-    logger->trace("========================================================");
+    std::cout << "========================================================" << std::endl;
 }
 
 template <class KmerHasher>
@@ -1123,58 +1131,56 @@ void print_bloom_filter_stats(const KmerBloomFilter<KmerHasher> *kmer_bloom) {
     if (!kmer_bloom)
         return;
 
-    logger->trace("====================== BLOOM STATS =====================");
-    logger->trace("Size (bits):\t{}", kmer_bloom->size());
-    logger->trace("Num hashes:\t{}", kmer_bloom->num_hash_functions());
-    logger->trace("========================================================");
+    std::cout << "====================== BLOOM STATS =====================" << std::endl;
+    std::cout << "Size (bits):\t" << kmer_bloom->size() << std::endl
+              << "Num hashes:\t" << kmer_bloom->num_hash_functions() << std::endl;
+    std::cout << "========================================================" << std::endl;
 }
 
 void print_stats(const Annotator &annotation) {
-    logger->trace("=================== ANNOTATION STATS ===================");
-    logger->trace("labels:  {}", annotation.num_labels());
-    logger->trace("objects: {}", annotation.num_objects());
-    logger->trace("density: {}",
-                  static_cast<double>(annotation.num_relations())
-                          / annotation.num_objects() / annotation.num_labels());
-    logger->trace("representation: ");
+    std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
+    std::cout << "labels:  " << annotation.num_labels() << std::endl;
+    std::cout << "objects: " << annotation.num_objects() << std::endl;
+    std::cout << "density: " << static_cast<double>(annotation.num_relations())
+                                    / annotation.num_objects()
+                                    / annotation.num_labels() << std::endl;
+    std::cout << "representation: ";
 
     if (dynamic_cast<const annotate::ColumnCompressed<std::string> *>(&annotation)) {
-        logger->trace("{}", Config::annotype_to_string(Config::ColumnCompressed));
+        std::cout << Config::annotype_to_string(Config::ColumnCompressed) << std::endl;
 
     } else if (dynamic_cast<const annotate::RowCompressed<std::string> *>(&annotation)) {
-        logger->trace("{}", Config::annotype_to_string(Config::RowCompressed));
+        std::cout << Config::annotype_to_string(Config::RowCompressed) << std::endl;
 
     } else if (dynamic_cast<const annotate::BRWTCompressed<std::string> *>(&annotation)) {
-        logger->trace("{}", Config::annotype_to_string(Config::BRWT));
+        std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
         const auto &brwt = dynamic_cast<const annotate::BRWTCompressed<std::string> &>(annotation).data();
-        logger->trace("=================== Multi-BRWT STATS ===================");
-        logger->trace("num nodes: {}", brwt.num_nodes());
-        logger->trace("avg arity: {}", brwt.avg_arity());
-        logger->trace("shrinkage: {}", brwt.shrinking_rate());
+        std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
+        std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
+        std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
+        std::cout << "shrinkage: " << brwt.shrinking_rate() << std::endl;
         if (utils::get_verbose()) {
-            logger->trace("==================== Multi-BRWT TREE ===================");
-            std::stringstream out;
-            brwt.print_tree_structure(out);
-            logger->trace("{}", out.str());
+            std::cout << "==================== Multi-BRWT TREE ===================" << std::endl;
+            brwt.print_tree_structure(std::cout);
         }
 
     } else if (dynamic_cast<const annotate::BinRelWT_sdslAnnotator *>(&annotation)) {
-        logger->trace("{}", Config::annotype_to_string(Config::BinRelWT_sdsl));
+        std::cout << Config::annotype_to_string(Config::BinRelWT_sdsl) << std::endl;
 
     } else if (dynamic_cast<const annotate::BinRelWTAnnotator *>(&annotation)) {
-        logger->trace("{}", Config::annotype_to_string(Config::BinRelWT));
+        std::cout << Config::annotype_to_string(Config::BinRelWT) << std::endl;
 
     } else if (dynamic_cast<const annotate::RowFlatAnnotator *>(&annotation)) {
-        logger->trace("{}", Config::annotype_to_string(Config::RowFlat));
+        std::cout << Config::annotype_to_string(Config::RowFlat) << std::endl;
 
     } else if (dynamic_cast<const annotate::RainbowfishAnnotator *>(&annotation)) {
-        logger->trace("{}", Config::annotype_to_string(Config::RBFish));
+        std::cout << Config::annotype_to_string(Config::RBFish) << std::endl;
 
     } else {
         assert(false);
         throw std::runtime_error("Unknown annotator");
     }
-    logger->trace("========================================================");
+    std::cout << "========================================================" << std::endl;
 }
 
 template <class Callback, class CountedKmer, class Loop>
