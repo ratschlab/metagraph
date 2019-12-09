@@ -19,6 +19,7 @@ class BloomFilter {
     void batch_insert(const uint64_t hashes[], size_t len);
 
     bool check(uint64_t hash) const;
+    sdsl::bit_vector batch_check(const uint64_t hashes[], size_t len) const;
 
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);

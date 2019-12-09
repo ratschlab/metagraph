@@ -1,6 +1,7 @@
 #include "bloom_filter.hpp"
 
 #include <vector>
+#include <immintrin.h>
 
 #include "utils/serialization.hpp"
 
@@ -93,6 +94,52 @@ bool BloomFilter::check(uint64_t hash) const {
     }
 
     return found;
+}
+
+sdsl::bit_vector BloomFilter::batch_check(const uint64_t hashes[], size_t len) const {
+    sdsl::bit_vector presence(len, false);
+    size_t i = 0;
+
+    const auto size = filter_.size();
+    uint64_t offsets[4];
+    uint32_t h[8];
+
+    for (; i + 4 <= len; i += 4) {
+        // offset = ((hash % size) >> SHIFT) << SHIFT;
+        offsets[0] = hashes[i] % size;
+        offsets[1] = hashes[i + 1] % size;
+        offsets[2] = hashes[i + 2] % size;
+        offsets[3] = hashes[i + 3] % size;
+
+        // __m256i ymm = _mm256_castpd_si256(_mm256_loadu_pd((const double*)offsets));
+        // ymm = _mm256_srli_epi64(ymm, SHIFT);
+        // ymm = _mm256_slli_epi64(ymm, SHIFT);
+
+        // // dump hashes
+        // _mm256_storeu_ps((float*)h, _mm256_castsi256_ps(ymm));
+
+        offsets[0] = (offsets[0] >> SHIFT) << SHIFT;
+        offsets[1] = (offsets[1] >> SHIFT) << SHIFT;
+        offsets[2] = (offsets[2] >> SHIFT) << SHIFT;
+        offsets[3] = (offsets[3] >> SHIFT) << SHIFT;
+        memcpy(h, (const uint32_t*)offsets, sizeof(uint32_t) * 8);
+
+        for (size_t j = 0; j < 4; ++j) {
+            bool found = true;
+            for (size_t k = 0; found && k < num_hash_functions_; ++k) {
+                found &= filter_[offsets[j] + ((h[j * 2] + k * h[j * 2 + 1]) & BLOCK_MASK)];
+            }
+
+            if (found)
+                presence[i + j] = true;
+        }
+    }
+
+    for (; i < len; ++i) {
+        presence[i] = check(hashes[i]);
+    }
+
+    return presence;
 }
 
 void BloomFilter::serialize(std::ostream &out) const {

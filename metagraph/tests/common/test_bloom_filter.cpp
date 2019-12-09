@@ -133,3 +133,45 @@ TEST(BloomFilter, check_set_bits_batch) {
         }
     }
 }
+
+TEST(BloomFilter, check_set_bits_batch_check) {
+    constexpr uint64_t max_num_hash_functions = 10;
+
+    for (double bits_per_element : { 0.1, 1.0, 5.0 }) {
+        for (uint64_t num_elements : { 10000, 50000, 100000 }) {
+            BloomFilter filter(std::ceil(bits_per_element * num_elements),
+                               num_elements,
+                               max_num_hash_functions);
+            sdsl::bit_vector check(filter.size());
+
+            std::vector<uint64_t> hashes(num_elements);
+            for (size_t i = 0; i < num_elements; ++i) {
+                hashes[i] = hasher(i);
+                insert(check, hashes[i], filter.num_hash_functions());
+            }
+
+            filter.batch_insert(hashes.data(), num_elements);
+            ASSERT_EQ(check, filter.data());
+
+            EXPECT_EQ(
+                num_elements,
+                sdsl::util::cnt_one_bits(filter.batch_check(hashes.data(), num_elements))
+            );
+
+            uint64_t false_positives = 0;
+            for (size_t i = num_elements; i < num_elements + 1000; ++i) {
+                auto hash = hasher(i);
+                false_positives += is_present(check, hash, filter.num_hash_functions());
+                EXPECT_EQ(is_present(check, hash, filter.num_hash_functions()),
+                          filter.check(hash));
+            }
+
+            TEST_COUT << "Elements: " << num_elements << std::endl
+                      << "Bloom filter: " << filter.size() << " bits; "
+                      << filter.num_hash_functions() << " hashes" << std::endl
+                      << "Expected FPR: " << expected_fpr(filter, num_elements) << std::endl
+                      << "False positives: " << double(false_positives) / 1000 << "; "
+                      << false_positives << " / 1000" << std::endl;
+        }
+    }
+}
