@@ -191,8 +191,8 @@ bool KmerBloomFilter<KmerHasher>
     if (static_cast<size_t>(end - begin) < k_)
         return false;
 
-    size_t num_kmers = end - begin - k_ + 1;
-    size_t min_num_kmers = std::max(size_t(1), size_t(std::ceil(discovery_fraction * num_kmers)));
+    const size_t num_kmers = end - begin - k_ + 1;
+    const size_t min_num_kmers = std::max(size_t(1), size_t(std::ceil(discovery_fraction * num_kmers)));
     size_t num_discovered = 0;
     size_t i = 0;
 
