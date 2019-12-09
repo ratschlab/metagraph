@@ -29,10 +29,18 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
     }
 
     double density(const Label &label) {
+
+        auto iter = densities_.find(label);
+        if (iter != densities_.end())
+            return iter->second;
+
         std::unique_ptr<bit_vector> column = load_column_by_label(label);
 
-        return column->num_set_bits()
+        double density = column->num_set_bits()
             / static_cast<double>(get_base_object()->get_graph().num_nodes());
+
+        densities_[label] = density;
+        return density;
     }
 
     bool load(const std::string &filename_base) {
@@ -117,8 +125,9 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
     std::vector<std::unique_ptr<annotate::LabelEncoder<Label>>> label_encoders_;
 
     // Label -> (columncompressed filename, offset to column)
-    std::map<Label, std::pair<std::string, std::streampos>> column_locations_;
+    std::unordered_map<Label, std::pair<std::string, std::streampos>> column_locations_;
 
+    std::unordered_map<Label, double> densities_;
 };
 
 #endif // __COLUMN_ANALYSIS_HPP__
