@@ -22,6 +22,8 @@ BloomFilter::BloomFilter(size_t filter_size,
                     std::min(max_num_hash_functions,
                              optim_h(filter_size, expected_num_elements))) {}
 
+// TODO: rewrite some of these with SIMD instructions
+
 void BloomFilter::insert(uint64_t hash) {
     const auto size = filter_.size();
 
@@ -77,8 +79,6 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
 bool BloomFilter::check(uint64_t hash) const {
     const auto size = filter_.size();
 
-    bool found = true;
-
     // use the 64-bit hash to select a 512-bit block
     size_t offset = ((hash % size) >> SHIFT) << SHIFT;
 
@@ -86,6 +86,7 @@ bool BloomFilter::check(uint64_t hash) const {
     uint32_t h1 = hash;
     uint32_t h2 = hash >> 32;
 
+    bool found = true;
     for (uint32_t i = 0; i < num_hash_functions_; ++i) {
         // check bits within block
         found &= filter_[offset + ((h1 + i * h2) & BLOCK_MASK)];
