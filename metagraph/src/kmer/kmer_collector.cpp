@@ -3,11 +3,12 @@
 #include <type_traits>
 
 #include "utils/template_utils.hpp"
+#include "common/logger.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_set_disk.hpp"
 #include "common/unix_tools.hpp"
-#include "common/seq_tools/reverse_complement.hpp"
 #include "kmer.hpp"
 #include "kmer_extractor.hpp"
 
@@ -197,15 +198,13 @@ KmerCollector<KMER, KmerExtractor, Container>
               bool both_strands_mode,
               Sequence&& filter_suffix_encoded,
               size_t num_threads,
-              double memory_preallocated,
-              bool verbose)
+              double memory_preallocated)
       : k_(k),
         kmers_(get_cleanup<Extractor, typename Container::storage_type>(filter_suffix_encoded.empty())),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
         stored_sequences_size_(0),
-        verbose_(verbose),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
         both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
@@ -214,13 +213,10 @@ KmerCollector<KMER, KmerExtractor, Container>
                && "SortedSetDisk does not support chunking");
     }
     kmers_.reserve(memory_preallocated / sizeof(typename Container::value_type));
-    if (verbose_) {
-        std::cout << "Preallocated "
-                  << (kmers_.data().capacity() * sizeof(typename Container::value_type) >> 30)
-                  << "Gb for the k-mer storage"
-                  << ", capacity: " << kmers_.data().capacity() << " k-mers"
-                  << std::endl;
-    }
+    common::logger->trace("Preallocated {} GB for the k-mer storage, capacity: {} k-mers",
+                        (kmers_.data().capacity() * sizeof(typename Container::value_type)
+                         >> 30),
+                        kmers_.data().capacity());
 }
 
 template <typename KMER, class KmerExtractor, class Container>

@@ -46,14 +46,12 @@ class KmerCollector {
      * sequences
      * @param memory_preallocated number of bytes to pre-allocate in the resulting
      * Container
-     * @param verbose true for extra logging
      */
     KmerCollector(size_t k,
                 bool both_strands_mode = false,
                 Sequence&& filter_suffix_encoded = {},
                 size_t num_threads = 1,
-                double memory_preallocated = 0,
-                bool verbose = false);
+                double memory_preallocated = 0);
 
     inline size_t get_k() const { return k_; }
 
@@ -73,7 +71,6 @@ class KmerCollector {
 
     void clear() { join(); kmers_.clear(); }
 
-    inline bool verbose() const { return verbose_; }
     inline bool is_both_strands_mode() const { return both_strands_mode_; }
     inline size_t num_threads() const { return num_threads_; }
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
@@ -91,8 +88,6 @@ class KmerCollector {
 
     std::vector<std::pair<std::string, uint64_t>> buffered_sequences_;
     size_t stored_sequences_size_;
-
-    bool verbose_;
 
     Sequence filter_suffix_encoded_;
 

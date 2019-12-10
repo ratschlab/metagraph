@@ -3,6 +3,7 @@
 
 #include "common/chunked_wait_queue.hpp"
 #include "common/file_merger.hpp"
+#include "common/logger.hpp"
 #include "common/threading.hpp"
 #include "utils/vectors.hpp"
 
@@ -59,7 +60,6 @@ class SortedSetDisk {
      * @param cleanup function to run each time a chunk is written to disk; typically
      * performs cleanup operations, such as removing redundant dummy source k-mers
      * @param num_threads the number of threads to use by the sorting algorithm
-     * @param verbose true if verbose logging is desired
      * @param container_size the size of the in-memory container that is written
      * to disk when full
      */
@@ -67,12 +67,10 @@ class SortedSetDisk {
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
             std::function<void(const T&)> on_item_pushed = [](const T&){},
             size_t num_threads = 1,
-            bool verbose = false,
             size_t container_size = CONTAINER_SIZE_BYTES,
             size_t merge_queue_size = MERGE_QUEUE_SIZE / sizeof(T),
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
         : num_threads_(num_threads),
-          verbose_(verbose),
           merge_queue_(merge_queue_size, num_last_elements_cached, on_item_pushed),
           cleanup_(cleanup) {
         try {
@@ -180,18 +178,13 @@ class SortedSetDisk {
 
   private:
     void shrink_data() {
-        if (verbose_) {
-            std::cout << "Allocated capacity exceeded, erasing duplicate values..."
-                      << std::flush;
-        }
+        logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
         size_t old_size = data_->size();
         sort_and_remove_duplicates(data_, num_threads_);
 
-        if (verbose_) {
-            std::cout << " done. Size reduced from " << old_size << " to " << data_->size()
-                      << ", " << (data_->size() * sizeof(T) >> 20) << "Mb" << std::endl;
-        }
+        logger->trace("...done. Size reduced from {} to {}, {}MB", old_size,
+                      data_->size(), (data_->size() * sizeof(T) >> 20));
     }
 
     static std::string file_name_for_chunk(uint32_t chunk) {
@@ -284,7 +277,6 @@ class SortedSetDisk {
      * True if the data merging thread was started, and data started flowing into the #merge_queue_.
      */
     bool is_merging_ = false;
-    bool verbose_;
 
     /**
      * Ensures mutually exclusive access (and thus thread-safety) to #data.

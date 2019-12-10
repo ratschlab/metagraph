@@ -5,6 +5,7 @@
 #include "boss_chunk.hpp"
 #include "common/circular_buffer.hpp"
 #include "common/file_merger.hpp"
+#include "common/logger.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_set_disk.hpp"
@@ -72,21 +73,15 @@ void sort_and_remove_duplicates(Array *array,
 template <typename Array>
 void shrink_kmers(Array *kmers,
                   size_t num_threads,
-                  bool verbose,
                   size_t offset) {
-    if (verbose) {
-        std::cout << "Allocated capacity exceeded, filter out non-unique k-mers..."
-                  << std::flush;
-    }
+    common::logger->trace("Allocated capacity exceeded, filter out non-unique k-mers...");
 
     size_t prev_num_kmers = kmers->size();
     sort_and_remove_duplicates(kmers, num_threads, offset);
 
-    if (verbose) {
-        std::cout << " done. Number of kmers reduced from " << prev_num_kmers
-                                                  << " to " << kmers->size() << ", "
-                  << (kmers->size() * sizeof(typename Array::value_type) >> 20) << "Mb" << std::endl;
-    }
+    common::logger->trace(" done. Number of kmers reduced from {} to {}, {}Mb",
+                          prev_num_kmers, kmers->size(),
+                          (kmers->size() * sizeof(typename Array::value_type) >> 20));
 }
 
 template <class Container, typename KMER>
@@ -118,8 +113,7 @@ template <typename Container>
 void recover_source_dummy_nodes(size_t k,
                                 Container *kmers,
                                 size_t num_threads,
-                                size_t /* alphabet size */,
-                                bool verbose) {
+                                size_t /* alphabet size */) {
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
@@ -139,20 +133,16 @@ void recover_source_dummy_nodes(size_t k,
         num_dummy_parent_kmers++;
 
         if (kmers->size() + 1 > kmers->capacity())
-            shrink_kmers(kmers, num_threads, verbose, dummy_begin);
+            shrink_kmers(kmers, num_threads, dummy_begin);
 
         push_back(*kmers, kmer).to_prev(k + 1, BOSS::kSentinelCode);
     }
-    if (verbose) {
-        std::cout << "Number of dummy k-mers with dummy prefix of length 1: "
-                  << num_dummy_parent_kmers << std::endl;
-    }
+    common::logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
+                          num_dummy_parent_kmers);
     sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
-    if (verbose) {
-        std::cout << "Number of dummy k-mers with dummy prefix of length 2: "
-                  << kmers->size() - dummy_begin << std::endl;
-    }
+    common::logger->trace("Number of dummy k-mers with dummy prefix of length 2: {}",
+                          kmers->size() - dummy_begin);
 
     for (size_t c = 3; c < k + 1; ++c) {
         size_t succ_dummy_begin = dummy_begin;
@@ -160,16 +150,14 @@ void recover_source_dummy_nodes(size_t k,
 
         for (size_t i = succ_dummy_begin; i < dummy_begin; ++i) {
             if (kmers->size() + 1 > kmers->capacity())
-                shrink_kmers(kmers, num_threads, verbose, dummy_begin);
+                shrink_kmers(kmers, num_threads, dummy_begin);
 
             push_back(*kmers, utils::get_first((*kmers)[i])).to_prev(k + 1, BOSS::kSentinelCode);
         }
         sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
-        if (verbose) {
-            std::cout << "Number of dummy k-mers with dummy prefix of length " << c
-                      << ": " << kmers->size() - dummy_begin << std::endl;
-        }
+        common::logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}",
+                              c, kmers->size() - dummy_begin);
     }
     ips4o::parallel::sort(kmers->begin(), kmers->end(),
                           utils::LessFirst(),
@@ -274,8 +262,7 @@ template <typename T>
 void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
                                 size_t, /* num_threads unused */
-                                size_t alphabet_size,
-                                bool verbose) {
+                                size_t alphabet_size) {
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name
             = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
@@ -339,10 +326,8 @@ void recover_source_dummy_nodes(size_t k,
     // push out the leftover dummy kmers
     sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
 
-    if (verbose) {
-        std::cout << "Number of dummy k-mers with dummy prefix of length 1: "
-                  << num_dummy_parent_kmers << std::endl;
-    }
+    common::logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
+                          num_dummy_parent_kmers);
 
     // generate dummy k-mers of prefix length 3..k
     common::SortedSetDisk<T> sorted_dummy_kmers2;
@@ -369,10 +354,8 @@ void recover_source_dummy_nodes(size_t k,
         dest->insert(dummy_kmers.begin(), dummy_kmers.end());
 
 
-        if (verbose) {
-            std::cout << "Number of dummy k-mers with dummy prefix of length "
-                      << (dummy_pref_len - 1) << ": " << num_kmers << std::endl;
-        }
+        common::logger->trace("Number of dummy k-mers with dummy prefix of length {} :",
+                              (dummy_pref_len - 1), num_kmers);
         std::swap(source, dest);
     }
     for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
@@ -421,14 +404,12 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          bool canonical_mode = false,
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
-                         double memory_preallocated = 0,
-                         bool verbose = false)
+                         double memory_preallocated = 0)
           : kmer_storage_(k + 1,
                           canonical_mode,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
-                          memory_preallocated,
-                          verbose) {
+                          memory_preallocated) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_storage_.insert_dummy(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
@@ -446,22 +427,17 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         auto &kmers = kmer_storage_.data();
 
         if (!kmer_storage_.suffix_length()) {
-            if (kmer_storage_.verbose()) {
-                std::cout << "Reconstructing all required dummy source k-mers..."
-                          << std::endl;
-            }
+            common::logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
 
             // kmer_collector stores (BOSS::k_ + 1)-mers
             recover_source_dummy_nodes(kmer_storage_.get_k() - 1,
                                        &kmers,
                                        kmer_storage_.num_threads(),
-                                       kmer_storage_.alphabet_size(),
-                                       kmer_storage_.verbose());
+                                       kmer_storage_.alphabet_size());
 
-            if (kmer_storage_.verbose())
-                std::cout << "Dummy source k-mers were reconstructed in "
-                          << timer.elapsed() << "sec" << std::endl;
+            common::logger->trace("Dummy source k-mers were reconstructed in {} sec",
+                                  timer.elapsed());
         }
 
         BOSS::Chunk *result;
@@ -516,10 +492,9 @@ IBOSSChunkConstructor
              bool count_kmers,
              const std::string &filter_suffix,
              size_t num_threads,
-             double memory_preallocated,
-             bool verbose) {
+             double memory_preallocated) {
 
-    #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
+    #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated
 
     if (count_kmers) {
         return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
