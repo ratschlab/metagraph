@@ -97,7 +97,7 @@ class CircularBuffer<T>::Iterator {
     }
 
     bool at_begin() {
-        return idx_ == parent_->_begin;
+        return idx_ == parent_->front_;
     }
 
   private:

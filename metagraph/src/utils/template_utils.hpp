@@ -43,7 +43,7 @@ template <typename T>
 inline T& get_first(T &value) { return value; }
 
 template <typename T>
-inline T& get_first(const T &value) { return value; }
+inline const T& get_first(const T &value) { return value; }
 
 struct LessFirst {
     template <typename T>

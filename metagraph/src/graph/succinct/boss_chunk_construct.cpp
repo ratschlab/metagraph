@@ -51,7 +51,7 @@ enum class ExtractorContainer {
     VECTOR_DISK
 };
 
-constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR;
+constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR_DISK;
 
 const static uint8_t kBitsPerCount = 8;
 
@@ -176,29 +176,39 @@ void recover_source_dummy_nodes(size_t k,
                           num_threads);
 }
 
-template <typename T>
-using BackQueue = common::CircularBuffer<std::pair<T, bool>>;
 /**
-  * Iterate backwards and check if there is another incoming edge (an edge with
-  * identical suffix and label as the current one) into the same node.
-  * If such an edge is found, then we either:
-  * 1. remove it, if its a dummy edge (because it's redundant), otherwise
-  * 2. mark the current edge label with '-' (not the first incoming edge with that
-  * label)
-  */
+ * An element of #RecentKmers. Contains a k-mer and a flag that indicates if the k-mer
+ * was identified as a redundant dummy source when iterating backwards.
+ * */
+template <typename T>
+struct Kmer {
+    T kmer; // the actual k-mer or k-mer with count
+    bool is_removed; // true if this is a redundant dummy source k-mer
+};
+
+template <typename T>
+using RecentKmers = common::CircularBuffer<Kmer<T>>;
+/**
+ * Iterate backwards and check if there is a dummy incoming edge (a dummy edge with
+ * identical suffix and label as the current one) into the same node.
+ * If such an edge is found, then we remove it (because it's redundant).
+ * @param kmer check for redundancy against this k-mer
+ * @param buffer queue that stores the last  |Alphabet|^2 k-mers used for identifying
+ * redundant dummy source k-mers
+ */
 template < typename T,typename TAlphabet>
-static void remove_redundant_dummy_source(const T &kmer, BackQueue<T> *buffer) {
+static void remove_redundant_dummy_source(const T &kmer, RecentKmers<T> *buffer) {
     TAlphabet curW = kmer[0];
     if (buffer->size() < 2 || curW == 0) {
         return;
     }
-    using Iterator = typename BackQueue<T>::iterator;
+    using Iterator = typename RecentKmers<T>::iterator;
     Iterator it = buffer->rbegin();
     --it;
-    for (; T::compare_suffix(kmer, utils::get_first((*it).first), 1); --it) {
-        const T prev_kmer = utils::get_first((*it).first);
+    for (; T::compare_suffix(kmer, utils::get_first((*it).kmer), 1); --it) {
+        const T prev_kmer = utils::get_first((*it).kmer);
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
-            (*it).second = false;
+            (*it).is_removed = true;
             return;
         }
         if (it.at_begin())
@@ -206,13 +216,60 @@ static void remove_redundant_dummy_source(const T &kmer, BackQueue<T> *buffer) {
     }
 }
 
+
+template <typename T>
+void write_to_file(std::fstream *f, const T &v) {
+    if (!f->write(reinterpret_cast<const char *>(&v), sizeof(T))) {
+        std::cerr << "Error: Writing of merged data failed." << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+};
+
+/**
+ * Writes the kmer at the front of #buffer to a file if it's not a redundant dummy
+ * kmer. If the k-mer at the front is a (not-redundant) dummy k-mer it also writes its
+ * corresponding dummy k-mer of prefix length 2 into #sorted_dummy_kmers.
+ */
+template <typename T>
+uint8_t write_kmer(size_t k,
+                   std::fstream *f,
+                   Vector<T> *dummy_kmers,
+                   ThreadPool *file_write_pool,
+                   RecentKmers<T> *buffer,
+                   common::SortedSetDisk<T> *sorted_dummy_kmers) {
+    const Kmer<T> to_write = buffer->pop_front();
+    if (to_write.is_removed) { // redundant dummy k-mer
+        return 0;
+    }
+    file_write_pool->enqueue(write_to_file<T>, f, to_write.kmer);
+    using KMER = std::remove_reference_t<decltype(utils::get_first(to_write.kmer))>;
+    using TAlphabet = typename T::CharType;
+
+    const KMER &kmer_to_write = utils::get_first(to_write.kmer);
+    const TAlphabet node_last_char = kmer_to_write[1];
+    const TAlphabet edge_label = kmer_to_write[0];
+    if (node_last_char || !edge_label) { // not a dummy source kmer
+        return 0;
+    }
+
+
+    if (dummy_kmers->size() == dummy_kmers->capacity()) {
+        sorted_dummy_kmers->insert(dummy_kmers->begin(), dummy_kmers->end());
+        dummy_kmers->resize(0);
+    }
+
+    push_back(*dummy_kmers, kmer_to_write).to_prev(k + 1, BOSS::kSentinelCode);
+    return 1;
+}
+
 /**
  * Specialization of recover_dummy_nodes for a #common::ChunkedWaitQueue container
  * (used by #common::SortedSetDisk).
- * The method gradually constructs dummy source k-mers of prefix length 2..k and writes
- * them into separate files, de-duped and sorted. The final result is obtained by merging
- * the original #kmers (containing dummy source k-mers of prefix length 1) with the dummy
- * source k-mers for prefix length 2..k which were generated and saved into files.
+ * The method first removes redundant dummy source k-mers of prefix length 1, then
+ * gradually constructs dummy source k-mers of prefix length 2..k and writes them into
+ * separate files, de-duped and sorted. The final result is obtained by merging the
+ * original #kmers (minus the redundant dummy source k-mers of prefix length 1) with  the
+ * dummy source k-mers for prefix length 2..k which were generated and saved into files.
  */
 template <typename T>
 void recover_source_dummy_nodes(size_t k,
@@ -222,16 +279,11 @@ void recover_source_dummy_nodes(size_t k,
                                 bool verbose) {
     std::vector<std::string> files_to_merge;
     files_to_merge.push_back("/tmp/original_kmers");
+    std::fstream f(files_to_merge.back(), std::ios::out | std::ios::binary);
+    kmers->set_out_file("");
 
     using TAlphabet = typename T::CharType;
-    BackQueue<T> back_buffer(alphabet_size * alphabet_size);
-
-    const auto write_to_file = [](std::fstream &f, const T v) {
-        if (!f.write(reinterpret_cast<const char *>(&v), sizeof(T))) {
-            std::cerr << "Error: Writing of merged data failed." << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
-    };
+    RecentKmers<T> recent_buffer(alphabet_size * alphabet_size);
 
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name
@@ -246,46 +298,29 @@ void recover_source_dummy_nodes(size_t k,
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.capacity());
 
-    ThreadPool file_write_pool_ = ThreadPool(1, 100);
-    std::fstream f(files_to_merge.back());
+    ThreadPool file_write_pool = ThreadPool(1, 100);
 
     // remove redundant dummy source k-mers of prefix length 1 and write them to a file
     // While traversing and removing redundant dummy sourc k-mers of prefix length 1,
     // we also  generate dummy k-mers of prefix length 2.
-    const T first = *(kmers->begin());
+    const T first = *(kmers->begin()); // T is either a k-mer or a k-mer/count pair
     using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
     size_t num_dummy_parent_kmers = 0;
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
-        const T el = utils::get_first(*it);
+        const T el = *it;
         const KMER &kmer = utils::get_first(el);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
-        back_buffer.push_back({ el, true });
-        remove_redundant_dummy_source<T, TAlphabet>(el, &back_buffer);
-        if (back_buffer.full()) {
-            const std::pair<T, bool> to_write = back_buffer.pop_front();
-            if (!to_write.second) { // redundant dummy k-mer
-                continue;
-            }
-            const KMER &kmer_to_write = utils::get_first(to_write.first);
-
-            file_write_pool_.enqueue(write_to_file, f, kmer_to_write);
-
-            const TAlphabet node_last_char = kmer_to_write[1];
-            const TAlphabet edge_label = kmer_to_write[0];
-            if (node_last_char || !edge_label) { // not a dummy source kmer
-                continue;
-            }
-
-            num_dummy_parent_kmers++;
-
-            if (dummy_kmers.size() == dummy_kmers.capacity()) {
-                sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
-                dummy_kmers.resize(0);
-            }
-
-            push_back(dummy_kmers, kmer_to_write).to_prev(k + 1, BOSS::kSentinelCode);
+        recent_buffer.push_back({ el, false });
+        remove_redundant_dummy_source<T, TAlphabet>(el, &recent_buffer);
+        if (recent_buffer.full()) {
+            num_dummy_parent_kmers += write_kmer(k, &f, &dummy_kmers, &file_write_pool,
+                                                 &recent_buffer, &sorted_dummy_kmers);
         }
+    }
+    while (!recent_buffer.empty()) { // empty the buffer
+        num_dummy_parent_kmers += write_kmer(k, &f, &dummy_kmers, &file_write_pool,
+                                             &recent_buffer, &sorted_dummy_kmers);
     }
 
     // push out the leftover dummy kmers
@@ -332,7 +367,10 @@ void recover_source_dummy_nodes(size_t k,
         // we iterate to merge the data and write it to disk
     }
 
-    // at this point, we have the origial k-mers plus the  dummy k-mers with prefix
+    file_write_pool.join();
+    f.close();
+
+    // at this point, we have the original k-mers plus the  dummy k-mers with prefix
     // length x in /tmp/dummy{x}, and we'll merge them all into a single stream
     kmers->reset();
     kmers->set_out_file("");
