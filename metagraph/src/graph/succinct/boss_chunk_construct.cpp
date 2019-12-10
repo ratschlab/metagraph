@@ -51,7 +51,7 @@ enum class ExtractorContainer {
     VECTOR_DISK
 };
 
-constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR_DISK;
+constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR;
 
 const static uint8_t kBitsPerCount = 8;
 
@@ -178,7 +178,7 @@ void recover_source_dummy_nodes(size_t k,
 
 /**
  * An element of #RecentKmers. Contains a k-mer and a flag that indicates if the k-mer
- * was identified as a redundant dummy source when iterating backwards.
+ * was identified as a redundant dummy source k-mer.
  * */
 template <typename T>
 struct Kmer {
@@ -252,7 +252,6 @@ uint8_t write_kmer(size_t k,
         return 0;
     }
 
-
     if (dummy_kmers->size() == dummy_kmers->capacity()) {
         sorted_dummy_kmers->insert(dummy_kmers->begin(), dummy_kmers->end());
         dummy_kmers->resize(0);
@@ -277,8 +276,6 @@ void recover_source_dummy_nodes(size_t k,
                                 size_t, /* num_threads unused */
                                 size_t alphabet_size,
                                 bool verbose) {
-    ThreadPool file_write_pool = ThreadPool(1, 100);
-
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name
             = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
@@ -286,33 +283,33 @@ void recover_source_dummy_nodes(size_t k,
     const auto no_cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
 
     // asynchronously writes a value of type T to a file stream
+    // TODO(ddanciu): profile this, as I suspect it's slow - use a WaitQueue instead
+    ThreadPool file_write_pool = ThreadPool(1, 10000);
     auto async_file_writer = [&file_write_pool](std::fstream &f) {
         return [&f, &file_write_pool](const T &v) {
             file_write_pool.enqueue(write_or_die<T>, &f, v);
         };
     };
 
-    using stream_ptr = std::unique_ptr<std::fstream>;
-    std::vector<std::pair<std::string, stream_ptr>> files_to_merge;
+    std::vector<std::pair<std::string, std::fstream *>> files_to_merge;
     auto create_stream = [](const std::string &name) {
-        stream_ptr f
-                = std::make_unique<std::fstream>(name, std::ios::out | std::ios::binary);
-        return std::pair<std::string, stream_ptr>({ name, std::move(f) });
+        std::fstream *f = new std::fstream(name, std::ios::out | std::ios::binary);
+        return std::pair<std::string, std::fstream *>({ name, f });
     };
 
     std::string file_name = "/tmp/original_and_dummy_l1";
     files_to_merge.push_back(create_stream(file_name));
-    std::fstream &dummy_l1 = *(files_to_merge.back().second);
+    std::fstream *dummy_l1 = files_to_merge.back().second;
 
     using TAlphabet = typename T::CharType;
     RecentKmers<T> recent_buffer(alphabet_size * alphabet_size);
 
     std::string file_name_l2 = get_file_name(2);
     files_to_merge.push_back(create_stream(file_name_l2));
-    std::fstream &dummy_l2 = *(files_to_merge.back().second);
+    std::fstream *dummy_l2 = files_to_merge.back().second;
 
     // this will contain dummy k-mers of prefix length 2
-    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, async_file_writer(dummy_l2));
+    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, async_file_writer(*dummy_l2));
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.capacity());
 
@@ -330,12 +327,12 @@ void recover_source_dummy_nodes(size_t k,
         recent_buffer.push_back({ el, false });
         remove_redundant_dummy_source<T, TAlphabet>(el, &recent_buffer);
         if (recent_buffer.full()) {
-            num_dummy_parent_kmers += write_kmer(k, &dummy_l1, &dummy_kmers, &file_write_pool,
+            num_dummy_parent_kmers += write_kmer(k, dummy_l1, &dummy_kmers, &file_write_pool,
                                                  &recent_buffer, &sorted_dummy_kmers);
         }
     }
     while (!recent_buffer.empty()) { // empty the buffer
-        num_dummy_parent_kmers += write_kmer(k, &dummy_l1, &dummy_kmers, &file_write_pool,
+        num_dummy_parent_kmers += write_kmer(k, dummy_l1, &dummy_kmers, &file_write_pool,
                                              &recent_buffer, &sorted_dummy_kmers);
     }
 
@@ -389,7 +386,7 @@ void recover_source_dummy_nodes(size_t k,
     kmers->reset();
     std::vector<std::string> file_names;
     std::for_each(files_to_merge.begin(), files_to_merge.end(), [&file_names](auto &el) {
-        el.second->close();
+        delete el.second; // this will also close the stream
         file_names.push_back(el.first);
     });
     common::merge_files(file_names, kmers);
