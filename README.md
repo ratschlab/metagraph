@@ -14,7 +14,7 @@ All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbr
 
 #### For compiling with GNU GCC:
 ```
-brew install gcc autoconf automake libtool cmake make htslib
+brew install gcc autoconf automake libtool cmake make htslib spdlog
 [[ "$OSTYPE" == "darwin"* ]] \
     && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
     && brew install --cc=gcc-7 boost folly \
@@ -36,7 +36,7 @@ export CXX=\"\$(which g++-9)\"
 
 #### For compiling with LLVM Clang:
 ```
-brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
+brew install llvm libomp autoconf automake libtool cmake make htslib boost folly spdlog
 ```
 Then set the environment variables accordingly:
 ```
@@ -245,5 +245,5 @@ Stats for both
 ```
 
 ## License
-Metagraph is distributed under the GPLv3 License (see LICENSE). 
+Metagraph is distributed under the GPLv3 License (see LICENSE).
 Please find further information in the AUTHORS and COPYRIGHTS files.
