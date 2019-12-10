@@ -29,7 +29,7 @@ namespace common {
  *  4. Since the queue exposes a single iterator, it expects a single reader thread.
  * Multiple writers may push information into the queue.
  *
- *  The ChunkedWaitQueue uses a pre-allocated circular array to store the elements in
+ * The ChunkedWaitQueue uses a pre-allocated circular array to store the elements in
  * order to avoid resize and heap allocations at runtime.
  *
  * Writers can push_front a value to the queue, the reader can access elements in order
@@ -41,10 +41,7 @@ namespace common {
  * shut down (if not already shut down) and the destructor will wait until all elements
  * were read (i.e. the iterator reaches past the last available element).
  *
- * The class will optionally write all enqueued elements to a file specified via
- * #set_out_file. The #push_front operation will block until an output file is specified.
- *
- * The class is not copyable or copy constructible.
+ * The class is not copyable or copy-constructible.
  */
 template <typename T, typename Alloc = std::allocator<T>>
 class ChunkedWaitQueue {
@@ -75,7 +72,6 @@ class ChunkedWaitQueue {
           end_iterator_(Iterator(this, buffer_size)),
           is_shutdown_(false) {
         assert(fence_size < buffer_size);
-        output_file_.status = OutputFile::Status::NotSet;
     }
 
     /**
@@ -97,7 +93,6 @@ class ChunkedWaitQueue {
         last_ = buffer_size_;
         is_shutdown_ = false;
         iterator_.idx_ = 0;
-        output_file_.status = OutputFile::Status::NotSet;
     }
 
     /**
@@ -142,36 +137,20 @@ class ChunkedWaitQueue {
         }
         is_shutdown_ = true;
         not_empty_.notify_all();
-        file_write_pool_.join();
-        if (output_file_.status == OutputFile::Status::Set && output_file_.stream.is_open()) {
-            output_file_.stream.close();
-        }
     }
 
     /**
-     * Enqueues x by *moving* it into the queue, blocks when full or when no output
-     * file has yet been set.
+     * Enqueues x by *moving* it into the queue, blocks when full.
+     *
      * Note that this function receives its parameter by value, so make sure you
      * std::move it into the queue if the copy construction is expensive.
      */
     void push(value_type x) {
         std::unique_lock<std::mutex> lock(mutex_);
-        not_full_.wait(lock, [this] {
-            return !full() && output_file_.status != OutputFile::Status::NotSet;
-        });
+        not_full_.wait(lock, [this] { return !full(); });
         bool was_all_read = iterator_.no_more_elements();
         last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
         queue_[last_] = std::move(x);
-        if (output_file_.status == OutputFile::Status::Set) {
-            auto write_to_file = [this](const T v) {
-                if (!output_file_.stream.write(reinterpret_cast<const char *>(&v),
-                                               sizeof(value_type))) {
-                    std::cerr << "Error: Writing of merged data failed." << std::endl;
-                    std::exit(EXIT_FAILURE);
-                }
-            };
-            file_write_pool_.enqueue(write_to_file, queue_[last_]);
-        }
         if (was_all_read) { // queue was empty or all items were read
             not_empty_.notify_one();
         }
@@ -189,32 +168,6 @@ class ChunkedWaitQueue {
      * queue was shut down *and* the iterator past the last element in the queue.
      */
     Iterator &end() { return end_iterator_; }
-
-    /**
-     * Sets the name of the output file.
-     * The queue's #push_front will block until a (possibly empty) output file was
-     * specified.
-     */
-    void set_out_file(const std::string &output_name) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (output_file_.status == OutputFile::Status::Set && output_file_.stream.is_open()) {
-            file_write_pool_.join();
-            output_file_.stream.close();
-        }
-        if (output_name == "") {
-            output_file_.status = OutputFile::Status::SetNoOutput;
-        } else {
-            output_file_.stream
-                    = std::fstream(output_name, std::ios::binary | std::ios::out);
-            if (!output_file_.stream) {
-                std::cerr << "Error: Could not open output file " + output_name << std::endl;
-                std::exit(EXIT_FAILURE);
-            }
-            output_file_.status = OutputFile::Status::Set;
-        }
-        // we can now start pushing elements into the queue
-        not_full_.notify_all();
-    }
 
   private:
     const size_type chunk_size_;
@@ -236,22 +189,12 @@ class ChunkedWaitQueue {
     std::condition_variable empty_;
 
     /**
-     * Signals that the queue is ready to accept new elements, i.e. it is not full and
-     * an output file was set vai #set_out_file.
+     * Signals that the queue is ready to accept new elements.
      */
     std::condition_variable not_full_;
 
     size_type first_ = 0;
     size_type last_ = buffer_size_;
-
-    /** The queue may optionally write its input to a file */
-    struct OutputFile {
-        enum class Status { NotSet, SetNoOutput, Set } status;
-        std::fstream stream;
-    } output_file_;
-
-    // TODO(ddanciu): consider using a WaitQueue instead, to reduce per-task overhead
-    ThreadPool file_write_pool_ = ThreadPool(1, 100);
 
     Iterator iterator_ = Iterator(this);
     Iterator end_iterator_;
