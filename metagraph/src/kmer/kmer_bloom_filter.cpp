@@ -17,10 +17,9 @@ template <class KmerBF>
 inline void call_kmers(const KmerBF &kmer_bloom,
                        const char *begin,
                        const char *end,
-                       const std::function<void(size_t, uint64_t)> &callback,
-                       const std::function<bool()> &terminate = []() { return false; }) {
+                       const std::function<void(size_t, uint64_t)> &callback) {
     const auto k = kmer_bloom.get_k();
-    if (begin >= end || static_cast<size_t>(end - begin) < k || terminate())
+    if (begin >= end || static_cast<size_t>(end - begin) < k)
         return;
 
     const auto max_encoded_val = KmerDef::alphabet.size();
@@ -45,13 +44,8 @@ inline void call_kmers(const KmerBF &kmer_bloom,
         auto rev = kmer_bloom.get_hasher();
         rev.reset(rc_coded.data() + rc_coded.size() - k);
 
-        if (!invalid[k - 1]) {
-            const auto &canonical = std::min(fwd, rev);
-            callback(0, canonical);
-
-            if (terminate())
-                return;
-        }
+        if (!invalid[k - 1])
+            callback(0, std::min(fwd, rev));
 
         for (size_t i = k, j = coded.size() - k - 1; i < coded.size(); ++i, --j) {
             if (coded.at(i) >= max_encoded_val)
@@ -64,20 +58,13 @@ inline void call_kmers(const KmerBF &kmer_bloom,
 
             if (!invalid[i]) {
                 assert(i + 1 >= k);
-                const auto &canonical = std::min(fwd, rev);
-                callback(i + 1 - k, canonical);
-
-                if (terminate())
-                    return;
+                callback(i + 1 - k, std::min(fwd, rev));
             }
         }
 
     } else {
-        if (!invalid[k - 1]) {
+        if (!invalid[k - 1])
             callback(0, fwd);
-            if (terminate())
-                return;
-        }
 
         for (size_t i = k; i < coded.size(); ++i) {
             if (coded.at(i) >= max_encoded_val)
@@ -88,39 +75,9 @@ inline void call_kmers(const KmerBF &kmer_bloom,
             if (!invalid[i]) {
                 assert(i + 1 >= k);
                 callback(i + 1 - k, fwd);
-
-                if (terminate())
-                    return;
             }
         }
     }
-}
-
-template <class KmerBF>
-void call_kmer_presence(const KmerBF &kmer_bloom,
-                        const char *begin,
-                        const char *end,
-                        const std::function<void(bool)> &callback,
-                        const std::function<bool()> &terminate
-                            = []() { return false; }) {
-    const auto k = kmer_bloom.get_k();
-    if (begin >= end || static_cast<size_t>(end - begin) < k || terminate())
-        return;
-
-    size_t j = 0;
-    call_kmers<KmerBF>(kmer_bloom, begin, end, [&](auto i, auto hash) {
-        assert(i < static_cast<size_t>(end - begin - k + 1));
-        assert(j <= i);
-
-        while (j < i) {
-            callback(false);
-            ++j;
-        }
-
-        callback(kmer_bloom.get_filter().check(hash));
-
-        ++j;
-    }, terminate);
 }
 
 template <class KmerHasher>
@@ -177,34 +134,12 @@ void KmerBloomFilter<KmerHasher>
 }
 
 template <class KmerHasher>
-bool KmerBloomFilter<KmerHasher>
-::find(const char *begin, const char *end, double discovery_fraction) const {
-    if (static_cast<size_t>(end - begin) < k_)
-        return false;
-
-    const size_t num_kmers = end - begin - k_ + 1;
-    const size_t min_num_kmers = std::max(size_t(1), size_t(std::ceil(discovery_fraction * num_kmers)));
-    size_t num_discovered = 0;
-    size_t i = 0;
-
-    call_kmer_presence(
-        *this,
-        begin, end,
-        [&](bool val) { num_discovered += val; ++i; },
-        [&]() { return num_discovered >= min_num_kmers
-            || num_discovered + num_kmers - i < min_num_kmers; }
-    );
-
-    return num_discovered >= min_num_kmers;
-}
-
-template <class KmerHasher>
 sdsl::bit_vector KmerBloomFilter<KmerHasher>
 ::check_kmer_presence(const char *begin, const char *end) const {
     if (begin >= end || static_cast<size_t>(end - begin) < k_)
         return sdsl::bit_vector();
 
-    // aggregate and sort hashes to ensure contiguous access to filter
+    // aggregate hashes, then batch check
     std::vector<std::pair<uint64_t, size_t>> hash_index;
 
     call_kmers(*this, begin, end, [&](auto i, auto hash) {

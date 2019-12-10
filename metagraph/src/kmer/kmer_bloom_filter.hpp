@@ -27,16 +27,6 @@ class KmerBloomFilter {
     typedef std::function<void(const std::string&)> CallString;
     void add_sequences(const std::function<void(const CallString&)> &generate_sequences);
 
-    bool find(const char *begin,
-              const char *end,
-              double discovery_fraction = 1.0) const;
-
-    bool find(const std::string &sequence,
-              double discovery_fraction = 1.0) const {
-        return find(sequence.c_str(), sequence.c_str() + sequence.length(),
-                    discovery_fraction);
-    }
-
     // Checks for k-mer presence in the Bloom filter
     sdsl::bit_vector check_kmer_presence(const char *begin, const char *end) const;
 

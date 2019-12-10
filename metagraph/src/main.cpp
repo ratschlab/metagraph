@@ -873,8 +873,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
     }
 
-    exit(1);
-
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
     graph->call_sequences(
