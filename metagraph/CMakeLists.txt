@@ -90,6 +90,7 @@ endif()
 string(APPEND CMAKE_CXX_FLAGS
   " -Wall -Wextra -Werror"
   " -D_THREAD_SAFE -pthread"
+  " -DSPDLOG_FMT_EXTERNAL"
   # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 )
 
@@ -295,7 +296,6 @@ if(FOLLY_LIBRARIES)
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
       -lglog
-      -lgflags
     )
   endif()
   find_library(LIBERTY
@@ -340,6 +340,7 @@ set(METALIBS ${METALIBS}
   -lhts -lz -lbz2
   -lmaus2
   -lsdsl
+  -lgflags
   brwt
   jsoncpp
   progress_bar
