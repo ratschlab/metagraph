@@ -17,10 +17,10 @@ class BloomFilter {
                 uint32_t max_num_hash_functions);
 
     void insert(uint64_t hash);
-    void batch_insert(const uint64_t hashes[], size_t len);
-
     bool check(uint64_t hash) const;
-    sdsl::bit_vector batch_check(const std::vector<std::pair<uint64_t, size_t>> &hashes,
+
+    void batch_insert(const uint64_t hashes[], size_t len);
+    sdsl::bit_vector batch_check(const std::vector<std::pair<uint64_t, size_t>> &hash_index,
                                  size_t length) const;
 
     void serialize(std::ostream &out) const;

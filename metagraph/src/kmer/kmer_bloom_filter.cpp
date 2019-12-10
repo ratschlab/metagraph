@@ -1,7 +1,5 @@
 #include "kmer_bloom_filter.hpp"
 
-#include <ips4o.hpp>
-
 #ifndef NDEBUG
 #include "common/seq_tools/reverse_complement.hpp"
 #endif
@@ -166,9 +164,6 @@ void KmerBloomFilter<KmerHasher>
             if (buffer.capacity() < sequence.size() - k_ + 1) {
                 buffer.reserve(buffer.size() + sequence.size() - k_ + 1);
             } else {
-                ips4o::parallel::sort(buffer.begin(), buffer.end(),
-                                      std::less<uint64_t>(),
-                                      get_num_threads());
                 filter_.batch_insert(buffer.data(), buffer.size());
                 buffer.clear();
             }
@@ -177,10 +172,6 @@ void KmerBloomFilter<KmerHasher>
         call_kmers(*this, sequence.c_str(), sequence.c_str() + sequence.size(),
                    [&](auto, auto hash) { buffer.emplace_back(hash); });
     });
-
-    ips4o::parallel::sort(buffer.begin(), buffer.end(),
-                          std::less<uint64_t>(),
-                          get_num_threads());
 
     filter_.batch_insert(buffer.data(), buffer.size());
 }
@@ -213,8 +204,6 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
     if (begin >= end || static_cast<size_t>(end - begin) < k_)
         return sdsl::bit_vector();
 
-    sdsl::bit_vector check_vec(end - begin - k_ + 1);
-
     // aggregate and sort hashes to ensure contiguous access to filter
     std::vector<std::pair<uint64_t, size_t>> hash_index;
 
@@ -224,13 +213,7 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
         hash_index.emplace_back(hash, i);
     });
 
-    std::sort(hash_index.begin(), hash_index.end());
-
-    for (const auto &[hash, index] : hash_index) {
-        check_vec[index] = filter_.check(hash);
-    }
-
-    return check_vec;
+    return filter_.batch_check(hash_index, end - begin - k_ + 1);
 }
 
 template <class KmerHasher>

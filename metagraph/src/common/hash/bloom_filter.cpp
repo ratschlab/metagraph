@@ -1,11 +1,12 @@
 #include "bloom_filter.hpp"
 
-#include <vector>
+#ifdef __AVX2__
 #include <immintrin.h>
+#endif
 
 #include "utils/serialization.hpp"
 
-constexpr size_t BLOCK_MASK = 0b111111111;
+constexpr uint32_t BLOCK_MASK = 0b111111111;
 constexpr uint32_t SHIFT = 9;
 
 BloomFilter::BloomFilter(size_t filter_size, uint32_t num_hash_functions)
@@ -32,7 +33,7 @@ void BloomFilter::insert(uint64_t hash) {
     size_t offset = ((hash % size) >> SHIFT) << SHIFT;
 
     // split 64-bit hash into two 32-bit hashes
-    uint32_t h1 = hash;
+    uint32_t h1 = hash & 0xFFFFFFFF;
     uint32_t h2 = hash >> 32;
 
     /*
@@ -49,34 +50,6 @@ void BloomFilter::insert(uint64_t hash) {
     assert(check(hash));
 }
 
-void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
-    const auto size = filter_.size();
-
-    std::vector<std::pair<size_t, uint64_t>> sorted_hashes(len);
-    std::transform(
-        hashes,
-        hashes + len,
-        sorted_hashes.begin(),
-        [&](auto hash) {
-            return std::make_pair(((hash % size) >> SHIFT) << SHIFT, hash);
-        }
-    );
-    std::sort(sorted_hashes.begin(), sorted_hashes.end());
-
-    // use the 64-bit hash to select a 512-bit block
-    for (const auto &[offset, hash] : sorted_hashes) {
-        // split 64-bit hash into two 32-bit hashes
-        uint32_t h1 = hash;
-        uint32_t h2 = hash >> 32;
-
-        for (uint32_t i = 0; i < num_hash_functions_; ++i) {
-            filter_[offset + ((h1 + i * h2) & BLOCK_MASK)] = true;
-        }
-
-        assert(check(hash));
-    }
-}
-
 bool BloomFilter::check(uint64_t hash) const {
     const auto size = filter_.size();
 
@@ -84,7 +57,7 @@ bool BloomFilter::check(uint64_t hash) const {
     size_t offset = ((hash % size) >> SHIFT) << SHIFT;
 
     // split 64-bit hash into two 32-bit hashes
-    uint32_t h1 = hash;
+    uint32_t h1 = hash & 0xFFFFFFFF;
     uint32_t h2 = hash >> 32;
 
     bool found = true;
@@ -96,45 +69,160 @@ bool BloomFilter::check(uint64_t hash) const {
     return found;
 }
 
-sdsl::bit_vector BloomFilter
-::batch_check(const std::vector<std::pair<uint64_t, size_t>> &hashes,
-             size_t length) const {
-    sdsl::bit_vector presence(length, false);
-    size_t i = 0;
+
+// constants for batch insert and check
+#ifdef __AVX__
+const __m256i zeros = _mm256_set1_epi32(0);
+
+// used to restrict indices to the size of a block
+const __m256i blockmask = _mm256_set1_epi32(BLOCK_MASK);
+
+// permute 32-bit hashes into correct order after _mm256_hadd_epi32
+const __m256i permute = _mm256_setr_epi32(0, 2, 1, 3, 4, 6, 5, 7);
+#endif
+
+void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
+    size_t j = 0;
+
+#ifdef __AVX2__
+    // compute Bloom filter hashes in batches of 4
 
     const auto size = filter_.size();
-    uint64_t offsets[4];
-    uint32_t h[8];
 
-    for (; i + 4 <= length; i += 4) {
+    uint64_t hs[4] __attribute__ ((aligned (16)));
+    uint64_t indices[4] __attribute__ ((aligned (16)));
+
+    __m256i offsets, inds, mult;
+
+    for (; j + 4 <= len; j += 4) {
+        // copy hashes
+        memcpy(hs, hashes + j, sizeof(uint64_t) * 4);
+
+        // compute offsets
         // offset = ((hash % size) >> SHIFT) << SHIFT;
-        h[0] = hashes[i].first;
-        h[1] = hashes[i + 1].first;
-        h[2] = hashes[i + 2].first;
-        h[3] = hashes[i + 3].first;
-        __m256i ymm = _mm256_set_epi64x(hashes[i].first % size,
-                                        hashes[i + 1].first % size,
-                                        hashes[i + 2].first % size,
-                                        hashes[i + 3].first % size);
-        ymm = _mm256_srli_epi64(ymm, SHIFT);
-        ymm = _mm256_slli_epi64(ymm, SHIFT);
+        offsets = _mm256_setr_epi64x(hs[0] % size,
+                                     hs[1] % size,
+                                     hs[2] % size,
+                                     hs[3] % size);
+        offsets = _mm256_srli_epi64(offsets, SHIFT);
+        offsets = _mm256_slli_epi64(offsets, SHIFT);
 
-        // dump hashes
-        _mm256_storeu_pd((double*)offsets, _mm256_castsi256_pd(ymm));
+        for (uint32_t k = 0; k < num_hash_functions_; ++k) {
+            // load hashes to ymm register
+            inds = _mm256_load_si256((__m256i*)hs);
 
-        for (size_t j = 0; j < 4; ++j) {
-            bool found = true;
-            for (size_t k = 0; found && k < num_hash_functions_; ++k) {
-                found &= filter_[offsets[j] + ((h[j * 2] + k * h[j * 2 + 1]) & BLOCK_MASK)];
+            // compute the kth hashes
+            // hash = (h1 + k * h2) & BLOCK_MASK
+            mult = _mm256_setr_epi32(1, k, 1, k, 1, k, 1, k);
+            inds = _mm256_mullo_epi32(inds, mult);
+            inds = _mm256_hadd_epi32(inds, zeros);
+            inds = _mm256_and_si256(inds, blockmask);
+            inds = _mm256_permutevar8x32_epi32(inds, permute);
+
+            // add offsets to hashes
+            // id += offset
+            inds = _mm256_add_epi64(offsets, inds);
+
+            // store indices
+            _mm256_store_si256((__m256i*)indices, inds);
+
+            // add to filter
+            for (size_t i = 0; i < 4; ++i) {
+                filter_[indices[i]] = true;
             }
-
-            if (found)
-                presence[hashes[i + j].second] = true;
         }
     }
 
-    for (; i < length; ++i) {
-        presence[hashes[i].second] = check(hashes[i].first);
+#endif
+
+    for (; j < len; ++j) {
+        insert(hashes[j]);
+    }
+}
+
+sdsl::bit_vector BloomFilter
+::batch_check(const std::vector<std::pair<uint64_t, size_t>> &hash_index,
+             size_t length) const {
+    const auto num_elements = hash_index.size();
+    sdsl::bit_vector presence(length, false);
+    size_t i = 0;
+
+#ifdef __AVX2__
+    // compute Bloom filter hashes in batches of 4
+
+    const auto size = filter_.size();
+
+    uint64_t indices[4] __attribute__ ((aligned (16)));
+    uint64_t hs[4] __attribute__ ((aligned (16)));
+
+    bool found[4];
+
+    __m256i offsets, inds, mult;
+
+    size_t found_count = 0;
+
+    for (; i + 4 <= num_elements; i += 4) {
+        // reset found array
+        found[0] = true;
+        found[1] = true;
+        found[2] = true;
+        found[3] = true;
+
+        // copy hashes
+        hs[0] = hash_index[i].first;
+        hs[1] = hash_index[i + 1].first;
+        hs[2] = hash_index[i + 2].first;
+        hs[3] = hash_index[i + 3].first;
+
+        // compute offsets
+        // offset = ((hash % size) >> SHIFT) << SHIFT;
+        offsets = _mm256_setr_epi64x(hs[0] % size,
+                                     hs[1] % size,
+                                     hs[2] % size,
+                                     hs[3] % size);
+        offsets = _mm256_srli_epi64(offsets, SHIFT);
+        offsets = _mm256_slli_epi64(offsets, SHIFT);
+
+        for (uint32_t k = 0; k < num_hash_functions_; ++k) {
+            // load hashes to ymm register
+            inds = _mm256_load_si256((__m256i*)hs);
+
+            // compute the kth hashes
+            // hash = (h1 + k * h2) & BLOCK_MASK
+            mult = _mm256_setr_epi32(1, k, 1, k, 1, k, 1, k);
+            inds = _mm256_mullo_epi32(inds, mult);
+            inds = _mm256_hadd_epi32(inds, zeros);
+            inds = _mm256_and_si256(inds, blockmask);
+            inds = _mm256_permutevar8x32_epi32(inds, permute);
+
+            // add offsets to hashes
+            // id += offset
+            inds = _mm256_add_epi64(offsets, inds);
+
+            // store indices
+            _mm256_store_si256((__m256i*)indices, inds);
+
+            // check indices
+            found_count = 0;
+            for (size_t j = 0; j < 4; ++j) {
+                if (found[j]) {
+                    found_count += (found[j] &= filter_[indices[j]]);
+                }
+            }
+
+            if (!found_count)
+                break;
+        }
+
+        for (size_t j = 0; j < 4; ++j) {
+            if (found[j])
+                presence[hash_index[i + j].second] = true;
+        }
+    }
+#endif
+
+    for (; i < num_elements; ++i) {
+        presence[hash_index[i].second] = check(hash_index[i].first);
     }
 
     return presence;
