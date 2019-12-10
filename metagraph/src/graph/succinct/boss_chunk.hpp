@@ -23,8 +23,8 @@ class BOSS::Chunk {
     Chunk(uint64_t alph_size, size_t k, bool canonical);
 
     /**
-     * Creates a BOSS Chunk with k-mer chunks. Assumes that k-mers are
-     * distinct and sorted.
+     * Creates a BOSS Chunk with k-mer counts. Assumes that k-mers are distinct and
+     * sorted.
      * @param alph_size the alphabet size. For DNA this will be 5 ($,A,C,G,T).
      * @param k k-mer size
      * @param canonical if true, the BOSS table will be constructed with both a k-mer

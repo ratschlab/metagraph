@@ -21,7 +21,6 @@ TEST(WaitQueue, Empty) {
 
 TEST(WaitQueue, PushPop) {
     ChunkedWaitQueue<int32_t> under_test(3, 1);
-    under_test.set_out_file("/tmp/test_chunked_wait_queue");
     under_test.push(1);
     EXPECT_FALSE(under_test.full());
     under_test.push(2);
@@ -44,7 +43,6 @@ TEST(WaitQueue, PushPop) {
     under_test.shutdown();
     ++iterator;
     EXPECT_TRUE(iterator == under_test.end());
-    std::filesystem::remove("/tmp/test_chunked_wait_queue");
 }
 
 TEST(WaitQueue, Shutdown) {
@@ -56,7 +54,6 @@ TEST(WaitQueue, Shutdown) {
 
 void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
     ChunkedWaitQueue<int32_t> under_test(20, 2);
-    under_test.set_out_file("/tmp/test_chunked_wait_queue_rw");
     struct Receiver {
         ChunkedWaitQueue<int32_t> *const under_test;
         uint32_t delay_read_ms;
@@ -95,7 +92,6 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
     for (int32_t i = 0; i < 100; ++i) {
         EXPECT_EQ(i, receiver.pop_result[i]);
     }
-    std::filesystem::remove("/tmp/test_chunked_wait_queue_rw");
 }
 
 TEST(WaitQueue, OneWriterOneReader) {

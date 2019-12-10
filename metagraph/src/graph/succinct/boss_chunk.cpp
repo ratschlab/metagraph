@@ -210,7 +210,6 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                                  std::vector<bool> *last,
                                  std::vector<uint64_t> *F,
                                  sdsl::int_vector<> *weights = nullptr) {
-        container.set_out_file(""); // don't save the output to file
         Iterator &begin = container.begin();
         Iterator &end = container.end();
 

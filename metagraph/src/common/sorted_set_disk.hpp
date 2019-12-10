@@ -65,6 +65,7 @@ class SortedSetDisk {
      */
     SortedSetDisk(
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
+            std::function<void(const T&)> on_item_pushed = [](const T&){},
             size_t num_threads = 1,
             bool verbose = false,
             size_t container_size = CONTAINER_SIZE_BYTES,
@@ -72,7 +73,7 @@ class SortedSetDisk {
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
         : num_threads_(num_threads),
           verbose_(verbose),
-          merge_queue_(merge_queue_size, num_last_elements_cached),
+          merge_queue_(merge_queue_size, num_last_elements_cached, on_item_pushed),
           cleanup_(cleanup) {
         try {
             try_reserve(container_size);
@@ -138,13 +139,6 @@ class SortedSetDisk {
         return merge_queue_;
     }
 
-    /**
-     * Sets the output file where the merged data will be written to.
-     */
-    void set_out_file(const std::string &out_file) {
-        merge_queue_.set_out_file(out_file);
-    }
-
     void start_merging() {
         std::vector<std::string> file_names(chunk_count_);
         for (size_t i = 0; i < chunk_count_; ++i) {
@@ -153,7 +147,7 @@ class SortedSetDisk {
         thread_pool_.enqueue(merge_files<T>, file_names, &merge_queue_);
     }
 
-    void clear() {
+    void clear(std::function<void(const T&)> on_item_pushed  = [](const T&v){}) {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         is_merging_ = false;
@@ -161,7 +155,7 @@ class SortedSetDisk {
         data_ = &data_first_;
         data_first_.resize(0); // this makes sure the buffer is not reallocated
         data_second_.resize(0);
-        merge_queue_.reset();
+        merge_queue_.reset(on_item_pushed);
     }
 
     template <class Array>
