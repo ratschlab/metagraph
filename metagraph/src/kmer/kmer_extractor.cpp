@@ -273,7 +273,7 @@ static_assert(KmerExtractorBOSS::bits_per_char <= sizeof(KmerExtractorBOSS::TAlp
 
 
 KmerExtractorBOSS::KmerExtractorBOSS() {
-     assert(alphabet.size() <= (1llu << bits_per_char));
+    assert(alphabet.size() <= (1llu << bits_per_char));
 }
 
 KmerExtractorBOSS::TAlphabet KmerExtractorBOSS::encode(char s) {

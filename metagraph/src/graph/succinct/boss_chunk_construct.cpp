@@ -51,7 +51,7 @@ enum class ExtractorContainer {
     VECTOR_DISK
 };
 
-constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR;
+constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR_DISK;
 
 const static uint8_t kBitsPerCount = 8;
 
@@ -285,7 +285,7 @@ void recover_source_dummy_nodes(size_t k,
     // asynchronously writes a value of type T to a file stream
     // TODO(ddanciu): profile this, as I suspect it's slow - use a WaitQueue instead
     ThreadPool file_write_pool = ThreadPool(1, 10000);
-    auto async_file_writer = [&file_write_pool](std::fstream &f) {
+    const auto async_file_writer = [&file_write_pool](std::fstream &f) {
         return [&f, &file_write_pool](const T &v) {
             file_write_pool.enqueue(write_or_die<T>, &f, v);
         };
@@ -314,7 +314,7 @@ void recover_source_dummy_nodes(size_t k,
     dummy_kmers.reserve(sorted_dummy_kmers.capacity());
 
     // remove redundant dummy source k-mers of prefix length 1 and write them to a file
-    // While traversing and removing redundant dummy sourc k-mers of prefix length 1,
+    // While traversing and removing redundant dummy source k-mers of prefix length 1,
     // we also  generate dummy k-mers of prefix length 2.
     const T first = *(kmers->begin()); // T is either a k-mer or a k-mer/count pair
     using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
