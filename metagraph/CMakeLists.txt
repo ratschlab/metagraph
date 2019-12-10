@@ -7,8 +7,6 @@ include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CMakeListsHelpers.txt)
 
-enableCCache()
-
 enable_testing()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -51,6 +49,8 @@ function(message)
     _message(${ARGV})
   endif()
 endfunction()
+
+enableCCache()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
@@ -189,7 +189,7 @@ if(${CMAKE_BUILD_TYPE} MATCHES GPROFILE)
   if(PROFILER_LIBRARIES)
     set(METALIBS ${METALIBS} -lprofiler)
   else()
-    message(FATAL_ERROR "Could not find -lprofiler installed")
+    message(WARNING "Could not find -lprofiler installed")
   endif()
 endif()
 

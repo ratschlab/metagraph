@@ -28,6 +28,7 @@
 #include "kmc_parser.hpp"
 #include "dbg_hash_ordered.hpp"
 #include "dbg_hash_string.hpp"
+#include "dbg_hash_fast.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
@@ -64,6 +65,9 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, ".hashstrdbg")) {
         return Config::GraphType::HASH_STR;
+
+    } else if (utils::ends_with(filename, ".hashfastdbg")) {
+        return Config::GraphType::HASH_FAST;
 
     } else if (utils::ends_with(filename, ".bitmapdbg")) {
         return Config::GraphType::BITMAP;
@@ -105,6 +109,7 @@ std::string remove_graph_extension(const std::string &filename) {
     return utils::remove_suffix(filename, ".dbg",
                                           ".orhashdbg",
                                           ".hashstrdbg",
+                                          ".hashfastdbg",
                                           ".bitmapdbg");
 }
 
@@ -132,6 +137,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH_STR:
             return load_critical_graph_from_file<DBGHashString>(filename);
+
+        case Config::GraphType::HASH_FAST:
+            return load_critical_graph_from_file<DBGHashFast>(filename);
 
         case Config::GraphType::BITMAP:
             return load_critical_graph_from_file<DBGBitmap>(filename);
@@ -374,20 +382,17 @@ void execute_query(const std::string &seq_name,
                    std::ostream &output_stream,
                    IDBGAligner *aligner = nullptr) {
     std::vector<std::string> sequences;
-
     std::vector<double> weights;
 
     if (aligner) {
         auto alignments = aligner->align(sequence);
         sequences.reserve(alignments.size());
-        weights.reserve(alignments.size());
 
-        for (const auto &alignment : alignments) {
-            sequences.emplace_back(alignment.get_sequence());
-            weights.emplace_back(std::exp(alignment.get_score()
-                - aligner->get_config().match_score(sequences.back().begin(),
-                                                    sequences.back().end())));
-        }
+        std::transform(alignments.begin(), alignments.end(),
+                       std::back_inserter(sequences),
+                       [](const auto &alignment) { return alignment.get_sequence(); });
+
+        weights = alignments.get_alignment_weights(aligner->get_config());
     }
 
     assert(sequences.size() == weights.size());
@@ -486,10 +491,9 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
-    // TODO: introduce something like graph->max_node_index() to replace num_nodes() here
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(parse_annotation_type(config.infbase_annotators.at(0)), config, 0)
-            : initialize_annotation(config.anno_type, config, graph->num_nodes());
+            : initialize_annotation(config.anno_type, config, graph->max_index());
 
     if (config.infbase_annotators.size()
             && !annotation_temp->load(config.infbase_annotators.at(0))) {
@@ -885,7 +889,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // map contigs onto the full graph
     auto index_in_full_graph
-        = std::make_shared<std::vector<uint64_t>>(graph->num_nodes() + 1, 0);
+        = std::make_shared<std::vector<uint64_t>>(graph->max_index() + 1, 0);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
@@ -917,7 +921,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     assert(!(*index_in_full_graph)[0]);
 
     if (discovery_fraction > 0) {
-        sdsl::bit_vector mask(graph->num_nodes() + 1, false);
+        sdsl::bit_vector mask(graph->max_index() + 1, false);
 
         call_sequences([&](const std::string &sequence) {
             if (sequence.length() < graph->get_k())
@@ -982,7 +986,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
     auto annotation = std::make_unique<annotate::RowCompressed<>>(
-        graph->num_nodes(),
+        graph->max_index(),
         full_annotation.get_label_encoder().get_labels(),
         [&](annotate::RowCompressed<>::CallRow call_row) {
 
@@ -1582,6 +1586,10 @@ int main(int argc, char *argv[]) {
                         graph.reset(new DBGHashOrdered(config->k, config->canonical, true));
                         break;
 
+                    case Config::GraphType::HASH_FAST:
+                        graph.reset(new DBGHashFast(config->k, config->canonical, true));
+                        break;
+
                     case Config::GraphType::HASH_STR:
                         if (config->canonical) {
                             logger->warn(
@@ -1617,7 +1625,7 @@ int main(int argc, char *argv[]) {
                 );
 
                 if (config->count_kmers) {
-                    graph->add_extension(std::make_shared<NodeWeights>(graph->num_nodes() + 1, kBitsPerCount));
+                    graph->add_extension(std::make_shared<NodeWeights>(graph->max_index() + 1, kBitsPerCount));
                     auto node_weights = graph->get_extension<NodeWeights>();
                     assert(node_weights->is_compatible(*graph));
 
@@ -1704,7 +1712,7 @@ int main(int argc, char *argv[]) {
 
             std::unique_ptr<bit_vector_dyn> inserted_edges;
             if (config->infbase_annotators.size() || node_weights)
-                inserted_edges.reset(new bit_vector_dyn(graph->num_nodes() + 1, 0));
+                inserted_edges.reset(new bit_vector_dyn(graph->max_index() + 1, 0));
 
             timer.reset();
 
@@ -1871,7 +1879,7 @@ int main(int argc, char *argv[]) {
             auto graph_temp = load_critical_dbg(config->infbase);
 
             auto annotation_temp
-                = std::make_unique<annotate::RowCompressed<>>(graph_temp->num_nodes());
+                = std::make_unique<annotate::RowCompressed<>>(graph_temp->max_index());
 
             if (config->infbase_annotators.size()
                     && !annotation_temp->load(config->infbase_annotators.at(0))) {
@@ -2390,7 +2398,7 @@ int main(int argc, char *argv[]) {
 
                 auto &weights = node_weights->get_data();
 
-                assert(graph->num_nodes() + 1 == weights.size());
+                assert(graph->max_index() + 1 == weights.size());
 
                 // compute clean count histogram
                 std::unordered_map<uint64_t, uint64_t> count_hist;

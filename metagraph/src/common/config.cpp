@@ -439,6 +439,7 @@ Config::Config(int argc, char *argv[]) {
         outfbase = utils::remove_suffix(infbase, ".dbg",
                                                  ".orhashdbg",
                                                  ".hashstrdbg",
+                                                 ".hashfastdbg",
                                                  ".bitmapdbg");
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
@@ -605,6 +606,9 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
     } else if (string == "hashstr") {
         return GraphType::HASH_STR;
 
+    } else if (string == "hashfast") {
+        return GraphType::HASH_FAST;
+
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
 
@@ -688,7 +692,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashpacked / hashstr [succinct]\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
