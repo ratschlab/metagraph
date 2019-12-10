@@ -1,56 +1,11 @@
 #include "aligner_methods.hpp"
 
 #include <unordered_set>
-#include <string_view>
 
-#include "algorithms.hpp"
-#include "dbg_succinct.hpp"
-#include "bounded_priority_queue.hpp"
+#include "common/bounded_priority_queue.hpp"
+#include "graph/succinct/dbg_succinct.hpp"
+#include "utils/algorithms.hpp"
 
-
-template <typename NodeType>
-typename Alignment<NodeType>::DPTable
-initialize_dp_table(NodeType start_node,
-                    char start_char,
-                    typename Alignment<NodeType>::score_t initial_score,
-                    typename Alignment<NodeType>::score_t min_score,
-                    size_t size,
-                    int8_t gap_opening_penalty,
-                    int8_t gap_extension_penalty) {
-    typename Alignment<NodeType>::DPTable dp_table;
-
-    // Initialize first column
-    auto& table_init = dp_table.emplace(
-        start_node,
-        typename Alignment<NodeType>::Column {
-            std::vector<typename Alignment<NodeType>::score_t>(size, min_score),
-            std::vector<typename Alignment<NodeType>::Step>(size),
-            start_char,
-            0
-        }
-    ).first->second;
-
-    table_init.scores.front() = initial_score;
-    table_init.steps.front().cigar_op = Cigar::Operator::MATCH;
-    table_init.steps.front().prev_node = DeBruijnGraph::npos;
-
-    if (size > 1 && table_init.scores.front() + gap_opening_penalty > min_score) {
-        table_init.scores[1] = table_init.scores.front() + gap_opening_penalty;
-        table_init.steps[1].cigar_op = Cigar::Operator::INSERTION;
-        table_init.steps[1].prev_node = start_node;
-    }
-
-    for (size_t i = 2; i < size; ++i) {
-        if (table_init.scores[i - 1] + gap_extension_penalty <= min_score)
-            break;
-
-        table_init.scores[i] = table_init.scores[i - 1] + gap_extension_penalty;
-        table_init.steps[i].cigar_op = Cigar::Operator::INSERTION;
-        table_init.steps[i].prev_node = start_node;
-    }
-
-    return dp_table;
-}
 
 bool early_cutoff(const DeBruijnGraph &graph,
                   const DBGAlignerConfig &config,
@@ -196,13 +151,14 @@ DefaultColumnExtender<NodeType, Compare>
                          std::vector<typename DPTable::value_type*>,
                          PriorityFunction> columns_to_update(config_.queue_size);
 
-    auto dp_table = initialize_dp_table(path.back(),
-                                        *(align_start - 1),
-                                        path.get_score(),
-                                        config_.min_cell_score,
-                                        size,
-                                        config_.gap_opening_penalty,
-                                        config_.gap_extension_penalty);
+    DPTable dp_table(path.back(),
+                     *(align_start - 1),
+                     path.get_score(),
+                     config_.min_cell_score,
+                     size,
+                     config_.gap_opening_penalty,
+                     config_.gap_extension_penalty);
+
     assert(dp_table.size() == 1);
     assert(dp_table.find(path.back()) != dp_table.end());
 
@@ -321,7 +277,9 @@ DefaultColumnExtender<NodeType, Compare>
             for (const auto &prev_node : in_nodes) {
                 // the value of the node last character stored here is a
                 // placeholder which is later corrected by call_outgoing_kmers above
-                const auto& incoming = dp_table[prev_node];
+                auto find = dp_table.find(prev_node);
+                assert(find != dp_table.end());
+                const auto& incoming = find->second;
 
                 size_t begin = incoming.best_pos >= config_.bandwidth
                     ? incoming.best_pos - config_.bandwidth : 0;
@@ -493,57 +451,12 @@ DefaultColumnExtender<NodeType, Compare>
     }
 
     // get alternative alignments
-
-    // store visited nodes in paths to avoid returning subalignments
-    std::unordered_set<node_index> visited_nodes;
-
-    std::vector<const typename DPTable::value_type*> starts;
-    starts.reserve(dp_table.size());
-    for (auto it = dp_table.cbegin(); it != dp_table.cend(); ++it) {
-        if (it->second.best_score() > min_path_score
-                && it->second.best_step().cigar_op == Cigar::Operator::MATCH)
-            starts.emplace_back(&*it);
-    }
-
-    if (starts.empty())
-        return {};
-
-    std::sort(starts.begin(), starts.end(),
-              [](const auto &a, const auto &b) {
-                  return a->second.best_score() > b->second.best_score();
-              });
-
-    assert(start_node == starts.front());
-    for (const auto &column_it : starts) {
-        if (next_paths.size() >= config_.num_alternative_paths)
-            break;
-
-        // ignore if the current point is a subalignment of one already visited
-        if (visited_nodes.find(column_it->first) != visited_nodes.end())
-            continue;
-
-        next_paths.emplace_back(dp_table,
-                                column_it,
-                                column_it->second.best_pos,
-                                column_it->second.best_score() - path.get_score(),
-                                align_start,
-                                orientation,
-                                graph_.get_k() - 1);
-
-        if (next_paths.back().empty() && !next_paths.back().get_query_begin()) {
-            next_paths.pop_back();
-        } else {
-            visited_nodes.insert(next_paths.back().begin(), next_paths.back().end());
-
-            // TODO: remove this when the branch and bound is set to only consider
-            //       converged scores
-            next_paths.back().recompute_score(config_);
-
-            assert(next_paths.back().is_valid(graph_, &config_));
-        }
-    }
-
-    return next_paths;
+    return dp_table.extract_alignments(graph_,
+                                       config_,
+                                       path.get_score(),
+                                       align_start,
+                                       orientation,
+                                       min_path_score);
 }
 
 template <typename NodeType>

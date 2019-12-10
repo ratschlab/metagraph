@@ -7,7 +7,7 @@
 
 class Config {
   public:
-    Config(int argc, const char *argv[]);
+    Config(int argc, char *argv[]);
 
     static constexpr auto UNINITIALIZED_STR = "\0";
 
@@ -170,6 +170,7 @@ class Config {
         HASH,
         HASH_PACKED,
         HASH_STR,
+        HASH_FAST,
         BITMAP,
     };
 
