@@ -1,15 +1,24 @@
-#include "gtest/gtest.h"
-
 #include "common/hash/bloom_filter.hpp"
 #include "../test_helpers.hpp"
 
-#include <functional>
-#include <vector>
-
+#include <gtest/gtest.h>
 #include <sdsl/int_vector.hpp>
 
+#include <random>
+#include <vector>
+#include <cmath>
 
-const std::hash<size_t> hasher;
+
+// Note: std::hash<uint64_t> is not required by the specification to be a
+//       cryographic hash, so use this to generate random numbers as hashes
+const struct {
+    uint64_t operator()(uint64_t i) const {
+        gen.seed(i);
+        return gen();
+    }
+
+    mutable std::mt19937_64 gen;
+} hasher;
 
 TEST(BloomFilter, empty) {
     BloomFilter filter(0, 0, 4);
@@ -63,6 +72,10 @@ TEST(BloomFilter, insert_and_check) {
             BloomFilter filter(std::ceil(bits_per_element * num_elements),
                                num_elements,
                                max_num_hash_functions);
+
+            ASSERT_LE(std::ceil(bits_per_element * num_elements), filter.size());
+            ASSERT_EQ(0u, filter.size() % 512);
+
             sdsl::bit_vector check(filter.size());
 
             for (size_t i = 0; i < num_elements; ++i) {
@@ -101,6 +114,9 @@ TEST(BloomFilter, batch_insert_and_check) {
             BloomFilter filter(std::ceil(bits_per_element * num_elements),
                                num_elements,
                                max_num_hash_functions);
+            ASSERT_LE(std::ceil(bits_per_element * num_elements), filter.size());
+            ASSERT_EQ(0u, filter.size() % 512);
+
             sdsl::bit_vector check(filter.size());
 
             std::vector<uint64_t> hashes(num_elements);
@@ -142,6 +158,9 @@ TEST(BloomFilter, batch_insert_and_batch_check) {
             BloomFilter filter(std::ceil(bits_per_element * num_elements),
                                num_elements,
                                max_num_hash_functions);
+            ASSERT_LE(std::ceil(bits_per_element * num_elements), filter.size());
+            ASSERT_EQ(0u, filter.size() % 512);
+
             sdsl::bit_vector check(filter.size());
 
             std::vector<uint64_t> hashes(num_elements);
@@ -161,12 +180,17 @@ TEST(BloomFilter, batch_insert_and_batch_check) {
             );
 
             uint64_t false_positives = 0;
+            sdsl::bit_vector checks(1000, false);
+            std::vector<std::pair<uint64_t, size_t>> next_hashes;
+            next_hashes.reserve(1000);
             for (size_t i = num_elements; i < num_elements + 1000; ++i) {
-                auto hash = hasher(i);
-                false_positives += is_present(check, hash, filter.num_hash_functions());
-                EXPECT_EQ(is_present(check, hash, filter.num_hash_functions()),
-                          filter.check(hash));
+                next_hashes.emplace_back(hasher(i), i - num_elements);
+                checks[i - num_elements] = is_present(check, next_hashes.back().first, filter.num_hash_functions());
+                false_positives += checks[i - num_elements];
+                EXPECT_EQ(checks[i - num_elements], filter.check(next_hashes.back().first));
             }
+
+            EXPECT_EQ(checks, filter.batch_check(next_hashes, 1000));
 
             TEST_COUT << "Elements: " << num_elements << std::endl
                       << "Bloom filter: " << filter.size() << " bits; "
