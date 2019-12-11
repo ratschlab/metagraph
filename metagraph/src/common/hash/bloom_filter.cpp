@@ -71,14 +71,11 @@ bool BloomFilter::check(uint64_t hash) const {
 
 
 // constants for batch insert and check
-#ifdef __AVX__
-const __m256i zeros = _mm256_set1_epi32(0);
+#ifdef __AVX2__
+const __m128i zeros = _mm_set1_epi32(0);
 
 // used to restrict indices to the size of a block
-const __m256i blockmask = _mm256_set1_epi32(BLOCK_MASK);
-
-// permute 32-bit hashes into correct order after _mm256_hadd_epi32
-const __m256i permute = _mm256_setr_epi32(0, 2, 1, 3, 4, 6, 5, 7);
+const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
 #endif
 
 void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
@@ -90,8 +87,10 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
     const auto size = filter_.size();
 
     uint64_t indices[4] __attribute__ ((aligned (32)));
+    uint32_t *hh;
 
-    __m256i offsets, inds, mult;
+    __m256i offsets;
+    __m128i lhashes, mult;
 
     for (; hs + 4 <= end; hs += 4) {
         // compute offsets
@@ -103,28 +102,35 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
         offsets = _mm256_srli_epi64(offsets, SHIFT);
         offsets = _mm256_slli_epi64(offsets, SHIFT);
 
-        for (uint32_t k = 0; k < num_hash_functions_; ++k) {
-            // load hashes to ymm register
-            inds = _mm256_loadu_si256((__m256i*)hs);
+        _mm256_store_si256((__m256i*)indices, offsets);
 
-            // compute the kth hashes
-            // hash = (h1 + k * h2) & BLOCK_MASK
-            mult = _mm256_setr_epi32(1, k, 1, k, 1, k, 1, k);
-            inds = _mm256_mullo_epi32(inds, mult);
-            inds = _mm256_hadd_epi32(inds, zeros);
-            inds = _mm256_and_si256(inds, blockmask);
-            inds = _mm256_permutevar8x32_epi32(inds, permute);
+        for (size_t j = 0; j < 4; ++j) {
+            uint32_t k = 0;
 
-            // add offsets to hashes
-            // id += offset
-            inds = _mm256_add_epi64(offsets, inds);
+            // hash functions in pairs
+            for (; k + 2 <= num_hash_functions_; k += 2) {
+                // load hash
+                lhashes = _mm_set1_epi64x(hs[j]);
 
-            // store indices
-            _mm256_store_si256((__m256i*)indices, inds);
+                // compute hashes
+                // hash = (h1 + k * h2) & BLOCK_MASK
+                mult = _mm_setr_epi32(1, k, 1, k + 1);
+                lhashes = _mm_mullo_epi32(lhashes, mult);
+                lhashes = _mm_hadd_epi32(lhashes, zeros);
+                lhashes = _mm_and_si128(lhashes, blockmask);
 
-            // add to filter
-            for (size_t i = 0; i < 4; ++i) {
-                filter_[indices[i]] = true;
+                // add to filter
+                hh = (uint32_t*)&lhashes;
+                filter_[indices[j] + hh[0]] = true;
+                filter_[indices[j] + hh[1]] = true;
+            }
+
+            // if num_hash_functions is odd, add the last one
+            if (num_hash_functions_ & 1) {
+                hh = (uint32_t*)&hs[j];
+                filter_[indices[j]
+                            + ((hh[0] + (num_hash_functions_ - 1) * hh[1])
+                                & BLOCK_MASK)] = true;
             }
         }
 
@@ -152,20 +158,12 @@ sdsl::bit_vector BloomFilter
 
     uint64_t hs[4] __attribute__ ((aligned (32)));
     uint64_t indices[4] __attribute__ ((aligned (32)));
+    uint32_t *hh;
 
-    bool found[4];
-
-    __m256i offsets, inds, mult;
-
-    size_t found_count = 0;
+    __m256i offsets;
+    __m128i hashes, mult;
 
     for (; i + 4 <= num_elements; i += 4) {
-        // reset found array
-        found[0] = true;
-        found[1] = true;
-        found[2] = true;
-        found[3] = true;
-
         // copy hashes
         hs[0] = hash_index[i].first;
         hs[1] = hash_index[i + 1].first;
@@ -181,47 +179,41 @@ sdsl::bit_vector BloomFilter
         offsets = _mm256_srli_epi64(offsets, SHIFT);
         offsets = _mm256_slli_epi64(offsets, SHIFT);
 
-        for (uint32_t k = 0; k < num_hash_functions_; ++k) {
-            // load hashes to ymm register
-            inds = _mm256_load_si256((__m256i*)hs);
-
-            // compute the kth hashes
-            // hash = (h1 + k * h2) & BLOCK_MASK
-            mult = _mm256_setr_epi32(1, k, 1, k, 1, k, 1, k);
-            inds = _mm256_mullo_epi32(inds, mult);
-            inds = _mm256_hadd_epi32(inds, zeros);
-            inds = _mm256_and_si256(inds, blockmask);
-            inds = _mm256_permutevar8x32_epi32(inds, permute);
-
-            // add offsets to hashes
-            // id += offset
-            inds = _mm256_add_epi64(offsets, inds);
-
-            // store indices
-            _mm256_store_si256((__m256i*)indices, inds);
-
-            // check indices
-            found_count = 0;
-            for (size_t j = 0; j < 4; ++j) {
-                if (found[j]) {
-                    found_count += (found[j] &= filter_[indices[j]]);
-                }
-            }
-
-            if (!found_count)
-                break;
-        }
+        _mm256_store_si256((__m256i*)indices, offsets);
 
         for (size_t j = 0; j < 4; ++j) {
-            if (found[j]) {
-                assert(check(hash_index[i + j].first));
+            bool found = true;
+            uint32_t k = 0;
+
+            // hash functions in pairs
+            for (; found && k + 2 <= num_hash_functions_; k += 2) {
+                // load hash
+                hashes = _mm_set1_epi64x(hs[j]);
+
+                // compute hashes
+                // hash = (h1 + k * h2) & BLOCK_MASK
+                mult = _mm_setr_epi32(1, k, 1, k + 1);
+                hashes = _mm_mullo_epi32(hashes, mult);
+                hashes = _mm_hadd_epi32(hashes, zeros);
+                hashes = _mm_and_si128(hashes, blockmask);
+
+                // check hashes
+                hh = (uint32_t*)&hashes;
+                found &= filter_[indices[j] + hh[0]] & filter_[indices[j] + hh[1]];
+            }
+
+            // if num_hash_functions is odd, check the last one
+            if (found && (num_hash_functions_ & 1)) {
+                hh = (uint32_t*)&hs[j];
+                found &= filter_[indices[j]
+                                    + ((hh[0] + (num_hash_functions_ - 1) * hh[1])
+                                        & BLOCK_MASK)];
+            }
+
+            if (found) {
                 presence[hash_index[i + j].second] = true;
+                assert(check(hs[j]));
             }
-#ifndef NDEBUG
-            else {
-                assert(!check(hash_index[i + j].first));
-            }
-#endif
         }
     }
 
