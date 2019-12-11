@@ -96,20 +96,20 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
     uint64_t *block;
     uint32_t offset;
 
-    __m256i offsets;
+    __m256i block_indices;
     __m128i lhashes, mult;
 
     for (; hs + 4 <= end; hs += 4) {
         // compute offsets
         // offset = ((hash % size) >> SHIFT) << SHIFT;
-        offsets = _mm256_setr_epi64x(hs[0] % size,
-                                     hs[1] % size,
-                                     hs[2] % size,
-                                     hs[3] % size);
-        offsets = _mm256_srli_epi64(offsets, SHIFT);
-        offsets = _mm256_slli_epi64(offsets, SHIFT - 6);
+        block_indices = _mm256_setr_epi64x(hs[0] % size,
+                                           hs[1] % size,
+                                           hs[2] % size,
+                                           hs[3] % size);
+        block_indices = _mm256_srli_epi64(block_indices, SHIFT);
+        block_indices = _mm256_slli_epi64(block_indices, SHIFT - 6);
 
-        _mm256_store_si256((__m256i*)indices, offsets);
+        _mm256_store_si256((__m256i*)indices, block_indices);
 
         // clean up after AVX2 instructions
         _mm256_zeroupper();
@@ -176,7 +176,7 @@ sdsl::bit_vector BloomFilter
     const uint64_t *block;
     uint32_t offset;
 
-    __m256i offsets;
+    __m256i block_indices;
     __m128i hashes, mult;
 
     for (; i + 4 <= num_elements; i += 4) {
@@ -188,14 +188,14 @@ sdsl::bit_vector BloomFilter
 
         // compute offsets
         // offset = ((hash % size) >> SHIFT) << SHIFT;
-        offsets = _mm256_setr_epi64x(hs[0] % size,
-                                     hs[1] % size,
-                                     hs[2] % size,
-                                     hs[3] % size);
-        offsets = _mm256_srli_epi64(offsets, SHIFT);
-        offsets = _mm256_slli_epi64(offsets, SHIFT - 6);
+        block_indices = _mm256_setr_epi64x(hs[0] % size,
+                                           hs[1] % size,
+                                           hs[2] % size,
+                                           hs[3] % size);
+        block_indices = _mm256_srli_epi64(block_indices, SHIFT);
+        block_indices = _mm256_slli_epi64(block_indices, SHIFT - 6);
 
-        _mm256_store_si256((__m256i*)indices, offsets);
+        _mm256_store_si256((__m256i*)indices, block_indices);
 
         // clean up after AVX2 instructions
         _mm256_zeroupper();
