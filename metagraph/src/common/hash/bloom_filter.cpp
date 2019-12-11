@@ -82,22 +82,18 @@ const __m256i permute = _mm256_setr_epi32(0, 2, 1, 3, 4, 6, 5, 7);
 #endif
 
 void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
-    size_t j = 0;
+    const uint64_t *hs = hashes;
+    const uint64_t *end = hashes + len;
 
 #ifdef __AVX2__
     // compute Bloom filter hashes in batches of 4
-
     const auto size = filter_.size();
 
-    uint64_t hs[4] __attribute__ ((aligned (16)));
-    uint64_t indices[4] __attribute__ ((aligned (16)));
+    uint64_t indices[4] __attribute__ ((aligned (32)));
 
     __m256i offsets, inds, mult;
 
-    for (; j + 4 <= len; j += 4) {
-        // copy hashes
-        memcpy(hs, hashes + j, sizeof(uint64_t) * 4);
-
+    for (; hs + 4 <= end; hs += 4) {
         // compute offsets
         // offset = ((hash % size) >> SHIFT) << SHIFT;
         offsets = _mm256_setr_epi64x(hs[0] % size,
@@ -109,7 +105,7 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
 
         for (uint32_t k = 0; k < num_hash_functions_; ++k) {
             // load hashes to ymm register
-            inds = _mm256_load_si256((__m256i*)hs);
+            inds = _mm256_loadu_si256((__m256i*)hs);
 
             // compute the kth hashes
             // hash = (h1 + k * h2) & BLOCK_MASK
@@ -131,12 +127,14 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
                 filter_[indices[i]] = true;
             }
         }
+
+        assert(std::all_of(hs, hs + 4, [&](uint64_t hash) { return check(hash); }));
     }
 
 #endif
 
-    for (; j < len; ++j) {
-        insert(hashes[j]);
+    for (; hs < end; ++hs) {
+        insert(*hs);
     }
 }
 
@@ -152,8 +150,8 @@ sdsl::bit_vector BloomFilter
 
     const auto size = filter_.size();
 
-    uint64_t indices[4] __attribute__ ((aligned (16)));
-    uint64_t hs[4] __attribute__ ((aligned (16)));
+    uint64_t hs[4] __attribute__ ((aligned (32)));
+    uint64_t indices[4] __attribute__ ((aligned (32)));
 
     bool found[4];
 
@@ -215,10 +213,18 @@ sdsl::bit_vector BloomFilter
         }
 
         for (size_t j = 0; j < 4; ++j) {
-            if (found[j])
+            if (found[j]) {
+                assert(check(hash_index[i + j].first));
                 presence[hash_index[i + j].second] = true;
+            }
+#ifndef NDEBUG
+            else {
+                assert(!check(hash_index[i + j].first));
+            }
+#endif
         }
     }
+
 #endif
 
     for (; i < num_elements; ++i) {
