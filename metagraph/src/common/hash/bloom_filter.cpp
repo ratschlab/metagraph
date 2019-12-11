@@ -104,6 +104,9 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
 
         _mm256_store_si256((__m256i*)indices, offsets);
 
+        // clean up after AVX2 instructions
+        _mm256_zeroupper();
+
         for (size_t j = 0; j < 4; ++j) {
             uint32_t k = 0;
 
@@ -180,6 +183,9 @@ sdsl::bit_vector BloomFilter
         offsets = _mm256_slli_epi64(offsets, SHIFT);
 
         _mm256_store_si256((__m256i*)indices, offsets);
+
+        // clean up after AVX2 instructions
+        _mm256_zeroupper();
 
         for (size_t j = 0; j < 4; ++j) {
             bool found = true;
