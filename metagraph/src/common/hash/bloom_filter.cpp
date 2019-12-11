@@ -69,25 +69,22 @@ bool BloomFilter::check(uint64_t hash) const {
     return true;
 }
 
-
-// constants for batch insert and check
-#ifdef __AVX2__
-// used to restrict indices to the size of a block
-const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
-
-// used to set offset from block start
-const __m128i shift = _mm_setr_epi32(6, 6, 0, 0);
-
-// used to select bit
-const __m128i andmask = _mm_setr_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0x3F, 0x3F);
-#endif
-
 void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
     const uint64_t *hs = hash_array;
     const uint64_t *end = hash_array + len;
 
 #ifdef __AVX2__
     // compute Bloom filter hashes in batches of 4
+
+    // used to restrict indices to the size of a block
+    const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
+
+    // used to set offset from block start
+    const __m128i shift = _mm_setr_epi32(6, 6, 0, 0);
+
+    // used to select bit
+    const __m128i andmask = _mm_setr_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0x3F, 0x3F);
+
     const auto size = filter_.size();
 
     uint64_t indices[4] __attribute__ ((aligned (32)));
@@ -166,6 +163,15 @@ sdsl::bit_vector BloomFilter
 
 #ifdef __AVX2__
     // compute Bloom filter hashes in batches of 4
+
+    // used to restrict indices to the size of a block
+    const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
+
+    // used to set offset from block start
+    const __m128i shift = _mm_setr_epi32(6, 6, 0, 0);
+
+    // used to select bit
+    const __m128i andmask = _mm_setr_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0x3F, 0x3F);
 
     const auto size = filter_.size();
 
