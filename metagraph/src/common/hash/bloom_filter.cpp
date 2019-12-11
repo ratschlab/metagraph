@@ -205,7 +205,7 @@ sdsl::bit_vector BloomFilter
 
                 // check hashes
                 hh = (uint32_t*)&hashes;
-                found &= filter_[indices[j] + hh[0]] & filter_[indices[j] + hh[1]];
+                found &= filter_[indices[j] + hh[0]] && filter_[indices[j] + hh[1]];
             }
 
             // if num_hash_functions is odd, check the last one
