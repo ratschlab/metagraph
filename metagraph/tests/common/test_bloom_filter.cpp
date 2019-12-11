@@ -55,7 +55,7 @@ double expected_fpr(const BloomFilter &filter, size_t num_elements) {
                     filter.num_hash_functions());
 }
 
-TEST(BloomFilter, check_set_bits) {
+TEST(BloomFilter, insert_and_check) {
     constexpr uint64_t max_num_hash_functions = 10;
 
     for (double bits_per_element : { 0.1, 1.0, 5.0 }) {
@@ -93,7 +93,7 @@ TEST(BloomFilter, check_set_bits) {
     }
 }
 
-TEST(BloomFilter, check_set_bits_batch) {
+TEST(BloomFilter, batch_insert_and_check) {
     constexpr uint64_t max_num_hash_functions = 10;
 
     for (double bits_per_element : { 0.1, 1.0, 5.0 }) {
@@ -134,7 +134,7 @@ TEST(BloomFilter, check_set_bits_batch) {
     }
 }
 
-TEST(BloomFilter, check_set_bits_batch_check) {
+TEST(BloomFilter, batch_insert_and_batch_check) {
     constexpr uint64_t max_num_hash_functions = 10;
 
     for (double bits_per_element : { 0.1, 1.0, 5.0 }) {
