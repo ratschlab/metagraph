@@ -72,10 +72,14 @@ bool BloomFilter::check(uint64_t hash) const {
 
 // constants for batch insert and check
 #ifdef __AVX2__
-const __m128i zeros = _mm_set1_epi32(0);
-
 // used to restrict indices to the size of a block
 const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
+
+// used to set offset from block start
+const __m128i shift = _mm_setr_epi32(6, 6, 0, 0);
+
+// used to select bit
+const __m128i andmask = _mm_setr_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0x3F, 0x3F);
 #endif
 
 void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
@@ -87,7 +91,10 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
     const auto size = filter_.size();
 
     uint64_t indices[4] __attribute__ ((aligned (32)));
+    uint32_t ht[4] __attribute__ ((aligned (16)));
     uint32_t *hh;
+    uint64_t *block;
+    uint32_t offset;
 
     __m256i offsets;
     __m128i lhashes, mult;
@@ -100,7 +107,7 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
                                      hs[2] % size,
                                      hs[3] % size);
         offsets = _mm256_srli_epi64(offsets, SHIFT);
-        offsets = _mm256_slli_epi64(offsets, SHIFT);
+        offsets = _mm256_slli_epi64(offsets, SHIFT - 6);
 
         _mm256_store_si256((__m256i*)indices, offsets);
 
@@ -109,6 +116,7 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
 
         for (size_t j = 0; j < 4; ++j) {
             uint32_t k = 0;
+            block = filter_.data() + indices[j];
 
             // hash functions in pairs
             for (; k + 2 <= num_hash_functions_; k += 2) {
@@ -119,21 +127,23 @@ void BloomFilter::batch_insert(const uint64_t hashes[], size_t len) {
                 // hash = (h1 + k * h2) & BLOCK_MASK
                 mult = _mm_setr_epi32(1, k, 1, k + 1);
                 lhashes = _mm_mullo_epi32(lhashes, mult);
-                lhashes = _mm_hadd_epi32(lhashes, zeros);
+                lhashes = _mm_hadd_epi32(lhashes, lhashes);
                 lhashes = _mm_and_si128(lhashes, blockmask);
 
                 // add to filter
-                hh = (uint32_t*)&lhashes;
-                filter_[indices[j] + hh[0]] = true;
-                filter_[indices[j] + hh[1]] = true;
+                // filter_[indices[j] + hh[0]] && filter_[indices[j] + hh[1]] = true
+                lhashes = _mm_srlv_epi32(lhashes, shift);
+                lhashes = _mm_and_si128(lhashes, andmask);
+                _mm_store_si128((__m128i*)ht, lhashes);
+                block[ht[0]] |= 1llu << ht[2];
+                block[ht[1]] |= 1llu << ht[3];
             }
 
             // if num_hash_functions is odd, add the last one
             if (num_hash_functions_ & 1) {
                 hh = (uint32_t*)&hs[j];
-                filter_[indices[j]
-                            + ((hh[0] + (num_hash_functions_ - 1) * hh[1])
-                                & BLOCK_MASK)] = true;
+                offset = (hh[0] + (num_hash_functions_ - 1) * hh[1]) & BLOCK_MASK;
+                block[offset >> 6] |= 1llu << (offset & 0x3F);
             }
         }
 
@@ -161,7 +171,10 @@ sdsl::bit_vector BloomFilter
 
     uint64_t hs[4] __attribute__ ((aligned (32)));
     uint64_t indices[4] __attribute__ ((aligned (32)));
+    uint32_t ht[4] __attribute__ ((aligned (16)));
     uint32_t *hh;
+    const uint64_t *block;
+    uint32_t offset;
 
     __m256i offsets;
     __m128i hashes, mult;
@@ -180,7 +193,7 @@ sdsl::bit_vector BloomFilter
                                      hs[2] % size,
                                      hs[3] % size);
         offsets = _mm256_srli_epi64(offsets, SHIFT);
-        offsets = _mm256_slli_epi64(offsets, SHIFT);
+        offsets = _mm256_slli_epi64(offsets, SHIFT - 6);
 
         _mm256_store_si256((__m256i*)indices, offsets);
 
@@ -190,6 +203,7 @@ sdsl::bit_vector BloomFilter
         for (size_t j = 0; j < 4; ++j) {
             bool found = true;
             uint32_t k = 0;
+            block = filter_.data() + indices[j];
 
             // hash functions in pairs
             for (; found && k + 2 <= num_hash_functions_; k += 2) {
@@ -200,20 +214,23 @@ sdsl::bit_vector BloomFilter
                 // hash = (h1 + k * h2) & BLOCK_MASK
                 mult = _mm_setr_epi32(1, k, 1, k + 1);
                 hashes = _mm_mullo_epi32(hashes, mult);
-                hashes = _mm_hadd_epi32(hashes, zeros);
+                hashes = _mm_hadd_epi32(hashes, hashes);
                 hashes = _mm_and_si128(hashes, blockmask);
 
                 // check hashes
-                hh = (uint32_t*)&hashes;
-                found &= filter_[indices[j] + hh[0]] && filter_[indices[j] + hh[1]];
+                //found &= filter_[indices[j] + hh[0]] && filter_[indices[j] + hh[1]];
+                hashes = _mm_srlv_epi32(hashes, shift);
+                hashes = _mm_and_si128(hashes, andmask);
+                _mm_store_si128((__m128i*)ht, hashes);
+                found &= (block[ht[0]] & (1llu << ht[2]))
+                    && (block[ht[1]] & (1llu << ht[3]));
             }
 
             // if num_hash_functions is odd, check the last one
             if (found && (num_hash_functions_ & 1)) {
                 hh = (uint32_t*)&hs[j];
-                found &= filter_[indices[j]
-                                    + ((hh[0] + (num_hash_functions_ - 1) * hh[1])
-                                        & BLOCK_MASK)];
+                offset = (hh[0] + (num_hash_functions_ - 1) * hh[1]) & BLOCK_MASK;
+                found = block[offset >> 6] & (1llu << (offset & 0x3F));
             }
 
             if (found) {
