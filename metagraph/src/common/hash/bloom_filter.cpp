@@ -60,13 +60,13 @@ bool BloomFilter::check(uint64_t hash) const {
     uint32_t h1 = hash & 0xFFFFFFFF;
     uint32_t h2 = hash >> 32;
 
-    bool found = true;
     for (uint32_t i = 0; i < num_hash_functions_; ++i) {
         // check bits within block
-        found &= filter_[offset + ((h1 + i * h2) & BLOCK_MASK)];
+        if (!filter_[offset + ((h1 + i * h2) & BLOCK_MASK)])
+            return false;
     }
 
-    return found;
+    return true;
 }
 
 
