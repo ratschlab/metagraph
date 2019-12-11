@@ -145,7 +145,7 @@ class SortedSetDisk {
         thread_pool_.enqueue(merge_files<T>, file_names, &merge_queue_);
     }
 
-    void clear(std::function<void(const T&)> on_item_pushed  = [](const T&v){}) {
+    void clear(std::function<void(const T&)> on_item_pushed  = [](const T&){}) {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         is_merging_ = false;

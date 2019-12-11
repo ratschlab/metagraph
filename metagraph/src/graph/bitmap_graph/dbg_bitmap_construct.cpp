@@ -24,8 +24,7 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
                            bool canonical_mode = false,
                            const std::string &filter_suffix = "",
                            size_t num_threads = 1,
-                           double memory_preallocated = 0,
-                           bool verbose = false);
+                           double memory_preallocated = 0);
 
     void add_sequence(std::string&& sequence, uint64_t count) {
         kmer_collector_.add_sequence(std::move(sequence), count);
@@ -69,30 +68,26 @@ BitmapChunkConstructor<KmerCollector>
                          bool canonical_mode,
                          const std::string &filter_suffix,
                          size_t num_threads,
-                         double memory_preallocated,
-                         bool verbose)
+                         double memory_preallocated)
       : kmer_collector_(k,
                         canonical_mode,
                         encode_filter_suffix<KmerExtractor2Bit>(filter_suffix),
                         num_threads,
-                        memory_preallocated,
-                        verbose) {}
+                        memory_preallocated) {}
 
 DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
                                            bool canonical_mode,
                                            uint8_t bits_per_count,
                                            const std::string &filter_suffix,
                                            size_t num_threads,
-                                           double memory_preallocated,
-                                           bool verbose)
+                                           double memory_preallocated)
       : constructor_(IBitmapChunkConstructor::initialize(
             k,
             canonical_mode,
             bits_per_count > 0,
             filter_suffix,
             num_threads,
-            memory_preallocated,
-            verbose)
+            memory_preallocated)
         ),
         bits_per_count_(bits_per_count) {}
 
@@ -264,36 +259,35 @@ IBitmapChunkConstructor
              bool count_kmers,
              const std::string &filter_suffix,
              size_t num_threads,
-             double memory_preallocated,
-             bool verbose) {
+             double memory_preallocated) {
     using Extractor = KmerExtractor2Bit;
 
     if (count_kmers) {
         if (k * Extractor::bits_per_char <= 64) {
             return new BitmapChunkConstructor<KmerMultset<typename Extractor::Kmer64, uint8_t>>(
-                k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
+                k, canonical_mode, filter_suffix, num_threads, memory_preallocated
             );
         } else if (k * Extractor::bits_per_char <= 128) {
             return new BitmapChunkConstructor<KmerMultset<typename Extractor::Kmer128, uint8_t>>(
-                k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
+                k, canonical_mode, filter_suffix, num_threads, memory_preallocated
             );
         } else {
             return new BitmapChunkConstructor<KmerMultset<typename Extractor::Kmer256, uint8_t>>(
-                k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
+                k, canonical_mode, filter_suffix, num_threads, memory_preallocated
             );
         }
     } else {
         if (k * Extractor::bits_per_char <= 64) {
             return new BitmapChunkConstructor<KmerSet<typename Extractor::Kmer64>>(
-                k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
+                k, canonical_mode, filter_suffix, num_threads, memory_preallocated
             );
         } else if (k * Extractor::bits_per_char <= 128) {
             return new BitmapChunkConstructor<KmerSet<typename Extractor::Kmer128>>(
-                k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
+                k, canonical_mode, filter_suffix, num_threads, memory_preallocated
             );
         } else {
             return new BitmapChunkConstructor<KmerSet<typename Extractor::Kmer256>>(
-                k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
+                k, canonical_mode, filter_suffix, num_threads, memory_preallocated
             );
         }
     }

@@ -1452,8 +1452,7 @@ int main(int argc, char *argv[]) {
                         config->count_kmers,
                         suffix,
                         config->parallel,
-                        static_cast<uint64_t>(config->memory_available) << 30,
-                        config->verbose
+                        static_cast<uint64_t>(config->memory_available) << 30
                     );
 
                     parse_sequences(files, *config, timer,
@@ -1525,8 +1524,7 @@ int main(int argc, char *argv[]) {
                             config->count_kmers ? kBitsPerCount : 0,
                             suffix,
                             config->parallel,
-                            static_cast<uint64_t>(config->memory_available) << 30,
-                            config->verbose
+                            static_cast<uint64_t>(config->memory_available) << 30
                         )
                     );
 
