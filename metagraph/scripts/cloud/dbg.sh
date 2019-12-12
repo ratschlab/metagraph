@@ -118,12 +118,18 @@ while read -r sra_number; do
 	if [ -d "$download_dir/$sra_number" ]; then
 		echo "Submission $sra_number already downloaded. Skipping"
 	else 
-		ascp -QT -P "$PORT" -i "$ASPERA_SSH" era-fasp@fasp.sra.ebi.ac.uk:"${FOLDER}/${sra_number}/" "${download_dir}"
+		execute ascp -QT -P "$PORT" -i "$ASPERA_SSH" era-fasp@fasp.sra.ebi.ac.uk:"${FOLDER}/${sra_number}/" "${download_dir}"
     fi
 	if [ -f "$HOME/dbg/${sra_number}.dbg" ]; then
 		echo "deBrujin graph already generated for $sra_number. Skipping."
 	else
-		metagraph build -v -p 1 -k 10 --canonical --count-kmers -o "${HOME}/dbg/${sra_number}"  "${download_dir}/${sra_number}/*"
+		# for reasons I don't understand glob expansion doesn't work, so doing it manually by concatenating all downloaded fastq.gz files
+		input_filenames="" 
+		for i in $(ls -p "${download_dir}/${sra_number}/"); do
+		  input_filenames="$input_filenames ${download_dir}/${sra_number}/$i"
+		done
+		echo "Input filenames is $input_filenames"
+		execute metagraph build -v -p 1 -k 10 --canonical --count-kmers -o "${HOME}/dbg/${sra_number}"  $input_filenames
 	fi
 	if [ -f "${HOME}/dbg/${sra_number}pruned.fasta.gz" ]; then
 		echo "deBrujin graph already pruned for $sra_number. Skipping."
