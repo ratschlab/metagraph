@@ -2,7 +2,6 @@
 #include <typeinfo>
 
 #include <fmt/format.h>
-#include <gflags/gflags.h>
 #include <ips4o.hpp>
 #include <json/json.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -41,14 +40,9 @@
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
 
+using mg::common::logger;
 using namespace mg::bitmap_graph;
 using namespace mg::succinct;
-using mg::common::logger;
-DEFINE_string(log_level,
-              "info",
-              "A string value identifying the log level. Possible values: trace, "
-              "debug, info, warn, critical, err, off");
-
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -1384,10 +1378,7 @@ std::string form_client_reply(const std::string &received_message,
 int main(int argc, char *argv[]) {
     auto config = std::make_unique<Config>(argc, argv);
 
-    gflags::AllowCommandLineReparsing(); // allows undefined flags
-    gflags::ParseCommandLineFlags(&argc, &argv, true);
-
-    logger->set_level(spdlog::level::from_str(FLAGS_log_level));
+    logger->set_level(config->verbose ? spdlog::level::trace : spdlog::level::info);
     //logger->set_pattern("%^date %x....%$  %v");
     //console_sink->set_color(spdlog::level::trace, "\033[37m");
 
