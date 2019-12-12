@@ -346,7 +346,7 @@ set(METALIBS ${METALIBS}
   jsoncpp
   progress_bar
   ${OpenMP_CXX_LIBRARIES}
-  fmt::fmt-header-only
+  fmt::fmt
   mersenne_twister
   spdlog::spdlog
 )
