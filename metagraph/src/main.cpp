@@ -1283,7 +1283,7 @@ void parse_sequences(const std::vector<std::string> &files,
                 }, config.forward_and_reverse);
             }
         } else {
-            logger->error("ERROR: File type unknown for file {}", file);
+            logger->error("ERROR: File type unknown for file '{}'", file);
             exit(1);
         }
 
