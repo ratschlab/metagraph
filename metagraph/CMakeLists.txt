@@ -251,10 +251,12 @@ include_directories(
   external-libraries/cpp_progress_bar
   external-libraries/nvbio/contrib/priority-deque
   external-libraries/rollinghashcpp
+  external-libraries/spdlog/include
   ${INCLUDE_DIRS}
 )
 
 add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
+add_subdirectory(external-libraries/spdlog)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
@@ -344,8 +346,9 @@ set(METALIBS ${METALIBS}
   jsoncpp
   progress_bar
   ${OpenMP_CXX_LIBRARIES}
-  fmt::fmt-header-only
+  fmt::fmt
   mersenne_twister
+  spdlog::spdlog
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)

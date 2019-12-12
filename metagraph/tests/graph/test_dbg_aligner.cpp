@@ -127,9 +127,9 @@ TYPED_TEST(DBGAlignerTest, align_sequence_too_short) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
-    auto alt_paths = aligner.align(query);
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(0ull, alt_paths.size());
+    EXPECT_EQ(0ull, paths.size());
 }
 
 TYPED_TEST(DBGAlignerTest, align_single_node) {
@@ -139,11 +139,15 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(1ull, path.size());
     EXPECT_EQ("CAT", path.get_sequence());
@@ -157,10 +161,10 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, align_straight) {
@@ -171,7 +175,6 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_FALSE(paths.empty());
 
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -207,10 +210,14 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
 
     DBGAligner<> aligner(*graph, config_fwd_and_rev);
     auto paths = aligner.align(query);
-    ASSERT_FALSE(paths.empty());
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -256,11 +263,15 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner<> aligner(*graph, config);
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
@@ -274,10 +285,10 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, align_branch) {
@@ -288,11 +299,15 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner<> aligner(*graph, config);
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
@@ -306,10 +321,10 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
@@ -319,11 +334,15 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
@@ -337,10 +356,10 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, variation) {
@@ -350,11 +369,15 @@ TYPED_TEST(DBGAlignerTest, variation) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -369,10 +392,10 @@ TYPED_TEST(DBGAlignerTest, variation) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
@@ -386,11 +409,15 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
     DBGAligner<> aligner(*graph, config);
 
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_TRUE(path.get_sequence().compare(reference_1) == 0 ||
@@ -408,10 +435,10 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, multiple_variations) {
@@ -421,11 +448,15 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -440,10 +471,10 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
@@ -458,12 +489,18 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     config.num_alternative_paths = 2;
     DBGAligner<> aligner(*graph, config);
 
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(2u, alt_paths.size());
-    EXPECT_NE(alt_paths.front(), alt_paths.back());
-    auto path = alt_paths.front();
+    ASSERT_EQ(2u, paths.size());
+    std::vector<double> weights = {
+        std::exp(paths[0].get_score() - config.match_score(paths[0].get_sequence().begin(),
+                                                           paths[0].get_sequence().end())),
+        std::exp(paths[1].get_score() - config.match_score(paths[1].get_sequence().begin(),
+                                                           paths[1].get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
+    EXPECT_NE(paths.front(), paths.back());
+    auto path = paths.front();
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference_1, path.get_sequence());
@@ -478,10 +515,10 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
@@ -499,11 +536,22 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     config.queue_size = 100;
     DBGAligner<> aligner(*graph, config);
 
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(config.num_alternative_paths, alt_paths.size());
-    for (const auto &path : alt_paths) {
+    std::vector<double> weights(paths.size());
+    std::transform(
+        paths.begin(), paths.end(),
+        weights.begin(),
+        [&](const auto &path) {
+            return std::exp(path.get_score()
+                - config.match_score(path.get_sequence().begin(),
+                                     path.get_sequence().end()));
+        }
+    );
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
+
+    EXPECT_EQ(config.num_alternative_paths, paths.size());
+    for (const auto &path : paths) {
         EXPECT_EQ("4=1X4=1X2=", path.get_cigar().to_string())
             << query << "\n" << path.get_sequence();
         EXPECT_EQ(10u, path.get_num_matches());
@@ -514,11 +562,11 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
         check_json_dump_load(*graph,
                              path,
-                             alt_paths.get_query(),
-                             alt_paths.get_query_reverse_complement());
+                             paths.get_query(),
+                             paths.get_query_reverse_complement());
     }
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
@@ -529,10 +577,14 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_FALSE(paths.empty());
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -566,10 +618,14 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
 
         DBGAligner<> aligner(*graph, config_bandwidth);
         auto paths = aligner.align(query);
-        ASSERT_FALSE(paths.empty());
 
-        EXPECT_EQ(1ull, paths.size());
+        ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
+        std::vector<double> weights = {
+            std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                           path.get_sequence().end()))
+        };
+        EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
         EXPECT_EQ(query.size() - k + 1, path.size());
         EXPECT_EQ(reference, path.get_sequence());
@@ -599,10 +655,14 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_FALSE(paths.empty());
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -632,10 +692,15 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_FALSE(paths.empty());
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
+
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -669,10 +734,14 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_FALSE(paths.empty());
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -702,11 +771,15 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
-    auto alt_paths = aligner.align(query);
-    ASSERT_FALSE(alt_paths.empty());
+    auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(5ull, path.size());
     EXPECT_EQ(reference.substr(2), path.get_sequence());
@@ -721,10 +794,10 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
-                         alt_paths.get_query(),
-                         alt_paths.get_query_reverse_complement());
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
 
-    check_extend(graph, aligner.get_config(), alt_paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, align_clipping2) {
@@ -735,10 +808,14 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_FALSE(paths.empty());
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(11u, path.size());
     EXPECT_EQ(reference.substr(3), path.get_sequence());
@@ -758,6 +835,42 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_long_clipping) {
+    size_t k = 4;
+    std::string reference = "TTTTTTT" "AAAAGCTTCGAGGCCAA";
+    std::string query =     "CCCCCCC" "AAAAGCTTCGAGGCCAA";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_FALSE(paths.empty());
+
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
+
+    EXPECT_EQ(14u, path.size());
+    EXPECT_EQ(reference.substr(7), path.get_sequence());
+    EXPECT_EQ(config.match_score(query.begin() + 7, query.end()), path.get_score());
+    EXPECT_EQ("7S17=", path.get_cigar().to_string());
+    EXPECT_EQ(17u, path.get_num_matches());
+    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_EQ(7u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_end_clipping());
+    EXPECT_EQ(0u, path.get_offset());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph,
+                         path,
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
+
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
 TYPED_TEST(DBGAlignerTest, align_end_clipping) {
     size_t k = 4;
     std::string reference = "AAAAGCTTCGAGGCCAA" "TTTTTTT";
@@ -766,10 +879,14 @@ TYPED_TEST(DBGAlignerTest, align_end_clipping) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_FALSE(paths.empty());
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(14u, path.size());
     EXPECT_EQ(reference.substr(0, 17), path.get_sequence());
@@ -800,8 +917,14 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     config.min_path_score = std::numeric_limits<score_t>::min();
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
+
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(7u, path.size());
     EXPECT_EQ(reference.substr(5), path.get_sequence());
@@ -840,6 +963,11 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
+        std::vector<double> weights = {
+            std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                           path.get_sequence().end()))
+        };
+        EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
         EXPECT_EQ(7u, path.size());
         EXPECT_EQ(reference.substr(5), path.get_sequence());
@@ -868,6 +996,11 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
+        std::vector<double> weights = {
+            std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                           path.get_sequence().end()))
+        };
+        EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
         EXPECT_EQ(15u, path.size()); // includes dummy k-mers
         EXPECT_EQ(reference.substr(3), path.get_sequence());
@@ -904,6 +1037,11 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(15u, path.size()); // includes dummy k-mers
     EXPECT_EQ(reference.substr(3), path.get_sequence());
@@ -933,6 +1071,11 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(6u, path.size());
     EXPECT_EQ(reference.substr(6), path.get_sequence());
@@ -967,6 +1110,11 @@ TEST(DBGAlignerTest, align_dummy) {
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+    std::vector<double> weights = {
+        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
+                                                       path.get_sequence().end()))
+    };
+    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(14u, path.size());
     EXPECT_EQ(reference, path.get_sequence());
