@@ -91,9 +91,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
                                   size_t num_threads = 1) const;
 
-    bool dump_columns(const std::string &prefix,
-                      bool binary = false,
-                      size_t num_threads = 1) const;
+    bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 
     const auto& data() const { return bitmatrix_; };
 

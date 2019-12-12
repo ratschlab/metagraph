@@ -1,10 +1,11 @@
 #include "gtest/gtest.h"
 
 #include "../graph/test_dbg_helpers.hpp"
+#include "../graph/test_dbg_aligner_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
-#include "threading.hpp"
-#include "annotated_graph_algorithm.hpp"
+#include "common/threading.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 
 
 template <typename GraphAnnotationPair>
@@ -44,7 +45,10 @@ void test_mask_indices(double density_cutoff) {
                                              0.0,
                                              0.0,
                                              density_cutoff);
-        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+
+        // FYI: num_nodes() throws exception for masked graph with lazy node mask
+        // EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+        ASSERT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 
         masked_dbg.call_kmers([&](auto i, const auto &kmer) {
             auto cur_labels = anno_graph->get_labels(i);
@@ -107,7 +111,7 @@ test_mask_unitigs(double inlabel_fraction,
             )
         );
 
-        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+        EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 
         masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
 

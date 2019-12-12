@@ -3,9 +3,10 @@
 #include <cassert>
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "serialization.hpp"
-#include "bit_vector.hpp"
-#include "hash_utils.hpp"
+#include "utils/serialization.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
+#include "utils/hash_utils.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 template <typename KMER = KmerExtractor2Bit::Kmer64>

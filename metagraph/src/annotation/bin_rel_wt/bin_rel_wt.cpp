@@ -3,10 +3,12 @@
 #include <cassert>
 #include <iterator>
 
-#include "serialization.hpp"
+#include "utils/bit_vectors/bit_vector.hpp"
+#include "utils/serialization.hpp"
 
 typedef brwt::binary_relation::object_id object_id;
 typedef brwt::binary_relation::label_id label_id;
+
 
 label_id to_label_id(uint64_t x) {
     return static_cast<label_id>(x + 1);

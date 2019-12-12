@@ -5,6 +5,7 @@ project(Metagraph)
 
 include(CheckFunctionExists)
 include(CheckLibraryExists)
+include(CMakeListsHelpers.txt)
 
 enable_testing()
 
@@ -48,6 +49,8 @@ function(message)
     _message(${ARGV})
   endif()
 endfunction()
+
+enableCCache()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
@@ -140,12 +143,6 @@ else()
 message(STATUS "Compiling without msse4.2 instructions!")
 endif()
 
-if(WITH_MMAP)
-message(STATUS "Enabling boost iostreams for mmapped reader")
-string(APPEND CMAKE_CXX_FLAGS " -D_USE_MMAP")
-set(METALIBS ${METALIBS} -lboost_iostreams)
-endif()
-
 #-------------------
 # KMC k-mer counter
 #-------------------
@@ -192,7 +189,7 @@ if(${CMAKE_BUILD_TYPE} MATCHES GPROFILE)
   if(PROFILER_LIBRARIES)
     set(METALIBS ${METALIBS} -lprofiler)
   else()
-    message(FATAL_ERROR "Could not find -lprofiler installed")
+    message(WARNING "Could not find -lprofiler installed")
   endif()
 endif()
 

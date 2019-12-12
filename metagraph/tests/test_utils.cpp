@@ -37,25 +37,6 @@ const std::vector<std::vector<uint64_t>> indices {
 };
 
 
-utils::RowsFromColumnsTransformer generate_rct_file() {
-    annotate::ColumnCompressed<> annotation(6);
-
-    annotation.set_labels(1, { "Label0", "Label1" });
-    annotation.set_labels(2, { "Label0", "Label1" });
-    annotation.set_labels(3, { "Label1" });
-    annotation.set_labels(4, { "Label1" });
-    annotation.set_labels(5, { "Label0", "Label1" });
-
-    annotation.dump_columns(test_dump_basename);
-
-    utils::RowsFromColumnsTransformer rct(7, {
-        test_dump_basename + ".0.raw.column.annodbg",
-        test_dump_basename + ".1.raw.column.annodbg"
-    });
-
-    return rct;
-}
-
 std::vector<bit_vector_small> generate_rows() {
     std::vector<bit_vector_small> rows;
     std::transform(vectors.begin(), vectors.end(), std::back_inserter(rows),
@@ -101,16 +82,6 @@ void check_indices(utils::RowsFromColumnsTransformer&& rct) {
 
     EXPECT_EQ(8u, counter);
     EXPECT_EQ(0u, rct.values_left());
-}
-
-TEST(Utils, RowsFromColumnsTransformerCallRowsFile) {
-    auto rct = generate_rct_file();
-    check_rows(std::move(rct));
-}
-
-TEST(Utils, RowsFromColumnsTransformerCallIndicesFile) {
-    auto rct = generate_rct_file();
-    check_indices(std::move(rct));
 }
 
 TEST(Utils, RowsFromColumnsTransformerCallRowsColumns) {

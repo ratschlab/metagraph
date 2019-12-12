@@ -86,6 +86,8 @@ void DeBruijnGraph::traverse(node_index start,
 
 void DeBruijnGraph::call_nodes(const std::function<void(node_index)> &callback,
                                const std::function<bool()> &stop_early) const {
+    assert(num_nodes() == max_index());
+
     const auto nnodes = num_nodes();
     for (node_index i = 1; i <= nnodes && !stop_early(); ++i) {
         callback(i);
@@ -260,7 +262,7 @@ void call_sequences(const DeBruijnGraph &graph,
                     bool call_unitigs,
                     uint64_t min_tip_size = 0,
                     bool kmers_in_single_form = false) {
-    sdsl::bit_vector discovered(graph.num_nodes() + 1, true);
+    sdsl::bit_vector discovered(graph.max_index() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
     sdsl::bit_vector visited = discovered;
 
@@ -306,11 +308,8 @@ void call_sequences(const DeBruijnGraph &graph,
         //  .____  or  .____
         //              \___
         //
-        graph.call_source_nodes([&](auto node) {
-            assert(graph.has_no_incoming(node));
-            assert(!visited[node] || kmers_in_single_form);
-
-            if (!kmers_in_single_form || !visited[node])
+        call_zeros(visited, [&](auto node) {
+            if (graph.has_no_incoming(node) && !visited[node])
                 call_paths_from(node);
         });
     }
@@ -320,6 +319,7 @@ void call_sequences(const DeBruijnGraph &graph,
     //       \___
     //
     call_zeros(visited, [&](auto node) {
+        // TODO: this two calls to outgoing nodes could be combined into one
         if (graph.has_multiple_outgoing(node)) {
             graph.adjacent_outgoing_nodes(node, [&](auto next) {
                 if (!visited[next])
@@ -348,7 +348,7 @@ void DeBruijnGraph::call_unitigs(const CallPath &callback,
  */
 void DeBruijnGraph
 ::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
-    sdsl::bit_vector visited(num_nodes() + 1, false);
+    sdsl::bit_vector visited(max_index() + 1, false);
     std::stack<std::pair<node_index, std::string>> nodes;
 
     call_nodes([&](node_index i) {

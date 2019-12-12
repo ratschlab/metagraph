@@ -7,7 +7,7 @@
 
 class Config {
   public:
-    Config(int argc, const char *argv[]);
+    Config(int argc, char *argv[]);
 
     static constexpr auto UNINITIALIZED_STR = "\0";
 
@@ -31,7 +31,6 @@ class Config {
     bool count_kmers = false;
     bool query_presence = false;
     bool filter_present = false;
-    bool dump_raw_anno = false;
     bool dump_text_anno = false;
     bool sparse = false;
     bool fast = false;
@@ -172,6 +171,7 @@ class Config {
         HASH,
         HASH_PACKED,
         HASH_STR,
+        HASH_FAST,
         BITMAP,
     };
 
