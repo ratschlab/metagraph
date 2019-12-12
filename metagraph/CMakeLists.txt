@@ -256,7 +256,7 @@ include_directories(
 )
 
 add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
-add_subdirectory(external-libraries/spdlog EXCLUDE_FROM_ALL)
+add_subdirectory(external-libraries/spdlog)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
