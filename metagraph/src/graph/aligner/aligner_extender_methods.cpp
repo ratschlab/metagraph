@@ -116,6 +116,10 @@ void compute_match_scores(const char *align_begin,
                           std::vector<OpType> &match_ops,
                           const ScoreRowType &row,
                           const OpRowType &op_row) {
+    static_assert(std::is_same<ScoreType, typename ScoreRowType::value_type>::value);
+    static_assert(std::is_same<OpType, typename OpRowType::value_type>::value);
+    static_assert(sizeof(ScoreType) == 1);
+    static_assert(sizeof(OpType) == 1);
     assert(align_end >= align_begin);
 
     // compute match scores
