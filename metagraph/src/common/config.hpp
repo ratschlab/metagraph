@@ -85,8 +85,8 @@ class Config {
     int64_t alignment_min_cell_score = 0;
     int64_t alignment_min_path_score = 0;
 
-    size_t alignment_queue_size = 50;
-    size_t alignment_vertical_bandwidth = 10;
+    size_t alignment_queue_size = 20;
+    size_t alignment_vertical_bandwidth = 17;
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
