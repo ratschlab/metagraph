@@ -303,14 +303,9 @@ void recover_source_dummy_nodes(size_t k,
     // remove redundant dummy source k-mers of prefix length 1 and write them to a file
     // While traversing and removing redundant dummy source k-mers of prefix length 1,
     // we also  generate dummy k-mers of prefix length 2.
-    const T first = *(kmers->begin()); // T is either a k-mer or a k-mer/count pair
-    using KMER = std::remove_reference_t<decltype(utils::get_first(first))>;
     size_t num_dummy_parent_kmers = 0;
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         const T el = *it;
-        const KMER &kmer = utils::get_first(el);
-        // we never add reads shorter than k
-        assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
         recent_buffer.push_back({ el, false });
         remove_redundant_dummy_source<T, TAlphabet>(el, &recent_buffer);
         if (recent_buffer.full()) {

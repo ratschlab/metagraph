@@ -34,16 +34,14 @@ void expect_equals(common::SortedSetDisk<TypeParam> &underTest,
 
 template <typename T>
 common::SortedSetDisk<T> create_sorted_set_disk() {
-    constexpr bool verbose = false;
     constexpr size_t thread_count = 1;
     constexpr size_t container_size = 8;
     constexpr size_t merge_queue_size = 1000;
     constexpr size_t num_last_elements_cached = 10;
     auto nocleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
     auto on_item_pushed = [](const T &) {};
-    return common::SortedSetDisk<T>(nocleanup, on_item_pushed, thread_count, verbose,
-                                    container_size, merge_queue_size,
-                                    num_last_elements_cached);
+    return common::SortedSetDisk<T>(nocleanup, on_item_pushed, thread_count, container_size,
+                                    merge_queue_size, num_last_elements_cached);
 }
 
 TYPED_TEST(SortedSetDiskTest, Empty) {
