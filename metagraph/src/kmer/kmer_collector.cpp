@@ -198,7 +198,7 @@ KmerCollector<KMER, KmerExtractor, Container>
               double memory_preallocated,
               bool verbose)
       : k_(k),
-        kmers_(get_cleanup<Extractor, typename Container::storage_type>(filter_suffix_encoded.empty())),
+        kmers_(get_cleanup<Extractor, typename Container::storage_type>(filter_suffix_encoded.empty()), num_threads, verbose),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
