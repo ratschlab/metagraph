@@ -107,32 +107,33 @@ std::vector<std::string> AnnotatedDBG
     assert(sequences.size() == weights.size());
 
     std::unordered_map<uint64_t, double> index_weights;
-    double weighted_num_kmers = 0;
+    double weighted_num_missing_kmers = 0;
     double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
 
     for (size_t j = 0; j < sequences.size(); ++j) {
         graph_->map_to_nodes(sequences[j], [&](uint64_t i) {
-            if (i > 0)
+            if (i > 0) {
                 index_weights[graph_to_anno_index(i)] += weights[j];
-
-            weighted_num_kmers += weights[j];
+            } else {
+                weighted_num_missing_kmers += weights[j];
+            }
         });
     }
 
     std::unordered_map<uint64_t, size_t> index_counts;
 
+    size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
     size_t num_present_kmers = 0;
 
     for (const auto &pair : index_weights) {
-        index_counts[pair.first] = pair.second;
-
-        if (pair.second >= scale)
-            num_present_kmers += pair.second;
+        double count = std::floor(pair.second / scale);
+        index_counts[pair.first] = count;
+        num_present_kmers += count;
     }
 
-    assert(std::floor(weighted_num_kmers) >= num_present_kmers);
     size_t min_count = std::max(1.0, std::ceil(presence_ratio
-                                                 * std::floor(weighted_num_kmers)));
+                                                 * (num_present_kmers
+                                                     + num_missing_kmers)));
 
     if (num_present_kmers < min_count)
         return {};
@@ -201,39 +202,40 @@ std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
                              const std::vector<double> &weights,
                              size_t num_top_labels,
-                             double min_label_frequency) const {
-    assert(min_label_frequency >= 0.);
-    assert(min_label_frequency <= 1.);
+                             double presence_ratio) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
     assert(check_compatibility());
     assert(sequences.size() == weights.size());
 
     std::unordered_map<uint64_t, double> index_weights;
-    double weighted_num_kmers = 0;
+    double weighted_num_missing_kmers = 0;
     double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
 
     for (size_t j = 0; j < sequences.size(); ++j) {
         graph_->map_to_nodes(sequences[j], [&](uint64_t i) {
-            if (i > 0)
+            if (i > 0) {
                 index_weights[graph_to_anno_index(i)] += weights[j];
-
-            weighted_num_kmers += weights[j];
+            } else {
+                weighted_num_missing_kmers += weights[j];
+            }
         });
     }
 
     std::unordered_map<uint64_t, size_t> index_counts;
 
+    size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
     size_t num_present_kmers = 0;
 
     for (const auto &pair : index_weights) {
-        index_counts[pair.first] = pair.second;
-
-        if (pair.second >= scale)
-            num_present_kmers += pair.second;
+        double count = std::floor(pair.second / scale);
+        index_counts[pair.first] = count;
+        num_present_kmers += count;
     }
 
-    assert(std::floor(weighted_num_kmers) >= num_present_kmers);
-    size_t min_count = std::max(1.0, std::ceil(min_label_frequency
-                                                 * std::floor(weighted_num_kmers)));
+    size_t min_count = std::max(1.0, std::ceil(presence_ratio
+                                                 * (num_present_kmers
+                                                     + num_missing_kmers)));
 
     if (num_present_kmers < min_count)
         return {};
