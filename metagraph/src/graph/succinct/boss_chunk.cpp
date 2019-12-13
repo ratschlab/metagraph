@@ -183,22 +183,21 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
     }
 
     template <typename KMER>
-    static void set_weights(const Iterator &it,
+    static void set_weights(const size_t count,
                             const KMER &kmer,
                             size_t curpos,
                             uint64_t max_count,
                             sdsl::int_vector<> *weights) {
         if (weights->capacity() == curpos) {
-                weights->resize(weights->capacity() * 1.5);
+            weights->resize(weights->capacity() * 1.5);
+        }
+        if (weights) { // set weights for non-dummy k-mers
+            if (count && kmer[0] && kmer[1]) {
+                (*weights)[curpos] = std::min(static_cast<uint64_t>(count), max_count);
+            } else { // dummy k-mers have a weight of 0
+                (*weights)[curpos] = 0;
             }
-            if (weights) { // set weights for non-dummy k-mers
-                if ((*it).second && kmer[0] && kmer[1]) {
-                    (*weights)[curpos]
-                            = std::min(static_cast<uint64_t>((*it).second), max_count);
-                } else { // dummy k-mers have a weight of 0
-                    (*weights)[curpos] = 0;
-                }
-            }
+        }
     }
 
     static void initialize_chunk(uint64_t alph_size,
@@ -271,7 +270,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             }
 
             if constexpr (utils::is_pair<T>::value) {
-                set_weights(it, kmer, curpos, max_count, weights);
+                set_weights((*it).second, kmer, curpos, max_count, weights);
             }
 
             curpos++;
