@@ -188,8 +188,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                             size_t curpos,
                             uint64_t max_count,
                             sdsl::int_vector<> *weights) {
-        if constexpr (utils::is_pair<T>::value) {
-            if (weights->capacity() == curpos) {
+        if (weights->capacity() == curpos) {
                 weights->resize(weights->capacity() * 1.5);
             }
             if (weights) { // set weights for non-dummy k-mers
@@ -200,7 +199,6 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                     (*weights)[curpos] = 0;
                 }
             }
-        }
     }
 
     static void initialize_chunk(uint64_t alph_size,
@@ -272,7 +270,9 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                 F->at(++lastF) = curpos - 1;
             }
 
-            set_weights(it, kmer, curpos, max_count, weights);
+            if constexpr (utils::is_pair<T>::value) {
+                set_weights(it, kmer, curpos, max_count, weights);
+            }
 
             curpos++;
         }

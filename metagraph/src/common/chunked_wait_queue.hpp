@@ -117,7 +117,7 @@ class ChunkedWaitQueue {
     }
 
     /**
-     * Returns the capacity of the queue's internal buffer.
+     * Returns the capacitwwy of the queue's internal buffer.
      */
     size_type capacity() const { return queue_.capacity(); }
 
