@@ -61,9 +61,9 @@ class SortedSetDisk {
      */
     SortedSetDisk(
             std::function<void(storage_type *)> = [](storage_type *) {},
-            const std::string &out_file = "",
             size_t num_threads = 1,
             bool verbose = false,
+            const std::string &out_file = "",
             size_t container_size = CONTAINER_SIZE_BYTES,
             size_t merge_queue_size = MERGE_QUEUE_SIZE / sizeof(T),
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
