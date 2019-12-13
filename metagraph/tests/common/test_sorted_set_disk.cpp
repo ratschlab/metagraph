@@ -55,7 +55,7 @@ SortedSetDisk<T> create_sorted_set_disk() {
     constexpr size_t merge_queue_size = 1000;
     constexpr size_t num_last_elements_cached = 10;
     auto cleanup = [](typename SortedSetDisk<T>::storage_type *) {};
-    return SortedSetDisk<T>(cleanup, out_file, thread_count, verbose, container_size,
+    return SortedSetDisk<T>(cleanup, thread_count, verbose, out_file, container_size,
                             merge_queue_size, num_last_elements_cached);
 }
 

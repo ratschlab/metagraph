@@ -387,6 +387,9 @@ void execute_query(const std::string &seq_name,
                        [](const auto &alignment) { return alignment.get_sequence(); });
 
         weights = alignments.get_alignment_weights(aligner->get_config());
+
+        if (sequences.empty())
+            aligner = nullptr;
     }
 
     assert(sequences.size() == weights.size());
