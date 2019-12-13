@@ -69,7 +69,7 @@ class AnnotatedDBG {
     get_top_labels(const std::vector<std::string> &sequences,
                    const std::vector<double> &weights,
                    size_t num_top_labels,
-                   double min_label_frequency = 0.0) const;
+                   double presence_ratio = 0.0) const;
 
     std::vector<std::pair<std::string, size_t>>
     get_top_labels(const std::unordered_map<row_index, size_t> &index_counts,
