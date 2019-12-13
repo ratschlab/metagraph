@@ -132,6 +132,11 @@ void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
                 hashes = _mm_srlv_epi32(hashes, shift);
                 hashes = _mm_and_si128(hashes, andmask);
                 _mm_store_si128((__m128i*)ht, hashes);
+
+                assert(ht[0] < 8);
+                assert(ht[1] < 8);
+                assert(ht[2] < 64);
+                assert(ht[3] < 64);
                 block[ht[0]] |= 1llu << ht[2];
                 block[ht[1]] |= 1llu << ht[3];
             }
@@ -228,6 +233,11 @@ sdsl::bit_vector BloomFilter
                 hashes = _mm_srlv_epi32(hashes, shift);
                 hashes = _mm_and_si128(hashes, andmask);
                 _mm_store_si128((__m128i*)ht, hashes);
+
+                assert(ht[0] < 8);
+                assert(ht[1] < 8);
+                assert(ht[2] < 64);
+                assert(ht[3] < 64);
                 found &= (block[ht[0]] & (1llu << ht[2]))
                     && (block[ht[1]] & (1llu << ht[3]));
             }
