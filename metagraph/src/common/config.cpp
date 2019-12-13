@@ -188,7 +188,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--align-alternative-alignments")) {
             alignment_num_alternative_paths = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-cell-score")) {
-            alignment_min_cell_score = atoi(get_value(i++));
+            alignment_min_cell_score = atol(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-path-score")) {
             alignment_min_path_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-seed-length")) {

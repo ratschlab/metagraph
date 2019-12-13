@@ -146,7 +146,6 @@ void compute_match_delete_updates(const DBGAlignerConfig &config,
                                   const int8_t *char_scores,
                                   const Cigar::Operator *match_ops,
                                   std::vector<int8_t> &gap_scores,
-                                  const score_t min_cell_score,
                                   size_t length) {
     // compute delete scores
     gap_scores.resize(length);
@@ -161,8 +160,7 @@ void compute_match_delete_updates(const DBGAlignerConfig &config,
 
     auto gap_it = gap_scores.begin();
 
-    if (*incoming_scores != min_cell_score
-            && *incoming_scores + *gap_it > std::get<1>(*updates)) {
+    if (*incoming_scores + *gap_it > std::get<1>(*updates)) {
         updates->first.cigar_op = Cigar::Operator::DELETION;
         updates->first.prev_node = prev_node;
         updates->second = *incoming_scores + *gap_it;
@@ -175,17 +173,14 @@ void compute_match_delete_updates(const DBGAlignerConfig &config,
     ++updates;
 
     for (size_t i = 1; i < length; ++i) {
-        // prevent underflow if min_cell_score == MIN_INT
-        if ((*char_scores >= 0 || *(incoming_scores - 1) != min_cell_score)
-                && (*(incoming_scores - 1) + *char_scores > std::get<1>(*updates))) {
+        if (*(incoming_scores - 1) + *char_scores > std::get<1>(*updates)) {
             updates->first.cigar_op = *match_ops;
             updates->first.prev_node = prev_node;
             updates->second = *(incoming_scores - 1) + *char_scores;
         }
 
         // TODO: enable check for deletion after insertion?
-        if ((*incoming_scores != min_cell_score)
-                && (*incoming_scores + *gap_it > std::get<1>(*updates))) {
+        if (*incoming_scores + *gap_it > std::get<1>(*updates)) {
             updates->first.cigar_op = Cigar::Operator::DELETION;
             updates->first.prev_node = prev_node;
             updates->second = *incoming_scores + *gap_it;
@@ -311,7 +306,6 @@ DefaultColumnExtender<NodeType, Compare>
                     char_scores.data() + (begin - overall_begin),
                     match_ops.data() + (begin - overall_begin),
                     gap_scores,
-                    config_.min_cell_score,
                     end - begin
                 );
             }

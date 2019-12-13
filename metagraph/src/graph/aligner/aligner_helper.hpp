@@ -107,9 +107,9 @@ class DBGAlignerConfig {
     typedef std::array<int8_t, 128> ScoreMatrixRow;
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
-    DBGAlignerConfig(const ScoreMatrix &score_matrix,
-                     int8_t gap_opening = -3,
-                     int8_t gap_extension = -1);
+    explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
+                              int8_t gap_opening = -3,
+                              int8_t gap_extension = -1);
 
     explicit DBGAlignerConfig(const Config &config);
 
@@ -158,6 +158,8 @@ class DBGAlignerConfig {
     int8_t gap_extension_penalty;
 
     bool forward_and_reverse_complement = false;
+
+    bool check_config_scores() const;
 
     static ScoreMatrix scoring_matrix(const Config &config);
 

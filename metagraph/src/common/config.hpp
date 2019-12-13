@@ -82,8 +82,8 @@ class Config {
     int8_t alignment_gap_opening_penalty = 3;
     int8_t alignment_gap_extension_penalty = 1;
 
-    int64_t alignment_min_cell_score = 0;
-    int64_t alignment_min_path_score = 0;
+    int32_t alignment_min_cell_score = 0;
+    int32_t alignment_min_path_score = 0;
 
     size_t alignment_queue_size = 20;
     size_t alignment_vertical_bandwidth = 17;

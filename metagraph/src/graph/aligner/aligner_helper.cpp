@@ -228,19 +228,36 @@ bool Cigar::is_valid(const char *reference_begin, const char *reference_end,
 }
 
 
+// check to make sure the current scoring system won't underflow
+bool DBGAlignerConfig::check_config_scores() const {
+    int8_t min_element = std::min(gap_opening_penalty, gap_extension_penalty);
+    for (const auto &row : score_matrix_) {
+        min_element = std::min(min_element, *std::min_element(row.begin(), row.end()));
+    }
+
+    score_t shift = min_cell_score + min_element;
+    if (shift > min_cell_score) {
+        std::cerr << "min_cell_score: " << min_cell_score << std::endl
+                  << "underflow value: " << shift << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 DBGAlignerConfig::DBGAlignerConfig(const ScoreMatrix &score_matrix,
                                    int8_t gap_opening,
                                    int8_t gap_extension)
       : gap_opening_penalty(gap_opening),
         gap_extension_penalty(gap_extension),
-        score_matrix_(score_matrix) { }
+        score_matrix_(score_matrix) {}
 
 DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
                                    int8_t gap_opening,
                                    int8_t gap_extension)
       : gap_opening_penalty(gap_opening),
         gap_extension_penalty(gap_extension),
-        score_matrix_(std::move(score_matrix)) { }
+        score_matrix_(std::move(score_matrix)) {}
 
 DBGAlignerConfig::DBGAlignerConfig(const Config &config)
       : queue_size(config.alignment_queue_size),
