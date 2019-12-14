@@ -342,9 +342,9 @@ list(REVERSE src_files)
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
-add_library(metagraph STATIC ${src_files})
-add_executable(metagraph-bin "src/main.cpp")
-set_target_properties(metagraph-bin PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
+add_library(metagraph-core STATIC ${src_files})
+add_executable(metagraph "src/main.cpp")
+set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
   -lKMC
@@ -418,11 +418,11 @@ if(NOT CPPNOFS)
 endif()
 
 target_link_libraries(
-  metagraph ${METALIBS}
+  metagraph-core ${METALIBS}
 )
 
 target_link_libraries(
-  metagraph-bin metagraph ${METALIBS}
+  metagraph metagraph-core ${METALIBS}
 )
 
 add_custom_target(link_target ALL
@@ -455,7 +455,7 @@ link_directories(
 add_executable(run_experiments ${experiment_files})
 
 target_link_libraries(
-  run_experiments metagraph ${METALIBS}
+  run_experiments metagraph-core ${METALIBS}
 )
 
 #-------------------
@@ -468,9 +468,9 @@ file(GLOB header_files
   "src/*/*/*.hpp"
 )
 
-install(TARGETS metagraph DESTINATION lib)
+install(TARGETS metagraph-core DESTINATION lib)
 install(FILES ${header_files} DESTINATION include/metagraph)
-install(TARGETS metagraph-bin DESTINATION bin)
+install(TARGETS metagraph DESTINATION bin)
 
 #-------------------
 # Unit Tests
@@ -535,7 +535,7 @@ link_directories(
 add_executable(unit_tests ${unit_tests_files})
 target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 target_link_libraries(unit_tests gtest_main gtest
-  metagraph
+  metagraph-core
   ${METALIBS}
 )
 
@@ -550,7 +550,7 @@ find_package (Python3 3.4 REQUIRED COMPONENTS Interpreter)
 # --- integration tests ---
 add_custom_target(check
   COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/integration_tests/main.py
-  DEPENDS metagraph-bin
+  DEPENDS metagraph
 )
 # --- integration tests + unit tests ---
 add_custom_target(check_all
@@ -579,5 +579,5 @@ if(PYTHON_INTERFACE)
   SET_SOURCE_FILES_PROPERTIES(${interface_files} PROPERTIES CPLUSPLUS ON)
 
   SWIG_ADD_LIBRARY(metagraph LANGUAGE python SOURCES ${interface_files})
-  SWIG_LINK_LIBRARIES(metagraph metagraph ${METALIBS} ${PYTHON_LIBRARIES})
+  SWIG_LINK_LIBRARIES(metagraph metagraph-core ${METALIBS} ${PYTHON_LIBRARIES})
 endif()
