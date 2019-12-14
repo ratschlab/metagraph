@@ -142,7 +142,6 @@ class DefaultColumnExtender : public Extender<NodeType> {
     typedef typename Extender<NodeType>::node_index node_index;
     typedef typename Extender<NodeType>::score_t score_t;
     typedef typename ::DPTable<NodeType> DPTable;
-    typedef typename DPTable::Step Step;
     typedef typename DPTable::Column Column;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
