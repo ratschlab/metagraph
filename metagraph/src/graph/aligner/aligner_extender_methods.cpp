@@ -143,32 +143,36 @@ void compute_match_scores(const char *align_begin,
                    [&op_row](char c) { return op_row[c]; });
 }
 
+void compute_delete_scores(const Cigar::Operator *incoming_ops_begin,
+                           const Cigar::Operator *incoming_ops_end,
+                           std::vector<int8_t> &gap_scores,
+                           int8_t gap_opening_penalty,
+                           int8_t gap_extension_penalty) {
+    assert(incoming_ops_end >= incoming_ops_begin);
+
+    // compute delete scores
+    gap_scores.resize(incoming_ops_end - incoming_ops_begin);
+    std::transform(incoming_ops_begin,
+                   incoming_ops_end,
+                   gap_scores.begin(),
+                   [&](const auto &op) {
+                       return op == Cigar::Operator::DELETION
+                           ? gap_extension_penalty
+                           : gap_opening_penalty;
+                   });
+}
+
 template <typename NodeType,
           typename score_t = typename Alignment<NodeType>::score_t>
-void compute_match_delete_updates(const DBGAlignerConfig &config,
-                                  score_t *update_scores,
+void compute_match_delete_updates(score_t *update_scores,
                                   NodeType *update_prevs,
                                   Cigar::Operator *update_ops,
                                   const NodeType &prev_node,
                                   const score_t *incoming_scores,
-                                  const Cigar::Operator *incoming_ops,
                                   const int8_t *char_scores,
                                   const Cigar::Operator *match_ops,
-                                  std::vector<int8_t> &gap_scores,
+                                  const int8_t *gap_it,
                                   size_t length) {
-    // compute delete scores
-    gap_scores.resize(length);
-    std::transform(incoming_ops,
-                   incoming_ops + length,
-                   gap_scores.begin(),
-                   [&config](const auto &op) {
-                       return op == Cigar::Operator::DELETION
-                           ? config.gap_extension_penalty
-                           : config.gap_opening_penalty;
-                   });
-
-    auto gap_it = gap_scores.data();
-
     // handle first element (i.e., no match update possible)
     if (*incoming_scores + *gap_it > *update_scores) {
         *update_ops = Cigar::Operator::DELETION;
@@ -380,17 +384,21 @@ DefaultColumnExtender<NodeType, Compare>
 
                 assert(end > begin);
 
+                compute_delete_scores(incoming.ops.data() + begin,
+                                      incoming.ops.data() + end,
+                                      gap_scores,
+                                      config_.gap_opening_penalty,
+                                      config_.gap_extension_penalty);
+
                 compute_match_delete_updates(
-                    config_,
                     update_scores.data() + (begin - overall_begin),
                     update_prevs.data() + (begin - overall_begin),
                     update_ops.data() + (begin - overall_begin),
                     prev_node,
                     incoming.scores.data() + begin,
-                    incoming.ops.data() + begin,
                     char_scores.data() + (begin - overall_begin),
                     match_ops.data() + (begin - overall_begin),
-                    gap_scores,
+                    gap_scores.data(),
                     end - begin
                 );
             }
