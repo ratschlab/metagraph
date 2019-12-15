@@ -477,10 +477,12 @@ DefaultColumnExtender<NodeType, Compare>
 
             if (updated) {
                 // store max pos
-                next_column.best_pos = std::max_element(
+                max_pos = std::max_element(
                     next_column.scores.begin() + overall_begin,
                     next_column.scores.begin() + overall_end
-                ) - next_column.scores.begin();
+                );
+
+                next_column.best_pos = max_pos - next_column.scores.begin();
 
                 if (*max_pos > start_node->second.best_score())
                     start_node = iter;
