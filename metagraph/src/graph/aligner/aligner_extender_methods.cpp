@@ -515,7 +515,7 @@ DefaultColumnExtender<NodeType, Compare>
                                 return a.second < b.second;
                             })->second.best_score());
 
-    assert(start_node->second.best_step().cigar_op == Cigar::Operator::MATCH);
+    assert(start_node->second.best_op() == Cigar::Operator::MATCH);
 
     // avoid sorting column iterators if we're only interested in the top path
     std::vector<DBGAlignment> next_paths;
