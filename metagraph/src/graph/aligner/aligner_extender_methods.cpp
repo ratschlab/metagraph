@@ -143,47 +143,32 @@ void compute_match_scores(const char *align_begin,
                    [&op_row](char c) { return op_row[c]; });
 }
 
-void compute_delete_scores(const Cigar::Operator *incoming_ops_begin,
-                           const Cigar::Operator *incoming_ops_end,
-                           std::vector<int8_t> &gap_scores,
-                           int8_t gap_opening_penalty,
-                           int8_t gap_extension_penalty) {
-    assert(incoming_ops_end >= incoming_ops_begin);
-
-    // compute delete scores
-    gap_scores.resize(incoming_ops_end - incoming_ops_begin);
-    std::transform(incoming_ops_begin,
-                   incoming_ops_end,
-                   gap_scores.begin(),
-                   [&](const auto &op) {
-                       return op == Cigar::Operator::DELETION
-                           ? gap_extension_penalty
-                           : gap_opening_penalty;
-                   });
-}
-
 template <typename NodeType,
           typename score_t = typename Alignment<NodeType>::score_t>
-void compute_match_delete_updates(score_t *update_scores,
+void compute_match_delete_updates(const DBGAlignerConfig &config,
+                                  score_t *update_scores,
                                   NodeType *update_prevs,
                                   Cigar::Operator *update_ops,
                                   const NodeType &prev_node,
                                   const score_t *incoming_scores,
+                                  const Cigar::Operator *incoming_ops,
                                   const int8_t *char_scores,
                                   const Cigar::Operator *match_ops,
-                                  const int8_t *gap_it,
                                   size_t length) {
     // handle first element (i.e., no match update possible)
-    if (*incoming_scores + *gap_it > *update_scores) {
+    score_t gap_score = *incoming_scores + (*incoming_ops == Cigar::Operator::DELETION
+        ? config.gap_extension_penalty : config.gap_opening_penalty);
+
+    if (gap_score > *update_scores) {
         *update_ops = Cigar::Operator::DELETION;
         *update_prevs = prev_node;
-        *update_scores = *incoming_scores + *gap_it;
+        *update_scores = gap_score;
     }
 
     ++incoming_scores;
+    ++incoming_ops;
     ++char_scores;
     ++match_ops;
-    ++gap_it;
     ++update_scores;
     ++update_prevs;
     ++update_ops;
@@ -197,16 +182,23 @@ void compute_match_delete_updates(score_t *update_scores,
 
     __m256i prev_packed = _mm256_set1_epi64x(prev_node);
     __m256i del_packed = _mm256_set1_epi32(Cigar::Operator::DELETION);
+    __m256i gap_open_packed = _mm256_set1_epi32(config.gap_opening_penalty);
+    __m256i gap_extend_packed = _mm256_set1_epi32(config.gap_extension_penalty);
     for (; i + 8 <= length; i += 8) {
         // compute match and delete scores
         __m256i match_scores_packed = _mm256_add_epi32(
-            _mm256_cvtepi8_epi32(_mm_set1_epi64(*(const __m64*)char_scores)),
+            _mm256_cvtepi8_epi32(_mm_loadl_epi64((__m128i*)char_scores)),
             _mm256_loadu_si256((__m256i*)(incoming_scores - 1))
         );
 
         __m256i delete_scores_packed = _mm256_add_epi32(
-            _mm256_cvtepi8_epi32(_mm_set1_epi64(*(const __m64*)gap_it)),
-            _mm256_loadu_si256((__m256i*)incoming_scores) // TODO: avoid a reload
+            _mm256_loadu_si256((__m256i*)incoming_scores), // TODO: avoid a reload
+            _mm256_blendv_epi8(
+                gap_open_packed,
+                gap_extend_packed,
+                _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i*)incoming_ops),
+                                   del_packed)
+            )
         );
 
         // update scores
@@ -243,9 +235,9 @@ void compute_match_delete_updates(score_t *update_scores,
         update_prevs += 8;
         update_ops += 8;
         incoming_scores += 8;
+        incoming_ops += 8;
         char_scores += 8;
         match_ops += 8;
-        gap_it += 8;
     }
 
     // clean up after AVX2 instructions
@@ -261,16 +253,18 @@ void compute_match_delete_updates(score_t *update_scores,
         }
 
         // TODO: enable check for deletion after insertion?
-        if (*incoming_scores + *gap_it > *update_scores) {
+        gap_score = *incoming_scores + (*incoming_ops == Cigar::Operator::DELETION
+            ? config.gap_extension_penalty : config.gap_opening_penalty);
+        if (gap_score > *update_scores) {
             *update_ops = Cigar::Operator::DELETION;
             *update_prevs = prev_node;
-            *update_scores = *incoming_scores + *gap_it;
+            *update_scores = gap_score;
         }
 
         ++incoming_scores;
+        ++incoming_ops;
         ++char_scores;
         ++match_ops;
-        ++gap_it;
         ++update_scores;
         ++update_prevs;
         ++update_ops;
@@ -323,7 +317,6 @@ DefaultColumnExtender<NodeType, Compare>
     // for storage of intermediate values
     std::vector<int8_t> char_scores;
     std::vector<Cigar::Operator> match_ops;
-    std::vector<int8_t> gap_scores;
     std::vector<node_index> in_nodes;
 
     AlignedVector<score_t> update_scores;
@@ -384,21 +377,16 @@ DefaultColumnExtender<NodeType, Compare>
 
                 assert(end > begin);
 
-                compute_delete_scores(incoming.ops.data() + begin,
-                                      incoming.ops.data() + end,
-                                      gap_scores,
-                                      config_.gap_opening_penalty,
-                                      config_.gap_extension_penalty);
-
                 compute_match_delete_updates(
+                    config_,
                     update_scores.data() + (begin - overall_begin),
                     update_prevs.data() + (begin - overall_begin),
                     update_ops.data() + (begin - overall_begin),
                     prev_node,
                     incoming.scores.data() + begin,
+                    incoming.ops.data() + begin,
                     char_scores.data() + (begin - overall_begin),
                     match_ops.data() + (begin - overall_begin),
-                    gap_scores.data(),
                     end - begin
                 );
             }
