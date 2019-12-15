@@ -1,5 +1,7 @@
 #include "boss_chunk_construct.hpp"
 
+#include <future>
+
 #include <ips4o.hpp>
 
 #include "boss_chunk.hpp"
@@ -304,7 +306,10 @@ void recover_source_dummy_nodes(size_t k,
     // While traversing and removing redundant dummy source k-mers of prefix length 1,
     // we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
+    size_t num_parent_kmers = 0;
+    common::logger->trace("begin==end is {}", kmers->begin()==kmers->end());
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
+        num_parent_kmers++;
         const T el = *it;
         recent_buffer.push_back({ el, false });
         remove_redundant_dummy_source<T, TAlphabet>(el, &recent_buffer);
@@ -323,13 +328,14 @@ void recover_source_dummy_nodes(size_t k,
 
     common::logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                           num_dummy_parent_kmers);
+    common::logger->trace("Total number of k-mers: {}", num_parent_kmers);
 
     // generate dummy k-mers of prefix length 3..k
     common::SortedSetDisk<T> sorted_dummy_kmers2;
     common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
     common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
-    for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
-        std::string file_name = get_file_name(dummy_pref_len);
+    for (size_t dummy_pref_len = 3; dummy_pref_len < 4; ++dummy_pref_len) {
+        const std::string file_name = get_file_name(dummy_pref_len);
         files_to_merge.push_back(create_stream(file_name));
         dest->clear(async_file_writer(*(files_to_merge.back().second)));
         dummy_kmers.resize(0);
@@ -349,7 +355,7 @@ void recover_source_dummy_nodes(size_t k,
         dest->insert(dummy_kmers.begin(), dummy_kmers.end());
 
 
-        common::logger->trace("Number of dummy k-mers with dummy prefix of length {} :",
+        common::logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                               (dummy_pref_len - 1), num_kmers);
         std::swap(source, dest);
     }
@@ -367,7 +373,7 @@ void recover_source_dummy_nodes(size_t k,
         delete el.second; // this will also close the stream
         file_names.push_back(el.first);
     });
-    common::merge_files(file_names, kmers);
+    std::async(std::launch::async, &common::merge_files<T>, file_names, kmers);
 }
 
 inline std::vector<KmerExtractorBOSS::TAlphabet>

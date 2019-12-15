@@ -85,6 +85,10 @@ class SortedMultiset {
         try_reserve(size);
     }
 
+    size_t capacity() {
+        return data_.capacity();
+    }
+
     result_type& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);

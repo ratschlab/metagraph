@@ -1,17 +1,17 @@
 #pragma once
 
 #include "common/chunked_wait_queue.hpp"
+#include "common/logger.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <queue>
-#include <iostream>
 #include <string>
+
 #include <vector>
 
 namespace mg {
 namespace common {
-
 /**
  * Given a list of n source files, containing ordered elements of type T, merge the n
  * sources into a single (ordered) wait queue.
@@ -36,7 +36,7 @@ void merge_files(const std::vector<std::string> sources,
             chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(data_item));
             merge_heap.push({ data_item, i });
         } else {
-            std::cerr << "Error: Unable to open chunk file '" << sources[i] << "'\n";
+            logger->trace("Error: Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
     }

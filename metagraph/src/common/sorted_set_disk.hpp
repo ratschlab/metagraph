@@ -42,10 +42,10 @@ class SortedSetDisk {
      * guaranteed to flush to disk when the newly added data would exceed this
      * size.
      */
-    static constexpr size_t CONTAINER_SIZE_BYTES = 1e5; // 1 GB //TODO: undo
+    static constexpr size_t CONTAINER_SIZE_BYTES = 1e9; // 1 GB
 
     /** Size of the merge queue's underlying circular buffer */
-    static constexpr size_t MERGE_QUEUE_SIZE = 1e5; // 1GB
+    static constexpr size_t MERGE_QUEUE_SIZE = 1e9; // 1GB
     /** Number of elements that can be iterated backwards in the merge queue */
     static constexpr size_t NUM_LAST_ELEMENTS_CACHED = 100;
 
@@ -74,7 +74,7 @@ class SortedSetDisk {
           merge_queue_(merge_queue_size, num_last_elements_cached, on_item_pushed),
           cleanup_(cleanup) {
         try {
-            try_reserve(container_size);
+            try_reserve(container_size / sizeof(T));
         } catch (const std::bad_alloc &exception) {
             std::cerr << "ERROR: Not enough memory for SortedSetDisk. Requested"
                       << CONTAINER_SIZE_BYTES << " bytes" << std::endl;

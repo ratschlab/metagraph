@@ -214,9 +214,8 @@ KmerCollector<KMER, KmerExtractor, Container>
     }
     kmers_.reserve(memory_preallocated / sizeof(typename Container::value_type));
     common::logger->trace("Preallocated {} GB for the k-mer storage, capacity: {} k-mers",
-                        (kmers_.data().capacity() * sizeof(typename Container::value_type)
-                         >> 30),
-                        kmers_.data().capacity());
+                          (kmers_.capacity() * sizeof(typename Container::value_type) >> 30),
+                          kmers_.capacity());
 }
 
 template <typename KMER, class KmerExtractor, class Container>

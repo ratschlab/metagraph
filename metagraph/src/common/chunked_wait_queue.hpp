@@ -158,7 +158,7 @@ class ChunkedWaitQueue {
         queue_[last_] = std::move(x);
         on_item_pushed_(x);
         if (was_all_read) { // queue was empty or all items were read
-            not_empty_.notify_one();
+            not_empty_.notify_all();
         }
     }
 
@@ -239,7 +239,6 @@ class ChunkedWaitQueue {
         if (empty() && is_shutdown_) {
             return end_iterator_;
         }
-
         return iterator_;
     }
 };
