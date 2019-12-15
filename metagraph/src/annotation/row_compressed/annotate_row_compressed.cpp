@@ -3,6 +3,7 @@
 #include <string>
 #include <algorithm>
 #include <stdexcept>
+#include <set>
 
 #include "serialization.hpp"
 #include "string_utils.hpp"
