@@ -502,7 +502,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     // load graph
     auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph),
                                                      std::move(annotation_temp),
-                                                     config.parallel);
+                                                     get_num_threads());
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Error: graph and annotation are not compatible.");
@@ -1228,7 +1228,7 @@ void parse_sequences(const std::vector<std::string> &files,
                         [](const auto &first, const auto &second) {
                             return first.first < second.first;
                         },
-                        config.parallel
+                        get_num_threads()
                     );
 
                     if (config.min_count_quantile > 0)
@@ -1260,7 +1260,7 @@ void parse_sequences(const std::vector<std::string> &files,
 
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
-            if (files.size() >= config.parallel) {
+            if (files.size() >= get_num_threads()) {
                 auto forward_and_reverse = config.forward_and_reverse;
 
                 // capture all required values by copying to be able
@@ -1443,7 +1443,7 @@ int main(int argc, char *argv[]) {
                         config->canonical,
                         config->count_kmers,
                         suffix,
-                        config->parallel,
+                        get_num_threads(),
                         static_cast<uint64_t>(config->memory_available) << 30,
                         config->verbose
                     );
@@ -1516,7 +1516,7 @@ int main(int argc, char *argv[]) {
                             config->canonical,
                             config->count_kmers ? kBitsPerCount : 0,
                             suffix,
-                            config->parallel,
+                            get_num_threads(),
                             static_cast<uint64_t>(config->memory_available) << 30,
                             config->verbose
                         )
@@ -1654,7 +1654,7 @@ int main(int argc, char *argv[]) {
                     logger->trace("Detecting all dummy k-mers...");
 
                     timer.reset();
-                    dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(config->parallel, false);
+                    dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(get_num_threads(), false);
 
                     logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
                 }
@@ -1836,9 +1836,9 @@ int main(int argc, char *argv[]) {
                 anno_graph->get_annotation().serialize(config->outfbase);
 
             } else {
-                size_t num_threads = config->parallel;
+                size_t num_threads = get_num_threads();
                 // annotate multiple columns in parallel, each in a single thread
-                config->parallel = 1;
+                set_num_threads(1);
 
                 #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
                 for (size_t i = 0; i < files.size(); ++i) {
@@ -1884,7 +1884,7 @@ int main(int argc, char *argv[]) {
             // load graph
             AnnotatedDBG anno_graph(graph_temp,
                                     std::move(annotation_temp),
-                                    config->parallel,
+                                    get_num_threads(),
                                     config->fast);
 
             if (!anno_graph.check_compatibility()) {
@@ -1956,7 +1956,7 @@ int main(int argc, char *argv[]) {
             auto graph = load_critical_dbg(config->infbase);
             auto anno_graph = initialize_annotated_dbg(graph, *config);
 
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
 
             Timer timer;
 
@@ -1987,7 +1987,7 @@ int main(int argc, char *argv[]) {
                             );
                         },
                         config->count_labels ? 0 : config->discovery_fraction,
-                        config->parallel
+                        get_num_threads()
                     );
 
                     graph_to_query = query_graph.get();
@@ -2043,7 +2043,7 @@ int main(int argc, char *argv[]) {
             if (config->align_sequences && !config->fast)
                 aligner.reset(build_aligner(*graph, *config).release());
 
-            const size_t num_threads = std::max(1u, config->parallel);
+            const size_t num_threads = std::max(1u, get_num_threads());
 
             logger->info("Initializing tcp service with {} threads, listening port {}",
                          num_threads, config->port);
@@ -2066,7 +2066,7 @@ int main(int argc, char *argv[]) {
                 );
 
                 std::vector<std::thread> workers;
-                for (size_t i = 0; i < std::max(1u, config->parallel); ++i) {
+                for (size_t i = 0; i < std::max(1u, get_num_threads()); ++i) {
                     workers.emplace_back([&io_context]() { io_context.run(); });
                 }
                 for (auto &thread : workers) {
@@ -2143,7 +2143,7 @@ int main(int argc, char *argv[]) {
                                 "Traverse source dummy edges,"
                                 " remove redundant ones, and mark"
                                 " those that cannot be removed.");
-                        dbg_succ->mask_dummy_kmers(config->parallel, true);
+                        dbg_succ->mask_dummy_kmers(get_num_threads(), true);
                     }
                     graph = std::move(dbg_succ);
                     break;
@@ -2223,7 +2223,7 @@ int main(int argc, char *argv[]) {
 
                     dbg_graphs.at(i).reset();
                 }
-            } else if (config->parallel > 1 || config->parts_total > 1) {
+            } else if (get_num_threads() > 1 || config->parts_total > 1) {
                 logger->info("Start merging blocks");
                 timer.reset();
 
@@ -2231,7 +2231,7 @@ int main(int argc, char *argv[]) {
                     graphs,
                     config->part_idx,
                     config->parts_total,
-                    config->parallel,
+                    get_num_threads(),
                     config->num_bins_per_thread,
                     config->verbose
                 );
@@ -2435,10 +2435,10 @@ int main(int argc, char *argv[]) {
                     [](const auto &first, const auto &second) {
                         return first.first < second.first;
                     },
-                    config->parallel
+                    get_num_threads()
                 );
 
-                #pragma omp parallel for num_threads(config->parallel)
+                #pragma omp parallel for num_threads(get_num_threads())
                 for (size_t i = 1; i < config->count_slice_quantiles.size(); ++i) {
                     // extract sequences for k-mer counts bin |i|
                     assert(config->count_slice_quantiles[i - 1] < config->count_slice_quantiles[i]);
@@ -2493,7 +2493,7 @@ int main(int argc, char *argv[]) {
 
                     print_boss_stats(boss_graph,
                                      config->count_dummy,
-                                     config->parallel,
+                                     get_num_threads(),
                                      config->verbose);
 
                     if (config->print_graph_internal_repr) {
@@ -2757,7 +2757,7 @@ int main(int argc, char *argv[]) {
                         if (config->fast) {
                             annotate::RowCompressed<> row_annotator(0);
                             annotator->convert_to_row_annotator(&row_annotator,
-                                                                config->parallel);
+                                                                get_num_threads());
                             annotator.reset();
 
                             logger->trace("Annotation converted in {} sec", timer.elapsed());
@@ -2779,12 +2779,12 @@ int main(int argc, char *argv[]) {
                             ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
                                 std::move(*annotator),
                                 config->parallel_nodes,
-                                config->parallel)
+                                get_num_threads())
                             : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
                                 std::move(*annotator),
                                 config->arity_brwt,
                                 config->parallel_nodes,
-                                config->parallel);
+                                get_num_threads());
 
                         annotator.reset();
                         logger->trace("Annotation converted  in {} sec", timer.elapsed());
@@ -2889,7 +2889,7 @@ int main(int argc, char *argv[]) {
                 timer.reset();
 
                 // remove redundant dummy edges and mark all other dummy edges
-                dbg_succ->mask_dummy_kmers(config->parallel, true);
+                dbg_succ->mask_dummy_kmers(get_num_threads(), true);
 
                 logger->trace("... traversal done in {} sec", timer.elapsed());
                 timer.reset();
@@ -3007,7 +3007,7 @@ int main(int argc, char *argv[]) {
 
             annotate::relax_BRWT<annotate::BRWTCompressed<>>(annotator.get(),
                                                              config->relax_arity_brwt,
-                                                             config->parallel);
+                                                             get_num_threads());
 
             annotator->serialize(config->outfbase);
             logger->trace("BRWT relaxation done in {} sec", timer.elapsed());
@@ -3026,7 +3026,7 @@ int main(int argc, char *argv[]) {
                 dbg->reset_mask();
 
             Timer timer;
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
             std::mutex print_mutex;
 
             if (config->map_sequences) {
@@ -3216,7 +3216,7 @@ int main(int argc, char *argv[]) {
 
             std::sort(config->label_filter.begin(), config->label_filter.end());
 
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
             std::mutex print_label_mutex;
             std::atomic_uint64_t num_calls = 0;
 

@@ -125,8 +125,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
-            parallel = atoi(get_value(i++));
-            set_num_threads(parallel);
+            set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -320,7 +319,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (parallel_nodes == static_cast<unsigned int>(-1))
-        parallel_nodes = parallel;
+        parallel_nodes = get_num_threads();
 
     if (identity == TRANSFORM && to_fasta)
         identity = ASSEMBLE;
