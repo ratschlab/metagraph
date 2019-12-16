@@ -567,16 +567,13 @@ void ColumnCompressed<Label>
         return;
     }
 
-    ThreadPool thread_pool(num_threads);
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
-        thread_pool.enqueue(
-            [this](auto... args) { this->add_labels(args...); },
-            i, std::min(i + kNumRowsInBlock, num_rows_),
-            annotator,
-            &progress_bar
-        );
+        this->add_labels(i,
+                         std::min(i + kNumRowsInBlock, num_rows_),
+                         annotator,
+                         &progress_bar);
     }
-    thread_pool.join();
 }
 
 template <typename Label>
