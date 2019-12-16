@@ -107,8 +107,12 @@ template <typename Label>
 void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
                                          const VLabels &labels) {
     for (const auto &label : labels) {
+        const auto j = label_encoder_.insert_and_encode(label);
+        auto &uncompressed_column = decompress(j);
+
         for (Index i : indices) {
-            add_label(i, label);
+            assert(i < num_rows_);
+            uncompressed_column.set(i, 1);
         }
     }
 }
