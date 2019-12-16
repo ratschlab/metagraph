@@ -186,7 +186,7 @@ void annotate_data(const std::vector<std::string> &files,
                     labels.insert(labels.end(),
                                   variant_labels.begin(), variant_labels.end());
 
-                    anno_graph->annotate_sequence(seq, labels);
+                    anno_graph->annotate_sequence(std::move(seq), labels);
 
                     total_seqs += 1;
 

@@ -34,6 +34,7 @@ void AnnotatedDBG::insert_zero_rows(Annotator *annotator,
 void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
                                                  const std::vector<std::string> &labels) {
     std::vector<uint64_t> indices;
+    indices.reserve(sequence.size());
 
     graph_->map_to_nodes(sequence, [&](uint64_t i) {
         if (i > 0)
@@ -42,6 +43,10 @@ void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
 
     if (!indices.size())
         return;
+
+    // sort to reduce cache misses
+    std::sort(indices.begin(), indices.end());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
 
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -56,15 +61,15 @@ void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
     annotator_->add_labels(indices, labels);
 }
 
-void AnnotatedDBG::annotate_sequence(const std::string &sequence,
+void AnnotatedDBG::annotate_sequence(std::string&& sequence,
                                      const std::vector<std::string> &labels) {
     assert(check_compatibility());
 
     thread_pool_.enqueue(
-        [this](auto... args) {
+        [this](const auto&... args) {
             this->annotate_sequence_thread_safe(args...);
         },
-        sequence, labels
+        std::move(sequence), labels
     );
 }
 
