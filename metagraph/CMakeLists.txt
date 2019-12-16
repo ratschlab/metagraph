@@ -545,7 +545,7 @@ target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TE
 #-------------------
 # Tests
 #-------------------
-find_package (Python3 3.4 REQUIRED COMPONENTS Interpreter)
+find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
 
 # --- integration tests ---
 add_custom_target(check
