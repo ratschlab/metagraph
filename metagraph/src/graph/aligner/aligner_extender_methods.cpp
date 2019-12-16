@@ -36,10 +36,7 @@ get_outgoing_columns(const DeBruijnGraph &graph,
         cur_node,
         [&](auto next_node, char c) {
             auto find = dp_table.find(next_node);
-            if (find != dp_table.end()) {
-                // if the entry was found, correct the stored character
-                find->second.last_char = c;
-            } else {
+            if (find == dp_table.end()) {
                 find = dp_table.emplace(
                     next_node,
                     Column { std::vector<score_t>(size, min_cell_score),
