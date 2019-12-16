@@ -89,7 +89,7 @@ Config::Config(int argc, char *argv[]) {
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
-            verbose = true;
+            utils::set_verbose(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--print-col-names")) {
@@ -333,8 +333,6 @@ Config::Config(int argc, char *argv[]) {
                 && !kmc_file_set.insert(utils::remove_suffix(*it, ".kmc_pre", ".kmc_suf")).second)
             fname.erase(it--);
     }
-
-    utils::set_verbose(verbose);
 
     if (!fname.size() && identity != STATS
                       && identity != SERVER_QUERY

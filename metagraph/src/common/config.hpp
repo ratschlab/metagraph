@@ -11,7 +11,6 @@ class Config {
 
     static constexpr auto UNINITIALIZED_STR = "\0";
 
-    bool verbose = false;
     bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
