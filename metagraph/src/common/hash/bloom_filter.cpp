@@ -85,16 +85,20 @@ void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
     // used to select bit
     const __m128i andmask = _mm_setr_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0x3F, 0x3F);
 
+    const __m128i ones = _mm_set1_epi64x(1);
+
     const auto size = filter_.size();
 
     uint64_t indices[4] __attribute__ ((aligned (32)));
-    uint32_t ht[4] __attribute__ ((aligned (16)));
+    uint32_t ht[2] __attribute__ ((aligned (8)));
+    uint64_t updated_block[2] __attribute__ ((aligned (16)));
     uint32_t *hh;
     uint64_t *block;
     uint32_t offset;
 
     __m256i block_indices;
     __m128i hashes, mult;
+    __m64 *harray = (__m64*)&hashes;
 
     for (; hs + 4 <= end; hs += 4) {
         // compute offsets
@@ -113,7 +117,9 @@ void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
 
         for (size_t j = 0; j < 4; ++j) {
             uint32_t k = 0;
+
             block = filter_.data() + indices[j];
+            _mm_prefetch(block, _MM_HINT_T0);
 
             // hash functions in pairs
             for (; k + 2 <= num_hash_functions_; k += 2) {
@@ -131,14 +137,18 @@ void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
                 // block[hash / 64] |= 1llu << (hash % 64)
                 hashes = _mm_srlv_epi32(hashes, shift);
                 hashes = _mm_and_si128(hashes, andmask);
+
+                _mm_store_si128(
+                    (__m128i*)updated_block,
+                    _mm_sllv_epi64(ones, _mm_cvtepi32_epi64(_mm_set1_epi64(harray[1])))
+                );
                 _mm_store_si128((__m128i*)ht, hashes);
 
                 assert(ht[0] < 8);
                 assert(ht[1] < 8);
-                assert(ht[2] < 64);
-                assert(ht[3] < 64);
-                block[ht[0]] |= 1llu << ht[2];
-                block[ht[1]] |= 1llu << ht[3];
+
+                block[ht[0]] |= updated_block[0];
+                block[ht[1]] |= updated_block[1];
             }
 
             // if num_hash_functions is odd, add the last one
@@ -178,17 +188,19 @@ sdsl::bit_vector BloomFilter
     // used to select bit
     const __m128i andmask = _mm_setr_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0x3F, 0x3F);
 
+    const __m128i ones = _mm_set1_epi64x(1);
+
     const auto size = filter_.size();
 
     uint64_t hs[4] __attribute__ ((aligned (32)));
     uint64_t indices[4] __attribute__ ((aligned (32)));
-    uint32_t ht[4] __attribute__ ((aligned (16)));
     uint32_t *hh;
     const uint64_t *block;
     uint32_t offset;
 
     __m256i block_indices;
     __m128i hashes, mult;
+    __m64 *harray = (__m64*)&hashes;
 
     for (; i + 4 <= num_elements; i += 4) {
         // copy hashes
@@ -214,7 +226,9 @@ sdsl::bit_vector BloomFilter
         for (size_t j = 0; j < 4; ++j) {
             bool found = true;
             uint32_t k = 0;
+
             block = filter_.data() + indices[j];
+            _mm_prefetch(block, _MM_HINT_T0);
 
             // hash functions in pairs
             for (; found && k + 2 <= num_hash_functions_; k += 2) {
@@ -232,14 +246,13 @@ sdsl::bit_vector BloomFilter
                 // found &= bool(block[hash / 64] & (1llu << (hash % 64)))
                 hashes = _mm_srlv_epi32(hashes, shift);
                 hashes = _mm_and_si128(hashes, andmask);
-                _mm_store_si128((__m128i*)ht, hashes);
-
-                assert(ht[0] < 8);
-                assert(ht[1] < 8);
-                assert(ht[2] < 64);
-                assert(ht[3] < 64);
-                found &= (block[ht[0]] & (1llu << ht[2]))
-                    && (block[ht[1]] & (1llu << ht[3]));
+                found &= _mm_testc_si128(
+                    _mm_srlv_epi64(
+                        _mm_i32gather_epi64((long long int*)block, hashes, 8),
+                        _mm_cvtepi32_epi64(_mm_set1_epi64(harray[1]))
+                    ),
+                    ones
+                );
             }
 
             // if num_hash_functions is odd, check the last one
