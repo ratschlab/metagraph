@@ -482,7 +482,7 @@ bitmap_dyn& ColumnCompressed<Label>::decompress(size_t j) {
         if (j == bitmatrix_.size())
             bitmatrix_.emplace_back();
 
-        auto *vector = new bitmap_adaptive(num_rows_, 0);
+        auto *vector = new bitmap_vector(num_rows_, 0);
 
         if (bitmatrix_[j].get())
             *vector |= *bitmatrix_[j];
