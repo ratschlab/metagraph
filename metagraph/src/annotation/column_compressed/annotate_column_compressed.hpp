@@ -100,7 +100,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
   private:
     void set(Index i, size_t j, bool value);
-    bool is_set(Index i, size_t j) const;
 
     void add_labels(uint64_t begin, uint64_t end,
                     RowCompressed<Label> *annotator,
