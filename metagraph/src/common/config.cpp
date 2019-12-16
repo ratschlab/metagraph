@@ -111,7 +111,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--anno-filename")) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
-            fasta_anno = true;
+            annotate_sequence_headers = true;
         } else if (!strcmp(argv[i], "--header-comment-delim")) {
             fasta_anno_comment_delim = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--anno-label")) {
@@ -426,7 +426,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (identity == ANNOTATE
-            && !filename_anno && !fasta_anno && !anno_labels.size()) {
+            && !filename_anno && !annotate_sequence_headers && !anno_labels.size()) {
         std::cerr << "Error: No annotation to add" << std::endl;
         print_usage_and_exit = true;
     }

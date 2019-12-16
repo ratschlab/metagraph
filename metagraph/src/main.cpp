@@ -156,7 +156,7 @@ void annotate_data(const std::vector<std::string> &files,
                    size_t min_count,
                    size_t max_count,
                    bool filename_anno,
-                   bool fasta_anno,
+                   bool annotate_sequence_headers,
                    const std::string &fasta_anno_comment_delim,
                    const std::string &fasta_header_delimiter,
                    const std::vector<std::string> &anno_labels) {
@@ -169,38 +169,39 @@ void annotate_data(const std::vector<std::string> &files,
         Timer data_reading_timer;
 
         logger->trace("\nParsing {}", file);
-        // read files
+
+        std::vector<std::string> labels = anno_labels;
+        if (filename_anno) {
+            labels.push_back(file);
+        }
+        // remember the number of base labels to remove those unique to each sequence quickly
+        const size_t num_base_labels = labels.size();
+
         if (utils::get_filetype(file) == "VCF") {
             read_vcf_file_with_annotations_critical(
                 file,
                 ref_sequence_path,
                 dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k(),
                 [&](auto&& seq, const auto &variant_labels) {
-                    std::vector<std::string> labels(variant_labels.begin(),
-                                                    variant_labels.end());
-
-                    if (filename_anno)
-                        labels.push_back(file);
-
-                    for (const auto &label : anno_labels) {
-                        labels.push_back(label);
-                    }
+                    labels.insert(labels.end(),
+                                  variant_labels.begin(), variant_labels.end());
 
                     anno_graph->annotate_sequence(seq, labels);
+
+                    total_seqs += 1;
+
+                    if (logger->level() <= spdlog::level::level_enum::trace
+                                                    && total_seqs % 10000 == 0) {
+                        logger->trace(
+                            "processed {} variants, last was annotated as <{}>, {} sec",
+                            total_seqs, fmt::join(labels, "><"), timer.elapsed());
+                    }
+
+                    labels.resize(num_base_labels);
                 },
                 forward_and_reverse
             );
         } else if (utils::get_filetype(file) == "KMC") {
-            std::vector<std::string> labels;
-
-            if (filename_anno) {
-                labels.push_back(file);
-            }
-
-            for (const auto &label : anno_labels) {
-                labels.push_back(label);
-            }
-
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence) {
@@ -221,28 +222,21 @@ void annotate_data(const std::vector<std::string> &files,
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
-            read_fasta_file_critical(file,
+            read_fasta_file_critical(
+                file,
                 [&](kseq_t *read_stream) {
-                    std::vector<std::string> labels;
-
-                    if (fasta_anno) {
-                        labels = utils::split_string(
-                            fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                                && read_stream->comment.l
-                                    ? utils::join_strings(
-                                        { read_stream->name.s, read_stream->comment.s },
-                                        fasta_anno_comment_delim,
-                                        true)
-                                    : read_stream->name.s,
-                            fasta_header_delimiter
-                        );
-                    }
-                    if (filename_anno) {
-                        labels.push_back(file);
-                    }
-
-                    for (const auto &label : anno_labels) {
-                        labels.push_back(label);
+                    // add sequence header to labels
+                    if (annotate_sequence_headers) {
+                        for (const auto &label
+                                : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                                                        ? utils::join_strings(
+                                                            { read_stream->name.s, read_stream->comment.s },
+                                                            fasta_anno_comment_delim,
+                                                            true)
+                                                        : read_stream->name.s,
+                                                      fasta_header_delimiter)) {
+                            labels.push_back(label);
+                        }
                     }
 
                     anno_graph->annotate_sequence(read_stream->seq.s, labels);
@@ -255,6 +249,8 @@ void annotate_data(const std::vector<std::string> &files,
                             "processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
                             total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                     }
+
+                    labels.resize(num_base_labels);
                 },
                 forward_and_reverse
             );
@@ -1797,7 +1793,7 @@ int main(int argc, char *argv[]) {
                               config->min_count,
                               config->max_count,
                               config->filename_anno,
-                              config->fasta_anno,
+                              config->annotate_sequence_headers,
                               config->fasta_anno_comment_delim,
                               config->fasta_header_delimiter,
                               config->anno_labels);
@@ -1805,9 +1801,9 @@ int main(int argc, char *argv[]) {
                 anno_graph->get_annotation().serialize(config->outfbase);
 
             } else {
-                size_t num_threads = get_num_threads();
                 // |config->separately| is true
                 // annotate multiple columns in parallel, each in a single thread
+                size_t num_threads = get_num_threads();
                 set_num_threads(1);
 
                 #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
@@ -1821,7 +1817,7 @@ int main(int argc, char *argv[]) {
                                   config->min_count,
                                   config->max_count,
                                   config->filename_anno,
-                                  config->fasta_anno,
+                                  config->annotate_sequence_headers,
                                   config->fasta_anno_comment_delim,
                                   config->fasta_header_delimiter,
                                   config->anno_labels);

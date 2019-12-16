@@ -20,7 +20,7 @@ class Config {
     bool dynamic = false;
     bool mark_dummy_kmers = true;
     bool filename_anno = false;
-    bool fasta_anno = false;
+    bool annotate_sequence_headers = false;
     bool to_adj_list = false;
     bool to_fasta = false;
     bool to_gfa = false;
