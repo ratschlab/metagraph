@@ -58,7 +58,7 @@ class KMer {
 
   private:
     static constexpr CharType kFirstCharMask = (1ull << kBitsPerChar) - 1;
-    static inline const WordType kAllSetMask = ~WordType(0ull);
+    static inline const WordType kAllSetMask = ~(WordType(0ull));
     WordType seq_; // kmer sequence
 };
 
