@@ -23,7 +23,7 @@ template <typename NodeType = typename DeBruijnGraph::node_index>
 class ExactSeeder : public Seeder<NodeType> {
   public:
     ExactSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config) {}
+          : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
 
     std::vector<Alignment<NodeType>> operator()(const char *begin, const char *end,
                                                 size_t clipping = 0,
@@ -85,6 +85,7 @@ class MEMSeeder : public Seeder<NodeType> {
             orientation_(false),
             is_mem_terminus_(std::move(is_mem_terminus)) {
         assert(is_mem_terminus_->size() == graph.max_index() + 1);
+        assert(config_.check_config_scores());
     }
 
   private:
@@ -141,11 +142,10 @@ class DefaultColumnExtender : public Extender<NodeType> {
     typedef typename Extender<NodeType>::node_index node_index;
     typedef typename Extender<NodeType>::score_t score_t;
     typedef typename ::DPTable<NodeType> DPTable;
-    typedef typename DPTable::Step Step;
     typedef typename DPTable::Column Column;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config) {}
+          : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
 
     std::vector<DBGAlignment>
     operator()(const DBGAlignment &path,
