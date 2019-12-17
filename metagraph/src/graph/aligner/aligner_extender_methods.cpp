@@ -141,18 +141,18 @@ inline void compute_match_scores(const char *align_begin,
 }
 
 #ifdef __AVX2__
-inline void compute_match_delete_updates_avx(size_t &i,
-                                             size_t length,
-                                             int64_t prev_node,
-                                             int32_t gap_opening_penalty,
-                                             int32_t gap_extension_penalty,
-                                             int32_t *&update_scores,
-                                             long long int *&update_prevs,
-                                             int32_t *&update_ops,
-                                             const int32_t *&incoming_scores,
-                                             const int32_t *&incoming_ops,
-                                             const int8_t *&char_scores,
-                                             const int32_t *&match_ops) {
+inline void compute_match_delete_updates_avx2(size_t &i,
+                                              size_t length,
+                                              int64_t prev_node,
+                                              int32_t gap_opening_penalty,
+                                              int32_t gap_extension_penalty,
+                                              int32_t *&update_scores,
+                                              long long int *&update_prevs,
+                                              int32_t *&update_ops,
+                                              const int32_t *&incoming_scores,
+                                              const int32_t *&incoming_ops,
+                                              const int8_t *&char_scores,
+                                              const int32_t *&match_ops) {
     __m256i prev_packed = _mm256_set1_epi64x(prev_node);
     __m256i del_packed = _mm256_set1_epi32(Cigar::Operator::DELETION);
     __m256i gap_open_packed = _mm256_set1_epi32(gap_opening_penalty);
@@ -262,7 +262,7 @@ inline void compute_match_delete_updates(const DBGAlignerConfig &config,
     static_assert(std::is_same<score_t, int32_t>::value);
 
     // update 8 scores at a time
-    compute_match_delete_updates_avx(
+    compute_match_delete_updates_avx2(
         i,
         length,
         prev_node,
