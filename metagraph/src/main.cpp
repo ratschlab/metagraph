@@ -186,7 +186,7 @@ void annotate_data(const std::vector<std::string> &files,
                     labels.insert(labels.end(),
                                   variant_labels.begin(), variant_labels.end());
 
-                    anno_graph->annotate_sequence(seq, labels);
+                    anno_graph->annotate_sequence(std::move(seq), labels);
 
                     total_seqs += 1;
 
@@ -1802,9 +1802,13 @@ int main(int argc, char *argv[]) {
 
             } else {
                 // |config->separately| is true
-                // annotate multiple columns in parallel, each in a single thread
-                size_t num_threads = get_num_threads();
-                set_num_threads(1);
+
+                size_t num_threads = 1;
+                if (!config->files_sequentially) {
+                    // annotate multiple files in parallel, each in a single thread
+                    num_threads = get_num_threads();
+                    set_num_threads(1);
+                }
 
                 #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
                 for (size_t i = 0; i < files.size(); ++i) {

@@ -210,6 +210,8 @@ Config::Config(int argc, char *argv[]) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
+        } else if (!strcmp(argv[i], "--sequentially")) {
+            files_sequentially = true;
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -870,6 +872,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file [<GRAPH>]\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
+            fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");

@@ -76,7 +76,7 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
         EXPECT_FALSE(anno_graph.label_exists("Label"));
         EXPECT_FALSE(anno_graph.label_exists("NotLabel"));
 
-        anno_graph.annotate_sequence(sequence, { "Label" });
+        anno_graph.annotate_sequence(std::string(sequence), { "Label" });
 
         EXPECT_EQ(std::vector<std::string> { "Label" },
                   anno_graph.get_labels(sequence, 1));
@@ -112,7 +112,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         EXPECT_FALSE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -133,7 +133,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
 
         check_labels(anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
@@ -178,7 +178,7 @@ TEST(AnnotatedDBG, Transform) {
         EXPECT_FALSE(anno_graph->label_exists("Second"));
         EXPECT_FALSE(anno_graph->label_exists("Third"));
 
-        anno_graph->annotate_sequence(seq_first, { "First" });
+        anno_graph->annotate_sequence(std::string(seq_first), { "First" });
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph->get_labels(seq_first, 1));
@@ -199,7 +199,7 @@ TEST(AnnotatedDBG, Transform) {
 
         check_labels(*anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
-        anno_graph->annotate_sequence(seq_second, { "Second" });
+        anno_graph->annotate_sequence(std::string(seq_second), { "Second" });
 
         anno_graph = std::make_unique<AnnotatedDBG>(
             std::move(anno_graph->graph_),
@@ -260,7 +260,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -279,14 +279,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_TRUE(anno_graph.label_exists("Third"));
@@ -364,7 +364,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -384,8 +384,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -470,7 +470,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_FALSE(anno_graph.label_exists("Second"));
@@ -489,14 +489,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
@@ -583,7 +583,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -603,8 +603,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -687,7 +687,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_FALSE(anno_graph.label_exists("Second"));
@@ -710,14 +710,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
@@ -799,7 +799,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -823,8 +823,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));

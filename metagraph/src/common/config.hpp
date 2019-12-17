@@ -40,6 +40,7 @@ class Config {
     bool canonical_mode = false;
     bool greedy_brwt = false;
     bool separately = false;
+    bool files_sequentially = false;
     bool call_bubbles = false;
     bool call_breakpoints = false;
     bool map_sequences = false;

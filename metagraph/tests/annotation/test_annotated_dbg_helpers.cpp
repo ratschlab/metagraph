@@ -22,7 +22,7 @@ build_anno_graph(uint64_t k,
     );
 
     for (size_t i = 0; i < sequences.size(); ++i) {
-        anno_graph->annotate_sequence(sequences[i], { labels[i] });
+        anno_graph->annotate_sequence(std::string(sequences[i]), { labels[i] });
     }
 
     if (!std::is_same<Annotation, annotate::ColumnCompressed<>>::value)
