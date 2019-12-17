@@ -24,8 +24,6 @@ BloomFilter::BloomFilter(size_t filter_size,
                     std::min(max_num_hash_functions,
                              optim_h(filter_size, expected_num_elements))) {}
 
-// TODO: rewrite some of these with SIMD instructions
-
 void BloomFilter::insert(uint64_t hash) {
     const auto size = filter_.size();
 
