@@ -107,8 +107,12 @@ template <typename Label>
 void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
                                          const VLabels &labels) {
     for (const auto &label : labels) {
+        const auto j = label_encoder_.insert_and_encode(label);
+        auto &uncompressed_column = decompress(j);
+
         for (Index i : indices) {
-            add_label(i, label);
+            assert(i < num_rows_);
+            uncompressed_column.set(i, 1);
         }
     }
 }
@@ -482,7 +486,7 @@ bitmap_dyn& ColumnCompressed<Label>::decompress(size_t j) {
         if (j == bitmatrix_.size())
             bitmatrix_.emplace_back();
 
-        auto *vector = new bitmap_adaptive(num_rows_, 0);
+        auto *vector = new bitmap_vector(num_rows_, 0);
 
         if (bitmatrix_[j].get())
             *vector |= *bitmatrix_[j];
@@ -567,16 +571,13 @@ void ColumnCompressed<Label>
         return;
     }
 
-    ThreadPool thread_pool(num_threads);
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
-        thread_pool.enqueue(
-            [this](auto... args) { this->add_labels(args...); },
-            i, std::min(i + kNumRowsInBlock, num_rows_),
-            annotator,
-            &progress_bar
-        );
+        this->add_labels(i,
+                         std::min(i + kNumRowsInBlock, num_rows_),
+                         annotator,
+                         &progress_bar);
     }
-    thread_pool.join();
 }
 
 template <typename Label>

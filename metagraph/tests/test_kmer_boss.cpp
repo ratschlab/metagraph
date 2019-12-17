@@ -11,7 +11,6 @@
 
 #include "kmer_boss.hpp"
 #include "kmer_extractor.hpp"
-#include "test_kmer_helpers.hpp"
 
 
 template <typename T>
@@ -156,10 +155,10 @@ TYPED_TEST(KmerBOSS, BitShiftBuild) {
                     long_seq.rbegin() + 3)
     ));
     for (int i = long_seq.length() - 4; i >= 0; --i) {
-        left_shift(&kmer_builtup.seq_, kBitsPerChar);
+        kmer_builtup.seq_ <<= static_cast<uint64_t>(kBitsPerChar);
         kmer_builtup.seq_ |= KmerExtractorBOSS::encode(long_seq[i]);
     }
-    left_shift(&kmer_builtup.seq_, kBitsPerChar);
+    kmer_builtup.seq_ <<= static_cast<uint64_t>(kBitsPerChar);
     kmer_builtup.seq_ |= KmerExtractorBOSS::encode(long_seq[long_seq.length() - 1]);
     std::string dec = kmer_builtup.to_string(long_seq.length(), KmerExtractorBOSS::alphabet);
     ASSERT_EQ(long_seq, dec);
