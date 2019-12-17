@@ -9,6 +9,8 @@
 
 #include <ips4o.hpp>
 
+#include "logger.hpp"
+
 namespace mg {
 namespace common {
 
@@ -27,9 +29,8 @@ class SortedMultiset {
     typedef Container result_type;
 
     SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-                   size_t num_threads = 1,
-                   bool verbose = false)
-      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
+                   size_t num_threads = 1)
+      : num_threads_(num_threads), cleanup_(cleanup) {}
 
     ~SortedMultiset() {}
 
@@ -111,21 +112,14 @@ class SortedMultiset {
 
   private:
     void shrink_data() {
-        if (verbose_) {
-            std::cout << "Allocated capacity exceeded, erase duplicate values..."
-                      << std::flush;
-        }
+        logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
         size_t old_size = data_.size();
         sort_and_merge_duplicates();
         sorted_end_ = data_.size();
 
-        if (verbose_) {
-            std::cout << " done. Size reduced from " << old_size
-                                                     << " to " << data_.size()
-                      << ", " << (data_.size() * sizeof(value_type) >> 20) << "Mb"
-                      << std::endl;
-        }
+        logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
+                      data_.size(), (data_.size() * sizeof(value_type) >> 20));
     }
 
     void sort_and_merge_duplicates() {
@@ -177,7 +171,6 @@ class SortedMultiset {
 
     storage_type data_;
     size_t num_threads_;
-    bool verbose_;
 
     std::function<void(storage_type*)> cleanup_;
 

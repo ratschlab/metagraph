@@ -326,10 +326,12 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         if (idx_ == parent_->first_) { // underflow
             throw std::runtime_error("Attempting to move before the first element.");
         }
-        if (idx_ == parent_->buffer_size_) {
+        if (idx_ == parent_->buffer_size_) { // past the end iterator
             idx_ = parent_->last_;
+        } else if (idx_ > 0) {
+            idx_--;
         } else {
-            (idx_ > 0) ? idx_-- : idx_ = parent_->queue_.size() - 1;
+            idx_ = parent_->queue_.size() - 1;
         }
         return *this;
     }
@@ -367,7 +369,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
   private:
     ChunkedWaitQueue *parent_;
     size_type idx_ = 0;
-    std::stack<size_type> saved_indexes_;
+    std::stack<size_type, std::vector<size_type>> saved_indexes_;
 
   private:
     size_type index_dist() {

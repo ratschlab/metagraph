@@ -20,7 +20,7 @@ class Config;
 
 class Cigar {
   public:
-    enum Operator {
+    enum Operator : int8_t {
         CLIPPED,
         MATCH,
         MISMATCH,

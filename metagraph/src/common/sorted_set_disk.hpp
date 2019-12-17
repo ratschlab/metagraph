@@ -12,7 +12,6 @@
 #include <cassert>
 #include <fstream> //TODO(ddanciu) - try boost mmapped instead
 #include <future>
-#include <iostream>
 #include <mutex>
 #include <queue>
 #include <shared_mutex>
@@ -65,8 +64,8 @@ class SortedSetDisk {
      */
     SortedSetDisk(
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-            std::function<void(const T&)> on_item_pushed = [](const T&){},
             size_t num_threads = 1,
+            std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t container_size = CONTAINER_SIZE_BYTES,
             size_t merge_queue_size = MERGE_QUEUE_SIZE / sizeof(T),
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
@@ -76,8 +75,9 @@ class SortedSetDisk {
         try {
             try_reserve(container_size / sizeof(T));
         } catch (const std::bad_alloc &exception) {
-            std::cerr << "ERROR: Not enough memory for SortedSetDisk. Requested"
-                      << CONTAINER_SIZE_BYTES << " bytes" << std::endl;
+            logger->error(
+                    "ERROR: Not enough memory for SortedSetDisk. Requested {} bytes",
+                    CONTAINER_SIZE_BYTES);
             exit(EXIT_FAILURE);
         }
     }
@@ -183,7 +183,7 @@ class SortedSetDisk {
         size_t old_size = data_->size();
         sort_and_remove_duplicates(data_, num_threads_);
 
-        logger->trace("...done. Size reduced from {} to {}, {}MB", old_size,
+        logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
                       data_->size(), (data_->size() * sizeof(T) >> 20));
     }
 
@@ -204,11 +204,11 @@ class SortedSetDisk {
         std::string file_name = file_name_for_chunk(chunk_count);
         std::fstream binary_file = std::fstream(file_name, std::ios::out | std::ios::binary);
         if (!binary_file) {
-            std::cerr << "Error creating chunk file " << file_name << std::endl;
+            logger->error("Error: Creating chunk file '{}' failed", file_name);
             std::exit(EXIT_FAILURE);
         }
         if (!binary_file.write((char *)&((*data)[0]), sizeof((*data)[0]) * data->size())) {
-            std::cerr << "Error: Writing to " << file_name << " failed." << std::endl;
+            logger->error("Error: Writing to '{}' failed", file_name);
             std::exit(EXIT_FAILURE);
         }
         binary_file.close();

@@ -16,28 +16,30 @@ namespace common {
 template <typename T>
 class CircularBuffer {
   public:
-    class Iterator;
-    using iterator = Iterator;
+    class ReverseIterator;
+    using reverse_iterator = ReverseIterator;
     explicit CircularBuffer(size_t size)
         : buf_(std::unique_ptr<T[]>(new T[size])), size_(size) {}
 
     void push_back(T item) {
-        buf_[back_] = item;
+        buf_[end_] = item;
 
         if (full_) { // throw away oldest element
             front_ = (front_ + 1) % size_;
         }
 
-        back_ = (back_ + 1) % size_;
+        end_ = (end_ + 1) % size_;
 
-        full_ = back_ == front_;
+        full_ = end_ == front_;
     }
 
     T pop_front() {
+#ifdef DEBUG
         if (empty()) {
-            return T();
+            std::cerr << "Attempting to pop empty buffer." << std::endl;
+            std::exit(EXIT_FAILURE);
         }
-
+#endif
         T val = buf_[front_];
         full_ = false;
         front_ = (front_ + 1) % size_;
@@ -46,11 +48,11 @@ class CircularBuffer {
     }
 
     void reset() {
-        back_ = front_;
+        end_ = front_;
         full_ = false;
     }
 
-    bool empty() const { return (!full_ && (back_ == front_)); }
+    bool empty() const { return (!full_ && (end_ == front_)); }
 
     bool full() const { return full_; }
 
@@ -60,38 +62,38 @@ class CircularBuffer {
         size_t size = size_;
 
         if (!full_) {
-            if (back_ >= front_) {
-                size = back_ - front_;
+            if (end_ >= front_) {
+                size = end_ - front_;
             } else {
-                size = size_ + back_ - front_;
+                size = size_ + end_ - front_;
             }
         }
 
         return size;
     }
 
-    Iterator rbegin() { return Iterator(this, (size_ + back_ - 1) % size_); }
+    ReverseIterator rbegin() { return ReverseIterator(this, (size_ + end_ - 1) % size_); }
 
     friend
     std::ostream& operator<<(std::ostream& o, const CircularBuffer<T> &buf);
 
   private:
     std::unique_ptr<T[]> buf_;
-    size_t back_ = 0;
+    size_t end_ = 0;
     size_t front_ = 0;
     const size_t size_;
     bool full_ = 0;
 };
 
 template <typename T>
-class CircularBuffer<T>::Iterator {
+class CircularBuffer<T>::ReverseIterator {
   public:
-    explicit Iterator(CircularBuffer<T> *parent, size_t idx)
+    explicit ReverseIterator(CircularBuffer<T> *parent, size_t idx)
         : parent_(parent), idx_(idx) {}
 
     T& operator*()  { return parent_->buf_[idx_]; }
 
-    Iterator& operator--() {
+    ReverseIterator & operator++() {
         idx_ = idx_ > 0 ? idx_ - 1 : parent_->size() - 1;
         return *this;
     }

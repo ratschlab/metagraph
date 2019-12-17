@@ -40,7 +40,7 @@ common::SortedSetDisk<T> create_sorted_set_disk() {
     constexpr size_t num_last_elements_cached = 10;
     auto nocleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
     auto on_item_pushed = [](const T &) {};
-    return common::SortedSetDisk<T>(nocleanup, on_item_pushed, thread_count, container_size,
+    return common::SortedSetDisk<T>(nocleanup, thread_count, on_item_pushed, container_size,
                                     merge_queue_size, num_last_elements_cached);
 }
 

@@ -1,13 +1,15 @@
 #ifndef __SORTED_SET_HPP__
 #define __SORTED_SET_HPP__
 
+#include <cassert>
+#include <iostream>
 #include <mutex>
 #include <shared_mutex>
-#include <iostream>
 #include <vector>
-#include <cassert>
 
 #include <ips4o.hpp>
+
+#include "logger.hpp"
 
 namespace mg {
 namespace common {
@@ -23,10 +25,10 @@ class SortedSet {
     typedef Container storage_type;
     typedef Container result_type;
 
-    SortedSet(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-              size_t num_threads = 1,
-              bool verbose = false)
-      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
+    SortedSet(
+            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
+            size_t num_threads = 1)
+        : num_threads_(num_threads), cleanup_(cleanup) {}
 
     ~SortedSet() {}
 
@@ -48,7 +50,7 @@ class SortedSet {
                 try_reserve(data_.size() + data_.size() / 2,
                             data_.size() + batch_size);
             } catch (const std::bad_alloc &exception) {
-                std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
+                logger->error("ERROR: Can't reallocate. Not enough memory");
                 exit(1);
             }
         }
@@ -110,19 +112,14 @@ class SortedSet {
 
   private:
     void shrink_data() {
-        if (verbose_) {
-            std::cout << "Allocated capacity exceeded, erase duplicate values..."
-                      << std::flush;
-        }
+        logger->trace("Allocated capacity exceeded, erase duplicate values...");
 
         size_t old_size = data_.size();
         sort_and_remove_duplicates(&data_, num_threads_);
         sorted_end_ = data_.size();
 
-        if (verbose_) {
-            std::cout << " done. Size reduced from " << old_size << " to " << data_.size()
-                      << ", " << (data_.size() * sizeof(T) >> 20) << "Mb" << std::endl;
-        }
+        logger->trace("Erasing duplicate values done. Size reduced from {} to {}, {}MiB",
+                      old_size, data_.size(), (data_.size() * sizeof(T) >> 20));
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
@@ -141,7 +138,6 @@ class SortedSet {
 
     storage_type data_;
     size_t num_threads_;
-    bool verbose_;
 
     std::function<void(storage_type *)> cleanup_;
 

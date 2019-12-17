@@ -308,8 +308,8 @@ Config::Config(int argc, char *argv[]) {
             taxonomy_nodes = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy-map")) {
             taxonomy_map = std::string(get_value(i++));
-        } else if (!strcmp(argv[i], "--log_level")) {
-            i++; // TODO(ddanciu): migrate to GFlags and remove
+        } else if (!strcmp(argv[i], "--container")) {
+            container = string_to_container(get_value(i++));
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -550,6 +550,16 @@ Config::StateType Config::string_to_state(const std::string &string) {
     }
 }
 
+Config::ContainerType Config::string_to_container(const std::string &string) {
+    if (string == "vector") {
+        return ContainerType::VECTOR;
+    } else if (string == "vector_disk") {
+        return ContainerType::VECTOR_DISK;
+    } else {
+        throw std::runtime_error("Error: unknown k-mer container: " + string);
+    }
+}
+
 std::string Config::annotype_to_string(AnnotationType state) {
     switch (state) {
         case ColumnCompressed:
@@ -704,6 +714,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --container [STR] \tcontainer to use for storing k-mers: vector/vector_disk [vector]\n");
         } break;
         case CLEAN: {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());

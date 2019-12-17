@@ -89,8 +89,8 @@ void initialize_chunk(uint64_t alph_size,
         }
         // set W
         if (it != begin && curW > 0) {
-            for (Iterator prev = it - 1;
-                 KMER::compare_suffix(kmer, get_kmer(*prev), 1); --prev) {
+            for (Iterator prev = it - 1; KMER::compare_suffix(kmer, get_kmer(*prev), 1);
+                 --prev) {
                 if (get_kmer(*prev)[0] == curW) {
                     curW += alph_size;
                     break;

@@ -41,20 +41,7 @@ template <typename KMER,
 using KmerMultset
         = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultiset<KMER, KmerCount, Container>>;
 
-/**
- * What type of data structure to use in the #KmerSet for k-mer storage.
- * Note: for k-mer counting, only VECTOR is supported.
- */
-enum class ExtractorContainer {
-    VECTOR,
-    /**
-     * Uses several vectors that are written to disk and then merged, as defined
-     * in #SortedSetDisk
-     */
-    VECTOR_DISK
-};
 
-constexpr static ExtractorContainer kExtractorContainer = ExtractorContainer::VECTOR_DISK;
 
 const static uint8_t kBitsPerCount = 8;
 
@@ -128,7 +115,7 @@ void recover_source_dummy_nodes(size_t k,
 
         auto node_last_char = kmer[1];
         auto edge_label = kmer[0];
-        // nothing to do if it's not a source dummy kmer
+        // skip if it's not a source dummy kmer
         if (node_last_char || !edge_label)
             continue;
 
@@ -192,10 +179,10 @@ static void remove_redundant_dummy_source(const T &kmer, RecentKmers<T> *buffer)
     if (buffer->size() < 2 || curW == 0) {
         return;
     }
-    using Iterator = typename RecentKmers<T>::iterator;
-    Iterator it = buffer->rbegin();
-    --it;
-    for (; T::compare_suffix(kmer, utils::get_first((*it).kmer), 1); --it) {
+    using ReverseIterator = typename RecentKmers<T>::reverse_iterator;
+    ReverseIterator it = buffer->rbegin();
+    ++it;
+    for (; T::compare_suffix(kmer, utils::get_first((*it).kmer), 1); ++it) {
         const T prev_kmer = utils::get_first((*it).kmer);
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
             (*it).is_removed = true;
@@ -263,7 +250,7 @@ uint8_t write_kmer(size_t k,
 template <typename T>
 void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
-                                size_t, /* num_threads unused */
+                                size_t num_threads,
                                 size_t alphabet_size) {
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name
@@ -298,7 +285,8 @@ void recover_source_dummy_nodes(size_t k,
     std::fstream *dummy_l2 = files_to_merge.back().second;
 
     // this will contain dummy k-mers of prefix length 2
-    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, async_file_writer(*dummy_l2));
+    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads,
+                                                async_file_writer(*dummy_l2));
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.capacity());
 
@@ -307,7 +295,7 @@ void recover_source_dummy_nodes(size_t k,
     // we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
-    common::logger->trace("begin==end is {}", kmers->begin()==kmers->end());
+    common::logger->trace("begin==end is {}", kmers->begin() == kmers->end());
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
@@ -500,7 +488,7 @@ IBOSSChunkConstructor
     if (count_kmers) {
         return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
     } else {
-        switch (kExtractorContainer) {
+        switch (container) {
             case ExtractorContainer::VECTOR:
                 return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
             case ExtractorContainer::VECTOR_DISK:
@@ -508,7 +496,7 @@ IBOSSChunkConstructor
             default:
                 throw std::logic_error(
                         "Unknown extractor container: " +
-                        to_string(static_cast<uint32_t>(kExtractorContainer)));
+                        to_string(static_cast<uint32_t>(container)));
         }
     }
 }

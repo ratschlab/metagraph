@@ -1287,9 +1287,9 @@ std::vector<double> QueryAlignment<NodeType>
     std::transform(alignments_.begin(), alignments_.end(),
                    std::back_inserter(weights),
                    [&](const auto &a) {
-                       return std::exp(a.get_score())
+                       return std::exp(a.get_score()
                            - config.match_score(a.get_sequence().begin(),
-                                                a.get_sequence().end());
+                                                a.get_sequence().end()));
                    });
 
     return weights;

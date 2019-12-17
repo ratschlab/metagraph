@@ -10,7 +10,7 @@
 /**
  * Models a kmer (https://en.wikipedia.org/wiki/K-mer) that is stored in a BOSS table.
  * Just like #KMer, each character in the k-mer uses L bits of the internal representation
- * type G (typically a 64, 128 or 256 bit integer) and characters ares stored in reverse
+ * type G (typically a 64, 128 or 256 bit integer) and characters are stored in reverse
  * order.
  * The  only  difference from #KMer is that #KmerBoss leaves the last character in the
  * least significant bits of G. For example, the k-mer "ACGT" is stored in memory as
@@ -153,7 +153,15 @@ void KMerBOSS<G, L>::to_next(size_t k, CharType new_last, CharType old_last) {
 template <typename G, int L>
 void KMerBOSS<G, L>::to_next(size_t k, CharType new_last) {
     WordType old_last = seq_ & WordType(kFirstCharMask);
-    to_next(k, new_last, old_last);
+    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
+    seq_ = seq_ >> kBitsPerChar;
+    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
+    seq_ += old_last << static_cast<int>(kBitsPerChar * (k - 1));
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
+    seq_ |= kFirstCharMask;
+    // s[7]s[6]s[5]s[4]s[3]s[2]1111
+    seq_ -= kFirstCharMask - new_last;
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
 }
 
 template <typename G, int L>
