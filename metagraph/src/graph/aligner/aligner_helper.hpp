@@ -20,7 +20,7 @@ class Config;
 
 class Cigar {
   public:
-    enum Operator : int8_t {
+    enum Operator : int32_t {
         CLIPPED,
         MATCH,
         MISMATCH,
@@ -107,9 +107,9 @@ class DBGAlignerConfig {
     typedef std::array<int8_t, 128> ScoreMatrixRow;
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
-    DBGAlignerConfig(const ScoreMatrix &score_matrix,
-                     int8_t gap_opening = -3,
-                     int8_t gap_extension = -1);
+    explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
+                              int8_t gap_opening = -3,
+                              int8_t gap_extension = -1);
 
     explicit DBGAlignerConfig(const Config &config);
 
@@ -158,6 +158,8 @@ class DBGAlignerConfig {
     int8_t gap_extension_penalty;
 
     bool forward_and_reverse_complement = false;
+
+    bool check_config_scores() const;
 
     static ScoreMatrix scoring_matrix(const Config &config);
 
@@ -434,19 +436,16 @@ class DPTable {
   public:
     typedef ::score_t score_t;
 
-    struct Step {
-        Cigar::Operator cigar_op;
-        NodeType prev_node;
-    };
-
     struct Column {
         std::vector<score_t> scores;
-        std::vector<Step> steps;
+        std::vector<Cigar::Operator> ops;
+        std::vector<NodeType> prev_nodes;
         char last_char;
         size_t best_pos;
 
         const score_t& best_score() const { return scores.at(best_pos); }
-        const Step& best_step() const { return steps.at(best_pos); }
+        const Cigar::Operator& best_op() const { return ops.at(best_pos); }
+        const NodeType& best_prev_node() const { return prev_nodes.at(best_pos); }
 
         bool operator<(const Column &other) const {
             return best_score() < other.best_score();
