@@ -4,8 +4,6 @@
 #include <iterator>
 #include <cmath>
 
-#include <sdsl/construct.hpp>
-
 #include "algorithms.hpp"
 #include "serialization.hpp"
 
@@ -40,7 +38,7 @@ BinRelWT_sdsl
     delimiters_ = bit_vector_stat(to_sdsl(std::move(delimiters_vec)))
                     .convert_to<bit_vector_rrr<>>();
 
-    construct_im(wt_, std::move(flat));
+    decltype(wt_)(std::move(flat)).swap(wt_);
 }
 
 uint64_t BinRelWT_sdsl::num_columns() const {

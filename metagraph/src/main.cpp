@@ -41,6 +41,7 @@
 #include "taxid_mapper.hpp"
 
 using mg::common::logger;
+using utils::get_verbose;
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -155,11 +156,10 @@ void annotate_data(const std::vector<std::string> &files,
                    size_t min_count,
                    size_t max_count,
                    bool filename_anno,
-                   bool fasta_anno,
+                   bool annotate_sequence_headers,
                    const std::string &fasta_anno_comment_delim,
                    const std::string &fasta_header_delimiter,
-                   const std::vector<std::string> &anno_labels,
-                   bool verbose) {
+                   const std::vector<std::string> &anno_labels) {
     size_t total_seqs = 0;
 
     Timer timer;
@@ -169,53 +169,51 @@ void annotate_data(const std::vector<std::string> &files,
         Timer data_reading_timer;
 
         logger->trace("\nParsing {}", file);
-        // read files
+
+        std::vector<std::string> labels = anno_labels;
+        if (filename_anno) {
+            labels.push_back(file);
+        }
+        // remember the number of base labels to remove those unique to each sequence quickly
+        const size_t num_base_labels = labels.size();
+
         if (utils::get_filetype(file) == "VCF") {
             read_vcf_file_with_annotations_critical(
                 file,
                 ref_sequence_path,
                 dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k(),
                 [&](auto&& seq, const auto &variant_labels) {
-                    std::vector<std::string> labels(variant_labels.begin(),
-                                                    variant_labels.end());
-
-                    if (filename_anno)
-                        labels.push_back(file);
-
-                    for (const auto &label : anno_labels) {
-                        labels.push_back(label);
-                    }
+                    labels.insert(labels.end(),
+                                  variant_labels.begin(), variant_labels.end());
 
                     anno_graph->annotate_sequence(seq, labels);
+
+                    total_seqs += 1;
+
+                    if (logger->level() <= spdlog::level::level_enum::trace
+                                                    && total_seqs % 10000 == 0) {
+                        logger->trace(
+                            "processed {} variants, last was annotated as <{}>, {} sec",
+                            total_seqs, fmt::join(labels, "><"), timer.elapsed());
+                    }
+
+                    labels.resize(num_base_labels);
                 },
                 forward_and_reverse
             );
         } else if (utils::get_filetype(file) == "KMC") {
-            std::vector<std::string> labels;
-
-            if (filename_anno) {
-                labels.push_back(file);
-            }
-
-            for (const auto &label : anno_labels) {
-                labels.push_back(label);
-            }
-
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence) {
                     anno_graph->annotate_sequence(std::move(sequence), labels);
 
                     total_seqs += 1;
-                    if (verbose && total_seqs % 10000 == 0) {
-                        std::stringstream str_labels;
-                        for (const auto &label : labels) {
-                            str_labels << "<" << label << ">";
-                        }
+
+                    if (logger->level() <= spdlog::level::level_enum::trace
+                                                    && total_seqs % 10000 == 0) {
                         logger->trace(
-                                "processed {} sequences, trying to annotate as {}, {} "
-                                "sec",
-                                total_seqs, str_labels.str(), timer.elapsed());
+                            "processed {} sequences, trying to annotate as <{}>, {} sec",
+                            total_seqs, fmt::join(labels, "><"), timer.elapsed());
                     }
                 },
                 !dynamic_cast<const DeBruijnGraph&>(anno_graph->get_graph()).is_canonical_mode(),
@@ -224,44 +222,35 @@ void annotate_data(const std::vector<std::string> &files,
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
-            read_fasta_file_critical(file,
+            read_fasta_file_critical(
+                file,
                 [&](kseq_t *read_stream) {
-                    std::vector<std::string> labels;
-
-                    if (fasta_anno) {
-                        labels = utils::split_string(
-                            fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                                && read_stream->comment.l
-                                    ? utils::join_strings(
-                                        { read_stream->name.s, read_stream->comment.s },
-                                        fasta_anno_comment_delim,
-                                        true)
-                                    : read_stream->name.s,
-                            fasta_header_delimiter
-                        );
-                    }
-                    if (filename_anno) {
-                        labels.push_back(file);
-                    }
-
-                    for (const auto &label : anno_labels) {
-                        labels.push_back(label);
+                    // add sequence header to labels
+                    if (annotate_sequence_headers) {
+                        for (const auto &label
+                                : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                                                        ? utils::join_strings(
+                                                            { read_stream->name.s, read_stream->comment.s },
+                                                            fasta_anno_comment_delim,
+                                                            true)
+                                                        : read_stream->name.s,
+                                                      fasta_header_delimiter)) {
+                            labels.push_back(label);
+                        }
                     }
 
                     anno_graph->annotate_sequence(read_stream->seq.s, labels);
 
                     total_seqs += 1;
-                    if (verbose && total_seqs % 10000 == 0) {
-                        std::stringstream str_labels;
-                        for (const auto &label : labels) {
-                            str_labels << "<" << label << ">";
-                        }
+
+                    if (logger->level() <= spdlog::level::level_enum::trace
+                                                    && total_seqs % 10000 == 0) {
                         logger->trace(
-                                "processed {} sequences, last was {}, trying to annotate "
-                                "as {}, {} sec",
-                                total_seqs, read_stream->name.s, str_labels.str(),
-                                timer.elapsed());
+                            "processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                            total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                     }
+
+                    labels.resize(num_base_labels);
                 },
                 forward_and_reverse
             );
@@ -283,8 +272,7 @@ void annotate_data(const std::vector<std::string> &files,
 void annotate_coordinates(const std::vector<std::string> &files,
                           AnnotatedDBG *anno_graph,
                           bool forward_and_reverse,
-                          size_t genome_bin_size,
-                          bool verbose) {
+                          size_t genome_bin_size) {
     size_t total_seqs = 0;
 
     Timer timer;
@@ -331,16 +319,14 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     }
 
                     total_seqs += 1;
-                    if (verbose && total_seqs % 10000 == 0) {
-                        std::stringstream str_labels;
-                        for (const auto &label : labels) {
-                            str_labels << "<" << label << ">";
-                        }
+
+                    if (logger->level() <= spdlog::level::level_enum::trace
+                                                    && total_seqs % 10000 == 0) {
                         logger->trace(
-                                "processed {} sequences, last was {}, "
-                                "trying to annotate as {}, {} sec",
-                                total_seqs, read_stream->name.s, str_labels.str(),
-                                timer.elapsed());
+                            "processed {} sequences, last was {}, "
+                            "trying to annotate as <{}>, {} sec",
+                            total_seqs, read_stream->name.s, fmt::join(labels, "><"),
+                            timer.elapsed());
                     }
 
                     // If we read both strands, the next sequence is
@@ -447,7 +433,7 @@ std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_typ
         case Config::ColumnCompressed: {
             annotation.reset(
                 new annotate::ColumnCompressed<>(
-                    num_rows, kNumCachedColumns, config.verbose
+                    num_rows, kNumCachedColumns, get_verbose()
                 )
             );
             break;
@@ -502,7 +488,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     // load graph
     auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph),
                                                      std::move(annotation_temp),
-                                                     config.parallel);
+                                                     get_num_threads());
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Error: graph and annotation are not compatible.");
@@ -550,19 +536,8 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
         config->label_mask_out.end()
     );
 
-    if (config->verbose) {
-        std::stringstream out_str;
-        for (const auto &in : config->label_mask_in) {
-            out_str << " " << in;
-        }
-        logger->trace("Masked in:{}", out_str.str());
-
-        out_str = std::stringstream();
-        for (const auto &out : config->label_mask_out) {
-            out_str << " " << out;
-        }
-        logger->trace("Masked out:{}", out_str.str());
-    }
+    logger->trace("Masked in: {}", fmt::join(config->label_mask_in, " "));
+    logger->trace("Masked out: {}", fmt::join(config->label_mask_out, " "));
 
     if (!config->filter_by_kmer) {
         return std::make_unique<MaskedDeBruijnGraph>(
@@ -719,7 +694,7 @@ void map_sequences_in_file(const std::string &file,
     Timer data_reading_timer;
 
     read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-        if (config.verbose)
+        if (get_verbose())
             std::cout << "Sequence: " << read_stream->seq.s << "\n";
 
         if (config.query_presence
@@ -838,9 +813,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(full_dbg);
     if (kPrefilterWithBloom && dbg_succ) {
-        if (utils::get_verbose() && dbg_succ->get_bloom_filter()) {
+        if (dbg_succ->get_bloom_filter())
             logger->trace("Indexing k-mers pre-filtered with Bloom filter");
-        }
+
         call_sequences([&graph,&dbg_succ](const std::string &sequence) {
             graph->add_sequence(sequence, get_missing_kmer_skipper(
                 dbg_succ->get_bloom_filter(),
@@ -854,10 +829,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         });
     }
 
-    if (utils::get_verbose()) {
-        logger->trace("Query graph --- k-mers indexed: {} sec", timer.elapsed());
-        timer.reset();
-    }
+    logger->trace("Query graph --- k-mers indexed: {} sec", timer.elapsed());
+    timer.reset();
 
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
@@ -865,10 +838,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         [&](const std::string &contig, const auto &path) { contigs.emplace_back(contig, path); },
         full_dbg->is_canonical_mode()
     );
-    if (utils::get_verbose()) {
-        logger->trace("Query graph --- contigs extracted: {} sec", timer.elapsed());
-        timer.reset();
-    }
+
+    logger->trace("Query graph --- contigs extracted: {} sec", timer.elapsed());
+    timer.reset();
 
     if (full_dbg->is_canonical_mode()) {
         // construct graph storing all distinct k-mers in query
@@ -877,11 +849,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         for (const auto &pair : contigs) {
             graph->add_sequence(pair.first);
         }
-        if (utils::get_verbose()) {
-            logger->trace("Query graph --- reindexed k-mers in canonical mode: {} sec",
-                          timer.elapsed());
-            timer.reset();
-        }
+
+        logger->trace("Query graph --- reindexed k-mers in canonical mode: {} sec",
+                      timer.elapsed());
+        timer.reset();
     }
 
     // map contigs onto the full graph
@@ -908,10 +879,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         assert(j == path.size());
     }
-    if (utils::get_verbose()) {
-        logger->trace("Query graph --- contigs mapped to graph: {} sec", timer.elapsed());
-        timer.reset();
-    }
+
+    logger->trace("Query graph --- contigs mapped to graph: {} sec", timer.elapsed());
+    timer.reset();
 
     contigs.clear();
 
@@ -954,11 +924,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         // correcting the mask
         call_zeros(mask, [&](auto i) { (*index_in_full_graph)[i] = 0; });
 
-        if (utils::get_verbose()) {
-            logger->trace("Query graph --- reduced k-mer dictionary: {} sec",
-                          timer.elapsed());
-            timer.reset();
-        }
+        logger->trace("Query graph --- reduced k-mer dictionary: {} sec",
+                      timer.elapsed());
+        timer.reset();
     }
 
     assert(index_in_full_graph.get());
@@ -1017,11 +985,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         }
     );
 
-    if (utils::get_verbose()) {
-        logger->trace("Query graph --- constructed query annotation: {} sec",
-                      timer.elapsed());
-        timer.reset();
-    }
+    logger->trace("Query graph --- constructed query annotation: {} sec",
+                  timer.elapsed());
+    timer.reset();
 
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(graph,
         [=](auto i) -> bool { return (*index_in_full_graph)[i]; }
@@ -1108,7 +1074,7 @@ void print_stats(const DeBruijnGraph &graph) {
         std::cout << "nnz weights: " << num_non_zero_weights << std::endl;
         std::cout << "avg weight: " << static_cast<double>(sum_weights) / num_non_zero_weights << std::endl;
 
-        if (utils::get_verbose()) {
+        if (get_verbose()) {
             if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph)) {
                 // In DBGSuccinct some of the nodes may be masked out
                 // TODO: Fix this by using non-contiguous indexing in graph
@@ -1160,7 +1126,7 @@ void print_stats(const Annotator &annotation) {
         std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
         std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
         std::cout << "shrinkage: " << brwt.shrinking_rate() << std::endl;
-        if (utils::get_verbose()) {
+        if (get_verbose()) {
             std::cout << "==================== Multi-BRWT TREE ===================" << std::endl;
             brwt.print_tree_structure(std::cout);
         }
@@ -1228,7 +1194,7 @@ void parse_sequences(const std::vector<std::string> &files,
                         [](const auto &first, const auto &second) {
                             return first.first < second.first;
                         },
-                        config.parallel
+                        get_num_threads()
                     );
 
                     if (config.min_count_quantile > 0)
@@ -1260,7 +1226,7 @@ void parse_sequences(const std::vector<std::string> &files,
 
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
-            if (files.size() >= config.parallel) {
+            if (files.size() >= get_num_threads()) {
                 auto forward_and_reverse = config.forward_and_reverse;
 
                 // capture all required values by copying to be able
@@ -1379,7 +1345,7 @@ std::string form_client_reply(const std::string &received_message,
 int main(int argc, char *argv[]) {
     auto config = std::make_unique<Config>(argc, argv);
 
-    logger->set_level(config->verbose ? spdlog::level::trace : spdlog::level::info);
+    logger->set_level(get_verbose() ? spdlog::level::trace : spdlog::level::info);
     //logger->set_pattern("%^date %x....%$  %v");
     //console_sink->set_color(spdlog::level::trace, "\033[37m");
 
@@ -1443,9 +1409,9 @@ int main(int argc, char *argv[]) {
                         config->canonical,
                         config->count_kmers,
                         suffix,
-                        config->parallel,
+                        get_num_threads(),
                         static_cast<uint64_t>(config->memory_available) << 30,
-                        config->verbose
+                        get_verbose()
                     );
 
                     parse_sequences(files, *config, timer,
@@ -1516,9 +1482,9 @@ int main(int argc, char *argv[]) {
                             config->canonical,
                             config->count_kmers ? kBitsPerCount : 0,
                             suffix,
-                            config->parallel,
+                            get_num_threads(),
                             static_cast<uint64_t>(config->memory_available) << 30,
-                            config->verbose
+                            get_verbose()
                         )
                     );
 
@@ -1561,7 +1527,7 @@ int main(int argc, char *argv[]) {
                     timer.reset();
                     graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
                                                                      config->canonical,
-                                                                     config->verbose));
+                                                                     get_verbose()));
                 }
 
             } else {
@@ -1654,7 +1620,7 @@ int main(int argc, char *argv[]) {
                     logger->trace("Detecting all dummy k-mers...");
 
                     timer.reset();
-                    dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(config->parallel, false);
+                    dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(get_num_threads(), false);
 
                     logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
                 }
@@ -1827,18 +1793,18 @@ int main(int argc, char *argv[]) {
                               config->min_count,
                               config->max_count,
                               config->filename_anno,
-                              config->fasta_anno,
+                              config->annotate_sequence_headers,
                               config->fasta_anno_comment_delim,
                               config->fasta_header_delimiter,
-                              config->anno_labels,
-                              config->verbose);
+                              config->anno_labels);
 
                 anno_graph->get_annotation().serialize(config->outfbase);
 
             } else {
-                size_t num_threads = config->parallel;
+                // |config->separately| is true
                 // annotate multiple columns in parallel, each in a single thread
-                config->parallel = 1;
+                size_t num_threads = get_num_threads();
+                set_num_threads(1);
 
                 #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
                 for (size_t i = 0; i < files.size(); ++i) {
@@ -1851,11 +1817,10 @@ int main(int argc, char *argv[]) {
                                   config->min_count,
                                   config->max_count,
                                   config->filename_anno,
-                                  config->fasta_anno,
+                                  config->annotate_sequence_headers,
                                   config->fasta_anno_comment_delim,
                                   config->fasta_header_delimiter,
-                                  config->anno_labels,
-                                  config->verbose);
+                                  config->anno_labels);
 
                     anno_graph->get_annotation().serialize(
                         config->outfbase.size()
@@ -1884,7 +1849,7 @@ int main(int argc, char *argv[]) {
             // load graph
             AnnotatedDBG anno_graph(graph_temp,
                                     std::move(annotation_temp),
-                                    config->parallel,
+                                    get_num_threads(),
                                     config->fast);
 
             if (!anno_graph.check_compatibility()) {
@@ -1895,8 +1860,7 @@ int main(int argc, char *argv[]) {
             annotate_coordinates(files,
                                  &anno_graph,
                                  config->forward_and_reverse,
-                                 config->genome_binsize_anno,
-                                 config->verbose);
+                                 config->genome_binsize_anno);
 
             anno_graph.get_annotation().serialize(config->outfbase);
 
@@ -1904,7 +1868,7 @@ int main(int argc, char *argv[]) {
         }
         case Config::MERGE_ANNOTATIONS: {
             if (config->anno_type == Config::ColumnCompressed) {
-                annotate::ColumnCompressed<> annotation(0, kNumCachedColumns, config->verbose);
+                annotate::ColumnCompressed<> annotation(0, kNumCachedColumns, get_verbose());
                 if (!annotation.merge_load(files)) {
                     logger->error("ERROR: can't load annotations");
                     exit(1);
@@ -1956,7 +1920,7 @@ int main(int argc, char *argv[]) {
             auto graph = load_critical_dbg(config->infbase);
             auto anno_graph = initialize_annotated_dbg(graph, *config);
 
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
 
             Timer timer;
 
@@ -1987,7 +1951,7 @@ int main(int argc, char *argv[]) {
                             );
                         },
                         config->count_labels ? 0 : config->discovery_fraction,
-                        config->parallel
+                        get_num_threads()
                     );
 
                     graph_to_query = query_graph.get();
@@ -2043,7 +2007,7 @@ int main(int argc, char *argv[]) {
             if (config->align_sequences && !config->fast)
                 aligner.reset(build_aligner(*graph, *config).release());
 
-            const size_t num_threads = std::max(1u, config->parallel);
+            const size_t num_threads = std::max(1u, get_num_threads());
 
             logger->info("Initializing tcp service with {} threads, listening port {}",
                          num_threads, config->port);
@@ -2066,7 +2030,7 @@ int main(int argc, char *argv[]) {
                 );
 
                 std::vector<std::thread> workers;
-                for (size_t i = 0; i < std::max(1u, config->parallel); ++i) {
+                for (size_t i = 0; i < std::max(1u, get_num_threads()); ++i) {
                     workers.emplace_back([&io_context]() { io_context.run(); });
                 }
                 for (auto &thread : workers) {
@@ -2133,7 +2097,7 @@ int main(int argc, char *argv[]) {
             std::unique_ptr<DeBruijnGraph> graph;
             switch (config->graph_type) {
                 case Config::GraphType::SUCCINCT: {
-                    auto p = BOSS::Chunk::build_boss_from_chunks(chunk_files, config->verbose);
+                    auto p = BOSS::Chunk::build_boss_from_chunks(chunk_files, get_verbose());
                     auto dbg_succ = std::make_unique<DBGSuccinct>(p.first, p.second);
 
                     logger->trace("Chunks concatenated in {} sec", timer.elapsed());
@@ -2143,14 +2107,14 @@ int main(int argc, char *argv[]) {
                                 "Traverse source dummy edges,"
                                 " remove redundant ones, and mark"
                                 " those that cannot be removed.");
-                        dbg_succ->mask_dummy_kmers(config->parallel, true);
+                        dbg_succ->mask_dummy_kmers(get_num_threads(), true);
                     }
                     graph = std::move(dbg_succ);
                     break;
                 }
                 case Config::GraphType::BITMAP: {
                     graph.reset(DBGBitmapConstructor::build_graph_from_chunks(
-                        chunk_files, config->canonical, config->verbose
+                        chunk_files, config->canonical, get_verbose()
                     ));
                     break;
                 }
@@ -2162,8 +2126,9 @@ int main(int argc, char *argv[]) {
             }
             assert(graph);
 
-            if (logger->level() == spdlog::level::level_enum::trace) {
-                logger->trace("Graph was assembled in {} sec", timer.elapsed());
+            logger->trace("Graph was assembled in {} sec", timer.elapsed());
+
+            if (logger->level() <= spdlog::level::level_enum::trace) {
                 print_stats(*graph);
                 if (config->graph_type == Config::GraphType::SUCCINCT) {
                     print_boss_stats(
@@ -2194,7 +2159,7 @@ int main(int argc, char *argv[]) {
 
                 graphs.push_back(&dbg_graphs.back()->get_boss());
 
-                if (config->verbose)
+                if (get_verbose())
                     print_boss_stats(*graphs.back());
 
                 config->canonical &= dbg_graphs.back()->is_canonical_mode();
@@ -2223,7 +2188,7 @@ int main(int argc, char *argv[]) {
 
                     dbg_graphs.at(i).reset();
                 }
-            } else if (config->parallel > 1 || config->parts_total > 1) {
+            } else if (get_num_threads() > 1 || config->parts_total > 1) {
                 logger->info("Start merging blocks");
                 timer.reset();
 
@@ -2231,9 +2196,9 @@ int main(int argc, char *argv[]) {
                     graphs,
                     config->part_idx,
                     config->parts_total,
-                    config->parallel,
+                    get_num_threads(),
                     config->num_bins_per_thread,
-                    config->verbose
+                    get_verbose()
                 );
                 if (!chunk) {
                     logger->error("ERROR when building chunk {}", config->part_idx);
@@ -2254,7 +2219,7 @@ int main(int argc, char *argv[]) {
                 logger->info("Start merging graphs");
                 timer.reset();
 
-                graph = merge::merge(graphs, config->verbose);
+                graph = merge::merge(graphs, get_verbose());
             }
             dbg_graphs.clear();
 
@@ -2435,10 +2400,10 @@ int main(int argc, char *argv[]) {
                     [](const auto &first, const auto &second) {
                         return first.first < second.first;
                     },
-                    config->parallel
+                    get_num_threads()
                 );
 
-                #pragma omp parallel for num_threads(config->parallel)
+                #pragma omp parallel for num_threads(get_num_threads())
                 for (size_t i = 1; i < config->count_slice_quantiles.size(); ++i) {
                     // extract sequences for k-mer counts bin |i|
                     assert(config->count_slice_quantiles[i - 1] < config->count_slice_quantiles[i]);
@@ -2493,8 +2458,8 @@ int main(int argc, char *argv[]) {
 
                     print_boss_stats(boss_graph,
                                      config->count_dummy,
-                                     config->parallel,
-                                     config->verbose);
+                                     get_num_threads(),
+                                     get_verbose());
 
                     if (config->print_graph_internal_repr) {
                         std::stringstream out;
@@ -2757,7 +2722,7 @@ int main(int argc, char *argv[]) {
                         if (config->fast) {
                             annotate::RowCompressed<> row_annotator(0);
                             annotator->convert_to_row_annotator(&row_annotator,
-                                                                config->parallel);
+                                                                get_num_threads());
                             annotator.reset();
 
                             logger->trace("Annotation converted in {} sec", timer.elapsed());
@@ -2779,12 +2744,12 @@ int main(int argc, char *argv[]) {
                             ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
                                 std::move(*annotator),
                                 config->parallel_nodes,
-                                config->parallel)
+                                get_num_threads())
                             : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
                                 std::move(*annotator),
                                 config->arity_brwt,
                                 config->parallel_nodes,
-                                config->parallel);
+                                get_num_threads());
 
                         annotator.reset();
                         logger->trace("Annotation converted  in {} sec", timer.elapsed());
@@ -2889,7 +2854,7 @@ int main(int argc, char *argv[]) {
                 timer.reset();
 
                 // remove redundant dummy edges and mark all other dummy edges
-                dbg_succ->mask_dummy_kmers(config->parallel, true);
+                dbg_succ->mask_dummy_kmers(get_num_threads(), true);
 
                 logger->trace("... traversal done in {} sec", timer.elapsed());
                 timer.reset();
@@ -3007,7 +2972,7 @@ int main(int argc, char *argv[]) {
 
             annotate::relax_BRWT<annotate::BRWTCompressed<>>(annotator.get(),
                                                              config->relax_arity_brwt,
-                                                             config->parallel);
+                                                             get_num_threads());
 
             annotator->serialize(config->outfbase);
             logger->trace("BRWT relaxation done in {} sec", timer.elapsed());
@@ -3026,7 +2991,7 @@ int main(int argc, char *argv[]) {
                 dbg->reset_mask();
 
             Timer timer;
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
             std::mutex print_mutex;
 
             if (config->map_sequences) {
@@ -3046,14 +3011,14 @@ int main(int argc, char *argv[]) {
                     exit(1);
                 }
 
-                if (utils::get_verbose()) {
+                if (get_verbose()) {
                     logger->trace("Map sequences against the de Bruijn graph with k= {}",
                                   graph->get_k());
                     logger->trace(" Length of mapped k-mers: {}", config->alignment_length);
                 }
 
                 for (const auto &file : files) {
-                    if (utils::get_verbose())
+                    if (get_verbose())
                         logger->trace("Map sequences from file {}", file);
 
                     map_sequences_in_file(file,
@@ -3184,14 +3149,7 @@ int main(int argc, char *argv[]) {
             auto anno_graph = initialize_annotated_dbg(*config);
             auto masked_graph = mask_graph(*anno_graph, config.get());
 
-            if (config->verbose) {
-                std::stringstream out_str;
-                out_str << "Filter out:";
-                for (const auto &out : config->label_filter) {
-                    out_str << " " << out;
-                }
-                logger->trace("{}", out_str.str());
-            }
+            logger->trace("Filter out: {}", fmt::join(config->label_filter, " "));
 
             std::ostream *outstream = config->outfbase.size()
                 ? new std::ofstream(config->outfbase)
@@ -3216,7 +3174,7 @@ int main(int argc, char *argv[]) {
 
             std::sort(config->label_filter.begin(), config->label_filter.end());
 
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
             std::mutex print_label_mutex;
             std::atomic_uint64_t num_calls = 0;
 

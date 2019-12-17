@@ -24,8 +24,8 @@ class ThreadPool {
     ThreadPool(size_t num_workers, size_t max_num_tasks = -1);
 
     template <class F, typename... Args>
-    auto enqueue(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
-        using return_type = typename std::result_of<F(Args...)>::type;
+    auto enqueue(F&& f, Args&&... args) {
+        using return_type = decltype(f(std::forward<Args>(args)...));
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
         );
@@ -68,12 +68,12 @@ class ThreadPool {
 class AsyncActivity {
   public:
     template <class F, typename... Args>
-    auto run_async(F&& f, Args&&... args) -> decltype(f(args...)) {
+    auto run_async(F&& f, Args&&... args) {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             parallel_jobs_++;
         }
-        auto result = f(args...);
+        auto result = f(std::forward<Args>(args)...);
         {
             std::unique_lock<std::mutex> lock(mutex_);
             parallel_jobs_--;
@@ -83,12 +83,12 @@ class AsyncActivity {
     }
 
     template <class F, typename... Args>
-    auto run_unique(F&& f, Args&&... args) -> decltype(f(args...)) {
+    auto run_unique(F&& f, Args&&... args) {
         std::unique_lock<std::mutex> lock(mutex_);
         while (parallel_jobs_ > 0) {
             cond_var_.wait(lock);
         }
-        return f(args...);
+        return f(std::forward<Args>(args)...);
     }
 
   private:

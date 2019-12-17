@@ -11,7 +11,6 @@ class Config {
 
     static constexpr auto UNINITIALIZED_STR = "\0";
 
-    bool verbose = false;
     bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
@@ -21,7 +20,7 @@ class Config {
     bool dynamic = false;
     bool mark_dummy_kmers = true;
     bool filename_anno = false;
-    bool fasta_anno = false;
+    bool annotate_sequence_headers = false;
     bool to_adj_list = false;
     bool to_fasta = false;
     bool to_gfa = false;
@@ -50,7 +49,6 @@ class Config {
 
     unsigned int k = 3;
     unsigned int distance = 0;
-    unsigned int parallel = 1;
     unsigned int parallel_nodes = -1;  // if not set, redefined by |parallel|
     unsigned int num_bins_per_thread = 1;
     unsigned int parts_total = 1;
