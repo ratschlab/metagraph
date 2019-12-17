@@ -34,13 +34,42 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
                     const sdsl::bit_vector &second);
 
 
-class bitmap {
+class bitmap_builder {
+  public:
+    virtual ~bitmap_builder() {}
+
+    virtual void add_one(uint64_t pos) = 0;
+    virtual void add_ones(const uint64_t *begin, const uint64_t *end) {
+        std::for_each(begin, end, [&](uint64_t pos) { add_one(pos); });
+    }
+
+    // Data for initializing a bitmap
+    struct InitializationData {
+        const uint64_t size;
+        const uint64_t num_set_bits;
+        const std::function<void(const VoidCall<uint64_t> &callback)> call_ones;
+    };
+
+    InitializationData get_initialization_data() const {
+        return { size(), num_set_bits(),
+                 [&](auto callback) { call_ones(callback); } };
+    }
+
+  private:
+    virtual uint64_t size() const = 0;
+    virtual uint64_t num_set_bits() const = 0;
+    virtual void call_ones(const VoidCall<uint64_t> &callback) const = 0;
+};
+
+
+class bitmap : public bitmap_builder {
   public:
     virtual ~bitmap() {}
 
     virtual bool operator==(const bitmap &other) const final;
     virtual bool operator!=(const bitmap &other) const final { return !(*this == other); }
 
+    virtual void add_one(uint64_t id) { set(id, true); }
     virtual void set(uint64_t id, bool val) = 0;
 
     virtual bool operator[](uint64_t id) const = 0;
