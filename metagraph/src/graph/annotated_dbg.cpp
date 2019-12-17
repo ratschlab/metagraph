@@ -44,10 +44,6 @@ void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
     if (!indices.size())
         return;
 
-    // sort to reduce cache misses
-    std::sort(indices.begin(), indices.end());
-    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
-
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (force_fast_) {

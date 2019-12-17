@@ -15,6 +15,7 @@
 using utils::remove_suffix;
 
 size_t kNumRowsInBlock = 50'000;
+size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
 
 
 namespace annotate {
@@ -523,7 +524,8 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
         if (j == bitmatrix_.size()) {
             // the column is new, create an efficient builder for it
             bitmatrix_.emplace_back();
-            vector = new bitmap_builder_set(num_rows_, get_num_threads());
+            vector = new bitmap_builder_set(num_rows_, get_num_threads(),
+                                            kNumElementsReservedInBitmapBuilder);
         } else {
             // otherwise, decompress the existing column and initialize a bitmap
             vector = new bitmap_vector(bitmatrix_[j]->template convert_to<sdsl::bit_vector>());
