@@ -255,6 +255,9 @@ include_directories(
   ${INCLUDE_DIRS}
 )
 
+# makes ASIO not depend on boost
+string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE")
+
 add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
 
 # assume built-in pthreads on MacOS

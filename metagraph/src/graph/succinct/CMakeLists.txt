@@ -24,7 +24,6 @@ set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 target_include_directories(metagraph_succinct
   PUBLIC
     ${PROJECT_PARENT_DIR}/src/
-    ${Boost_INCLUDE_DIRS}
     ${EXTERNAL_LIB_DIR}/rollinchashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
   PRIVATE
