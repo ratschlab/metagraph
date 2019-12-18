@@ -52,6 +52,9 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
                 throw std::ifstream::failure("can't open stream");
 
         const auto num_rows = load_number(instream);
+        if (num_rows_ > 0 && num_rows != num_rows_)
+            throw std::runtime_error("annotators have different num_rows");
+        num_rows_ = num_rows;
 
         auto label_encoder_load = std::make_unique<annotate::LabelEncoder<Label>>();
         if (!label_encoder_load->load(instream))
@@ -69,7 +72,7 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
             std::unique_ptr<bit_vector> new_column =
                 annotate::ColumnCompressed<Label>::load_next_column(instream);
 
-            if (new_column->size() != num_rows)
+            if (new_column->size() != num_rows_)
                 throw std::ifstream::failure("inconsistent column size");
 
             column_locations_.emplace(label_encoder_load->decode(c),
@@ -107,6 +110,33 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
         return true;
     };
 
+    // return column where bit is set iff weighted sum over labels >= threshold
+    std::unique_ptr<bit_vector>
+    summarize_to_new_column(double threshold,
+                            const std::vector<std::pair<std::string, double>> &labels_and_weights) {
+        if (!labels_and_weights.size())
+            return std::make_unique<bit_vector_dyn>(num_rows_, 0);
+
+        std::vector<double> sums(num_rows_, .0L);
+
+        for (const auto &[label, weight] : labels_and_weights) {
+            auto column = load_column_by_label(label);
+
+            for (size_t i = 0; i < num_rows_; ++i) {
+                if ((*column)[i])
+                    sums[i] += weight;
+            }
+        }
+
+        auto new_column = std::make_unique<bit_vector_dyn>(num_rows_, 0);
+        for (size_t i = 0; i < num_rows_; ++i) {
+            if (sums[i] >= threshold)
+                new_column->set(i, true);
+        }
+
+        return new_column;
+    }
+
   private:
 
     std::unique_ptr<bit_vector> load_column_by_label(const Label &label) {
@@ -121,6 +151,8 @@ class ColumnAnalysis : public AnnotatedDBG::AnnotatedGraphExtension {
 
         return column;
     }
+
+    uint64_t num_rows_ = 0;
 
     std::vector<std::unique_ptr<annotate::LabelEncoder<Label>>> label_encoders_;
 
