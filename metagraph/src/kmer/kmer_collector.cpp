@@ -200,8 +200,11 @@ KmerCollector<KMER, KmerExtractor, Container>
               size_t num_threads,
               double memory_preallocated)
       : k_(k),
-        kmers_(get_cleanup<Extractor, typename Container::storage_type>(filter_suffix_encoded.empty()), num_threads),
-        num_threads_(num_threads),
+      kmers_(get_cleanup<Extractor, typename Container::storage_type>(
+                     filter_suffix_encoded.empty()),
+             num_threads,
+             memory_preallocated / sizeof(typename Container::value_type)),
+      num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
         stored_sequences_size_(0),
@@ -212,10 +215,9 @@ KmerCollector<KMER, KmerExtractor, Container>
         assert(filter_suffix_encoded_.empty()
                && "SortedSetDisk does not support chunking");
     }
-    kmers_.reserve(memory_preallocated / sizeof(typename Container::value_type));
     common::logger->trace("Preallocated {} GB for the k-mer storage, capacity: {} k-mers",
-                          (kmers_.capacity() * sizeof(typename Container::value_type) >> 30),
-                          kmers_.capacity());
+                          (kmers_.buffer_size() * sizeof(typename Container::value_type) >> 30),
+                          kmers_.buffer_size());
 }
 
 template <typename KMER, class KmerExtractor, class Container>

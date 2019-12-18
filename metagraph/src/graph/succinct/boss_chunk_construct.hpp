@@ -14,6 +14,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
 
     static std::unique_ptr<IBOSSChunkConstructor>
     initialize(size_t k,
+               bool use_sorted_set_disk = false,
                bool canonical_mode = false,
                bool count_kmers = false,
                const std::string &filter_suffix = "",

@@ -158,23 +158,24 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
      * first incoming edge with that label)
      */
     template <typename KMER>
-    static void check_incoming_edges(uint64_t alph_size,
-                                            Iterator &it,
-                                            const KMER &kmer,
-                                            TAlphabet *curW) {
-        if (it.at_begin() || *curW == 0) {
+    static void check_incoming_edges(size_t cur_pos,
+                                     uint64_t alph_size,
+                                     Iterator &it,
+                                     const KMER &kmer,
+                                     TAlphabet *curW) {
+        if (cur_pos == 1 || *curW == 0) {
             return;
         }
         it.push_pos();
         --it;
-        for (; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it) {
+        for (; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it, --cur_pos) {
             const KMER prev_kmer = get_kmer(*it);
             if (prev_kmer[0] == *curW) {
                 // not the first incoming edge to the node, mark with -
                 *curW += alph_size;
                 break;
             }
-            if (it.at_begin())
+            if (cur_pos == 1)
                 break;
         }
         it.pop_pos();
@@ -261,8 +262,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             }
             was_skipped.push_back(0);
             --it;
-
-            check_incoming_edges<KMER>(alph_size, it, kmer, &curW);
+            check_incoming_edges<KMER>(curpos, alph_size, it, kmer, &curW);
             W->push_back(curW);
 
             while (curF > lastF && lastF + 1 < static_cast<TAlphabet>(alph_size)) {

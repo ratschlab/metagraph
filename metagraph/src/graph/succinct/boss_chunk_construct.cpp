@@ -286,16 +286,16 @@ void recover_source_dummy_nodes(size_t k,
 
     // this will contain dummy k-mers of prefix length 2
     common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads,
+                                                kmers->buffer_size(), "/tmp/chunk_",
                                                 async_file_writer(*dummy_l2));
     Vector<T> dummy_kmers;
-    dummy_kmers.reserve(sorted_dummy_kmers.capacity());
+    dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
     // remove redundant dummy source k-mers of prefix length 1 and write them to a file
     // While traversing and removing redundant dummy source k-mers of prefix length 1,
     // we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
-    common::logger->trace("begin==end is {}", kmers->begin() == kmers->end());
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
@@ -361,7 +361,8 @@ void recover_source_dummy_nodes(size_t k,
         delete el.second; // this will also close the stream
         file_names.push_back(el.first);
     });
-    std::async(std::launch::async, &common::merge_files<T>, file_names, kmers);
+    std::async(std::launch::async, &common::merge_files<T>, file_names,
+               [kmers](const T &v) { kmers->push(v); });
 }
 
 inline std::vector<KmerExtractorBOSS::TAlphabet>
@@ -475,28 +476,22 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
 }
 
 std::unique_ptr<IBOSSChunkConstructor>
-IBOSSChunkConstructor
-::initialize(size_t k,
-             bool canonical_mode,
-             bool count_kmers,
-             const std::string &filter_suffix,
-             size_t num_threads,
-             double memory_preallocated) {
-
-    #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated
+IBOSSChunkConstructor ::initialize(size_t k,
+                                   bool use_sorted_set_disk,
+                                   bool canonical_mode,
+                                   bool count_kmers,
+                                   const std::string &filter_suffix,
+                                   size_t num_threads,
+                                   double memory_preallocated) {
+#define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated
 
     if (count_kmers) {
         return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
     } else {
-        switch (container) {
-            case ExtractorContainer::VECTOR:
-                return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
-            case ExtractorContainer::VECTOR_DISK:
-                return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
-            default:
-                throw std::logic_error(
-                        "Unknown extractor container: " +
-                        to_string(static_cast<uint32_t>(container)));
+        if (use_sorted_set_disk) {
+            return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
+        } else {
+            return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
         }
     }
 }

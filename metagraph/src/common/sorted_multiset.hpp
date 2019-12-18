@@ -29,8 +29,10 @@ class SortedMultiset {
     typedef Container result_type;
 
     SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-                   size_t num_threads = 1)
-      : num_threads_(num_threads), cleanup_(cleanup) {}
+                   size_t num_threads = 1, size_t container_size_bytes = 0)
+      : num_threads_(num_threads), cleanup_(cleanup) {
+        reserve(container_size_bytes);
+    }
 
     ~SortedMultiset() {}
 
@@ -86,7 +88,7 @@ class SortedMultiset {
         try_reserve(size);
     }
 
-    size_t capacity() {
+    size_t buffer_size() {
         return data_.capacity();
     }
 

@@ -42,6 +42,14 @@ inline T& get_first(std::pair<T, U> &pair) { return pair.first; }
 template <typename T>
 inline T& get_first(T &value) { return value; }
 
+class GreaterFirst {
+  public:
+    template <typename T>
+    bool operator()(const T &p1, const T &p2) const {
+        return get_first(p1) > get_first(p2);
+    }
+};
+
 struct LessFirst {
     template <typename T>
     bool operator()(const T &p1, const T &p2) const {

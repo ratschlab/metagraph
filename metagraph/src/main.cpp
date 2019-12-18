@@ -1442,6 +1442,7 @@ int main(int argc, char *argv[]) {
 
                     auto constructor = IBOSSChunkConstructor::initialize(
                         boss_graph->get_k(),
+                        config->container == Config::ContainerType::VECTOR_DISK,
                         config->canonical,
                         config->count_kmers,
                         suffix,

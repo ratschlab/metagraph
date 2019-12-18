@@ -11,16 +11,12 @@
 
 #include <cassert>
 #include <fstream> //TODO(ddanciu) - try boost mmapped instead
-#include <future>
 #include <mutex>
 #include <queue>
 #include <shared_mutex>
 
 namespace mg {
 namespace common {
-
-const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
-
 
 /**
  * Thread safe data storage that is able to sort and extract distinct elements
@@ -36,15 +32,6 @@ const std::string output_dir = "/tmp/"; // TODO(ddanciu) - use a flag instead
 template <typename T>
 class SortedSetDisk {
   public:
-    /**
-     * Size of the underlying data structure storing the kmers. The class is
-     * guaranteed to flush to disk when the newly added data would exceed this
-     * size.
-     */
-    static constexpr size_t CONTAINER_SIZE_BYTES = 1e9; // 1 GB
-
-    /** Size of the merge queue's underlying circular buffer */
-    static constexpr size_t MERGE_QUEUE_SIZE = 1e9; // 1GB
     /** Number of elements that can be iterated backwards in the merge queue */
     static constexpr size_t NUM_LAST_ELEMENTS_CACHED = 100;
 
@@ -59,27 +46,29 @@ class SortedSetDisk {
      * @param cleanup function to run each time a chunk is written to disk; typically
      * performs cleanup operations, such as removing redundant dummy source k-mers
      * @param num_threads the number of threads to use by the sorting algorithm
+     * @param chunk_file_prefix the prefix of the temporary files where chunks are
+     * written before being merged
      * @param container_size the size of the in-memory container that is written
      * to disk when full
      */
     SortedSetDisk(
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
             size_t num_threads = 1,
+            size_t container_size_bytes = 1e6,
+            const std::string &chunk_file_prefix = "/tmp/chunk_",
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
-            size_t container_size = CONTAINER_SIZE_BYTES,
-            size_t merge_queue_size = MERGE_QUEUE_SIZE / sizeof(T),
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
         : num_threads_(num_threads),
-          merge_queue_(merge_queue_size, num_last_elements_cached, on_item_pushed),
+          chunk_file_prefix_(chunk_file_prefix),
+          merge_queue_(container_size_bytes / sizeof(T),
+                       num_last_elements_cached,
+                       on_item_pushed),
           cleanup_(cleanup) {
-        try {
-            try_reserve(container_size / sizeof(T));
-        } catch (const std::bad_alloc &exception) {
-            logger->error(
-                    "ERROR: Not enough memory for SortedSetDisk. Requested {} bytes",
-                    CONTAINER_SIZE_BYTES);
-            exit(EXIT_FAILURE);
-        }
+        reserve(container_size_bytes);
+    }
+
+    ~SortedSetDisk() {
+        merge_queue_.shutdown(); // make sure the data was processed
     }
 
     /**
@@ -127,25 +116,31 @@ class SortedSetDisk {
             // write any residual data left
             if (!data_->empty()) {
                 sort_and_remove_duplicates(data_, num_threads_);
-                dump_to_file_async();
+                dump_to_file();
             }
-            if (write_to_disk_future_.valid()) {
-                write_to_disk_future_.get(); // make sure all pending data was written
-            }
+            // async_worker_.join(); // make sure all pending data was written
             start_merging();
         }
         return merge_queue_;
     }
 
-    void start_merging() {
-        std::vector<std::string> file_names(chunk_count_);
-        for (size_t i = 0; i < chunk_count_; ++i) {
-            file_names[i] = file_name_for_chunk(i);
+    static void merge_func(const std::string chunk_file_prefix,
+                           uint32_t chunk_count,
+                           ChunkedWaitQueue<T> &merge_queue) {
+        std::vector<std::string> file_names(chunk_count);
+        for (size_t i = 0; i < chunk_count; ++i) {
+            file_names[i] = chunk_file_prefix + std::to_string(i);
         }
-        thread_pool_.enqueue(merge_files<T>, file_names, &merge_queue_);
+        merge_files<T>(file_names, [&merge_queue](const T &v) { merge_queue.push(v); });
+        merge_queue.shutdown();
+    };
+
+    void start_merging() {
+        async_worker_.enqueue(merge_func, chunk_file_prefix_, chunk_count_,
+                              std::ref(merge_queue_));
     }
 
-    void clear(std::function<void(const T&)> on_item_pushed  = [](const T&){}) {
+    void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {}) {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         is_merging_ = false;
@@ -169,14 +164,11 @@ class SortedSetDisk {
         cleanup_(vector); // typically removes source dummy k-mers
     }
 
-    void reserve(size_t) {
-    }
-
-    size_t capacity() {
-        return data_->capacity();
-    }
+    size_t buffer_size() { return data_->capacity(); }
 
   private:
+    void reserve(size_t bytes) { try_reserve(bytes / sizeof(T)); }
+
     void shrink_data() {
         logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
@@ -185,10 +177,6 @@ class SortedSetDisk {
 
         logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
                       data_->size(), (data_->size() * sizeof(T) >> 20));
-    }
-
-    static std::string file_name_for_chunk(uint32_t chunk) {
-        return output_dir + "chunk_" + std::to_string(chunk) + ".bin";
     }
 
     /**
@@ -200,8 +188,7 @@ class SortedSetDisk {
      * empty, but its allocated memory will remain unaffected
      */
     template <class storage_type>
-    static void dump_to_file(uint32_t chunk_count, storage_type *data) {
-        std::string file_name = file_name_for_chunk(chunk_count);
+    static void dump_to_file(const std::string &file_name, storage_type *data) {
         std::fstream binary_file = std::fstream(file_name, std::ios::out | std::ios::binary);
         if (!binary_file) {
             logger->error("Error: Creating chunk file '{}' failed", file_name);
@@ -221,17 +208,28 @@ class SortedSetDisk {
      * insertions which will be written into the other #data_ buffer.
      */
     void dump_to_file_async() {
-        if (write_to_disk_future_.valid()) {
-            write_to_disk_future_.wait(); // wait for other thread to finish writing
-        }
+        async_worker_.join(); // wait for other thread to finish writing
         assert(!data_->empty());
+        std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
         if (data_->data() == data_first_.data()) {
-            write_to_disk_future_ = thread_pool_.enqueue(dump_to_file<storage_type>,
-                                                         chunk_count_, &data_first_);
+            async_worker_.enqueue(dump_to_file<storage_type>, file_name, &data_first_);
             data_ = &data_second_;
         } else {
-            write_to_disk_future_ = thread_pool_.enqueue(dump_to_file<storage_type>,
-                                                         chunk_count_, &data_second_);
+            async_worker_.enqueue(dump_to_file<storage_type>, file_name, &data_second_);
+            data_ = &data_first_;
+        }
+        chunk_count_++;
+    }
+
+    void dump_to_file() {
+        async_worker_.join(); // wait for other thread to finish writing
+        assert(!data_->empty());
+        std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
+        if (data_->data() == data_first_.data()) {
+            dump_to_file<storage_type>(file_name, &data_first_);
+            data_ = &data_second_;
+        } else {
+            dump_to_file<storage_type>(file_name, &data_second_);
             data_ = &data_first_;
         }
         chunk_count_++;
@@ -239,11 +237,16 @@ class SortedSetDisk {
 
     void try_reserve(size_t size, size_t min_size = 0) {
         size = std::max(size, min_size);
-
+        size_t original_size = size;
         while (size > min_size) {
             try {
                 data_first_.reserve(size);
                 data_second_.reserve(size);
+                if (size != original_size) {
+                    logger->warn("SortedSetDisk: Requested {}MiB, but only found {}MiB",
+                                 (original_size * sizeof(T)) >> 20,
+                                 (size * sizeof(T)) >> 20);
+                }
                 return;
             } catch (const std::bad_alloc &exception) {
                 size = min_size + (size - min_size) * 2 / 3;
@@ -273,6 +276,7 @@ class SortedSetDisk {
      */
     storage_type *data_ = &data_first_;
     size_t num_threads_;
+    std::string chunk_file_prefix_;
     /**
      * True if the data merging thread was started, and data started flowing into the #merge_queue_.
      */
@@ -292,11 +296,7 @@ class SortedSetDisk {
      * Thread pool with two threads: one for writing to disk and one for merging data from disk.
      * Each thread has a single task (write to disk and merge from disk, respectively).
      */
-    ThreadPool thread_pool_ = ThreadPool(2, 1);
-    /**
-     * Future that signals whether the current writing to disk job was done.
-     */
-    std::future<void> write_to_disk_future_;
+    ThreadPool async_worker_ = ThreadPool(1, 1);
 
     ChunkedWaitQueue<T> merge_queue_;
 

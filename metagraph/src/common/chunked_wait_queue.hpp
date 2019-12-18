@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "common/logger.hpp"
 #include "common/threading.hpp"
 
 namespace mg {
@@ -113,13 +114,13 @@ class ChunkedWaitQueue {
      * the older elements via #pop_chunk().
      */
     bool full() const {
-        return last_ != buffer_size_ && first_ == (last_ + 1) % queue_.size();
+        return last_ != buffer_size_ && first_ == (last_ + 1) % buffer_size_;
     }
 
     /**
-     * Returns the capacitwwy of the queue's internal buffer.
+     * Returns the capacity of the queue's internal buffer.
      */
-    size_type capacity() const { return queue_.capacity(); }
+    size_type buffer_size() const { return queue_.size(); }
 
     /**
      * Returns the number of elements in the buffer. Sort of irrelevant, as the number of
@@ -214,7 +215,6 @@ class ChunkedWaitQueue {
         if (size() < chunk_size_) { // nothing to pop
             return;
         }
-
         const bool was_full = full();
 
         first_ = (first_ + chunk_size_) % queue_.size();
@@ -230,11 +230,11 @@ class ChunkedWaitQueue {
      * Should not be called from within multiple threads.
      */
     Iterator &iter() {
-        std::unique_lock<std::mutex> l(mutex_);
+        std::unique_lock<std::mutex> lock(mutex_);
         // if the queue is empty, we don't know if elements will be added at a later time
         // so we need to wait until either an element is added or shutdown() is called
         if (empty()) {
-            not_empty_.wait(l, [this]() { return is_shutdown_ || !empty(); });
+            not_empty_.wait(lock, [this]() { return is_shutdown_ || !empty(); });
         }
         if (empty() && is_shutdown_) {
             return end_iterator_;
@@ -324,27 +324,17 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     Iterator &operator--() {
         std::unique_lock<std::mutex> l(parent_->mutex_);
         if (idx_ == parent_->first_) { // underflow
-            throw std::runtime_error("Attempting to move before the first element.");
+            logger->error("Attempting to move before the first element.");
+            std::exit(EXIT_FAILURE);
         }
         if (idx_ == parent_->buffer_size_) { // past the end iterator
             idx_ = parent_->last_;
         } else if (idx_ > 0) {
             idx_--;
         } else {
-            idx_ = parent_->queue_.size() - 1;
+            idx_ = parent_->buffer_size_ - 1;
         }
         return *this;
-    }
-
-    /**
-     * Returns true if the iterator is pointing at the first available element. Note
-     * that this is not necessarily the same as pointing to the first element in the
-     * queue - as this element my no longer be available.
-     * Useful when iterating backwards - this method returns false if the iterator
-     * reached the oldest available element.
-     * */
-    bool at_begin() {
-        return (idx_ == parent_->first_);
     }
 
     void push_pos() {
@@ -374,7 +364,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
   private:
     size_type index_dist() {
         return idx_ >= parent_->first_ ? idx_ - parent_->first_
-                                       : parent_->size() + idx_ - parent_->first_;
+                                       : parent_->buffer_size_ + idx_ - parent_->first_;
     }
 
     bool no_more_elements() { return parent_->empty() || idx_ == parent_->last_; }

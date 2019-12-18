@@ -1,7 +1,8 @@
 #pragma once
 
-#include "common/chunked_wait_queue.hpp"
 #include "common/logger.hpp"
+
+#include "utils/template_utils.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -17,18 +18,18 @@ namespace common {
  * sources into a single (ordered) wait queue.
  * Since the merging happens in a wait queue, it's okay to merge data that doesn't fit
  * in memory - the merging will block until some of the merged data is read.
+ *
+ * Note: this method blocks until all the data was successfully processed.
  */
 template <typename T>
 void merge_files(const std::vector<std::string> sources,
-                 ChunkedWaitQueue<T> *merge_queue) {
+                 std::function<void(const T &)> on_new_item) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     std::vector<std::fstream> chunk_files(sources.size());
 
-    auto comp = [](const auto &a, const auto &b) { return a.first > b.first; };
-
-    std::priority_queue<std::pair<T, uint32_t>, std::vector<std::pair<T, uint32_t>>, decltype(comp)>
-            merge_heap(comp);
+    std::priority_queue<std::pair<T, uint32_t>, std::vector<std::pair<T, uint32_t>>, utils::GreaterFirst>
+            merge_heap;
     for (uint32_t i = 0; i < sources.size(); ++i) {
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
         T data_item;
@@ -36,7 +37,7 @@ void merge_files(const std::vector<std::string> sources,
             chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(data_item));
             merge_heap.push({ data_item, i });
         } else {
-            logger->trace("Error: Unable to open chunk file '{}'", sources[i]);
+            logger->error("Error: Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
     }
@@ -51,7 +52,7 @@ void merge_files(const std::vector<std::string> sources,
         merge_heap.pop();
         if (!has_written || smallest.first != last_written) {
             has_written = true;
-            merge_queue->push(smallest.first);
+            on_new_item(smallest.first);
             last_written = smallest.first;
             totalSize++;
         }
@@ -66,7 +67,6 @@ void merge_files(const std::vector<std::string> sources,
     for (uint32_t i = 0; i < sources.size(); ++i) {
         std::filesystem::remove(sources[i]);
     }
-    merge_queue->shutdown();
 }
 
 } // namespace common
