@@ -4,10 +4,6 @@ project(metagraph_utils)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(BOOST_INCLUDEDIR "~/.linuxbrew/include/")
-set(Boost_NO_BOOST_CMAKE ON)
-find_package(Boost REQUIRED COMPONENTS iostreams)
-
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
@@ -26,7 +22,6 @@ target_compile_options(metagraph_utils PRIVATE -DASIO_STANDALONE -Werror -Wall -
 
 target_include_directories(metagraph_utils
   PUBLIC
-    ${Boost_INCLUDE_DIRS}
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
     ${EXTERNAL_LIB_DIR}/libmaus2/include
@@ -44,5 +39,4 @@ target_link_libraries(metagraph_utils
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
     ${LIBMAUS_LIBRARY}
-    Boost::iostreams
 )

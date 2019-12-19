@@ -6,10 +6,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(../utils metagraph_utils)
 
-set(BOOST_INCLUDEDIR "~/.linuxbrew/include/")
-set(Boost_NO_BOOST_CMAKE ON)
-find_package(Boost REQUIRED COMPONENTS iostreams)
-
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
@@ -26,7 +22,6 @@ set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
 target_include_directories(metagraph_common
   PUBLIC
-    ${Boost_INCLUDE_DIRS}
     ${EXTERNAL_LIB_DIR}/asio/asio/include
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
@@ -45,6 +40,5 @@ target_link_libraries(metagraph_common
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
-    Boost::iostreams
     metagraph_utils
 )
