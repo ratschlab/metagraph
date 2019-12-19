@@ -10,7 +10,8 @@ constexpr uint32_t BLOCK_MASK = 0b111111111;
 constexpr uint32_t SHIFT = 9;
 
 BloomFilter::BloomFilter(size_t filter_size, uint32_t num_hash_functions)
-      : filter_(filter_size ? (((filter_size + BLOCK_MASK) >> SHIFT) << SHIFT) : BLOCK_MASK + 1),
+      : filter_(filter_size ? (((filter_size + BLOCK_MASK) >> SHIFT) << SHIFT)
+                            : BLOCK_MASK + 1),
         num_hash_functions_(num_hash_functions) {
     assert(filter_.size() >= filter_size);
     assert(filter_.size() > BLOCK_MASK);
@@ -42,11 +43,6 @@ inline uint64_t restrict_to(long long unsigned int h, size_t size) {
 }
 
 void BloomFilter::insert(uint64_t hash) {
-    if (is_absent(hash)) {
-        assert(!check(hash));
-        return;
-    }
-
     // use the 64-bit hash to select a 512-bit block
     const size_t offset = (restrict_to(hash, filter_.size()) >> SHIFT) << SHIFT;
 
@@ -69,9 +65,6 @@ void BloomFilter::insert(uint64_t hash) {
 }
 
 bool BloomFilter::check(uint64_t hash) const {
-    if (is_absent(hash))
-        return false;
-
     // use the 64-bit hash to select a 512-bit block
     const size_t offset = (restrict_to(hash, filter_.size()) >> SHIFT) << SHIFT;
 
@@ -97,6 +90,9 @@ const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
                                   const uint32_t num_hash_functions_,
                                   const uint64_t *hs,
                                   const uint64_t *end) {
+    // only used for assert
+    std::ignore = bloom;
+
     // used to restrict indices to the size of a block
     const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
 
@@ -116,7 +112,6 @@ const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
     uint32_t *hh;
     uint64_t *block;
     uint32_t offset;
-    int mask;
 
     __m256i block_indices;
     __m128i hashes_init, hashes, mult;
@@ -124,14 +119,6 @@ const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
 
     for (; hs + 4 <= end; hs += 4) {
         // check next batch to see if all hashes are absent
-        mask = _mm256_movemask_epi8(_mm256_and_si256(
-            _mm256_loadu_si256((__m256i*)hs),
-            _mm256_set1_epi64x(bloom.ABSENCE_CHECK)
-        ));
-
-        if (__builtin_popcount(mask) == 4)
-            continue;
-
         // compute offsets
         block_indices = _mm256_setr_epi64x(
             restrict_to(hs[0], size),
@@ -148,13 +135,6 @@ const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
         _mm256_zeroupper();
 
         for (size_t j = 0; j < 4; ++j) {
-            if (mask & 1) {
-                mask >>= 8;
-                continue;
-            }
-
-            mask >>= 8;
-
             uint32_t k = 0;
 
             block = filter_.data() + indices[j];
@@ -234,6 +214,9 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
                           sdsl::bit_vector &presence,
                           const sdsl::bit_vector &filter_,
                           const uint32_t num_hash_functions_) {
+    // only used for assert
+    std::ignore = bloom;
+
     // used to restrict indices to the size of a block
     const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
 
@@ -251,7 +234,6 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
     uint32_t *hh;
     const uint64_t *block;
     uint32_t offset;
-    int mask;
 
     __m256i block_indices;
     __m128i hashes_init, hashes, mult;
@@ -260,15 +242,6 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
     size_t i = 0;
     const size_t num_elements = hashes_end - hashes_begin;
     for (; i + 4 <= num_elements; i += 4) {
-        // check next batch to see if all hashes are absent
-        mask = _mm256_movemask_epi8(_mm256_and_si256(
-            _mm256_loadu_si256((__m256i*)hashes_begin),
-            _mm256_set1_epi64x(bloom.ABSENCE_CHECK)
-        ));
-
-        if (__builtin_popcount(mask) == 4)
-            continue;
-
         // copy hashes
         block_indices = _mm256_setr_epi64x(
             restrict_to(hashes_begin[0], size),
@@ -285,13 +258,6 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
         _mm256_zeroupper();
 
         for (size_t j = 0; j < 4; ++j) {
-            if (mask & 1) {
-                mask >>= 8;
-                continue;
-            }
-
-            mask >>= 8;
-
             bool found = true;
             uint32_t k = 0;
 

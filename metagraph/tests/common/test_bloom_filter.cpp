@@ -14,7 +14,7 @@
 const struct {
     uint64_t operator()(uint64_t i) const {
         gen.seed(i);
-        return BloomFilter::set_present(gen());
+        return gen();
     }
 
     mutable std::mt19937_64 gen;
@@ -35,9 +35,6 @@ void insert(sdsl::bit_vector &vector, uint64_t hash, size_t num_hash_functions) 
     if (!vector.size())
         return;
 
-    if (BloomFilter::is_absent(hash))
-        return;
-
     const uint64_t offset = ((__uint128_t(hash) * vector.size()) >> (64 + 9)) << 9;
     uint64_t base = hash, jump = hash >> 32;
 
@@ -49,9 +46,6 @@ void insert(sdsl::bit_vector &vector, uint64_t hash, size_t num_hash_functions) 
 bool is_present(const sdsl::bit_vector &vector, uint64_t hash, size_t num_hash_functions) {
     if (!vector.size())
         return true;
-
-    if (BloomFilter::is_absent(hash))
-        return false;
 
     const uint64_t offset = ((__uint128_t(hash) * vector.size()) >> (64 + 9)) << 9;
     uint64_t base = hash, jump = hash >> 32;

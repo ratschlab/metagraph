@@ -17,18 +17,20 @@ typedef KmerDef::TAlphabet TAlphabet;
 template <typename T>
 using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
+constexpr uint64_t npos = 0;
+
 
 template <class KmerBF>
 inline void call_kmers(const KmerBF &kmer_bloom,
                        const char *begin,
                        const char *end,
-                       const std::function<void(uint64_t)> &callback) {
+                       const std::function<void(uint64_t /* hash */,
+                                                bool /* is valid */)> &callback) {
     const auto k = kmer_bloom.get_k();
     if (begin >= end || static_cast<size_t>(end - begin) < k)
         return;
 
     const auto max_encoded_val = KmerDef::alphabet.size();
-    const auto &filter = kmer_bloom.get_filter();
 
     std::vector<TAlphabet> coded(end - begin);
     std::transform(begin, end,
@@ -49,9 +51,7 @@ inline void call_kmers(const KmerBF &kmer_bloom,
         auto rev = kmer_bloom.get_hasher();
         rev.reset(rc_coded.data() + rc_coded.size() - k);
 
-        callback(!invalid[k - 1]
-            ? filter.set_present(std::min(fwd, rev))
-            : filter.ABSENCE_CHECK);
+        callback(std::min(fwd, rev), !invalid[k - 1]);
 
         for (size_t i = k, j = coded.size() - k - 1; i < coded.size(); ++i, --j) {
             if (coded.at(i) < max_encoded_val) {
@@ -61,25 +61,23 @@ inline void call_kmers(const KmerBF &kmer_bloom,
                 rev.prev(rc_coded.at(j));
 
                 assert(invalid[i] || i + 1 >= k);
-                callback(!invalid[i]
-                    ? filter.set_present(std::min(fwd, rev))
-                    : filter.ABSENCE_CHECK);
+                callback(std::min(fwd, rev), !invalid[i]);
             } else {
-                callback(filter.ABSENCE_CHECK);
+                callback(npos, false);
             }
         }
 
     } else {
-        callback(!invalid[k - 1] ? filter.set_present(fwd) : filter.ABSENCE_CHECK);
+        callback(fwd, !invalid[k - 1]);
 
         for (size_t i = k; i < coded.size(); ++i) {
             if (coded.at(i) < max_encoded_val) {
                 fwd.next(coded.at(i));
 
                 assert(invalid[i] || i + 1 >= k);
-                callback(!invalid[i] ? filter.set_present(fwd) : filter.ABSENCE_CHECK);
+                callback(fwd, !invalid[i]);
             } else {
-                callback(filter.ABSENCE_CHECK);
+                callback(npos, false);
             }
         }
     }
@@ -94,18 +92,18 @@ void KmerBloomFilter<KmerHasher>
     size_t counter = 0;
 #endif
 
-    size_t i = 0;
-    AlignedVector<uint64_t> hashes(end - begin - k_ + 1);
-    call_kmers(*this, begin, end, [&](auto hash) {
-        hashes[i++] = hash;
+    AlignedVector<uint64_t> hashes;
+    hashes.reserve(end - begin - k_ + 1);
+    call_kmers(*this, begin, end, [&](auto hash, bool is_valid) {
+        if (is_valid) {
+            hashes.push_back(hash);
 
 #ifndef NDEBUG
-        counter += !BloomFilter::is_absent(hash);
+            ++counter;
 #endif
+        }
 
     });
-
-    assert(i == end - begin - k_ + 1);
 
     filter_.insert(hashes.data(), hashes.data() + hashes.size());
 
@@ -141,7 +139,10 @@ void KmerBloomFilter<KmerHasher>
         }
 
         call_kmers(*this, sequence.c_str(), sequence.c_str() + sequence.size(),
-                   [&](auto hash) { buffer.emplace_back(hash); });
+                   [&](auto hash, bool is_valid) {
+                       if (is_valid)
+                           buffer.push_back(hash);
+                   });
     });
 
     filter_.insert(buffer.data(), buffer.data() + buffer.size());
@@ -156,8 +157,9 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
     // aggregate hashes, then batch check
     size_t i = 0;
     AlignedVector<uint64_t> hashes(end - begin - k_ + 1);
-    call_kmers(*this, begin, end, [&](auto hash) { hashes[i++] = hash; });
-    assert(i == end - begin - k_ + 1);
+    call_kmers(*this, begin, end, [&](auto hash, bool) { hashes[i++] = hash; });
+
+    assert(i == hashes.size());
 
     return filter_.check(hashes.data(), hashes.data() + hashes.size());
 }
