@@ -524,8 +524,16 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
         if (j == bitmatrix_.size()) {
             // the column is new, create an efficient builder for it
             bitmatrix_.emplace_back();
-            vector = new bitmap_builder_set(num_rows_, get_num_threads(),
-                                            kNumElementsReservedInBitmapBuilder);
+            // Work with the full uncompressed bitmap if it takes less space
+            // than the buffer in its builder.
+            if (num_rows_ < kNumElementsReservedInBitmapBuilder * 64) {
+                vector = new bitmap_vector(num_rows_, 0);
+            } else {
+                // For large bitmaps, use the efficient builder, using only
+                // space proportional to the number of bits set in the bitmap.
+                vector = new bitmap_builder_set(num_rows_, get_num_threads(),
+                                                kNumElementsReservedInBitmapBuilder);
+            }
         } else {
             // otherwise, decompress the existing column and initialize a bitmap
             vector = new bitmap_vector(bitmatrix_[j]->template convert_to<sdsl::bit_vector>());
