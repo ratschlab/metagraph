@@ -121,21 +121,16 @@ void KmerBloomFilter<KmerHasher>
 template <class KmerHasher>
 void KmerBloomFilter<KmerHasher>
 ::add_sequences(const std::function<void(const CallString&)> &generate_sequences) {
-    constexpr size_t buffer_size = 1000000;
     AlignedVector<uint64_t> buffer;
-    buffer.reserve(buffer_size);
+    buffer.reserve(1000000);
 
     generate_sequences([&](const std::string &sequence) {
         if (sequence.size() < k_)
             return;
 
         if (buffer.capacity() < buffer.size() + sequence.size() - k_ + 1) {
-            if (buffer.capacity() < sequence.size() - k_ + 1) {
-                buffer.reserve(buffer.size() + sequence.size() - k_ + 1);
-            } else {
-                filter_.insert(buffer.data(), buffer.data() + buffer.size());
-                buffer.clear();
-            }
+            filter_.insert(buffer.data(), buffer.data() + buffer.size());
+            buffer.clear();
         }
 
         call_kmers(*this, sequence.c_str(), sequence.c_str() + sequence.size(),
