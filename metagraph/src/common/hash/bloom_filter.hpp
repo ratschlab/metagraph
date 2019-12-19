@@ -18,6 +18,9 @@
  */
 class BloomFilter {
   public:
+    constexpr static uint64_t HASH_MASK = 0x7FFFFFFFFFFFFFFF;
+    constexpr static uint64_t ABSENCE_CHECK = ~HASH_MASK;
+
     /**
      * Constructs a Bloom filter from the given parameters.
      * @param filter_size set the filter size to be the next greatest multiple of
@@ -64,9 +67,7 @@ class BloomFilter {
      * less than length.
      * @param length the length of the returned bit_vector
      */
-    sdsl::bit_vector check(const std::vector<std::pair<uint64_t /* hash */,
-                                                       size_t /* index */>> &hash_index,
-                           size_t length) const;
+    sdsl::bit_vector check(const uint64_t *hashes_begin, const uint64_t *hashes_end) const;
 
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
@@ -75,6 +76,11 @@ class BloomFilter {
     uint32_t num_hash_functions() const { return num_hash_functions_; }
 
     const sdsl::bit_vector& data() const { return filter_; }
+
+    inline constexpr static uint64_t set_present(uint64_t hash) { return hash & HASH_MASK; }
+    inline constexpr static uint64_t set_absent(uint64_t hash) { return hash | ABSENCE_CHECK; }
+
+    inline constexpr static bool is_absent(uint64_t hash) { return hash & ABSENCE_CHECK; }
 
     /**
      * Compute the optimal size of a Bloom filter given the parameters.

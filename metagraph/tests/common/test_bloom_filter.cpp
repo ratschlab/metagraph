@@ -14,7 +14,7 @@
 const struct {
     uint64_t operator()(uint64_t i) const {
         gen.seed(i);
-        return gen();
+        return BloomFilter::set_present(gen());
     }
 
     mutable std::mt19937_64 gen;
@@ -35,6 +35,9 @@ void insert(sdsl::bit_vector &vector, uint64_t hash, size_t num_hash_functions) 
     if (!vector.size())
         return;
 
+    if (BloomFilter::is_absent(hash))
+        return;
+
     const uint64_t offset = ((__uint128_t(hash) * vector.size()) >> (64 + 9)) << 9;
     uint64_t base = hash, jump = hash >> 32;
 
@@ -46,6 +49,9 @@ void insert(sdsl::bit_vector &vector, uint64_t hash, size_t num_hash_functions) 
 bool is_present(const sdsl::bit_vector &vector, uint64_t hash, size_t num_hash_functions) {
     if (!vector.size())
         return true;
+
+    if (BloomFilter::is_absent(hash))
+        return false;
 
     const uint64_t offset = ((__uint128_t(hash) * vector.size()) >> (64 + 9)) << 9;
     uint64_t base = hash, jump = hash >> 32;
@@ -164,10 +170,8 @@ TEST(BloomFilter, batch_insert_and_batch_check) {
             sdsl::bit_vector check(filter.size());
 
             std::vector<uint64_t> hashes(num_elements);
-            std::vector<std::pair<uint64_t, size_t>> hash_index(num_elements);
             for (size_t i = 0; i < num_elements; ++i) {
                 hashes[i] = hasher(i);
-                hash_index[i] = std::make_pair(hashes[i], i);
                 insert(check, hashes[i], filter.num_hash_functions());
             }
 
@@ -176,21 +180,26 @@ TEST(BloomFilter, batch_insert_and_batch_check) {
 
             EXPECT_EQ(
                 num_elements,
-                sdsl::util::cnt_one_bits(filter.check(hash_index, num_elements))
+                sdsl::util::cnt_one_bits(
+                    filter.check(hashes.data(),
+                                 hashes.data() + num_elements)
+                )
             );
 
             uint64_t false_positives = 0;
             sdsl::bit_vector checks(1000, false);
-            std::vector<std::pair<uint64_t, size_t>> next_hashes;
+            std::vector<uint64_t> next_hashes;
             next_hashes.reserve(1000);
             for (size_t i = num_elements; i < num_elements + 1000; ++i) {
-                next_hashes.emplace_back(hasher(i), i - num_elements);
-                checks[i - num_elements] = is_present(check, next_hashes.back().first, filter.num_hash_functions());
+                next_hashes.emplace_back(hasher(i));
+                checks[i - num_elements] = is_present(check,
+                                                      next_hashes.back(),
+                                                      filter.num_hash_functions());
                 false_positives += checks[i - num_elements];
-                EXPECT_EQ(checks[i - num_elements], filter.check(next_hashes.back().first));
+                EXPECT_EQ(checks[i - num_elements], filter.check(next_hashes.back()));
             }
 
-            EXPECT_EQ(checks, filter.check(next_hashes, 1000));
+            EXPECT_EQ(checks, filter.check(next_hashes.data(), next_hashes.data() + 1000));
 
             TEST_COUT << "Elements: " << num_elements << std::endl
                       << "Bloom filter: " << filter.size() << " bits; "

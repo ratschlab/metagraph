@@ -17,20 +17,20 @@ template <class KmerBF>
 inline void call_kmers(const KmerBF &kmer_bloom,
                        const char *begin,
                        const char *end,
-                       const std::function<void(size_t, uint64_t)> &callback) {
+                       const std::function<void(uint64_t)> &callback) {
     const auto k = kmer_bloom.get_k();
     if (begin >= end || static_cast<size_t>(end - begin) < k)
         return;
 
     const auto max_encoded_val = KmerDef::alphabet.size();
+    const auto &filter = kmer_bloom.get_filter();
 
     std::vector<TAlphabet> coded(end - begin);
     std::transform(begin, end,
                    coded.begin(),
                    [](char c) { return KmerDef::encode(c); });
-    auto invalid = utils::drag_and_mark_segments(
-        coded, max_encoded_val, k
-    );
+
+    auto invalid = utils::drag_and_mark_segments(coded, max_encoded_val, k);
 
     auto fwd = kmer_bloom.get_hasher();
     fwd.reset(coded.data());
@@ -44,37 +44,37 @@ inline void call_kmers(const KmerBF &kmer_bloom,
         auto rev = kmer_bloom.get_hasher();
         rev.reset(rc_coded.data() + rc_coded.size() - k);
 
-        if (!invalid[k - 1])
-            callback(0, std::min(fwd, rev));
+        callback(!invalid[k - 1]
+            ? filter.set_present(std::min(fwd, rev))
+            : filter.ABSENCE_CHECK);
 
         for (size_t i = k, j = coded.size() - k - 1; i < coded.size(); ++i, --j) {
-            if (coded.at(i) >= max_encoded_val)
-                continue;
+            if (coded.at(i) < max_encoded_val) {
+                assert(rc_coded.at(j) < max_encoded_val);
 
-            assert(rc_coded.at(j) < max_encoded_val);
+                fwd.next(coded.at(i));
+                rev.prev(rc_coded.at(j));
 
-            fwd.next(coded.at(i));
-            rev.prev(rc_coded.at(j));
-
-            if (!invalid[i]) {
-                assert(i + 1 >= k);
-                callback(i + 1 - k, std::min(fwd, rev));
+                assert(invalid[i] || i + 1 >= k);
+                callback(!invalid[i]
+                    ? filter.set_present(std::min(fwd, rev))
+                    : filter.ABSENCE_CHECK);
+            } else {
+                callback(filter.ABSENCE_CHECK);
             }
         }
 
     } else {
-        if (!invalid[k - 1])
-            callback(0, fwd);
+        callback(!invalid[k - 1] ? filter.set_present(fwd) : filter.ABSENCE_CHECK);
 
         for (size_t i = k; i < coded.size(); ++i) {
-            if (coded.at(i) >= max_encoded_val)
-                continue;
+            if (coded.at(i) < max_encoded_val) {
+                fwd.next(coded.at(i));
 
-            fwd.next(coded.at(i));
-
-            if (!invalid[i]) {
-                assert(i + 1 >= k);
-                callback(i + 1 - k, fwd);
+                assert(invalid[i] || i + 1 >= k);
+                callback(!invalid[i] ? filter.set_present(fwd) : filter.ABSENCE_CHECK);
+            } else {
+                callback(filter.ABSENCE_CHECK);
             }
         }
     }
@@ -90,7 +90,7 @@ void KmerBloomFilter<KmerHasher>
 #endif
 
     // TODO: insert all hashes in arbitrary order in a single call
-    call_kmers(*this, begin, end, [&](auto, auto hash) {
+    call_kmers(*this, begin, end, [&](auto hash) {
         filter_.insert(hash);
 #ifndef NDEBUG
         counter++;
@@ -127,7 +127,7 @@ void KmerBloomFilter<KmerHasher>
         }
 
         call_kmers(*this, sequence.c_str(), sequence.c_str() + sequence.size(),
-                   [&](auto, auto hash) { buffer.emplace_back(hash); });
+                   [&](auto hash) { buffer.emplace_back(hash); });
     });
 
     filter_.insert(buffer.data(), buffer.data() + buffer.size());
@@ -140,15 +140,11 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
         return sdsl::bit_vector();
 
     // aggregate hashes, then batch check
-    std::vector<std::pair<uint64_t, size_t>> hash_index;
+    size_t i = 0;
+    std::vector<uint64_t> hashes(end - begin - k_ + 1);
+    call_kmers(*this, begin, end, [&](auto hash) { hashes[i++] = hash; });
 
-    call_kmers(*this, begin, end, [&](auto i, auto hash) {
-        assert(i < static_cast<size_t>(end - begin - k_ + 1));
-
-        hash_index.emplace_back(hash, i);
-    });
-
-    return filter_.check(hash_index, end - begin - k_ + 1);
+    return filter_.check(hashes.data(), hashes.data() + hashes.size());
 }
 
 template <class KmerHasher>
