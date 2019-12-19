@@ -77,7 +77,7 @@ TYPED_TEST_CASE(CountKmers, KmerTypes);
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor(k, false, TypeParam::kWeighted);
         constructor.add_sequences({ std::string(100, 'A') });
         BOSS constructed(&constructor);
 
@@ -90,7 +90,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingTwoPaths) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor(k, false, TypeParam::kWeighted);
         constructor.add_sequences({ std::string(100, 'A'),
                                     std::string(50, 'B') });
         BOSS constructed(&constructor);
@@ -105,12 +105,12 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingTwoPaths) {
 
 TYPED_TEST(BOSSConstruct, ConstructionLowerCase) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor_first(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor_first(k, false, TypeParam::kWeighted);
         constructor_first.add_sequences({ std::string(100, 'A'),
                                           std::string(50, 'C') });
         BOSS first(&constructor_first);
 
-        BOSSConstructor constructor_second(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor_second(k, false, TypeParam::kWeighted);
         constructor_second.add_sequences({ std::string(100, 'a'),
                                            std::string(50, 'c') });
         BOSS second(&constructor_second);
@@ -125,12 +125,12 @@ TYPED_TEST(BOSSConstruct, ConstructionLowerCase) {
 
 TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor_first(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor_first(k, false, TypeParam::kWeighted);
         constructor_first.add_sequences({ std::string(100, 'N'),
                                           std::string(50, '$') });
         BOSS first(&constructor_first);
 
-        BOSSConstructor constructor_second(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor_second(k, false, TypeParam::kWeighted);
         constructor_second.add_sequences({ std::string(100, 'N'),
                                            std::string(50, '.') });
         BOSS second(&constructor_second);
@@ -147,7 +147,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
             "ATATATTCTCTCTCTCTCATA",
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
-        BOSSConstructor constructor(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor(k, false, TypeParam::kWeighted);
         constructor.add_sequences(input_data);
         BOSS constructed(&constructor);
 
@@ -171,7 +171,7 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
 
-        BOSSConstructor constructor(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor(k, false, TypeParam::kWeighted);
         constructor.add_sequences(input_data);
 
         BOSS constructed;
@@ -198,7 +198,7 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
 TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
     ASSERT_TRUE(TypeParam::kWeighted);
 
-    for (bool use_sorted_set_disk : { false, true }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -210,8 +210,8 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
             BOSS constructed(k);
 
             auto constructor
-                    = IBOSSChunkConstructor::initialize(k, use_sorted_set_disk, false,
-                                                        TypeParam::kWeighted);
+                    = IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted,
+                                                        "", 1, 0, container);
 
             for (auto &&sequence : input_data) {
                 constructor->add_sequence(std::move(sequence));
@@ -248,7 +248,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
             "ATATATTCTCTCTCTCTCATA",
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
-        BOSSConstructor constructor(k, false, true, TypeParam::kWeighted);
+        BOSSConstructor constructor(k, true, TypeParam::kWeighted);
         constructor.add_sequences(input_data);
         BOSS constructed(&constructor);
 
@@ -265,7 +265,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
 
 TYPED_TEST(BOSSConstruct, ConstructionLong) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor(k, false, TypeParam::kWeighted);
         constructor.add_sequences({ std::string(k + 1, 'A') });
         BOSS constructed(&constructor);
 
@@ -279,7 +279,7 @@ TYPED_TEST(BOSSConstruct, ConstructionLong) {
 
 TYPED_TEST(BOSSConstruct, ConstructionShort) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor(k, false, false, TypeParam::kWeighted);
+        BOSSConstructor constructor(k, false, TypeParam::kWeighted);
         constructor.add_sequences({ std::string(k, 'A') });
         BOSS constructed(&constructor);
 
@@ -304,8 +304,8 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
 
             for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                 std::unique_ptr<IBOSSChunkConstructor> constructor(
-                        IBOSSChunkConstructor::initialize(k, false, false,
-                                                          TypeParam::kWeighted, suffix));
+                        IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted,
+                                                          suffix));
 
                 constructor->add_sequence(std::string(100, 'A'));
                 constructor->add_sequence(std::string(100, 'C'));
@@ -340,9 +340,8 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
 
             for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                 std::unique_ptr<IBOSSChunkConstructor> constructor(
-                    IBOSSChunkConstructor::initialize(k, false, false,
-                            TypeParam::kWeighted, suffix, num_threads)
-                );
+                        IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted,
+                                                          suffix, num_threads));
 
                 constructor->add_sequence(std::string(100, 'A'));
                 constructor->add_sequence(std::string(100, 'C'));

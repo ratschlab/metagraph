@@ -337,15 +337,6 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         return *this;
     }
 
-    void push_pos() {
-        saved_indexes_.push(idx_);
-    }
-
-    void pop_pos() {
-        idx_ = saved_indexes_.top();
-        saved_indexes_.pop();
-    }
-
     bool operator==(const Iterator &other) {
         return parent_ == other.parent_ && idx_ == other.idx_;
     }

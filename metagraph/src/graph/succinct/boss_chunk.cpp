@@ -151,41 +151,8 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
     using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
 
 
-    /**
-     * Iterate backwards and check if there is another incoming edge (an edge with
-     * identical suffix and label as the current one) into the same node.
-     * If such an edge is found, then we  mark the current edge label with '-' (not the
-     * first incoming edge with that label)
-     */
     template <typename KMER>
-    static void check_incoming_edges(size_t cur_pos,
-                                     uint64_t alph_size,
-                                     Iterator &it,
-                                     const KMER &kmer,
-                                     TAlphabet *curW) {
-        if (cur_pos == 1 || *curW == 0) {
-            return;
-        }
-        it.push_pos();
-        --it;
-        --cur_pos;
-        for (; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it, --cur_pos) {
-            const KMER prev_kmer = get_kmer(*it);
-            if (prev_kmer[0] == *curW) {
-                // not the first incoming edge to the node, mark with -
-                *curW += alph_size;
-                break;
-            }
-            if (cur_pos == 1)
-                break;
-        }
-        it.pop_pos();
-
-        assert(*curW < (1llu << (alph_size + 1)));
-    }
-
-    template <typename KMER>
-    static void set_weights(const size_t count,
+    static void set_weight(const size_t count,
                             const KMER &kmer,
                             size_t curpos,
                             uint64_t max_count,
@@ -239,8 +206,10 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         size_t curpos = 1;
         TAlphabet lastF = 0;
         common::CircularBuffer<bool> was_skipped(alph_size * alph_size);
+        // last kmer for each label, so we can test multiple edges coming to same node
+        std::vector<std::remove_const_t <KMER>> last_kmer(alph_size, typename KMER::WordType(0));
         for (Iterator &it = begin; it != end; ++it) {
-            const KMER kmer = get_kmer(*it);
+            KMER kmer = get_kmer(*it);
             TAlphabet curW = kmer[0];
             TAlphabet curF = kmer[k];
 
@@ -263,7 +232,12 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             }
             was_skipped.push_back(0);
             --it;
-            check_incoming_edges<KMER>(curpos, alph_size, it, kmer, &curW);
+            if (KMER::compare_suffix(kmer, last_kmer[curW])) {
+                // not the first incoming edge to the node, mark with -
+                curW += alph_size;
+            } else {
+                last_kmer[curW] = kmer;
+            }
             W->push_back(curW);
 
             while (curF > lastF && lastF + 1 < static_cast<TAlphabet>(alph_size)) {
@@ -271,7 +245,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             }
 
             if constexpr (utils::is_pair<T>::value) {
-                set_weights((*it).second, kmer, curpos, max_count, weights);
+                set_weight((*it).second, kmer, curpos, max_count, weights);
             }
 
             curpos++;
