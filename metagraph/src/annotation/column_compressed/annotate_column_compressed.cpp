@@ -66,7 +66,7 @@ ColumnCompressed<Label>::get_label_codes(Index i) const {
 
     SetBitPositions label_indices;
     for (size_t j = 0; j < num_labels(); ++j) {
-        if (is_set(i, j))
+        if (get_column(j)[i])
             label_indices.push_back(j);
     }
     return label_indices;
@@ -78,10 +78,12 @@ ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) cons
     std::vector<SetBitPositions> rows(indices.size());
 
     for (size_t j = 0; j < num_labels(); ++j) {
+        const auto &column = get_column(j);
+
         for (size_t i = 0; i < indices.size(); ++i) {
             assert(indices[i] < num_rows_);
 
-            if (is_set(indices[i], j))
+            if (column[indices[i]])
                 rows[i].push_back(j);
         }
     }
@@ -107,8 +109,12 @@ template <typename Label>
 void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
                                          const VLabels &labels) {
     for (const auto &label : labels) {
+        const auto j = label_encoder_.insert_and_encode(label);
+        auto &uncompressed_column = decompress(j);
+
         for (Index i : indices) {
-            add_label(i, label);
+            assert(i < num_rows_);
+            uncompressed_column.set(i, 1);
         }
     }
 }
@@ -116,7 +122,7 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
 template <typename Label>
 bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
-        return is_set(i, label_encoder_.encode(label));
+        return get_column(label)[i];
     } catch (...) {
         return false;
     }
@@ -129,13 +135,13 @@ void ColumnCompressed<Label>
                  std::function<void(Index, bool)> callback,
                  std::function<bool()> terminate) const {
     try {
-        size_t label_code = label_encoder_.encode(label);
+        const auto &column = get_column(label);
 
         for (Index i : indices) {
             if (terminate())
                 return;
 
-            callback(i, is_set(i, label_code));
+            callback(i, column[i]);
         }
 
     } catch (...) {
@@ -290,14 +296,11 @@ template <typename Label>
 void ColumnCompressed<Label>
 ::call_objects(const Label &label,
                std::function<void(Index)> callback) const {
-    size_t col;
     try {
-        col = label_encoder_.encode(label);
+        get_column(label).call_ones(callback);
     } catch (...) {
         return;
     }
-
-    get_column(col).call_ones(callback);
 }
 
 template <typename Label>
@@ -429,13 +432,16 @@ uint64_t ColumnCompressed<Label>::num_relations() const {
 template <typename Label>
 void ColumnCompressed<Label>::set(Index i, size_t j, bool value) {
     assert(i < num_rows_);
-    if (j >= bitmatrix_.size() || is_set(i, j) != value)
-        decompress(j).set(i, value);
-}
 
-template <typename Label>
-bool ColumnCompressed<Label>::is_set(Index i, size_t j) const {
-    return get_column(j)[i];
+    // We update the value if:
+    //  * we are inserting a new column
+    //  * found uncompressed, hence it's easier to blindly update
+    //  * the column exists but compressed -- update only if value differs
+    if (j >= bitmatrix_.size()
+            || cached_columns_.Cached(j)
+            || (*bitmatrix_[j])[i] != value) {  // only compressed -- check value
+        decompress(j).set(i, value);
+    }
 }
 
 template <typename Label>
@@ -482,7 +488,7 @@ bitmap_dyn& ColumnCompressed<Label>::decompress(size_t j) {
         if (j == bitmatrix_.size())
             bitmatrix_.emplace_back();
 
-        auto *vector = new bitmap_adaptive(num_rows_, 0);
+        auto *vector = new bitmap_vector(num_rows_, 0);
 
         if (bitmatrix_[j].get())
             *vector |= *bitmatrix_[j];
@@ -567,16 +573,13 @@ void ColumnCompressed<Label>
         return;
     }
 
-    ThreadPool thread_pool(num_threads);
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
-        thread_pool.enqueue(
-            [this](auto... args) { this->add_labels(args...); },
-            i, std::min(i + kNumRowsInBlock, num_rows_),
-            annotator,
-            &progress_bar
-        );
+        this->add_labels(i,
+                         std::min(i + kNumRowsInBlock, num_rows_),
+                         annotator,
+                         &progress_bar);
     }
-    thread_pool.join();
 }
 
 template <typename Label>

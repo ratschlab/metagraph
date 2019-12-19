@@ -21,9 +21,6 @@
  */
 template <typename G, int L>
 class KMerBOSS {
-    template <typename U, int P>
-    friend std::ostream& operator<<(std::ostream &os, const KMerBOSS<U, P> &kmer);
-
   public:
     typedef G WordType;
     typedef uint64_t CharType;
@@ -47,8 +44,8 @@ class KMerBOSS {
     template <typename T>
     KMerBOSS(const std::vector<T> &arr) : KMerBOSS(arr, arr.size()) {}
 
-    explicit KMerBOSS(WordType &&seq) noexcept : seq_(seq) {}
-    explicit KMerBOSS(const WordType &seq) : seq_(seq) {}
+    KMerBOSS(WordType&& seq) noexcept : seq_(seq) {}
+    explicit KMerBOSS(const WordType &seq) noexcept : seq_(seq) {}
 
     // corresponds to the BOSS (co-lex, one-swapped) order of k-mers
     bool operator<(const KMerBOSS &other) const { return seq_ < other.seq_; }
@@ -80,7 +77,7 @@ class KMerBOSS {
      * @param old_last the last character in the current k-mer (provided, if available,
      * for efficiency reasons)
      */
-    inline void to_next(size_t k, CharType new_last, CharType old_last);
+    inline void to_next(size_t k, CharType new_last, WordType old_last);
     inline void to_next(size_t k, CharType new_last);
     /**
      * Replaces the current k-mer with its predecessor. The last k-1 characters of the
@@ -100,8 +97,12 @@ class KMerBOSS {
                 || std::equal(suffix.begin(), suffix.end(), kmer + k - suffix.size() - 1);
     }
 
+    void print_hex(std::ostream &os) const;
+
   private:
-    static const CharType kFirstCharMask;
+    static constexpr CharType kFirstCharMask = (1ull << kBitsPerChar) - 1;
+    static inline const WordType kAllButFirstCharMask = ~(WordType(kFirstCharMask));
+    static inline const WordType kAllSetMask = ~(WordType(0ull));
     WordType seq_; // kmer sequence
 };
 
@@ -121,8 +122,12 @@ KMerBOSS<G, L>::KMerBOSS(const V &arr, size_t k) : seq_(0) {
                  && "Too small Digit size for representing the character");
 
         seq_ |= arr[i];
-        seq_ = seq_ << kBitsPerChar;
+        seq_ <<= kBitsPerChar;
     }
+
+    assert(static_cast<uint64_t>(arr[k - 1]) <= kFirstCharMask
+            && "Too small Digit size for representing the character");
+
     seq_ |= arr[k - 1];
 }
 
@@ -132,16 +137,16 @@ KMerBOSS<G, L>::KMerBOSS(const V &arr, size_t k) : seq_(0) {
  *      = s[7] << k + (kmer & mask) >> 1 + s[8].
  */
 template <typename G, int L>
-void KMerBOSS<G, L>::to_next(size_t k, CharType new_last, CharType old_last) {
-    assert(old_last == (seq_ & WordType(kFirstCharMask)));
+void KMerBOSS<G, L>::to_next(size_t k, CharType new_last, WordType old_last) {
+    assert(old_last == (seq_ & kFirstCharMask));
     // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    seq_ = seq_ >> kBitsPerChar;
+    seq_ >>= kBitsPerChar;
     // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ += WordType(old_last) << static_cast<int>(kBitsPerChar * (k - 1));
+    seq_ |= old_last << static_cast<int>(kBitsPerChar * (k - 1));
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ |= kFirstCharMask;
-    // s[7]s[6]s[5]s[4]s[3]s[2]1111
-    seq_ -= kFirstCharMask - new_last;
+    seq_ &= kAllButFirstCharMask;
+    // s[7]s[6]s[5]s[4]s[3]s[2]0000
+    seq_ |= new_last;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
 }
 
@@ -152,39 +157,31 @@ void KMerBOSS<G, L>::to_next(size_t k, CharType new_last, CharType old_last) {
  */
 template <typename G, int L>
 void KMerBOSS<G, L>::to_next(size_t k, CharType new_last) {
-    WordType old_last = seq_ & WordType(kFirstCharMask);
-    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    seq_ = seq_ >> kBitsPerChar;
-    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ += old_last << static_cast<int>(kBitsPerChar * (k - 1));
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ |= kFirstCharMask;
-    // s[7]s[6]s[5]s[4]s[3]s[2]1111
-    seq_ -= kFirstCharMask - new_last;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
+    to_next(k, new_last, seq_ & static_cast<WordType>(kFirstCharMask));
 }
 
 template <typename G, int L>
 void KMerBOSS<G, L>::to_prev(size_t k, CharType new_first) {
     const int shift = kBitsPerChar * (k - 1);
     WordType last_char = seq_ >> shift;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-    seq_ |= kFirstCharMask;
-    seq_ -= kFirstCharMask - new_first;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ -= last_char << shift;
-    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ = seq_ << kBitsPerChar;
-    // s[6]s[5]s[4]s[3]s[2]s[1]0000
-    seq_ += last_char;
-    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
+    //     s[7]s[6]s[5]s[4]s[3]s[2]s[8]
+    seq_ &= kAllButFirstCharMask;
+    //     s[7]s[6]s[5]s[4]s[3]s[2]0000
+    seq_ |= new_first;
+    //     s[7]s[6]s[5]s[4]s[3]s[2]s[1]
+    seq_ <<= kBitsPerChar;
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]0000
+    seq_ &= kAllSetMask >> (sizeof(WordType) * 8 - kBitsPerChar * k);
+    //     s[6]s[5]s[4]s[3]s[2]s[1]0000
+    seq_ |= last_char;
+    //     s[6]s[5]s[4]s[3]s[2]s[1]s[7]
 }
 
 template <typename G, int L>
 typename KMerBOSS<G, L>::CharType KMerBOSS<G, L>::operator[](size_t i) const {
     static_assert(kBitsPerChar <= 64, "Too large digit!");
     assert(kBitsPerChar * (i + 1) <= sizeof(WordType) * 8);
-    return static_cast<uint64_t>(seq_ >> static_cast<int>(kBitsPerChar * i))
+    return static_cast<CharType>(seq_ >> static_cast<int>(kBitsPerChar * i))
              & kFirstCharMask;
 }
 
@@ -198,6 +195,13 @@ template <typename G, int L>
 bool KMerBOSS<G, L>::compare_suffix(const KMerBOSS &k1, const KMerBOSS &k2, size_t minus) {
     return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
              == k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
+}
+
+
+template <typename G, int L>
+std::ostream& operator<<(std::ostream &os, const KMerBOSS<G, L> &kmer) {
+    kmer.print_hex(os);
+    return os;
 }
 
 #endif // __KMER_BOSS_HPP__

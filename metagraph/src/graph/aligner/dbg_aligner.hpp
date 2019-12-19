@@ -35,7 +35,11 @@ template <class Seeder = ExactSeeder<>,
 class DBGAligner : public IDBGAligner {
   public:
     DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config) {}
+          : graph_(graph), config_(config) {
+        if (!config_.check_config_scores()) {
+            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
+        }
+    }
 
     DBGQueryAlignment align(const std::string &query) const {
         Seeder seeder(graph_, config_);
@@ -129,6 +133,7 @@ class DBGAligner : public IDBGAligner {
                bool orientation,
                score_t min_path_score,
                const Seeder &seeder) const {
+        assert(config_.check_config_scores());
         min_path_score = std::max(min_path_score, config_.min_cell_score);
 
         BoundedPriorityQueue<DBGAlignment> path_queue(config_.num_alternative_paths);

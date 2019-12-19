@@ -20,9 +20,6 @@
  */
 template <typename G, int L>
 class KMer {
-    template <typename U, int P>
-    friend std::ostream& operator<<(std::ostream &os, const KMer<U, P> &kmer);
-
   public:
     typedef G WordType;
     typedef uint64_t CharType;
@@ -47,8 +44,8 @@ class KMer {
     template <typename T>
     KMer(const std::vector<T> &arr) : KMer(arr, arr.size()) {}
 
-    explicit KMer(WordType &&seq) noexcept : seq_(seq) {}
-    explicit KMer(const WordType &seq) : seq_(seq) {}
+    KMer(WordType&& seq) noexcept : seq_(seq) {}
+    explicit KMer(const WordType &seq) noexcept : seq_(seq) {}
 
     // corresponds to the co-lex order of k-mers
     bool operator<(const KMer &other) const { return seq_ < other.seq_; }
@@ -74,7 +71,7 @@ class KMer {
      * @param k the k-mer size
      * @param edge_label the new last character
      */
-    inline void to_next(size_t k, CharType edge_label);
+    inline void to_next(size_t k, WordType edge_label);
     /**
      * Replaces the current k-mer with its predecessor. The last k-1 characters of the
      * predecessors are identical to the first k-1 characters of the successors.
@@ -93,9 +90,12 @@ class KMer {
                 || std::equal(suffix.begin(), suffix.end(), kmer + k - suffix.size());
     }
 
+    void print_hex(std::ostream &os) const;
+
   private:
     /** Bit mask for extracting the first character in packed kmers. */
-    static const CharType kFirstCharMask;
+    static constexpr CharType kFirstCharMask = (1ull << kBitsPerChar) - 1;
+    static inline const WordType kAllSetMask = ~(WordType(0ull));
     /** Packed k-mer representation */
     WordType seq_;
 };
@@ -111,26 +111,33 @@ KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
         exit(1);
     }
 
-    for (int i = k - 1; i >= 0; --i) {
+    for (int i = k - 1; i > 0; --i) {
         assert(static_cast<CharType>(arr[i]) <= kFirstCharMask
                  && "Too small Digit size for representing the character");
 
-        seq_ = seq_ << kBitsPerChar;
         seq_ |= arr[i];
+        seq_ <<= kBitsPerChar;
     }
+
+    assert(static_cast<CharType>(arr[0]) <= kFirstCharMask
+            && "Too small Digit size for representing the character");
+
+    seq_ |= arr[0];
 }
 
 template <typename G, int L>
-void KMer<G, L>::to_next(size_t k, CharType edge_label) {
-    assert(edge_label <= kFirstCharMask);
-    seq_ = seq_ >> kBitsPerChar;
-    seq_ |= WordType(edge_label) << static_cast<int>(kBitsPerChar * (k - 1));
+void KMer<G, L>::to_next(size_t k, WordType edge_label) {
+    assert(edge_label <= static_cast<WordType>(kFirstCharMask));
+    assert(k * kBitsPerChar <= sizeof(WordType) * 8);
+    seq_ >>= kBitsPerChar;
+    seq_ |= edge_label << static_cast<int>(kBitsPerChar * (k - 1));
 }
 
 template <typename G, int L>
 void KMer<G, L>::to_prev(size_t k, CharType first_char) {
-    seq_ = seq_ << kBitsPerChar;
-    seq_ = seq_ & ((WordType(1llu) << static_cast<int>(kBitsPerChar * k)) - WordType(1));
+    assert(k * kBitsPerChar <= sizeof(WordType) * 8);
+    seq_ <<= kBitsPerChar;
+    seq_ &= kAllSetMask >> (sizeof(WordType) * 8 - kBitsPerChar * k);
     seq_ |= first_char;
 }
 
@@ -140,6 +147,13 @@ typename KMer<G, L>::CharType KMer<G, L>::operator[](size_t i) const {
     assert(kBitsPerChar * (i + 1) <= sizeof(WordType) * 8);
     return static_cast<uint64_t>(seq_ >> static_cast<int>(kBitsPerChar * i))
              & kFirstCharMask;
+}
+
+
+template <typename G, int L>
+std::ostream& operator<<(std::ostream &os, const KMer<G, L> &kmer) {
+    kmer.print_hex(os);
+    return os;
 }
 
 #endif // __KMER_HPP__

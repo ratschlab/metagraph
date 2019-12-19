@@ -25,7 +25,7 @@ class AnnotatedDBG {
     bool has_label(node_index index,
                    const std::string &label) const;
 
-    void annotate_sequence(const std::string &sequence,
+    void annotate_sequence(std::string&& sequence,
                            const std::vector<std::string> &labels);
 
     void call_annotated_nodes(const std::string &label,

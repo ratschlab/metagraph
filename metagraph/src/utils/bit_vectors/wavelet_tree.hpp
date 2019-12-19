@@ -5,7 +5,7 @@
 #include <mutex>
 #include <atomic>
 
-#include <sdsl/wavelet_trees.hpp>
+#include <sdsl/wt_huff.hpp>
 #include <dynamic.hpp>
 
 #include "bit_vector.hpp"

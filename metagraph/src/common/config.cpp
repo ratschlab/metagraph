@@ -89,7 +89,7 @@ Config::Config(int argc, char *argv[]) {
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
-            verbose = true;
+            utils::set_verbose(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--print-col-names")) {
@@ -111,7 +111,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--anno-filename")) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
-            fasta_anno = true;
+            annotate_sequence_headers = true;
         } else if (!strcmp(argv[i], "--header-comment-delim")) {
             fasta_anno_comment_delim = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--anno-label")) {
@@ -125,8 +125,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
-            parallel = atoi(get_value(i++));
-            set_num_threads(parallel);
+            set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -188,7 +187,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--align-alternative-alignments")) {
             alignment_num_alternative_paths = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-cell-score")) {
-            alignment_min_cell_score = atoi(get_value(i++));
+            alignment_min_cell_score = atol(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-path-score")) {
             alignment_min_path_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-seed-length")) {
@@ -211,6 +210,8 @@ Config::Config(int argc, char *argv[]) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
+        } else if (!strcmp(argv[i], "--sequentially")) {
+            files_sequentially = true;
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -320,7 +321,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (parallel_nodes == static_cast<unsigned int>(-1))
-        parallel_nodes = parallel;
+        parallel_nodes = get_num_threads();
 
     if (identity == TRANSFORM && to_fasta)
         identity = ASSEMBLE;
@@ -334,8 +335,6 @@ Config::Config(int argc, char *argv[]) {
                 && !kmc_file_set.insert(utils::remove_suffix(*it, ".kmc_pre", ".kmc_suf")).second)
             fname.erase(it--);
     }
-
-    utils::set_verbose(verbose);
 
     if (!fname.size() && identity != STATS
                       && identity != SERVER_QUERY
@@ -429,7 +428,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (identity == ANNOTATE
-            && !filename_anno && !fasta_anno && !anno_labels.size()) {
+            && !filename_anno && !annotate_sequence_headers && !anno_labels.size()) {
         std::cerr << "Error: No annotation to add" << std::endl;
         print_usage_and_exit = true;
     }
@@ -772,8 +771,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [50]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [10]\n");
+            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
+            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [17]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -884,6 +883,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file [<GRAPH>]\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
+            fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
@@ -964,8 +964,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [50]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [10]\n");
+            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
+            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [17]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -997,8 +997,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [50]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [10]\n");
+            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
+            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [17]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");

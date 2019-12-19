@@ -228,19 +228,36 @@ bool Cigar::is_valid(const char *reference_begin, const char *reference_end,
 }
 
 
+// check to make sure the current scoring system won't underflow
+bool DBGAlignerConfig::check_config_scores() const {
+    int8_t min_element = std::min(gap_opening_penalty, gap_extension_penalty);
+    for (const auto &row : score_matrix_) {
+        min_element = std::min(min_element, *std::min_element(row.begin(), row.end()));
+    }
+
+    score_t shift = min_cell_score + min_element;
+    if (shift > min_cell_score) {
+        std::cerr << "min_cell_score: " << min_cell_score << std::endl
+                  << "underflow value: " << shift << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 DBGAlignerConfig::DBGAlignerConfig(const ScoreMatrix &score_matrix,
                                    int8_t gap_opening,
                                    int8_t gap_extension)
       : gap_opening_penalty(gap_opening),
         gap_extension_penalty(gap_extension),
-        score_matrix_(score_matrix) { }
+        score_matrix_(score_matrix) {}
 
 DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
                                    int8_t gap_opening,
                                    int8_t gap_extension)
       : gap_opening_penalty(gap_opening),
         gap_extension_penalty(gap_extension),
-        score_matrix_(std::move(score_matrix)) { }
+        score_matrix_(std::move(score_matrix)) {}
 
 DBGAlignerConfig::DBGAlignerConfig(const Config &config)
       : queue_size(config.alignment_queue_size),
@@ -462,19 +479,20 @@ DPTable<NodeType>::DPTable(NodeType start_node,
     auto& table_init = dp_table_.emplace(
         start_node,
         Column { std::vector<score_t>(size, min_score),
-                 std::vector<Step>(size),
+                 std::vector<Cigar::Operator>(size),
+                 std::vector<NodeType>(size),
                  start_char,
                  0 }
     ).first->second;
 
     table_init.scores.front() = initial_score;
-    table_init.steps.front().cigar_op = Cigar::Operator::MATCH;
-    table_init.steps.front().prev_node = DeBruijnGraph::npos;
+    table_init.ops.front() = Cigar::Operator::MATCH;
+    table_init.prev_nodes.front() = DeBruijnGraph::npos;
 
     if (size > 1 && table_init.scores.front() + gap_opening_penalty > min_score) {
         table_init.scores[1] = table_init.scores.front() + gap_opening_penalty;
-        table_init.steps[1].cigar_op = Cigar::Operator::INSERTION;
-        table_init.steps[1].prev_node = start_node;
+        table_init.ops[1] = Cigar::Operator::INSERTION;
+        table_init.prev_nodes[1] = start_node;
     }
 
     for (size_t i = 2; i < size; ++i) {
@@ -482,8 +500,8 @@ DPTable<NodeType>::DPTable(NodeType start_node,
             break;
 
         table_init.scores[i] = table_init.scores[i - 1] + gap_extension_penalty;
-        table_init.steps[i].cigar_op = Cigar::Operator::INSERTION;
-        table_init.steps[i].prev_node = start_node;
+        table_init.ops[i] = Cigar::Operator::INSERTION;
+        table_init.prev_nodes[i] = start_node;
     }
 }
 
@@ -504,7 +522,7 @@ DPTable<NodeType>::extract_alignments(const DeBruijnGraph &graph,
     starts.reserve(size());
     for (const auto &pair : dp_table_) {
         if (pair.second.best_score() > min_path_score
-                && pair.second.best_step().cigar_op == Cigar::Operator::MATCH)
+                && pair.second.best_op() == Cigar::Operator::MATCH)
             starts.emplace_back(&pair);
     }
 
@@ -610,29 +628,31 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     assert(column);
 
     auto i = start_pos;
-    const auto* step = &column->second.steps.at(i);
+    const auto* op = &column->second.ops.at(i);
+    const auto* prev_node = &column->second.prev_nodes.at(i);
 
-    if (!i && step->prev_node == DeBruijnGraph::npos)
+    if (!i && *prev_node == DeBruijnGraph::npos)
         return;
 
     std::vector<const typename DPTable::value_type*> out_columns;
-    while (step->prev_node != DeBruijnGraph::npos) {
-        cigar_.append(step->cigar_op);
+    while (*prev_node != DeBruijnGraph::npos) {
+        cigar_.append(*op);
 
-        if (step->cigar_op != Cigar::Operator::INSERTION)
+        if (*op != Cigar::Operator::INSERTION)
             out_columns.emplace_back(column);
 
-        if (step->cigar_op != Cigar::Operator::DELETION)
+        if (*op != Cigar::Operator::DELETION)
             --i;
 
-        if (step->cigar_op == Cigar::Operator::MATCH)
-            num_matches_++;
+        if (*op == Cigar::Operator::MATCH)
+            ++num_matches_;
 
-        auto find = dp_table.find(step->prev_node);
+        auto find = dp_table.find(*prev_node);
         assert(find != dp_table.end());
         column = &*find;
 
-        step = &column->second.steps.at(i);
+        op = &column->second.ops.at(i);
+        prev_node = &column->second.prev_nodes.at(i);
     }
 
     if (UNLIKELY(i > std::numeric_limits<Cigar::LengthType>::max())) {

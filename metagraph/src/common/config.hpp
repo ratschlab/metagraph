@@ -11,7 +11,6 @@ class Config {
 
     static constexpr auto UNINITIALIZED_STR = "\0";
 
-    bool verbose = false;
     bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
@@ -21,7 +20,7 @@ class Config {
     bool dynamic = false;
     bool mark_dummy_kmers = true;
     bool filename_anno = false;
-    bool fasta_anno = false;
+    bool annotate_sequence_headers = false;
     bool to_adj_list = false;
     bool to_fasta = false;
     bool to_gfa = false;
@@ -41,6 +40,7 @@ class Config {
     bool canonical_mode = false;
     bool greedy_brwt = false;
     bool separately = false;
+    bool files_sequentially = false;
     bool call_bubbles = false;
     bool call_breakpoints = false;
     bool map_sequences = false;
@@ -50,7 +50,6 @@ class Config {
 
     unsigned int k = 3;
     unsigned int distance = 0;
-    unsigned int parallel = 1;
     unsigned int parallel_nodes = -1;  // if not set, redefined by |parallel|
     unsigned int num_bins_per_thread = 1;
     unsigned int parts_total = 1;
@@ -82,11 +81,11 @@ class Config {
     int8_t alignment_gap_opening_penalty = 3;
     int8_t alignment_gap_extension_penalty = 1;
 
-    int64_t alignment_min_cell_score = 0;
-    int64_t alignment_min_path_score = 0;
+    int32_t alignment_min_cell_score = 0;
+    int32_t alignment_min_path_score = 0;
 
-    size_t alignment_queue_size = 50;
-    size_t alignment_vertical_bandwidth = 10;
+    size_t alignment_queue_size = 20;
+    size_t alignment_vertical_bandwidth = 17;
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();

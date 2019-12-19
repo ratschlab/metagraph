@@ -8,7 +8,6 @@
 #include "vector_row_binmat.hpp"
 #include "partitionings.hpp"
 #include "bitmap_mergers.hpp"
-#include "threading.hpp"
 
 
 template <typename T>
@@ -288,22 +287,18 @@ subsample_rows(const std::vector<std::unique_ptr<BitVector>> &source_columns,
     assert(selector->num_set_bits() == num_selected_rows);
 
     std::vector<std::unique_ptr<bit_vector>> columns(source_columns.size());
-    ThreadPool thread_pool(num_threads);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t i = 0; i < columns.size(); ++i) {
-        thread_pool.enqueue(
-            [&](auto i, const auto *selector, auto num_selected_rows) {
-                sdsl::bit_vector column(num_selected_rows, false);
-                selector->call_ones(
-                    [&](uint64_t pos) {
-                        if ((*source_columns[i])[pos])
-                            column[selector->rank1(pos)] = true;
-                    }
-                );
-                columns[i].reset(new bit_vector_small(std::move(column)));
-            }, i, selector.get(), num_selected_rows
+        sdsl::bit_vector column(num_selected_rows, false);
+        selector->call_ones(
+            [&](uint64_t pos) {
+                if ((*source_columns[i])[pos])
+                    column[selector->rank1(pos)] = true;
+            }
         );
+        columns[i].reset(new bit_vector_small(std::move(column)));
     }
-    thread_pool.join();
 
     return columns;
 }
