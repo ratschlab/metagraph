@@ -151,7 +151,6 @@ class BOSS {
     /**
      * Mark source dummy edges into mask by traversing the entire dummy subgraph (which
      * is a tree).
-     * Does not include the main dummy edge (with edge_index = 1).
      * @param[out] mask a bit mask where sink dummy edges are marked. Must have the same
      * size as #W_ or must be nullptr.
      * @param[in] num_threads number of threads to use in the traversal (1 thread if <=1).
