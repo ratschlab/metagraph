@@ -34,6 +34,9 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
                     const sdsl::bit_vector &second);
 
 
+/**
+ * An abstract interface for a bitmap constructor.
+ */
 class bitmap_builder {
   public:
     virtual ~bitmap_builder() {}
@@ -62,6 +65,11 @@ class bitmap_builder {
 };
 
 
+/**
+ * An abstract bitmap class: vector of a fixed size with elements 0 and 1.
+ * Given an exising bitmap, can initialize another bitmap.
+ * Thus, the class is inherited from `bitmap_builder`.
+ */
 class bitmap : public bitmap_builder {
   public:
     virtual ~bitmap() {}

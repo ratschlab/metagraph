@@ -11,14 +11,16 @@
 /**
  * A class for building a bitmap from positions of its set bits (ones).
  * The positions may be not distinct and can be passed in arbitrary order.
- *
- * Input parameters:
- * #size -- bitmap size
- * #num_threads -- threads used by SortedSet for parallel processing
- * #reserved -- number of elements in buffer (grows automatically)
  */
 class bitmap_builder_set : public bitmap_builder {
   public:
+    /**
+     * @brief      Constructs a new bitmap builder.
+     *
+     * @param[in]  size         bitmap size
+     * @param[in]  num_threads  threads used by SortedSet for parallel processing
+     * @param[in]  reserved     number of elements in buffer (grows automatically)
+     */
     bitmap_builder_set(uint64_t size, size_t num_threads = 0, uint64_t reserved = 0)
           : size_(size), set_bit_positions_([](const auto &) {}, num_threads) {
         set_bit_positions_.reserve(reserved);
