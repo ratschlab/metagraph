@@ -926,7 +926,7 @@ void DBGSuccinct
     );
 
     bloom_filter_->add_sequences([&](const auto &callback) {
-        call_sequences([&](const auto &sequence, auto&&) { callback(sequence); },
+        call_sequences([&](const auto &sequence, const auto &) { callback(sequence); },
                        canonical_mode_);
     });
 }
