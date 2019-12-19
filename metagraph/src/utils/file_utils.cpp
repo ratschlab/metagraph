@@ -46,7 +46,7 @@ std::string get_filetype(const std::string &fname) {
     if (ext == ".kmc_pre" || ext == ".kmc_suf")
         return "KMC";
 
-    if (ext == ".gz") {
+    if (ext == ".gz" || ext == ".bgz") {
         size_t nextind = fname.substr(0, dotind - 1).rfind(".");
         if (nextind == std::string::npos)
             return "";
