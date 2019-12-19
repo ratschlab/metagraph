@@ -24,13 +24,13 @@ BloomFilter::BloomFilter(size_t filter_size,
                     std::min(max_num_hash_functions,
                              optim_h(filter_size, expected_num_elements))) {}
 
+static_assert(sizeof(long long unsigned int) == sizeof(uint64_t));
+
 // fast map of h uniformly to the region [0, size)
 // (h * size) >> 64
-inline uint64_t restrict_to(uint64_t h, size_t size) {
+inline uint64_t restrict_to(long long unsigned int h, size_t size) {
 #ifdef __BMI2__
-    static_assert(sizeof(long long unsigned int) == sizeof(uint64_t));
-
-    _mulx_u64(h, size, reinterpret_cast<long long unsigned int*>(&h));
+    _mulx_u64(h, size, &h);
 
     assert(h < size);
     return h;
@@ -83,11 +83,14 @@ bool BloomFilter::check(uint64_t hash) const {
 
 #ifdef __AVX2__
 
-const uint64_t* batch_insert_avx2(sdsl::bit_vector &filter_,
+// compute Bloom filter hashes in batches of 4
+const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
+                                  sdsl::bit_vector &filter_,
                                   const uint32_t num_hash_functions_,
                                   const uint64_t *hs,
                                   const uint64_t *end) {
-    // compute Bloom filter hashes in batches of 4
+    // this is used only for an assert
+    std::ignore = bloom;
 
     // used to restrict indices to the size of a block
     const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
@@ -110,7 +113,7 @@ const uint64_t* batch_insert_avx2(sdsl::bit_vector &filter_,
     uint32_t offset;
 
     __m256i block_indices;
-    __m128i hashes, mult;
+    __m128i hashes_init, hashes, mult;
     __m64 *harray = (__m64*)&hashes;
 
     for (; hs + 4 <= end; hs += 4) {
@@ -137,10 +140,12 @@ const uint64_t* batch_insert_avx2(sdsl::bit_vector &filter_,
             // ensure the start of the 512-bit block is prefetched, prepare for write
             __builtin_prefetch(block, 1);
 
+            hashes_init = _mm_set1_epi64x(hs[j]);
+
             // hash functions in pairs
             for (; k + 2 <= num_hash_functions_; k += 2) {
                 // load hash
-                hashes = _mm_set1_epi64x(hs[j]);
+                hashes = hashes_init;
 
                 // compute hashes
                 // hash = (h1 + k * h2) & BLOCK_MASK
@@ -175,34 +180,41 @@ const uint64_t* batch_insert_avx2(sdsl::bit_vector &filter_,
             }
         }
 
-        assert(std::all_of(hs, hs + 4, [&](uint64_t hash) { return check(hash); }));
+        assert(std::all_of(hs, hs + 4, [&](uint64_t hash) { return bloom.check(hash); }));
     }
 
     return hs;
 }
+
 #endif
 
-void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
-    const uint64_t *hs = hash_array;
-    const uint64_t *end = hash_array + len;
-
+void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_end) {
 #ifdef __AVX2__
-    hs = batch_insert_avx2(filter_, num_hash_functions_, hs, end);
+    hashes_begin = batch_insert_avx2(*this,
+                                     filter_,
+                                     num_hash_functions_,
+                                     hashes_begin,
+                                     hashes_end);
 #endif
 
-    for (; hs < end; ++hs) {
-        insert(*hs);
+    // insert residual
+    for (; hashes_begin < hashes_end; ++hashes_begin) {
+        insert(*hashes_begin);
     }
 }
 
 #ifdef __AVX2__
 
-void batch_check_avx2(const std::vector<std::pair<uint64_t, size_t>> &hash_index,
+// compute Bloom filter hashes in batches of 4
+void batch_check_avx2(const BloomFilter &bloom,
+                      const std::vector<std::pair<uint64_t, size_t>> &hash_index,
                       size_t &i,
                       sdsl::bit_vector &presence,
                       const sdsl::bit_vector &filter_,
                       const uint32_t num_hash_functions_) {
-    // compute Bloom filter hashes in batches of 4
+    // this is used only for an assert
+    std::ignore = bloom;
+
     const size_t num_elements = hash_index.size();
 
     // used to restrict indices to the size of a block
@@ -224,7 +236,7 @@ void batch_check_avx2(const std::vector<std::pair<uint64_t, size_t>> &hash_index
     uint32_t offset;
 
     __m256i block_indices;
-    __m128i hashes, mult;
+    __m128i hashes_init, hashes, mult;
     __m64 *harray = (__m64*)&hashes;
 
     for (; i + 4 <= num_elements; i += 4) {
@@ -252,10 +264,12 @@ void batch_check_avx2(const std::vector<std::pair<uint64_t, size_t>> &hash_index
             // ensure the start of the 512-bit block is prefetched, prepare for read
             __builtin_prefetch(block, 0);
 
+            hashes_init = _mm_set1_epi64x(hash_index[i + j].first);
+
             // hash functions in pairs
             for (; found && k + 2 <= num_hash_functions_; k += 2) {
                 // load hash
-                hashes = _mm_set1_epi64x(hash_index[i + j].first);
+                hashes = hashes_init;
 
                 // compute hashes
                 // hash = (h1 + k * h2) & BLOCK_MASK
@@ -286,7 +300,7 @@ void batch_check_avx2(const std::vector<std::pair<uint64_t, size_t>> &hash_index
 
             if (found) {
                 presence[hash_index[i + j].second] = true;
-                assert(check(hash_index[i + j].first));
+                assert(bloom.check(hash_index[i + j].first));
             }
         }
     }
@@ -295,16 +309,17 @@ void batch_check_avx2(const std::vector<std::pair<uint64_t, size_t>> &hash_index
 #endif
 
 sdsl::bit_vector BloomFilter
-::batch_check(const std::vector<std::pair<uint64_t, size_t>> &hash_index,
-              size_t length) const {
+::check(const std::vector<std::pair<uint64_t, size_t>> &hash_index,
+        size_t length) const {
     const size_t num_elements = hash_index.size();
     sdsl::bit_vector presence(length, false);
     size_t i = 0;
 
 #ifdef __AVX2__
-    batch_check_avx2(hash_index, i, presence, filter_, num_hash_functions_);
+    batch_check_avx2(*this, hash_index, i, presence, filter_, num_hash_functions_);
 #endif
 
+    // check residual
     for (; i < num_elements; ++i) {
         presence[hash_index[i].second] = check(hash_index[i].first);
     }

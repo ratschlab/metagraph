@@ -125,7 +125,7 @@ TEST(BloomFilter, batch_insert_and_check) {
                 insert(check, hashes[i], filter.num_hash_functions());
             }
 
-            filter.batch_insert(hashes.data(), num_elements);
+            filter.insert(hashes.data(), hashes.data() + num_elements);
             ASSERT_EQ(check, filter.data());
 
             for (size_t i = 0; i < num_elements; ++i) {
@@ -171,12 +171,12 @@ TEST(BloomFilter, batch_insert_and_batch_check) {
                 insert(check, hashes[i], filter.num_hash_functions());
             }
 
-            filter.batch_insert(hashes.data(), num_elements);
+            filter.insert(hashes.data(), hashes.data() + num_elements);
             ASSERT_EQ(check, filter.data());
 
             EXPECT_EQ(
                 num_elements,
-                sdsl::util::cnt_one_bits(filter.batch_check(hash_index, num_elements))
+                sdsl::util::cnt_one_bits(filter.check(hash_index, num_elements))
             );
 
             uint64_t false_positives = 0;
@@ -190,7 +190,7 @@ TEST(BloomFilter, batch_insert_and_batch_check) {
                 EXPECT_EQ(checks[i - num_elements], filter.check(next_hashes.back().first));
             }
 
-            EXPECT_EQ(checks, filter.batch_check(next_hashes, 1000));
+            EXPECT_EQ(checks, filter.check(next_hashes, 1000));
 
             TEST_COUT << "Elements: " << num_elements << std::endl
                       << "Bloom filter: " << filter.size() << " bits; "

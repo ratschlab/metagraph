@@ -121,7 +121,7 @@ void KmerBloomFilter<KmerHasher>
             if (buffer.capacity() < sequence.size() - k_ + 1) {
                 buffer.reserve(buffer.size() + sequence.size() - k_ + 1);
             } else {
-                filter_.batch_insert(buffer.data(), buffer.size());
+                filter_.insert(buffer.data(), buffer.data() + buffer.size());
                 buffer.clear();
             }
         }
@@ -130,7 +130,7 @@ void KmerBloomFilter<KmerHasher>
                    [&](auto, auto hash) { buffer.emplace_back(hash); });
     });
 
-    filter_.batch_insert(buffer.data(), buffer.size());
+    filter_.insert(buffer.data(), buffer.data() + buffer.size());
 }
 
 template <class KmerHasher>
@@ -148,7 +148,7 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
         hash_index.emplace_back(hash, i);
     });
 
-    return filter_.batch_check(hash_index, end - begin - k_ + 1);
+    return filter_.check(hash_index, end - begin - k_ + 1);
 }
 
 template <class KmerHasher>

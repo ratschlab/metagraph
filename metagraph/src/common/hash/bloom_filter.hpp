@@ -45,16 +45,16 @@ class BloomFilter {
     void insert(uint64_t hash);
 
     /**
+     * Insert a batch of elements into the Bloom filter by hash value
+     */
+    void insert(const uint64_t *hashes_begin, const uint64_t *hashes_end);
+
+    /**
      * Check an element for presence in the Bloom filter. Returns false if
      * the element is not in the set and true if the element may be in the set.
      * @param hash the hash of the inserted element
      */
     bool check(uint64_t hash) const;
-
-    /**
-     * Insert a batch of elements into the Bloom filter by hash value
-     */
-    void batch_insert(const uint64_t hashes[], size_t len);
 
     /**
      * Check a batch of elements in the Bloom filter and report their
@@ -64,9 +64,9 @@ class BloomFilter {
      * less than length.
      * @param length the length of the returned bit_vector
      */
-    sdsl::bit_vector batch_check(const std::vector<std::pair<uint64_t /* hash */,
-                                                             size_t /* index */>> &hash_index,
-                                 size_t length) const;
+    sdsl::bit_vector check(const std::vector<std::pair<uint64_t /* hash */,
+                                                       size_t /* index */>> &hash_index,
+                           size_t length) const;
 
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
