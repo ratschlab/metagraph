@@ -31,8 +31,8 @@ void BloomFilter::insert(uint64_t hash) {
     size_t offset = ((hash % size) >> SHIFT) << SHIFT;
 
     // split 64-bit hash into two 32-bit hashes
-    uint32_t h1 = hash & 0xFFFFFFFF;
-    uint32_t h2 = hash >> 32;
+    const uint32_t h1 = hash & 0xFFFFFFFF;
+    const uint32_t h2 = hash >> 32;
 
     /*
      * Use two 32-bit hashes to generate num_hash_functions hashes
@@ -55,8 +55,8 @@ bool BloomFilter::check(uint64_t hash) const {
     size_t offset = ((hash % size) >> SHIFT) << SHIFT;
 
     // split 64-bit hash into two 32-bit hashes
-    uint32_t h1 = hash & 0xFFFFFFFF;
-    uint32_t h2 = hash >> 32;
+    const uint32_t h1 = hash & 0xFFFFFFFF;
+    const uint32_t h2 = hash >> 32;
 
     for (uint32_t i = 0; i < num_hash_functions_; ++i) {
         // check bits within block
@@ -67,11 +67,11 @@ bool BloomFilter::check(uint64_t hash) const {
     return true;
 }
 
-void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
-    const uint64_t *hs = hash_array;
-    const uint64_t *end = hash_array + len;
-
 #ifdef __AVX2__
+void batch_insert_avx2(sdsl::bit_vector &filter_,
+                       const uint32_t num_hash_functions_,
+                       const uint64_t *&hs,
+                       const uint64_t *&end) {
     // compute Bloom filter hashes in batches of 4
 
     // used to restrict indices to the size of a block
@@ -85,7 +85,7 @@ void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
 
     const __m128i ones = _mm_set1_epi64x(1);
 
-    const auto size = filter_.size();
+    const size_t size = filter_.size();
 
     uint64_t indices[4] __attribute__ ((aligned (32)));
     uint32_t ht[2] __attribute__ ((aligned (8)));
@@ -159,7 +159,15 @@ void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
 
         assert(std::all_of(hs, hs + 4, [&](uint64_t hash) { return check(hash); }));
     }
+}
+#endif
 
+void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
+    const uint64_t *hs = hash_array;
+    const uint64_t *end = hash_array + len;
+
+#ifdef __AVX2__
+    batch_insert_avx2(filter_, num_hash_functions_, hs, end);
 #endif
 
     for (; hs < end; ++hs) {
@@ -167,15 +175,15 @@ void BloomFilter::batch_insert(const uint64_t hash_array[], size_t len) {
     }
 }
 
-sdsl::bit_vector BloomFilter
-::batch_check(const std::vector<std::pair<uint64_t, size_t>> &hash_index,
-             size_t length) const {
-    const auto num_elements = hash_index.size();
-    sdsl::bit_vector presence(length, false);
-    size_t i = 0;
-
 #ifdef __AVX2__
+
+void batch_check_avx2(const std::vector<std::pair<uint64_t, size_t>> &hash_index,
+                      size_t &i,
+                      sdsl::bit_vector &presence,
+                      const sdsl::bit_vector &filter_,
+                      const uint32_t num_hash_functions_) {
     // compute Bloom filter hashes in batches of 4
+    const size_t num_elements = hash_index.size();
 
     // used to restrict indices to the size of a block
     const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
@@ -188,7 +196,7 @@ sdsl::bit_vector BloomFilter
 
     const __m128i ones = _mm_set1_epi64x(1);
 
-    const auto size = filter_.size();
+    const size_t size = filter_.size();
 
     uint64_t hs[4] __attribute__ ((aligned (32)));
     uint64_t indices[4] __attribute__ ((aligned (32)));
@@ -266,7 +274,19 @@ sdsl::bit_vector BloomFilter
             }
         }
     }
+}
 
+#endif
+
+sdsl::bit_vector BloomFilter
+::batch_check(const std::vector<std::pair<uint64_t, size_t>> &hash_index,
+              size_t length) const {
+    const size_t num_elements = hash_index.size();
+    sdsl::bit_vector presence(length, false);
+    size_t i = 0;
+
+#ifdef __AVX2__
+    batch_check_avx2(hash_index, i, presence, filter_, num_hash_functions_);
 #endif
 
     for (; i < num_elements; ++i) {
