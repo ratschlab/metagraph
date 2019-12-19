@@ -256,7 +256,6 @@ include_directories(
 )
 
 add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
-add_subdirectory(external-libraries/spdlog)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
