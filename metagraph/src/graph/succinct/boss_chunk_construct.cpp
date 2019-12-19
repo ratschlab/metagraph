@@ -11,6 +11,7 @@
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_set_disk.hpp"
+#include "common/threading.hpp"
 #include "common/unix_tools.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "utils/template_utils.hpp"
@@ -102,7 +103,8 @@ template <typename Container>
 void recover_source_dummy_nodes(size_t k,
                                 Container *kmers,
                                 size_t num_threads,
-                                size_t /* alphabet size */) {
+                                size_t /* alphabet size */,
+                                ThreadPool & /* async_worker */) {
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
@@ -251,7 +253,8 @@ template <typename T>
 void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
                                 size_t num_threads,
-                                size_t alphabet_size) {
+                                size_t alphabet_size,
+                                ThreadPool &async_worker) {
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name
             = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
@@ -322,7 +325,7 @@ void recover_source_dummy_nodes(size_t k,
     common::SortedSetDisk<T> sorted_dummy_kmers2;
     common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
     common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
-    for (size_t dummy_pref_len = 3; dummy_pref_len < 4; ++dummy_pref_len) {
+    for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
         const std::string file_name = get_file_name(dummy_pref_len);
         files_to_merge.push_back(create_stream(file_name));
         dest->clear(async_file_writer(*(files_to_merge.back().second)));
@@ -361,8 +364,9 @@ void recover_source_dummy_nodes(size_t k,
         delete el.second; // this will also close the stream
         file_names.push_back(el.first);
     });
-    std::async(std::launch::async, &common::merge_files<T>, file_names,
-               [kmers](const T &v) { kmers->push(v); });
+    async_worker.enqueue(&common::merge_files<T>, file_names,
+                         [kmers](const T &v) { kmers->push(v); });
+    async_worker.enqueue([kmers]() { kmers->shutdown(); });
 }
 
 inline std::vector<KmerExtractorBOSS::TAlphabet>
@@ -421,10 +425,9 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
             Timer timer;
 
             // kmer_collector stores (BOSS::k_ + 1)-mers
-            recover_source_dummy_nodes(kmer_storage_.get_k() - 1,
-                                       &kmers,
+            recover_source_dummy_nodes(kmer_storage_.get_k() - 1, &kmers,
                                        kmer_storage_.num_threads(),
-                                       kmer_storage_.alphabet_size());
+                                       kmer_storage_.alphabet_size(), async_worker_);
 
             common::logger->trace("Dummy source k-mers were reconstructed in {} sec",
                                   timer.elapsed());
@@ -455,6 +458,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     uint64_t get_k() const { return kmer_storage_.get_k() - 1; }
 
     KmerCollector kmer_storage_;
+    /** Used as an async executor for merging chunks from disk */
+    ThreadPool async_worker_ = ThreadPool(1, 1);
 };
 
 template <template <typename KMER> class KmerContainer, typename... Args>

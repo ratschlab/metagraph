@@ -54,17 +54,17 @@ class SortedSetDisk {
     SortedSetDisk(
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
             size_t num_threads = 1,
-            size_t container_size_bytes = 1e6,
+            size_t max_num_elements = 1e6,
             const std::string &chunk_file_prefix = "/tmp/chunk_",
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
         : num_threads_(num_threads),
           chunk_file_prefix_(chunk_file_prefix),
-          merge_queue_(container_size_bytes / sizeof(T),
+          merge_queue_(max_num_elements ,
                        num_last_elements_cached,
                        on_item_pushed),
           cleanup_(cleanup) {
-        reserve(container_size_bytes);
+        try_reserve(max_num_elements);
     }
 
     ~SortedSetDisk() {
@@ -167,8 +167,6 @@ class SortedSetDisk {
     size_t buffer_size() { return data_->capacity(); }
 
   private:
-    void reserve(size_t bytes) { try_reserve(bytes / sizeof(T)); }
-
     void shrink_data() {
         logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
@@ -293,8 +291,8 @@ class SortedSetDisk {
     mutable std::shared_timed_mutex multi_insert_mutex_;
 
     /**
-     * Thread pool with two threads: one for writing to disk and one for merging data from disk.
-     * Each thread has a single task (write to disk and merge from disk, respectively).
+     * Thread pool for writing to disk and  for merging data from disk. Since writing
+     * to disk happens before the merging, a single thread is needed.
      */
     ThreadPool async_worker_ = ThreadPool(1, 1);
 

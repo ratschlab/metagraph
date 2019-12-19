@@ -168,6 +168,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         }
         it.push_pos();
         --it;
+        --cur_pos;
         for (; KMER::compare_suffix(kmer, get_kmer(*it), 1); --it, --cur_pos) {
             const KMER prev_kmer = get_kmer(*it);
             if (prev_kmer[0] == *curW) {

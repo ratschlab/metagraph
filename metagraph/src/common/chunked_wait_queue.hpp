@@ -319,7 +319,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
 
     /**
      * Moves the iterator to the previous element in the queue.
-     * @throw std::runtime_error if attempting to move before the first element
+     * Stops execution if attempting to move before the first element
      */
     Iterator &operator--() {
         std::unique_lock<std::mutex> l(parent_->mutex_);

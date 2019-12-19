@@ -215,8 +215,8 @@ KmerCollector<KMER, KmerExtractor, Container>
         assert(filter_suffix_encoded_.empty()
                && "SortedSetDisk does not support chunking");
     }
-    common::logger->trace("Preallocated {} GB for the k-mer storage, capacity: {} k-mers",
-                          (kmers_.buffer_size() * sizeof(typename Container::value_type) >> 30),
+    common::logger->trace("Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
+                          (kmers_.buffer_size() * sizeof(typename Container::value_type) >> 20),
                           kmers_.buffer_size());
 }
 
