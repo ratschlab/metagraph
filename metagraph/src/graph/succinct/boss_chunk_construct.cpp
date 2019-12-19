@@ -14,13 +14,14 @@
 #include "common/threading.hpp"
 #include "common/unix_tools.hpp"
 #include "kmer/kmer_collector.hpp"
+#include "utils/file_utils.hpp"
 #include "utils/template_utils.hpp"
 
 namespace mg {
 namespace succinct {
 
 using namespace mg;
-
+using common::logger;
 
 template <typename KMER>
 using KmerMultsetVector = kmer::KmerCollector<
@@ -64,14 +65,13 @@ template <typename Array>
 void shrink_kmers(Array *kmers,
                   size_t num_threads,
                   size_t offset) {
-    common::logger->trace("Allocated capacity exceeded, filter out non-unique k-mers...");
+    logger->trace("Allocated capacity exceeded, filter out non-unique k-mers...");
 
     size_t prev_num_kmers = kmers->size();
     sort_and_remove_duplicates(kmers, num_threads, offset);
 
-    common::logger->trace(" done. Number of kmers reduced from {} to {}, {}Mb",
-                          prev_num_kmers, kmers->size(),
-                          (kmers->size() * sizeof(typename Array::value_type) >> 20));
+    logger->trace("...done. Number of kmers reduced from {} to {}, {}Mb", prev_num_kmers,
+                  kmers->size(), (kmers->size() * sizeof(typename Array::value_type) >> 20));
 }
 
 template <class Container, typename KMER>
@@ -128,12 +128,12 @@ void recover_source_dummy_nodes(size_t k,
 
         push_back(*kmers, kmer).to_prev(k + 1, BOSS::kSentinelCode);
     }
-    common::logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
-                          num_dummy_parent_kmers);
+    logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
+                  num_dummy_parent_kmers);
     sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
-    common::logger->trace("Number of dummy k-mers with dummy prefix of length 2: {}",
-                          kmers->size() - dummy_begin);
+    logger->trace("Number of dummy k-mers with dummy prefix of length 2: {}",
+                  kmers->size() - dummy_begin);
 
     for (size_t c = 3; c < k + 1; ++c) {
         size_t succ_dummy_begin = dummy_begin;
@@ -147,8 +147,8 @@ void recover_source_dummy_nodes(size_t k,
         }
         sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
-        common::logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}",
-                              c, kmers->size() - dummy_begin);
+        logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}", c,
+                      kmers->size() - dummy_begin);
     }
     ips4o::parallel::sort(kmers->begin(), kmers->end(),
                           utils::LessFirst(),
@@ -204,6 +204,7 @@ void write_or_die(std::fstream *f, const T &v) {
     }
 };
 
+
 /**
  * Writes the kmer at the front of #buffer to a file if it's not a redundant dummy
  * kmer. If the k-mer at the front is a (not-redundant) dummy k-mer it also writes its
@@ -211,16 +212,15 @@ void write_or_die(std::fstream *f, const T &v) {
  */
 template <typename T>
 uint8_t write_kmer(size_t k,
-                   std::fstream *f,
                    Vector<T> *dummy_kmers,
-                   ThreadPool *file_write_pool,
+                   utils::BufferedAsyncWriter<T> *writer,
                    RecentKmers<T> *buffer,
                    common::SortedSetDisk<T> *sorted_dummy_kmers) {
     const Kmer<T> to_write = buffer->pop_front();
     if (to_write.is_removed) { // redundant dummy, &file_write_pool k-mer
         return 0;
     }
-    file_write_pool->enqueue(write_or_die<T>, f, to_write.kmer);
+    writer->push(to_write.kmer);
     using KMER = std::remove_reference_t<decltype(utils::get_first(to_write.kmer))>;
     using TAlphabet = typename T::CharType;
 
@@ -276,14 +276,14 @@ void recover_source_dummy_nodes(size_t k,
         return std::pair<std::string, std::fstream *>({ name, f });
     };
 
-    std::string file_name = "/tmp/original_and_dummy_l1";
+    const std::string file_name = "/tmp/original_and_dummy_l1";
     files_to_merge.push_back(create_stream(file_name));
     std::fstream *dummy_l1 = files_to_merge.back().second;
 
     using TAlphabet = typename T::CharType;
     RecentKmers<T> recent_buffer(alphabet_size * alphabet_size);
 
-    std::string file_name_l2 = get_file_name(2);
+    const std::string file_name_l2 = get_file_name(2);
     files_to_merge.push_back(create_stream(file_name_l2));
     std::fstream *dummy_l2 = files_to_merge.back().second;
 
@@ -293,33 +293,35 @@ void recover_source_dummy_nodes(size_t k,
                                                 async_file_writer(*dummy_l2));
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
-
+    Timer timer;
     // remove redundant dummy source k-mers of prefix length 1 and write them to a file
     // While traversing and removing redundant dummy source k-mers of prefix length 1,
     // we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
+    utils::BufferedAsyncWriter<T> writer(file_name, dummy_l1);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
         recent_buffer.push_back({ el, false });
         remove_redundant_dummy_source<T, TAlphabet>(el, &recent_buffer);
         if (recent_buffer.full()) {
-            num_dummy_parent_kmers += write_kmer(k, dummy_l1, &dummy_kmers, &file_write_pool,
-                                                 &recent_buffer, &sorted_dummy_kmers);
+            num_dummy_parent_kmers += write_kmer(k, &dummy_kmers, &writer, &recent_buffer,
+                                                 &sorted_dummy_kmers);
         }
     }
     while (!recent_buffer.empty()) { // empty the buffer
-        num_dummy_parent_kmers += write_kmer(k, dummy_l1, &dummy_kmers, &file_write_pool,
-                                             &recent_buffer, &sorted_dummy_kmers);
+        num_dummy_parent_kmers += write_kmer(k, &dummy_kmers, &writer, &recent_buffer,
+                                             &sorted_dummy_kmers);
     }
-
+    writer.flush();
+    logger->trace("Building l1 in {}s", timer.elapsed());
     // push out the leftover dummy kmers
     sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
 
-    common::logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
-                          num_dummy_parent_kmers);
-    common::logger->trace("Total number of k-mers: {}", num_parent_kmers);
+    logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
+                  num_dummy_parent_kmers);
+    logger->trace("Total number of k-mers: {}", num_parent_kmers);
 
     // generate dummy k-mers of prefix length 3..k
     common::SortedSetDisk<T> sorted_dummy_kmers2;
@@ -346,8 +348,8 @@ void recover_source_dummy_nodes(size_t k,
         dest->insert(dummy_kmers.begin(), dummy_kmers.end());
 
 
-        common::logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
-                              (dummy_pref_len - 1), num_kmers);
+        logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
+                      (dummy_pref_len - 1), num_kmers);
         std::swap(source, dest);
     }
     for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
@@ -421,7 +423,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         auto &kmers = kmer_storage_.data();
 
         if (!kmer_storage_.suffix_length()) {
-            common::logger->trace("Reconstructing all required dummy source k-mers...");
+            logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
 
             // kmer_collector stores (BOSS::k_ + 1)-mers
@@ -429,8 +431,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                        kmer_storage_.num_threads(),
                                        kmer_storage_.alphabet_size(), async_worker_);
 
-            common::logger->trace("Dummy source k-mers were reconstructed in {} sec",
-                                  timer.elapsed());
+            logger->trace("Dummy source k-mers were reconstructed in {} sec",
+                          timer.elapsed());
         }
 
         BOSS::Chunk *result;
