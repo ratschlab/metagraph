@@ -264,11 +264,8 @@ void recover_source_dummy_nodes(size_t k,
     // asynchronously writes a value of type T to a file stream
     // TODO(ddanciu): profile this, as I suspect it's slow - use a WaitQueue instead
     ThreadPool file_write_pool = ThreadPool(1, 10000);
-    const auto async_file_writer = [&file_write_pool](std::fstream &f) {
-        return [&f, &file_write_pool](const T &v) {
-            file_write_pool.enqueue(write_or_die<T>, &f, v);
-        };
-    };
+    const auto file_writer
+            = [](std::fstream &f) { return [&f](const T &v) { write_or_die<T>(&f, v); }; };
 
     std::vector<std::pair<std::string, std::fstream *>> files_to_merge;
     auto create_stream = [](const std::string &name) {
@@ -290,7 +287,7 @@ void recover_source_dummy_nodes(size_t k,
     // this will contain dummy k-mers of prefix length 2
     common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads,
                                                 kmers->buffer_size(), "/tmp/chunk_",
-                                                async_file_writer(*dummy_l2));
+                                                file_writer(*dummy_l2));
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
     Timer timer;
@@ -330,7 +327,7 @@ void recover_source_dummy_nodes(size_t k,
     for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
         const std::string file_name = get_file_name(dummy_pref_len);
         files_to_merge.push_back(create_stream(file_name));
-        dest->clear(async_file_writer(*(files_to_merge.back().second)));
+        dest->clear(file_writer(*(files_to_merge.back().second)));
         dummy_kmers.resize(0);
         size_t num_kmers = 0;
         for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
@@ -484,21 +481,25 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
 
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor ::initialize(size_t k,
-                                   bool use_sorted_set_disk,
                                    bool canonical_mode,
                                    bool count_kmers,
                                    const std::string &filter_suffix,
                                    size_t num_threads,
-                                   double memory_preallocated) {
+                                   double memory_preallocated,
+                                   kmer::ContainerType container_type) {
 #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated
 
     if (count_kmers) {
         return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
     } else {
-        if (use_sorted_set_disk) {
-            return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
-        } else {
-            return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
+        switch (container_type) {
+            case kmer::ContainerType::VECTOR_DISK:
+                return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
+            case kmer::ContainerType::VECTOR:
+                return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
+            default:
+                logger->error("Invalid container type {}", container_type);
+                std::exit(1);
         }
     }
 }

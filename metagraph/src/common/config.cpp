@@ -10,6 +10,7 @@
 #include "utils/algorithms.hpp"
 #include "common/threading.hpp"
 
+using namespace mg;
 
 Config::Config(int argc, char *argv[]) {
     // provide help overview if no identity was given
@@ -549,11 +550,11 @@ Config::StateType Config::string_to_state(const std::string &string) {
     }
 }
 
-Config::ContainerType Config::string_to_container(const std::string &string) {
+kmer::ContainerType Config::string_to_container(const std::string &string) {
     if (string == "vector") {
-        return ContainerType::VECTOR;
+        return kmer::ContainerType::VECTOR;
     } else if (string == "vector_disk") {
-        return ContainerType::VECTOR_DISK;
+        return kmer::ContainerType::VECTOR_DISK;
     } else {
         throw std::runtime_error("Error: unknown k-mer container: " + string);
     }

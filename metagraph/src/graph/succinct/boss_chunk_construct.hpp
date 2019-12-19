@@ -4,6 +4,7 @@
 #include "graph/succinct/boss_chunk.hpp"
 
 #include "graph/base/dbg_construct.hpp"
+#include "kmer/kmer_collector_config.hpp"
 
 #include <string>
 #include <cstdint>
@@ -19,12 +20,12 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
 
     static std::unique_ptr<IBOSSChunkConstructor>
     initialize(size_t k,
-               bool use_sorted_set_disk = false,
                bool canonical_mode = false,
                bool count_kmers = false,
                const std::string &filter_suffix = "",
                size_t num_threads = 1,
-               double memory_preallocated = 0);
+               double memory_preallocated = 0,
+               mg::kmer::ContainerType container_type = mg::kmer::ContainerType::VECTOR);
 
     virtual void add_sequence(std::string &&sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;

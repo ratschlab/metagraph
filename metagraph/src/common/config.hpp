@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "kmer/kmer_collector_config.hpp"
+
 
 class Config {
   public:
@@ -176,20 +178,8 @@ class Config {
     AnnotationType anno_type = ColumnCompressed;
     GraphType graph_type = SUCCINCT;
 
-    /**
-     * What type of data structure to use in the #KmerSet for k-mer storage.
-     * Note: for k-mer counting, only VECTOR is supported.
-     */
-    enum class ContainerType {
-        VECTOR,
-        /**
-         * Uses several vectors that are written to disk and then merged, as defined
-         * in #SortedSetDisk
-         */
-        VECTOR_DISK
-    };
-    ContainerType container;
-    static ContainerType string_to_container(const std::string &string);
+    mg::kmer::ContainerType container;
+    static mg::kmer::ContainerType string_to_container(const std::string &string);
 
     static std::string annotype_to_string(AnnotationType state);
     static AnnotationType string_to_annotype(const std::string &string);
