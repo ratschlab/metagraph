@@ -35,7 +35,7 @@ void insert(sdsl::bit_vector &vector, uint64_t hash, size_t num_hash_functions) 
     if (!vector.size())
         return;
 
-    const auto offset = ((hash % vector.size()) >> 9) << 9;
+    const uint64_t offset = ((__uint128_t(hash) * vector.size()) >> (64 + 9)) << 9;
     uint64_t base = hash, jump = hash >> 32;
 
     for (size_t i = 0; i < num_hash_functions; ++i) {
@@ -47,7 +47,7 @@ bool is_present(const sdsl::bit_vector &vector, uint64_t hash, size_t num_hash_f
     if (!vector.size())
         return true;
 
-    const auto offset = ((hash % vector.size()) >> 9) << 9;
+    const uint64_t offset = ((__uint128_t(hash) * vector.size()) >> (64 + 9)) << 9;
     uint64_t base = hash, jump = hash >> 32;
 
     for (size_t i = 0; i < num_hash_functions; ++i) {
