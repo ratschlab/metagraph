@@ -101,7 +101,7 @@ class BloomFilter {
     constexpr static uint32_t optim_h(size_t filter_size, size_t expected_num_elements) {
         return expected_num_elements
             ? std::ceil(M_LN2 * filter_size / expected_num_elements)
-            : static_cast<size_t>(-1);
+            : static_cast<uint32_t>(-1);
     }
 
   private:
