@@ -44,7 +44,6 @@ inline uint64_t restrict_to(long long unsigned int h, size_t size) {
 void BloomFilter::insert(uint64_t hash) {
     if (is_absent(hash)) {
         assert(!check(hash));
-
         return;
     }
 
@@ -117,12 +116,22 @@ const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
     uint32_t *hh;
     uint64_t *block;
     uint32_t offset;
+    int mask;
 
     __m256i block_indices;
     __m128i hashes_init, hashes, mult;
     __m64 *harray = (__m64*)&hashes;
 
     for (; hs + 4 <= end; hs += 4) {
+        // check next batch to see if all hashes are absent
+        mask = _mm256_movemask_epi8(_mm256_and_si256(
+            _mm256_loadu_si256((__m256i*)hs),
+            _mm256_set1_epi64x(bloom.ABSENCE_CHECK)
+        ));
+
+        if (__builtin_popcount(mask) == 4)
+            continue;
+
         // compute offsets
         block_indices = _mm256_setr_epi64x(
             restrict_to(hs[0], size),
@@ -139,8 +148,12 @@ const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
         _mm256_zeroupper();
 
         for (size_t j = 0; j < 4; ++j) {
-            if (bloom.is_absent(hs[j]))
+            if (mask & 1) {
+                mask >>= 8;
                 continue;
+            }
+
+            mask >>= 8;
 
             uint32_t k = 0;
 
@@ -238,25 +251,23 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
     uint32_t *hh;
     const uint64_t *block;
     uint32_t offset;
+    int mask;
 
-    __m256i block_indices;//, raw_hashes;
+    __m256i block_indices;
     __m128i hashes_init, hashes, mult;
     __m64 *harray = (__m64*)&hashes;
 
     size_t i = 0;
     const size_t num_elements = hashes_end - hashes_begin;
     for (; i + 4 <= num_elements; i += 4) {
-        //raw_hashes = _mm256_loadu_si256((__m256i*)hashes_begin);
+        // check next batch to see if all hashes are absent
+        mask = _mm256_movemask_epi8(_mm256_and_si256(
+            _mm256_loadu_si256((__m256i*)hashes_begin),
+            _mm256_set1_epi64x(bloom.ABSENCE_CHECK)
+        ));
 
-        // // skip this batch if they are all npos
-        // if (_mm256_testc_si256(raw_hashes,
-        //                        _mm256_setr_epi64x(ABSENCE_CHECK,
-        //                                           ABSENCE_CHECK,
-        //                                           ABSENCE_CHECK,
-        //                                           ABSENCE_CHECK))) {
-        //     hashes_begin += 4;
-        //     continue;
-        // }
+        if (__builtin_popcount(mask) == 4)
+            continue;
 
         // copy hashes
         block_indices = _mm256_setr_epi64x(
@@ -274,8 +285,12 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
         _mm256_zeroupper();
 
         for (size_t j = 0; j < 4; ++j) {
-            if (bloom.is_absent(hashes_begin[j]))
+            if (mask & 1) {
+                mask >>= 8;
                 continue;
+            }
+
+            mask >>= 8;
 
             bool found = true;
             uint32_t k = 0;

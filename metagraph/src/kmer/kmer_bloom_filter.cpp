@@ -1,5 +1,7 @@
 #include "kmer_bloom_filter.hpp"
 
+#include <Eigen/StdVector>
+
 #ifndef NDEBUG
 #include "common/seq_tools/reverse_complement.hpp"
 #endif
@@ -11,6 +13,9 @@
 // TODO: switch to KmerExtractor once it supports all alphabets
 typedef KmerExtractorBOSS KmerDef;
 typedef KmerDef::TAlphabet TAlphabet;
+
+template <typename T>
+using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
 
 template <class KmerBF>
@@ -86,31 +91,40 @@ void KmerBloomFilter<KmerHasher>
     assert(end >= begin && static_cast<size_t>(end - begin) >= k_);
 
 #ifndef NDEBUG
-    uint64_t counter = 0;
+    size_t counter = 0;
 #endif
 
-    // TODO: insert all hashes in arbitrary order in a single call
+    size_t i = 0;
+    AlignedVector<uint64_t> hashes(end - begin - k_ + 1);
     call_kmers(*this, begin, end, [&](auto hash) {
-        filter_.insert(hash);
+        hashes[i++] = hash;
+
 #ifndef NDEBUG
-        counter++;
+        counter += !BloomFilter::is_absent(hash);
 #endif
+
     });
 
+    assert(i == end - begin - k_ + 1);
+
+    filter_.insert(hashes.data(), hashes.data() + hashes.size());
+
     assert(sdsl::util::cnt_one_bits(check_kmer_presence(begin, end)) == counter);
+
 #ifndef NDEBUG
     std::string rev_comp(begin, end);
     reverse_complement(rev_comp.begin(), rev_comp.end());
     assert(!canonical_mode_
             || sdsl::util::cnt_one_bits(check_kmer_presence(rev_comp)) == counter);
 #endif
+
 }
 
 template <class KmerHasher>
 void KmerBloomFilter<KmerHasher>
 ::add_sequences(const std::function<void(const CallString&)> &generate_sequences) {
     constexpr size_t buffer_size = 1000000;
-    std::vector<uint64_t> buffer;
+    AlignedVector<uint64_t> buffer;
     buffer.reserve(buffer_size);
 
     generate_sequences([&](const std::string &sequence) {
@@ -141,8 +155,9 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
 
     // aggregate hashes, then batch check
     size_t i = 0;
-    std::vector<uint64_t> hashes(end - begin - k_ + 1);
+    AlignedVector<uint64_t> hashes(end - begin - k_ + 1);
     call_kmers(*this, begin, end, [&](auto hash) { hashes[i++] = hash; });
+    assert(i == end - begin - k_ + 1);
 
     return filter_.check(hashes.data(), hashes.data() + hashes.size());
 }

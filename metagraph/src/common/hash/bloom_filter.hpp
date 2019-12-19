@@ -18,7 +18,7 @@
  */
 class BloomFilter {
   public:
-    constexpr static uint64_t HASH_MASK = 0x7FFFFFFFFFFFFFFF;
+    constexpr static uint64_t HASH_MASK = 0xFFFFFFFFFFFFFFFE;
     constexpr static uint64_t ABSENCE_CHECK = ~HASH_MASK;
 
     /**
