@@ -52,7 +52,7 @@ class CircularBuffer {
         full_ = false;
     }
 
-    bool empty() const { return (!full_ && (end_ == front_)); }
+    bool empty() const { return !full_ && (end_ == front_); }
 
     bool full() const { return full_; }
 

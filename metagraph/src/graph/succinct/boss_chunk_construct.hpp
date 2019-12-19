@@ -27,10 +27,10 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                double memory_preallocated = 0,
                mg::kmer::ContainerType container_type = mg::kmer::ContainerType::VECTOR);
 
-    virtual void add_sequence(std::string &&sequence, uint64_t count = 1) = 0;
+    virtual void add_sequence(std::string&& sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
-    virtual BOSS::Chunk *build_chunk() = 0;
+    virtual BOSS::Chunk* build_chunk() = 0;
 
     virtual uint64_t get_k() const = 0;
 };

@@ -92,7 +92,7 @@ class ChunkedWaitQueue {
      * Resets the queue to an empty state.
      * Undefined behavior if the queue is reset while iterating over it.
      */
-    void reset(std::function<void(const T&)> on_item_pushed = [](const T&){}) {
+    void reset(std::function<void(const T&)> on_item_pushed = [](const T&) {}) {
         shutdown();
         first_ = 0;
         last_ = buffer_size_;

@@ -15,7 +15,7 @@ class BOSS::Chunk {
 
     /**
      * Creates an empty BOSS chunk with the given parameters
-     * @param alph_size the alphabet size. For DNA this will be 5 (A,C,G,T,$).
+     * @param alph_size the alphabet size. For DNA this will be 5 ($,A,C,G,T).
      * @param k k-mer size
      * @param canonical if true, the BOSS table will be constructed with both a k-mer
      *        and its reverse complement
