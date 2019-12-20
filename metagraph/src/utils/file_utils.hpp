@@ -47,17 +47,18 @@ class BufferedAsyncWriter {
         : buf_(capacity), buf_dump_(capacity), name_(name), f_(f) {}
 
     void push(const T &v) {
-        if (buf_->size() == capacity) {
+        if (buf_.size() == capacity) {
             wait_for_write();
             buf_.swap(buf_dump_);
-            write_future = std::async(flush_to_file, name_, f_, buf_dump_);
-            buf_->resize(0);
+            write_future = std::async(std::launch::async, flush_to_file, name_, f_,
+                    &buf_dump_);
+            buf_.resize(0);
         }
-        buf_->push_back(v);
+        buf_.push_back(v);
     }
 
     void flush() {
-        flush_to_file(name_, f_, buf_);
+        flush_to_file(name_, f_, &buf_);
         wait_for_write();
     }
 

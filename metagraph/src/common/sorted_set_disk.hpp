@@ -115,7 +115,9 @@ class SortedSetDisk {
                 sort_and_remove_duplicates(&data_, num_threads_);
                 dump_to_file_async();
             }
-            // async_worker_.join(); // make sure all pending data was written
+            async_worker_.join(); // make sure all pending data was written
+            // TODO(ddanciu): instead of writing to file, pass buffer to merge_func to
+            //  avoid writing/reading to disk for small graphs
             start_merging();
         }
         return merge_queue_;
