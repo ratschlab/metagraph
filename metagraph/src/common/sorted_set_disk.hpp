@@ -51,17 +51,17 @@ class SortedSetDisk {
     SortedSetDisk(
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
             size_t num_threads = 1,
-            size_t max_num_elements = 1e6,
+            size_t reserved_num_elements = 1e6,
             const std::string &chunk_file_prefix = "/tmp/chunk_",
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100)
         : num_threads_(num_threads),
           chunk_file_prefix_(chunk_file_prefix),
-          merge_queue_(max_num_elements ,
+          merge_queue_(reserved_num_elements ,
                        num_last_elements_cached,
                        on_item_pushed),
           cleanup_(cleanup) {
-        try_reserve(max_num_elements);
+        try_reserve(reserved_num_elements);
     }
 
     ~SortedSetDisk() {

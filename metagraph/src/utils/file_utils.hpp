@@ -50,7 +50,7 @@ class BufferedAsyncWriter {
         if (buf_.size() == capacity) {
             wait_for_write();
             buf_.swap(buf_dump_);
-            write_future = std::async(std::launch::async, flush_to_file, name_, f_,
+            write_future = std::async(std::launch::async, flush_to_buffer, name_, f_,
                     &buf_dump_);
             buf_.resize(0);
         }
@@ -58,8 +58,9 @@ class BufferedAsyncWriter {
     }
 
     void flush() {
-        flush_to_file(name_, f_, &buf_);
+        flush_to_buffer(name_, f_, &buf_);
         wait_for_write();
+        f_->flush();
     }
 
   private:
@@ -70,7 +71,7 @@ class BufferedAsyncWriter {
     }
 
     static void
-    flush_to_file(const std::string name, std::fstream *f, const std::vector<T> *buf) {
+    flush_to_buffer(const std::string name, std::fstream *f, const std::vector<T> *buf) {
         if (buf->empty()) {
             return;
         }
