@@ -32,9 +32,6 @@ namespace common {
 template <typename T>
 class SortedSetDisk {
   public:
-    /** Number of elements that can be iterated backwards in the merge queue */
-    static constexpr size_t NUM_LAST_ELEMENTS_CACHED = 100;
-
     typedef T key_type;
     typedef T value_type;
     typedef Vector<T> storage_type;
@@ -84,7 +81,7 @@ class SortedSetDisk {
 
         // acquire the mutex to restrict the number of writing threads
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
-        if (data_->size() + batch_size > data_->capacity()) { // time to write to disk
+        if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
             std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
             // TODO(ddanciu) - test if it's worth it to keep adding in memory if the
             // shrinking was significant
@@ -93,14 +90,14 @@ class SortedSetDisk {
             dump_to_file_async();
         }
 
-        size_t offset = data_->size();
+        size_t offset = data_.size();
         // resize to the future size after insertion (no reallocation will happen)
-        data_->resize(data_->size() + batch_size);
+        data_.resize(data_.size() + batch_size);
         std::shared_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         exclusive_lock.unlock();
         // different threads will insert to different chunks of memory, so it's okay
         // (and desirable) to allow concurrent inserts
-        std::copy(begin, end, data_->begin() + offset);
+        std::copy(begin, end, data_.begin() + offset);
     }
 
     /**
@@ -114,9 +111,9 @@ class SortedSetDisk {
         if (!is_merging_) {
             is_merging_ = true;
             // write any residual data left
-            if (!data_->empty()) {
-                sort_and_remove_duplicates(data_, num_threads_);
-                dump_to_file();
+            if (!data_.empty()) {
+                sort_and_remove_duplicates(&data_, num_threads_);
+                dump_to_file_async();
             }
             // async_worker_.join(); // make sure all pending data was written
             start_merging();
@@ -124,20 +121,15 @@ class SortedSetDisk {
         return merge_queue_;
     }
 
-    static void merge_func(const std::string chunk_file_prefix,
-                           uint32_t chunk_count,
-                           ChunkedWaitQueue<T> &merge_queue) {
-        std::vector<std::string> file_names(chunk_count);
-        for (size_t i = 0; i < chunk_count; ++i) {
-            file_names[i] = chunk_file_prefix + std::to_string(i);
-        }
-        merge_files<T>(file_names, [&merge_queue](const T &v) { merge_queue.push(v); });
-        merge_queue.shutdown();
-    };
-
     void start_merging() {
-        async_worker_.enqueue(merge_func, chunk_file_prefix_, chunk_count_,
-                              std::ref(merge_queue_));
+        async_worker_.enqueue([this]() {
+            std::vector<std::string> file_names(chunk_count_);
+            for (size_t i = 0; i < chunk_count_; ++i) {
+                file_names[i] = chunk_file_prefix_ + std::to_string(i);
+            }
+            merge_files<T>(file_names, [this](const T &v) { merge_queue_.push(v); });
+            merge_queue_.shutdown();
+        });
     }
 
     void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {}) {
@@ -145,9 +137,8 @@ class SortedSetDisk {
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         is_merging_ = false;
         chunk_count_ = 0;
-        data_ = &data_first_;
-        data_first_.resize(0); // this makes sure the buffer is not reallocated
-        data_second_.resize(0);
+        data_.resize(0); // this makes sure the buffer is not reallocated
+        data_dump_.resize(0);
         merge_queue_.reset(on_item_pushed);
     }
 
@@ -164,17 +155,17 @@ class SortedSetDisk {
         cleanup_(vector); // typically removes source dummy k-mers
     }
 
-    size_t buffer_size() { return data_->capacity(); }
+    size_t buffer_size() { return data_.capacity(); }
 
   private:
     void shrink_data() {
         logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
-        size_t old_size = data_->size();
-        sort_and_remove_duplicates(data_, num_threads_);
+        size_t old_size = data_.size();
+        sort_and_remove_duplicates(&data_, num_threads_);
 
         logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
-                      data_->size(), (data_->size() * sizeof(T) >> 20));
+                      data_.size(), (data_.size() * sizeof(T) >> 20));
     }
 
     /**
@@ -207,29 +198,11 @@ class SortedSetDisk {
      */
     void dump_to_file_async() {
         async_worker_.join(); // wait for other thread to finish writing
-        assert(!data_->empty());
+        assert(!data_.empty());
         std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
-        if (data_->data() == data_first_.data()) {
-            async_worker_.enqueue(dump_to_file<storage_type>, file_name, &data_first_);
-            data_ = &data_second_;
-        } else {
-            async_worker_.enqueue(dump_to_file<storage_type>, file_name, &data_second_);
-            data_ = &data_first_;
-        }
-        chunk_count_++;
-    }
 
-    void dump_to_file() {
-        async_worker_.join(); // wait for other thread to finish writing
-        assert(!data_->empty());
-        std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
-        if (data_->data() == data_first_.data()) {
-            dump_to_file<storage_type>(file_name, &data_first_);
-            data_ = &data_second_;
-        } else {
-            dump_to_file<storage_type>(file_name, &data_second_);
-            data_ = &data_first_;
-        }
+        data_dump_.swap(data_);
+        async_worker_.enqueue(dump_to_file<storage_type>, file_name, &data_dump_);
         chunk_count_++;
     }
 
@@ -238,8 +211,8 @@ class SortedSetDisk {
         size_t original_size = size;
         while (size > min_size) {
             try {
-                data_first_.reserve(size);
-                data_second_.reserve(size);
+                data_.reserve(size);
+                data_dump_.reserve(size);
                 if (size != original_size) {
                     logger->warn("SortedSetDisk: Requested {}MiB, but only found {}MiB",
                                  (original_size * sizeof(T)) >> 20,
@@ -250,8 +223,8 @@ class SortedSetDisk {
                 size = min_size + (size - min_size) * 2 / 3;
             }
         }
-        data_first_.reserve(min_size);
-        data_second_.reserve(min_size);
+        data_.reserve(min_size);
+        data_dump_.reserve(min_size);
     }
 
     /**
@@ -260,19 +233,15 @@ class SortedSetDisk {
      */
     uint32_t chunk_count_ = 0;
     /**
-     * Alternating buffers into which data is inserted using #insert(). While
-     * one buffer is being written to disk using #dump_to_file() the other one
-     * is inserted into using #insert(). Once the insert buffer is full, we
-     * wait for the disk write operation to finish (if needed) and then swap
-     * buffers.
+     * Hold the data filled in via #insert.
      */
-    storage_type data_first_;
-    storage_type data_second_;
+    storage_type data_;
     /**
-     * Reference to the buffer data is currently written into (either #data1_
-     * or #data2_)
+     * Buffer containing the data that is currently being dumped to disk (while #data_
+     * is being filled with new information.
      */
-    storage_type *data_ = &data_first_;
+    storage_type data_dump_;
+
     size_t num_threads_;
     std::string chunk_file_prefix_;
     /**

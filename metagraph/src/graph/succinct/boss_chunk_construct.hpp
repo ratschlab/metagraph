@@ -1,14 +1,13 @@
 #ifndef __BOSS_CHUNK_CONSTRUCT_HPP__
 #define __BOSS_CHUNK_CONSTRUCT_HPP__
 
-#include "graph/succinct/boss_chunk.hpp"
-
-#include "graph/base/dbg_construct.hpp"
-#include "kmer/kmer_collector_config.hpp"
-
 #include <string>
 #include <cstdint>
 #include <functional>
+
+#include "graph/succinct/boss_chunk.hpp"
+#include "graph/base/dbg_construct.hpp"
+#include "kmer/kmer_collector_config.hpp"
 
 namespace mg {
 namespace succinct {

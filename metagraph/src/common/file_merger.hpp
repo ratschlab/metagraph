@@ -1,25 +1,24 @@
 #pragma once
 
-#include "common/logger.hpp"
-
-#include "utils/template_utils.hpp"
-
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <queue>
 #include <string>
-
 #include <vector>
+
+#include "common/logger.hpp"
+#include "utils/template_utils.hpp"
 
 namespace mg {
 namespace common {
 /**
  * Given a list of n source files, containing ordered elements of type T, merge the n
- * sources into a single (ordered) wait queue.
- * Since the merging happens in a wait queue, it's okay to merge data that doesn't fit
- * in memory - the merging will block until some of the merged data is read.
+ * sources into a single (ordered) list.
+ * @param sources the files containing sorted lists of type T
+ * @param on_new_item callback to invoke when a new element was merged
  *
- * Note: this method blocks until all the data was successfully processed.
+ * Note: this method blocks until all the data was successfully merged.
  */
 template <typename T>
 void merge_files(const std::vector<std::string> sources,
@@ -64,9 +63,8 @@ void merge_files(const std::vector<std::string> sources,
             }
         }
     }
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-        std::filesystem::remove(sources[i]);
-    }
+    std::for_each(sources.begin(), sources.end(),
+                  [](const std::string &s) { std::filesystem::remove(s); });
 }
 
 } // namespace common

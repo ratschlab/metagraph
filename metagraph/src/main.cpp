@@ -1408,12 +1408,12 @@ int main(int argc, char *argv[]) {
 
                     auto constructor = IBOSSChunkConstructor::initialize(
                         boss_graph->get_k(),
-                        config->container == Config::ContainerType::VECTOR_DISK,
                         config->canonical,
                         config->count_kmers,
                         suffix,
                         get_num_threads(),
-                        static_cast<uint64_t>(config->memory_available) << 30
+                        static_cast<uint64_t>(config->memory_available) << 30,
+                        config->container
                     );
 
                     parse_sequences(files, *config, timer,

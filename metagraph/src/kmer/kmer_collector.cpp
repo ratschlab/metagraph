@@ -204,16 +204,16 @@ KmerCollector<KMER, KmerExtractor, Container>
                      filter_suffix_encoded.empty()),
              num_threads,
              memory_preallocated / sizeof(typename Container::value_type)),
-      num_threads_(num_threads),
+        num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
         stored_sequences_size_(0),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
         both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
-    if constexpr (utils::is_instance<Container, common::SortedSetDisk> {}) {
-        assert(filter_suffix_encoded_.empty()
-               && "SortedSetDisk does not support chunking");
+    if (utils::is_instance<Container, common::SortedSetDisk> {} && filter_suffix_encoded_.size()) {
+        common::logger->error("SortedSetDisk does not support chunking");
+        exit(1);
     }
     common::logger->trace("Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
                           (kmers_.buffer_size() * sizeof(typename Container::value_type) >> 20),

@@ -34,12 +34,7 @@ class CircularBuffer {
     }
 
     T pop_front() {
-#ifdef DEBUG
-        if (empty()) {
-            std::cerr << "Attempting to pop empty buffer." << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
-#endif
+        assert(!empty() && "Attempting to pop empty buffer");
         T val = buf_[front_];
         full_ = false;
         front_ = (front_ + 1) % size_;
@@ -59,17 +54,13 @@ class CircularBuffer {
     size_t capacity() const { return size_; }
 
     size_t size() const {
-        size_t size = size_;
+        if (full_)
+            return size_;
 
-        if (!full_) {
-            if (end_ >= front_) {
-                size = end_ - front_;
-            } else {
-                size = size_ + end_ - front_;
-            }
-        }
+        if (end_ >= front_)
+            return end_ - front_;
 
-        return size;
+        return size_ + end_ - front_;
     }
 
     ReverseIterator rbegin() { return ReverseIterator(this, (size_ + end_ - 1) % size_); }

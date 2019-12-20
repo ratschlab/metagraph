@@ -29,9 +29,9 @@ class SortedMultiset {
     typedef Container result_type;
 
     SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-                   size_t num_threads = 1, size_t container_size_bytes = 0)
+                   size_t num_threads = 1, size_t max_num_elements = 0)
       : num_threads_(num_threads), cleanup_(cleanup) {
-        reserve(container_size_bytes);
+        reserve(max_num_elements);
     }
 
     ~SortedMultiset() {}
