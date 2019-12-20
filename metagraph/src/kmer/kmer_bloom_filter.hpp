@@ -6,7 +6,7 @@
 
 
 /**
- * A wrapper around BloomFilter for inserting and checking k-mers from sequences.
+ * BloomFilter for inserting and checking k-mers extracted from sequences.
  * When in canonical mode, all k-mers are converted to their canonical forms
  * before inserting and checking.
  */
