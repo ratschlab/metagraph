@@ -42,6 +42,18 @@ inline uint64_t restrict_to(long long unsigned int h, size_t size) {
 #endif
 }
 
+
+#ifdef __AVX2__
+
+inline __m256i restrict_to_epi64(const uint64_t *hashes, size_t size) {
+    return _mm256_setr_epi64x(restrict_to(hashes[0], size),
+                              restrict_to(hashes[1], size),
+                              restrict_to(hashes[2], size),
+                              restrict_to(hashes[3], size));
+}
+
+#endif
+
 void BloomFilter::insert(uint64_t hash) {
     // use the 64-bit hash to select a 512-bit block
     const size_t offset = (restrict_to(hash, filter_.size()) >> SHIFT) << SHIFT;
@@ -120,12 +132,7 @@ const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
     for (; hs + 4 <= end; hs += 4) {
         // check next batch to see if all hashes are absent
         // compute offsets
-        block_indices = _mm256_setr_epi64x(
-            restrict_to(hs[0], size),
-            restrict_to(hs[1], size),
-            restrict_to(hs[2], size),
-            restrict_to(hs[3], size)
-        );
+        block_indices = restrict_to_epi64(hs, size);
         block_indices = _mm256_srli_epi64(block_indices, SHIFT);
         block_indices = _mm256_slli_epi64(block_indices, SHIFT - 6);
 
@@ -243,12 +250,7 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
     const size_t num_elements = hashes_end - hashes_begin;
     for (; i + 4 <= num_elements; i += 4) {
         // copy hashes
-        block_indices = _mm256_setr_epi64x(
-            restrict_to(hashes_begin[0], size),
-            restrict_to(hashes_begin[1], size),
-            restrict_to(hashes_begin[2], size),
-            restrict_to(hashes_begin[3], size)
-        );
+        block_indices = restrict_to_epi64(hashes_begin, size);
         block_indices = _mm256_srli_epi64(block_indices, SHIFT);
         block_indices = _mm256_slli_epi64(block_indices, SHIFT - 6);
 
