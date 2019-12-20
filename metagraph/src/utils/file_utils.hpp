@@ -40,7 +40,7 @@ class TempFile {
 
 template <typename T>
 class BufferedAsyncWriter {
-    static constexpr uint32_t capacity = 100000;
+    static constexpr uint32_t capacity = 100'000;
 
   public:
     BufferedAsyncWriter(const std::string &name, std::fstream *f)
