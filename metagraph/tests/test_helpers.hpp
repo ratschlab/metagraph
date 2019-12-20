@@ -1,6 +1,8 @@
 #ifndef __TEST_HELPERS_HPP__
 #define __TEST_HELPERS_HPP__
 
+#include <set>
+
 
 // Disable death tests
 #ifdef _NO_DEATH_TEST

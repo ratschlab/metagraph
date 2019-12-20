@@ -134,10 +134,10 @@ class DBGSuccinct : public DeBruijnGraph {
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
-                                          size_t max_num_hash_functions = -1);
+                                          uint32_t max_num_hash_functions = -1);
 
     void initialize_bloom_filter(double bits_per_kmer,
-                                 size_t max_num_hash_functions = -1);
+                                 uint32_t max_num_hash_functions = -1);
 
     const KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
 

@@ -50,7 +50,7 @@ typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
 static const size_t kRowBatchSize = 100'000;
-const bool kPrefilterWithBloom = false;
+const bool kPrefilterWithBloom = true;
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
 

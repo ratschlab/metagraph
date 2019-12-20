@@ -5,12 +5,21 @@
 #include "common/hash/bloom_filter.hpp"
 
 
-// Bloom filter for approximate membership queries on k-mers
-template <class KmerHasher = RollingMultiHash<2>>
+/**
+ * BloomFilter for inserting and checking k-mers extracted from sequences.
+ * When in canonical mode, all k-mers are converted to their canonical forms
+ * before inserting and checking.
+ */
+template <class KmerHasher = RollingHash<>>
 class KmerBloomFilter {
   public:
     typedef KmerHasher KmerHasherType;
 
+    /**
+     * Construction a KmerBloomFilter given k and the desired canonical mode.
+     * See BloomFilter constructors for possible combinations of Bloom filter
+     * parameters.
+     */
     template <typename... Args>
     KmerBloomFilter(size_t k, bool canonical_mode, Args&&... args)
           : filter_(std::forward<Args>(args)...),
@@ -18,16 +27,32 @@ class KmerBloomFilter {
             k_(k),
             hasher_(k_) {}
 
-    // Add the k-mers of the sequence to the Bloom filter
+    /**
+     * Insert the k-mers of a sequence into the Bloom filter.
+     */
     void add_sequence(const char *begin, const char *end);
+
+    /**
+     * Insert the k-mers of a sequence into the Bloom filter.
+     */
     void add_sequence(const std::string &sequence) {
         add_sequence(sequence.data(), sequence.data() + sequence.size());
     }
 
-    // Checks for k-mer presence in the Bloom filter
-    sdsl::bit_vector check_kmer_presence(const char *begin,
-                                         const char *end) const;
+    /**
+     * Insert the k-mers of the generated sequences into the Bloom filter.
+     */
+    typedef std::function<void(const std::string&)> CallString;
+    void add_sequences(const std::function<void(const CallString&)> &generate_sequences);
 
+    /**
+     * Check the k-mers of a sequence for presence/absence in the Bloom filter
+     */
+    sdsl::bit_vector check_kmer_presence(const char *begin, const char *end) const;
+
+    /**
+     * Check the k-mers of a sequence for presence/absence in the Bloom filter
+     */
     sdsl::bit_vector check_kmer_presence(const std::string &sequence) const {
         return check_kmer_presence(sequence.data(), sequence.data() + sequence.size());
     }
@@ -41,13 +66,15 @@ class KmerBloomFilter {
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
 
-    KmerHasherType get_hasher() const { return hasher_; }
+    const KmerHasher& get_hasher() const { return hasher_; }
+
+    const BloomFilter& get_filter() const { return filter_; }
 
   private:
     BloomFilter filter_;
     bool canonical_mode_;
     size_t k_;
-    const KmerHasherType hasher_;
+    const KmerHasher hasher_;
 };
 
 
