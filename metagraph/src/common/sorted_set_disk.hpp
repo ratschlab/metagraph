@@ -57,7 +57,7 @@ class SortedSetDisk {
             size_t max_num_elements = 1e6,
             const std::string &chunk_file_prefix = "/tmp/chunk_",
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
-            size_t num_last_elements_cached = NUM_LAST_ELEMENTS_CACHED)
+            size_t num_last_elements_cached = 100)
         : num_threads_(num_threads),
           chunk_file_prefix_(chunk_file_prefix),
           merge_queue_(max_num_elements ,
