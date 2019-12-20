@@ -229,7 +229,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                 last->push_back(true);
             }
             --it;
-            if (KMER::compare_suffix(kmer, last_kmer[curW], 1)) {
+            if (curW && last_kmer[curW][0] && KMER::compare_suffix(kmer, last_kmer[curW], 1)) {
                 // not the first incoming edge to the node, mark with -
                 curW += alph_size;
             } else {

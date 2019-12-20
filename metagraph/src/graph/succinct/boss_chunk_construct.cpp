@@ -291,7 +291,7 @@ void recover_source_dummy_nodes(size_t k,
                                                 file_writer(*dummy_l2));
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
-    Timer timer;
+
     // remove redundant dummy source k-mers of prefix length 1 and write them to a file
     // While traversing and removing redundant dummy source k-mers of prefix length 1,
     // we also  generate dummy k-mers of prefix length 2.
@@ -313,7 +313,6 @@ void recover_source_dummy_nodes(size_t k,
                                              &sorted_dummy_kmers);
     }
     writer.flush();
-    logger->trace("Building l1 in {}s", timer.elapsed());
     // push out the leftover dummy kmers
     sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
 
