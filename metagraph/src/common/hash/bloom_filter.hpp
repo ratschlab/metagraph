@@ -31,7 +31,8 @@ class BloomFilter {
      * Constructs a Bloom filter with optimal parameters.
      * @param filter_size set the filter size to be the next greatest multiple of
      * 512 and filter_size
-     * @param expected_num_elements the number of elements expected to be inserted
+     * @param expected_num_elements the number of elements (hashed items)
+     * expected to be inserted into the Bloom filter (not the number of set bits)
      * @param max_num_hash_functions upper bound on the number of hash functions
      * to use per element
      */
