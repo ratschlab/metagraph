@@ -65,9 +65,6 @@ class CircularBuffer {
 
     ReverseIterator rbegin() { return ReverseIterator(this, (size_ + end_ - 1) % size_); }
 
-    friend
-    std::ostream& operator<<(std::ostream& o, const CircularBuffer<T> &buf);
-
   private:
     std::unique_ptr<T[]> buf_;
     size_t end_ = 0;
