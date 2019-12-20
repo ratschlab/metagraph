@@ -107,11 +107,11 @@ bool BloomFilter::check(uint64_t hash) const {
 #ifdef __AVX2__
 
 // compute Bloom filter hashes in batches of 4
-const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
-                                  sdsl::bit_vector &filter_,
-                                  const uint32_t num_hash_functions_,
-                                  const uint64_t *hs,
-                                  const uint64_t *end) {
+inline const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
+                                         sdsl::bit_vector &filter_,
+                                         const uint32_t num_hash_functions_,
+                                         const uint64_t *hs,
+                                         const uint64_t *end) {
     // only used for assert
     std::ignore = bloom;
 
@@ -223,12 +223,13 @@ void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_en
 #ifdef __AVX2__
 
 // compute Bloom filter hashes in batches of 4
-uint64_t batch_check_avx2(const BloomFilter &bloom,
-                          const uint64_t *hashes_begin,
-                          const uint64_t *hashes_end,
-                          sdsl::bit_vector &presence,
-                          const sdsl::bit_vector &filter_,
-                          const uint32_t num_hash_functions_) {
+inline uint64_t
+batch_check_avx2(const BloomFilter &bloom,
+                 const uint64_t *hashes_begin,
+                 const uint64_t *hashes_end,
+                 const sdsl::bit_vector &filter_,
+                 const uint32_t num_hash_functions_,
+                 const std::function<void(size_t)> &present_index_callback) {
     // only used for assert
     std::ignore = bloom;
 
@@ -309,7 +310,7 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
             }
 
             if (found) {
-                presence[i + j] = true;
+                present_index_callback(i + j);
                 assert(bloom.check(hashes_begin[j]));
             }
         }
@@ -322,11 +323,11 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
 
 #endif
 
-sdsl::bit_vector BloomFilter
-::check(const uint64_t *hashes_begin, const uint64_t *hashes_end) const {
+void BloomFilter::check(const uint64_t *hashes_begin,
+                        const uint64_t *hashes_end,
+                        const std::function<void(size_t)> &present_index_callback) const {
     assert(hashes_end >= hashes_begin);
 
-    sdsl::bit_vector presence(hashes_end - hashes_begin, false);
     size_t i = 0;
     const size_t num_elements = hashes_end - hashes_begin;
 
@@ -334,18 +335,16 @@ sdsl::bit_vector BloomFilter
     i = batch_check_avx2(*this,
                          hashes_begin,
                          hashes_end,
-                         presence,
                          filter_,
-                         num_hash_functions_);
+                         num_hash_functions_,
+                         present_index_callback);
 #endif
 
     // check residual
     for (; i < num_elements; ++i) {
         if (check(hashes_begin[i]))
-            presence[i] = true;
+            present_index_callback(i);
     }
-
-    return presence;
 }
 
 void BloomFilter::serialize(std::ostream &out) const {

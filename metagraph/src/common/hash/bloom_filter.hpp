@@ -1,6 +1,7 @@
 #ifndef __BLOOM_FILTER_HPP__
 #define __BLOOM_FILTER_HPP__
 
+#include <functional>
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -57,14 +58,25 @@ class BloomFilter {
     bool check(uint64_t hash) const;
 
     /**
+     * Check a batch of elements in the Bloom filter and call present_index_callback
+     * for the correspoding indices for each present hash.
+     */
+    void check(const uint64_t *hashes_begin,
+               const uint64_t *hashes_end,
+               const std::function<void(size_t)> &present_index_callback) const;
+
+    /**
      * Check a batch of elements in the Bloom filter and report their
      * presence/absence.
-     * @param hash_index a vector of pairs defining the hash value and corresponding
-     * index in the returned bit_vector for each element. Each index must be
-     * less than length.
-     * @param length the length of the returned bit_vector
      */
-    sdsl::bit_vector check(const uint64_t *hashes_begin, const uint64_t *hashes_end) const;
+    inline sdsl::bit_vector check(const uint64_t *hashes_begin,
+                                  const uint64_t *hashes_end) const {
+        assert(hashes_end >= hashes_begin);
+
+        sdsl::bit_vector presence(hashes_end - hashes_begin, false);
+        check(hashes_begin, hashes_end, [&](size_t i) { presence[i] = true; });
+        return presence;
+    }
 
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
