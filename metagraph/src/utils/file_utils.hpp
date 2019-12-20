@@ -45,6 +45,7 @@ class BufferedAsyncWriter {
   public:
     BufferedAsyncWriter(const std::string &name, std::fstream *f)
         : buf1_(capacity), buf2_(capacity), buf_(&buf1_), name_(name), f_(f) {}
+
     static void
     flush_to_file(const std::string name, std::fstream *f, const std::vector<T> *buf) {
         if (!f->write((char *)&((*buf)[0]), sizeof((*buf)[0]) * buf->size())) {
