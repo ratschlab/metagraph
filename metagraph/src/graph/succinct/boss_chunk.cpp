@@ -205,11 +205,10 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
         size_t curpos = 1;
         TAlphabet lastF = 0;
-        common::CircularBuffer<bool> was_skipped(alph_size * alph_size);
         // last kmer for each label, so we can test multiple edges coming to same node
         std::vector<std::remove_const_t <KMER>> last_kmer(alph_size, typename KMER::WordType(0));
         for (Iterator &it = begin; it != end; ++it) {
-            KMER kmer = get_kmer(*it);
+            const KMER kmer = get_kmer(*it);
             TAlphabet curW = kmer[0];
             TAlphabet curF = kmer[k];
 
@@ -222,7 +221,6 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                 // skip redundant dummy sink edges
                 if (curW == 0 && curF > 0) {
                     --it;
-                    was_skipped.push_back(1);
                     continue;
                 }
 
@@ -230,9 +228,8 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             } else {
                 last->push_back(true);
             }
-            was_skipped.push_back(0);
             --it;
-            if (KMER::compare_suffix(kmer, last_kmer[curW])) {
+            if (KMER::compare_suffix(kmer, last_kmer[curW], 1)) {
                 // not the first incoming edge to the node, mark with -
                 curW += alph_size;
             } else {

@@ -61,6 +61,10 @@ class SortedSetDisk {
                        num_last_elements_cached,
                        on_item_pushed),
           cleanup_(cleanup) {
+        if (reserved_num_elements == 0) {
+            logger->error("SortedSetDisk buffer cannot have size 0");
+            std::exit(EXIT_FAILURE);
+        }
         try_reserve(reserved_num_elements);
     }
 

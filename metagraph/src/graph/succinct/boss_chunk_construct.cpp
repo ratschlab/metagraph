@@ -217,7 +217,7 @@ uint8_t write_kmer(size_t k,
                    RecentKmers<T> *buffer,
                    common::SortedSetDisk<T> *sorted_dummy_kmers) {
     const Kmer<T> to_write = buffer->pop_front();
-    if (to_write.is_removed) { // redundant dummy, &file_write_pool k-mer
+    if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
     }
     writer->push(to_write.kmer);
