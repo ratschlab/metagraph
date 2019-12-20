@@ -40,14 +40,17 @@ class TempFile {
 
 template <typename T>
 class BufferedAsyncWriter {
-    static constexpr uint32_t capacity = 100'000;
+    static constexpr uint32_t CAPACITY = 100'000;
 
   public:
     BufferedAsyncWriter(const std::string &name, std::fstream *f)
-        : buf_(capacity), buf_dump_(capacity), name_(name), f_(f) {}
+        : name_(name), f_(f) {
+        buf_.reserve(CAPACITY);
+        buf_dump_.reserve(CAPACITY);
+    }
 
     void push(const T &v) {
-        if (buf_.size() == capacity) {
+        if (buf_.size() == CAPACITY) {
             wait_for_write();
             buf_.swap(buf_dump_);
             write_future = std::async(std::launch::async, flush_to_buffer, name_, f_,
@@ -60,6 +63,7 @@ class BufferedAsyncWriter {
     void flush() {
         flush_to_buffer(name_, f_, &buf_);
         wait_for_write();
+        buf_.resize(0);
         f_->flush();
     }
 
