@@ -27,20 +27,22 @@ BloomFilter::BloomFilter(size_t filter_size,
                     std::min(max_num_hash_functions,
                              optim_h(filter_size, expected_num_elements))) {}
 
-static_assert(sizeof(long long unsigned int) == sizeof(uint64_t));
-
 // fast map of h uniformly to the region [0, size)
 // (h * size) >> 64
-inline uint64_t restrict_to(long long unsigned int h, size_t size) {
+inline uint64_t restrict_to(uint64_t h, size_t size) {
 #ifdef __BMI2__
-    _mulx_u64(h, size, &h);
+    static_assert(sizeof(long long unsigned int) == sizeof(uint64_t));
+    _mulx_u64(h, size, reinterpret_cast<long long unsigned int*>(&h));
 
     assert(h < size);
     return h;
-#else
+#elif __SIZEOF_INT128__
     assert(((static_cast<__uint128_t>(h) * size) >> 64) < size);
 
     return (static_cast<__uint128_t>(h) * size) >> 64;
+#else
+    // TODO: include a backup implementation here
+    static_assert(false);
 #endif
 }
 
