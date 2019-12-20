@@ -6,11 +6,13 @@
 
 #include "utils/serialization.hpp"
 
+// used to implement size % 512
 constexpr uint32_t BLOCK_MASK = 0b111111111;
 constexpr uint32_t SHIFT = 9;
+constexpr uint64_t BLOCK_MASK_OUT = ~static_cast<uint64_t>(BLOCK_MASK);
 
 BloomFilter::BloomFilter(size_t filter_size, uint32_t num_hash_functions)
-      : filter_(filter_size ? (((filter_size + BLOCK_MASK) >> SHIFT) << SHIFT)
+      : filter_(filter_size ? (filter_size + BLOCK_MASK) & BLOCK_MASK_OUT
                             : BLOCK_MASK + 1),
         num_hash_functions_(num_hash_functions) {
     assert(filter_.size() >= filter_size);
@@ -45,18 +47,24 @@ inline uint64_t restrict_to(long long unsigned int h, size_t size) {
 
 #ifdef __AVX2__
 
-inline __m256i restrict_to_epi64(const uint64_t *hashes, size_t size) {
-    return _mm256_setr_epi64x(restrict_to(hashes[0], size),
-                              restrict_to(hashes[1], size),
-                              restrict_to(hashes[2], size),
-                              restrict_to(hashes[3], size));
+inline __m256i restrict_to_mask_epi64(const uint64_t *hashes,
+                                      size_t size,
+                                      uint64_t mask) {
+    // TODO: for some reason, doing the bitwise AND with _mm256_and_si256 leads
+    //       to the incorrect result, so this is a compromise. It may have to
+    //       do with -O3 optimizations
+    // TODO: is there a vectorized way of doing this?
+    return _mm256_setr_epi64x(restrict_to(hashes[0], size) & mask,
+                              restrict_to(hashes[1], size) & mask,
+                              restrict_to(hashes[2], size) & mask,
+                              restrict_to(hashes[3], size) & mask);
 }
 
 #endif
 
 void BloomFilter::insert(uint64_t hash) {
     // use the 64-bit hash to select a 512-bit block
-    const size_t offset = (restrict_to(hash, filter_.size()) >> SHIFT) << SHIFT;
+    const size_t offset = restrict_to(hash, filter_.size()) & BLOCK_MASK_OUT;
 
     // split 64-bit hash into two 32-bit hashes
     const uint32_t h1 = hash & 0xFFFFFFFF;
@@ -78,7 +86,7 @@ void BloomFilter::insert(uint64_t hash) {
 
 bool BloomFilter::check(uint64_t hash) const {
     // use the 64-bit hash to select a 512-bit block
-    const size_t offset = (restrict_to(hash, filter_.size()) >> SHIFT) << SHIFT;
+    const size_t offset = restrict_to(hash, filter_.size()) & BLOCK_MASK_OUT;
 
     // split 64-bit hash into two 32-bit hashes
     const uint32_t h1 = hash & 0xFFFFFFFF;
@@ -132,10 +140,8 @@ const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
     for (; hs + 4 <= end; hs += 4) {
         // check next batch to see if all hashes are absent
         // compute offsets
-        block_indices = restrict_to_epi64(hs, size);
-        block_indices = _mm256_srli_epi64(block_indices, SHIFT);
-        block_indices = _mm256_slli_epi64(block_indices, SHIFT - 6);
-
+        block_indices = restrict_to_mask_epi64(hs, size, BLOCK_MASK_OUT);
+        block_indices = _mm256_srli_epi64(block_indices, 6);
         _mm256_store_si256((__m256i*)indices, block_indices);
 
         // clean up after AVX2 instructions
@@ -250,10 +256,8 @@ uint64_t batch_check_avx2(const BloomFilter &bloom,
     const size_t num_elements = hashes_end - hashes_begin;
     for (; i + 4 <= num_elements; i += 4) {
         // copy hashes
-        block_indices = restrict_to_epi64(hashes_begin, size);
-        block_indices = _mm256_srli_epi64(block_indices, SHIFT);
-        block_indices = _mm256_slli_epi64(block_indices, SHIFT - 6);
-
+        block_indices = restrict_to_mask_epi64(hashes_begin, size, BLOCK_MASK_OUT);
+        block_indices = _mm256_srli_epi64(block_indices, 6);
         _mm256_store_si256((__m256i*)indices, block_indices);
 
         // clean up after AVX2 instructions
