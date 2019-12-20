@@ -66,7 +66,7 @@ class KmerBloomFilter {
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
 
-    KmerHasher get_hasher() const { return hasher_; }
+    const KmerHasher& get_hasher() const { return hasher_; }
 
     const BloomFilter& get_filter() const { return filter_; }
 

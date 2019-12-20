@@ -52,18 +52,6 @@ class RollingHash {
 
     inline operator uint64_t() const { return hash_->hashvalue; }
 
-    bool operator<(const RollingHash &other) const {
-        return uint64_t(*this) < uint64_t(other);
-    }
-
-    bool operator>(const RollingHash &other) const {
-        return uint64_t(*this) > uint64_t(other);
-    }
-
-    bool operator==(const RollingHash &other) const {
-        return uint64_t(*this) == uint64_t(other);
-    }
-
     size_t get_k() const { return hash_->n; }
 
   private:

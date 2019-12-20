@@ -51,7 +51,7 @@ inline void call_kmers(const KmerBF &kmer_bloom,
         auto rev = kmer_bloom.get_hasher();
         rev.reset(rc_coded.data() + rc_coded.size() - k);
 
-        callback(std::min(fwd, rev), !invalid[k - 1]);
+        callback(std::min(uint64_t(fwd), uint64_t(rev)), !invalid[k - 1]);
 
         for (size_t i = k, j = coded.size() - k - 1; i < coded.size(); ++i, --j) {
             if (coded.at(i) < max_encoded_val) {
@@ -61,7 +61,7 @@ inline void call_kmers(const KmerBF &kmer_bloom,
                 rev.prev(rc_coded.at(j));
 
                 assert(invalid[i] || i + 1 >= k);
-                callback(std::min(fwd, rev), !invalid[i]);
+                callback(std::min(uint64_t(fwd), uint64_t(rev)), !invalid[i]);
             } else {
                 callback(npos, false);
             }
