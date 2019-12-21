@@ -179,7 +179,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         Iterator &begin = container.begin();
         Iterator &end = container.end();
 
-        using KMER = std::remove_reference_t<decltype(get_kmer(*begin))>;
+        using KMER = std::decay_t<decltype(get_kmer(*begin))>;
 
         static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
 
@@ -206,7 +206,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         size_t curpos = 1;
         TAlphabet lastF = 0;
         // last kmer for each label, so we can test multiple edges coming to same node
-        std::vector<std::remove_const_t <KMER>> last_kmer(alph_size, typename KMER::WordType(0));
+        std::vector<KMER> last_kmer(alph_size, typename KMER::WordType(0));
         for (Iterator &it = begin; it != end; ++it) {
             const KMER kmer = get_kmer(*it);
             TAlphabet curW = kmer[0];
