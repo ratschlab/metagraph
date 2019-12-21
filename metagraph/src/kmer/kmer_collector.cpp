@@ -29,7 +29,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    bool remove_redundant) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
     static_assert(utils::is_instance<Container, common::SortedSet>{}
-                  || utils::is_instance<Container, common::SortedSetDisk> {});
+                  || utils::is_instance<Container, common::SortedSetDisk>{});
     static_assert(std::is_same_v<KMER, typename Container::key_type>);
 
     Vector<KMER> temp_storage;
@@ -210,7 +210,7 @@ KmerCollector<KMER, KmerExtractor, Container>
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
         both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
-    if (utils::is_instance<Container, common::SortedSetDisk> {} && filter_suffix_encoded_.size()) {
+    if (utils::is_instance<Container, common::SortedSetDisk>{} && filter_suffix_encoded_.size()) {
         common::logger->error("SortedSetDisk does not support chunking");
         exit(1);
     }
@@ -243,7 +243,7 @@ template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
     if constexpr (utils::is_instance<Container, common::SortedSet>{}
-                  || utils::is_instance<Container, common::SortedSetDisk> {}) {
+                  || utils::is_instance<Container, common::SortedSetDisk>{}) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>, generate_sequences,
                              k_, both_strands_mode_, &kmers_, filter_suffix_encoded_, true);
     } else {
@@ -262,7 +262,7 @@ template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
     if constexpr (utils::is_instance<Container, common::SortedSet>{}
-                  || utils::is_instance<Container, common::SortedSetDisk> {}) {
+                  || utils::is_instance<Container, common::SortedSetDisk>{}) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallString callback) {
                                  generate_sequences([&](const std::string &seq, uint64_t) {
