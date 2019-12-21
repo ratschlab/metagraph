@@ -255,7 +255,8 @@ void recover_source_dummy_nodes(size_t k,
     std::ofstream *dummy_l1 = files_to_merge.back().second;
 
     using TAlphabet = typename T::CharType;
-    RecentKmers<T> recent_buffer(1llu << KMER::kBitsPerChar);
+    RecentKmers<T> recent_buffer((1llu << KMER::kBitsPerChar)
+                                  * (1llu << KMER::kBitsPerChar));
 
     const std::string file_name_l2 = get_file_name(2);
     files_to_merge.push_back(create_stream(file_name_l2));
