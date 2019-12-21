@@ -2322,7 +2322,7 @@ int main(int argc, char *argv[]) {
                     }
 
                     logger->info("Threshold for median k-mer abundance in unitigs: {}",
-                                  config->min_unitig_median_kmer_abundance);
+                                 config->min_unitig_median_kmer_abundance);
 
                     graph->call_unitigs([&](const std::string &unitig, const auto &path) {
                         if (!is_unreliable_unitig(path,
@@ -2427,11 +2427,10 @@ int main(int argc, char *argv[]) {
                         ? utils::get_quantile(count_hist_v, config->count_slice_quantiles[i])
                         : std::numeric_limits<uint64_t>::max();
 
-                    logger->info(
-                            "Used k-mer count thresholds:\n"
-                            "min (including): {}\n"
-                            "max (excluding): ",
-                            min_count, max_count);
+                    logger->info("k-mer count thresholds:\n"
+                                 "min (including): {}\n"
+                                 "max (excluding): ",
+                                 min_count, max_count);
 
                     assert(node_weights->is_compatible(*graph));
 
@@ -2466,15 +2465,14 @@ int main(int argc, char *argv[]) {
                                      get_verbose());
 
                     if (config->print_graph_internal_repr) {
-                        std::stringstream out;
-                        boss_graph.print_internal_representation(out);
-                        logger->info("Internal representation:\n{}", out.str());
+                        logger->info("Printing internal representation");
+                        boss_graph.print_internal_representation(std::cout);
                     }
                     print_bloom_filter_stats(dbg_succ->get_bloom_filter());
                 }
 
                 if (config->print_graph)
-                    logger->info("{}", *graph);
+                    std::cout << *graph;
             }
 
             for (const auto &file : config->infbase_annotators) {
