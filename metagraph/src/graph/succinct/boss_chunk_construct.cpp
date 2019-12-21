@@ -186,7 +186,7 @@ static void remove_redundant_dummy_source(const T &kmer, RecentKmers<T> *buffer)
     ++it;
     for (; T::compare_suffix(kmer, utils::get_first((*it).kmer), 1); ++it) {
         const T prev_kmer = utils::get_first((*it).kmer);
-        assert(curW || prev_kmer[1] && "Main dummy source k-mer must be unique");
+        assert((curW || prev_kmer[1]) && "Main dummy source k-mer must be unique");
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
             (*it).is_removed = true;
             return;
