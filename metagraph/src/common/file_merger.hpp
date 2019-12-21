@@ -21,7 +21,7 @@ namespace common {
  * Note: this method blocks until all the data was successfully merged.
  */
 template <typename T>
-void merge_files(const std::vector<std::string> sources,
+void merge_files(const std::vector<std::string> &sources,
                  std::function<void(const T &)> on_new_item) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
@@ -34,7 +34,7 @@ void merge_files(const std::vector<std::string> sources,
         T data_item;
         if (chunk_files[i].good()) {
             chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(data_item));
-            merge_heap.push({ data_item, i });
+            merge_heap.emplace(data_item, i);
         } else {
             logger->error("Error: Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
@@ -59,7 +59,7 @@ void merge_files(const std::vector<std::string> sources,
             T data_item;
             if (chunk_files[smallest.second].read(reinterpret_cast<char *>(&data_item),
                                                   sizeof(data_item))) {
-                merge_heap.push({ data_item, smallest.second });
+                merge_heap.emplace(data_item, smallest.second);
             }
         }
     }
