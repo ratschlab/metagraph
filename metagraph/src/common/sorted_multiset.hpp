@@ -30,7 +30,7 @@ class SortedMultiset {
 
     SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
                    size_t num_threads = 1, size_t max_num_elements = 0)
-      : num_threads_(num_threads), cleanup_(cleanup) {
+          : num_threads_(num_threads), cleanup_(cleanup) {
         reserve(max_num_elements);
     }
 
@@ -88,9 +88,7 @@ class SortedMultiset {
         try_reserve(size);
     }
 
-    size_t buffer_size() {
-        return data_.capacity();
-    }
+    size_t buffer_size() const { return data_.capacity(); }
 
     result_type& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);

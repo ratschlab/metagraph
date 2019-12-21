@@ -24,9 +24,9 @@ class CircularBuffer {
     void push_back(const T &item) {
         buf_[end_] = item;
 
-        if (full_) { // throw away oldest element
-            front_ = (front_ + 1) % size_;
-        }
+        // throw away the oldest element if full
+        if (full_ && ++front_ >= size_)
+            front_ = 0;
 
         if (++end_ >= size_)
             end_ = 0;
@@ -38,6 +38,7 @@ class CircularBuffer {
         assert(!empty() && "Attempting to pop empty buffer");
         T val = buf_[front_];
         full_ = false;
+
         if (++front_ >= size_)
             front_ = 0;
 

@@ -1,19 +1,19 @@
 #ifndef __SORTED_SET_DISK_HPP__
 #define __SORTED_SET_DISK_HPP__
 
-#include "common/chunked_wait_queue.hpp"
-#include "common/file_merger.hpp"
-#include "common/logger.hpp"
-#include "common/threading.hpp"
-#include "utils/vectors.hpp"
-
-#include <ips4o.hpp>
-
 #include <cassert>
 #include <fstream> //TODO(ddanciu) - try boost mmapped instead
 #include <mutex>
 #include <queue>
 #include <shared_mutex>
+
+#include <ips4o.hpp>
+
+#include "common/chunked_wait_queue.hpp"
+#include "common/file_merger.hpp"
+#include "common/logger.hpp"
+#include "common/threading.hpp"
+#include "utils/vectors.hpp"
 
 namespace mg {
 namespace common {
@@ -161,7 +161,7 @@ class SortedSetDisk {
         cleanup_(vector); // typically removes source dummy k-mers
     }
 
-    size_t buffer_size() { return data_.capacity(); }
+    size_t buffer_size() const { return data_.capacity(); }
 
   private:
     void shrink_data() {

@@ -28,7 +28,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
-    static_assert(utils::is_instance<Container, common::SortedSet> {}
+    static_assert(utils::is_instance<Container, common::SortedSet>{}
                   || utils::is_instance<Container, common::SortedSetDisk> {});
     static_assert(std::is_same_v<KMER, typename Container::key_type>);
 
@@ -77,7 +77,7 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  Container *kmers,
                  const std::vector<typename KmerExtractor::TAlphabet> &suffix) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
-    static_assert(utils::is_instance<Container, common::SortedMultiset> {});
+    static_assert(utils::is_instance<Container, common::SortedMultiset>{});
     static_assert(std::is_same_v<KMER, typename Container::key_type>);
 
     using KmerCount = typename Container::count_type;
@@ -195,15 +195,14 @@ std::function<void(StorageType*)> get_cleanup(bool clean_dummy_boss_kmers) {
 template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::KmerCollector(size_t k,
-              bool both_strands_mode,
-              Sequence&& filter_suffix_encoded,
-              size_t num_threads,
-              double memory_preallocated)
+                bool both_strands_mode,
+                Sequence&& filter_suffix_encoded,
+                size_t num_threads,
+                double memory_preallocated)
       : k_(k),
-      kmers_(get_cleanup<Extractor, typename Container::storage_type>(
-                     filter_suffix_encoded.empty()),
-             num_threads,
-             memory_preallocated / sizeof(typename Container::value_type)),
+        kmers_(get_cleanup<Extractor, typename Container::storage_type>(filter_suffix_encoded.empty()),
+               num_threads,
+               memory_preallocated / sizeof(typename Container::value_type)),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
@@ -216,7 +215,7 @@ KmerCollector<KMER, KmerExtractor, Container>
         exit(1);
     }
     common::logger->trace("Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
-                          (kmers_.buffer_size() * sizeof(typename Container::value_type) >> 20),
+                          kmers_.buffer_size() * sizeof(typename Container::value_type) >> 20,
                           kmers_.buffer_size());
 }
 
@@ -243,7 +242,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
-    if constexpr (utils::is_instance<Container, common::SortedSet> {}
+    if constexpr (utils::is_instance<Container, common::SortedSet>{}
                   || utils::is_instance<Container, common::SortedSetDisk> {}) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>, generate_sequences,
                              k_, both_strands_mode_, &kmers_, filter_suffix_encoded_, true);
@@ -262,7 +261,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-    if constexpr (utils::is_instance<Container, common::SortedSet> {}
+    if constexpr (utils::is_instance<Container, common::SortedSet>{}
                   || utils::is_instance<Container, common::SortedSetDisk> {}) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallString callback) {
@@ -274,8 +273,10 @@ void KmerCollector<KMER, KmerExtractor, Container>
                              filter_suffix_encoded_,
                              true);
     } else {
-        thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>, generate_sequences,
-                             k_, both_strands_mode_, &kmers_, filter_suffix_encoded_);
+        thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
+                             generate_sequences,
+                             k_, both_strands_mode_, &kmers_,
+                             filter_suffix_encoded_);
     }
 }
 
@@ -307,13 +308,13 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
 }
 
 
-#define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER, CONTAINER)                                 \
+#define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER, CONTAINER) \
     template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSet<KMER, CONTAINER<KMER>>>; \
-    template class KmerCollector<                                                                 \
-            KMER, KMER_EXTRACTOR,                                                                 \
-            common::SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>>>;          \
-    template class KmerCollector<                                                                 \
-            KMER, KMER_EXTRACTOR,                                                                 \
+    template class KmerCollector< \
+            KMER, KMER_EXTRACTOR, \
+            common::SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>>>; \
+    template class KmerCollector< \
+            KMER, KMER_EXTRACTOR, \
             common::SortedMultiset<KMER, uint32_t, CONTAINER<std::pair<KMER, uint32_t>>>>;
 
 

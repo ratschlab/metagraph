@@ -25,11 +25,10 @@ class SortedSet {
     typedef Container storage_type;
     typedef Container result_type;
 
-    SortedSet(
-            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-            size_t num_threads = 1,
-            size_t reserved_num_elements = 0)
-        : num_threads_(num_threads), cleanup_(cleanup) {
+    SortedSet(std::function<void(storage_type *)> cleanup = [](storage_type *) {},
+              size_t num_threads = 1,
+              size_t reserved_num_elements = 0)
+          : num_threads_(num_threads), cleanup_(cleanup) {
         reserve(reserved_num_elements);
     }
 
@@ -75,9 +74,7 @@ class SortedSet {
         try_reserve(size);
     }
 
-    size_t buffer_size() {
-        return data_.capacity();
-    }
+    size_t buffer_size() const { return data_.capacity(); }
 
     result_type& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);

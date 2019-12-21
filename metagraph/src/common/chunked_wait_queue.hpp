@@ -168,13 +168,15 @@ class ChunkedWaitQueue {
      * unique iterator, which will point to the first element only before starting
      * iterating.
      */
-    Iterator &begin() { return iter(); }
+    // TODO: construct iterator and return it instead of returning a reference
+    Iterator& begin() const { return const_cast<ChunkedWaitQueue*>(this)->iter(); }
 
     /**
      * Special iterator indicating the end of the queue - the end is reached when the
      * queue was shut down *and* the iterator past the last element in the queue.
      */
-    Iterator &end() { return end_iterator_; }
+    // TODO: construct iterator and return it instead of returning a reference
+    Iterator& end() const { return const_cast<ChunkedWaitQueue*>(this)->end_iterator_; }
 
   private:
     const size_type chunk_size_;

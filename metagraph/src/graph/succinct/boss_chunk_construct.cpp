@@ -1,7 +1,5 @@
 #include "boss_chunk_construct.hpp"
 
-#include <future>
-
 #include <ips4o.hpp>
 
 #include "boss_chunk.hpp"
@@ -22,28 +20,6 @@ namespace succinct {
 
 using namespace mg;
 using common::logger;
-
-template <typename KMER>
-using KmerMultsetVector = kmer::KmerCollector<
-        KMER,
-        KmerExtractorBOSS,
-        common::SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>;
-
-template <typename KMER>
-using KmerSetVector
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedSet<KMER, Vector<KMER>>>;
-
-template <typename KMER>
-using KmerSetDisk
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedSetDisk<KMER>>;
-
-template <typename KMER,
-          typename KmerCount = uint8_t,
-          class Container = Vector<std::pair<KMER, KmerCount>>>
-using KmerMultset
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultiset<KMER, KmerCount, Container>>;
-
-
 
 const static uint8_t kBitsPerCount = 8;
 
@@ -103,7 +79,6 @@ template <typename Container>
 void recover_source_dummy_nodes(size_t k,
                                 Container *kmers,
                                 size_t num_threads,
-                                size_t /* alphabet size */,
                                 ThreadPool & /* async_worker */) {
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
@@ -175,7 +150,7 @@ using RecentKmers = common::CircularBuffer<Kmer<T>>;
  * @param buffer queue that stores the last  |Alphabet|^2 k-mers used for identifying
  * redundant dummy source k-mers
  */
-template < typename T,typename TAlphabet>
+template <typename T, typename TAlphabet>
 static void remove_redundant_dummy_source(const T &kmer, RecentKmers<T> *buffer) {
     TAlphabet curW = kmer[0];
     if (buffer->size() < 2 || curW == 0) {
@@ -198,7 +173,7 @@ static void remove_redundant_dummy_source(const T &kmer, RecentKmers<T> *buffer)
 
 
 template <typename T>
-void write_or_die(std::fstream *f, const T &v) {
+void write_or_die(std::ofstream *f, const T &v) {
     if (!f->write(reinterpret_cast<const char *>(&v), sizeof(T))) {
         std::cerr << "Error: Writing of merged data failed." << std::endl;
         std::exit(EXIT_FAILURE);
@@ -254,8 +229,9 @@ template <typename T>
 void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
                                 size_t num_threads,
-                                size_t alphabet_size,
                                 ThreadPool &async_worker) {
+    using KMER = T;
+
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name
             = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
@@ -266,24 +242,24 @@ void recover_source_dummy_nodes(size_t k,
     // TODO(ddanciu): profile this, as I suspect it's slow - use a WaitQueue instead
     ThreadPool file_write_pool = ThreadPool(1, 10000);
     const auto file_writer
-            = [](std::fstream &f) { return [&f](const T &v) { write_or_die<T>(&f, v); }; };
+            = [](std::ofstream &f) { return [&f](const T &v) { write_or_die<T>(&f, v); }; };
 
-    std::vector<std::pair<std::string, std::fstream *>> files_to_merge;
+    std::vector<std::pair<std::string, std::ofstream *>> files_to_merge;
     auto create_stream = [](const std::string &name) {
-        std::fstream *f = new std::fstream(name, std::ios::out | std::ios::binary);
-        return std::pair<std::string, std::fstream *>({ name, f });
+        std::ofstream *f = new std::ofstream(name, std::ios::out | std::ios::binary);
+        return std::pair<std::string, std::ofstream *>({ name, f });
     };
 
     const std::string file_name = "/tmp/original_and_dummy_l1";
     files_to_merge.push_back(create_stream(file_name));
-    std::fstream *dummy_l1 = files_to_merge.back().second;
+    std::ofstream *dummy_l1 = files_to_merge.back().second;
 
     using TAlphabet = typename T::CharType;
-    RecentKmers<T> recent_buffer(alphabet_size * alphabet_size);
+    RecentKmers<T> recent_buffer(1llu << KMER::kBitsPerChar);
 
     const std::string file_name_l2 = get_file_name(2);
     files_to_merge.push_back(create_stream(file_name_l2));
-    std::fstream *dummy_l2 = files_to_merge.back().second;
+    std::ofstream *dummy_l2 = files_to_merge.back().second;
 
     // this will contain dummy k-mers of prefix length 2
     common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads,
@@ -363,9 +339,11 @@ void recover_source_dummy_nodes(size_t k,
         delete el.second; // this will also close the stream
         file_names.push_back(el.first);
     });
-    async_worker.enqueue(&common::merge_files<T>, file_names,
-                         [kmers](const T &v) { kmers->push(v); });
-    async_worker.enqueue([kmers]() { kmers->shutdown(); });
+
+    async_worker.enqueue([=]() {
+        common::merge_files<T>(file_names, [&](const T &v) { kmers->push(v); });
+        kmers->shutdown();
+    });
 }
 
 inline std::vector<KmerExtractorBOSS::TAlphabet>
@@ -424,9 +402,10 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
             Timer timer;
 
             // kmer_collector stores (BOSS::k_ + 1)-mers
-            recover_source_dummy_nodes(kmer_storage_.get_k() - 1, &kmers,
+            recover_source_dummy_nodes(kmer_storage_.get_k() - 1,
+                                       &kmers,
                                        kmer_storage_.num_threads(),
-                                       kmer_storage_.alphabet_size(), async_worker_);
+                                       async_worker_);
 
             logger->trace("Dummy source k-mers were reconstructed in {} sec",
                           timer.elapsed());
@@ -479,14 +458,31 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
     }
 }
 
+template <typename KMER>
+using KmerSetVector
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
+                              common::SortedSet<KMER, Vector<KMER>>>;
+
+template <typename KMER>
+using KmerMultsetVector
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
+                              common::SortedMultiset<KMER, uint8_t,
+                                                     Vector<std::pair<KMER, uint8_t>>>>;
+
+template <typename KMER>
+using KmerSetDisk
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
+                              common::SortedSetDisk<KMER>>;
+
 std::unique_ptr<IBOSSChunkConstructor>
-IBOSSChunkConstructor ::initialize(size_t k,
-                                   bool canonical_mode,
-                                   bool count_kmers,
-                                   const std::string &filter_suffix,
-                                   size_t num_threads,
-                                   double memory_preallocated,
-                                   kmer::ContainerType container_type) {
+IBOSSChunkConstructor
+::initialize(size_t k,
+             bool canonical_mode,
+             bool count_kmers,
+             const std::string &filter_suffix,
+             size_t num_threads,
+             double memory_preallocated,
+             kmer::ContainerType container_type) {
 #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated
 
     if (count_kmers) {

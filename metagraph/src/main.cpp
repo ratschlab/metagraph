@@ -51,6 +51,7 @@ const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
 static const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = false;
+const uint64_t kBytesInGigabyte = 1'000'000'000;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -1412,7 +1413,7 @@ int main(int argc, char *argv[]) {
                         config->count_kmers,
                         suffix,
                         get_num_threads(),
-                        static_cast<uint64_t>(config->memory_available) << 30,
+                        config->memory_available * kBytesInGigabyte,
                         config->container
                     );
 
@@ -1485,7 +1486,7 @@ int main(int argc, char *argv[]) {
                             config->count_kmers ? kBitsPerCount : 0,
                             suffix,
                             get_num_threads(),
-                            static_cast<uint64_t>(config->memory_available) << 30
+                            config->memory_available * kBytesInGigabyte
                         )
                     );
 
