@@ -1,6 +1,7 @@
 #ifndef __FILE_UTILS_HPP__
 #define __FILE_UTILS_HPP__
 
+#include <cassert>
 #include <fstream>
 #include <future>
 #include <iostream>
