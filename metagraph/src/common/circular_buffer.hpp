@@ -11,7 +11,7 @@ namespace common {
  * This class is NOT thread-safe.
  * For performance-critical code, consider using #RollingWindow.
  */
- //Implementation note: only the minimal operations needed by the current clients were
+ // Implementation note: only the minimal operations needed by the current clients were
  // implemented. Feel free to extend if you need more features.
 template <typename T>
 class CircularBuffer {
@@ -21,14 +21,15 @@ class CircularBuffer {
     explicit CircularBuffer(size_t size)
         : buf_(std::unique_ptr<T[]>(new T[size])), size_(size) {}
 
-    void push_back(T item) {
+    void push_back(const T &item) {
         buf_[end_] = item;
 
         if (full_) { // throw away oldest element
             front_ = (front_ + 1) % size_;
         }
 
-        end_ = (end_ + 1) % size_;
+        if (++end_ >= size_)
+            end_ = 0;
 
         full_ = end_ == front_;
     }
@@ -37,7 +38,8 @@ class CircularBuffer {
         assert(!empty() && "Attempting to pop empty buffer");
         T val = buf_[front_];
         full_ = false;
-        front_ = (front_ + 1) % size_;
+        if (++front_ >= size_)
+            front_ = 0;
 
         return val;
     }
@@ -79,9 +81,9 @@ class CircularBuffer<T>::ReverseIterator {
     explicit ReverseIterator(CircularBuffer<T> *parent, size_t idx)
         : parent_(parent), idx_(idx) {}
 
-    T& operator*()  { return parent_->buf_[idx_]; }
+    T& operator*() { return parent_->buf_[idx_]; }
 
-    ReverseIterator & operator++() {
+    ReverseIterator& operator++() {
         idx_ = idx_ > 0 ? idx_ - 1 : parent_->size() - 1;
         return *this;
     }
