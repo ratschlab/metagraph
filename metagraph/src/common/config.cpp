@@ -12,6 +12,14 @@
 
 using namespace mg;
 
+
+void print_welcome_message() {
+    fprintf(stderr, "#############################\n");
+    fprintf(stderr, "### Welcome to MetaGraph! ###\n");
+    fprintf(stderr, "#############################\n\n");
+    fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
+}
+
 Config::Config(int argc, char *argv[]) {
     // provide help overview if no identity was given
     if (argc == 1) {
@@ -61,6 +69,10 @@ Config::Config(int argc, char *argv[]) {
         identity = CALL_VARIANTS;
     } else if (!strcmp(argv[1], "parse_taxonomy")) {
         identity = PARSE_TAXONOMY;
+    } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
+        print_welcome_message();
+        print_usage(argv[0]);
+        exit(0);
     } else {
         print_usage(argv[0]);
         exit(-1);
@@ -284,6 +296,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--cache-size")) {
             row_cache_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            print_welcome_message();
             print_usage(argv[0], identity);
             exit(0);
         } else if (!strcmp(argv[i], "--label-mask-in")) {
@@ -629,8 +642,6 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
 }
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
-
     const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt')";
 
     switch (identity) {

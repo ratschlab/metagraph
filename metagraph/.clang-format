@@ -73,7 +73,7 @@ RawStringFormats:
     Language:        TextProto
     BasedOnStyle:    LLVM
 ReflowComments: true
-SortIncludes: true
+SortIncludes: false
 SortUsingDeclarations: false
 SpaceAfterCStyleCast: false
 SpaceAfterTemplateKeyword: true

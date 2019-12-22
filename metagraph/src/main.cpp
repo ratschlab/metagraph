@@ -171,7 +171,7 @@ void annotate_data(const std::vector<std::string> &files,
     for (const auto &file : files) {
         Timer data_reading_timer;
 
-        logger->trace("\nParsing {}", file);
+        logger->trace("Parsing {}", file);
 
         std::vector<std::string> labels = anno_labels;
         if (filename_anno) {
@@ -286,7 +286,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
     for (const auto &file : files) {
         Timer data_reading_timer;
 
-        logger->trace("\nParsing {}", file);
+        logger->trace("Parsing {}", file);
 
         // open stream
         if (utils::get_filetype(file) == "FASTA"
@@ -1162,7 +1162,7 @@ void parse_sequences(const std::vector<std::string> &files,
                      Loop call_sequences) {
     // iterate over input files
     for (const auto &file : files) {
-        logger->trace("\nParsing {}", file);
+        logger->trace("Parsing {}", file);
 
         Timer data_reading_timer;
 
@@ -1350,12 +1350,11 @@ int main(int argc, char *argv[]) {
 
     logger->set_level(get_verbose() ? spdlog::level::trace : spdlog::level::info);
     //logger->set_pattern("%^date %x....%$  %v");
+    //spdlog::set_pattern("[%H:%M:%S %z] [%n] [%^---%L---%$] [thread %t] %v");
     //console_sink->set_color(spdlog::level::trace, "\033[37m");
+    spdlog::flush_every(std::chrono::seconds(1));
 
-    logger->trace(
-            "\n#############################\n"
-            "### Welcome to MetaGraph! ###\n"
-            "#############################\n");
+    logger->trace("Metagraph started");
 
     const auto &files = config->fname;
 
@@ -1404,7 +1403,7 @@ int main(int argc, char *argv[]) {
                     timer.reset();
 
                     if (suffix.size() > 0 || suffixes.size() > 1) {
-                        logger->info("\nSuffix: {}", suffix);
+                        logger->info("Suffix: {}", suffix);
                     }
 
                     auto constructor = IBOSSChunkConstructor::initialize(
@@ -1476,7 +1475,7 @@ int main(int argc, char *argv[]) {
                     timer.reset();
 
                     if ((suffix.size() > 0 || suffixes.size() > 1)) {
-                        logger->trace("\nSuffix: {}", suffix);
+                        logger->trace("Suffix: {}", suffix);
                     }
 
                     constructor.reset(
@@ -1937,7 +1936,7 @@ int main(int argc, char *argv[]) {
 
             // iterate over input files
             for (const auto &file : files) {
-                logger->trace("\nParsing sequences from {}\n", file);
+                logger->trace("Parsing sequences from {}\n", file);
 
                 Timer curr_timer;
 
