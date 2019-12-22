@@ -7,7 +7,17 @@
 #include <vector>
 #include <cassert>
 
-
+/**
+ * Models a kmer (https://en.wikipedia.org/wiki/K-mer). Each character in the k-mer
+ * uses L bits of the internal representation type G (typically a 64, 128 or 256 bit
+ * integer). The last character of the k-mer uses the most significant bits of
+ * G, while the first will use the least significant ones. In other words, the memory
+ * layout of the k-mer "ACGT" is "TGCA". This way, ordering k-mers in co-lex order can be
+ * achieved by simply comparing the internal representations in G.
+ *
+ * @tparam G the type storing a kmer, typically a 64/128/256 bit integer
+ * @tparam L the number of bits storing a k-mer character (2 bits for DNA)
+ */
 template <typename G, int L>
 class KMer {
   public:
@@ -15,9 +25,22 @@ class KMer {
     typedef uint64_t CharType;
     static constexpr int kBitsPerChar = L;
 
+    /** Construct a default (uninitialized) k-mer. */
     KMer() {}
+
+    /**
+     * Construct a k-mer with the given size from the given array
+     * @tparam V an indexed data structure (e.g. std::vector or L[])
+     * @param arr unpacked k-mer
+     * @param k k-mer length
+     */
     template <typename V>
     KMer(const V &arr, size_t k);
+    /**
+     * Construct a k-mer from the given vector
+     * @tparam T k-mer character type
+     * @param arr unpacked k-mer
+     */
     template <typename T>
     KMer(const std::vector<T> &arr) : KMer(arr, arr.size()) {}
 
@@ -32,16 +55,29 @@ class KMer {
     bool operator==(const KMer &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMer &other) const { return seq_ != other.seq_; }
 
+    /** Return the character at position #i in the kmer. Undefined behavior if #i is
+     * out of range. */
     inline CharType operator[](size_t i) const;
 
+    /**
+     * Return the human-readable representation of the kmer using the given alphabet.
+     */
     std::string to_string(size_t k, const std::string &alphabet) const;
 
     /**
      * Construct the next k-mer for s[7]s[6]s[5]s[4]s[3]s[2]s[1].
      * next = s[8]s[7]s[6]s[5]s[4]s[3]s[2]
      *      = ( s[8] << k ) + ( kmer >> 1 ).
+     * @param k the k-mer size
+     * @param edge_label the new last character
      */
     inline void to_next(size_t k, WordType edge_label);
+    /**
+     * Replaces the current k-mer with its predecessor. The last k-1 characters of the
+     * predecessors are identical to the first k-1 characters of the successors.
+     * @param k the k-mer size
+     * @param first_char the first character in the predecessor
+     */
     inline void to_prev(size_t k, CharType first_char);
 
     inline const WordType& data() const { return seq_; }
@@ -57,9 +93,11 @@ class KMer {
     void print_hex(std::ostream &os) const;
 
   private:
+    /** Bit mask for extracting the first character in packed kmers. */
     static constexpr CharType kFirstCharMask = (1ull << kBitsPerChar) - 1;
     static inline const WordType kAllSetMask = ~(WordType(0ull));
-    WordType seq_; // kmer sequence
+    /** Packed k-mer representation */
+    WordType seq_;
 };
 
 

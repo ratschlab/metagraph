@@ -7,8 +7,11 @@
 #include "kmer_extractor.hpp"
 #include "bit_vector.hpp"
 
+namespace mg {
+namespace bitmap_graph {
 
 class DBGBitmapConstructor;
+
 
 /**
  * Node-centric de Bruijn graph
@@ -124,5 +127,8 @@ class DBGBitmap : public DeBruijnGraph {
 
     static constexpr auto kExtension = ".bitmapdbg";
 };
+
+} // namespace bitmap_graph
+} // namespace mg
 
 #endif // __DBG_BITMAP_HPP__

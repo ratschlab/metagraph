@@ -24,6 +24,9 @@ auto ALWAYS_FALSE = []() { return false; };
  */
 class BOSS {
   public:
+    /**
+     * Constant representing an invalid node or edge index.
+     */
     static constexpr uint64_t npos = 0;
     // in [1,...,num_nodes], 0 = npos (invalid index)
     typedef uint64_t node_index;
@@ -32,6 +35,9 @@ class BOSS {
 
     typedef uint8_t TAlphabet;
 
+    /**
+     * Construct a BOSS table with the given node (k-mer) size.
+     */
     explicit BOSS(size_t k = 1);
     explicit BOSS(BOSSConstructor *builder);
     ~BOSS();
@@ -47,7 +53,7 @@ class BOSS {
     bool operator==(const BOSS &other) const;
 
     /**
-     * Perform an element wise comparison of the arrays W, last and
+     * Perform an element-wise comparison of the arrays W, last and
      * F and will only check for identity. If any element differs, return
      * false and true otherwise.
      */
@@ -66,7 +72,7 @@ class BOSS {
 
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
-    // Call npos if a k-mer can't be mapped to the graph edges
+    // Invokes #callback with npos if a k-mer can't be mapped to the graph edges
     void map_to_edges(const std::string &sequence,
                       const std::function<void(edge_index)> &callback,
                       const std::function<bool()> &terminate = ALWAYS_FALSE,
@@ -142,11 +148,27 @@ class BOSS {
                                 size_t num_threads = 0,
                                 bool verbose = false);
 
+    /**
+     * Mark source dummy edges into mask by traversing the entire dummy subgraph (which
+     * is a tree).
+     * @param[out] mask a bit mask where sink dummy edges are marked. Must have the same
+     * size as #W_ or must be nullptr.
+     * @param[in] num_threads number of threads to use in the traversal (1 thread if <=1).
+     * @param[in] verbose logging verbosity
+     * @return the number of source dummy edges
+     */
     uint64_t mark_source_dummy_edges(sdsl::bit_vector *mask = NULL,
                                      size_t num_threads = 0,
                                      bool verbose = false) const;
 
-    // Do not include the main dummy edge (with edge_index = 1)
+    /**
+     * Mark sink dummy edges into mask. Does not include the main dummy edge (with
+     * edge_index = 1). A sink dummy edge is an outgoing edge labeled with $.
+     * @param[out] mask a bit mask where sink dummy edges are marked. Must have the same
+     * size as #W_ or must be nullptr.
+     * @return the number of sink dummy edges (i.e. the number of bits that would be set
+     * in #mask, if provided)
+     */
     uint64_t mark_sink_dummy_edges(sdsl::bit_vector *mask = NULL) const;
 
     // Mark npos, i.e. 0, as well as all the source
@@ -410,7 +432,14 @@ class BOSS {
         return std::make_tuple(rl, ru, it);
     }
 
+    /**
+     * The size of the alphabet for kmers that this graph encodes.
+     * For DNA, this value is 5 ($,A,C,G,T).
+     */
     const TAlphabet alph_size;
+    /**
+     * The symbols of the alphabet, for DNA this will be "$ACGT".
+     */
     const std::string &alphabet;
 
     static constexpr size_t kSentinelCode = 0;

@@ -9,7 +9,6 @@
 #include "bitmap.hpp"
 #include "bit_vector.hpp"
 
-
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";
 

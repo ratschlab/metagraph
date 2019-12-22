@@ -12,6 +12,7 @@
 #include "dbg_hash_fast.hpp"
 #include "dbg_bitmap.hpp"
 
+using namespace mg::bitmap_graph;
 
 template <size_t numerator, size_t denominator>
 class DBGSuccinctBloomFPR : public DBGSuccinct {

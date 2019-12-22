@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "kmer/kmer_collector_config.hpp"
+
 
 class Config {
   public:
@@ -57,7 +59,7 @@ class Config {
     unsigned int suffix_len = 0;
     unsigned int frequency = 1;
     unsigned int alignment_length = 0;
-    unsigned int memory_available = 0;
+    unsigned int memory_available = 1;
     unsigned int min_count = 1;
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
     unsigned int num_top_labels = -1;
@@ -175,6 +177,9 @@ class Config {
 
     AnnotationType anno_type = ColumnCompressed;
     GraphType graph_type = SUCCINCT;
+
+    mg::kmer::ContainerType container;
+    static mg::kmer::ContainerType string_to_container(const std::string &string);
 
     static std::string annotype_to_string(AnnotationType state);
     static AnnotationType string_to_annotype(const std::string &string);

@@ -4,6 +4,9 @@
 #include "dbg_bitmap.hpp"
 #include "dbg_construct.hpp"
 
+namespace mg {
+namespace bitmap_graph {
+
 
 class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> {
   public:
@@ -14,8 +17,7 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
                                                bool count_kmers = false,
                                                const std::string &filter_suffix = "",
                                                size_t num_threads = 1,
-                                               double memory_preallocated = 0,
-                                               bool verbose = false);
+                                               double memory_preallocated = 0);
 
     virtual void add_sequence(std::string&& sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
@@ -37,8 +39,7 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
                          uint8_t bits_per_count = 0,
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
-                         double memory_preallocated = 0,
-                         bool verbose = false);
+                         double memory_preallocated = 0);
 
     void add_sequence(std::string&& sequence, uint64_t count = 1) {
         constructor_->add_sequence(std::move(sequence), count);
@@ -72,5 +73,8 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
     std::unique_ptr<IBitmapChunkConstructor> constructor_;
     uint8_t bits_per_count_;
 };
+
+} // namespace bitmap_graph
+} // namespace mg
 
 #endif // __DBG_BITMAP_CONSTRUCT_HPP__

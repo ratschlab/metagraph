@@ -1,9 +1,13 @@
 #ifndef __FILE_UTILS_HPP__
 #define __FILE_UTILS_HPP__
 
-#include <string>
-#include <memory>
+#include <cassert>
 #include <fstream>
+#include <future>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
 
 
 namespace utils {
@@ -34,6 +38,68 @@ class TempFile {
     State state_;
     std::unique_ptr<std::ofstream> tmp_ostream_;
     std::unique_ptr<std::ifstream> tmp_istream_;
+};
+
+
+template <typename T>
+class BufferedAsyncWriter {
+    static constexpr uint32_t CAPACITY = 100'000;
+
+  public:
+    BufferedAsyncWriter(const std::string &name, std::ofstream *fos)
+          : name_(name), fos_(fos) {
+        assert(fos);
+
+        buf_.reserve(CAPACITY);
+        buf_dump_.reserve(CAPACITY);
+    }
+
+    void operator<<(const T &v) { push(v); }
+
+    void push(const T &v) {
+        if (buf_.size() == CAPACITY) {
+            wait_for_write();
+            buf_.swap(buf_dump_);
+            write_future_ = std::async(std::launch::async, flush_to_stream,
+                                       buf_dump_, fos_, name_);
+            buf_.resize(0);
+        }
+        buf_.push_back(v);
+    }
+
+    void flush() {
+        // dump the current buffer
+        flush_to_stream(buf_, fos_, name_);
+        buf_.resize(0);
+
+        // wait for the second to finish
+        wait_for_write();
+
+        fos_->flush();
+    }
+
+  private:
+    void wait_for_write() {
+        if (write_future_.valid())
+            write_future_.wait();
+    }
+
+    static void flush_to_stream(const std::vector<T> &buf,
+                                std::ofstream *fos,
+                                const std::string &name) {
+        if (!fos->write(reinterpret_cast<const char *>(buf.data()), sizeof(T) * buf.size())) {
+            std::cerr << "Error: Writing to '" << name << "' failed" << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+    std::vector<T> buf_;
+    std::vector<T> buf_dump_;
+
+    std::future<void> write_future_;
+
+    std::string name_;
+    std::ofstream *fos_;
 };
 
 } // namespace utils

@@ -10,6 +10,7 @@
 #include "utils/algorithms.hpp"
 #include "common/threading.hpp"
 
+using namespace mg;
 
 Config::Config(int argc, char *argv[]) {
     // provide help overview if no identity was given
@@ -309,8 +310,8 @@ Config::Config(int argc, char *argv[]) {
             taxonomy_nodes = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy-map")) {
             taxonomy_map = std::string(get_value(i++));
-        } else if (!strcmp(argv[i], "--log_level")) {
-            i++; // TODO(ddanciu): migrate to GFlags and remove
+        } else if (!strcmp(argv[i], "--container")) {
+            container = string_to_container(get_value(i++));
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -549,6 +550,16 @@ Config::StateType Config::string_to_state(const std::string &string) {
     }
 }
 
+kmer::ContainerType Config::string_to_container(const std::string &string) {
+    if (string == "vector") {
+        return kmer::ContainerType::VECTOR;
+    } else if (string == "vector_disk") {
+        return kmer::ContainerType::VECTOR_DISK;
+    } else {
+        throw std::runtime_error("Error: unknown k-mer container: " + string);
+    }
+}
+
 std::string Config::annotype_to_string(AnnotationType state) {
     switch (state) {
         case ColumnCompressed:
@@ -696,13 +707,14 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [0]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [1]\n");
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --container [STR] \tcontainer to use for storing k-mers: vector / vector_disk [vector]\n");
         } break;
         case CLEAN: {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());

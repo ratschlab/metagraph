@@ -9,6 +9,10 @@
 
 #include <ips4o.hpp>
 
+#include "logger.hpp"
+
+namespace mg {
+namespace common {
 
 // Thread safe data storage for counting
 template <typename T,
@@ -22,11 +26,13 @@ class SortedMultiset {
     typedef C count_type;
     typedef std::pair<T, C> value_type;
     typedef Container storage_type;
+    typedef Container result_type;
 
     SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-                   size_t num_threads = 1,
-                   bool verbose = false)
-      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
+                   size_t num_threads = 1, size_t max_num_elements = 0)
+          : num_threads_(num_threads), cleanup_(cleanup) {
+        reserve(max_num_elements);
+    }
 
     ~SortedMultiset() {}
 
@@ -82,7 +88,9 @@ class SortedMultiset {
         try_reserve(size);
     }
 
-    storage_type& data() {
+    size_t buffer_size() const { return data_.capacity(); }
+
+    result_type& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
@@ -104,21 +112,14 @@ class SortedMultiset {
 
   private:
     void shrink_data() {
-        if (verbose_) {
-            std::cout << "Allocated capacity exceeded, erase duplicate values..."
-                      << std::flush;
-        }
+        logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
         size_t old_size = data_.size();
         sort_and_merge_duplicates();
         sorted_end_ = data_.size();
 
-        if (verbose_) {
-            std::cout << " done. Size reduced from " << old_size
-                                                     << " to " << data_.size()
-                      << ", " << (data_.size() * sizeof(value_type) >> 20) << "Mb"
-                      << std::endl;
-        }
+        logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
+                      data_.size(), (data_.size() * sizeof(value_type) >> 20));
     }
 
     void sort_and_merge_duplicates() {
@@ -170,7 +171,6 @@ class SortedMultiset {
 
     storage_type data_;
     size_t num_threads_;
-    bool verbose_;
 
     std::function<void(storage_type*)> cleanup_;
 
@@ -180,5 +180,8 @@ class SortedMultiset {
     mutable std::mutex mutex_resize_;
     mutable std::shared_timed_mutex mutex_copy_;
 };
+
+} // namespace common
+} // namespace mg
 
 #endif // __SORTED_MULTISET_HPP__

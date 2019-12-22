@@ -7,7 +7,18 @@
 #include <vector>
 #include <cassert>
 
-
+/**
+ * Models a kmer (https://en.wikipedia.org/wiki/K-mer) that is stored in a BOSS table.
+ * Just like #KMer, each character in the k-mer uses L bits of the internal representation
+ * type G (typically a 64, 128 or 256 bit integer) and characters are stored in reverse
+ * order.
+ * The  only  difference from #KMer is that #KmerBoss leaves the last character in the
+ * least significant bits of G. For example, the k-mer "ACGT" is stored in memory as
+ * "GCAT", while #KMer stores it as "TGCA".
+ *
+ * @tparam G the type storing a kmer, typically a 64/128/256 bit integer
+ * @tparam L the number of bits storing a k-mer character (2 bits for DNA)
+ */
 template <typename G, int L>
 class KMerBOSS {
   public:
@@ -15,9 +26,21 @@ class KMerBOSS {
     typedef uint64_t CharType;
     static constexpr int kBitsPerChar = L;
 
+    /** Construct a default, uninitialized, BOSS k-mer. */
     KMerBOSS() {}
+    /**
+     * Construct a BOSS k-mer with the given size from the given array
+     * @tparam V an indexed data structure (e.g. std::vector or L[])
+     * @param arr the k-mer characters
+     * @param k k-mer length
+     */
     template <typename V>
     KMerBOSS(const V &arr, size_t k);
+    /**
+     * Construct a BOSS k-mer from the given vector
+     * @tparam T k-mer character type
+     * @param arr unpacked k-mer (e.g. 'ACATGGAA')
+     */
     template <typename T>
     KMerBOSS(const std::vector<T> &arr) : KMerBOSS(arr, arr.size()) {}
 
@@ -49,9 +72,19 @@ class KMerBOSS {
      * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
      * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
      *      = s[7] << k + (kmer & mask) >> 1 + s[8].
+     * @param k k-mer size
+     * @param new_last the character to append to the current k-mer
+     * @param old_last the last character in the current k-mer (provided, if available,
+     * for efficiency reasons)
      */
     inline void to_next(size_t k, CharType new_last, WordType old_last);
     inline void to_next(size_t k, CharType new_last);
+    /**
+     * Replaces the current k-mer with its predecessor. The last k-1 characters of the
+     * predecessors are identical to the first k-1 characters of the successors.
+     * @param k the k-mer size
+     * @param first_char the first character in the predecessor
+     */
     inline void to_prev(size_t k, CharType new_first);
 
     inline const WordType& data() const { return seq_; }

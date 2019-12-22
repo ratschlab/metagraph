@@ -42,6 +42,8 @@
 
 using mg::common::logger;
 using utils::get_verbose;
+using namespace mg::bitmap_graph;
+using namespace mg::succinct;
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -49,6 +51,7 @@ const size_t kNumCachedColumns = 10;
 const size_t kBitsPerCount = 8;
 static const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = false;
+const uint64_t kBytesInGigabyte = 1'000'000'000;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -1244,7 +1247,7 @@ void parse_sequences(const std::vector<std::string> &files,
                 }, config.forward_and_reverse);
             }
         } else {
-            logger->error("ERROR: File type unknown for file {}", file);
+            logger->error("ERROR: File type unknown for file '{}'", file);
             exit(1);
         }
 
@@ -1410,8 +1413,8 @@ int main(int argc, char *argv[]) {
                         config->count_kmers,
                         suffix,
                         get_num_threads(),
-                        static_cast<uint64_t>(config->memory_available) << 30,
-                        get_verbose()
+                        config->memory_available * kBytesInGigabyte,
+                        config->container
                     );
 
                     parse_sequences(files, *config, timer,
@@ -1483,8 +1486,7 @@ int main(int argc, char *argv[]) {
                             config->count_kmers ? kBitsPerCount : 0,
                             suffix,
                             get_num_threads(),
-                            static_cast<uint64_t>(config->memory_available) << 30,
-                            get_verbose()
+                            config->memory_available * kBytesInGigabyte
                         )
                     );
 

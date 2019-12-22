@@ -146,9 +146,9 @@ TEST(BOSS, SmallGraphTraversal) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    BOSSConstructor constructor(3);
+    BOSSConstructor constructor(3 /* k-mer length */);
 
-    for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
+    while (kseq_read(read_stream) >= 0) {
         constructor.add_sequences({ read_stream->seq.s });
     }
     kseq_destroy(read_stream);
@@ -389,10 +389,10 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
             second_ptr.reset(new BOSS(&constructor));
         }
 
-        auto &first = *first_ptr;
-        auto &second = *second_ptr;
+        BOSS &first = *first_ptr;
+        BOSS &second = *second_ptr;
 
-        ASSERT_TRUE(first.equals_internally(second)) << first;
+        ASSERT_TRUE(first.equals_internally(second)) << first << second;
 
         sdsl::bit_vector source_dummy_edges(second.num_edges() + 1, false);
         auto to_remove = second.erase_redundant_dummy_edges(&source_dummy_edges);
@@ -402,7 +402,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_EQ(0u, std::count(to_remove.begin(), to_remove.end(), true));
-        EXPECT_TRUE(first.equals_internally(second)) << first;
+        EXPECT_TRUE(first.equals_internally(second)) << first << second;
     }
 }
 

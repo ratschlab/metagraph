@@ -15,6 +15,7 @@ add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/base metagraph_graph_base)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 
+enableCCache()
 findOpenMP()
 buildProgressBar(EXTERNAL_LIB_DIR progress_bar)
 buildMersenneTwister(EXTERNAL_LIB_DIR mersenne_twister)

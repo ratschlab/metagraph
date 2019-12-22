@@ -10,7 +10,7 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     // see input arguments in IBOSSChunkConstructor::initialize
     template <typename... Args>
     BOSSConstructor(const Args&... args)
-      : constructor_(IBOSSChunkConstructor::initialize(args...)) {}
+      : constructor_(mg::succinct::IBOSSChunkConstructor::initialize(args...)) {}
 
     void add_sequence(std::string&& sequence, uint64_t count = 1) {
         constructor_->add_sequence(std::move(sequence), count);
@@ -49,7 +49,7 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     }
 
   private:
-    std::unique_ptr<IBOSSChunkConstructor> constructor_;
+    std::unique_ptr<mg::succinct::IBOSSChunkConstructor> constructor_;
 };
 
 #endif // __BOSS_CONSTRUCT_HPP__

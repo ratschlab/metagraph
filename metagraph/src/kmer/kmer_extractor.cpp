@@ -304,7 +304,13 @@ KmerExtractorBOSS::TAlphabet KmerExtractorBOSS::complement(TAlphabet c) {
 }
 
 /**
- * Break the sequence into kmers and add them to the kmer storage.
+ * Break the sequence into k-mers and add them to the k-mer storage.
+ * @param sequence sequence to be broken into k-mers
+ * @param k the k-mer length
+ * @param suffix if not empty, only k-mers that match this suffix are kept
+ * @param[out] kmers output parameter for the resulting k-mers
+ * @param canonical_mode if true, extracts canonical (lexicographically smaller vs. the
+ * reverse complement) k-mers
  */
 template <typename KMER>
 void KmerExtractorBOSS::sequence_to_kmers(const std::string &sequence,
@@ -334,6 +340,9 @@ void KmerExtractorBOSS::sequence_to_kmers(const std::string &sequence,
 
     while (begin_segm + dummy_prefix_size + k + 1 <= end) {
         assert(end >= end_segm);
+        // DNA segments may be stored continuously separated by a character outside of
+        // the valid alphabet (usually 'N'). Each segment is treated as a distinct DNA
+        // read and must be prepended with a dummy prefix
         end_segm = std::find_if(end_segm, end,
             [&](auto c) { return c >= alphabet.size(); }
         );
