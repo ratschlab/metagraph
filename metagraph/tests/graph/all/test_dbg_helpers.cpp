@@ -200,53 +200,6 @@ build_graph_batch<DBGSuccinctBloom<4, 50>>(uint64_t k,
     return graph;
 }
 
-template <class Graph>
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative(uint64_t k,
-                      std::function<void(std::function<void(const std::string&)>)> generate,
-                      bool canonical) {
-    std::vector<std::string> sequences;
-    generate([&](const auto &sequence) { sequences.push_back(sequence); });
-    return build_graph_batch<Graph>(k, sequences, canonical);
-}
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGHashOrdered>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGHashFast>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGHashString>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGBitmap>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGSuccinct>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGSuccinctBloomFPR<1, 1>>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGSuccinctBloomFPR<1, 10>>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGSuccinctBloom<4, 1>>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_iterative<DBGSuccinctBloom<4, 50>>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
-
-
 
 template <class Graph>
 bool check_graph(const std::string &alphabet, bool canonical, bool check_sequence) {

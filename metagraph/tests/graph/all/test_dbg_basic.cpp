@@ -198,7 +198,13 @@ TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
-    EXPECT_TRUE(check_graph<TypeParam>("ACGT", false));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGT", false, true));
+}
+
+TYPED_TEST(DeBruijnGraphTest, CheckGraphInputWithN) {
+    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", false, false));
+    EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
+              check_graph<TypeParam>("ACGTN", false, true));
 }
 
 TYPED_TEST(DeBruijnGraphTest, Alphabet) {

@@ -46,10 +46,14 @@ template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative(uint64_t k,
                       std::function<void(std::function<void(const std::string&)>)> generate,
-                      bool canonical = false);
+                      bool canonical = false) {
+    std::vector<std::string> sequences;
+    generate([&](const auto &sequence) { sequences.push_back(sequence); });
+    return build_graph_batch<Graph>(k, sequences, canonical);
+}
 
 template <class Graph>
-bool check_graph(const std::string &alphabet, bool canonical, bool check_sequence = false);
+bool check_graph(const std::string &alphabet, bool canonical, bool check_sequence);
 
 
 template <typename Graph>
@@ -74,6 +78,5 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>> StableGraphTypes;
-
 
 #endif // __TEST_DBG_HELPERS_HPP__
