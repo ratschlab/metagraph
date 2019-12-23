@@ -160,9 +160,14 @@ class DBGAlignerConfig {
 
     bool forward_and_reverse_complement = false;
 
+    bool alignment_edit_distance;
+    int8_t alignment_match_score;
+    int8_t alignment_mm_transition_score;
+    int8_t alignment_mm_transversion_score;
+
     bool check_config_scores() const;
 
-    static ScoreMatrix scoring_matrix(const Config &config);
+    void set_scoring_matrix();
 
     // Protein matrices
     static const ScoreMatrix score_matrix_blosum62;

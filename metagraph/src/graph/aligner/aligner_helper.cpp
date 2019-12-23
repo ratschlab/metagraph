@@ -270,7 +270,12 @@ DBGAlignerConfig::DBGAlignerConfig(const Config &config)
         gap_opening_penalty(-config.alignment_gap_opening_penalty),
         gap_extension_penalty(-config.alignment_gap_extension_penalty),
         forward_and_reverse_complement(config.forward_and_reverse),
-        score_matrix_(scoring_matrix(config)) {}
+        alignment_edit_distance(config.alignment_edit_distance),
+        alignment_match_score(config.alignment_match_score),
+        alignment_mm_transition_score(config.alignment_mm_transition_score),
+        alignment_mm_transversion_score(config.alignment_mm_transversion_score) {
+    set_scoring_matrix();
+}
 
 DBGAlignerConfig::score_t DBGAlignerConfig
 ::score_cigar(const char *reference_begin, const char *reference_end,
@@ -312,9 +317,8 @@ DBGAlignerConfig::score_t DBGAlignerConfig
     return score;
 }
 
-DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
-::scoring_matrix(const Config &config) {
-    if (config.alignment_edit_distance) {
+void DBGAlignerConfig::set_scoring_matrix() {
+    if (alignment_edit_distance) {
         // TODO: REPLACE THIS
         #if _PROTEIN_GRAPH
             const auto *alphabet = alphabets::kAlphabetProtein;
@@ -335,23 +339,24 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
             );
         #endif
 
-        return unit_scoring_matrix(1, alphabet, alphabet_encoding);
+        score_matrix_ = unit_scoring_matrix(1, alphabet, alphabet_encoding);
+        return;
     }
 
     #if _PROTEIN_GRAPH
-        return score_matrix_blosum62;
+        score_matrix_ = score_matrix_blosum62;
     #elif _DNA_CASE_SENSITIVE_GRAPH
-        return dna_scoring_matrix(config.alignment_match_score,
-                                  -config.alignment_mm_transition_score,
-                                  -config.alignment_mm_transversion_score);
+        score_matrix_ = dna_scoring_matrix(alignment_match_score,
+                                           -alignment_mm_transition_score,
+                                           -alignment_mm_transversion_score);
     #elif _DNA5_GRAPH
-        return dna_scoring_matrix(config.alignment_match_score,
-                                  -config.alignment_mm_transition_score,
-                                  -config.alignment_mm_transversion_score);
+        score_matrix_ = dna_scoring_matrix(alignment_match_score,
+                                           -alignment_mm_transition_score,
+                                           -alignment_mm_transversion_score);
     #elif _DNA_GRAPH
-        return dna_scoring_matrix(config.alignment_match_score,
-                                  -config.alignment_mm_transition_score,
-                                  -config.alignment_mm_transversion_score);
+        score_matrix_ = dna_scoring_matrix(alignment_match_score,
+                                           -alignment_mm_transition_score,
+                                           -alignment_mm_transversion_score);
     #else
         static_assert(false,
             "Define an alphabet: either "
