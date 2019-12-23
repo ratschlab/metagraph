@@ -230,19 +230,18 @@ bool Cigar::is_valid(const char *reference_begin, const char *reference_end,
 
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
-    int8_t min_element = std::min(gap_opening_penalty, gap_extension_penalty);
+    auto min_penalty_score = std::min(gap_opening_penalty, gap_extension_penalty);
     for (const auto &row : score_matrix_) {
-        min_element = std::min(min_element, *std::min_element(row.begin(), row.end()));
+        min_penalty_score = std::min(min_penalty_score, *std::min_element(row.begin(), row.end()));
     }
 
-    score_t shift = min_cell_score + min_element;
-    if (shift > min_cell_score) {
-        std::cerr << "min_cell_score: " << min_cell_score << std::endl
-                  << "underflow value: " << shift << std::endl;
-        return false;
-    }
+    assert(min_penalty_score < 0 && "min scores must be negative");
 
-    return true;
+    if (min_cell_score >= std::numeric_limits<score_t>::min() - min_penalty_score)
+        return true;
+
+    std::cerr << "min_cell_score is too small: " << min_cell_score << std::endl;
+    return false;
 }
 
 DBGAlignerConfig::DBGAlignerConfig(const ScoreMatrix &score_matrix,
@@ -343,16 +342,16 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
         return score_matrix_blosum62;
     #elif _DNA_CASE_SENSITIVE_GRAPH
         return dna_scoring_matrix(config.alignment_match_score,
-                                  -config.alignment_mm_transition,
-                                  -config.alignment_mm_transversion);
+                                  -config.alignment_mm_transition_score,
+                                  -config.alignment_mm_transversion_score);
     #elif _DNA5_GRAPH
         return dna_scoring_matrix(config.alignment_match_score,
-                                  -config.alignment_mm_transition,
-                                  -config.alignment_mm_transversion);
+                                  -config.alignment_mm_transition_score,
+                                  -config.alignment_mm_transversion_score);
     #elif _DNA_GRAPH
         return dna_scoring_matrix(config.alignment_match_score,
-                                  -config.alignment_mm_transition,
-                                  -config.alignment_mm_transversion);
+                                  -config.alignment_mm_transition_score,
+                                  -config.alignment_mm_transversion_score);
     #else
         static_assert(false,
             "Define an alphabet: either "
@@ -363,17 +362,17 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
 
 DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
 ::dna_scoring_matrix(int8_t match_score,
-                     int8_t mm_transition,
-                     int8_t mm_transversion) {
+                     int8_t mm_transition_score,
+                     int8_t mm_transversion_score) {
     ScoreMatrix score_matrix;
     for (auto& row : score_matrix) {
-        row.fill(mm_transversion);
+        row.fill(mm_transversion_score);
     }
 
-    score_matrix['a']['g'] = score_matrix['A']['g'] = score_matrix['a']['G'] = score_matrix['A']['G'] = mm_transition;
-    score_matrix['g']['a'] = score_matrix['G']['a'] = score_matrix['g']['A'] = score_matrix['G']['A'] = mm_transition;
-    score_matrix['c']['t'] = score_matrix['C']['t'] = score_matrix['c']['T'] = score_matrix['C']['T'] = mm_transition;
-    score_matrix['t']['c'] = score_matrix['T']['c'] = score_matrix['t']['C'] = score_matrix['T']['C'] = mm_transition;
+    score_matrix['a']['g'] = score_matrix['A']['g'] = score_matrix['a']['G'] = score_matrix['A']['G'] = mm_transition_score;
+    score_matrix['g']['a'] = score_matrix['G']['a'] = score_matrix['g']['A'] = score_matrix['G']['A'] = mm_transition_score;
+    score_matrix['c']['t'] = score_matrix['C']['t'] = score_matrix['c']['T'] = score_matrix['C']['T'] = mm_transition_score;
+    score_matrix['t']['c'] = score_matrix['T']['c'] = score_matrix['t']['C'] = score_matrix['T']['C'] = mm_transition_score;
     score_matrix['a']['a'] = score_matrix['A']['a'] = score_matrix['a']['A'] = score_matrix['A']['A'] = match_score;
     score_matrix['c']['c'] = score_matrix['C']['c'] = score_matrix['c']['C'] = score_matrix['C']['C'] = match_score;
     score_matrix['g']['g'] = score_matrix['G']['g'] = score_matrix['g']['G'] = score_matrix['G']['G'] = match_score;

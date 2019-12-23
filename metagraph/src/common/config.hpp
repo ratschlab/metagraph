@@ -78,8 +78,8 @@ class Config {
     bool alignment_edit_distance = false;
 
     int8_t alignment_match_score = 2;
-    int8_t alignment_mm_transition = 1;
-    int8_t alignment_mm_transversion = 2;
+    int8_t alignment_mm_transition_score = 1;
+    int8_t alignment_mm_transversion_score = 2;
     int8_t alignment_gap_opening_penalty = 3;
     int8_t alignment_gap_extension_penalty = 1;
 

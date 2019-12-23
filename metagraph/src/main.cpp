@@ -634,9 +634,9 @@ void set_aligner_parameters(const DeBruijnGraph &graph, Config &config) {
     if (!config.alignment_edit_distance) {
         logger->trace("\t Match score: {}", int64_t(config.alignment_match_score));
         logger->trace("\t (DNA) Transition score: {}",
-                      int64_t(config.alignment_mm_transition));
+                      int64_t(config.alignment_mm_transition_score));
         logger->trace("\t (DNA) Transversion score: {}",
-                      int64_t(config.alignment_mm_transversion));
+                      int64_t(config.alignment_mm_transversion_score));
     }
 }
 

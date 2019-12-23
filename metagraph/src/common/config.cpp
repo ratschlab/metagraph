@@ -178,9 +178,9 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--align-match-score")) {
             alignment_match_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-mm-transition-penalty")) {
-            alignment_mm_transition = atoi(get_value(i++));
+            alignment_mm_transition_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-mm-transversion-penalty")) {
-            alignment_mm_transversion = atoi(get_value(i++));
+            alignment_mm_transversion_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-gap-open-penalty")) {
             alignment_gap_opening_penalty = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-gap-extension-penalty")) {
@@ -400,8 +400,8 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (identity == ALIGN &&
-            (alignment_mm_transition < 0
-            || alignment_mm_transversion < 0
+            (alignment_mm_transition_score < 0
+            || alignment_mm_transversion_score < 0
             || alignment_gap_opening_penalty < 0
             || alignment_gap_extension_penalty < 0)) {
         std::cerr << "Error: alignment penalties should be given as positive integers"

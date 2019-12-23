@@ -151,6 +151,7 @@ class DBGAlignerConfig {
     size_t min_seed_length = 1;
     size_t max_seed_length = std::numeric_limits<size_t>::max();
     size_t max_num_seeds_per_locus = 1;
+    // thresholds for scores
     score_t min_cell_score = 0;
     score_t min_path_score = 0;
 
@@ -167,8 +168,8 @@ class DBGAlignerConfig {
     static const ScoreMatrix score_matrix_blosum62;
 
     static ScoreMatrix dna_scoring_matrix(int8_t match_score,
-                                          int8_t mm_transition,
-                                          int8_t mm_transversion);
+                                          int8_t mm_transition_score,
+                                          int8_t mm_transversion_score);
 
     static ScoreMatrix unit_scoring_matrix(int8_t match_score,
                                            const std::string &alphabet,
