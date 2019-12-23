@@ -606,7 +606,7 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 }
 
 
-void set_aligner_parameters(const DeBruijnGraph &graph, Config &config) {
+DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, Config &config) {
     // fix seed length bounds
     if (!config.alignment_min_seed_length || config.alignment_seed_unimems)
         config.alignment_min_seed_length = graph.get_k();
@@ -614,6 +614,24 @@ void set_aligner_parameters(const DeBruijnGraph &graph, Config &config) {
     if (config.alignment_max_seed_length == std::numeric_limits<size_t>::max()
             && !config.alignment_seed_unimems)
         config.alignment_max_seed_length = graph.get_k();
+
+    DBGAlignerConfig aligner_config;
+
+    aligner_config.queue_size = config.alignment_queue_size;
+    aligner_config.bandwidth = config.alignment_vertical_bandwidth;
+    aligner_config.num_alternative_paths = config.alignment_num_alternative_paths;
+    aligner_config.min_seed_length = config.alignment_min_seed_length;
+    aligner_config.max_seed_length = config.alignment_max_seed_length;
+    aligner_config.max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus;
+    aligner_config.min_cell_score = config.alignment_min_cell_score;
+    aligner_config.min_path_score = config.alignment_min_path_score;
+    aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
+    aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
+    aligner_config.forward_and_reverse_complement = config.forward_and_reverse;
+    aligner_config.alignment_edit_distance = config.alignment_edit_distance;
+    aligner_config.alignment_match_score = config.alignment_match_score;
+    aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
+    aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
 
     logger->trace("\t Alignment settings:");
     logger->trace("\t Seeding: {}", (config.alignment_seed_unimems ? "unimems" : "nodes"));
@@ -638,10 +656,14 @@ void set_aligner_parameters(const DeBruijnGraph &graph, Config &config) {
         logger->trace("\t (DNA) Transversion score: {}",
                       int64_t(config.alignment_mm_transversion_score));
     }
+
+    aligner_config.set_scoring_matrix();
+
+    return aligner_config;
 }
 
 std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &config) {
-    set_aligner_parameters(graph, config);
+    DBGAlignerConfig aligner_config = initialize_aligner_config(graph, config);
 
     // TODO: fix this when alphabets are no longer set at compile time
     #if _PROTEIN_GRAPH
@@ -666,7 +688,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &c
     Cigar::initialize_opt_table(alphabet, alphabet_encoding);
 
     if (config.alignment_seed_unimems) {
-        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, DBGAlignerConfig(config));
+        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, aligner_config);
 
     } else if (config.alignment_min_seed_length < graph.get_k()) {
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
@@ -677,10 +699,10 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &c
         }
 
         // Use the seeder that seeds to node suffixes
-        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, DBGAlignerConfig(config));
+        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
 
     } else {
-        return std::make_unique<DBGAligner<>>(graph, DBGAlignerConfig(config));
+        return std::make_unique<DBGAligner<>>(graph, aligner_config);
     }
 }
 

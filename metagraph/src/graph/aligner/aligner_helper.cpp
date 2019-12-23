@@ -3,7 +3,6 @@
 #include <unordered_set>
 #include <cmath>
 
-#include "common/config.hpp"
 #include "kmer/alphabets.hpp"
 #include "utils/algorithms.hpp"
 
@@ -257,25 +256,6 @@ DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
       : gap_opening_penalty(gap_opening),
         gap_extension_penalty(gap_extension),
         score_matrix_(std::move(score_matrix)) {}
-
-DBGAlignerConfig::DBGAlignerConfig(const Config &config)
-      : queue_size(config.alignment_queue_size),
-        bandwidth(config.alignment_vertical_bandwidth),
-        num_alternative_paths(config.alignment_num_alternative_paths),
-        min_seed_length(config.alignment_min_seed_length),
-        max_seed_length(config.alignment_max_seed_length),
-        max_num_seeds_per_locus(config.alignment_max_num_seeds_per_locus),
-        min_cell_score(config.alignment_min_cell_score),
-        min_path_score(config.alignment_min_path_score),
-        gap_opening_penalty(-config.alignment_gap_opening_penalty),
-        gap_extension_penalty(-config.alignment_gap_extension_penalty),
-        forward_and_reverse_complement(config.forward_and_reverse),
-        alignment_edit_distance(config.alignment_edit_distance),
-        alignment_match_score(config.alignment_match_score),
-        alignment_mm_transition_score(config.alignment_mm_transition_score),
-        alignment_mm_transversion_score(config.alignment_mm_transversion_score) {
-    set_scoring_matrix();
-}
 
 DBGAlignerConfig::score_t DBGAlignerConfig
 ::score_cigar(const char *reference_begin, const char *reference_end,

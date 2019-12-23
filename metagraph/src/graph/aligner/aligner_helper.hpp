@@ -16,8 +16,6 @@
 #include "graph/base/sequence_graph.hpp"
 
 
-class Config;
-
 class Cigar {
   public:
     enum Operator : int32_t {
@@ -107,11 +105,12 @@ class DBGAlignerConfig {
     typedef std::array<int8_t, 128> ScoreMatrixRow;
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
+    // Set parameters manually and call `set_scoring_matrix()`
+    DBGAlignerConfig() {}
+
     explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
                               int8_t gap_opening = -3,
                               int8_t gap_extension = -1);
-
-    explicit DBGAlignerConfig(const Config &config);
 
     DBGAlignerConfig(ScoreMatrix&& score_matrix,
                      int8_t gap_opening = -3,
