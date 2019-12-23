@@ -4,19 +4,17 @@
 
 #include "../test_helpers.hpp"
 #include "all/test_dbg_helpers.hpp"
-//TODO: remove annotated_dbg from here
-#include "../annotation/test_annotated_dbg_helpers.hpp"
 
 #include "masked_graph.hpp"
 
 
 template <typename Graph>
 class MaskedDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
-TYPED_TEST_CASE(MaskedDeBruijnGraphTest, MaskedGraphTypes);
+TYPED_TEST_CASE(MaskedDeBruijnGraphTest, GraphTypes);
 
 template <typename Graph>
 class MaskedStableDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
-TYPED_TEST_CASE(MaskedStableDeBruijnGraphTest, MaskedStableGraphTypes);
+TYPED_TEST_CASE(MaskedStableDeBruijnGraphTest, StableGraphTypes);
 
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
@@ -359,31 +357,6 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
             EXPECT_EQ(ref_nodes, rec_nodes);
         }
     }
-}
-
-// TODO: move this to differential assembly tests
-TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
-    size_t k = 4;
-    // TTGC      GCACGGGTC
-    //      TGCA
-    // ATGC      GCAGTGGTC
-    std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
-    const std::vector<std::string> labels { "A", "B" };
-    auto anno_graph = build_anno_graph<TypeParam,
-                                       annotate::ColumnCompressed<>>(
-        k, sequences, labels
-    );
-
-    auto masked_dbg = build_masked_graph(*anno_graph, { "A" }, {});
-    std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
-    std::unordered_multiset<std::string> obs;
-
-    masked_dbg.call_unitigs([&](const auto &unitig, const auto &path) {
-        ASSERT_EQ(path, map_sequence_to_nodes(masked_dbg, unitig));
-        obs.insert(unitig);
-    });
-
-    EXPECT_EQ(obs, ref);
 }
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
