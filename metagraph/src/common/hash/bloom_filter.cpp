@@ -206,18 +206,24 @@ inline const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
 #endif
 
 void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_end) {
+    const uint64_t *it = hashes_begin;
 #ifdef __AVX2__
-    hashes_begin = batch_insert_avx2(*this,
-                                     filter_,
-                                     num_hash_functions_,
-                                     hashes_begin,
-                                     hashes_end);
+    // TODO: figure out why this fails on Mac
+    // it = batch_insert_avx2(*this,
+    //                        filter_,
+    //                        num_hash_functions_,
+    //                        it,
+    //                        hashes_end);
 #endif
 
     // insert residual
-    for (; hashes_begin < hashes_end; ++hashes_begin) {
-        insert(*hashes_begin);
+    for (; it < hashes_end; ++it) {
+        insert(*it);
+        assert(check(*it));
     }
+
+    assert(std::all_of(hashes_begin, hashes_end,
+                       [&](uint64_t hash) { return this->check(hash); }));
 }
 
 #ifdef __AVX2__
@@ -309,9 +315,10 @@ batch_check_avx2(const BloomFilter &bloom,
                 found = block[offset >> 6] & (1llu << (offset & 0x3F));
             }
 
+            assert(found == bloom.check(hashes_begin[j]));
+
             if (found) {
                 present_index_callback(i + j);
-                assert(bloom.check(hashes_begin[j]));
             }
         }
 
