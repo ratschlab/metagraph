@@ -3,7 +3,6 @@
 
 #include <type_traits>
 
-#include "common/config.hpp"
 #include "graph/base/sequence_graph.hpp"
 #include "kmer/kmer_extractor.hpp"
 #include "utils/bit_vectors/bit_vector.hpp"
@@ -230,8 +229,17 @@ class BOSS {
      */
     void print_internal_representation(std::ostream &os = std::cout) const;
 
-    Config::StateType get_state() const { return state; }
-    void switch_state(Config::StateType state);
+    /**
+     * Representation states of the BOSS table.
+     *
+     * SMALL is the smallest
+     * STAT provides a good space/time tradeoff
+     * FAST is the fastest but large
+     */
+    enum State { STAT = 1, DYN, SMALL, FAST };
+
+    State get_state() const { return state; }
+    void switch_state(State state);
 
     /**
      * Write the adjacency list to file |filename| or
@@ -461,7 +469,7 @@ class BOSS {
     // the array containing the edge labels
     wavelet_tree *W_;
 
-    Config::StateType state = Config::DYN;
+    State state = State::DYN;
 
     /**
      * This function gets a value of the alphabet c and updates the offset of

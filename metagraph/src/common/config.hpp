@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "kmer/kmer_collector_config.hpp"
+#include "graph/succinct/boss.hpp"
 
 
 class Config {
@@ -149,11 +150,10 @@ class Config {
     };
     IdentityType identity = NO_IDENTITY;
 
-    enum StateType { STAT = 1, DYN, SMALL, FAST };
-    StateType state = STAT;
+    BOSS::State state = BOSS::State::STAT;
 
-    static std::string state_to_string(StateType state);
-    static StateType string_to_state(const std::string &string);
+    static std::string state_to_string(BOSS::State state);
+    static BOSS::State string_to_state(const std::string &string);
 
     enum AnnotationType {
         ColumnCompressed = 1,

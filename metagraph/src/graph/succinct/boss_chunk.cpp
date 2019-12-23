@@ -391,7 +391,7 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
 
     graph->k_ = k_;
 
-    graph->state = Config::STAT;
+    graph->state = BOSS::State::STAT;
 
     if (weights)
         *weights = std::move(weights_);
@@ -531,7 +531,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
 
     graph->F_ = std::move(F);
 
-    graph->state = Config::STAT;
+    graph->state = BOSS::State::STAT;
 
     assert(graph->is_valid());
 

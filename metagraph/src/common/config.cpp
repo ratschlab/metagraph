@@ -533,15 +533,15 @@ Config::Config(int argc, char *argv[]) {
     }
 }
 
-std::string Config::state_to_string(StateType state) {
+std::string Config::state_to_string(BOSS::State state) {
     switch (state) {
-        case STAT:
+        case BOSS::State::STAT:
             return "fast";
-        case DYN:
+        case BOSS::State::DYN:
             return "dynamic";
-        case SMALL:
+        case BOSS::State::SMALL:
             return "small";
-        case FAST:
+        case BOSS::State::FAST:
             return "faster";
         default:
             assert(false);
@@ -549,15 +549,15 @@ std::string Config::state_to_string(StateType state) {
     }
 }
 
-Config::StateType Config::string_to_state(const std::string &string) {
+BOSS::State Config::string_to_state(const std::string &string) {
     if (string == "fast") {
-        return StateType::STAT;
+        return BOSS::State::STAT;
     } else if (string == "dynamic") {
-        return StateType::DYN;
+        return BOSS::State::DYN;
     } else if (string == "small") {
-        return StateType::SMALL;
+        return BOSS::State::SMALL;
     } else if (string == "faster") {
-        return StateType::FAST;
+        return BOSS::State::FAST;
     } else {
         throw std::runtime_error("Error: unknown graph state");
     }

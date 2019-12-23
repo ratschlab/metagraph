@@ -680,19 +680,19 @@ bool DBGSuccinct::load(const std::string &filename) {
 
     // initialize a new vector
     switch (get_state()) {
-        case Config::STAT: {
+        case BOSS::State::STAT: {
             valid_edges_.reset(new bit_vector_stat());
             break;
         }
-        case Config::FAST: {
+        case BOSS::State::FAST: {
             valid_edges_.reset(new bit_vector_stat());
             break;
         }
-        case Config::DYN: {
+        case BOSS::State::DYN: {
             valid_edges_.reset(new bit_vector_dyn());
             break;
         }
-        case Config::SMALL: {
+        case BOSS::State::SMALL: {
             valid_edges_.reset(new bit_vector_small());
             break;
         }
@@ -764,13 +764,13 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     if (!valid_edges_.get())
         return;
 
-    assert((boss_graph_->get_state() == Config::StateType::STAT
+    assert((boss_graph_->get_state() == BOSS::State::STAT
                 && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == Config::StateType::FAST
+        || (boss_graph_->get_state() == BOSS::State::FAST
                 && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == Config::StateType::DYN
+        || (boss_graph_->get_state() == BOSS::State::DYN
                 && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == Config::StateType::SMALL
+        || (boss_graph_->get_state() == BOSS::State::SMALL
                 && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
 
     const auto out_filename = prefix + kDummyMaskExtension;
@@ -789,31 +789,31 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     }
 }
 
-void DBGSuccinct::switch_state(Config::StateType new_state) {
+void DBGSuccinct::switch_state(BOSS::State new_state) {
     if (get_state() == new_state)
         return;
 
     if (valid_edges_.get()) {
         switch (new_state) {
-            case Config::STAT: {
+            case BOSS::State::STAT: {
                 valid_edges_ = std::make_unique<bit_vector_stat>(
                     valid_edges_->convert_to<bit_vector_stat>()
                 );
                 break;
             }
-            case Config::FAST: {
+            case BOSS::State::FAST: {
                 valid_edges_ = std::make_unique<bit_vector_stat>(
                     valid_edges_->convert_to<bit_vector_stat>()
                 );
                 break;
             }
-            case Config::DYN: {
+            case BOSS::State::DYN: {
                 valid_edges_ = std::make_unique<bit_vector_dyn>(
                     valid_edges_->convert_to<bit_vector_dyn>()
                 );
                 break;
             }
-            case Config::SMALL: {
+            case BOSS::State::SMALL: {
                 valid_edges_ = std::make_unique<bit_vector_small>(
                     valid_edges_->convert_to<bit_vector_small>()
                 );
@@ -825,18 +825,18 @@ void DBGSuccinct::switch_state(Config::StateType new_state) {
     boss_graph_->switch_state(new_state);
 }
 
-Config::StateType DBGSuccinct::get_state() const {
+BOSS::State DBGSuccinct::get_state() const {
     assert(!valid_edges_.get()
-                || boss_graph_->get_state() != Config::StateType::STAT
+                || boss_graph_->get_state() != BOSS::State::STAT
                 || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
     assert(!valid_edges_.get()
-                || boss_graph_->get_state() != Config::StateType::FAST
+                || boss_graph_->get_state() != BOSS::State::FAST
                 || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
     assert(!valid_edges_.get()
-                || boss_graph_->get_state() != Config::StateType::DYN
+                || boss_graph_->get_state() != BOSS::State::DYN
                 || dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()));
     assert(!valid_edges_.get()
-                || boss_graph_->get_state() != Config::StateType::SMALL
+                || boss_graph_->get_state() != BOSS::State::SMALL
                 || dynamic_cast<const bit_vector_small*>(valid_edges_.get()));
 
     return boss_graph_->get_state();
@@ -852,19 +852,19 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     vector_mask.flip();
 
     switch (get_state()) {
-        case Config::STAT: {
+        case BOSS::State::STAT: {
             valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
             break;
         }
-        case Config::FAST: {
+        case BOSS::State::FAST: {
             valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
             break;
         }
-        case Config::DYN: {
+        case BOSS::State::DYN: {
             valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector_mask));
             break;
         }
-        case Config::SMALL: {
+        case BOSS::State::SMALL: {
             valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
             break;
         }

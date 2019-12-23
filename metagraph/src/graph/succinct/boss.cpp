@@ -221,13 +221,13 @@ bool BOSS::load(const std::string &filename) {
 
 bool BOSS::load(std::ifstream &instream) {
     // if not specified in the file, the default for loading is dynamic
-    state = Config::DYN;
+    state = State::DYN;
 
     try {
         // load F, k, and state
         F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
         k_ = load_number(instream);
-        state = static_cast<Config::StateType>(load_number(instream));
+        state = static_cast<State>(load_number(instream));
 
         if (F_.size() != alph_size) {
             std::cerr << "ERROR: failed to load F vector, incompatible size" << std::endl;
@@ -238,19 +238,19 @@ bool BOSS::load(std::ifstream &instream) {
         delete W_;
         delete last_;
         switch (state) {
-            case Config::DYN:
+            case State::DYN:
                 W_ = new wavelet_tree_dyn(bits_per_char_W_);
                 last_ = new bit_vector_dyn();
                 break;
-            case Config::STAT:
+            case State::STAT:
                 W_ = new wavelet_tree_stat(bits_per_char_W_);
                 last_ = new bit_vector_stat();
                 break;
-            case Config::FAST:
+            case State::FAST:
                 W_ = new wavelet_tree_fast(bits_per_char_W_);
                 last_ = new bit_vector_stat();
                 break;
-            case Config::SMALL:
+            case State::SMALL:
                 W_ = new wavelet_tree_small(bits_per_char_W_);
                 last_ = new bit_vector_small();
                 break;
@@ -944,26 +944,26 @@ void convert(wavelet_tree **W_, bit_vector **last_) {
     *last_ = last_new;
 }
 
-void BOSS::switch_state(Config::StateType new_state) {
+void BOSS::switch_state(State new_state) {
 
     //std::cerr << "switching state from " << this->state << " to " << state << std::endl;
     if (state == new_state)
         return;
 
     switch (new_state) {
-        case Config::STAT: {
+        case State::STAT: {
             convert<wavelet_tree_stat, bit_vector_stat>(&W_, &last_);
             break;
         }
-        case Config::SMALL: {
+        case State::SMALL: {
             convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
             break;
         }
-        case Config::FAST: {
+        case State::FAST: {
             convert<wavelet_tree_fast, bit_vector_stat>(&W_, &last_);
             break;
         }
-        case Config::DYN: {
+        case State::DYN: {
             convert<wavelet_tree_dyn, bit_vector_dyn>(&W_, &last_);
             break;
         }
@@ -1269,7 +1269,7 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
         F_[c++] = count;
     }
 
-    state = Config::STAT;
+    state = State::STAT;
 
     return num_edges_to_remove;
 }
@@ -1496,7 +1496,7 @@ BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
     if (get_last(1))
         return redundant_dummy_edges_mask;
 
-    switch_state(Config::STAT);
+    switch_state(State::STAT);
 
     auto num_dummy_traversed = traverse_dummy_edges(
         *this, &redundant_dummy_edges_mask, source_dummy_edges, num_threads, verbose

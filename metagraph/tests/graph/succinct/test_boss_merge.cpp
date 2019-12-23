@@ -138,7 +138,7 @@ TEST(BOSSMerge, TraversalMergeDisconnectedGraphs) {
         BOSS result(&constructor_third);
         ASSERT_EQ(4u, result.num_edges());
 
-        first.switch_state(Config::DYN);
+        first.switch_state(BOSS::State::DYN);
         first.merge(second);
 
         EXPECT_EQ(result, first);

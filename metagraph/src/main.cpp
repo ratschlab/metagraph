@@ -1662,10 +1662,10 @@ int main(int argc, char *argv[]) {
             if (dynamic_cast<DBGSuccinct*>(graph.get())) {
                 auto &succinct_graph = dynamic_cast<DBGSuccinct&>(*graph);
 
-                if (succinct_graph.get_state() != Config::DYN) {
+                if (succinct_graph.get_state() != BOSS::State::DYN) {
                     logger->trace("Switching state of succinct graph to dynamic...");
 
-                    succinct_graph.switch_state(Config::DYN);
+                    succinct_graph.switch_state(BOSS::State::DYN);
 
                     logger->trace("State switching done in {} sec", timer.elapsed());
                 }
@@ -2178,10 +2178,10 @@ int main(int argc, char *argv[]) {
 
                 graph = dbg_graphs.at(0)->release_boss();
 
-                if (graph->get_state() != Config::DYN) {
+                if (graph->get_state() != BOSS::State::DYN) {
                     logger->trace("Switching state of succinct graph to dynamic...");
 
-                    graph->switch_state(Config::DYN);
+                    graph->switch_state(BOSS::State::DYN);
 
                     logger->trace("Switching done in {} sec", timer.elapsed());
                 }

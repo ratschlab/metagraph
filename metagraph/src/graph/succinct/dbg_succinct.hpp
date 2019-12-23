@@ -2,7 +2,6 @@
 #define __DBG_SUCCINCT_HPP__
 
 #include "utils/bit_vectors/bit_vector.hpp"
-#include "common/config.hpp"
 #include "kmer/kmer_bloom_filter.hpp"
 #include "graph/base/sequence_graph.hpp"
 #include "boss.hpp"
@@ -110,8 +109,8 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual std::string file_extension() const override final { return kExtension; }
     std::string bloom_filter_file_extension() const { return kBloomFilterExtension; }
 
-    virtual void switch_state(Config::StateType new_state) final;
-    virtual Config::StateType get_state() const final;
+    virtual void switch_state(BOSS::State new_state) final;
+    virtual BOSS::State get_state() const final;
 
     virtual bool is_canonical_mode() const override final { return canonical_mode_; }
 
