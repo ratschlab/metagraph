@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "all/test_dbg_helpers.hpp"
-#include "test_dbg_aligner_helpers.hpp"
+#include "test_aligner_helpers.hpp"
 #include "../test_helpers.hpp"
 
 #include "graph/aligner/dbg_aligner.hpp"
