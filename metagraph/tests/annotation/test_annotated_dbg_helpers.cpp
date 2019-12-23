@@ -1,6 +1,6 @@
 #include "test_annotated_dbg_helpers.hpp"
 
-#include "../graph/test_dbg_helpers.hpp"
+#include "../graph/all/test_dbg_helpers.hpp"
 
 #include "annotation_converters.hpp"
 #include "annotated_graph_algorithm.hpp"

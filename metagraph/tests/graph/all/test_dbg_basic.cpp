@@ -5,7 +5,7 @@
 
 #include <set>
 
-#include "../test_helpers.hpp"
+#include "../../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 #include "node_weights.hpp"
 

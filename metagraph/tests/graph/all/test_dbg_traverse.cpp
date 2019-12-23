@@ -5,7 +5,7 @@
 
 #include <set>
 
-#include "../test_helpers.hpp"
+#include "../../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 
 TYPED_TEST_CASE(DeBruijnGraphTest, GraphTypes);

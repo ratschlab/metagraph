@@ -3,7 +3,7 @@
 #include <set>
 
 #include "../test_helpers.hpp"
-#include "test_dbg_helpers.hpp"
+#include "all/test_dbg_helpers.hpp"
 //TODO: remove annotated_dbg from here
 #include "../annotation/test_annotated_dbg_helpers.hpp"
 
