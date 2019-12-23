@@ -131,9 +131,13 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
                     == boss_graph_->get_node_last_value(edge));
 
             auto prev = boss_to_kmer_index(incoming_boss_edge);
-            if (prev != npos)
-                callback(prev, boss_graph_->get_minus_k_value(incoming_boss_edge,
-                                                              get_k() - 2).first);
+            if (prev != npos) {
+                callback(prev,
+                    boss_graph_->decode(
+                        boss_graph_->get_minus_k_value(incoming_boss_edge, get_k() - 2).first
+                    )
+                );
+            }
         }
     );
 }

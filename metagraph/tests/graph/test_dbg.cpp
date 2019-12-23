@@ -3,6 +3,8 @@
 #define private public
 #define protected public
 
+#include <set>
+
 #include "../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 #include "node_weights.hpp"
@@ -1331,9 +1333,9 @@ TYPED_TEST(DeBruijnGraphTest, CallOutgoingEdges) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A')
                                                + std::string(100, 'C')
                                                + std::string(k - 1, 'G') });
+        auto it = graph->kmer_to_node(std::string(k, 'A'));
         // AAA -> AAA
         // AAA -> AAC
-        auto it = graph->kmer_to_node(std::string(k, 'A'));
         std::set<char> set = { 'A', 'C' };
         graph->call_outgoing_kmers(it,
             [&](auto i, char c) {
@@ -1348,8 +1350,8 @@ TYPED_TEST(DeBruijnGraphTest, CallOutgoingEdges) {
         );
         ASSERT_TRUE(set.empty());
 
-        // AAC -> ACC
         it = graph->traverse(it, 'C');
+        // AAC -> ACC
         set = { 'C', };
         graph->call_outgoing_kmers(it,
             [&](auto i, char c) {
@@ -1364,9 +1366,9 @@ TYPED_TEST(DeBruijnGraphTest, CallOutgoingEdges) {
         );
         ASSERT_TRUE(set.empty());
 
+        it = graph->kmer_to_node(std::string(k, 'C'));
         // CCC -> CCC
         // CCC -> CCG
-        it = graph->kmer_to_node(std::string(k, 'C'));
         set = { 'C', 'G' };
         graph->call_outgoing_kmers(it,
             [&](auto i, char c) {
@@ -1381,8 +1383,8 @@ TYPED_TEST(DeBruijnGraphTest, CallOutgoingEdges) {
         );
         ASSERT_TRUE(set.empty());
 
-        // CCG -> CGG
         it = graph->traverse(it, 'G');
+        // CCG -> CGG
         set = { 'G', };
         graph->call_outgoing_kmers(it,
             [&](auto i, char c) {
@@ -1397,8 +1399,8 @@ TYPED_TEST(DeBruijnGraphTest, CallOutgoingEdges) {
         );
         ASSERT_TRUE(set.empty());
 
-        // CGG -> {}
         it = graph->kmer_to_node("C" + std::string(k - 1, 'G'));
+        // CGG -> {}
         set = {};
         graph->call_outgoing_kmers(it,
             [&](auto i, char c) {
@@ -1415,8 +1417,108 @@ TYPED_TEST(DeBruijnGraphTest, CallOutgoingEdges) {
         ASSERT_TRUE(set.empty());
 
         // GGG does not exist
-        it = graph->kmer_to_node(std::string(k, 'G'));
+        it = graph->traverse(it, 'G');
         ASSERT_EQ(DeBruijnGraph::npos, it);
+        ASSERT_EQ(DeBruijnGraph::npos, graph->kmer_to_node(std::string(k, 'G')));
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallIncomingEdges) {
+    for (size_t k = 3; k < 11; ++k) {
+        auto graph = build_graph<TypeParam>(k, { std::string(k - 1, 'A')
+                                               + std::string(100, 'C')
+                                               + std::string(k - 1, 'G') });
+        // GGG does not exist
+        auto it = graph->kmer_to_node(std::string(k, 'G'));
+        ASSERT_EQ(DeBruijnGraph::npos, it);
+
+        it = graph->kmer_to_node('C' + std::string(k - 1, 'G'));
+        // CCG <- CGG
+        std::set<char> set = { 'C' };
+        graph->call_incoming_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse_back(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        it = graph->kmer_to_node(std::string(k - 1, 'C') + 'G');
+        // ACC <- CCG
+        // CCC <- CCG
+        set = { 'A', 'C' };
+        graph->call_incoming_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse_back(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        it = graph->traverse_back(it, 'C');
+        // CCC <- CCC
+        // ACC <- CCC
+        set = { 'C', 'A' };
+        graph->call_incoming_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse_back(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        it = graph->traverse_back(it, 'A');
+        // AAC <- ACC
+        set = { 'A' };
+        graph->call_incoming_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse_back(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        it = graph->kmer_to_node(std::string(k - 1, 'A') + 'C');
+        // {} <- AAC
+        set = {};
+        graph->call_incoming_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c))
+                    << graph->get_node_sequence(i) << '\n' << c;
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // AAA does not exist
+        it = graph->traverse_back(it, 'A');
+        ASSERT_EQ(DeBruijnGraph::npos, it);
+        ASSERT_EQ(DeBruijnGraph::npos, graph->kmer_to_node(std::string(k, 'A')));
     }
 }
 
