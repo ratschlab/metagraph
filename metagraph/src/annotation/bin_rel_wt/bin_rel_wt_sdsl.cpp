@@ -13,7 +13,7 @@ BinRelWT_sdsl
                 uint64_t num_relations,
                 uint64_t num_columns)
       : num_columns_(num_columns) {
-    sdsl::int_vector<> flat(num_relations, 0, utils::code_length(num_columns));
+    sdsl::int_vector<> flat(num_relations, 0, sdsl::bits::hi(num_columns) + 1);
 
     // delimiters_ includes a 0 for each char in base
     // string and a 1 for each row (objects).

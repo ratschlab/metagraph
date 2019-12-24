@@ -407,7 +407,7 @@ void wavelet_tree_dyn::remove(uint64_t id) {
 }
 
 uint8_t wavelet_tree_dyn::logsigma() const {
-    return dwt_.alphabet_size() ? utils::code_length(dwt_.alphabet_size() - 1) : 1;
+    return dwt_.alphabet_size() ? sdsl::bits::hi(dwt_.alphabet_size() - 1) + 1 : 1;
 }
 
 void wavelet_tree_dyn::serialize(std::ostream &out) const {

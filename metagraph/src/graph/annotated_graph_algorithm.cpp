@@ -99,7 +99,7 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
     // in the beginning, it's the correct size, but double width
-    size_t width = utils::code_length(std::max(labels_in.size(), labels_out.size()));
+    size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::int_vector<> counts(anno_graph.get_graph().max_index() + 1, 0, width << 1);
 
     for (const auto &label_in : labels_in) {

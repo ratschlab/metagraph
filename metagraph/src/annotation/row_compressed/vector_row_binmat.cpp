@@ -135,7 +135,7 @@ void VectorRowBinMat<RowType>::serialize(std::ostream &outstream) const {
 
     sdsl::int_vector<> full_vector(num_relations() + num_rows(),
                                    0,
-                                   utils::code_length(num_columns()));
+                                   sdsl::bits::hi(num_columns()) + 1);
 
     for (uint64_t i = 0, p = 0; i < vector_.size(); ++i) {
         for (uint64_t value : vector_[i]) {

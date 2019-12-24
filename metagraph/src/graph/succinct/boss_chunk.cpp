@@ -57,7 +57,7 @@ void initialize_chunk(uint64_t alph_size,
         assert(utils::is_pair<T>::value);
         weights->resize(end - begin + 1);
         sdsl::util::set_to_value(*weights, 0);
-        max_count = utils::max_ull(weights->width());
+        max_count = sdsl::bits::lo_set[weights->width()];
     }
 
     assert(std::is_sorted(begin, end, utils::LessFirst()));
@@ -195,7 +195,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             weights->resize(100);
             assert(utils::is_pair<T>::value);
             sdsl::util::set_to_value(*weights, 0);
-            max_count = utils::max_ull(weights->width());
+            max_count = sdsl::bits::lo_set[weights->width()];
         }
 
         W->push_back(0); // the array containing edge labels
@@ -595,5 +595,5 @@ void BOSS::Chunk::serialize(const std::string &outbase) const {
 }
 
 uint8_t BOSS::Chunk::get_W_width() const {
-    return alph_size_ ? utils::code_length(alph_size_ * 2 - 1) : 1;
+    return alph_size_ ? sdsl::bits::hi(alph_size_ * 2 - 1) + 1 : 1;
 }

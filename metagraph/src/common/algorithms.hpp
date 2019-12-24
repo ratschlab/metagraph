@@ -2,11 +2,11 @@
 #define __ALGORITHMS_HPP__
 
 #include <vector>
+#include <numeric>
 #include <functional>
 #include <utility>
+#include <random>
 #include <set>
-
-#include "common/vectors/bitmap.hpp"
 
 
 // Branch prediction helper macros
@@ -75,10 +75,6 @@ namespace utils {
         return mask;
     }
 
-    inline uint8_t code_length(uint64_t x) { return sdsl::bits::hi(x) + 1; }
-
-    inline uint64_t max_ull(uint8_t width) { return sdsl::bits::lo_set[width]; }
-
     template <class AIt, class BIt>
     uint64_t count_intersection(AIt first_begin, AIt first_end,
                                 BIt second_begin, BIt second_end) {
@@ -113,9 +109,9 @@ namespace utils {
     }
 
     // Bitmap |new_indexes| marks positions of inserted values in the final vector
-    template <class Vector>
+    template <class Vector, class Bitmap>
     void insert(Vector *vector,
-                const bitmap &new_indexes,
+                const Bitmap &new_indexes,
                 const typename Vector::value_type &value) {
         assert(vector);
         assert(new_indexes.size() == vector->size() + new_indexes.num_set_bits());

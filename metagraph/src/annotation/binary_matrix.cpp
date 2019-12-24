@@ -72,7 +72,7 @@ void append_row_major(const std::string &filename,
         auto outbuf = sdsl::int_vector_buffer<>(filename,
                                                 std::ios::out | std::ios::binary,
                                                 1024 * 1024,
-                                                utils::code_length(num_cols),
+                                                sdsl::bits::hi(num_cols) + 1,
                                                 false,
                                                 iv_offs);
 
