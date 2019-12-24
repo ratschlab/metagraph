@@ -99,7 +99,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
         return Config::AnnotationType::RBFish;
 
     } else {
-        logger->error("Error: unknown annotation format in {}", filename);
+        logger->error("Unknown annotation format in '{}'", filename);
         exit(1);
     }
 }
@@ -116,7 +116,7 @@ template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     auto graph = std::make_shared<Graph>(2);
     if (!graph->load(filename)) {
-        logger->error("ERROR: can't load graph from file {}", filename);
+        logger->error("Cannot load graph from file '{}'", filename);
         exit(1);
     }
     return graph;
@@ -144,9 +144,8 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGBitmap>(filename);
 
         case Config::GraphType::INVALID:
-            logger->error(
-                    "ERROR: can't load graph from file '{}', needs valid file extension",
-                    filename);
+            logger->error("Cannot load graph from file '{}'",
+                          ", needs a valid file extension", filename);
             exit(1);
     }
     assert(false);
@@ -172,7 +171,7 @@ void annotate_data(const std::vector<std::string> &files,
     for (const auto &file : files) {
         Timer data_reading_timer;
 
-        logger->trace("Parsing {}", file);
+        logger->trace("Parsing '{}'", file);
 
         std::vector<std::string> labels = anno_labels;
         if (filename_anno) {
@@ -249,9 +248,8 @@ void annotate_data(const std::vector<std::string> &files,
 
                     if (logger->level() <= spdlog::level::level_enum::trace
                                                     && total_seqs % 10000 == 0) {
-                        logger->trace(
-                            "processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
-                            total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
+                        logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                                      total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                     }
 
                     labels.resize(num_base_labels);
@@ -259,13 +257,12 @@ void annotate_data(const std::vector<std::string> &files,
                 forward_and_reverse
             );
         } else {
-            logger->error("ERROR: Filetype unknown for file {}", file);
+            logger->error("Unknown filetype for file '{}'", file);
             exit(1);
         }
 
-        logger->trace(
-                "File processed in {} sec, current mem usage: {}MiB, total time {} sec",
-                data_reading_timer.elapsed(), (get_curr_RSS() >> 20), timer.elapsed());
+        logger->trace("File '{}' processed in {} sec, current mem usage: {} MiB, total time {} sec",
+                      file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
     }
 
     // join threads if any were initialized
@@ -287,7 +284,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
     for (const auto &file : files) {
         Timer data_reading_timer;
 
-        logger->trace("Parsing {}", file);
+        logger->trace("Parsing '{}'", file);
 
         // open stream
         if (utils::get_filetype(file) == "FASTA"
@@ -326,11 +323,8 @@ void annotate_coordinates(const std::vector<std::string> &files,
 
                     if (logger->level() <= spdlog::level::level_enum::trace
                                                     && total_seqs % 10000 == 0) {
-                        logger->trace(
-                            "processed {} sequences, last was {}, "
-                            "trying to annotate as <{}>, {} sec",
-                            total_seqs, read_stream->name.s, fmt::join(labels, "><"),
-                            timer.elapsed());
+                        logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                                      total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                     }
 
                     // If we read both strands, the next sequence is
@@ -342,13 +336,12 @@ void annotate_coordinates(const std::vector<std::string> &files,
                 forward_and_reverse
             );
         } else {
-            logger->error("ERROR: the type of file {} is not supported", file);
+            logger->error("The type of file '{}' is not supported", file);
             exit(1);
         }
 
-        logger->trace(
-                "File processed in {} sec, current mem usage: {}MiB, total time {} sec",
-                data_reading_timer.elapsed(), (get_curr_RSS() >> 20), timer.elapsed());
+        logger->trace("File '{}' processed in {} sec, current mem usage: {} MiB, total time {} sec",
+                      file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
     }
 
     // join threads if any were initialized
@@ -484,7 +477,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
     if (config.infbase_annotators.size()
             && !annotation_temp->load(config.infbase_annotators.at(0))) {
-        logger->error("ERROR: can't load annotations for graph {}, file corrupted",
+        logger->error("Cannot load annotations for graph {}, file corrupted",
                       config.infbase);
         exit(1);
     }
@@ -495,7 +488,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                                                      get_num_threads());
 
     if (!anno_graph->check_compatibility()) {
-        logger->error("Error: graph and annotation are not compatible.");
+        logger->error("Graph and annotation are not compatible");
         exit(1);
     }
 
@@ -594,14 +587,14 @@ template <class AnnotatorTo, class AnnotatorFrom>
 void convert(std::unique_ptr<AnnotatorFrom> annotator,
              const Config &config,
              const Timer &timer) {
-    logger->trace("Converting to {} annotator...",
+    logger->trace("Converting annotation to {}...",
                   Config::annotype_to_string(config.anno_type));
 
     auto target_annotator = annotate::convert<AnnotatorTo>(std::move(*annotator));
     annotator.reset();
     logger->trace("Conversion done in {} sec", timer.elapsed());
 
-    logger->trace("Serializing to {}...", config.outfbase);
+    logger->trace("Serializing annotation to '{}'...", config.outfbase);
     target_annotator->serialize(config.outfbase);
     logger->trace("Serialization done in {} sec", timer.elapsed());
 }
@@ -634,27 +627,26 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, Config &c
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
 
-    logger->trace("\t Alignment settings:");
+    logger->trace("Alignment settings:");
     logger->trace("\t Seeding: {}", (config.alignment_seed_unimems ? "unimems" : "nodes"));
     logger->trace("\t Alignments to report: {}", config.alignment_num_alternative_paths);
     logger->trace("\t Priority queue size: {}", config.alignment_queue_size);
     logger->trace("\t Min seed length: {}", config.alignment_min_seed_length);
     logger->trace("\t Max seed length: {}", config.alignment_max_seed_length);
     logger->trace("\t Max num seeds per locus: {}", config.alignment_max_num_seeds_per_locus);
-    logger->trace("\t Scoring matrix: {}",
-                  (config.alignment_edit_distance ? "unit costs" : "matrix"));
     logger->trace("\t Gap opening penalty: {}",
                   int64_t(config.alignment_gap_opening_penalty));
     logger->trace("\t Gap extension penalty: {}",
                   int64_t(config.alignment_gap_extension_penalty));
     logger->trace("\t Min DP table cell score: {}", int64_t(config.alignment_min_cell_score));
-    logger->trace("\t  Min alignment score: {}", config.alignment_min_path_score);
+    logger->trace("\t Min alignment score: {}", config.alignment_min_path_score);
 
+    logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {
-        logger->trace("\t Match score: {}", int64_t(config.alignment_match_score));
-        logger->trace("\t (DNA) Transition score: {}",
+        logger->trace("\t\t Match score: {}", int64_t(config.alignment_match_score));
+        logger->trace("\t\t (DNA) Transition score: {}",
                       int64_t(config.alignment_mm_transition_score));
-        logger->trace("\t (DNA) Transversion score: {}",
+        logger->trace("\t\t (DNA) Transversion score: {}",
                       int64_t(config.alignment_mm_transversion_score));
     }
 
@@ -693,9 +685,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &c
 
     } else if (config.alignment_min_seed_length < graph.get_k()) {
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            logger->error(
-                    "ERROR: SuffixSeeder can be used only with succinct graph "
-                    "representation");
+            logger->error("SuffixSeeder can be used only with succinct graph representation");
             exit(1);
         }
 
@@ -815,8 +805,8 @@ void map_sequences_in_file(const std::string &file,
 
     }, config.forward_and_reverse);
 
-    logger->trace("File processed in {} sec, current mem usage: {}MiB, total time {} sec",
-                  data_reading_timer.elapsed(), (get_curr_RSS() >> 20), timer.elapsed());
+    logger->trace("File '{}' processed in {} sec, current mem usage: {} MiB, total time {} sec",
+                  file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
 }
 
 typedef std::function<void(const std::string&)> SequenceCallback;
@@ -840,7 +830,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(full_dbg);
     if (kPrefilterWithBloom && dbg_succ) {
         if (dbg_succ->get_bloom_filter())
-            logger->trace("Indexing k-mers pre-filtered with Bloom filter");
+            logger->trace("[Query graph construction] Started indexing k-mers pre-filtered with Bloom filter");
 
         call_sequences([&graph,&dbg_succ](const std::string &sequence) {
             graph->add_sequence(sequence, get_missing_kmer_skipper(
@@ -855,7 +845,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         });
     }
 
-    logger->trace("Query graph --- k-mers indexed: {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] k-mer indexing took {} sec", timer.elapsed());
     timer.reset();
 
     // pull contigs from query graph
@@ -865,7 +855,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         full_dbg->is_canonical_mode()
     );
 
-    logger->trace("Query graph --- contigs extracted: {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
     if (full_dbg->is_canonical_mode()) {
@@ -876,7 +866,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             graph->add_sequence(pair.first);
         }
 
-        logger->trace("Query graph --- reindexed k-mers in canonical mode: {} sec",
+        logger->trace("[Query graph construction] k-mers reindexed in canonical mode in {} sec",
                       timer.elapsed());
         timer.reset();
     }
@@ -906,7 +896,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         assert(j == path.size());
     }
 
-    logger->trace("Query graph --- contigs mapped to graph: {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
     timer.reset();
 
     contigs.clear();
@@ -950,7 +940,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         // correcting the mask
         call_zeros(mask, [&](auto i) { (*index_in_full_graph)[i] = 0; });
 
-        logger->trace("Query graph --- reduced k-mer dictionary: {} sec",
+        logger->trace("[Query graph construction] Reduced k-mer dictionary in {} sec",
                       timer.elapsed());
         timer.reset();
     }
@@ -1011,7 +1001,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         }
     );
 
-    logger->trace("Query graph --- constructed query annotation: {} sec",
+    logger->trace("[Query graph construction] Query annotation constructed in {} sec",
                   timer.elapsed());
     timer.reset();
 
@@ -1087,7 +1077,7 @@ void print_stats(const DeBruijnGraph &graph) {
             }
         } else {
             if (!weights->is_compatible(graph)) {
-                logger->error("ERROR: node weights are not compatible with graph");
+                logger->error("Node weights are not compatible with graph");
                 exit(1);
             }
             graph.call_nodes([&](auto i) {
@@ -1185,7 +1175,7 @@ void parse_sequences(const std::vector<std::string> &files,
                      Loop call_sequences) {
     // iterate over input files
     for (const auto &file : files) {
-        logger->trace("Parsing {}", file);
+        logger->trace("Parsing '{}'", file);
 
         Timer data_reading_timer;
 
@@ -1230,11 +1220,9 @@ void parse_sequences(const std::vector<std::string> &files,
                     if (config.max_count_quantile < 1)
                         max_count = utils::get_quantile(count_hist_v, config.max_count_quantile);
 
-                    logger->info(
-                            "Used k-mer count thresholds:\n"
-                            "min (including): {}\n"
-                            "max (excluding): {}",
-                            min_count, max_count);
+                    logger->info("Used k-mer count thresholds:\n"
+                                 "min (including): {}\n"
+                                 "max (excluding): {}", min_count, max_count);
                 }
             }
 
@@ -1242,10 +1230,9 @@ void parse_sequences(const std::vector<std::string> &files,
                 file,
                 [&](std::string&& sequence, uint32_t count) {
                     if (!warning_different_k && sequence.size() != config.k) {
-                            logger->warn(
-                                    "Warning: k-mers parsed from KMC database {} have "
-                                    "length {} but graph is constructed for k={}",
-                                    file, sequence.size(), config.k);
+                            logger->warn("k-mers parsed from KMC database '{}' have "
+                                         "length {} but graph is constructed for k={}",
+                                         file, sequence.size(), config.k);
                             warning_different_k = true;
                         }
                         if (config.forward_and_reverse) {
@@ -1279,18 +1266,13 @@ void parse_sequences(const std::vector<std::string> &files,
                 }, config.forward_and_reverse);
             }
         } else {
-            logger->error("ERROR: File type unknown for file '{}'", file);
+            logger->error("File type unknown for '{}'", file);
             exit(1);
         }
 
-        logger->trace("Finished extracting sequences from file {} in {} sec", file,
+        logger->trace("Extracted all sequences from file '{}' in {} sec", file,
                       timer.elapsed());
-        logger->trace(
-                "File processed in {} sec, current mem usage: {}MiB, total time {} sec",
-                data_reading_timer.elapsed(), (get_curr_RSS() >> 20), timer.elapsed());
     }
-
-    logger->trace("");
 }
 
 std::string form_client_reply(const std::string &received_message,
@@ -1309,7 +1291,7 @@ std::string form_client_reply(const std::string &received_message,
                                received_message.data() + received_message.size(),
                                &json,
                                &errors)) {
-                logger->error("Error: bad json file:\n{}", errors);
+                logger->error("Bad json file:\n{}", errors);
                 //TODO: send error message back in a json file
                 throw std::domain_error("bad json received");
             }
@@ -1354,7 +1336,7 @@ std::string form_client_reply(const std::string &received_message,
                 }
             );
         } else {
-            logger->error("Error: no input sequences received from client");
+            logger->error("No input sequences received from client");
             // TODO: no input sequences -> form an error message for the client
             throw std::domain_error("No input sequences");
         }
@@ -1362,15 +1344,15 @@ std::string form_client_reply(const std::string &received_message,
         return oss.str();
 
     } catch (const Json::LogicError &e) {
-        logger->error("Error: bad json file: {}", e.what());
+        logger->error("Bad json file: {}", e.what());
         //TODO: send errors in a json file
         throw;
     } catch (const std::exception &e) {
-        logger->error("Error: processing request error: {}", e.what());
+        logger->error("Processing request error: {}", e.what());
         //TODO: send errors in a json file
         throw;
     } catch (...) {
-        logger->error("Error: processing request error");
+        logger->error("Processing request error");
         //TODO: send errors in a json file
         throw;
     }
@@ -1406,8 +1388,7 @@ int main(int argc, char *argv[]) {
 
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
-                    logger->error(
-                            "Error: Only bitmap-graph can be built in complete mode");
+                    logger->error("Only bitmap-graph can be built in complete mode");
                     exit(1);
                 }
 
@@ -1435,7 +1416,7 @@ int main(int argc, char *argv[]) {
                     timer.reset();
 
                     if (suffix.size() > 0 || suffixes.size() > 1) {
-                        logger->info("Suffix: {}", suffix);
+                        logger->info("k-mer suffix: '{}'", suffix);
                     }
 
                     auto constructor = IBOSSChunkConstructor::initialize(
@@ -1486,7 +1467,7 @@ int main(int argc, char *argv[]) {
             } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
 
                 if (!config->outfbase.size()) {
-                    logger->error("Error: No output file provided");
+                    logger->error("No output file provided");
                     exit(1);
                 }
 
@@ -1507,7 +1488,7 @@ int main(int argc, char *argv[]) {
                     timer.reset();
 
                     if ((suffix.size() > 0 || suffixes.size() > 1)) {
-                        logger->trace("Suffix: {}", suffix);
+                        logger->trace("k-mer suffix: '{}'", suffix);
                     }
 
                     constructor.reset(
@@ -1585,19 +1566,17 @@ int main(int argc, char *argv[]) {
 
                     case Config::GraphType::HASH_STR:
                         if (config->canonical) {
-                            logger->warn(
-                                    "Warning: string hash-based de Bruijn graph"
-                                    " does not support canonical mode."
-                                    " Normal mode will be used instead.");
+                            logger->warn("String hash-based de Bruijn graph"
+                                         " does not support canonical mode."
+                                         " Normal mode will be used instead.");
                         }
                         // TODO: implement canonical mode
                         graph.reset(new DBGHashString(config->k/*, config->canonical*/));
                         break;
 
                     case Config::GraphType::BITMAP:
-                        logger->error(
-                                "Error: Bitmap-graph construction"
-                                " in dynamic regime is not supported");
+                        logger->error("Bitmap-graph construction"
+                                      " in dynamic regime is not supported");
                         exit(1);
 
                     case Config::GraphType::INVALID:
@@ -1680,14 +1659,12 @@ int main(int argc, char *argv[]) {
             //       This can be fixed by using the same indexes in all cases
             //       (non-contiguous indexing)
             if (!node_weights->is_compatible(*graph)) {
-                logger->error(
-                        "Error: node weights are not compatible with graph {} "
-                        "and will not be updated",
-                        config->infbase);
+                logger->error("Node weights are not compatible with graph '{}' "
+                              "and will not be updated", config->infbase);
                 node_weights.reset();
             }
 
-            logger->trace("De Bruijn graph with k-mer size k={} was loaded in {} sec",
+            logger->trace("De Bruijn graph with k-mer length k={} was loaded in {} sec",
                           graph->get_k(), timer.elapsed());
             timer.reset();
 
@@ -1709,7 +1686,7 @@ int main(int argc, char *argv[]) {
 
             timer.reset();
 
-            logger->trace("Start graph extension");
+            logger->trace("Start graph augmentation");
 
             if (graph->is_canonical_mode())
                 config->forward_and_reverse = false;
@@ -1730,7 +1707,7 @@ int main(int argc, char *argv[]) {
                 }
             );
 
-            logger->trace("Graph extension done in {} sec", timer.elapsed());
+            logger->trace("Graph augmentation done in {} sec", timer.elapsed());
             timer.reset();
 
             if (node_weights) {
@@ -1782,7 +1759,8 @@ int main(int argc, char *argv[]) {
             auto annotation = initialize_annotation(config->infbase_annotators.at(0), *config);
 
             if (!annotation->load(config->infbase_annotators.at(0))) {
-                logger->error("ERROR: can't load annotations");
+                logger->error("Cannot load graph annotation from '{}'",
+                              config->infbase_annotators.at(0));
                 exit(1);
             } else {
                 logger->trace("Annotation was loaded in {} sec", timer.elapsed());
@@ -1794,15 +1772,15 @@ int main(int argc, char *argv[]) {
 
             if (annotation->num_objects() + 1 != inserted_edges->size()
                                                 - inserted_edges->num_set_bits()) {
-                logger->error("ERROR: incompatible graph and annotation.");
+                logger->error("Graph and annotation are incompatible");
                 exit(1);
             }
 
-            logger->trace("Insert empty rows to the annotation matrix...");
+            logger->trace("Insert empty rows in annotation matrix...");
 
             AnnotatedDBG::insert_zero_rows(annotation.get(), *inserted_edges);
 
-            logger->trace("Insertion done in {} sec", timer.elapsed());
+            logger->trace("Rows inserted in {} sec", timer.elapsed());
 
             annotation->serialize(config->outfbase);
 
@@ -1879,7 +1857,8 @@ int main(int argc, char *argv[]) {
 
             if (config->infbase_annotators.size()
                     && !annotation_temp->load(config->infbase_annotators.at(0))) {
-                logger->error("ERROR: can't load annotations");
+                logger->error("Cannot load annotations from '{}'",
+                              config->infbase_annotators.at(0));
                 exit(1);
             }
 
@@ -1890,7 +1869,7 @@ int main(int argc, char *argv[]) {
                                     config->fast);
 
             if (!anno_graph.check_compatibility()) {
-                logger->error("Error: graph and annotation are not compatible.");
+                logger->error("Graph and annotation are incompatible");
                 exit(1);
             }
 
@@ -1907,7 +1886,7 @@ int main(int argc, char *argv[]) {
             if (config->anno_type == Config::ColumnCompressed) {
                 annotate::ColumnCompressed<> annotation(0, kNumCachedColumns, get_verbose());
                 if (!annotation.merge_load(files)) {
-                    logger->error("ERROR: can't load annotations");
+                    logger->error("Cannot load annotations");
                     exit(1);
                 }
                 annotation.serialize(config->outfbase);
@@ -1924,7 +1903,7 @@ int main(int argc, char *argv[]) {
                 } else {
                     auto annotator = initialize_annotation(filename, *config);
                     if (!annotator->load(filename)) {
-                        logger->error("ERROR: can't load annotation from file {}", filename);
+                        logger->error("Cannot load annotations from file '{}'", filename);
                         exit(1);
                     }
                     annotators.push_back(std::move(annotator));
@@ -1944,7 +1923,7 @@ int main(int argc, char *argv[]) {
             } else if (config->anno_type == Config::BRWT) {
                 annotate::merge<annotate::BRWTCompressed<>>(std::move(annotators), stream_files, config->outfbase);
             } else {
-                logger->error("ERROR: Merging of annotations to '{}' is not implemented",
+                logger->error("Merging of annotations to '{}' representation is not implemented",
                               config->annotype_to_string(config->anno_type));
                 exit(1);
             }
@@ -1968,7 +1947,7 @@ int main(int argc, char *argv[]) {
 
             // iterate over input files
             for (const auto &file : files) {
-                logger->trace("Parsing sequences from {}\n", file);
+                logger->trace("Parsing sequences from file '{}'", file);
 
                 Timer curr_timer;
 
@@ -1993,8 +1972,8 @@ int main(int argc, char *argv[]) {
 
                     graph_to_query = query_graph.get();
 
-                    logger->trace("Query graph constructed for {} in {} sec", file,
-                                  std::to_string(curr_timer.elapsed()));
+                    logger->trace("Query graph constructed for '{}' in {} sec",
+                                  file, curr_timer.elapsed());
                 }
 
                 read_fasta_file_critical(file,
@@ -2019,9 +1998,8 @@ int main(int argc, char *argv[]) {
                 // wait while all threads finish processing the current file
                 thread_pool.join();
 
-                logger->trace("File {} was processed in {} sec, total time: {}", file,
-                              std::to_string(curr_timer.elapsed()),
-                              std::to_string(timer.elapsed()));
+                logger->trace("File '{}' was processed in {} sec, total time: {}", file,
+                              curr_timer.elapsed(), timer.elapsed());
             }
 
             return 0;
@@ -2036,8 +2014,8 @@ int main(int argc, char *argv[]) {
             auto graph = load_critical_dbg(config->infbase);
             auto anno_graph = initialize_annotated_dbg(graph, *config);
 
-            logger->info("Graph loaded in {} sec, current mem usage: {}MiB",
-                         timer.elapsed(), (get_curr_RSS() >> 20));
+            logger->info("Graph loaded in {} sec, current mem usage: {} MiB",
+                         timer.elapsed(), get_curr_RSS() >> 20);
 
             std::unique_ptr<IDBGAligner> aligner;
             // TODO: make aligner work with batch querying
@@ -2046,8 +2024,8 @@ int main(int argc, char *argv[]) {
 
             const size_t num_threads = std::max(1u, get_num_threads());
 
-            logger->info("Initializing tcp service with {} threads, listening port {}",
-                         num_threads, config->port);
+            logger->info("Initializing a TCP service with {} threads"
+                         ", listening on port {}", num_threads, config->port);
 
             try {
                 asio::io_context io_context;
@@ -2076,7 +2054,7 @@ int main(int argc, char *argv[]) {
             } catch (const std::exception &e) {
                 logger->error("Exception: {}", e.what());
             } catch (...) {
-                logger->error("Error: Unknown exception");
+                logger->error("Unknown exception");
             }
 
             return 0;
@@ -2084,11 +2062,11 @@ int main(int argc, char *argv[]) {
         case Config::COMPARE: {
             assert(files.size());
 
-            logger->info("Loading graph                {}", files.at(0));
+            logger->info("Loading graph                '{}'", files.at(0));
             auto graph = load_critical_dbg(files.at(0));
 
             for (size_t f = 1; f < files.size(); ++f) {
-                logger->info("Loading graph for comparison {}", files[f]);
+                logger->info("Loading graph for comparison '{}'", files[f]);
                 auto second = load_critical_dbg(files[f]);
                 if (*graph == *second) {
                     logger->info("Graphs are identical");
@@ -2120,7 +2098,7 @@ int main(int argc, char *argv[]) {
             }
 
             if (!chunk_files.size()) {
-                logger->error("Error: no input files provided, nothing to concatenate");
+                logger->error("No input files provided, nothing to concatenate");
                 exit(1);
             }
 
@@ -2140,10 +2118,9 @@ int main(int argc, char *argv[]) {
                     logger->trace("Chunks concatenated in {} sec", timer.elapsed());
 
                     if (config->clear_dummy) {
-                        logger->trace(
-                                "Traverse source dummy edges,"
-                                " remove redundant ones, and mark"
-                                " those that cannot be removed.");
+                        logger->trace("Traverse source dummy edges,"
+                                      " remove redundant ones, and mark"
+                                      " those that cannot be removed");
                         dbg_succ->mask_dummy_kmers(get_num_threads(), true);
                     }
                     graph = std::move(dbg_succ);
@@ -2156,9 +2133,7 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 default:
-                    logger->error(
-                            "ERROR: Cannot concatenate chunks for this graph "
-                            "representation");
+                    logger->error("Cannot concatenate chunks for this graph representation");
                     exit(1);
             }
             assert(graph);
@@ -2190,7 +2165,7 @@ int main(int argc, char *argv[]) {
             config->canonical = true;
 
             for (const auto &file : files) {
-                logger->info("Opening file {}", file);
+                logger->info("Opening file '{}'", file);
 
                 dbg_graphs.emplace_back(load_critical_graph_from_file<DBGSuccinct>(file));
 
@@ -2221,7 +2196,7 @@ int main(int argc, char *argv[]) {
                 for (size_t i = 1; i < graphs.size(); ++i) {
                     graph->merge(dbg_graphs.at(i)->get_boss());
 
-                    logger->info("traversal {} done\t {} sec", files[i], timer.elapsed());
+                    logger->info("Graph '{}' merged in {} sec", files[i], timer.elapsed());
 
                     dbg_graphs.at(i).reset();
                 }
@@ -2262,7 +2237,7 @@ int main(int argc, char *argv[]) {
 
             assert(graph);
 
-            logger->info("Graphs merged in > {} sec", timer.elapsed());
+            logger->info("Graphs merged in {} sec", timer.elapsed());
 
             // graph output
             DBGSuccinct(graph, config->canonical).serialize(config->outfbase);
@@ -2276,9 +2251,8 @@ int main(int argc, char *argv[]) {
             config->min_count = std::max(1u, config->min_count);
 
             if (!config->to_fasta) {
-                logger->error(
-                        "Error: Clean graph can be serialized only in"
-                        " form of contigs/unitigs, add flag --to-fasta");
+                logger->error("Clean graph can be serialized only in form "
+                              "of its contigs or unitigs. Add flag --to-fasta");
                 exit(1);
             }
 
@@ -2296,7 +2270,7 @@ int main(int argc, char *argv[]) {
                 auto node_weights = graph->load_extension<NodeWeights>(files.at(0));
 
                 if (!(node_weights)) {
-                    logger->error("ERROR: Cannot load k-mer counts from file {}",
+                    logger->error("Cannot load k-mer counts from file '{}'",
                                   files.at(0));
                     exit(1);
                 }
@@ -2305,7 +2279,7 @@ int main(int argc, char *argv[]) {
                     dbg_succ->reset_mask();
 
                 if (!node_weights->is_compatible(*graph)) {
-                    logger->error("Error: k-mer counts are not compatible with graph {}",
+                    logger->error("k-mer counts are not compatible with graph '{}'",
                                   files.at(0));
                     exit(1);
                 }
@@ -2349,8 +2323,7 @@ int main(int argc, char *argv[]) {
                     auto node_weights = graph->get_extension<NodeWeights>();
                     assert(node_weights);
                     if (!node_weights->is_compatible(*graph)) {
-                        logger->error(
-                                "Error: k-mer counts are not compatible with subgraph");
+                        logger->error("k-mer counts are not compatible with the subgraph");
                         exit(1);
                     }
 
@@ -2386,8 +2359,7 @@ int main(int argc, char *argv[]) {
             } else {
                 auto node_weights = graph->get_extension<NodeWeights>();
                 if (!node_weights) {
-                    logger->error(
-                            "Error: need k-mer counts for binning k-mers by abundance");
+                    logger->error("Need k-mer counts for binning k-mers by abundance");
                     exit(1);
                 }
                 assert(node_weights->is_compatible(*graph));
@@ -2462,8 +2434,7 @@ int main(int argc, char *argv[]) {
 
                     logger->info("k-mer count thresholds:\n"
                                  "min (including): {}\n"
-                                 "max (excluding): ",
-                                 min_count, max_count);
+                                 "max (excluding): ", min_count, max_count);
 
                     assert(node_weights->is_compatible(*graph));
 
@@ -2485,7 +2456,7 @@ int main(int argc, char *argv[]) {
                 graph = load_critical_dbg(file);
                 graph->load_extension<NodeWeights>(file);
 
-                logger->info("Statistics for graph {}", file);
+                logger->info("Statistics for graph '{}'", file);
 
                 print_stats(*graph);
 
@@ -2514,7 +2485,7 @@ int main(int argc, char *argv[]) {
                 if (config->print_column_names) {
                     annotate::LabelEncoder<std::string> label_encoder;
 
-                    logger->info("INFO: Scanning annotation {}", file);
+                    logger->info("Scanning annotation '{}'", file);
 
                     try {
                         std::ifstream instream(file, std::ios::binary);
@@ -2530,24 +2501,24 @@ int main(int argc, char *argv[]) {
                             throw std::ios_base::failure("");
 
                     } catch (...) {
-                        logger->error("Error: Can't read label encoder from file {}", file);
+                        logger->error("Cannot read label encoder from file '{}'", file);
                         exit(1);
                     }
 
-                    logger->info("INFO: Number of columns: {}", label_encoder.size());
+                    std::cout << "Number of columns: " << label_encoder.size() << std::endl;
                     for (size_t c = 0; c < label_encoder.size(); ++c) {
-                        logger->info("{}", label_encoder.decode(c));
+                        std::cout << label_encoder.decode(c) << '\n';
                     }
 
                     continue;
                 }
 
                 if (!annotation->load(file)) {
-                    logger->error("ERROR: can't load annotation from file {}", file);
+                    logger->error("Cannot load annotations from file '{}'", file);
                     exit(1);
                 }
 
-                logger->info("Statistics for annotation {}", file);
+                logger->info("Statistics for annotation '{}'", file);
                 print_stats(*annotation);
             }
 
@@ -2572,14 +2543,13 @@ int main(int argc, char *argv[]) {
 
                 if (config->anno_type == Config::ColumnCompressed) {
                     if (!annotation->merge_load(files)) {
-                        logger->error("ERROR: can't load annotations");
+                        logger->error("Cannot load annotations");
                         exit(1);
                     }
                 } else {
                     // Load annotation from disk
                     if (!annotation->load(files.at(0))) {
-                        logger->error("ERROR: can't load annotation from file {}",
-                                      files.at(0));
+                        logger->error("Cannot load annotations from file '{}'", files.at(0));
                         exit(1);
                     }
                 }
@@ -2614,8 +2584,7 @@ int main(int argc, char *argv[]) {
                 std::unordered_map<std::string, std::string> dict;
                 std::ifstream instream(config->rename_instructions_file);
                 if (!instream.is_open()) {
-                    logger->error("ERROR: Can't open file {}",
-                                  config->rename_instructions_file);
+                    logger->error("Cannot open file '{}'", config->rename_instructions_file);
                     exit(1);
                 }
                 std::string old_name;
@@ -2623,10 +2592,9 @@ int main(int argc, char *argv[]) {
                 while (instream.good() && !(instream >> old_name).eof()) {
                     instream >> new_name;
                     if (instream.fail() || instream.eof()) {
-                        logger->error(
-                                "ERROR: wrong format of the rules for"
-                                " renaming annotation columns passed in file {}",
-                                config->rename_instructions_file);
+                        logger->error("Wrong format of the rules for renaming"
+                                      " annotation columns passed in file '{}'",
+                                      config->rename_instructions_file);
                         exit(1);
                     }
                     dict[old_name] = new_name;
@@ -2639,7 +2607,7 @@ int main(int argc, char *argv[]) {
                 // TODO: rename columns without loading the full annotation
                 if (config->anno_type == Config::ColumnCompressed) {
                     if (!annotation->merge_load(files)) {
-                        logger->error("ERROR: can't load annotations");
+                        logger->error("Cannot load annotations");
                         exit(1);
                     } else {
                         logger->info("Annotation #objects: {}\t#labels: {}",
@@ -2648,8 +2616,7 @@ int main(int argc, char *argv[]) {
                 } else {
                     // Load annotation from disk
                     if (!annotation->load(files.at(0))) {
-                        logger->error("ERROR: can't load annotation from file {}",
-                                      files.at(0));
+                        logger->error("Cannot load annotations from file '{}'", files.at(0));
                         exit(1);
                     }
                 }
@@ -2674,15 +2641,14 @@ int main(int argc, char *argv[]) {
                 = parse_annotation_type(files.at(0));
 
             if (config->anno_type == input_anno_type) {
-                logger->error("Skipping conversion: same input and target type: {}",
+                logger->info("Skipping conversion: same input and target type: {}",
                               Config::annotype_to_string(config->anno_type));
-                exit(1);
+                return 0;
             }
 
             if (input_anno_type == Config::ColumnCompressed && files.size() > 1) {
-                logger->error(
-                        "ERROR: conversion of multiple annotators only supported "
-                        "for ColumnCompressed");
+                logger->error("Conversion of multiple annotators only "
+                              "supported for ColumnCompressed");
                 exit(1);
             }
 
@@ -2715,17 +2681,16 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                     default:
-                        logger->error(
-                                "Error: Streaming conversion from RowCompressed "
-                                "annotation is not implemented for the requested target "
-                                "type: {}",
-                                Config::annotype_to_string(config->anno_type));
+                        logger->error("Streaming conversion from RowCompressed "
+                                      "annotation is not implemented for the requested "
+                                      "target type: {}",
+                                      Config::annotype_to_string(config->anno_type));
                         exit(1);
                 }
 
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
-                logger->trace("Serializing to {}...", config->outfbase);
+                logger->trace("Serializing to '{}'...", config->outfbase);
 
                 target_annotator->serialize(config->outfbase);
 
@@ -2737,7 +2702,7 @@ int main(int argc, char *argv[]) {
 
                 // Load annotation from disk
                 if (!annotation->merge_load(files)) {
-                    logger->error("ERROR: can't load annotations");
+                    logger->error("Cannot load annotations");
                     exit(1);
                 }
 
@@ -2761,7 +2726,7 @@ int main(int argc, char *argv[]) {
                             annotator.reset();
 
                             logger->trace("Annotation converted in {} sec", timer.elapsed());
-                            logger->trace("Serializing to {} ...", config->outfbase);
+                            logger->trace("Serializing to '{}'...", config->outfbase);
 
                             row_annotator.serialize(config->outfbase);
 
@@ -2787,9 +2752,9 @@ int main(int argc, char *argv[]) {
                                 get_num_threads());
 
                         annotator.reset();
-                        logger->trace("Annotation converted  in {} sec", timer.elapsed());
+                        logger->trace("Annotation converted in {} sec", timer.elapsed());
 
-                        logger->trace("Serializing to {}", config->outfbase);
+                        logger->trace("Serializing to '{}'", config->outfbase);
 
                         brwt_annotator->serialize(config->outfbase);
 
@@ -2815,10 +2780,9 @@ int main(int argc, char *argv[]) {
                 }
 
             } else {
-                logger->error(
-                        "Error: Conversion to other representations"
-                        " is not implemented for {} annotator",
-                        Config::annotype_to_string(input_anno_type));
+                logger->error("Conversion to other representations"
+                              " is not implemented for {} annotator",
+                              Config::annotype_to_string(input_anno_type));
                 exit(1);
             }
 
@@ -2885,13 +2849,13 @@ int main(int argc, char *argv[]) {
             }
 
             if (config->clear_dummy) {
-                logger->trace("Traverse source dummy edges and remove redundant ones...");
+                logger->trace("Traverse the tree of source dummy edges and remove redundant ones...");
                 timer.reset();
 
                 // remove redundant dummy edges and mark all other dummy edges
                 dbg_succ->mask_dummy_kmers(get_num_threads(), true);
 
-                logger->trace("... traversal done in {} sec", timer.elapsed());
+                logger->trace("The tree of source dummy edges traversed in {} sec", timer.elapsed());
                 timer.reset();
             }
 
@@ -2951,7 +2915,7 @@ int main(int argc, char *argv[]) {
 
             if (config->to_gfa) {
                 if (!config->unitigs) {
-                    logger->error("'--unitigs' must be set for GFA output");
+                    logger->error("Flag '--unitigs' must be set for GFA output");
                     exit(1);
                 }
 
@@ -2983,7 +2947,7 @@ int main(int argc, char *argv[]) {
                                       config->kmers_in_single_form);
             }
 
-            logger->trace("Extracted sequences in {} sec", timer.elapsed());
+            logger->trace("Sequences extracted in {} sec", timer.elapsed());
 
             return 0;
         }
@@ -2998,7 +2962,7 @@ int main(int argc, char *argv[]) {
             logger->trace("Loading annotator...");
 
             if (!annotator->load(files.at(0))) {
-                logger->error("ERROR: can't load annotations from file {}", files.at(0));
+                logger->error("Cannot load annotations from file '{}'", files.at(0));
                 exit(1);
             }
             logger->trace("Annotator loaded in {} sec", timer.elapsed());
@@ -3033,28 +2997,22 @@ int main(int argc, char *argv[]) {
                 if (!config->alignment_length) {
                     config->alignment_length = graph->get_k();
                 } else if (config->alignment_length > graph->get_k()) {
-                    logger->warn(
-                            "Warning: Mapping to k-mers longer than k is not "
-                            "supported.");
+                    logger->warn("Mapping to k-mers longer than k is not supported");
                     config->alignment_length = graph->get_k();
                 }
 
                 if (!dbg && config->alignment_length != graph->get_k()) {
-                    logger->error(
-                            "Error: matching k-mers shorter than k only supported for "
-                            "DBGSuccinct");
+                    logger->error("Matching k-mers shorter than k only "
+                                  "supported for DBGSuccinct");
                     exit(1);
                 }
 
-                if (get_verbose()) {
-                    logger->trace("Map sequences against the de Bruijn graph with k= {}",
-                                  graph->get_k());
-                    logger->trace(" Length of mapped k-mers: {}", config->alignment_length);
-                }
+                logger->trace("Map sequences against the de Bruijn graph with k={}",
+                              graph->get_k());
+                logger->trace("Length of mapped k-mers: {}", config->alignment_length);
 
                 for (const auto &file : files) {
-                    if (get_verbose())
-                        logger->trace("Map sequences from file {}", file);
+                    logger->trace("Map sequences from file '{}'", file);
 
                     map_sequences_in_file(file,
                                           *graph,
@@ -3073,7 +3031,7 @@ int main(int argc, char *argv[]) {
             auto aligner = build_aligner(*graph, *config);
 
             for (const auto &file : files) {
-                logger->info("Align sequences from file {}", file);
+                logger->info("Align sequences from file '{}'", file);
 
                 Timer data_reading_timer;
 
@@ -3153,11 +3111,10 @@ int main(int argc, char *argv[]) {
                                 : std::string(read_stream->name.s)
                     );
 
-                    logger->trace(
-                            "File processed in {} sec, "
-                            "current mem usage: {}MiB, total time {} sec",
-                            data_reading_timer.elapsed(), (get_curr_RSS() >> 20),
-                            timer.elapsed());
+                    logger->trace("File '{}' processed in {} sec, "
+                                  "current mem usage: {} MiB, total time {} sec",
+                                  file, data_reading_timer.elapsed(),
+                                  get_curr_RSS() >> 20, timer.elapsed());
                 });
 
                 thread_pool.join();
@@ -3176,7 +3133,7 @@ int main(int argc, char *argv[]) {
                 taxid_mapper.reset(new TaxIDMapper());
                 std::ifstream taxid_mapper_in(config->taxonomy_map, std::ios::binary);
                 if (!taxid_mapper->load(taxid_mapper_in)) {
-                    logger->error("ERROR: failed to read accession2taxid map");
+                    logger->error("Failed to read accession->taxid map");
                     exit(1);
                 }
             }
@@ -3285,7 +3242,7 @@ int main(int argc, char *argv[]) {
                     &thread_pool
                 );
             } else {
-                logger->error("ERROR: no variant calling mode selected. Exiting");
+                logger->error("No variant calling mode selected. Exiting");
                 exit(1);
             }
 
@@ -3300,13 +3257,13 @@ int main(int argc, char *argv[]) {
             TaxIDMapper taxid_mapper;
             if (config->accession2taxid.length()
                 && !taxid_mapper.parse_accession2taxid(config->accession2taxid)) {
-                logger->error("ERROR: failed to read accession2taxid file");
+                logger->error("Failed to read accession->taxid file");
                 exit(1);
             }
 
             if (config->taxonomy_nodes.length()
                 && !taxid_mapper.parse_nodes(config->taxonomy_nodes)) {
-                logger->error("ERROR: failed to read nodes.dmp file");
+                logger->error("Failed to read nodes.dmp file");
                 exit(1);
             }
 
