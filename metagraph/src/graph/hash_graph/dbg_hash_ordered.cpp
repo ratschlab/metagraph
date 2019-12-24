@@ -3,8 +3,8 @@
 #include <cassert>
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "utils/serialization.hpp"
-#include "utils/bit_vectors/bit_vector.hpp"
+#include "common/serialization.hpp"
+#include "common/vectors/bit_vector.hpp"
 #include "utils/hash_utils.hpp"
 #include "kmer/kmer_extractor.hpp"
 

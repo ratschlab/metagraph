@@ -1,6 +1,6 @@
 #include "node_weights.hpp"
 
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 
 
 NodeWeights::NodeWeights(uint64_t max_index, size_t bits_per_count)

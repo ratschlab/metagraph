@@ -6,7 +6,7 @@
 #include <utility>
 #include <set>
 
-#include "utils/bit_vectors/bitmap.hpp"
+#include "common/vectors/bitmap.hpp"
 
 
 // Branch prediction helper macros

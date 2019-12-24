@@ -13,7 +13,7 @@
 #include "annotate_column_compressed.hpp"
 #include "unix_tools.hpp"
 #include "string_utils.hpp"
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 #include "kmc_parser.hpp"
 #include "alphabets.hpp"
 #include "aligner_helper.hpp"

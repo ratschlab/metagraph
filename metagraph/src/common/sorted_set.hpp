@@ -9,7 +9,7 @@
 
 #include <ips4o.hpp>
 
-#include "logger.hpp"
+#include "common/logger.hpp"
 
 namespace mg {
 namespace common {

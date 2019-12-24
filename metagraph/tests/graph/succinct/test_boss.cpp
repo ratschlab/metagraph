@@ -1,13 +1,12 @@
-#include "graph/succinct/boss.hpp"
+#include "gtest/gtest.h"
 
 #include <zlib.h>
 #include <htslib/kseq.h>
 #include <unordered_set>
-#include "gtest/gtest.h"
 
+#include "graph/succinct/boss.hpp"
 #include "graph/succinct/boss_construct.hpp"
-
-#include "utils/algorithms.hpp"
+#include "common/algorithms.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 

@@ -1,14 +1,13 @@
 #ifndef __ANNOTATE_COLUMN_COMPRESSED_HPP__
 #define __ANNOTATE_COLUMN_COMPRESSED_HPP__
 
-
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 #include <progress_bar.hpp>
 
+#include "common/vectors/bit_vector.hpp"
+#include "common/vector.hpp"
 #include "annotation/annotate.hpp"
-#include "utils/bit_vectors/bit_vector.hpp"
-#include "utils/vectors.hpp"
 
 
 namespace annotate {

@@ -3,8 +3,8 @@
 #include <unordered_set>
 #include <cmath>
 
+#include "common/algorithms.hpp"
 #include "kmer/alphabets.hpp"
-#include "utils/algorithms.hpp"
 
 
 Cigar::Cigar(const std::string &cigar_str) {

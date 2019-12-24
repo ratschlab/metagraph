@@ -7,8 +7,7 @@
 #include <memory>
 #include <functional>
 
-#include "utils/bit_vectors/bit_vector.hpp"
-#include "utils/serialization.hpp"
+#include "bit_vector.hpp"
 
 
 namespace utils {

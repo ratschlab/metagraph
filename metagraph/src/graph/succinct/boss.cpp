@@ -11,8 +11,8 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "common/threading.hpp"
-#include "utils/serialization.hpp"
-#include "utils/algorithms.hpp"
+#include "common/serialization.hpp"
+#include "common/algorithms.hpp"
 #include "boss_construct.hpp"
 
 using utils::remove_suffix;

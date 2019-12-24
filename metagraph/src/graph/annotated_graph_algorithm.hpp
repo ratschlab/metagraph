@@ -5,8 +5,8 @@
 #include <functional>
 
 #include "common/threading.hpp"
+#include "common/vectors/bitmap.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "utils/bit_vectors/bitmap.hpp"
 
 typedef std::function<size_t()> LabelCountCallback;
 

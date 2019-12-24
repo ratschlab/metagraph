@@ -13,7 +13,7 @@
 #include "partitionings.hpp"
 #include "string_utils.hpp"
 #include "template_utils.hpp"
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 #include "bitmap_mergers.hpp"
 #include "binary_matrix.hpp"
 #include "annotate_row_compressed.hpp"

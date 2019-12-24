@@ -6,7 +6,7 @@
 #include <zlib.h>
 
 #include "utils/string_utils.hpp"
-#include "utils/serialization.hpp"
+#include "common/serialization.hpp"
 
 
 std::string TaxIDMapper::parse_label(const std::string &gb) {

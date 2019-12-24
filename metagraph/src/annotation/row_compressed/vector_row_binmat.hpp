@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#include "utils/vectors.hpp"
+#include "common/vector.hpp"
 #include "binary_matrix.hpp"
 
 

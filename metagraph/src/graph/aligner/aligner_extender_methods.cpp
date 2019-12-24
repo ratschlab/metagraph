@@ -8,7 +8,7 @@
 #include <Eigen/StdVector>
 
 #include "common/bounded_priority_queue.hpp"
-#include "utils/algorithms.hpp"
+#include "common/algorithms.hpp"
 
 
 template <typename T>

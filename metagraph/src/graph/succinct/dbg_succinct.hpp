@@ -1,7 +1,7 @@
 #ifndef __DBG_SUCCINCT_HPP__
 #define __DBG_SUCCINCT_HPP__
 
-#include "utils/bit_vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector.hpp"
 #include "kmer/kmer_bloom_filter.hpp"
 #include "graph/base/sequence_graph.hpp"
 #include "boss.hpp"

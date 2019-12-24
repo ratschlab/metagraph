@@ -13,7 +13,7 @@
 #include "common/file_merger.hpp"
 #include "common/logger.hpp"
 #include "common/threading.hpp"
-#include "utils/vectors.hpp"
+#include "common/vector.hpp"
 
 namespace mg {
 namespace common {

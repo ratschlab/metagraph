@@ -5,8 +5,7 @@
 #include <vector>
 
 #include "graph/base/sequence_graph.hpp"
-
-#include "utils/bit_vectors/bitmap.hpp"
+#include "common/vectors/bitmap.hpp"
 
 
 class MaskedDeBruijnGraph : public DeBruijnGraph {

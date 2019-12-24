@@ -4,12 +4,12 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "serialization.hpp"
+#include "common/serialization.hpp"
 #include "string_utils.hpp"
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 #include "bitmap_builder.hpp"
 #include "bitmap_mergers.hpp"
-#include "threading.hpp"
+#include "common/threading.hpp"
 #include "annotate_row_compressed.hpp"
 
 using utils::remove_suffix;

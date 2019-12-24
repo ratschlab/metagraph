@@ -6,7 +6,7 @@
 #include <sdsl/int_vector.hpp>
 #include <sdsl/int_vector_buffer.hpp>
 
-#include "utils/vectors.hpp"
+#include "common/vector.hpp"
 
 
 class BinaryMatrix {

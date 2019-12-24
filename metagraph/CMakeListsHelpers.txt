@@ -71,20 +71,46 @@ endfunction()
 
 
 function (findFolly)
-set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
+set(FOLLY_LIBRARIES "")
 find_library(FOLLY_LIBRARIES
-        NAMES folly
-        HINTS
-        ENV LD_LIBRARY_PATH
-        PATHS
-        $ENV{HOME}/.linuxbrew/lib
-        )
+  NAMES folly
+  HINTS
+  ENV LD_LIBRARY_PATH
+  PATHS
+    $ENV{HOME}/.linuxbrew/lib
+)
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
+  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+  set(FOLLY_LIBRARIES ${FOLLY_LIBRARIES}
+    -ldouble-conversion
+    -ldl
+    -lboost_regex
+    -lboost_filesystem
+    -lboost_program_options
+    OpenSSL::Crypto
+  )
+  if(NOT BUILD_STATIC)
+    set(FOLLY_LIBRARIES ${FOLLY_LIBRARIES}
+      -lglog
+      -lgflags
+    )
+  endif()
+  find_library(LIBERTY
+    NAMES iberty
+    HINTS
+    ENV LD_LIBRARY_PATH
+    PATHS
+      $ENV{HOME}/.linuxbrew/lib
+  )
+  if(LIBERTY)
+    set(FOLLY_LIBRARIES ${FOLLY_LIBRARIES} ${LIBERTY})
+  endif()
 else()
+  set(FOLLY_LIBRARIES "")
   message(WARNING "Folly (Facebook Open Source Library) not found."
-          " Install folly to reduce memory taken up by the Row-Compressed annotator"
-          " and enable other optimizations.")
+  " Install folly to reduce memory taken up by the Row-Compressed annotator"
+  " and enable other optimizations.")
 endif()
 endfunction()
 

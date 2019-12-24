@@ -1,7 +1,7 @@
 #include "eigen_spmat.hpp"
 
-#include "algorithms.hpp"
-#include "serialization.hpp"
+#include "common/algorithms.hpp"
+#include "common/serialization.hpp"
 
 
 EigenSpMat::EigenSpMat(uint64_t num_rows, uint64_t max_num_cols) {

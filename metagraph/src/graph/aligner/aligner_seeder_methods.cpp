@@ -1,6 +1,6 @@
 #include "aligner_methods.hpp"
 
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 #include "dbg_succinct.hpp"
 
 

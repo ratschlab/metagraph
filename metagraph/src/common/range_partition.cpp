@@ -2,7 +2,7 @@
 
 #include <cassert>
 
-#include "utils/serialization.hpp"
+#include "common/serialization.hpp"
 
 
 RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,

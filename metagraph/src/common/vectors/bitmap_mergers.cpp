@@ -2,7 +2,7 @@
 
 #include <cassert>
 
-#include "utils/vectors.hpp"
+#include "common/vector.hpp"
 
 
 namespace utils {

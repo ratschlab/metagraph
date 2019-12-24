@@ -2,8 +2,8 @@
 
 #include <cassert>
 
-#include "serialization.hpp"
-#include "bit_vector.hpp"
+#include "common/serialization.hpp"
+#include "common/vectors/bit_vector.hpp"
 #include "alphabets.hpp"
 
 

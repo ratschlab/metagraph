@@ -3,7 +3,7 @@
 #include <omp.h>
 #include <progress_bar.hpp>
 
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 
 const uint64_t kBlockSize = 1'000'000 / 64 * 64;
 

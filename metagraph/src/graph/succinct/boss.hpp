@@ -3,10 +3,10 @@
 
 #include <type_traits>
 
+#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/wavelet_tree.hpp"
 #include "graph/base/sequence_graph.hpp"
 #include "kmer/kmer_extractor.hpp"
-#include "utils/bit_vectors/bit_vector.hpp"
-#include "utils/bit_vectors/wavelet_tree.hpp"
 
 class BOSSConstructor;
 

@@ -2,7 +2,7 @@
 #define __DBG_ALIGNER_METHODS_HPP__
 
 #include "aligner_helper.hpp"
-#include "utils/bit_vectors/bitmap.hpp"
+#include "common/vectors/bitmap.hpp"
 
 
 template <typename NodeType = typename DeBruijnGraph::node_index>

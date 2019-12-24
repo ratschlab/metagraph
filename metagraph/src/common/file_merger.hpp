@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "common/logger.hpp"
 #include "utils/template_utils.hpp"
+#include "common/logger.hpp"
 
 namespace mg {
 namespace common {

@@ -3,9 +3,9 @@
 #include <cstdio>
 #include <sdsl/int_vector_buffer.hpp>
 
-#include "serialization.hpp"
-#include "threading.hpp"
-#include "algorithms.hpp"
+#include "common/serialization.hpp"
+#include "common/threading.hpp"
+#include "common/algorithms.hpp"
 
 
 template <typename RowType>

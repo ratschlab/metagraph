@@ -5,12 +5,12 @@
 #include <tsl/hopscotch_map.h>
 #include <ips4o.hpp>
 
+#include "common/vector.hpp"
+#include "common/serialization.hpp"
+#include "common/threading.hpp"
 #include "utils/template_utils.hpp"
-#include "utils/vectors.hpp"
 #include "hash_utils.hpp"
-#include "serialization.hpp"
 #include "binary_matrix.hpp"
-#include "threading.hpp"
 
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,

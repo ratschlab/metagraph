@@ -2,10 +2,10 @@
 
 #include "common/chunked_wait_queue.hpp"
 #include "common/circular_buffer.hpp"
-#include "utils/algorithms.hpp"
-#include "utils/serialization.hpp"
+#include "common/algorithms.hpp"
+#include "common/serialization.hpp"
+#include "common/vector.hpp"
 #include "utils/template_utils.hpp"
-#include "utils/vectors.hpp"
 
 using namespace mg;
 

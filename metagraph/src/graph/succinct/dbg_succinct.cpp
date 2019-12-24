@@ -7,9 +7,9 @@
 #include <filesystem>
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "utils/serialization.hpp"
+#include "common/serialization.hpp"
+#include "common/algorithms.hpp"
 #include "utils/string_utils.hpp"
-#include "utils/algorithms.hpp"
 
 using utils::remove_suffix;
 

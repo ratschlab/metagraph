@@ -5,7 +5,7 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threading.hpp"
-#include "utils/bit_vectors/bitmap.hpp"
+#include "common/vectors/bitmap.hpp"
 
 namespace utils {
     bool get_verbose();

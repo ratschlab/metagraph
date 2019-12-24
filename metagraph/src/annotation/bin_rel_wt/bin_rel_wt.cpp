@@ -3,8 +3,8 @@
 #include <cassert>
 #include <iterator>
 
-#include "utils/bit_vectors/bit_vector.hpp"
-#include "utils/serialization.hpp"
+#include "common/serialization.hpp"
+#include "common/vectors/bit_vector.hpp"
 
 typedef brwt::binary_relation::object_id object_id;
 typedef brwt::binary_relation::label_id label_id;

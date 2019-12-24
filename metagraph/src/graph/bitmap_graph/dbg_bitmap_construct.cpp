@@ -2,10 +2,10 @@
 
 #include <progress_bar.hpp>
 
-#include "utils/template_utils.hpp"
-#include "utils/algorithms.hpp"
+#include "common/algorithms.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
+#include "utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "node_weights.hpp"
 

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 
-#include "utils/algorithms.hpp"
+#include "common/algorithms.hpp"
 
 
 namespace extractor {

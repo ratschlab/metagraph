@@ -2,8 +2,8 @@
 
 #include <cassert>
 
-#include "utils/algorithms.hpp"
-#include "utils/serialization.hpp"
+#include "common/algorithms.hpp"
+#include "common/serialization.hpp"
 
 
 // TODO: run benchmarks and optimize these parameters
