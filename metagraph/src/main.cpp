@@ -39,6 +39,7 @@
 #include "masked_graph.hpp"
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
+#include "reverse_complement.hpp"
 
 using mg::common::logger;
 using utils::get_verbose;
@@ -1207,8 +1208,10 @@ void parse_sequences(const std::vector<std::string> &files,
                 std::unordered_map<uint64_t, uint64_t> count_hist;
                 kmc::read_kmers(
                     file,
-                    [&](std::string&&, uint32_t count) { count_hist[count]++; },
-                    !config.canonical
+                    [&](std::string&&, uint32_t count) {
+                        count_hist[count] += (1 + config.forward_and_reverse);
+                    },
+                    !config.canonical && !config.forward_and_reverse
                 );
 
                 if (count_hist.size()) {
@@ -1245,9 +1248,16 @@ void parse_sequences(const std::vector<std::string> &files,
                                     file, sequence.size(), config.k);
                             warning_different_k = true;
                         }
-                        call_kmer(std::move(sequence), count);
+                        if (config.forward_and_reverse) {
+                            std::string reverse = sequence;
+                            reverse_complement(reverse.begin(), reverse.end());
+                            call_kmer(std::move(sequence), count);
+                            call_kmer(std::move(reverse), count);
+                        } else {
+                            call_kmer(std::move(sequence), count);
+                        }
                     },
-                    !config.canonical, min_count, max_count);
+                    !config.canonical && !config.forward_and_reverse, min_count, max_count);
 
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
