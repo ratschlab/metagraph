@@ -4,7 +4,7 @@
 #include <progress_bar.hpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "common/threading.hpp"
+#include "common/threads/threading.hpp"
 #include "common/vectors/bitmap.hpp"
 
 namespace utils {

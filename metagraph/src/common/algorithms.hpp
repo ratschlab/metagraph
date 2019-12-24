@@ -5,6 +5,7 @@
 #include <numeric>
 #include <functional>
 #include <utility>
+#include <cassert>
 #include <random>
 #include <set>
 

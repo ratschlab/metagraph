@@ -10,7 +10,7 @@
 #include <progress_bar.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
-#include "common/threading.hpp"
+#include "common/threads/threading.hpp"
 #include "common/serialization.hpp"
 #include "common/algorithms.hpp"
 #include "boss_construct.hpp"

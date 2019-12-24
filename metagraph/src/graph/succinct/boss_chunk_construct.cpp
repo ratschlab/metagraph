@@ -9,7 +9,7 @@
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_set_disk.hpp"
-#include "common/threading.hpp"
+#include "common/threads/threading.hpp"
 #include "common/unix_tools.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "utils/file_utils.hpp"

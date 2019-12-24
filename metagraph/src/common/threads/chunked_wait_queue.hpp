@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "common/logger.hpp"
-#include "common/threading.hpp"
+#include "threading.hpp"
 
 namespace mg {
 namespace common {

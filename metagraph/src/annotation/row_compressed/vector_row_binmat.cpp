@@ -5,7 +5,7 @@
 #include <sdsl/int_vector_buffer.hpp>
 
 #include "common/serialization.hpp"
-#include "common/threading.hpp"
+#include "common/threads/threading.hpp"
 #include "common/algorithms.hpp"
 
 

@@ -9,10 +9,10 @@
 
 #include <ips4o.hpp>
 
-#include "common/chunked_wait_queue.hpp"
+#include "common/threads/chunked_wait_queue.hpp"
 #include "common/file_merger.hpp"
 #include "common/logger.hpp"
-#include "common/threading.hpp"
+#include "common/threads/threading.hpp"
 #include "common/vector.hpp"
 
 namespace mg {

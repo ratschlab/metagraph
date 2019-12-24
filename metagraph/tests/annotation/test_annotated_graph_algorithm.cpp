@@ -4,7 +4,7 @@
 #include "../graph/test_aligner_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
-#include "common/threading.hpp"
+#include "common/threads/threading.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 
 

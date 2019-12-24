@@ -1,7 +1,7 @@
 #ifndef __KMER_COLLECTOR_HPP__
 #define __KMER_COLLECTOR_HPP__
 
-#include "common/threading.hpp"
+#include "common/threads/threading.hpp"
 
 namespace mg {
 namespace kmer {
