@@ -40,6 +40,7 @@
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
 #include "reverse_complement.hpp"
+#include "utils/template_utils.hpp"
 
 using mg::common::logger;
 using utils::get_verbose;
@@ -960,9 +961,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     }
 
     ips4o::parallel::sort(from_full_to_query.begin(), from_full_to_query.end(),
-        [](const auto &first, const auto &second) { return first.first < second.first; },
-        num_threads
-    );
+                          utils::LessFirst(), num_threads);
 
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
@@ -1209,11 +1208,7 @@ void parse_sequences(const std::vector<std::string> &files,
                                                                             count_hist.end());
 
                     ips4o::parallel::sort(count_hist_v.begin(), count_hist_v.end(),
-                        [](const auto &first, const auto &second) {
-                            return first.first < second.first;
-                        },
-                        get_num_threads()
-                    );
+                                          utils::LessFirst(), get_num_threads());
 
                     if (config.min_count_quantile > 0)
                         min_count = utils::get_quantile(count_hist_v, config.min_count_quantile);
@@ -2406,11 +2401,7 @@ int main(int argc, char *argv[]) {
                 count_hist.clear();
 
                 ips4o::parallel::sort(count_hist_v.begin(), count_hist_v.end(),
-                    [](const auto &first, const auto &second) {
-                        return first.first < second.first;
-                    },
-                    get_num_threads()
-                );
+                                      utils::LessFirst(), get_num_threads());
 
                 #pragma omp parallel for num_threads(get_num_threads())
                 for (size_t i = 1; i < config->count_slice_quantiles.size(); ++i) {

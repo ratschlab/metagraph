@@ -1,6 +1,7 @@
 #include "vector_row_binmat.hpp"
 
 #include <cstdio>
+
 #include <sdsl/int_vector_buffer.hpp>
 
 #include "common/serialization.hpp"

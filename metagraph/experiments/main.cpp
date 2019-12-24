@@ -23,6 +23,7 @@
 #include "config.hpp"
 #include "serialization.hpp"
 #include "wavelet_tree.hpp"
+#include "utils/template_utils.hpp"
 
 using namespace std::chrono_literals;
 
@@ -1038,9 +1039,7 @@ int main(int argc, char *argv[]) {
             }
 
             ips4o::parallel::sort(from_full_to_query.begin(), from_full_to_query.end(),
-                [](const auto &first, const auto &second) { return first.first < second.first; },
-                num_threads
-            );
+                                  utils::LessFirst(), num_threads);
 
             std::cout << "Indexes sampled in " << timer.elapsed() << " sec" << std::endl;
             timer.reset();
