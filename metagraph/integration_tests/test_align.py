@@ -18,12 +18,14 @@ graph_file_extension = {'succinct': '.dbg',
                         'hashfast': '.hashfastdbg',
                         'hashstr': '.hashstrdbg'}
 
+GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
+
 
 class TestAlign(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr', 'hashfast'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_all_graphs(self, representation):
 
         self.maxDiff = None
@@ -63,7 +65,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual(params_str[3], 'MT-4/1\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTCGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t*\t*\t0\t*\t*\t*')
         self.assertEqual(params_str[4], 'MT-2/1\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t+\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t300\t150\t150=\t0')
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr', 'hashfast'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_banded_all_graphs(self, representation):
 
         self.maxDiff = None
@@ -136,7 +138,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr', 'hashfast'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_fwd_rev_comp_all_graphs(self, representation):
 
         construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(

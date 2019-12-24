@@ -15,10 +15,13 @@ TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
                         'hash': '.orhashdbg',
+                        # 'hashfast': '.hashfastdbg',
                         'hashstr': '.hashstrdbg'}
 
 anno_file_extension = {'column': '.column.annodbg',
                        'row': '.row.annodbg'}
+
+GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 NUM_THREADS = 4
 
@@ -27,7 +30,7 @@ class TestAnnotate(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs(self, graph_repr):
 
         construct_command = '{exe} build -p {num_threads} \
@@ -132,7 +135,7 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual('density: 0.00948888', params_str[2])
             self.assertEqual('representation: ' + anno_repr, params_str[3])
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs_from_kmc(self, graph_repr):
         """
         Annotate non-canonical graph constructed from non-canonical KMC database
@@ -187,7 +190,7 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual('density: 1', params_str[2])
             self.assertEqual('representation: ' + anno_repr, params_str[3])
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs_from_kmc_both(self, graph_repr):
         """
         Annotate non-canonical graph constructed from canonical KMC database

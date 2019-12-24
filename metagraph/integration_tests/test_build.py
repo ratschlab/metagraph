@@ -15,7 +15,10 @@ TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
                         'hash': '.orhashdbg',
+                        'hashfast': '.hashfastdbg',
                         'hashstr': '.hashstrdbg'}
+
+GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 
 class TestBuild(unittest.TestCase):
@@ -27,7 +30,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         return res
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs(self, representation):
 
         construct_command = '{exe} build --graph {repr} -k 20 -o {outfile} {input}'.format(
@@ -110,7 +113,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('nodes (k): 1159851', params_str[1])
         self.assertEqual('canonical mode: yes', params_str[2])
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_build_tiny_k(self, representation):
         args = [METAGRAPH, 'build', '--graph', representation,
                 '-k', '2',
@@ -147,7 +150,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('nodes (k): 16', params_str[1])
         self.assertEqual('canonical mode: yes', params_str[2])
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_build_from_kmc(self, representation):
         construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
@@ -166,7 +169,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('nodes (k): 469983', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_build_from_kmc_both(self, representation):
         construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,

@@ -15,14 +15,17 @@ TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
                         'hash': '.orhashdbg',
+                        'hashfast': '.hashfastdbg',
                         'hashstr': '.hashstrdbg'}
+
+GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 
 class TestBuildWeighted(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs(self, representation):
 
         construct_command = '{exe} build \
@@ -77,7 +80,7 @@ class TestBuildWeighted(unittest.TestCase):
         self.assertEqual('nnz weights: 1159851', params_str[3])
         self.assertEqual('avg weight: 2.53761', params_str[4])
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_build_tiny_k(self, representation):
         args = [METAGRAPH, 'build', '--graph', representation,
                 '--count-kmers',
@@ -128,7 +131,7 @@ class TestBuildWeighted(unittest.TestCase):
         self.assertEqual('nnz weights: 16', params_str[3])
         self.assertEqual('avg weight: 255', params_str[4])
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_build_from_kmc(self, representation):
         construct_command = '{exe} build \
                 --graph {repr} --count-kmers -k 11 -o {outfile} {input}'.format(
@@ -154,7 +157,7 @@ class TestBuildWeighted(unittest.TestCase):
         self.assertEqual('nnz weights: 469983', params_str[3])
         self.assertEqual('avg weight: 3.15029', params_str[4])
 
-    @parameterized.expand(['succinct', 'bitmap', 'hash', 'hashstr'])
+    @parameterized.expand(GRAPH_TYPES)
     def test_build_from_kmc_both(self, representation):
         construct_command = '{exe} build \
                 --graph {repr} --count-kmers -k 11 -o {outfile} {input}'.format(
