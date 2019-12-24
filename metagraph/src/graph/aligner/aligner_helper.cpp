@@ -303,13 +303,7 @@ void DBGAlignerConfig::set_scoring_matrix() {
         #if _PROTEIN_GRAPH
             const auto *alphabet = alphabets::kAlphabetProtein;
             const auto *alphabet_encoding = alphabets::kCharToProtein;
-        #elif _DNA_CASE_SENSITIVE_GRAPH
-            const auto *alphabet = alphabets::kAlphabetDNA;
-            const auto *alphabet_encoding = alphabets::kCharToDNA;
-        #elif _DNA5_GRAPH
-            const auto *alphabet = alphabets::kAlphabetDNA;
-            const auto *alphabet_encoding = alphabets::kCharToDNA;
-        #elif _DNA_GRAPH
+        #elif _DNA_GRAPH || _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
             const auto *alphabet = alphabets::kAlphabetDNA;
             const auto *alphabet_encoding = alphabets::kCharToDNA;
         #else
@@ -320,29 +314,21 @@ void DBGAlignerConfig::set_scoring_matrix() {
         #endif
 
         score_matrix_ = unit_scoring_matrix(1, alphabet, alphabet_encoding);
-        return;
-    }
 
-    #if _PROTEIN_GRAPH
-        score_matrix_ = score_matrix_blosum62;
-    #elif _DNA_CASE_SENSITIVE_GRAPH
-        score_matrix_ = dna_scoring_matrix(alignment_match_score,
-                                           -alignment_mm_transition_score,
-                                           -alignment_mm_transversion_score);
-    #elif _DNA5_GRAPH
-        score_matrix_ = dna_scoring_matrix(alignment_match_score,
-                                           -alignment_mm_transition_score,
-                                           -alignment_mm_transversion_score);
-    #elif _DNA_GRAPH
-        score_matrix_ = dna_scoring_matrix(alignment_match_score,
-                                           -alignment_mm_transition_score,
-                                           -alignment_mm_transversion_score);
-    #else
-        static_assert(false,
-            "Define an alphabet: either "
-            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
-        );
-    #endif
+    } else {
+        #if _PROTEIN_GRAPH
+            score_matrix_ = score_matrix_blosum62;
+        #elif _DNA_GRAPH || _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+            score_matrix_ = dna_scoring_matrix(alignment_match_score,
+                                               -alignment_mm_transition_score,
+                                               -alignment_mm_transversion_score);
+        #else
+            static_assert(false,
+                "Define an alphabet: either "
+                "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+            );
+        #endif
+    }
 }
 
 DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
