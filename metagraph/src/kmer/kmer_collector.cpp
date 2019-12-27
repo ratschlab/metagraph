@@ -281,12 +281,6 @@ void KmerCollector<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerCollector<KMER, KmerExtractor, Container>
-::insert_dummy(const KMER &dummy_kmer) {
-    kmers_.insert(&dummy_kmer, &dummy_kmer + 1);
-};
-
-template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>::release_task_to_pool() {
     auto *buffered_sequences = new std::vector<std::pair<std::string, uint64_t>>();
     buffered_sequences->swap(buffered_sequences_);
@@ -308,34 +302,22 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
 }
 
 
-#define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER, CONTAINER) \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSet<KMER, CONTAINER<KMER>>>; \
-    template class KmerCollector< \
-            KMER, KMER_EXTRACTOR, \
-            common::SortedMultiset<KMER, uint8_t, CONTAINER<std::pair<KMER, uint8_t>>>>; \
-    template class KmerCollector< \
-            KMER, KMER_EXTRACTOR, \
-            common::SortedMultiset<KMER, uint32_t, CONTAINER<std::pair<KMER, uint32_t>>>>;
+#define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER) \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSet<KMER, Vector<KMER>>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, \
+            common::SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, \
+            common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER>>; \
 
 
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64, Vector)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128, Vector)
-INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256, Vector)
+INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64)
+INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128)
+INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256)
 
-template class KmerCollector<KmerExtractorBOSS::Kmer64,
-                             KmerExtractorBOSS,
-                             common::SortedSetDisk<KmerExtractorBOSS::Kmer64>>;
-template class KmerCollector<KmerExtractorBOSS::Kmer128,
-                             KmerExtractorBOSS,
-                             common::SortedSetDisk<KmerExtractorBOSS::Kmer128>>;
-template class KmerCollector<KmerExtractorBOSS::Kmer256,
-                             KmerExtractorBOSS,
-                             common::SortedSetDisk<KmerExtractorBOSS::Kmer256>>;
-
-
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64, Vector)
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128, Vector)
-INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256, Vector)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256)
 
 } // namespace kmer
 } // namespace mg
