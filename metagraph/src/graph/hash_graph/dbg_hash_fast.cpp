@@ -10,8 +10,8 @@
 #include "common/serialization.hpp"
 #include "common/vectors/bit_vector.hpp"
 #include "common/algorithms.hpp"
-#include "utils/hash_utils.hpp"
-#include "utils/string_utils.hpp"
+#include "common/hash/hash.hpp"
+#include "common/utils/string_utils.hpp"
 #include "kmer/kmer_extractor.hpp"
 
 

@@ -9,7 +9,6 @@ include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 
 add_subdirectory(${PROJECT_PARENT_DIR}/src/common metagraph_common)
-add_subdirectory(${PROJECT_PARENT_DIR}/src/utils metagraph_utils)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/kmer kmer)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/base metagraph_graph_base)
 
@@ -48,7 +47,6 @@ target_link_libraries(metagraph_succinct
     progress_bar
     kmer
     metagraph_common
-    metagraph_utils
     metagraph_graph_base
 )
 

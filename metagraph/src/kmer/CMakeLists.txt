@@ -6,14 +6,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(../common metagraph_common)
-add_subdirectory(../utils metagraph_utils)
 
 SET(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 
-file(GLOB src_files "*.cpp" "kmc_counter/*.cpp")
+file(GLOB src_files "*.cpp")
 
 add_library(kmer STATIC ${src_files})
 
@@ -21,7 +20,6 @@ set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 
 target_include_directories(kmer
   PRIVATE
-    ${EXTERNAL_LIB_DIR}/KMC/kmc_api
     ${EXTERNAL_LIB_DIR}/ips4o
   PUBLIC
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
@@ -34,7 +32,6 @@ target_link_libraries(kmer
     ${FOLLY_LIBRARIES}
     ${SDSL_LIBRARY}
     metagraph_common
-    metagraph_utils
 )
 
 

@@ -11,9 +11,9 @@
 #include "common/sorted_set_disk.hpp"
 #include "common/threads/threading.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
+#include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
-#include "utils/file_utils.hpp"
-#include "utils/template_utils.hpp"
 
 namespace mg {
 namespace succinct {

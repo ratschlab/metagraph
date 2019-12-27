@@ -2,7 +2,7 @@
 
 #include <type_traits>
 
-#include "utils/template_utils.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"

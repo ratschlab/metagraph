@@ -7,8 +7,8 @@
 
 #include "common/algorithms.hpp"
 #include "common/threads/threading.hpp"
-#include "utils/string_utils.hpp"
-#include "utils/file_utils.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 
 using namespace mg;
 

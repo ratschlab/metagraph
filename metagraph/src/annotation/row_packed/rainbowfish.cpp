@@ -8,8 +8,8 @@
 #include "common/vector.hpp"
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
-#include "utils/template_utils.hpp"
-#include "hash_utils.hpp"
+#include "common/hash/hash.hpp"
+#include "common/utils/template_utils.hpp"
 #include "binary_matrix.hpp"
 
 

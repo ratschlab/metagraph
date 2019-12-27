@@ -9,7 +9,7 @@
 #include <sdsl/uint256_t.hpp>
 
 #include "common/vector.hpp"
-#include "utils/string_utils.hpp"
+#include "common/utils/string_utils.hpp"
 #include "kmer.hpp"
 #include "kmer_boss.hpp"
 #include "alphabets.hpp"

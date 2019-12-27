@@ -5,7 +5,7 @@
 
 #include <zlib.h>
 
-#include "utils/string_utils.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/serialization.hpp"
 
 

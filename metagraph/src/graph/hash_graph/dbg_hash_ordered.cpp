@@ -5,7 +5,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/bit_vector.hpp"
-#include "utils/hash_utils.hpp"
+#include "common/hash/hash.hpp"
 #include "kmer/kmer_extractor.hpp"
 
 

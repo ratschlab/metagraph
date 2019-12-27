@@ -40,7 +40,7 @@
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
 #include "reverse_complement.hpp"
-#include "utils/template_utils.hpp"
+#include "common/utils/template_utils.hpp"
 
 using mg::common::logger;
 using utils::get_verbose;
