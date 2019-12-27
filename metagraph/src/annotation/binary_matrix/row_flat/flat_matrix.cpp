@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <functional>
 
-#include "serialization.hpp"
+#include "common/serialization.hpp"
 
 
 template <typename BitVector>

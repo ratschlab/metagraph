@@ -2,15 +2,16 @@
 
 #include <algorithm>
 #include <functional>
-#include <tsl/hopscotch_map.h>
+
 #include <ips4o.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "common/vector.hpp"
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
 #include "common/hash/hash.hpp"
 #include "common/utils/template_utils.hpp"
-#include "binary_matrix.hpp"
+#include "binary_matrix/base/binary_matrix.hpp"
 
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,

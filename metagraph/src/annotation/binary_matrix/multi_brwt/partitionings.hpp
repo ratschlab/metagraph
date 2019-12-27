@@ -4,7 +4,7 @@
 #include "BRWT_builders.hpp"
 
 
-// Partitionings for BRWT
+// Partitionings for Multi-BRWT
 
 // input: columns
 // output: partition, for instance -- a set of column pairs

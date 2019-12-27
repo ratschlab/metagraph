@@ -1,6 +1,6 @@
 #include "column_major.hpp"
 
-#include "serialization.hpp"
+#include "common/serialization.hpp"
 
 
 ColMajorCompressed

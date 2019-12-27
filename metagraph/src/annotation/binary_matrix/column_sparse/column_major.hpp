@@ -1,8 +1,8 @@
 #ifndef __COLUMN_MAJOR_HPP__
 #define __COLUMN_MAJOR_HPP__
 
-#include "binary_matrix.hpp"
-#include "bit_vector.hpp"
+#include "common/vectors/bit_vector.hpp"
+#include "binary_matrix/base/binary_matrix.hpp"
 
 
 class ColMajorCompressed : public BinaryMatrix {

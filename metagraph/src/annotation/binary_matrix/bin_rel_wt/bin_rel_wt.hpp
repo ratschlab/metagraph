@@ -3,7 +3,7 @@
 
 #include <brwt/binary_relation.h>
 
-#include "binary_matrix.hpp"
+#include "binary_matrix/base/binary_matrix.hpp"
 
 class bit_vector;
 

@@ -5,9 +5,9 @@
 #include <unordered_map>
 #include <memory>
 
-#include "binary_matrix.hpp"
-#include "bit_vector.hpp"
-#include "range_partition.hpp"
+#include "common/vectors/bit_vector.hpp"
+#include "common/range_partition.hpp"
+#include "binary_matrix/base/binary_matrix.hpp"
 
 
 // Compress sparse binary matrix (binary relations)

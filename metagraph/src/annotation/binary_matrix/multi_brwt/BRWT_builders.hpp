@@ -5,9 +5,9 @@
 #include <unordered_map>
 #include <memory>
 
+#include "common/vectors/bit_vector.hpp"
+#include "common/threads/threading.hpp"
 #include "BRWT.hpp"
-#include "bit_vector.hpp"
-#include "threading.hpp"
 
 
 class BRWTBuilder {

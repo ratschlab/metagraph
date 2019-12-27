@@ -3,9 +3,9 @@
 
 #include <vector>
 
-#include "binary_matrix.hpp"
-#include "bit_vector.hpp"
-#include "flat_matrix.hpp"
+#include "common/vectors/bit_vector.hpp"
+#include "binary_matrix/base/binary_matrix.hpp"
+#include "binary_matrix/row_flat/flat_matrix.hpp"
 
 
 class Rainbowfish : public BinaryMatrix {
