@@ -161,7 +161,7 @@ void MaskedDeBruijnGraph
 
     bool stop = false;
 
-    // TODO: add terminate<bool(void)> to call_ondes
+    // TODO: add terminate<bool(void)> to call_ones
     kmers_in_graph_->call_ones(
         [&](auto index) {
             if (stop || !index)

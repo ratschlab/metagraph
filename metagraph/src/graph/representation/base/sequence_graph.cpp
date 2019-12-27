@@ -332,7 +332,7 @@ void call_sequences(const DeBruijnGraph &graph,
     //       \___
     //
     call_zeros(visited, [&](auto node) {
-        // TODO: this two calls to outgoing nodes could be combined into one
+        // TODO: these two calls to outgoing nodes could be combined into one
         if (graph.has_multiple_outgoing(node)) {
             graph.adjacent_outgoing_nodes(node, [&](auto next) {
                 if (!visited[next])
