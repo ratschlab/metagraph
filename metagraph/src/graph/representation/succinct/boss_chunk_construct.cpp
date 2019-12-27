@@ -2,7 +2,6 @@
 
 #include <ips4o.hpp>
 
-#include "boss_chunk.hpp"
 #include "common/circular_buffer.hpp"
 #include "common/file_merger.hpp"
 #include "common/logger.hpp"
@@ -14,6 +13,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
+#include "boss_chunk.hpp"
 
 namespace mg {
 namespace succinct {

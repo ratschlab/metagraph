@@ -5,8 +5,8 @@
 
 #include "gtest/gtest.h"
 
-#include "graph/aligner/aligner_helper.hpp"
-#include "graph/base/sequence_graph.hpp"
+#include "graph/alignment/aligner_helper.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 template <typename NodeType>

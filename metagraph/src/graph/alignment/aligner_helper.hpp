@@ -13,7 +13,7 @@
 #include <json/json.h>
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "graph/base/sequence_graph.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 class Cigar {

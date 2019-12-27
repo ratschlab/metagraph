@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "kmer/kmer_collector_config.hpp"
-#include "graph/succinct/boss.hpp"
+#include "graph/representation/succinct/boss.hpp"
 
 
 class Config {

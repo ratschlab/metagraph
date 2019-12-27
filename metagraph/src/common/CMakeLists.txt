@@ -4,8 +4,6 @@ project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_subdirectory(./utils metagraph_utils)
-
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
@@ -52,7 +50,6 @@ target_link_libraries(metagraph_common
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
-    metagraph_utils
     spdlog::spdlog
 )
 

@@ -4,8 +4,8 @@
 #include "test_aligner_helpers.hpp"
 #include "../test_helpers.hpp"
 
-#include "graph/aligner/dbg_aligner.hpp"
-#include "graph/aligner/aligner_methods.hpp"
+#include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_methods.hpp"
 
 #include "annotation/column_compressed/annotate_column_compressed.hpp"
 #include "common/seq_tools/reverse_complement.hpp"

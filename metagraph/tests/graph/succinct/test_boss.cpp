@@ -4,8 +4,8 @@
 #include <htslib/kseq.h>
 #include <unordered_set>
 
-#include "graph/succinct/boss.hpp"
-#include "graph/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 #include "common/algorithms.hpp"
 
 KSEQ_INIT(gzFile, gzread);

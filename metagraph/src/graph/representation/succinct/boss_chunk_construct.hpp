@@ -5,9 +5,9 @@
 #include <cstdint>
 #include <functional>
 
-#include "graph/succinct/boss_chunk.hpp"
-#include "graph/base/dbg_construct.hpp"
 #include "kmer/kmer_collector_config.hpp"
+#include "graph/representation/base/dbg_construct.hpp"
+#include "boss_chunk.hpp"
 
 namespace mg {
 namespace succinct {

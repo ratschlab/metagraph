@@ -221,7 +221,7 @@ link_directories(
 )
 
 MACRO(SUBDIRLIST result curdir)
-  FILE(GLOB children RELATIVE ${curdir} ${curdir}/* ${curdir}/*/*)
+  FILE(GLOB children RELATIVE ${curdir} ${curdir}/* ${curdir}/*/* ${curdir}/*/*/*)
   SET(dirlist "${curdir}")
   FOREACH(child ${children})
     IF(IS_DIRECTORY ${curdir}/${child})
@@ -337,6 +337,7 @@ file(GLOB src_files
   "src/*.cpp"
   "src/*/*.cpp"
   "src/*/*/*.cpp"
+  "src/*/*/*/*.cpp"
 )
 
 # for compiling faster

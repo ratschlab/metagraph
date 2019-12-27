@@ -1,9 +1,9 @@
-#include "graph/succinct/boss_merge.hpp"
+#include "graph/representation/succinct/boss_merge.hpp"
 
 #include <gtest/gtest.h>
 
-#include "graph/succinct/boss.hpp"
-#include "graph/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 
 const std::string test_data_dir = TEST_DATA_DIR;
 

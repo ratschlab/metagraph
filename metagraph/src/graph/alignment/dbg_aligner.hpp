@@ -9,7 +9,7 @@
 #include "aligner_helper.hpp"
 #include "aligner_methods.hpp"
 #include "common/bounded_priority_queue.hpp"
-#include "graph/base/sequence_graph.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 class IDBGAligner {

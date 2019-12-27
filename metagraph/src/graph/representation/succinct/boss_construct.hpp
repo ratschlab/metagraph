@@ -1,8 +1,8 @@
 #ifndef __BOSS_CONSTRUCT_HPP__
 #define __BOSS_CONSTRUCT_HPP__
 
-#include "graph/succinct/boss_chunk_construct.hpp"
-#include "graph/base/dbg_construct.hpp"
+#include "graph/representation/base/dbg_construct.hpp"
+#include "boss_chunk_construct.hpp"
 
 
 class BOSSConstructor : public IGraphConstructor<BOSS> {

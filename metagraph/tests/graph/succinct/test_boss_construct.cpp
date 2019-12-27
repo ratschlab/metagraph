@@ -1,4 +1,4 @@
-#include "graph/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 
 #include <stdio.h>
 #include <string>
@@ -12,7 +12,7 @@
 #define protected public
 #define private public
 
-#include "graph/succinct/boss.hpp"
+#include "graph/representation/succinct/boss.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"

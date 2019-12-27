@@ -5,8 +5,8 @@
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/vectors/wavelet_tree.hpp"
-#include "graph/base/sequence_graph.hpp"
 #include "kmer/kmer_extractor.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 class BOSSConstructor;
 

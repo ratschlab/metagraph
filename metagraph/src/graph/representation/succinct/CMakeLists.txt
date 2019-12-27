@@ -3,14 +3,14 @@ project(metagraph_succinct)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../../..)
+set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../../../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 
 add_subdirectory(${PROJECT_PARENT_DIR}/src/common metagraph_common)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/kmer kmer)
-add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/base metagraph_graph_base)
+add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/representation/base metagraph_graph_base)
 
 findFolly()
 checkFileSystem()
