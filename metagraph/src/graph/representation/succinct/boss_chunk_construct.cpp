@@ -369,35 +369,35 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
                          double memory_preallocated = 0)
-          : kmer_storage_(k + 1,
-                          canonical_mode,
-                          encode_filter_suffix_boss(filter_suffix),
-                          num_threads,
-                          memory_preallocated) {
+          : kmer_collector_(k + 1,
+                            canonical_mode,
+                            encode_filter_suffix_boss(filter_suffix),
+                            num_threads,
+                            memory_preallocated) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
-            kmer_storage_.add_kmer(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
+            kmer_collector_.add_kmer(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
 
     void add_sequence(std::string&& sequence, uint64_t count) {
-        kmer_storage_.add_sequence(std::move(sequence), count);
+        kmer_collector_.add_sequence(std::move(sequence), count);
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {
-        kmer_storage_.add_sequences(generate_sequences);
+        kmer_collector_.add_sequences(generate_sequences);
     }
 
     BOSS::Chunk* build_chunk() {
-        auto &kmers = kmer_storage_.data();
+        auto &kmers = kmer_collector_.data();
 
-        if (!kmer_storage_.suffix_length()) {
+        if (!kmer_collector_.suffix_length()) {
             logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
 
             // kmer_collector stores (BOSS::k_ + 1)-mers
-            recover_source_dummy_nodes(kmer_storage_.get_k() - 1,
+            recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
                                        &kmers,
-                                       kmer_storage_.num_threads(),
+                                       kmer_collector_.num_threads(),
                                        async_worker_);
 
             logger->trace("Dummy source k-mers were reconstructed in {} sec",
@@ -408,27 +408,27 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
         if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
             // kmer_collector stores (BOSS::k_ + 1)-mers
-            result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
-                                     kmer_storage_.get_k() - 1,
-                                     kmer_storage_.is_both_strands_mode(),
+            result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
+                                     kmer_collector_.get_k() - 1,
+                                     kmer_collector_.is_both_strands_mode(),
                                      kmers,
                                      kBitsPerCount);
         } else {
             // kmer_collector stores (BOSS::k_ + 1)-mers
-            result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
-                                     kmer_storage_.get_k() - 1,
-                                     kmer_storage_.is_both_strands_mode(),
+            result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
+                                     kmer_collector_.get_k() - 1,
+                                     kmer_collector_.is_both_strands_mode(),
                                      kmers);
         }
 
-        kmer_storage_.clear();
+        kmer_collector_.clear();
 
         return result;
     }
 
-    uint64_t get_k() const { return kmer_storage_.get_k() - 1; }
+    uint64_t get_k() const { return kmer_collector_.get_k() - 1; }
 
-    KmerCollector kmer_storage_;
+    KmerCollector kmer_collector_;
     /** Used as an async executor for merging chunks from disk */
     ThreadPool async_worker_ = ThreadPool(1, 1);
 };
