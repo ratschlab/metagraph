@@ -206,7 +206,8 @@ KmerCollector<KMER, KmerExtractor, Container>
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
-        stored_sequences_size_(0),
+        batch_accumulator_([this](auto&& sequences) { add_batch(std::move(sequences)); },
+                           kMaxKmersChunkSize, kMaxKmersChunkSize, kMaxKmersChunkSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
         both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
@@ -225,18 +226,8 @@ void KmerCollector<KMER, KmerExtractor, Container>
     if (sequence.size() < k_)
         return;
 
-    // put read into temporary storage
-    stored_sequences_size_ += sequence.size();
-    buffered_sequences_.emplace_back(std::move(sequence), count);
-
-    if (stored_sequences_size_ < kMaxKmersChunkSize)
-        return;
-
-    // extract all k-mers from sequences accumulated in the temporary storage
-    release_task_to_pool();
-
-    assert(!stored_sequences_size_);
-    assert(!buffered_sequences_.size());
+    // push read to the processing queue
+    batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, std::move(sequence), count);
 }
 
 template <typename KMER, class KmerExtractor, class Container>
@@ -281,23 +272,18 @@ void KmerCollector<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerCollector<KMER, KmerExtractor, Container>::release_task_to_pool() {
-    auto *buffered_sequences = new std::vector<std::pair<std::string, uint64_t>>();
-    buffered_sequences->swap(buffered_sequences_);
-
-    add_sequences([buffered_sequences](CallStringCount callback) {
-        for (const auto& [sequence, count] : *buffered_sequences) {
-            callback(sequence, count);
+void KmerCollector<KMER, KmerExtractor, Container>
+::add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
+    add_sequences([buffered_sequences{std::move(sequences)}](CallStringCount callback) {
+        for (const auto &[seq, count] : buffered_sequences) {
+            callback(seq, count);
         }
-        delete buffered_sequences;
     });
-
-    stored_sequences_size_ = 0;
 }
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>::join() {
-    release_task_to_pool();
+    batch_accumulator_.process_all_buffered();
     thread_pool_.join();
 }
 

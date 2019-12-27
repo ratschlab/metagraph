@@ -2,6 +2,7 @@
 #define __KMER_COLLECTOR_HPP__
 
 #include "common/threads/threading.hpp"
+#include "common/batch_accumulator.hpp"
 
 namespace mg {
 namespace kmer {
@@ -73,9 +74,12 @@ class KmerCollector {
     inline size_t num_threads() const { return num_threads_; }
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
 
+    /**
+     * Sends sequences accumulated in #batch_accumulator_ for processing
+     * on the thread pool. */
+    void add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences);
+
   private:
-    /** Sends the current #buffered_sequences_ for processing on the thread pool. */
-    void release_task_to_pool();
     void join();
 
     size_t k_;
@@ -84,8 +88,7 @@ class KmerCollector {
     size_t num_threads_;
     ThreadPool thread_pool_;
 
-    std::vector<std::pair<std::string, uint64_t>> buffered_sequences_;
-    size_t stored_sequences_size_;
+    BatchAccumulator<std::pair<std::string, uint64_t>, size_t> batch_accumulator_;
 
     Sequence filter_suffix_encoded_;
 
