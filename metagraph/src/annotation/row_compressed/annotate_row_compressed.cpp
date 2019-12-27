@@ -72,8 +72,15 @@ void RowCompressed<Label>::add_labels(Index i, const VLabels &labels) {
 template <typename Label>
 void RowCompressed<Label>::add_labels(const std::vector<Index> &indices,
                                       const VLabels &labels) {
+    std::vector<uint64_t> columns(labels.size());
+    for (size_t t = 0; t < labels.size(); ++t) {
+        columns[t] = label_encoder_.insert_and_encode(labels[t]);
+    }
+
     for (Index i : indices) {
-        add_labels(i, labels);
+        for (size_t j : columns) {
+            matrix_->set(i, j);
+        }
     }
 }
 
