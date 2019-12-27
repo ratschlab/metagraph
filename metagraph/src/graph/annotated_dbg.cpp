@@ -17,20 +17,6 @@ AnnotatedDBG::AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
     assert(annotator_.get());
 }
 
-void AnnotatedDBG::insert_zero_rows(Annotator *annotator,
-                                    const bit_vector_dyn &inserted_edges) {
-    assert(annotator);
-
-    std::vector<uint64_t> inserted_edge_idx;
-
-    // transform indexes of the inserved k-mers to the annotation format
-    inserted_edges.call_ones([&](auto i) {
-        inserted_edge_idx.push_back(graph_to_anno_index(i));
-    });
-
-    annotator->insert_rows(inserted_edge_idx);
-}
-
 void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
                                                  const std::vector<std::string> &labels) {
     std::vector<uint64_t> indices;

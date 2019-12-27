@@ -1773,7 +1773,12 @@ int main(int argc, char *argv[]) {
 
             logger->trace("Insert empty rows in annotation matrix...");
 
-            AnnotatedDBG::insert_zero_rows(annotation.get(), *inserted_edges);
+            // transform indexes of the inserved k-mers to the annotation format
+            std::vector<uint64_t> inserted_rows;
+            inserted_edges->call_ones([&](auto i) {
+                inserted_rows.push_back(AnnotatedDBG::graph_to_anno_index(i));
+            });
+            annotation->insert_rows(inserted_rows);
 
             logger->trace("Rows inserted in {} sec", timer.elapsed());
 

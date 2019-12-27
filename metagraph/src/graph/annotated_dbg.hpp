@@ -42,10 +42,6 @@ class AnnotatedDBG {
 
     const Annotator& get_annotation() const { return *annotator_; }
 
-    // TODO: remove this method from here
-    static void insert_zero_rows(Annotator *annotator,
-                                 const bit_vector_dyn &inserted_edges);
-
     /*********************** Special queries **********************/
 
     // return labels that occur at least in |presence_ratio| k-mers
