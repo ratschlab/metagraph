@@ -343,15 +343,11 @@ inline std::vector<KmerExtractorBOSS::TAlphabet>
 encode_filter_suffix_boss(const std::string &filter_suffix) {
     KmerExtractorBOSS kmer_extractor;
     std::vector<typename KmerExtractorBOSS::TAlphabet> filter_suffix_encoded;
-    std::transform(
-        filter_suffix.begin(), filter_suffix.end(),
-        std::back_inserter(filter_suffix_encoded),
-        [&kmer_extractor](char c) {
-            return c == BOSS::kSentinel
-                            ? BOSS::kSentinelCode
-                            : kmer_extractor.encode(c);
-        }
-    );
+    for (char c : filter_suffix) {
+        filter_suffix_encoded.push_back(c == BOSS::kSentinel
+                                        ? BOSS::kSentinelCode
+                                        : kmer_extractor.encode(c));
+    }
     return filter_suffix_encoded;
 }
 

@@ -51,14 +51,9 @@ inline std::vector<typename KmerExtractor::TAlphabet>
 encode_filter_suffix(const std::string &filter_suffix) {
     KmerExtractor kmer_extractor;
     std::vector<typename KmerExtractor::TAlphabet> filter_suffix_encoded;
-    // TODO: cleanup
-    std::transform(
-        filter_suffix.begin(), filter_suffix.end(),
-        std::back_inserter(filter_suffix_encoded),
-        [&kmer_extractor](char c) {
-            return kmer_extractor.encode(c);
-        }
-    );
+    for (char c : filter_suffix) {
+        filter_suffix_encoded.push_back(kmer_extractor.encode(c));
+    }
     return filter_suffix_encoded;
 }
 
