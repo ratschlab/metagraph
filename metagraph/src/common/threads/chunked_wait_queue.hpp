@@ -276,12 +276,9 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
      * Undefined behavior if the iterator is pointing at the past-the-end element.
      */
     T operator*() const {
-#ifdef DEBUG
-        if (idx_ == parent_->buffer_size_) {
-            std::cerr << "Attempting to dereference past-the-end iterator." << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
-#endif
+        assert(idx_ < parent_->buffer_size_
+                && "Attempting to dereference past-the-end iterator");
+
         return parent_->queue_[idx_];
     }
 

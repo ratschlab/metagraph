@@ -238,21 +238,18 @@ void recover_source_dummy_nodes(size_t k,
 
     const auto no_cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
 
-    // asynchronously writes a value of type T to a file stream
-    // TODO(ddanciu): profile this, as I suspect it's slow - use a WaitQueue instead
-    ThreadPool file_write_pool = ThreadPool(1, 10000);
     const auto file_writer
             = [](std::ofstream &f) { return [&f](const T &v) { write_or_die<T>(&f, v); }; };
 
-    std::vector<std::pair<std::string, std::ofstream *>> files_to_merge;
-    auto create_stream = [](const std::string &name) {
-        std::ofstream *f = new std::ofstream(name, std::ios::out | std::ios::binary);
-        return std::pair<std::string, std::ofstream *>({ name, f });
+    std::vector<std::pair<std::string, std::ofstream>> files_to_merge;
+    auto create_stream = [](const std::string &filename) {
+        std::ofstream f(filename, std::ios::out | std::ios::binary);
+        return std::make_pair(filename, std::move(f));
     };
 
     const std::string file_name = "/tmp/original_and_dummy_l1";
     files_to_merge.push_back(create_stream(file_name));
-    std::ofstream *dummy_l1 = files_to_merge.back().second;
+    std::ofstream *dummy_l1 = &files_to_merge.back().second;
 
     using TAlphabet = typename T::CharType;
     RecentKmers<T> recent_buffer((1llu << KMER::kBitsPerChar)
@@ -260,7 +257,7 @@ void recover_source_dummy_nodes(size_t k,
 
     const std::string file_name_l2 = get_file_name(2);
     files_to_merge.push_back(create_stream(file_name_l2));
-    std::ofstream *dummy_l2 = files_to_merge.back().second;
+    std::ofstream *dummy_l2 = &files_to_merge.back().second;
 
     // this will contain dummy k-mers of prefix length 2
     common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads,
@@ -274,6 +271,7 @@ void recover_source_dummy_nodes(size_t k,
     // we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
+    // asynchronously writes a value of type T to a file stream
     utils::BufferedAsyncWriter<T> writer(file_name, dummy_l1);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
@@ -302,45 +300,39 @@ void recover_source_dummy_nodes(size_t k,
     common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
     common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
     for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
-        const std::string file_name = get_file_name(dummy_pref_len);
-        files_to_merge.push_back(create_stream(file_name));
-        dest->clear(file_writer(*(files_to_merge.back().second)));
+        files_to_merge.push_back(create_stream(get_file_name(dummy_pref_len)));
+        dest->clear(file_writer(files_to_merge.back().second));
         dummy_kmers.resize(0);
         size_t num_kmers = 0;
         for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
-            const T &kmer = *it;
             if (dummy_kmers.size() == dummy_kmers.capacity()) {
                 dest->insert(dummy_kmers.begin(), dummy_kmers.end());
                 dummy_kmers.resize(0);
             }
 
-
-            push_back(dummy_kmers, utils::get_first(kmer)).to_prev(k + 1, BOSS::kSentinelCode);
+            push_back(dummy_kmers, utils::get_first(*it)).to_prev(k + 1, BOSS::kSentinelCode);
             num_kmers++;
         }
         // push out the leftover dummy kmers
         dest->insert(dummy_kmers.begin(), dummy_kmers.end());
 
-
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
-                      (dummy_pref_len - 1), num_kmers);
+                      dummy_pref_len - 1, num_kmers);
+
         std::swap(source, dest);
     }
     for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
         // we iterate to merge the data and write it to disk
     }
 
-    file_write_pool.join();
-
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix
     // length x in /tmp/dummy{x}, and we'll merge them all into a single stream
-    kmers->reset();
     std::vector<std::string> file_names;
     std::for_each(files_to_merge.begin(), files_to_merge.end(), [&file_names](auto &el) {
-        delete el.second; // this will also close the stream
         file_names.push_back(el.first);
     });
 
+    kmers->reset();
     async_worker.enqueue([=]() {
         common::merge_files<T>(file_names, [&](const T &v) { kmers->push(v); });
         kmers->shutdown();

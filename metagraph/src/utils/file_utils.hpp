@@ -54,7 +54,7 @@ class BufferedAsyncWriter {
         buf_dump_.reserve(CAPACITY);
     }
 
-    void operator<<(const T &v) { push(v); }
+    ~BufferedAsyncWriter() { flush(); }
 
     void push(const T &v) {
         if (buf_.size() == CAPACITY) {
@@ -68,12 +68,12 @@ class BufferedAsyncWriter {
     }
 
     void flush() {
+        // wait for the other to finish
+        wait_for_write();
+
         // dump the current buffer
         flush_to_stream(buf_, fos_, name_);
         buf_.resize(0);
-
-        // wait for the second to finish
-        wait_for_write();
 
         fos_->flush();
     }
