@@ -14,9 +14,11 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
 
+    - name: install gcc-9
+      run: sudo apt-get install g++-9
+
     - name: install dependencies
       run: |
-        sudo apt-get install g++-9
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
         cd htslib-1.9
@@ -37,7 +39,11 @@ jobs:
         cmake --install .
 
     - name: install sdsl-lite
-      run: cd metagraph/external-libraries/sdsl-lite && ./install.sh $(pwd)
+      run: |
+        export CC=$(which gcc-9)
+        export CXX=$(which g++-9)
+        cd metagraph/external-libraries/sdsl-lite
+        ./install.sh $(pwd)
 
     - name: configure
       run: |
