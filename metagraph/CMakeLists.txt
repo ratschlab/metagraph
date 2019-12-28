@@ -356,7 +356,7 @@ set(METALIBS ${METALIBS}
   -lmaus2
   -lsdsl
   brwt
-  jsoncpp
+  jsoncpp_lib
   progress_bar
   ${OpenMP_CXX_LIBRARIES}
   fmt::fmt
