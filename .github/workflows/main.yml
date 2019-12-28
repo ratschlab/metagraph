@@ -80,46 +80,51 @@ jobs:
         cd metagraph/build && make check
 
 
-  # build-macos:
+  build-macos:
 
-  #   runs-on: macos-latest
+    runs-on: macos-latest
 
-  #   steps:
-  #   - uses: actions/checkout@v1
+    steps:
+    - uses: actions/checkout@v1
 
-  #   - name: checkout submodules
-  #     run: git submodule update --init --recursive
+    - name: checkout submodules
+      run: git submodule update --init --recursive
 
-  #   - name: install dependencies
-  #     run: brew install htslib libomp
+    - name: install dependencies
+      run: brew install htslib libomp
 
-  #   - name: install dependencies for integration tests
-  #     run: pip3 install parameterized
+    - name: install dependencies for integration tests
+      run: pip3 install parameterized
 
-  #   - name: install libmaus2-lite
-  #     run: |
-  #       cd metagraph/external-libraries/libmaus2
-  #       cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-  #       cmake --build .
-  #       cmake --install .
+    - name: install libmaus2-lite
+      run: |
+        cd metagraph/external-libraries/libmaus2
+        cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
+        cmake --build .
+        cmake --install .
 
-  #   - name: install sdsl-lite
-  #     run: cd metagraph/external-libraries/sdsl-lite && ./install.sh $(pwd)
+    - name: install sdsl-lite
+      run: |
+        cd metagraph/external-libraries/sdsl-lite
+        ./install.sh $(pwd)
 
-  #   - name: configure
-  #     run: cd metagraph && mkdir build && cd build && cmake ..
+    - name: configure
+      run: |
+        mkdir metagraph/build
+        cd metagraph/build
+        cmake ..
 
-  #   - name: build metagraph
-  #     run: cd metagraph/build && make metagraph
+    - name: build metagraph
+      run: cd metagraph/build && make -j 2 metagraph
 
-  #   - name: build unit tests
-  #     run: cd metagraph/build && make unit_tests
+    - name: build unit tests
+      run: cd metagraph/build && make -j 2 unit_tests
 
-  #   - name: build other
-  #     run: cd metagraph && cmake --build build
+    - name: build other
+      run: cd metagraph/build && make
 
-  #   - name: run unit tests
-  #     run: cd metagraph && cd build && ./unit_tests
+    - name: run unit tests
+      run: cd metagraph/build && ./unit_tests
 
-  #   - name: run integration tests
-  #     run: cd metagraph/build && make check
+    - name: run integration tests
+      run: cd metagraph/build && make check
