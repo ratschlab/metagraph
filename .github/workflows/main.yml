@@ -14,6 +14,8 @@ jobs:
       run: git submodule update --init --recursive
     - name: install dependencies
       run: brew install htslib libomp
+    - name: install dependencies for integration tests
+      run: pip3 install parameterized
     - name: install libmaus2-lite
       run: |
         cd metagraph/external-libraries/libmaus2
@@ -25,6 +27,8 @@ jobs:
     - name: configure
       run: cd metagraph && mkdir build && cd build && cmake ..
     - name: build
-      run: cd metagraph && cmake --build build --config Debug
+      run: cd metagraph && cmake --build build
     - name: test
-      run: cd metagraph && cd build && ctest
+      run: cd metagraph && cd build && ./unit_tests
+    - name: run integration tests
+      run: cd metagraph/build && make check
