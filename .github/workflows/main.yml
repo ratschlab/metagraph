@@ -4,7 +4,7 @@ on: [push]
 
 jobs:
 
-  build-macos:
+  build-linux:
 
     runs-on: ubuntu-latest
 
@@ -16,11 +16,11 @@ jobs:
 
     - name: install dependencies
       run: |
-        cd /usr/bin
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
         cd htslib-1.9
         make
+        sudo make install
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
