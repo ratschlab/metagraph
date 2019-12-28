@@ -16,6 +16,7 @@ jobs:
 
     - name: install dependencies
       run: |
+        sudo apt-get install gcc-9
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
         cd htslib-1.9
