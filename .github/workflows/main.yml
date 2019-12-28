@@ -14,6 +14,12 @@ jobs:
       run: git submodule update --init --recursive
     - name: install dependencies
       run: brew install htslib libomp
+    - name: install libmaus2-lite
+      run: |
+        cd metagraph/external-libraries/libmaus2
+        cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
+        cmake --build .
+        cmake --install .
     - name: install sdsl-lite
       run: cd metagraph/external-libraries/sdsl-lite && ./install.sh $(pwd)
     - name: configure
