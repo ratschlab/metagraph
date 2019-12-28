@@ -18,7 +18,7 @@ jobs:
       run: |
         sudo apt-get install g++-9
 
-        sudo apt purge --auto-remove cmake
+        sudo apt remove cmake
         wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | sudo apt-key add -
         sudo apt-add-repository 'deb https://apt.kitware.com/ubuntu/ bionic main'
         sudo apt update
