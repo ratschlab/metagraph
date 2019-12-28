@@ -12,6 +12,8 @@ jobs:
     - uses: actions/checkout@v1
     - name: checkout submodules
       run: git submodule update --init --recursive
+    - name: install dependencies
+      run: brew install htslib
     - name: configure
       run: cd metagraph && mkdir build && cd build && cmake ..
     - name: build
