@@ -18,14 +18,6 @@ jobs:
       run: |
         sudo apt-get install g++-9
 
-        # install cmake 3.13+, required by an exterrnal library (binrel_wt)
-        wget https://github.com/Kitware/CMake/releases/download/v3.16.2/cmake-3.16.2.tar.gz
-        tar xf cmake-3.16.2.tar.gz
-        cd cmake-3.16.2
-        ./bootstrap
-        make
-        sudo make install
-
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
         cd htslib-1.9
