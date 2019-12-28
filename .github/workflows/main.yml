@@ -1,0 +1,20 @@
+name: C/C++ CI
+
+on: [push]
+
+jobs:
+
+  build-macos:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: Checkout submodules
+      uses: textbook/git-checkout-submodule-action@2.0.0
+    - name: configure
+      run: cd metagraph && mkdir build && cd build && cmake ..
+    - name: build
+      run: cd metagraph && cmake --build build --config Debug
+    - name: test
+      run: cd metagraph && cd build && ctest
