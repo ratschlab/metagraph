@@ -18,13 +18,13 @@ jobs:
       run: |
         sudo apt-get install g++-9
 
-        sudo apt-get remove cmake
-        sudo apt-get update
-        sudo apt-get install apt-transport-https ca-certificates gnupg software-properties-common wget
-        wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | sudo apt-key add -
-        sudo apt-add-repository 'deb https://apt.kitware.com/ubuntu/ bionic main'
-        sudo apt-get update
-        sudo apt-get install cmake
+        # install cmake 3.13+, required by an exterrnal library (binrel_wt)
+        wget https://github.com/Kitware/CMake/releases/download/v3.16.2/cmake-3.16.2.tar.gz
+        tar xf cmake-3.16.2.tar.gz
+        cd cmake-3.16.2
+        ./bootstrap
+        make
+        sudo make install
 
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
