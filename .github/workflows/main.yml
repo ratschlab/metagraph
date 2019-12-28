@@ -17,8 +17,6 @@ jobs:
     - name: install dependencies
       run: |
         sudo apt-get install g++-9
-        export CC=$(which gcc-9)
-        export CXX=$(which g++-9)
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
         cd htslib-1.9
@@ -30,6 +28,9 @@ jobs:
 
     - name: install libmaus2-lite
       run: |
+        export CC=$(which gcc-9)
+        export CXX=$(which g++-9)
+        echo $CXX
         cd metagraph/external-libraries/libmaus2
         cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
         cmake --build .
@@ -39,7 +40,12 @@ jobs:
       run: cd metagraph/external-libraries/sdsl-lite && ./install.sh $(pwd)
 
     - name: configure
-      run: cd metagraph && mkdir build && cd build && cmake ..
+      run: |
+        export CC=$(which gcc-9)
+        export CXX=$(which g++-9)
+        mkdir metagraph/build
+        cd metagraph/build
+        cmake ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
