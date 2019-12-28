@@ -10,8 +10,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v1
-    - name: Checkout submodules
-      uses: textbook/git-checkout-submodule-action@2.0.0
+    - name: checkout submodules
+      run: git submodule update --init --recursive
     - name: configure
       run: cd metagraph && mkdir build && cd build && cmake ..
     - name: build
