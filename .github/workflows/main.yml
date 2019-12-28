@@ -6,7 +6,7 @@ jobs:
 
   build-macos:
 
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v1
@@ -15,7 +15,12 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install htslib libomp
+      run: |
+        cd /usr/bin
+        wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
+        tar -vxjf htslib-1.9.tar.bz2
+        cd htslib-1.9
+        make
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
@@ -34,16 +39,16 @@ jobs:
       run: cd metagraph && mkdir build && cd build && cmake ..
 
     - name: build metagraph
-      run: cd metagraph/build && make metagraph
+      run: cd metagraph/build && make -j 2 metagraph
 
     - name: build unit tests
-      run: cd metagraph/build && make unit_tests
+      run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
-      run: cd metagraph && cmake --build build
+      run: cd metagraph/build && make
 
     - name: run unit tests
-      run: cd metagraph && cd build && ./unit_tests
+      run: cd metagraph/build && ./unit_tests
 
     - name: run integration tests
       run: cd metagraph/build && make check
