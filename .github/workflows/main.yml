@@ -13,7 +13,7 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
     - name: install dependencies
-      run: brew install htslib
+      run: brew install htslib libomp
     - name: install sdsl-lite
       run: cd metagraph/external-libraries/sdsl-lite && ./install.sh $(pwd)
     - name: configure
