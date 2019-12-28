@@ -14,11 +14,18 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
 
-    - name: install gcc-9
-      run: sudo apt-get install g++-9
-
     - name: install dependencies
       run: |
+        sudo apt-get install g++-9
+
+        sudo apt purge --auto-remove cmake
+        wget https://github.com/Kitware/CMake/releases/download/v3.16.2/cmake-3.16.2.tar.gz
+        tar xf cmake-3.16.2.tar.gz
+        cd cmake-3.16.2
+        ./bootstrap
+        make
+        sudo make install
+
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
         cd htslib-1.9
