@@ -104,7 +104,7 @@ class Config {
     double bloom_bpk = 4.0;
     std::vector<double> count_slice_quantiles;
 
-    std::vector<std::string> fname;
+    std::vector<std::string> fnames;
     std::vector<std::string> anno_labels;
     std::vector<std::string> infbase_annotators;
     std::vector<std::string> label_mask_in;

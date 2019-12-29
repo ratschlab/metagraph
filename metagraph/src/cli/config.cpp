@@ -330,7 +330,7 @@ Config::Config(int argc, char *argv[]) {
             print_usage(argv[0], identity);
             exit(-1);
         } else {
-            fname.push_back(argv[i]);
+            fnames.push_back(argv[i]);
         }
     }
 
@@ -344,13 +344,13 @@ Config::Config(int argc, char *argv[]) {
     // this still allows for the same file to be included multiple times
     std::unordered_set<std::string> kmc_file_set;
 
-    for (auto it = fname.begin(); it != fname.end(); ++it) {
+    for (auto it = fnames.begin(); it != fnames.end(); ++it) {
         if (utils::get_filetype(*it) == "KMC"
                 && !kmc_file_set.insert(utils::remove_suffix(*it, ".kmc_pre", ".kmc_suf")).second)
-            fname.erase(it--);
+            fnames.erase(it--);
     }
 
-    if (!fname.size() && identity != STATS
+    if (!fnames.size() && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
                       && !(identity == CALL_VARIANTS)
@@ -359,7 +359,7 @@ Config::Config(int argc, char *argv[]) {
         std::string line;
         while (std::getline(std::cin, line)) {
             if (line.size())
-                fname.push_back(line);
+                fnames.push_back(line);
         }
     }
 
@@ -400,10 +400,10 @@ Config::Config(int argc, char *argv[]) {
             && !(identity == BUILD && complete)
             && !(identity == CALL_VARIANTS)
             && !(identity == PARSE_TAXONOMY)
-            && !fname.size())
+            && !fnames.size())
         print_usage_and_exit = true;
 
-    if (identity == CONCATENATE && !(fname.empty() ^ infbase.empty())) {
+    if (identity == CONCATENATE && !(fnames.empty() ^ infbase.empty())) {
         std::cerr << "Error: Either set all chunk filenames"
                   << " or use the -i and -l options" << std::endl;
         print_usage_and_exit = true;
@@ -464,7 +464,7 @@ Config::Config(int argc, char *argv[]) {
             || identity == CLEAN
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
-                    && fname.size() != 1)
+                    && fnames.size() != 1)
         print_usage_and_exit = true;
 
     if ((identity == TRANSFORM
@@ -483,10 +483,10 @@ Config::Config(int argc, char *argv[]) {
             ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
         print_usage_and_exit = true;
 
-    if (identity == MERGE && fname.size() < 2)
+    if (identity == MERGE && fnames.size() < 2)
         print_usage_and_exit = true;
 
-    if (identity == COMPARE && fname.size() != 2)
+    if (identity == COMPARE && fnames.size() != 2)
         print_usage_and_exit = true;
 
     if (discovery_fraction < 0 || discovery_fraction > 1)

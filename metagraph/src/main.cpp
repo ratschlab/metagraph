@@ -1357,7 +1357,7 @@ int main(int argc, char *argv[]) {
 
     logger->trace("Metagraph started");
 
-    const auto &files = config->fname;
+    const auto &files = config->fnames;
 
     switch (config->identity) {
         case Config::EXPERIMENT: {
