@@ -23,8 +23,8 @@ public:
         // find nodes that will
         vector<optional<pair<char,char>>> result_intermediate(graph.num_nodes()+1);
         #pragma omp parallel for
-        for(auto node=1;node<=graph.num_nodes();node++) {
-            if (graph.is_split(node)) {
+        for(uint64_t node=1;node<=graph.num_nodes();node++) {
+            if (is_split_node(graph,node)) {
                 auto possible_weak_split = is_weak_split(node);
                 if (possible_weak_split) {
                     result_intermediate[node] = *possible_weak_split;
@@ -66,13 +66,13 @@ public:
         if (delay_steps < -delay_gap) {
             return 0;
         }
-        if (delay_steps <= 0 and graph.is_join(node)) {
+        if (delay_steps <= 0 and is_join_node(graph,node)) {
             return node;
         }
-        if (graph.is_split(node) or graph.outdegree(node) == 0) {
+        if (is_split_node(graph,node) or graph.outdegree(node) == 0) {
             return 0;
         }
-        return first_join(graph.traverse(node,graph.get_outgoing_base(node)),delay_steps-1);
+        return first_join(graph.traverse(node,get_outgoing_base(graph,node)),delay_steps-1);
     }
     const Graph& graph;
 

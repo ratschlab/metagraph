@@ -133,12 +133,14 @@ inline void reduce_maps(std::map<int, int> &output, std::map<int, int> &input) {
     }
 }
 
+
+// inline them
 template <typename T>
 inline void append_vectors(std::vector<T>& output,std::vector<T>& input)
 {
     output.insert(output.end(),begin(input),end(input));
 }
-
+// inline them
 #pragma omp declare reduction(append : \
     std::vector<string> : \
     append_vectors(omp_out, omp_in))
@@ -162,12 +164,12 @@ inline void append_vectors(std::vector<T>& output,std::vector<T>& input)
 inline int8_t encode(char c) {
     if (c == '#') return 6;//alphabet_decoder.alph_size;
     if (c == '$') return 0;
-    return KmerExtractor::encode(c);
+    return KmerExtractorBOSS::encode(c);
 }
 inline char decode(int8_t c) {
     if (c == 6) return '#';
     if (c == 0) return '$';
-    return KmerExtractor::decode(c);
+    return KmerExtractorBOSS::decode(c);
 }
 
 inline string& clamp_alphabet(string& text,const string& alphabet="$ACGTN",char replacement='N') {
@@ -179,6 +181,7 @@ inline string& clamp_alphabet(string& text,const string& alphabet="$ACGTN",char 
     return text;
 }
 
+// TODO: change occurences of read_reads to streaming mode (with callback function)
 inline vector <string> read_reads_from_fasta(const string &filename) {
     vector<string> result;
     read_fasta_file_critical(
@@ -237,7 +240,7 @@ struct has_member {
 
 inline int64_t get_used_memory() {
     struct rusage my_rusage{};
-    int succ = getrusage(RUSAGE_SELF,&my_rusage);
+    getrusage(RUSAGE_SELF,&my_rusage);
     return my_rusage.ru_maxrss;
 }
 
@@ -268,13 +271,13 @@ struct has_member_##member {                                                \
 
 
 
-
+// TODO: move to tests
 #undef protected
 template <typename Test,typename Reference>
 class IdentityComparator : public Reference {
 public:
     template<typename ...Args>
-    IdentityComparator(Args... args) : Reference(args...), t(args...) {}
+    IdentityComparator(const Args&... args) : Reference(args...), t(args...) {}
 
     virtual ~IdentityComparator() {}
 

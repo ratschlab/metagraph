@@ -18,7 +18,7 @@
 #include "path_database.hpp"
 #include "graph_patch.hpp"
 #include "path_database_dynamic.hpp"
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
 #include "graph_preprocessor.hpp"
@@ -95,8 +95,8 @@ public:
     }
 
 
-    ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
     shared_ptr<const BetterDBGSuccinct> graph;
+    ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
 };
 
 

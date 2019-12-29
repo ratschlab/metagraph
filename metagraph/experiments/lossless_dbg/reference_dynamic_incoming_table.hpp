@@ -75,7 +75,6 @@ public:
 
     string print_content(node_index node) const {
         stringstream out;
-        auto table_size = size(node);
         for(char c : "$ACGTN") {
             out << c << ":" << branch_size(node,c) << endl;
         }

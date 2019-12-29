@@ -73,7 +73,7 @@ add_subdirectory(
 )
 
 if(NOT CMAKE_DBG_ALPHABET)
-  set(CMAKE_DBG_ALPHABET "DNA")
+  set(CMAKE_DBG_ALPHABET "DNA5") # keep legacy
 endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
@@ -94,7 +94,10 @@ string(APPEND CMAKE_CXX_FLAGS
 )
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  #  -Wno-unused-variable + -Wno-sign-compare added provisionally
   string(APPEND CMAKE_CXX_FLAGS " \
+    -Wno-unused-parameter \
+    -Wno-sign-compare \
     -Wno-exit-time-destructors \
     -Wno-unused-function \
     -Wno-old-style-cast \
@@ -283,6 +286,19 @@ find_library(FOLLY_LIBRARIES
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
   find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+  # Workaround for https://stackoverflow.com/questions/58446253/xcode-11-ld-error-your-binary-is-not-an-allowed-client-of-usr-lib-libcrypto-dy/59115529#59115529
+  if(OPENSSL_FOUND)
+    if(APPLE)
+      include_directories(/usr/local/Cellar/openssl@1.1/1.1.1d/include)
+      list(APPEND METALIBS /usr/local/Cellar/openssl@1.1/1.1.1d/lib/libssl.dylib)
+      list(APPEND METALIBS /usr/local/Cellar/openssl@1.1/1.1.1d/lib/libcrypto.dylib)
+      message(STATUS "OpenSSL Version: ${OPENSSL_VERSION} ${OPENSSL_INCLUDE_DIR} ${OPENSSL_LIBRARIES}")
+    else()
+      include_directories(${OPENSSL_INCLUDE_DIR})
+      list(APPEND METALIBS ${OPENSSL_LIBRARIES})
+      message(STATUS "OpenSSL Version: ${OPENSSL_VERSION} ${OPENSSL_INCLUDE_DIR} ${OPENSSL_LIBRARIES}")
+    endif()
+  endif()
   set(METALIBS ${METALIBS}
     ${FOLLY_LIBRARIES}
     -ldouble-conversion
@@ -290,7 +306,7 @@ if(FOLLY_LIBRARIES)
     -lboost_regex
     -lboost_filesystem
     -lboost_program_options
-    OpenSSL::Crypto
+    #OpenSSL::Crypto
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
@@ -445,6 +461,13 @@ add_executable(run_experiments ${experiment_files})
 target_link_libraries(
   run_experiments metagraph ${METALIBS}
 )
+
+
+# -------
+# Lossless dbg
+# -----
+
+add_subdirectory(experiments/lossless_dbg/)
 
 #-------------------
 # install library

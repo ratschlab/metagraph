@@ -14,7 +14,7 @@
 #include "path_database.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
@@ -110,7 +110,7 @@ public:
             }
         }
         else {
-            auto base = this->graph.get_outgoing_base(node);
+            auto base = get_outgoing_base(this->graph,node);
             auto new_node = this->graph.traverse(node,base);
             result[new_node].first = 0;
             result[new_node].second = history;

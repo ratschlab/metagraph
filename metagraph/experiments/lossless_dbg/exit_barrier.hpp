@@ -34,8 +34,8 @@ public:
         if (get_num_threads() > max_threads) {
             throw "Implementation doesn't work with more than "s + to_string(max_threads) + " threads"s;
         }
-        for(int64_t i=0;i<exit_barriers.elements.size();i++) {
-            using BarrierT = typename decltype(exit_barriers)::element_type;
+        for(uint64_t i=0;i<exit_barriers.elements.size();i++) {
+            //using BarrierT = typename decltype(exit_barriers)::element_type;
             //exit_barriers.elements[i] = BarrierT(get_num_threads(),{0});
             exit_barriers.elements[i] = {{0},{0}};
 #ifndef DISABLE_PARALELIZATION
@@ -44,7 +44,7 @@ public:
         }
     }
     ~ExitBarrier(){
-        for(int64_t i=0;i<exit_barriers.elements.size();i++) {
+        for(uint64_t i=0;i<exit_barriers.elements.size();i++) {
 #ifndef DISABLE_PARALELIZATION
             omp_destroy_lock(&exit_barrier_locks.elements[i]);
 #endif
@@ -157,13 +157,13 @@ class ReferenceExitBarrier {
 public:
 ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chunk_size=DefaultChunks) :
         waiting_threads(is_element,rank_is_element,chunk_size), waiting_queue_locks(is_element, rank_is_element, chunk_size) {
-    for(int64_t i=0;i<waiting_threads.elements.size();i++) {
+    for(uint64_t i=0;i<waiting_threads.elements.size();i++) {
         omp_init_lock(&waiting_queue_locks.elements[i]);
     }
 }
 
 ~ReferenceExitBarrier(){
-    for(int64_t i=0;i<waiting_threads.elements.size();i++) {
+    for(uint64_t i=0;i<waiting_threads.elements.size();i++) {
         omp_destroy_lock(&waiting_queue_locks.elements[i]);
     }
 }

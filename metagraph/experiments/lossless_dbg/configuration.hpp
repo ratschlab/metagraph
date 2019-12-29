@@ -7,8 +7,9 @@
 
 #include <sdsl/rrr_vector.hpp>
 #include <sdsl/wt_rlmn.hpp>
-
+// TODO: move to place where
 //#define MASK_DUMMY_KMERS
 using DefaultUnderlyingWaveletBV = sdsl::rrr_vector<>;
-using DefaultWavelet = sdsl::wt_rlmn<DefaultUnderlyingWaveletBV,DefaultUnderlyingWaveletBV::rank_1_type,DefaultUnderlyingWaveletBV::select_1_type,sdsl::wt_huff<>>;
+// the default
+using WaveletTreeRLMN = sdsl::wt_rlmn<DefaultUnderlyingWaveletBV>; // TODO: inline it
 #endif

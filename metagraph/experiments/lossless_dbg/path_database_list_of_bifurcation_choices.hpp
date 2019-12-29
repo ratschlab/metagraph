@@ -61,7 +61,7 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
 
     size_t num_paths() const override { return compressed_reads_.size(); }
 
-    json get_statistics() const {
+    virtual json get_statistics(__attribute__((unused)) int64_t verbosity = 0) const override {
         std::map<std::string, int64_t> bifurcation_size_histogram;
         for (const auto &read : compressed_reads_) {
             bifurcation_size_histogram[to_string(read.second.size())]++;
@@ -130,13 +130,12 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
 
         // for all other characters
         for (char character : read.substr(kmer_length_)) {
-            vector<node_index> outnodes;
-            graph_->adjacent_outgoing_nodes(node, &outnodes);
-            if (outnodes.size() > 1) {
+            int outdegree = graph_->outdegree(node);
+            if (outdegree > 1) {
                 edge_choices.push_back(character);
             }
             node = graph_->traverse(node, character);
-            assert(!outnodes.empty());
+            assert(outdegree > 0);
         }
         return { kmer, edge_choices };
     }
@@ -172,12 +171,12 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
         return read;
     }
 
-    void serialize(const fs::path& folder) const {};
+    void serialize(const fs::path& folder) const override {};
 
 
     std::vector<compressed_read_t> compressed_reads_;
-    const int64_t read_length;
     const int64_t kmer_length_;
+    const int64_t read_length;
 };
 
 #endif // __PATH_DATABASE_LIST_OF_BIFURCATION_CHOICES_HPP__

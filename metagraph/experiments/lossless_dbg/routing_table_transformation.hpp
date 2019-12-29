@@ -18,7 +18,7 @@
 #include <tsl/hopscotch_map.h>
 #include <nlohmann/json.hpp>
 
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "alphabets.hpp"
 
 #include "utilities.hpp"
@@ -113,7 +113,7 @@ public:
     static char transform(pair<char,char> transformation, char base) {
         return transformation.first == base ? transformation.second : base;
     }
-    json get_statistics(int64_t verbosity=0) const {
+    json get_statistics(__attribute__((unused)) int64_t verbosity=0) const {
         vector<string> transformed_nodes;
         for (auto&[node,transformation] : transformations) {
             if (this->graph) {

@@ -25,7 +25,7 @@ json get_statistics(DBGSuccinct& graph,int64_t verbosity=~0) {
     int64_t incoming_histogram[6] = {0,0,0,0,0,0};
     int64_t outgoing_histogram[6] = {0,0,0,0,0,0};
 #pragma omp parallel for reduction(+:joins,splits,incoming_histogram[:6],outgoing_histogram[:6])
-    for (int64_t node = 1; node <= graph.num_nodes();node++) {
+    for(uint64_t node = 1; node <= graph.num_nodes();node++) {
         int64_t indegree = graph.indegree(node);
         int64_t outdegree = graph.outdegree(node);
         if (verbosity & STATS_INCOMING_HISTOGRAM) {

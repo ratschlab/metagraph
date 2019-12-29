@@ -27,7 +27,7 @@ using namespace std::string_literals;
 
 
 int main(int argc, char *argv[]) {
-    DefaultWavelet wt;
+    WaveletTreeRLMN wt;
     wt.load(cin);
     sdsl::write_structure<HTML_FORMAT>(wt, cout);
     return 0;

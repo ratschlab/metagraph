@@ -14,14 +14,14 @@
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
 
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "configuration.hpp"
 #include "alphabets.hpp"
 
 #include "utilities.hpp"
 #include "routing_table_transformation.hpp"
 
-template<class Wavelet = DefaultWavelet>
+template<class Wavelet = WaveletTreeRLMN>
 class RoutingTableCore {
 public:
     RoutingTableCore() = default;
@@ -33,7 +33,7 @@ public:
     void initialize_content(const Container& routing_table_array) {
         // can't use int_vector<3> as the construction of routing table fails (routing table is malformed)
         sdsl::int_vector<> routing_table_array_encoded(routing_table_array.size(),0,3);
-        for(int64_t i=0;i<routing_table_array.size();i++) {
+        for(uint64_t i=0;i<routing_table_array.size();i++) {
             routing_table_array_encoded[i] = encode(routing_table_array[i]);
         }
         construct_im(routing_table,routing_table_array_encoded,0);
@@ -120,7 +120,7 @@ public:
     const shared_ptr<const DBGSuccinct> graph;
 };
 
-template <typename Wavelet=DefaultWavelet>
+template <typename Wavelet=WaveletTreeRLMN>
 using RoutingTable = TransformationsEnabler<RoutingTableCore<Wavelet>>;
 
 #endif // __ROUTING_TABLE_HPP__

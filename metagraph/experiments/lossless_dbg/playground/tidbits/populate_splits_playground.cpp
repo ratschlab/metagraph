@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     uint64_t chunk_size = (graph.num_nodes() + 1)/ chunks + 64ull;
     chunk_size &= ~63ull;
     vector<omp_lock_t> node_locks(chunks);
-    for(int i = 0; i < node_locks.size(); i++) {
+    for (uint64_t i = 0; i < node_locks.size(); i++) {
         omp_init_lock(&node_locks[i]);
     }
     #pragma omp parallel for
@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
         //debug_split_ids[i] = end_node;
 
     }
-    for(int i = 0; i < node_locks.size(); i++) {
+    for (uint64_t i = 0; i < node_locks.size(); i++) {
         omp_destroy_lock(&node_locks[i]);
     }
     auto bifurcation_timer = VerboseTimer("construction of bifurcation bit_vectors");
@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
 //#pragma omp parallel for reduction(append : debug_join_ids, debug_split_ids)
 #pragma omp parallel for
     for (uint64_t id = 0; id <= graph.num_nodes(); id += 64) {
-        for (int64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
+        for(uint64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
             if (!node)
                 continue;
             auto outdegree = graph.outdegree(node);

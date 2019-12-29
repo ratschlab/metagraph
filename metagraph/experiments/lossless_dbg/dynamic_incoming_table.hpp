@@ -16,7 +16,7 @@
 
 #include "graph_patch.hpp"
 #include "cxx-prettyprint.hpp"
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
 #include "solid_dynamic_incoming_table.hpp"
@@ -64,8 +64,8 @@ public:
         return chunk.print_content(chunks.position_in_chunk(location));
     }
 
-    ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
     shared_ptr<const BetterDBGSuccinct> graph;
+    ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
 };
 
 

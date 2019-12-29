@@ -98,7 +98,7 @@ public:
 
     int64_t underlying_position(int64_t n) const {
         assert(n >= 0);
-        assert(n < this->is_element->size());
+        assert(n < (ll) this->is_element->size());
         assert((*this->is_element)[n]);
         return chunk(n);
     }

@@ -12,10 +12,10 @@
 using namespace sdsl;
 using namespace std;
 int main(int argc, char *argv[]) {
-    DefaultWavelet wt;
+    WaveletTreeRLMN wt;
     wt.load(cin);
     int_vector<> dec(wt.size());
-    for(int64_t i=0;i<wt.size();i++) {
+    for(uint64_t i=0;i<wt.size();i++) {
         dec[i] = wt[i];
     }
     using t_bitvector = hyb_vector<>;

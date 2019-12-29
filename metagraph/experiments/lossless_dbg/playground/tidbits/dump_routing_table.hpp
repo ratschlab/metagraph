@@ -10,7 +10,7 @@
 int main_dumprt(int argc, char *argv[]) {
     sdsl::wt_rlmn<> wt;
     wt.load(cin);
-    for(int64_t i=0;i<wt.size();i++) {
+    for(uint64_t i=0;i<wt.size();i++) {
         cout << decode(wt[i]);
     }
     return 0;

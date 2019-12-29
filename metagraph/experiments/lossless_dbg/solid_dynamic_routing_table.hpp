@@ -12,7 +12,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "graph_patch.hpp"
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
 #include "wavelet_tree.hpp"
@@ -125,7 +125,7 @@ public:
 
     string print_content() const {
         stringstream out;
-        for(int i=0;i<routing_table.size();i++) {
+        for (uint64_t i=0;i<routing_table.size();i++) {
             out << routing_table[i];
         }
         out << endl;
@@ -156,9 +156,9 @@ public:
     }
 
     // Todo change from magic number to some define elsewhere
-    int64_t total_size;
     const static int64_t delimiter_encoded = 6;
     EntryT routing_table;
+    int64_t total_size;
 };
 
 #endif // __SOLID_DYNAMIC_ROUTING_TABLE_HPP__

@@ -14,7 +14,7 @@
 #include "path_database.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "utilities.hpp"
 #include "unix_tools.hpp"
 #include "threading.hpp"
@@ -135,7 +135,7 @@ public:
 
 //#endif
         if (this->node_is_join(node)) {
-            this->graph.call_incoming_kmers_mine(node,[&](node_index possible_node,char c) {
+            this->graph.call_incoming_kmers(node,[&](node_index possible_node,char c) { //mine
                 if (c == '$') return;
                 auto offset = use_char ?
                         this->incoming_table.branch_offset(node,c) :
@@ -151,7 +151,7 @@ public:
         }
         else {
             assert(this->graph.indegree(node) == 1);
-            this->graph.call_incoming_kmers_mine(node,[&](node_index possible_node,char c) {
+            this->graph.call_incoming_kmers(node,[&](node_index possible_node,char c) { //mine
                 prev_node = possible_node;
             });
         }

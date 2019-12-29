@@ -21,9 +21,6 @@ public:
     explicit IncomingTable(shared_ptr<const GraphT> graph, BitVector joins,
                            MultiplicityT edge_multiplicity_table) :
                                             graph(graph), joins(joins), edge_multiplicity_table(std::move(edge_multiplicity_table)) {}
-    using bit_vector_t = BitVector;
-    BitVector joins;
-    MultiplicityT edge_multiplicity_table;
     int64_t branch_offset(node_index node,node_index prev_node) const {
         int64_t branch_offset = relative_offset(node,prev_node);
         int64_t result = 0;
@@ -32,13 +29,9 @@ public:
         }
         return result;
     }
-
-
-
     bool is_join(node_index node) const {
         return size(node); // as 1
     }
-
     int64_t branch_size_rank(node_index node,int64_t offset) const {
         if (offset < 0) { return 0; }
         int64_t joins_position = joins.select1(node);
@@ -49,6 +42,8 @@ public:
         assert(offset < size(node));
         return edge_multiplicity_table[table_offset+offset];
     }
+
+
 
     int64_t branch_size(node_index node,node_index prev_node) const {
         return branch_size_rank(node,relative_offset(node,prev_node));
@@ -82,7 +77,7 @@ public:
         bool increment = has_new_reads(node);
         int64_t result;
         if (prev_node) {
-            result = graph->branch_id(node,prev_node);
+            result = incoming_edge_rank(*graph,node,prev_node);
         }
         else {
             result = -1; // starting branch is before all other branches
@@ -104,6 +99,10 @@ public:
     }
 
     shared_ptr<const GraphT> graph;
+    using bit_vector_t = BitVector;
+    BitVector joins;
+    MultiplicityT edge_multiplicity_table;
+
 };
 
 #endif // __INCOMING_TABLE_HPP__

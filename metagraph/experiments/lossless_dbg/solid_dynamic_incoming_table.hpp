@@ -15,7 +15,7 @@
 
 #include "graph_patch.hpp"
 #include "cxx-prettyprint.hpp"
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
 
@@ -100,7 +100,6 @@ public:
     string print_content(node_index node) const {
         assert(node < total_size);
         stringstream out;
-        auto table_size = size(node);
         for(char c : "$ACGTN") {
             out << c << ":" << branch_size(node,c) << endl;
         }

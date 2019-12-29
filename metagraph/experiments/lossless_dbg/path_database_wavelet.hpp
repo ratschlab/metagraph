@@ -1,4 +1,4 @@
-#pragma ide diagnostic ignored "openmp-use-default-none"
+//#pragma ide diagnostic ignored "openmp-use-default-none"
 //
 //  path_database_baseline.hpp
 //  PathDatabase
@@ -17,7 +17,7 @@
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "alphabets.hpp"
 #include "cxx-prettyprint.hpp"
 
@@ -101,14 +101,14 @@ public:
         {
             vector<char> routing_table_array_local;
             #pragma omp for
-            for (int64_t node = 1; node <= this->graph.num_nodes(); node++) {
+            for(uint64_t node = 1; node <= this->graph.num_nodes(); node++) {
                 routing_table_array_local.push_back('#');// to always start a block with #
                 if (PathDatabaseDynamicCore<DRT, DIT>::node_is_split(node)) {
                     auto &dynamic_table = PathDatabaseDynamicCore<DRT, DIT>::routing_table;
                     // todo: remove also other assertions that assume full coverage
                     //alt_assert(dynamic_table.size(node));
                     //int encoded = 0;
-                    for (int64_t i = 0; i < dynamic_table.size(node); i++) {
+                    for(uint64_t i = 0; i < dynamic_table.size(node); i++) {
                         routing_table_array_local.push_back(dynamic_table.get(node, i));
                     //    encoded++;
                     }
@@ -150,7 +150,7 @@ public:
             vector<int64_t> incoming_table_builder_local;
             vector<bool> delimiter_vector_local;
         #pragma omp for
-        for(int64_t node=1;node<=this->graph.num_nodes();node++) {
+        for(uint64_t node=1;node<=this->graph.num_nodes();node++) {
             delimiter_vector_local.push_back(true);
             if (PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node)) {
                 auto new_reads = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,'$');
@@ -171,7 +171,7 @@ public:
                     }
                 }
 #else
-                this->graph.call_incoming_kmers_mine(node,[&,this](node_index prev_node,char c) {
+                this->graph.call_incoming_kmers(node,[&,this](node_index prev_node,char c) { //mine
                     auto branch_size = c == '$' ? 0 : PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,c); // if dummy kmers (fix proper test)
                     incoming_table_builder_local.push_back(branch_size);
                     current_table_size++;
@@ -207,10 +207,10 @@ public:
         delimiter_vector.push_back(true);
         sdsl::bit_vector temporary_representation(delimiter_vector.size());
         sdsl::int_vector<> int_representation(incoming_table_builder.size());
-        for(int64_t i=0; i < int_representation.size(); i++) {
+        for(uint64_t i=0; i < int_representation.size(); i++) {
             int_representation[i] = incoming_table_builder[i];
         }
-        for(int64_t i=0; i <delimiter_vector.size();i++) {
+        for(uint64_t i=0; i <delimiter_vector.size();i++) {
             temporary_representation[i] = delimiter_vector[i];
         }
         using joins_type = typename decltype(incoming_table)::BitVector;
@@ -330,7 +330,7 @@ public:
         std::map<int64_t, int64_t> splits_size_histogram;
 //        std::map<int64_t, int64_t> splits_diff_symbols_histogram;
         if (verbosity > 0) {
-            for (int64_t node = 1; node <= this->graph.num_nodes(); node++) {
+            for(uint64_t node = 1; node <= this->graph.num_nodes(); node++) {
                 if (node_is_join(node)) {
                     if (this->graph.indegree(node) <= 1) {
                         added_joins++;

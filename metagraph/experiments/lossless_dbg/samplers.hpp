@@ -60,10 +60,10 @@ public:
         return reference.size();
     }
 private:
-    std::discrete_distribution<> err;
-    double probability_of_error;
     string reference;
     std::mt19937 generator;
+    double probability_of_error;
+    std::discrete_distribution<> err;
 };
 class SubSampler : public NoisySampler {
 public:
@@ -89,8 +89,8 @@ public:
     int64_t reference_size() override {
         return _reference_size;
     }
-    vector<string> samples;
     int64_t _reference_size;
+    vector<string> samples;
     int64_t current_sample = 0;
 };
 

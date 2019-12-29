@@ -19,14 +19,14 @@
 #include "exit_barrier.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "utilities.hpp"
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
 // TODO: Never use 'using namespace std;' in .hpp files
 // todo find a tool that removes this relative namespacing issue
-using namespace std;
+//using namespace std;
 
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 using node_index = DeBruijnGraph::node_index;
@@ -89,7 +89,7 @@ public:
                          const vector<string>&>::type transformed_sequences = sequences;
         if constexpr (has_member_transformations<RoutingTableT>::value) {
             #pragma omp parallel for
-            for (ll i = 0; i < sequences.size(); i++) {
+            for (uint64_t i = 0; i < sequences.size(); i++) {
                 transform_sequence_inplace(transformed_sequences[i]);
             }
         }
@@ -117,7 +117,7 @@ public:
 
 
         auto lock_init_timer = VerboseTimer("initializing locks & barriers");
-        for(int64_t i=0;i<node_locks.elements.size();i++) {
+        for(uint64_t i=0;i<node_locks.elements.size();i++) {
             omp_init_lock(&node_locks.elements[i]);
         }
         lock_init_timer.finished();
@@ -215,6 +215,7 @@ public:
                     assert((relative_position <= incoming_table.branch_size(node,join_symbol) || [&,node=node,join_symbol=join_symbol]{
                         using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
                         auto self = reinterpret_cast<TT*>(this);
+                        (void)self; // so it is always used (because of conditional compilation)
                         cerr << "current" << endl;
                         PRINT_VAR(relative_position,incoming_table.branch_size(node,join_symbol));
                         PRINT_VAR(graph.get_node_sequence(node));
@@ -293,7 +294,7 @@ public:
         }
 
 #ifndef DISABLE_PARALELIZATION
-        for(int64_t i=0;i<node_locks.elements.size();i++) {
+        for(uint64_t i=0;i<node_locks.elements.size();i++) {
             omp_destroy_lock(&node_locks.elements[i]);
 
         }
@@ -329,11 +330,11 @@ public:
         uint64_t chunk_size = (graph.num_nodes() + 1)/ chunks + 64ull;
         chunk_size &= ~63ull;
         vector<omp_lock_t> node_locks(chunks);
-        for(int i = 0; i < node_locks.size(); i++) {
+        for(uint64_t i = 0; i < node_locks.size(); i++) {
             omp_init_lock(&node_locks[i]);
         }
 #pragma omp parallel for
-        for (size_t i = 0; i < bits_to_set; ++i) {
+        for (int64_t i = 0; i < bits_to_set; ++i) {
             auto& transformed_sequence = transformed_sequences[i];
             omp_lock_t* lock_ptr;
             ll start_node =  graph.kmer_to_node(
@@ -357,7 +358,7 @@ public:
             //debug_split_ids[i] = end_node;
 
         }
-        for(int i = 0; i < node_locks.size(); i++) {
+        for (uint64_t i = 0; i < node_locks.size(); i++) {
             omp_destroy_lock(&node_locks[i]);
         }
         statistics["additional_bifurcations_time"] = additional_bifurcations_timer.finished();
@@ -366,7 +367,7 @@ public:
 //#pragma omp parallel for reduction(append : debug_join_ids, debug_split_ids)
 #pragma omp parallel for
         for (uint64_t id = 0; id <= graph.num_nodes(); id += 64) {
-            for (int64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
+            for (uint64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
                 if (!node)
                     continue;
                 auto outdegree = graph.outdegree(node);
@@ -463,8 +464,8 @@ public:
 
     std::shared_ptr<const GraphT> graph_;
     const GraphT& graph;
-    RoutingTableT routing_table;
     IncomingTableT incoming_table;
+    RoutingTableT routing_table;
     int64_t chunks;
 
     static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int64_t kmer_length) {
