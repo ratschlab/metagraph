@@ -74,6 +74,9 @@ class Config {
     unsigned int port = 5555;
     unsigned int bloom_max_num_hash_functions = 10;
 
+    // TODO: make a variable parameter
+    const size_t kNumCachedColumns = 10;
+
     // Alignment options
     bool alignment_seed_unimems = false;
     bool alignment_edit_distance = false;
