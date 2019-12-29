@@ -14,12 +14,6 @@ namespace utils {
 
 bool check_if_writable(const std::string &filename);
 
-/**
- *  Returns the input file type, given a filename
- *  One of: [KMC|VCF|FASTQ|FASTA].
- *  If filetype is unknown, return empty string "".
- */
-std::string get_filetype(const std::string &fname);
 
 class TempFile {
   public:

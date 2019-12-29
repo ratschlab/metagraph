@@ -41,6 +41,7 @@
 #include "taxid_mapper.hpp"
 #include "reverse_complement.hpp"
 #include "common/utils/template_utils.hpp"
+#include "seq_io/formats.hpp"
 
 using mg::common::logger;
 using utils::get_verbose;
@@ -173,7 +174,7 @@ void annotate_data(const std::vector<std::string> &files,
         // remember the number of base labels to remove those unique to each sequence quickly
         const size_t num_base_labels = labels.size();
 
-        if (utils::get_filetype(file) == "VCF") {
+        if (file_format(file) == "VCF") {
             read_vcf_file_with_annotations_critical(
                 file,
                 ref_sequence_path,
@@ -197,7 +198,7 @@ void annotate_data(const std::vector<std::string> &files,
                 },
                 forward_and_reverse
             );
-        } else if (utils::get_filetype(file) == "KMC") {
+        } else if (file_format(file) == "KMC") {
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence) {
@@ -216,8 +217,8 @@ void annotate_data(const std::vector<std::string> &files,
                 min_count,
                 max_count
             );
-        } else if (utils::get_filetype(file) == "FASTA"
-                    || utils::get_filetype(file) == "FASTQ") {
+        } else if (file_format(file) == "FASTA"
+                    || file_format(file) == "FASTQ") {
             read_fasta_file_critical(
                 file,
                 [&](kseq_t *read_stream) {
@@ -280,8 +281,8 @@ void annotate_coordinates(const std::vector<std::string> &files,
         logger->trace("Parsing '{}'", file);
 
         // open stream
-        if (utils::get_filetype(file) == "FASTA"
-                    || utils::get_filetype(file) == "FASTQ") {
+        if (file_format(file) == "FASTA"
+                    || file_format(file) == "FASTQ") {
 
             bool forward_strand = true;
 
@@ -1170,7 +1171,7 @@ void parse_sequences(const std::vector<std::string> &files,
 
         Timer data_reading_timer;
 
-        if (utils::get_filetype(file) == "VCF") {
+        if (file_format(file) == "VCF") {
             read_vcf_file_critical(file,
                                    config.refpath,
                                    config.k,
@@ -1179,7 +1180,7 @@ void parse_sequences(const std::vector<std::string> &files,
                                    },
                                    config.forward_and_reverse);
 
-        } else if (utils::get_filetype(file) == "KMC") {
+        } else if (file_format(file) == "KMC") {
             bool warning_different_k = false;
 
             auto min_count = config.min_count;
@@ -1233,8 +1234,8 @@ void parse_sequences(const std::vector<std::string> &files,
                     },
                     !config.canonical && !config.forward_and_reverse, min_count, max_count);
 
-        } else if (utils::get_filetype(file) == "FASTA"
-                    || utils::get_filetype(file) == "FASTQ") {
+        } else if (file_format(file) == "FASTA"
+                    || file_format(file) == "FASTQ") {
             if (files.size() >= get_num_threads()) {
                 auto forward_and_reverse = config.forward_and_reverse;
 
