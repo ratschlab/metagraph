@@ -34,8 +34,8 @@ jobs:
         echo $CXX
         cd metagraph/external-libraries/libmaus2
         cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-        cmake --build .
-        cmake --install .
+        make
+        make install
 
     - name: install sdsl-lite
       run: |
@@ -92,8 +92,8 @@ jobs:
       run: |
         cd metagraph/external-libraries/libmaus2
         cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-        cmake --build .
-        cmake --install .
+        make
+        make install
 
     - name: install sdsl-lite
       run: |
