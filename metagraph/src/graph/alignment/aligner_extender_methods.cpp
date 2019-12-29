@@ -141,6 +141,7 @@ inline void compute_match_scores(const char *align_begin,
 }
 
 #ifdef __AVX2__
+
 inline void compute_match_delete_updates_avx2(size_t &i,
                                               size_t length,
                                               int64_t prev_node,
@@ -213,10 +214,8 @@ inline void compute_match_delete_updates_avx2(size_t &i,
         char_scores += 8;
         match_ops += 8;
     }
-
-    // clean up after AVX2 instructions
-    _mm256_zeroupper();
 }
+
 #endif
 
 template <typename NodeType,
@@ -307,6 +306,7 @@ inline void compute_match_delete_updates(const DBGAlignerConfig &config,
 }
 
 #ifdef __AVX2__
+
 template <typename NodeType,
           typename score_t = typename Alignment<NodeType>::score_t,
           typename Column = typename DPTable<NodeType>::Column>
@@ -345,11 +345,8 @@ inline size_t update_column_avx2(bool &updated,
         updated |= bool(_mm256_movemask_epi8(cmp));
 
         // store updates in column
-        _mm256_maskstore_epi32(next_column_scores,
-                               cmp,
-                               updates);
-        _mm256_maskstore_epi32(next_column_ops,
-                               cmp,
+        _mm256_maskstore_epi32(next_column_scores, cmp, updates);
+        _mm256_maskstore_epi32(next_column_ops, cmp,
                                _mm256_load_si256((__m256i*)&update_ops[i]));
 
         // TODO: this can be done with one AVX512 instruction
@@ -368,11 +365,9 @@ inline size_t update_column_avx2(bool &updated,
         next_column_ops += 8;
     }
 
-    // clean up after AVX2 instructions
-    _mm256_zeroupper();
-
     return i;
 }
+
 #endif
 
 
