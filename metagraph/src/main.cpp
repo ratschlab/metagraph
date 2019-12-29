@@ -2781,11 +2781,11 @@ int main(int argc, char *argv[]) {
             assert(files.size() == 1);
             assert(config->outfbase.size());
 
-            if (config->initialize_bloom
-                    && parse_graph_type(files.at(0)) == Config::GraphType::SUCCINCT)
+            if (config->initialize_bloom) {
                 std::filesystem::remove(
                     utils::remove_suffix(config->outfbase, ".bloom") + ".bloom"
                 );
+            }
 
             Timer timer;
             logger->trace("Graph loading...");
