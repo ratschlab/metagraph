@@ -21,7 +21,7 @@ jobs:
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
         cd htslib-1.9
-        make
+        make -j 2
         sudo make install
 
     - name: install dependencies for integration tests
@@ -34,7 +34,7 @@ jobs:
         echo $CXX
         cd metagraph/external-libraries/libmaus2
         cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-        make
+        make -j 2
         make install
 
     - name: install sdsl-lite
@@ -53,13 +53,13 @@ jobs:
         cmake ..
 
     - name: build metagraph
-      run: cd metagraph/build && make metagraph
+      run: cd metagraph/build && make -j 2 metagraph
 
     - name: build unit tests
-      run: cd metagraph/build && make unit_tests
+      run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
-      run: cd metagraph/build && make
+      run: cd metagraph/build && make -j 2
 
     - name: run unit tests
       run: |
@@ -92,7 +92,7 @@ jobs:
       run: |
         cd metagraph/external-libraries/libmaus2
         cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-        make
+        make -j 2
         make install
 
     - name: install sdsl-lite
@@ -107,13 +107,13 @@ jobs:
         cmake ..
 
     - name: build metagraph
-      run: cd metagraph/build && make metagraph
+      run: cd metagraph/build && make -j 2 metagraph
 
     - name: build unit tests
-      run: cd metagraph/build && make unit_tests
+      run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
-      run: cd metagraph/build && make
+      run: cd metagraph/build && make -j 2
 
     - name: run unit tests
       run: cd metagraph/build && ./unit_tests
