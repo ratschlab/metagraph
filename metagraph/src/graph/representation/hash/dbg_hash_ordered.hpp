@@ -2,7 +2,6 @@
 #define __DBG_HASH_ORDERED_HPP__
 
 #include <fstream>
-#include <tsl/ordered_set.h>
 
 #include "sequence_graph.hpp"
 

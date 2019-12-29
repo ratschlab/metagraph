@@ -435,34 +435,6 @@ bool DBGHashFastImpl<KMER>::has_no_incoming(node_index node) const {
     return true;
 }
 
-class Serializer {
-  public:
-    explicit Serializer(std::ostream &os) : os_(os) {}
-
-    template <class T>
-    void operator()(const T &value) {
-        os_.write(reinterpret_cast<const char *>(&value), sizeof(T));
-    }
-
-  private:
-    std::ostream &os_;
-};
-
-class Deserializer {
-  public:
-    explicit Deserializer(std::istream &is) : is_(is) {}
-
-    template <class T>
-    T operator()() {
-        T value;
-        is_.read(reinterpret_cast<char *>(&value), sizeof(T));
-        return value;
-    }
-
-  private:
-    std::istream &is_;
-};
-
 template <typename KMER>
 void DBGHashFastImpl<KMER>::serialize(std::ostream &out) const {
     if (!out.good())

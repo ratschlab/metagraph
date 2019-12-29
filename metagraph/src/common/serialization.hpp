@@ -47,5 +47,32 @@ void serialize_set(std::ostream &out, const Set &set);
 template <class Set>
 bool load_set(std::istream &in, Set *set);
 
+class Serializer {
+  public:
+    explicit Serializer(std::ostream &os) : os_(os) {}
+
+    template <class T>
+    void operator()(const T &value) {
+        os_.write(reinterpret_cast<const char *>(&value), sizeof(T));
+    }
+
+  private:
+    std::ostream &os_;
+};
+
+class Deserializer {
+  public:
+    explicit Deserializer(std::istream &is) : is_(is) {}
+
+    template <class T>
+    T operator()() {
+        T value;
+        is_.read(reinterpret_cast<char *>(&value), sizeof(T));
+        return value;
+    }
+
+  private:
+    std::istream &is_;
+};
 
 #endif // __SERIALIZATION_HPP__

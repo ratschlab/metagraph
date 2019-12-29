@@ -2,6 +2,8 @@
 
 #include <cassert>
 
+#include <tsl/ordered_set.h>
+
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/bit_vector.hpp"
@@ -417,34 +419,6 @@ std::string DBGHashOrderedImpl<KMER>::get_node_sequence(node_index node) const {
 
     return seq_encoder_.kmer_to_sequence(get_kmer(node), k_);
 }
-
-class Serializer {
-  public:
-    explicit Serializer(std::ostream &os) : os_(os) {}
-
-    template <class T>
-    void operator()(const T &value) {
-        os_.write(reinterpret_cast<const char *>(&value), sizeof(T));
-    }
-
-  private:
-    std::ostream &os_;
-};
-
-class Deserializer {
-  public:
-    explicit Deserializer(std::istream &is) : is_(is) {}
-
-    template <class T>
-    T operator()() {
-        T value;
-        is_.read(reinterpret_cast<char *>(&value), sizeof(T));
-        return value;
-    }
-
-  private:
-    std::istream &is_;
-};
 
 template <typename KMER>
 void DBGHashOrderedImpl<KMER>::serialize(std::ostream &out) const {
