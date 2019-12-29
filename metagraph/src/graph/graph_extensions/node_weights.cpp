@@ -1,15 +1,15 @@
 #include "node_weights.hpp"
 
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 
 
-NodeWeights::NodeWeights(uint64_t num_nodes, size_t bits_per_count)
-      : weights_(num_nodes, 0, bits_per_count),
-        max_weight_(utils::max_ull(weights_.width())) {}
+NodeWeights::NodeWeights(uint64_t max_index, size_t bits_per_count)
+      : weights_(max_index, 0, bits_per_count),
+        max_weight_(sdsl::bits::lo_set[weights_.width()]) {}
 
 NodeWeights::NodeWeights(sdsl::int_vector<>&& weights)
       : weights_(std::move(weights)),
-        max_weight_(utils::max_ull(weights_.width())) {}
+        max_weight_(sdsl::bits::lo_set[weights_.width()]) {}
 
 void NodeWeights::insert_nodes(const bitmap &nodes_inserted) {
     utils::insert(&weights_, nodes_inserted, 0);
@@ -36,7 +36,7 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
             return false;
 
         weights_.load(instream);
-        max_weight_ = utils::max_ull(weights_.width());
+        max_weight_ = sdsl::bits::lo_set[weights_.width()];
         return true;
 
     } catch (...) {
@@ -57,8 +57,7 @@ void NodeWeights::serialize(const std::string &filename_base) const {
 
 bool NodeWeights::is_compatible(const SequenceGraph &graph, bool verbose) const {
     // nodes plus dummy npos
-    // TODO: fix this by implementing SequenceGraph::max_index()
-    if (graph.num_nodes() + 1 == weights_.size())
+    if (graph.max_index() + 1 == weights_.size())
         return true;
 
     if (verbose)

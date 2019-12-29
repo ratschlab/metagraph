@@ -3,8 +3,8 @@
 #ifndef NDEBUG
 #include "common/seq_tools/reverse_complement.hpp"
 #endif
-#include "utils/serialization.hpp"
-#include "utils/algorithms.hpp"
+#include "common/serialization.hpp"
+#include "common/algorithms.hpp"
 #include "kmer/kmer_extractor.hpp"
 
 // TODO: switch to KmerExtractor once it supports all alphabets

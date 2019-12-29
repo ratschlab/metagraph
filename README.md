@@ -4,13 +4,12 @@
 
 ### Prerequisites
 - cmake 3.6.1
-- GNU GCC with C++17 (gcc-8 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- GNU GCC with C++17 (gcc-8.2.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
 - HTSlib
-- boost
 - folly (optional)
 - Python 3 (for running integration tests)
 
-All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (requires no root)
+All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (does not require root)
 
 #### For compiling with GNU GCC:
 ```
@@ -28,7 +27,7 @@ brew install gcc autoconf automake libtool cmake make htslib
 Then set the environment variables accordingly:
 ```
 echo "\
-# Use gcc-8 with cmake
+# Use gcc-9 with cmake
 export CC=\"\$(which gcc-9)\"
 export CXX=\"\$(which g++-9)\"
 " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
@@ -245,5 +244,5 @@ Stats for both
 ```
 
 ## License
-Metagraph is distributed under the GPLv3 License (see LICENSE). 
+Metagraph is distributed under the GPLv3 License (see LICENSE).
 Please find further information in the AUTHORS and COPYRIGHTS files.

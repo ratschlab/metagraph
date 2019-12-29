@@ -4,12 +4,6 @@ project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_subdirectory(../utils metagraph_utils)
-
-set(BOOST_INCLUDEDIR "~/.linuxbrew/include/")
-set(Boost_NO_BOOST_CMAKE ON)
-find_package(Boost REQUIRED COMPONENTS iostreams)
-
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
@@ -25,8 +19,9 @@ set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 # ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
 target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
 target_include_directories(metagraph_common
+  PRIVATE
+    ${PROJECT_PARENT_DIR}/src/
   PUBLIC
-    ${Boost_INCLUDE_DIRS}
     ${EXTERNAL_LIB_DIR}/asio/asio/include
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
@@ -36,8 +31,18 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    .. # this ensures include files in the project are visible relative to the project root
+    ${EXTERNAL_LIB_DIR}/spdlog/include
 )
+
+# assume built-in pthreads on MacOS
+IF(APPLE)
+    set(CMAKE_THREAD_LIBS_INIT "-lpthread")
+    set(CMAKE_HAVE_THREADS_LIBRARY 1)
+    set(CMAKE_USE_WIN32_THREADS_INIT 0)
+    set(CMAKE_USE_PTHREADS_INIT 1)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+ENDIF()
+add_subdirectory(${EXTERNAL_LIB_DIR}/spdlog spdlog)
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(metagraph_common
@@ -45,6 +50,10 @@ target_link_libraries(metagraph_common
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
-    Boost::iostreams
-    metagraph_utils
+    spdlog::spdlog
+)
+
+message(STATUS "Compile flags used:"
+  "${CMAKE_CXX_FLAGS}"
+  " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
 )

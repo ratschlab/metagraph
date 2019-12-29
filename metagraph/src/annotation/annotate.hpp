@@ -8,7 +8,7 @@
 #include <memory>
 #include <functional>
 
-#include "utils/vectors.hpp"
+#include "common/vector.hpp"
 
 
 namespace annotate {

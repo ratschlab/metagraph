@@ -3,14 +3,16 @@
 
 #include <zlib.h>
 #include <htslib/kseq.h>
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
+
 #include "../test_helpers.hpp"
-
-
-KSEQ_INIT(gzFile, gzread);
-
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
+
+namespace {
+using namespace mg::bitmap_graph;
+
+KSEQ_INIT(gzFile, gzread);
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
@@ -331,3 +333,5 @@ TEST(DBGBitmap, SmallGraphTraversal) {
     delete graph;
 }
 */
+
+} // namespace

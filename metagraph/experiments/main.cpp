@@ -13,7 +13,7 @@
 #include "annotate_column_compressed.hpp"
 #include "unix_tools.hpp"
 #include "string_utils.hpp"
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 #include "kmc_parser.hpp"
 #include "alphabets.hpp"
 #include "aligner_helper.hpp"
@@ -23,6 +23,7 @@
 #include "config.hpp"
 #include "serialization.hpp"
 #include "wavelet_tree.hpp"
+#include "common/utils/template_utils.hpp"
 
 using namespace std::chrono_literals;
 
@@ -1038,9 +1039,7 @@ int main(int argc, char *argv[]) {
             }
 
             ips4o::parallel::sort(from_full_to_query.begin(), from_full_to_query.end(),
-                [](const auto &first, const auto &second) { return first.first < second.first; },
-                num_threads
-            );
+                                  utils::LessFirst(), num_threads);
 
             std::cout << "Indexes sampled in " << timer.elapsed() << " sec" << std::endl;
             timer.reset();
@@ -1109,7 +1108,7 @@ int main(int argc, char *argv[]) {
             // load F, k, and state
             auto F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
             auto k_ = load_number(instream);
-            auto state = static_cast<Config::StateType>(load_number(instream));
+            auto state = static_cast<BOSS::State>(load_number(instream));
 
             // old alphabet: {$,A,C,G,T,N}
             if (F_.size() != alph_size + 1) {
@@ -1127,19 +1126,19 @@ int main(int argc, char *argv[]) {
 
             // load W and last arrays
             switch (state) {
-                case Config::DYN:
+                case BOSS::State::DYN:
                     W_ = new wavelet_tree_dyn(bits_per_char_W);
                     last_ = new bit_vector_dyn();
                     break;
-                case Config::STAT:
+                case BOSS::State::STAT:
                     W_ = new wavelet_tree_stat(bits_per_char_W);
                     last_ = new bit_vector_stat();
                     break;
-                case Config::FAST:
+                case BOSS::State::FAST:
                     W_ = new wavelet_tree_fast(bits_per_char_W);
                     last_ = new bit_vector_stat();
                     break;
-                case Config::SMALL:
+                case BOSS::State::SMALL:
                     W_ = new wavelet_tree_small(bits_per_char_W);
                     last_ = new bit_vector_small();
                     break;
@@ -1187,16 +1186,16 @@ int main(int argc, char *argv[]) {
             W.width(bits_per_char_W);
 
             switch (state) {
-                case Config::DYN:
+                case BOSS::State::DYN:
                     W_ = new wavelet_tree_dyn(bits_per_char_W, std::move(W));
                     break;
-                case Config::STAT:
+                case BOSS::State::STAT:
                     W_ = new wavelet_tree_stat(bits_per_char_W, std::move(W));
                     break;
-                case Config::FAST:
+                case BOSS::State::FAST:
                     W_ = new wavelet_tree_fast(bits_per_char_W, std::move(W));
                     break;
-                case Config::SMALL:
+                case BOSS::State::SMALL:
                     W_ = new wavelet_tree_small(bits_per_char_W, std::move(W));
                     break;
                 default:

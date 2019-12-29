@@ -1,4 +1,4 @@
-#include "graph/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 
 #include <stdio.h>
 #include <string>
@@ -12,17 +12,23 @@
 #define protected public
 #define private public
 
-#include "graph/succinct/boss.hpp"
+#include "graph/representation/succinct/boss.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
+#include "kmer/kmer_collector.hpp"
+
+namespace {
+using namespace mg;
+using namespace mg::succinct;
 
 KSEQ_INIT(gzFile, gzread);
 
 const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
+
 
 template <typename Kmer>
 class BOSSConstruct : public ::testing::Test { };
@@ -192,44 +198,44 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
 TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
     ASSERT_TRUE(TypeParam::kWeighted);
 
-    for (size_t k = 1; k < kMaxK; ++k) {
-        std::vector<std::string> input_data = {
-            "ACAGCTAGCTAGCTAGCTAGCTG",
-            "ATATTATAAAAAATTTTAAAAAA",
-            "ATATATTCTCTCTCTCTCATA",
-            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-        };
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; ++k) {
+            std::vector<std::string> input_data = {
+                "ACAGCTAGCTAGCTAGCTAGCTG",
+                "ATATTATAAAAAATTTTAAAAAA",
+                "ATATATTCTCTCTCTCTCATA",
+                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+            };
 
-        BOSS constructed(k);
+            BOSS constructed(k);
 
-        auto constructor = IBOSSChunkConstructor::initialize(
-            k,
-            false,
-            TypeParam::kWeighted
-        );
+            auto constructor
+                    = IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted,
+                                                        "", 1, 0, container);
 
-        for (auto&& sequence : input_data) {
-            constructor->add_sequence(std::move(sequence));
-        }
+            for (auto &&sequence : input_data) {
+                constructor->add_sequence(std::move(sequence));
+            }
 
-        std::unique_ptr<BOSS::Chunk> chunk { constructor->build_chunk() };
+            std::unique_ptr<BOSS::Chunk> chunk { constructor->build_chunk() };
 
-        sdsl::int_vector<> weights;
-        chunk->initialize_boss(&constructed, &weights);
+            sdsl::int_vector<> weights;
+            chunk->initialize_boss(&constructed, &weights);
 
-        ASSERT_EQ(constructed.num_edges() + 1, weights.size());
+            ASSERT_EQ(constructed.num_edges() + 1, weights.size());
 
-        auto mask = constructed.mark_all_dummy_edges(1);
-        ASSERT_EQ(weights.size(), mask.size());
+            auto mask = constructed.mark_all_dummy_edges(1);
+            ASSERT_EQ(weights.size(), mask.size());
 
-        for (size_t i = 1; i < weights.size(); ++i) {
-            auto node_str = constructed.get_node_str(i)
-                + constructed.decode(constructed.get_W(i) % constructed.alph_size);
+            for (size_t i = 1; i < weights.size(); ++i) {
+                auto node_str = constructed.get_node_str(i)
+                        + constructed.decode(constructed.get_W(i) % constructed.alph_size);
 
-            ASSERT_EQ(k + 1, node_str.size());
-            ASSERT_EQ(node_str[0] == '$' || node_str[k] == '$', mask[i]);
+                ASSERT_EQ(k + 1, node_str.size());
+                ASSERT_EQ(node_str[0] == '$' || node_str[k] == '$', mask[i]);
 
-            EXPECT_EQ(mask[i], weights[i] == 0) << i << " " << node_str;
+                EXPECT_EQ(mask[i], weights[i] == 0) << i << " " << node_str;
+            }
         }
     }
 }
@@ -298,8 +304,8 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
 
             for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                 std::unique_ptr<IBOSSChunkConstructor> constructor(
-                    IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted, suffix)
-                );
+                        IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted,
+                                                          suffix));
 
                 constructor->add_sequence(std::string(100, 'A'));
                 constructor->add_sequence(std::string(100, 'C'));
@@ -316,7 +322,7 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
 
             EXPECT_EQ(boss_dynamic, boss);
         }
-    }
+}
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
@@ -334,8 +340,8 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
 
             for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                 std::unique_ptr<IBOSSChunkConstructor> constructor(
-                    IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted, suffix, num_threads)
-                );
+                        IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted,
+                                                          suffix, num_threads));
 
                 constructor->add_sequence(std::string(100, 'A'));
                 constructor->add_sequence(std::string(100, 'C'));
@@ -356,25 +362,17 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
 }
 
 
-template <typename KMER, class KmerExtractor, class Container>
-void extract_kmers(std::function<void(CallString)> generate_reads,
-                   size_t k,
-                   bool both_strands_mode,
-                   Container *kmers,
-                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                   bool remove_redundant = true);
-
 // TODO: k is node length
 template <typename KMER>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        SortedSet<KMER, Vector<KMER>> *kmers,
+                                        common::SortedSet<KMER, Vector<KMER>> *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    extract_kmers<KMER, KmerExtractorBOSS, SortedSet<KMER, Vector<KMER>>>(
-        [reads](CallString callback) {
+    kmer::extract_kmers<KMER, KmerExtractorBOSS, common::SortedSet<KMER, Vector<KMER>>>(
+        [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
         k, false, kmers, suffix, remove_redundant
@@ -383,7 +381,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
-    SortedSet<TypeParam, Vector<TypeParam>> result;
+    common::SortedSet<TypeParam, Vector<TypeParam>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -426,7 +424,7 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
 }
 
 TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
-    SortedSet<TypeParam, Vector<TypeParam>> result;
+    common::SortedSet<TypeParam, Vector<TypeParam>> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -459,7 +457,7 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
 }
 
 TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {
-    SortedSet<TypeParam, Vector<TypeParam>> result;
+    common::SortedSet<TypeParam, Vector<TypeParam>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -510,7 +508,7 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {
 }
 
 TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
-    SortedSet<TypeParam, Vector<TypeParam>> result;
+    common::SortedSet<TypeParam, Vector<TypeParam>> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -560,31 +558,22 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
     ASSERT_EQ(5u, result.data().size());
 }
 
-typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
-
-template <typename KMER, class KmerExtractor, class Container>
-void count_kmers(std::function<void(CallStringCount)> generate_reads,
-                 size_t k,
-                 bool both_strands_mode,
-                 Container *kmers,
-                 const std::vector<typename KmerExtractor::TAlphabet> &suffix);
-
 // TODO: k is node length
 template <typename TypeParam, typename KmerCount>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        SortedMultiset<TypeParam,
-                                                       KmerCount,
-                                                       Vector<std::pair<TypeParam, KmerCount>>> *kmers,
+                                        common::SortedMultiset<TypeParam,
+                                                               KmerCount,
+                                                               Vector<std::pair<TypeParam, KmerCount>>> *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    count_kmers<TypeParam,
-                KmerExtractorBOSS,
-                SortedMultiset<TypeParam,
-                               KmerCount,
-                               Vector<std::pair<TypeParam, KmerCount>>>>(
-        [reads](CallStringCount callback) {
+    kmer::count_kmers<TypeParam,
+                      KmerExtractorBOSS,
+                      common::SortedMultiset<TypeParam,
+                                             KmerCount,
+                                             Vector<std::pair<TypeParam, KmerCount>>>>(
+            [reads](kmer::CallStringCount callback) {
             for (const auto &read : *reads) {
                 callback(read, 1);
             }
@@ -595,7 +584,8 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TYPED_TEST(CountKmers, CountKmers8bits) {
-    SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>> result;
+    common::SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>>
+            result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -669,7 +659,8 @@ TYPED_TEST(CountKmers, CountKmers8bits) {
 }
 
 TYPED_TEST(CountKmers, CountKmers32bits) {
-    SortedMultiset<TypeParam, uint32_t, Vector<std::pair<TypeParam, uint32_t>>> result;
+    common::SortedMultiset<TypeParam, uint32_t, Vector<std::pair<TypeParam, uint32_t>>>
+            result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -743,7 +734,8 @@ TYPED_TEST(CountKmers, CountKmers32bits) {
 }
 
 TYPED_TEST(CountKmers, CountKmersAppendParallel) {
-    SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>> result;
+    common::SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>>
+            result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -774,3 +766,5 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
     ASSERT_EQ(6u, result.data().size());
 #endif
 }
+
+}  // namespace

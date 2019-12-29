@@ -2,10 +2,10 @@
 #include "test_helpers.hpp"
 
 #include "annotate_column_compressed.hpp"
-#include "vectors.hpp"
+#include "common/vector.hpp"
 #include "string_utils.hpp"
 #include "file_utils.hpp"
-#include "algorithms.hpp"
+#include "common/algorithms.hpp"
 #include "bitmap_mergers.hpp"
 #include "threading.hpp"
 #include "bit_vector.hpp"

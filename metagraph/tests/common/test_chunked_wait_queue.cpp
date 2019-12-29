@@ -1,4 +1,4 @@
-#include "common/chunked_wait_queue.hpp"
+#include "common/threads/chunked_wait_queue.hpp"
 
 #include "gtest/gtest.h"
 
@@ -10,7 +10,8 @@
 
 namespace {
 
-using threads::ChunkedWaitQueue;
+using namespace mg;
+using common::ChunkedWaitQueue;
 
 TEST(WaitQueue, Empty) {
     ChunkedWaitQueue<int32_t> under_test(20, 1);
@@ -20,13 +21,13 @@ TEST(WaitQueue, Empty) {
 
 TEST(WaitQueue, PushPop) {
     ChunkedWaitQueue<int32_t> under_test(3, 1);
-    under_test.push_front(1);
+    under_test.push(1);
     EXPECT_FALSE(under_test.full());
-    under_test.push_front(2);
+    under_test.push(2);
     EXPECT_FALSE(under_test.full());
-    under_test.push_front(3);
+    under_test.push(3);
     EXPECT_TRUE(under_test.full());
-    ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.iterator();
+    ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.begin();
     EXPECT_EQ(1, *iterator);
     EXPECT_EQ(2, *(++iterator));
     // the chunk wasn't yet cleaned up, so the queue should be full
@@ -36,7 +37,7 @@ TEST(WaitQueue, PushPop) {
     // at this point the first chunk was cleaned up, so the queue is not full any longer
     EXPECT_FALSE(under_test.full());
 
-    under_test.push_front(4);
+    under_test.push(4);
     EXPECT_EQ(4, *(++iterator));
 
     under_test.shutdown();
@@ -48,19 +49,18 @@ TEST(WaitQueue, Shutdown) {
     ChunkedWaitQueue<std::string> under_test(20, 2);
     under_test.shutdown();
     std::string v;
-    EXPECT_TRUE(under_test.iterator() == under_test.end());
+    EXPECT_TRUE(under_test.begin() == under_test.end());
 }
 
 void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
     ChunkedWaitQueue<int32_t> under_test(20, 2);
-
     struct Receiver {
         ChunkedWaitQueue<int32_t> *const under_test;
         uint32_t delay_read_ms;
         std::vector<int32_t> pop_result;
 
         void run() {
-            for (auto &it = under_test->iterator(); it != under_test->end(); ++it) {
+            for (auto &it = under_test->begin(); it != under_test->end(); ++it) {
                 if (delay_read_ms > 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay_read_ms));
                 }
@@ -80,7 +80,7 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
             if (delay_write_ms > 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(delay_write_ms));
             }
-            under_test.push_front(i);
+            under_test.push(i);
         }
         under_test.shutdown();
     });

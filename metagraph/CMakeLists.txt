@@ -7,8 +7,6 @@ include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CMakeListsHelpers.txt)
 
-enableCCache()
-
 enable_testing()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -51,6 +49,8 @@ function(message)
     _message(${ARGV})
   endif()
 endfunction()
+
+enableCCache()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
@@ -192,7 +192,7 @@ if(${CMAKE_BUILD_TYPE} MATCHES GPROFILE)
   if(PROFILER_LIBRARIES)
     set(METALIBS ${METALIBS} -lprofiler)
   else()
-    message(FATAL_ERROR "Could not find -lprofiler installed")
+    message(WARNING "Could not find -lprofiler installed")
   endif()
 endif()
 
@@ -224,7 +224,7 @@ link_directories(
 )
 
 MACRO(SUBDIRLIST result curdir)
-  FILE(GLOB children RELATIVE ${curdir} ${curdir}/* ${curdir}/*/*)
+  FILE(GLOB children RELATIVE ${curdir} ${curdir}/* ${curdir}/*/* ${curdir}/*/*/*)
   SET(dirlist "${curdir}")
   FOREACH(child ${children})
     IF(IS_DIRECTORY ${curdir}/${child})
@@ -254,10 +254,24 @@ include_directories(
   external-libraries/cpp_progress_bar
   external-libraries/nvbio/contrib/priority-deque
   external-libraries/rollinghashcpp
+  external-libraries/spdlog/include
   ${INCLUDE_DIRS}
 )
 
+# makes ASIO not depend on boost
+string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE")
+
 add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
+
+# assume built-in pthreads on MacOS
+IF(APPLE)
+    set(CMAKE_THREAD_LIBS_INIT "-lpthread")
+    set(CMAKE_HAVE_THREADS_LIBRARY 1)
+    set(CMAKE_USE_WIN32_THREADS_INIT 0)
+    set(CMAKE_USE_PTHREADS_INIT 1)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+ENDIF()
+add_subdirectory(external-libraries/spdlog)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
@@ -339,6 +353,7 @@ file(GLOB src_files
   "src/*.cpp"
   "src/*/*.cpp"
   "src/*/*/*.cpp"
+  "src/*/*/*/*.cpp"
 )
 
 # for compiling faster
@@ -347,9 +362,9 @@ list(REVERSE src_files)
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
-add_library(metagraph STATIC ${src_files})
-add_executable(metagraph-bin "src/main.cpp")
-set_target_properties(metagraph-bin PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
+add_library(metagraph-core STATIC ${src_files})
+add_executable(metagraph "src/main.cpp")
+set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
   -lKMC
@@ -360,8 +375,9 @@ set(METALIBS ${METALIBS}
   jsoncpp
   progress_bar
   ${OpenMP_CXX_LIBRARIES}
-  fmt::fmt-header-only
+  fmt::fmt
   mersenne_twister
+  spdlog::spdlog
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)
@@ -422,11 +438,11 @@ if(NOT CPPNOFS)
 endif()
 
 target_link_libraries(
-  metagraph ${METALIBS}
+  metagraph-core ${METALIBS}
 )
 
 target_link_libraries(
-  metagraph-bin metagraph ${METALIBS}
+  metagraph metagraph-core ${METALIBS}
 )
 
 add_custom_target(link_target ALL
@@ -459,7 +475,7 @@ link_directories(
 add_executable(run_experiments ${experiment_files})
 
 target_link_libraries(
-  run_experiments metagraph ${METALIBS}
+  run_experiments metagraph-core ${METALIBS}
 )
 
 
@@ -479,9 +495,9 @@ file(GLOB header_files
   "src/*/*/*.hpp"
 )
 
-install(TARGETS metagraph DESTINATION lib)
+install(TARGETS metagraph-core DESTINATION lib)
 install(FILES ${header_files} DESTINATION include/metagraph)
-install(TARGETS metagraph-bin DESTINATION bin)
+install(TARGETS metagraph DESTINATION bin)
 
 #-------------------
 # Unit Tests
@@ -546,7 +562,7 @@ link_directories(
 add_executable(unit_tests ${unit_tests_files})
 target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 target_link_libraries(unit_tests gtest_main gtest
-  metagraph
+  metagraph-core
   ${METALIBS}
 )
 
@@ -556,12 +572,12 @@ target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TE
 #-------------------
 # Tests
 #-------------------
-find_package (Python3 3.4 REQUIRED COMPONENTS Interpreter)
+find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
 
 # --- integration tests ---
 add_custom_target(check
   COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/integration_tests/main.py
-  DEPENDS metagraph-bin
+  DEPENDS metagraph
 )
 # --- integration tests + unit tests ---
 add_custom_target(check_all
@@ -590,5 +606,5 @@ if(PYTHON_INTERFACE)
   SET_SOURCE_FILES_PROPERTIES(${interface_files} PROPERTIES CPLUSPLUS ON)
 
   SWIG_ADD_LIBRARY(metagraph LANGUAGE python SOURCES ${interface_files})
-  SWIG_LINK_LIBRARIES(metagraph metagraph ${METALIBS} ${PYTHON_LIBRARIES})
+  SWIG_LINK_LIBRARIES(metagraph metagraph-core ${METALIBS} ${PYTHON_LIBRARIES})
 endif()

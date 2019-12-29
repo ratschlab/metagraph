@@ -25,7 +25,7 @@ class AnnotatedDBG {
     bool has_label(node_index index,
                    const std::string &label) const;
 
-    void annotate_sequence(const std::string &sequence,
+    void annotate_sequence(std::string&& sequence,
                            const std::vector<std::string> &labels);
 
     void call_annotated_nodes(const std::string &label,
@@ -41,10 +41,6 @@ class AnnotatedDBG {
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
 
     const Annotator& get_annotation() const { return *annotator_; }
-
-    // TODO: remove this method from here
-    static void insert_zero_rows(Annotator *annotator,
-                                 const bit_vector_dyn &inserted_edges);
 
     /*********************** Special queries **********************/
 
@@ -69,7 +65,7 @@ class AnnotatedDBG {
     get_top_labels(const std::vector<std::string> &sequences,
                    const std::vector<double> &weights,
                    size_t num_top_labels,
-                   double min_label_frequency = 0.0) const;
+                   double presence_ratio = 0.0) const;
 
     std::vector<std::pair<std::string, size_t>>
     get_top_labels(const std::unordered_map<row_index, size_t> &index_counts,

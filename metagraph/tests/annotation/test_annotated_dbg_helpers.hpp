@@ -16,8 +16,11 @@
 #include "dbg_succinct.hpp"
 #include "dbg_hash_string.hpp"
 #include "dbg_hash_ordered.hpp"
+#include "dbg_hash_fast.hpp"
 #include "dbg_bitmap.hpp"
 #include "masked_graph.hpp"
+
+using namespace mg::bitmap_graph;
 
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
@@ -35,6 +38,7 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
 typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
                          DBGHashOrdered,
+                         DBGHashFast,
                          DBGSuccinct> MaskedGraphTypes;
 
 typedef ::testing::Types<DBGBitmap,
@@ -43,17 +47,21 @@ typedef ::testing::Types<DBGBitmap,
 typedef ::testing::Types<std::pair<DBGBitmap, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashString, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annotate::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annotate::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annotate::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annotate::RowFlatAnnotator>,
                          std::pair<DBGHashString, annotate::RowFlatAnnotator>,
                          std::pair<DBGHashOrdered, annotate::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annotate::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annotate::RowFlatAnnotator>
                         > GraphAnnotationPairTypes;
 
 typedef ::testing::Types<std::pair<DBGBitmap, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annotate::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annotate::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annotate::RowFlatAnnotator>,
-                         std::pair<DBGHashOrdered, annotate::RowFlatAnnotator>
+                         std::pair<DBGHashOrdered, annotate::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annotate::RowFlatAnnotator>
                         > GraphNoNAnnotationPairTypes;
 
 typedef ::testing::Types<std::pair<DBGHashString, annotate::ColumnCompressed<>>,

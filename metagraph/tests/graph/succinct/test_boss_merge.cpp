@@ -1,9 +1,9 @@
-#include "graph/succinct/boss_merge.hpp"
+#include "graph/representation/succinct/boss_merge.hpp"
 
 #include <gtest/gtest.h>
 
-#include "graph/succinct/boss.hpp"
-#include "graph/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 
 const std::string test_data_dir = TEST_DATA_DIR;
 
@@ -138,7 +138,7 @@ TEST(BOSSMerge, TraversalMergeDisconnectedGraphs) {
         BOSS result(&constructor_third);
         ASSERT_EQ(4u, result.num_edges());
 
-        first.switch_state(Config::DYN);
+        first.switch_state(BOSS::State::DYN);
         first.merge(second);
 
         EXPECT_EQ(result, first);

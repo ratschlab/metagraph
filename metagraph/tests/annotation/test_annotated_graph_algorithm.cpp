@@ -1,16 +1,40 @@
 #include "gtest/gtest.h"
 
-#include "../graph/test_dbg_helpers.hpp"
+#include "../graph/all/test_dbg_helpers.hpp"
+#include "../graph/test_aligner_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
-#include "threading.hpp"
-#include "annotated_graph_algorithm.hpp"
+#include "common/threads/threading.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 
 
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
-
 TYPED_TEST_CASE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
+
+// TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
+//     size_t k = 4;
+//     // TTGC      GCACGGGTC
+//     //      TGCA
+//     // ATGC      GCAGTGGTC
+//     std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
+//     const std::vector<std::string> labels { "A", "B" };
+//     auto anno_graph = build_anno_graph<TypeParam,
+//                                        annotate::ColumnCompressed<>>(
+//         k, sequences, labels
+//     );
+
+//     auto masked_dbg = build_masked_graph(*anno_graph, { "A" }, {});
+//     std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
+//     std::unordered_multiset<std::string> obs;
+
+//     masked_dbg.call_unitigs([&](const auto &unitig, const auto &path) {
+//         ASSERT_EQ(path, map_sequence_to_nodes(masked_dbg, unitig));
+//         obs.insert(unitig);
+//     });
+
+//     EXPECT_EQ(obs, ref);
+// }
 
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
 void test_mask_indices(double density_cutoff) {
@@ -44,7 +68,10 @@ void test_mask_indices(double density_cutoff) {
                                              0.0,
                                              0.0,
                                              density_cutoff);
-        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+
+        // FYI: num_nodes() throws exception for masked graph with lazy node mask
+        // EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+        ASSERT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 
         masked_dbg.call_kmers([&](auto i, const auto &kmer) {
             auto cur_labels = anno_graph->get_labels(i);
@@ -107,7 +134,7 @@ test_mask_unitigs(double inlabel_fraction,
             )
         );
 
-        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+        EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 
         masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
 

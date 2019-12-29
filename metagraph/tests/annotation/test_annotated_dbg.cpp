@@ -53,6 +53,14 @@ void check_labels(const AnnotatedDBG &anno_graph,
     }
 }
 
+std::vector<uint64_t> edge_to_row_idx(const bitmap &edge_mask) {
+    // transform indexes of k-mers to the annotation format
+    std::vector<uint64_t> rows;
+    edge_mask.call_ones([&](auto i) {
+        rows.push_back(AnnotatedDBG::graph_to_anno_index(i));
+    });
+    return rows;
+}
 
 TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
@@ -64,19 +72,19 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
 
         std::string sequence(100, 'A');
 
-        bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph.get_graph().max_index() + 1, 0);
         anno_graph.graph_->add_sequence(sequence, &inserted_edges);
 
         ASSERT_EQ(k + 2, anno_graph.get_graph().num_nodes());
         EXPECT_EQ(1u, anno_graph.get_annotation().num_objects());
 
-        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_edges));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_edges.size());
 
         EXPECT_FALSE(anno_graph.label_exists("Label"));
         EXPECT_FALSE(anno_graph.label_exists("NotLabel"));
 
-        anno_graph.annotate_sequence(sequence, { "Label" });
+        anno_graph.annotate_sequence(std::string(sequence), { "Label" });
 
         EXPECT_EQ(std::vector<std::string> { "Label" },
                   anno_graph.get_labels(sequence, 1));
@@ -104,7 +112,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
+            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -112,7 +120,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         EXPECT_FALSE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -123,17 +131,17 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
 
         check_labels(anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
-        bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph.get_graph().max_index() + 1, 0);
 
         anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
-        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_edges));
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
         check_labels(anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
@@ -170,7 +178,7 @@ TEST(AnnotatedDBG, Transform) {
         uint64_t num_nodes = graph->num_nodes();
         auto anno_graph = std::make_unique<AnnotatedDBG>(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
+            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph->get_graph().num_nodes());
 
@@ -178,7 +186,7 @@ TEST(AnnotatedDBG, Transform) {
         EXPECT_FALSE(anno_graph->label_exists("Second"));
         EXPECT_FALSE(anno_graph->label_exists("Third"));
 
-        anno_graph->annotate_sequence(seq_first, { "First" });
+        anno_graph->annotate_sequence(std::string(seq_first), { "First" });
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph->get_labels(seq_first, 1));
@@ -189,17 +197,17 @@ TEST(AnnotatedDBG, Transform) {
 
         check_labels(*anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
-        bit_vector_dyn inserted_edges(anno_graph->get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph->get_graph().max_index() + 1, 0);
 
         anno_graph->graph_->add_sequence(seq_second, &inserted_edges);
-        AnnotatedDBG::insert_zero_rows(anno_graph->annotator_.get(), inserted_edges);
+        anno_graph->annotator_->insert_rows(edge_to_row_idx(inserted_edges));
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph->get_labels(seq_first, 1));
 
         check_labels(*anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
-        anno_graph->annotate_sequence(seq_second, { "Second" });
+        anno_graph->annotate_sequence(std::string(seq_second), { "Second" });
 
         anno_graph = std::make_unique<AnnotatedDBG>(
             std::move(anno_graph->graph_),
@@ -251,7 +259,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
+            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -260,7 +268,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -270,23 +278,23 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph.get_graph().max_index() + 1, 0);
 
         anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
         anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
-        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_edges));
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_TRUE(anno_graph.label_exists("Third"));
@@ -355,7 +363,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
+            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -364,7 +372,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -375,17 +383,17 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph.get_graph().max_index() + 1, 0);
 
         anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
         anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
-        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_edges));
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -457,7 +465,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
+            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -470,7 +478,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_FALSE(anno_graph.label_exists("Second"));
@@ -480,23 +488,23 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph.get_graph().max_index() + 1, 0);
 
         anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
         anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
-        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_edges));
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
@@ -568,10 +576,9 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(10, false);
 
-        uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(num_nodes),
+            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index()),
             10
         );
 
@@ -584,7 +591,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -595,17 +602,17 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph.get_graph().max_index() + 1, 0);
 
         anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
         anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
-        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_edges));
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -678,10 +685,9 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(0, true);
 
-        uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
+            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
         );
 
         EXPECT_FALSE(anno_graph.label_exists("First"));
@@ -689,7 +695,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_FALSE(anno_graph.label_exists("Second"));
@@ -703,23 +709,23 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph.get_graph().max_index() + 1, 0);
 
         anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
         anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
-        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_edges));
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
         EXPECT_TRUE(anno_graph.label_exists("Second"));
@@ -790,10 +796,9 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(10, true);
 
-        uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(num_nodes),
+            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index()),
             10
         );
 
@@ -802,7 +807,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        anno_graph.annotate_sequence(seq_first, { "First" });
+        anno_graph.annotate_sequence(std::string(seq_first), { "First" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -817,17 +822,17 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
+        bit_vector_dyn inserted_edges(anno_graph.get_graph().max_index() + 1, 0);
 
         anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
         anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
-        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_edges));
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
-        anno_graph.annotate_sequence(seq_second, { "Second" });
-        anno_graph.annotate_sequence(seq_third, { "Third" });
+        anno_graph.annotate_sequence(std::string(seq_second), { "Second" });
+        anno_graph.annotate_sequence(std::string(seq_third), { "Third" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.label_exists("First"));
@@ -1053,6 +1058,64 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_labels_equal_weights) {
     }
 }
 
+TYPED_TEST(AnnotatedDBGWithNTest, get_labels_equal_nonone_weights) {
+    for (size_t k = 1; k < 10; ++k) {
+        const std::vector<std::string> sequences {
+            std::string(100, 'A') + std::string(k, 'C'),
+            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
+            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+        };
+        const auto& seq_first = sequences[0];
+        const auto& seq_second = sequences[1];
+        const auto& seq_third = sequences[2];
+
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            k + 1, sequences, { "First", "Second" , "Third" }
+        );
+
+        EXPECT_TRUE(anno_graph->label_exists("First"));
+        EXPECT_TRUE(anno_graph->label_exists("Second"));
+        EXPECT_TRUE(anno_graph->label_exists("Third"));
+        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
+
+        for (size_t i = 1; i < 4; ++i) {
+            std::vector<std::string> seqs_first(i, seq_first);
+            std::vector<std::string> seqs_second(i, seq_second);
+            std::vector<std::string> seqs_third(i, seq_third);
+            std::vector<double> weights(i, 0.5);
+
+            EXPECT_EQ(std::vector<std::string> { "First" },
+                      anno_graph->get_labels(seqs_first, weights, 1))
+                << i;
+
+#if _DNA_GRAPH
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                           / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                           / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                          / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                          / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+#else
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+#endif
+        }
+    }
+}
+
 TYPED_TEST(AnnotatedDBGWithNTest, get_labels_unequal_weights) {
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1181,6 +1244,56 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_labels_equal_weights) {
             std::vector<std::string> seqs_second(i, seq_second);
             std::vector<std::string> seqs_third(i, seq_third);
             std::vector<double> weights(i, 1.0);
+
+            EXPECT_EQ(std::vector<std::string> { "First" },
+                      anno_graph->get_labels(seqs_first, weights, 1)) << i;
+
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights,  1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Second" },
+                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+            EXPECT_EQ(std::vector<std::string> {},
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
+            EXPECT_EQ(std::vector<std::string> { "Third" },
+                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+        }
+    }
+}
+
+TYPED_TEST(AnnotatedDBGNoNTest, get_labels_equal_nonone_weights) {
+    for (size_t k = 1; k < 10; ++k) {
+        const std::vector<std::string> sequences {
+            std::string(100, 'A') + std::string(k, 'C'),
+            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
+            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+        };
+        const auto& seq_first = sequences[0];
+        const auto& seq_second = sequences[1];
+        const auto& seq_third = sequences[2];
+
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            k + 1, sequences, { "First", "Second" , "Third" }
+        );
+
+        EXPECT_TRUE(anno_graph->label_exists("First"));
+        EXPECT_TRUE(anno_graph->label_exists("Second"));
+        EXPECT_TRUE(anno_graph->label_exists("Third"));
+        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
+
+        for (size_t i = 1; i < 4; ++i) {
+            std::vector<std::string> seqs_first(i, seq_first);
+            std::vector<std::string> seqs_second(i, seq_second);
+            std::vector<std::string> seqs_third(i, seq_third);
+            std::vector<double> weights(i, 0.5);
 
             EXPECT_EQ(std::vector<std::string> { "First" },
                       anno_graph->get_labels(seqs_first, weights, 1)) << i;

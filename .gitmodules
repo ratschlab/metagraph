@@ -27,7 +27,7 @@
 	url = https://github.com/sara-jvz/binrel_wt.git
 [submodule "metagraph/external-libraries/ordered-map"]
 	path = metagraph/external-libraries/ordered-map
-	url = https://github.com/Tessil/ordered-map.git
+	url = https://github.com/chrisbarber/ordered-map.git
 [submodule "metagraph/external-libraries/sparsepp"]
 	path = metagraph/external-libraries/sparsepp
 	url = https://github.com/greg7mdp/sparsepp.git
@@ -55,3 +55,6 @@
 [submodule "metagraph/external-libraries/rollinghashcpp"]
 	path = metagraph/external-libraries/rollinghashcpp
 	url = https://github.com/hmusta/rollinghashcpp
+[submodule "metagraph/external-libraries/spdlog"]
+	path = metagraph/external-libraries/spdlog
+	url = https://github.com/gabime/spdlog

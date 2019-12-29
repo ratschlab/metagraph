@@ -8,13 +8,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../../..)
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 
-add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/succinct succinct)
+add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/representation/base metagraph_graph_base)
+add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/representation/succinct succinct)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/kmer kmer)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/utils metagraph_utils)
-add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/base metagraph_graph_base)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 
+enableCCache()
 findOpenMP()
 buildProgressBar(EXTERNAL_LIB_DIR progress_bar)
 buildMersenneTwister(EXTERNAL_LIB_DIR mersenne_twister)

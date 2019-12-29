@@ -17,7 +17,7 @@ class NodeWeights : public SequenceGraph::GraphExtension {
 
     NodeWeights() {}
     // initialize zero weights
-    NodeWeights(uint64_t num_nodes, size_t bits_per_count);
+    NodeWeights(uint64_t max_index, size_t bits_per_count);
     // initialize weights from existing vector
     NodeWeights(sdsl::int_vector<>&& weights);
 

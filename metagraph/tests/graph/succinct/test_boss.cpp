@@ -1,13 +1,12 @@
-#include "graph/succinct/boss.hpp"
+#include "gtest/gtest.h"
 
 #include <zlib.h>
 #include <htslib/kseq.h>
 #include <unordered_set>
-#include "gtest/gtest.h"
 
-#include "graph/succinct/boss_construct.hpp"
-
-#include "utils/algorithms.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
+#include "common/algorithms.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -19,8 +18,8 @@ const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 void test_graph(BOSS *graph, const std::string &last,
                              const std::vector<uint64_t> &W,
                              const std::string &F,
-                             Config::StateType state) {
-    Config::StateType old_state = graph->get_state();
+                             BOSS::State state) {
+    BOSS::State old_state = graph->get_state();
     graph->switch_state(state);
 
     std::ostringstream ostr;
@@ -61,16 +60,16 @@ void test_graph(BOSS *graph, const std::string &last,
 void test_graph(BOSS *graph, const std::string &last,
                              const std::vector<uint64_t> &W,
                              const std::string &F) {
-    test_graph(graph, last, W, F, Config::DYN);
-    test_graph(graph, last, W, F, Config::DYN);
-    test_graph(graph, last, W, F, Config::STAT);
-    test_graph(graph, last, W, F, Config::STAT);
-    test_graph(graph, last, W, F, Config::SMALL);
-    test_graph(graph, last, W, F, Config::SMALL);
-    test_graph(graph, last, W, F, Config::STAT);
-    test_graph(graph, last, W, F, Config::DYN);
-    test_graph(graph, last, W, F, Config::SMALL);
-    test_graph(graph, last, W, F, Config::DYN);
+    test_graph(graph, last, W, F, BOSS::State::DYN);
+    test_graph(graph, last, W, F, BOSS::State::DYN);
+    test_graph(graph, last, W, F, BOSS::State::STAT);
+    test_graph(graph, last, W, F, BOSS::State::STAT);
+    test_graph(graph, last, W, F, BOSS::State::SMALL);
+    test_graph(graph, last, W, F, BOSS::State::SMALL);
+    test_graph(graph, last, W, F, BOSS::State::STAT);
+    test_graph(graph, last, W, F, BOSS::State::DYN);
+    test_graph(graph, last, W, F, BOSS::State::SMALL);
+    test_graph(graph, last, W, F, BOSS::State::DYN);
 }
 
 
@@ -146,9 +145,9 @@ TEST(BOSS, SmallGraphTraversal) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    BOSSConstructor constructor(3);
+    BOSSConstructor constructor(3 /* k-mer length */);
 
-    for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
+    while (kseq_read(read_stream) >= 0) {
         constructor.add_sequences({ read_stream->seq.s });
     }
     kseq_destroy(read_stream);
@@ -389,10 +388,10 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
             second_ptr.reset(new BOSS(&constructor));
         }
 
-        auto &first = *first_ptr;
-        auto &second = *second_ptr;
+        BOSS &first = *first_ptr;
+        BOSS &second = *second_ptr;
 
-        ASSERT_TRUE(first.equals_internally(second)) << first;
+        ASSERT_TRUE(first.equals_internally(second)) << first << second;
 
         sdsl::bit_vector source_dummy_edges(second.num_edges() + 1, false);
         auto to_remove = second.erase_redundant_dummy_edges(&source_dummy_edges);
@@ -402,7 +401,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
         EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_EQ(0u, std::count(to_remove.begin(), to_remove.end(), true));
-        EXPECT_TRUE(first.equals_internally(second)) << first;
+        EXPECT_TRUE(first.equals_internally(second)) << first << second;
     }
 }
 
@@ -1060,7 +1059,7 @@ TEST(BOSS, CallPaths) {
             BOSS graph(k);
             graph.add_sequence("AAACACTAG", true);
             graph.add_sequence("AACGACATG", true);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1076,7 +1075,7 @@ TEST(BOSS, CallPaths) {
             graph.add_sequence("AGACACTGA", true);
             graph.add_sequence("GACTACGTA", true);
             graph.add_sequence("ACTAACGTA", true);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1092,7 +1091,7 @@ TEST(BOSS, CallPaths) {
             graph.add_sequence("AGACACAGT", true);
             graph.add_sequence("GACTTGCAG", true);
             graph.add_sequence("ACTAGTCAG", true);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1107,7 +1106,7 @@ TEST(BOSS, CallPaths) {
             BOSS graph(k);
             graph.add_sequence("AAACTCGTAGC", true);
             graph.add_sequence("AAATGCGTAGC", true);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1122,7 +1121,7 @@ TEST(BOSS, CallPaths) {
             BOSS graph(k);
             graph.add_sequence("AAACT", false);
             graph.add_sequence("AAATG", false);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1142,7 +1141,7 @@ TEST(BOSS, CallUnitigs) {
             BOSS graph(k);
             graph.add_sequence("AAACACTAG", true);
             graph.add_sequence("AACGACATG", true);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1158,7 +1157,7 @@ TEST(BOSS, CallUnitigs) {
             graph.add_sequence("AGACACTGA", true);
             graph.add_sequence("GACTACGTA", true);
             graph.add_sequence("ACTAACGTA", true);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1174,7 +1173,7 @@ TEST(BOSS, CallUnitigs) {
             graph.add_sequence("AGACACAGT", true);
             graph.add_sequence("GACTTGCAG", true);
             graph.add_sequence("ACTAGTCAG", true);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1189,7 +1188,7 @@ TEST(BOSS, CallUnitigs) {
             BOSS graph(k);
             graph.add_sequence("AAACTCGTAGC", true);
             graph.add_sequence("AAATGCGTAGC", true);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1204,7 +1203,7 @@ TEST(BOSS, CallUnitigs) {
             BOSS graph(k);
             graph.add_sequence("AAACT", false);
             graph.add_sequence("AAATG", false);
-            graph.switch_state(Config::STAT);
+            graph.switch_state(BOSS::State::STAT);
 
             BOSS reconstructed(k);
 
@@ -1742,7 +1741,7 @@ TEST(BOSS, CallEdgesTestPathDisconnected) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
         BOSS graph(&constructor);
-        graph.switch_state(Config::DYN);
+        graph.switch_state(BOSS::State::DYN);
 
         graph.add_sequence(std::string(100, 'T'));
 
@@ -1760,7 +1759,7 @@ TEST(BOSS, CallEdgesTestPathDisconnected2) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'G'));
         BOSS graph(&constructor);
-        graph.switch_state(Config::DYN);
+        graph.switch_state(BOSS::State::DYN);
 
         graph.add_sequence(std::string(k, 'A') + "T");
 
@@ -1875,7 +1874,7 @@ TEST(BOSS, CallKmersTestPathDisconnected) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
         BOSS graph(&constructor);
-        graph.switch_state(Config::DYN);
+        graph.switch_state(BOSS::State::DYN);
 
         graph.add_sequence(std::string(100, 'T'));
 
@@ -1890,7 +1889,7 @@ TEST(BOSS, CallKmersTestPathDisconnected2) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'G'));
         BOSS graph(&constructor);
-        graph.switch_state(Config::DYN);
+        graph.switch_state(BOSS::State::DYN);
 
         graph.add_sequence(std::string(k, 'A') + "T");
 

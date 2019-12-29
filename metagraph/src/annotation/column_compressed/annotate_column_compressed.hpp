@@ -1,14 +1,13 @@
 #ifndef __ANNOTATE_COLUMN_COMPRESSED_HPP__
 #define __ANNOTATE_COLUMN_COMPRESSED_HPP__
 
-
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 #include <progress_bar.hpp>
 
+#include "common/vectors/bit_vector.hpp"
+#include "common/vector.hpp"
 #include "annotation/annotate.hpp"
-#include "utils/bit_vectors/bit_vector.hpp"
-#include "utils/vectors.hpp"
 
 
 namespace annotate {
@@ -100,15 +99,15 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
   private:
     void set(Index i, size_t j, bool value);
-    bool is_set(Index i, size_t j) const;
 
     void add_labels(uint64_t begin, uint64_t end,
                     RowCompressed<Label> *annotator,
                     ProgressBar *progress_bar) const;
     void release();
     void flush() const;
-    void flush(size_t j, const bitmap &annotation_curr);
-    bitmap_dyn& decompress(size_t j);
+    void flush(size_t j, const bitmap_builder &column_builder);
+    bitmap_builder& decompress_builder(size_t j);
+    bitmap_dyn& decompress_bitmap(size_t j);
     const bitmap& get_column(size_t j) const;
 
     SetBitPositions get_label_codes(Index i) const override;
@@ -120,7 +119,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
 
     caches::fixed_sized_cache<size_t,
-                              bitmap_dyn*,
+                              bitmap_builder*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
     LabelEncoder<Label> &label_encoder_ {

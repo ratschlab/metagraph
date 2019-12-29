@@ -8,13 +8,21 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
-#include "utils/string_utils.hpp"
-#include "utils/vectors.hpp"
+#include "common/vector.hpp"
+#include "common/utils/string_utils.hpp"
 #include "kmer.hpp"
 #include "kmer_boss.hpp"
 #include "alphabets.hpp"
 
 
+/**
+ * Extracts k-mers to be placed in a BOSS table from sequences. Each sequence is
+ * prepended with (k-1) $ characters (aka 'dummy prefix') and terminated with a $ to
+ * facilitate graph traversal.
+ * A sequence may sometimes contain multiple segments separated by a character not in
+ * the alphabet (DNA sequences are typically separated by an N, e.g. AAATNGGGC
+ * resulting in the segments AAAT and GGGC).
+ */
 class KmerExtractorBOSS {
   public:
 
@@ -105,8 +113,8 @@ class KmerExtractor2BitT {
                        const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
 
     /**
-     * Break the sequence into kmers and add them to the kmer storage.
-     * Adds only valid k-mers.
+     * Break the sequence into kmers and add them to the kmer collector. If suffix is
+     * not empty, only kmers with the given suffix are added.
      */
     template <class T>
     void sequence_to_kmers(const std::string &sequence,
