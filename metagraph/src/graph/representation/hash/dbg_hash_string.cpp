@@ -30,13 +30,10 @@ void DBGHashString::add_sequence(const std::string &sequence,
         assert(sequence.size() >= k_);
 
         for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
-            auto index_insert = indices_.emplace(seq_encoded.substr(i, k_),
-                                                 kmers_.size());
-            if (index_insert.second) {
-                kmers_.push_back(index_insert.first->first);
-                if (nodes_inserted)
-                    nodes_inserted->insert_bit(kmers_.size() - 1, true);
-            }
+            auto index_insert = kmers_.insert(seq_encoded.substr(i, k_));
+
+            if (index_insert.second && nodes_inserted)
+                nodes_inserted->insert_bit(kmers_.size() - 1, true);
         }
     }
 }
@@ -243,36 +240,77 @@ bool DBGHashString::has_single_incoming(node_index node) const {
 
 void DBGHashString
 ::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
-    for (const auto &kmer : indices_) {
-        callback(kmer.second + 1, kmer.first);
+    for (auto it = kmers_.begin(); it != kmers_.end(); ++it) {
+        callback(it - kmers_.begin() + 1, *it);
     }
 }
 
 DBGHashString::node_index
 DBGHashString::kmer_to_node(const std::string &kmer) const {
-    if (kmer.length() != k_)
-        throw std::runtime_error("Error: incompatible k-mer size");
+    assert(kmer.length() == k_);
 
-    auto find = indices_.find(kmer);
-    if (find == indices_.end())
+    auto find = kmers_.find(kmer);
+    if (find == kmers_.end())
         return npos;
 
-    return find->second + 1;
+    return find - kmers_.begin() + 1;
 }
 
 std::string DBGHashString::node_to_kmer(node_index node) const {
     assert(in_graph(node));
-    assert(kmers_.at(node - 1).size() == k_);
-    return std::string(kmers_.at(node - 1));
+    assert((kmers_.begin() + (node - 1))->length() == k_);
+    return *(kmers_.begin() + (node - 1));
 }
+
+class KmerSerializer {
+  public:
+    KmerSerializer(std::ostream &os, size_t k) : os_(os), k_(k) {}
+
+    void operator()(const std::string &str) {
+        assert(str.size() == k_);
+        os_.write(str.data(), k_);
+    }
+
+    template <class T>
+    void operator()(const T &value) {
+        os_.write(reinterpret_cast<const char *>(&value), sizeof(T));
+    }
+
+  private:
+    std::ostream &os_;
+    size_t k_;
+};
+
+class KmerDeserializer {
+  public:
+    KmerDeserializer(std::istream &is, size_t k) : is_(is), k_(k) {}
+
+    template <class T>
+    T operator()() {
+        T value;
+        if constexpr(std::is_same<T, std::string>::value) {
+            value.resize(k_);
+            is_.read(value.data(), k_);
+        } else {
+            is_.read(reinterpret_cast<char *>(&value), sizeof(T));
+        }
+        return value;
+    }
+
+  private:
+    std::istream &is_;
+    size_t k_;
+};
 
 void DBGHashString::serialize(std::ostream &out) const {
     if (!out.good())
         throw std::ofstream::failure("Error: trying to dump graph to a bad stream");
 
-    serialize_number(out, kmers_.size());
+    out.exceptions(out.badbit | out.failbit);
+
     serialize_number(out, k_);
-    serialize_string_number_map(out, indices_);
+    KmerSerializer serializer(out, k_);
+    kmers_.serialize(serializer);
 }
 
 void DBGHashString::serialize(const std::string &filename) const {
@@ -285,16 +323,13 @@ bool DBGHashString::load(std::istream &in) {
     if (!in.good())
         return false;
 
+    in.exceptions(in.badbit | in.failbit | in.eofbit);
+
     try {
-        size_t size = load_number(in);
         k_ = load_number(in);
-        kmers_.resize(size);
-        load_string_number_map(in, &indices_);
-        //kmers_.resize(indices_.size());
-        for (auto &kmer : indices_) {
-            kmers_[kmer.second] = kmer.first;
-        }
-        return true;
+        KmerDeserializer deserializer(in, k_);
+        kmers_ = KmerIndex::deserialize(deserializer, true);
+        return in.good();
     } catch (...) {
         return false;
     }
@@ -320,7 +355,6 @@ bool DBGHashString::operator==(const DeBruijnGraph &other) const {
         return true;
 
     assert(k_ == other_hash.k_);
-    assert(indices_.size() == other_hash.indices_.size());
     assert(kmers_.size() == other_hash.kmers_.size());
     assert(is_canonical_mode() == other_hash.is_canonical_mode());
 

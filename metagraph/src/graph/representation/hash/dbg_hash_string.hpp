@@ -2,7 +2,7 @@
 #define __DBG_HASH_STRING_HPP__
 
 #include <fstream>
-#include <tsl/hopscotch_map.h>
+#include <tsl/ordered_set.h>
 
 #include "sequence_graph.hpp"
 
@@ -95,8 +95,14 @@ class DBGHashString : public DeBruijnGraph {
     std::vector<std::string> encode_sequence(const std::string &sequence) const;
 
     size_t k_;
-    tsl::hopscotch_map<std::string, uint64_t> indices_;
-    std::vector<std::string> kmers_;
+
+    using KmerIndex = tsl::ordered_set<std::string,
+                                       std::hash<std::string>,
+                                       std::equal_to<std::string>,
+                                       std::allocator<std::string>,
+                                       std::deque<std::string>,
+                                       std::uint64_t>;
+    KmerIndex kmers_;
 
     static const std::string alphabet_;
 };
