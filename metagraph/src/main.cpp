@@ -1227,7 +1227,7 @@ int main(int argc, char *argv[]) {
         }
         case Config::MERGE_ANNOTATIONS: {
             if (config->anno_type == Config::ColumnCompressed) {
-                annotate::ColumnCompressed<> annotation(0, config->kNumCachedColumns, get_verbose());
+                annotate::ColumnCompressed<> annotation(0, config->num_columns_cached, get_verbose());
                 if (!annotation.merge_load(files)) {
                     logger->error("Cannot load annotations");
                     exit(1);
