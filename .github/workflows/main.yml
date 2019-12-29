@@ -53,10 +53,10 @@ jobs:
         cmake ..
 
     - name: build metagraph
-      run: cd metagraph/build && make -j 2 metagraph
+      run: cd metagraph/build && make metagraph
 
     - name: build unit tests
-      run: cd metagraph/build && make -j 2 unit_tests
+      run: cd metagraph/build && make unit_tests
 
     - name: build other
       run: cd metagraph/build && make
@@ -107,10 +107,10 @@ jobs:
         cmake ..
 
     - name: build metagraph
-      run: cd metagraph/build && make -j 2 metagraph
+      run: cd metagraph/build && make metagraph
 
     - name: build unit tests
-      run: cd metagraph/build && make -j 2 unit_tests
+      run: cd metagraph/build && make unit_tests
 
     - name: build other
       run: cd metagraph/build && make
