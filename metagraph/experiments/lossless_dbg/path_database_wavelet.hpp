@@ -28,6 +28,7 @@
 #include "utilities.hpp"
 #include "query_enabler.hpp"
 #include "configuration.hpp"
+#include "config.hpp"
 
 #include "graph_patch.hpp"
 //#define CHECK_CORECTNESS 1
@@ -261,7 +262,7 @@ public:
 #else
         alt_assert(this->graph_->get_node_sequence(1) == std::string(this->graph_->get_k(), '$'));
 #endif
-        const_cast<DBGSuccinct&>(this->graph).get_boss().switch_state(Config::SMALL);
+        const_cast<DBGSuccinct&>(this->graph).get_boss().switch_state(BOSS::SMALL);
         this->graph.serialize(graph_filename);
 
         cerr << "Finished serializing the path encoder in " << timer.elapsed() << " sec." << endl;

@@ -18,6 +18,7 @@
 #include "boss.hpp"
 #include "kmer_extractor.hpp"
 #include "sequence_io.hpp"
+#include "unix_tools.hpp"
 
 using namespace std;
 using ll = long long;

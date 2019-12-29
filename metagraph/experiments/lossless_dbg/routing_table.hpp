@@ -13,6 +13,7 @@
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
+#include <sdsl/construct.hpp>
 
 //#include "utils.hpp"
 #include "configuration.hpp"
