@@ -89,6 +89,8 @@ class DBGHashString : public DeBruijnGraph {
 
     bool in_graph(node_index node) const;
 
+    static constexpr auto kExtension = ".hashstrdbg";
+
   private:
     std::vector<std::string> encode_sequence(const std::string &sequence) const;
 
@@ -97,8 +99,6 @@ class DBGHashString : public DeBruijnGraph {
     std::vector<std::string> kmers_;
 
     static const std::string alphabet_;
-
-    static constexpr auto kExtension = ".hashstrdbg";
 };
 
 #endif // __DBG_HASH_STRING_HPP__

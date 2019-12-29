@@ -105,6 +105,7 @@ class DBGBitmap : public DeBruijnGraph {
 
     using Chunk = bit_vector_smart;
 
+    static constexpr auto kExtension = ".bitmapdbg";
     static constexpr auto kChunkFileExtension = ".dbgsdchunk";
 
   private:
@@ -124,8 +125,6 @@ class DBGBitmap : public DeBruijnGraph {
     bit_vector_smart kmers_;
 
     bool complete_ = false;
-
-    static constexpr auto kExtension = ".bitmapdbg";
 };
 
 } // namespace bitmap_graph

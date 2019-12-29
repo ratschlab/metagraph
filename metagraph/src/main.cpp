@@ -56,20 +56,20 @@ const bool kPrefilterWithBloom = false;
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
 
-Config::GraphType parse_graph_extension(const std::string &filename) {
-    if (utils::ends_with(filename, ".dbg")) {
+Config::GraphType parse_graph_type(const std::string &filename) {
+    if (utils::ends_with(filename, DBGSuccinct::kExtension)) {
         return Config::GraphType::SUCCINCT;
 
-    } else if (utils::ends_with(filename, ".orhashdbg")) {
+    } else if (utils::ends_with(filename, DBGHashOrdered::kExtension)) {
         return Config::GraphType::HASH;
 
-    } else if (utils::ends_with(filename, ".hashstrdbg")) {
+    } else if (utils::ends_with(filename, DBGHashString::kExtension)) {
         return Config::GraphType::HASH_STR;
 
-    } else if (utils::ends_with(filename, ".hashfastdbg")) {
+    } else if (utils::ends_with(filename, DBGHashFast::kExtension)) {
         return Config::GraphType::HASH_FAST;
 
-    } else if (utils::ends_with(filename, ".bitmapdbg")) {
+    } else if (utils::ends_with(filename, DBGBitmap::kExtension)) {
         return Config::GraphType::BITMAP;
 
     } else {
@@ -105,14 +105,6 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     }
 }
 
-std::string remove_graph_extension(const std::string &filename) {
-    return utils::remove_suffix(filename, ".dbg",
-                                          ".orhashdbg",
-                                          ".hashstrdbg",
-                                          ".hashfastdbg",
-                                          ".bitmapdbg");
-}
-
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     auto graph = std::make_shared<Graph>(2);
@@ -124,7 +116,7 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
 }
 
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
-    auto graph_type = parse_graph_extension(filename);
+    auto graph_type = parse_graph_type(filename);
     switch (graph_type) {
         case Config::GraphType::SUCCINCT:
             return load_critical_graph_from_file<DBGSuccinct>(filename);
@@ -2789,7 +2781,7 @@ int main(int argc, char *argv[]) {
             assert(config->outfbase.size());
 
             if (config->initialize_bloom
-                    && parse_graph_extension(files.at(0)) == Config::GraphType::SUCCINCT)
+                    && parse_graph_type(files.at(0)) == Config::GraphType::SUCCINCT)
                 std::filesystem::remove(
                     utils::remove_suffix(config->outfbase, ".bloom") + ".bloom"
                 );

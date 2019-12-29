@@ -140,6 +140,10 @@ class DBGSuccinct : public DeBruijnGraph {
 
     const KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
 
+    static constexpr auto kExtension = ".dbg";
+    static constexpr auto kDummyMaskExtension = ".edgemask";
+    static constexpr auto kBloomFilterExtension = ".bloom";
+
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
 
@@ -150,10 +154,6 @@ class DBGSuccinct : public DeBruijnGraph {
     bool canonical_mode_;
 
     std::unique_ptr<KmerBloomFilter<>> bloom_filter_;
-
-    static constexpr auto kExtension = ".dbg";
-    static constexpr auto kDummyMaskExtension = ".edgemask";
-    static constexpr auto kBloomFilterExtension = ".bloom";
 };
 
 
