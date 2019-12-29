@@ -12,8 +12,8 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
+#include "config/config.hpp"
 #include "sequence_reader.hpp"
-#include "config.hpp"
 
 using mg::common::logger;
 using utils::get_verbose;

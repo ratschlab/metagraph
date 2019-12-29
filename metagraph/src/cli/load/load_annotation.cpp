@@ -7,7 +7,7 @@
 #include "annotation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/static_annotators_def.hpp"
-#include "cli/config.hpp"
+#include "cli/config/config.hpp"
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {

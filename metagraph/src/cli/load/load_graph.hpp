@@ -5,7 +5,7 @@
 
 #include "common/logger.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
-#include "cli/config.hpp"
+#include "cli/config/config.hpp"
 
 
 Config::GraphType parse_graph_type(const std::string &filename);

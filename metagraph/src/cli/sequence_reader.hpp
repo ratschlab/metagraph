@@ -14,7 +14,7 @@
 #include "seq_io/formats.hpp"
 #include "seq_io/kmc_parser.hpp"
 #include "seq_io/sequence_io.hpp"
-#include "config.hpp"
+#include "config/config.hpp"
 
 
 template <class Callback, class CountedKmer, class Loop>

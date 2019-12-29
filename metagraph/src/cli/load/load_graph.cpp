@@ -9,7 +9,7 @@
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "cli/config.hpp"
+#include "cli/config/config.hpp"
 
 
 Config::GraphType parse_graph_type(const std::string &filename) {

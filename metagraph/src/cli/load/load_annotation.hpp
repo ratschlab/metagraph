@@ -4,7 +4,7 @@
 #include <string>
 
 #include "annotation/annotate.hpp"
-#include "cli/config.hpp"
+#include "cli/config/config.hpp"
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename);
