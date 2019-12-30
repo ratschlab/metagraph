@@ -24,10 +24,10 @@ class ConvertFromRowCompressed : public ::testing::Test {
 
     virtual void SetUp() {
         initial_annotation = new annotate::RowCompressed<>(num_rows);
-        initial_annotation->add_labels(0, {"Label0", "Label2", "Label8"});
-        initial_annotation->add_labels(2, {"Label1", "Label2"});
-        initial_annotation->add_labels(3, {"Label1", "Label2", "Label8"});
-        initial_annotation->add_labels(4, {"Label2"});
+        initial_annotation->add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        initial_annotation->add_labels({ 2 }, {"Label1", "Label2"});
+        initial_annotation->add_labels({ 3 }, {"Label1", "Label2", "Label8"});
+        initial_annotation->add_labels({ 4 }, {"Label2"});
     }
 
     virtual void TearDown() {
@@ -67,22 +67,22 @@ class MergeAnnotators : public ::testing::Test {
     virtual void SetUp() {
 
         input_annotation_1 = new annotate::RowCompressed<>(num_rows);
-        input_annotation_1->add_labels(0, {"Label0", "Label2", "Label8"});
-        input_annotation_1->add_labels(2, {"Label1", "Label2"});
-        input_annotation_1->add_labels(3, {"Label1", "Label2", "Label8"});
-        input_annotation_1->add_labels(4, {"Label2"});
+        input_annotation_1->add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        input_annotation_1->add_labels({ 2 }, {"Label1", "Label2"});
+        input_annotation_1->add_labels({ 3 }, {"Label1", "Label2", "Label8"});
+        input_annotation_1->add_labels({ 4 }, {"Label2"});
 
         input_annotation_2 = new annotate::RowCompressed<>(num_rows);
-        input_annotation_2->add_labels(1, {"Label0", "Label3"});
-        input_annotation_2->add_labels(2, {"Label0", "Label9", "Label7"});
-        input_annotation_2->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
+        input_annotation_2->add_labels({ 1 }, {"Label0", "Label3"});
+        input_annotation_2->add_labels({ 2 }, {"Label0", "Label9", "Label7"});
+        input_annotation_2->add_labels({ 4 }, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
 
         merged_annotation_expected = new annotate::RowCompressed<>(num_rows);
-        merged_annotation_expected->add_labels(0, {"Label0", "Label2", "Label8"});
-        merged_annotation_expected->add_labels(1, {"Label0", "Label3"});
-        merged_annotation_expected->add_labels(2, {"Label0", "Label2", "Label1", "Label9", "Label7"});
-        merged_annotation_expected->add_labels(3, {"Label2", "Label8", "Label1"});
-        merged_annotation_expected->add_labels(4, {"Label2", "Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
+        merged_annotation_expected->add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        merged_annotation_expected->add_labels({ 1 }, {"Label0", "Label3"});
+        merged_annotation_expected->add_labels({ 2 }, {"Label0", "Label2", "Label1", "Label9", "Label7"});
+        merged_annotation_expected->add_labels({ 3 }, {"Label2", "Label8", "Label1"});
+        merged_annotation_expected->add_labels({ 4 }, {"Label2", "Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
     }
 
     virtual void TearDown() {
@@ -114,10 +114,10 @@ class ConvertFromColumnCompressed : public ::testing::Test {
 
     virtual void SetUp() {
         initial_annotation = new annotate::ColumnCompressed<>(5);
-        initial_annotation->add_labels(0, {"Label0", "Label2", "Label8"});
-        initial_annotation->add_labels(2, {"Label1", "Label2"});
-        initial_annotation->add_labels(3, {"Label1", "Label2", "Label8"});
-        initial_annotation->add_labels(4, {"Label2"});
+        initial_annotation->add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        initial_annotation->add_labels({ 2 }, {"Label1", "Label2"});
+        initial_annotation->add_labels({ 3 }, {"Label1", "Label2", "Label8"});
+        initial_annotation->add_labels({ 4 }, {"Label2"});
     }
 
     virtual void TearDown() {
@@ -402,27 +402,27 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
     }
     {
         auto annotator = std::make_unique<annotate::ColumnCompressed<> >(5);
-        annotator->add_labels(1, {"Label0", "Label3"});
-        annotator->add_labels(2, {"Label0", "Label9", "Label7"});
-        annotator->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
+        annotator->add_labels({ 1 }, {"Label0", "Label3"});
+        annotator->add_labels({ 2 }, {"Label0", "Label9", "Label7"});
+        annotator->add_labels({ 4 }, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
         annotators.push_back(std::move(annotator));
     }
     //TODO
     {
         auto annotator = std::make_unique<annotate::ColumnCompressed<> >(5);
-        annotator->add_labels(1, {"Label0", "Label3"});
-        annotator->add_labels(2, {"Label0", "Label9", "Label7"});
-        annotator->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
+        annotator->add_labels({ 1 }, {"Label0", "Label3"});
+        annotator->add_labels({ 2 }, {"Label0", "Label9", "Label7"});
+        annotator->add_labels({ 4 }, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
         annotators.push_back(std::move(annotator));
     }
     {
         //TODO: move into fixture as input_annotation_3 and make non-overlapping
         const std::string filename = test_dump_basename_row_compressed_merge + "_mixed_2";
         auto annotation = std::make_unique<annotate::RowCompressed<> >(num_rows);
-        annotation->add_labels(0, {"Label0"});
-        annotation->add_labels(2, {"Label1"});
-        annotation->add_labels(3, {"Label1"});
-        annotation->add_labels(4, {"Label2"});
+        annotation->add_labels({ 0 }, {"Label0"});
+        annotation->add_labels({ 2 }, {"Label1"});
+        annotation->add_labels({ 3 }, {"Label1"});
+        annotation->add_labels({ 4 }, {"Label2"});
         annotation->serialize(filename);
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
     }

@@ -42,7 +42,7 @@ TYPED_TEST(AnnotatorPresetTest, GetLabels) {
 
 TYPED_TEST(AnnotatorTest, GetLabelsOneRow) {
     annotate::ColumnCompressed<> column_annotator(5);
-    column_annotator.add_labels(0, {"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"});
+    column_annotator.add_labels({ 0 }, {"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"});
     this->set(std::move(column_annotator));
     EXPECT_EQ(convert_to_set({"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"}),
               convert_to_set(this->annotation->get(0)));
@@ -54,7 +54,7 @@ TYPED_TEST(AnnotatorPresetTest, NumObjects) {
 
 TYPED_TEST(AnnotatorStaticTest, NumLabelsOneEmptyRow) {
     annotate::ColumnCompressed<> column_annotator(5);
-    column_annotator.add_labels(0, {});
+    column_annotator.add_labels({ 0 }, {});
     this->set(std::move(column_annotator));
     EXPECT_EQ(0u, this->annotation->num_labels());
     EXPECT_EQ(0u, this->annotation->num_objects());
@@ -63,8 +63,8 @@ TYPED_TEST(AnnotatorStaticTest, NumLabelsOneEmptyRow) {
 
 TYPED_TEST(AnnotatorTest, NumLabelsOneRow) {
     annotate::ColumnCompressed<> column_annotator(5);
-    column_annotator.add_labels(0, {"Label 0", "Label 1", "Label 2",
-                                    "Label 3", "Label 4"});
+    column_annotator.add_labels({0}, {"Label 0", "Label 1", "Label 2",
+                                      "Label 3", "Label 4"});
     this->set(std::move(column_annotator));
     EXPECT_EQ(5u, this->annotation->num_labels());
     EXPECT_EQ(5u, this->annotation->num_objects());
@@ -334,10 +334,10 @@ TYPED_TEST(AnnotatorPreset3Test, CallIndices) {
 
 TYPED_TEST(AnnotatorDynamicTest, add_label) {
     TypeParam annotation(5);
-    annotation.add_label(0, "0");
-    annotation.add_label(1, "0");
-    annotation.add_label(2, "1");
-    annotation.add_label(1, "2");
+    annotation.add_labels({ 0 }, { "0" });
+    annotation.add_labels({ 1 }, { "0" });
+    annotation.add_labels({ 2 }, { "1" });
+    annotation.add_labels({ 1 }, { "2" });
 
     EXPECT_EQ(convert_to_set({"0"}), convert_to_set(annotation.get(0)));
     EXPECT_EQ(convert_to_set({"0", "2"}), convert_to_set(annotation.get(1)));
@@ -383,10 +383,10 @@ TYPED_TEST(AnnotatorDynamicTest, add_label_sequential) {
     size_t graph_half_size = 1000;
     TypeParam annotation(graph_half_size * 2);
     for (size_t i = 0; i < graph_half_size; ++i) {
-        annotation.add_label(i, "Label1");
+        annotation.add_labels({ i }, { "Label1" });
     }
     for (size_t i = graph_half_size; i < 2 * graph_half_size; ++i) {
-        annotation.add_label(i, "Label2");
+        annotation.add_labels({ i }, { "Label2" });
     }
     for (size_t i = 0; i < 2 * graph_half_size; i+= 100) {
         ASSERT_EQ(1u, annotation.get(i).size());
@@ -400,7 +400,7 @@ TYPED_TEST(AnnotatorDynamicTest, add_label_random) {
     std::vector<std::string> labels { "Label1", "Label2" };
 
     for (size_t i = 0; i < 2 * graph_half_size; ++i) {
-        annotation.add_label(i, labels[i % 2]);
+        annotation.add_labels({ i }, { labels[i % 2] });
     }
     for (size_t i = 0; i < 2 * graph_half_size; i+= 100) {
         ASSERT_EQ(1u, annotation.get(i).size());
