@@ -55,7 +55,7 @@ using namespace mg::succinct;
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 static const size_t kRowBatchSize = 100'000;
-const bool kPrefilterWithBloom = false;
+const bool kPrefilterWithBloom = true;
 
 
 void annotate_data(const std::vector<std::string> &files,
