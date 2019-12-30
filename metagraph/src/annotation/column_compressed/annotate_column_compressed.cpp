@@ -94,20 +94,6 @@ ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) cons
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::add_label(Index i, const Label &label) {
-    assert(i < num_rows_);
-
-    set(i, label_encoder_.insert_and_encode(label), 1);
-}
-
-template <typename Label>
-void ColumnCompressed<Label>::add_labels(Index i, const VLabels &labels) {
-    for (const auto &label : labels) {
-        add_label(i, label);
-    }
-}
-
-template <typename Label>
 void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
                                          const VLabels &labels) {
     for (const auto &label : labels) {

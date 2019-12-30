@@ -43,8 +43,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     void set(Index i, const VLabels &labels) override;
 
-    void add_label(Index i, const Label &label) override;
-    void add_labels(Index i, const VLabels &labels) override;
     void add_labels(const std::vector<Index> &indices,
                     const VLabels &labels) override;
 

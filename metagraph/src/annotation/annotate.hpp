@@ -43,8 +43,6 @@ class MultiLabelAnnotation
 
     /******************* General functionality *******************/
 
-    virtual void add_label(Index i, const Label &label) = 0;
-    virtual void add_labels(Index i, const VLabels &labels) = 0;
     virtual void add_labels(const std::vector<Index> &indices,
                             const VLabels &labels) = 0;
 

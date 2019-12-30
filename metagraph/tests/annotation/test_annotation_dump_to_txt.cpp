@@ -50,7 +50,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextEmpty) {
         while (num_set_bits--) {
             fin >> pos;
             ASSERT_GT(this->annotation->num_objects(), pos);
-            loaded.add_labels(pos, { labels[i] });
+            loaded.add_labels({ pos }, { labels[i] });
         }
     }
 }
@@ -79,7 +79,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadText) {
         while (num_set_bits--) {
             fin >> pos;
             ASSERT_GT(this->annotation->num_objects(), pos);
-            loaded.add_labels(pos, { labels[i] });
+            loaded.add_labels({ pos }, { labels[i] });
         }
     }
 
@@ -114,7 +114,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextParallel) {
         while (num_set_bits--) {
             fin >> pos;
             ASSERT_GT(this->annotation->num_objects(), pos);
-            loaded.add_labels(pos, { labels[i] });
+            loaded.add_labels({ pos }, { labels[i] });
         }
     }
 

@@ -37,8 +37,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     uint64_t num_relations() const override;
 
     void set(Index, const VLabels &) override { except_dyn(); }
-    void add_label(Index, const Label &) override { except_dyn(); }
-    void add_labels(Index, const VLabels &) override { except_dyn(); }
     void add_labels(const std::vector<Index> &, const VLabels &) override { except_dyn(); }
     void insert_rows(const std::vector<Index> &) override { except_dyn(); }
 
