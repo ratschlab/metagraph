@@ -121,25 +121,6 @@ MultiLabelEncoded<IndexType, LabelType>::get_labels(Index i) const {
     return labels;
 }
 
-// calls get_label_codes(indices)
-template <typename IndexType, typename LabelType>
-std::vector<typename MultiLabelEncoded<IndexType, LabelType>::VLabels>
-MultiLabelEncoded<IndexType, LabelType>
-::get_labels(const std::vector<Index> &indices) const {
-    std::vector<VLabels> annotation;
-    annotation.reserve(indices.size());
-
-    for (const auto &label_codes : get_label_codes(indices)) {
-        annotation.emplace_back(label_codes.size());
-
-        for (size_t k = 0; k < label_codes.size(); ++k) {
-            annotation.back()[k] = label_encoder_.decode(label_codes[k]);
-        }
-    }
-
-    return annotation;
-}
-
 template <typename IndexType, typename LabelType>
 std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 MultiLabelEncoded<IndexType, LabelType>
