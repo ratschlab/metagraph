@@ -365,7 +365,7 @@ void ColumnCompressed<Label>
     for (const auto &pair : dict) {
         try {
             index_to_label[label_encoder_.encode(pair.first)] = pair.second;
-        } catch (const std::runtime_error&) {
+        } catch (const std::out_of_range &) {
             std::cerr << "Warning: label '" << pair.first << "' not"
                       << " found in annotation. Skipping instruction"
                       << " '" << pair.first << " -> " << pair.second << "'."

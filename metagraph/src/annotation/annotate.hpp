@@ -13,31 +13,13 @@
 
 namespace annotate {
 
-// class GenomeAnnotation {
-//   public:
-//     typedef uint64_t Index;
-//     enum Label {
-//         OUTGOING_EDGE_LABELS = 0,
-//         SEQUENCE_NAME,
-//     };
-
-//     virtual const Annotation& get(Index i, Label j) const = 0;
-//     virtual void set(Index i, Label j, const Annotation &label) = 0;
-//     virtual void merge(const GenomeAnnotation &annotation) = 0;
-
-//     virtual bool load(const std::string &filename) = 0;
-//     virtual void serialize(const std::string &filename) const = 0;
-// };
-
-
-template <typename Index, typename LabelType>
+template <typename IndexType, typename LabelType>
 class AnnotationCategory {
   public:
     virtual ~AnnotationCategory() {}
 
-    virtual LabelType get(Index i) const = 0;
-    virtual void add(Index i, const LabelType &label) = 0;
-    virtual void set(Index i, const LabelType &label) = 0;
+    virtual LabelType get(IndexType i) const = 0;
+    virtual void set(IndexType i, const LabelType &label) = 0;
 
     virtual void serialize(const std::string &filename) const = 0;
     virtual bool load(const std::string &filename) { return merge_load({ filename }); }
@@ -46,8 +28,8 @@ class AnnotationCategory {
 
 
 // Graph annotation
-// An annotated graph is a graph with labeled edges.
-// A labeled edge is an edge carrying certain labels.
+// An annotated graph is a graph with labeled nodes/edges.
+// A labeled node/edge is an node/edge carrying certain labels.
 template <typename IndexType, typename LabelType>
 class MultiLabelAnnotation
       : public AnnotationCategory<IndexType, std::vector<LabelType>> {
@@ -66,9 +48,6 @@ class MultiLabelAnnotation
     }
     virtual void set(Index i, const VLabels &labels) override final {
         set_labels(i, labels);
-    }
-    virtual void add(Index i, const VLabels &labels) override final {
-        add_labels(i, labels);
     }
 
     /******************* General functionality *******************/
@@ -92,17 +71,12 @@ class MultiLabelAnnotation
     // and merges all relations (*, L') with matching labels L', if supported.
     virtual void rename_labels(const std::unordered_map<Label, Label> &dict) = 0;
 
-    /*********************** Special queries **********************/
-
-    virtual void call_objects(const Label &label,
-                              std::function<void(Index)> callback) const = 0;
-
     /************************* Properties *************************/
 
     virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
-    virtual const VLabels& get_all_labels() const = 0;
+    virtual const std::vector<Label>& get_all_labels() const = 0;
 
     virtual bool label_exists(const Label &label) const = 0;
 
@@ -110,7 +84,7 @@ class MultiLabelAnnotation
 };
 
 
-// A dictionary to encode annotation labels
+// Basic dictionary mapping abstract objects to integer indexes: [0, 1, 2, ...]
 template <typename Label = std::string>
 class LabelEncoder {
   public:
@@ -124,7 +98,7 @@ class LabelEncoder {
      * Return the code of the label passed.
      * Throw exception if it does not exist.
      */
-    size_t encode(const Label &label) const;
+    size_t encode(const Label &label) const { return encode_label_.at(label); }
 
     /**
      * Check if the label has been added to encoder.
@@ -162,22 +136,48 @@ class MultiLabelEncoded
     using VLabels = typename MultiLabelAnnotation<IndexType, LabelType>::VLabels;
     typedef Vector<uint64_t> SetBitPositions;
 
+    virtual ~MultiLabelEncoded() {}
+
+    /******************* General functionality *******************/
+
+    virtual VLabels get_labels(Index i) const override final;
+    virtual std::vector<VLabels>
+    get_labels(const std::vector<Index> &indices) const override final;
+
+    virtual SetBitPositions get_label_codes(Index i) const = 0;
+    virtual std::vector<SetBitPositions>
+    get_label_codes(const std::vector<Index> &indices) const;
+
+    // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
+    // and merges all relations (*, L') with matching labels L', if supported.
+    virtual void rename_labels(const std::unordered_map<Label, Label> &dict) override;
+
+    virtual bool label_exists(const Label &label) const override final {
+        return label_encoder_.label_exists(label);
+    }
+
+    virtual const std::vector<Label>& get_all_labels() const override final {
+        return label_encoder_.get_labels();
+    }
+
+    virtual const LabelEncoder<Label>& get_label_encoder() const final {
+        return label_encoder_;
+    }
+
+    /*********************** Special queries **********************/
+
+    // TODO: return a shared_ptr to const bitmap
+    virtual void call_objects(const Label &label,
+                              std::function<void(Index)> callback) const = 0;
+
     class IterateRows {
       public:
         virtual ~IterateRows() {}
         virtual SetBitPositions next_row() = 0;
     };
 
-    virtual ~MultiLabelEncoded() {}
-
-    virtual VLabels get_labels(Index i) const override final;
-    virtual std::vector<VLabels>
-    get_labels(const std::vector<Index> &indices) const override final;
-
+    // TODO: remove this and return reference to BinaryMatrix instead
     virtual std::unique_ptr<IterateRows> iterator() const;
-    virtual SetBitPositions get_label_codes(Index i) const = 0;
-    virtual std::vector<SetBitPositions>
-    get_label_codes(const std::vector<Index> &indices) const;
 
     /**
      * Return all labels for which counts are greater than or equal to |min_count|.
@@ -187,30 +187,6 @@ class MultiLabelEncoded
     count_labels(const std::unordered_map<Index, size_t> &index_counts,
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const;
-
-    virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
-
-    /******************* General functionality *******************/
-
-    // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
-    // and merges all relations (*, L') with matching labels L', if supported.
-    virtual void rename_labels(const std::unordered_map<Label, Label> &dict) override;
-
-    // For each Index in indices, call row_callback on the vector of its
-    // corresponding label indices. Terminate early if terminate returns true.
-    virtual void call_rows(const std::vector<Index> &indices,
-                           const std::function<void(SetBitPositions&&)> &row_callback,
-                           const std::function<bool()> &terminate = []() { return false; }) const;
-
-    virtual bool label_exists(const Label &label) const override final {
-        return label_encoder_.label_exists(label);
-    }
-
-    virtual const VLabels& get_all_labels() const override final {
-        return label_encoder_.get_labels();
-    }
-
-    virtual std::string file_extension() const override = 0;
 
   protected:
     LabelEncoder<Label> label_encoder_;

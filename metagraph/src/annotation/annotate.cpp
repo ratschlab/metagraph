@@ -2,7 +2,8 @@
 
 #include <libmaus2/util/StringSerialisation.hpp>
 
-#include "serialization.hpp"
+#include "common/serialization.hpp"
+#include "common/logger.hpp"
 
 using libmaus2::util::StringSerialisation;
 
@@ -10,24 +11,12 @@ using libmaus2::util::StringSerialisation;
 namespace annotate {
 
 template <typename Label>
-size_t LabelEncoder<Label>::encode(const Label &label) const {
-    auto it = encode_label_.find(label);
-    if (it != encode_label_.end()) {
-        return it->second;
-    } else {
-        throw std::runtime_error("ERROR: No such label");
-    }
-}
-
-template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
-    try {
-        return encode(label);
-    } catch (const std::runtime_error &e) {
-        encode_label_[label] = decode_label_.size();
+    auto [it, inserted] = encode_label_.emplace(label, decode_label_.size());
+    if (inserted)
         decode_label_.push_back(label);
-        return decode_label_.size() - 1;
-    }
+
+    return it->second;
 }
 
 template<>
@@ -52,7 +41,7 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         load_string_number_map(instream, &encode_label_);
         decode_label_ = StringSerialisation::deserialiseStringVector(instream);
 
-        return true;
+        return instream.good();
     } catch (...) {
         return false;
     }
@@ -64,20 +53,17 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
 template <typename IndexType, typename LabelType>
 void MultiLabelEncoded<IndexType, LabelType>
 ::rename_labels(const std::unordered_map<Label, Label> &dict) {
-    std::vector<Label> index_to_label(label_encoder_.size());
     // old labels
-    for (size_t i = 0; i < index_to_label.size(); ++i) {
-        index_to_label[i] = label_encoder_.decode(i);
-    }
+    std::vector<Label> index_to_label = label_encoder_.get_labels();
+
     // new labels
     for (const auto &pair : dict) {
         try {
             index_to_label[label_encoder_.encode(pair.first)] = pair.second;
-        } catch (const std::runtime_error&) {
-            std::cerr << "Warning: label '" << pair.first << "' not"
-                      << " found in annotation. Skipping instruction"
-                      << " '" << pair.first << " -> " << pair.second << "'."
-                      << std::endl;
+        } catch (const std::out_of_range &) {
+            mg::common::logger->warn("Label '{}' not found"
+                                     ", instruction '{} -> {}' skipped",
+                                     pair.first, pair.first, pair.second);
         }
     }
 
@@ -85,32 +71,16 @@ void MultiLabelEncoded<IndexType, LabelType>
 
     // insert new column labels
     for (const auto &label : index_to_label) {
-        try {
-            label_encoder_.encode(label);
+        if (label_encoder_.label_exists(label)) {
             // no exception -> there already exists a column with this name
-            std::cerr << "Error: detected more than one column with"
-                      << " target name " << label
-                      << ". Merging columns is not implemented"
-                      << " for this annotation type."
-                      << std::endl;
+            mg::common::logger->error("Detected multiple labels renamed to '{}'"
+                                      ". Annotation merge is not implemented"
+                                      " for this annotation type.", label);
             exit(1);
-        } catch (...) {
-            // this is the first column with this name
-            label_encoder_.insert_and_encode(label);
         }
-    }
-}
 
-template <typename IndexType, typename LabelType>
-void MultiLabelEncoded<IndexType, LabelType>
-::call_rows(const std::vector<Index> &indices,
-            const std::function<void(SetBitPositions&&)> &row_callback,
-            const std::function<bool()> &terminate) const {
-    for (Index i : indices) {
-        if (terminate())
-            break;
-
-        row_callback(get_label_codes(i));
+        // this is the first column with this name
+        label_encoder_.insert_and_encode(label);
     }
 }
 
@@ -156,16 +126,14 @@ template <typename IndexType, typename LabelType>
 std::vector<typename MultiLabelEncoded<IndexType, LabelType>::VLabels>
 MultiLabelEncoded<IndexType, LabelType>
 ::get_labels(const std::vector<Index> &indices) const {
-    auto rows = get_label_codes(indices);
+    std::vector<VLabels> annotation;
+    annotation.reserve(indices.size());
 
-    std::vector<VLabels> annotation(rows.size());
+    for (const auto &label_codes : get_label_codes(indices)) {
+        annotation.emplace_back(label_codes.size());
 
-    for (size_t i = 0; i < rows.size(); ++i) {
-        auto row = std::move(rows[i]);
-
-        annotation[i].reserve(row.size());
-        for (auto label_code : row) {
-            annotation[i].push_back(label_encoder_.decode(label_code));
+        for (size_t k = 0; k < label_codes.size(); ++k) {
+            annotation.back()[k] = label_encoder_.decode(label_codes[k]);
         }
     }
 
@@ -200,24 +168,23 @@ MultiLabelEncoded<IndexType, LabelType>
     size_t total_checked = 0;
 
     auto it = index_counts.begin();
-    call_rows(
-        indices,
-        [&](const auto &row) {
-            assert(it != index_counts.end());
+    for (Index i : indices) {
+        assert(it != index_counts.end());
 
-            for (size_t label_code : row) {
-                assert(label_code < code_counts.size());
+        if (max_matched + (total_sum_count - total_checked) < min_count)
+            break;
 
-                code_counts[label_code] += it->second;
-                max_matched = std::max(max_matched, code_counts[label_code]);
-            }
+        for (size_t label_code : get_label_codes(i)) {
+            assert(label_code < code_counts.size());
 
-            total_checked += it->second;
+            code_counts[label_code] += it->second;
+            max_matched = std::max(max_matched, code_counts[label_code]);
+        }
 
-            ++it;
-        },
-        [&]() { return max_matched + (total_sum_count - total_checked) < min_count; }
-    );
+        total_checked += it->second;
+
+        ++it;
+    }
 
     if (max_matched < min_count)
         return {};

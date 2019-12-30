@@ -16,18 +16,11 @@ std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<uint64_t, 
         label_counts.emplace_back(label_encoder.decode(j), 0);
     }
 
-    annotator.call_rows(
-        indices,
-        [&](auto&& label_indices) {
-            for (auto j : label_indices) {
-                label_counts[j].second++;
-            }
-        },
-        [&]() {
-            return std::all_of(label_counts.begin(), label_counts.end(),
-                               [&](const auto &pair) { return pair.second >= min_count; });
+    for (auto i : indices) {
+        for (auto j : annotator.get_label_codes(i)) {
+            label_counts[j].second++;
         }
-    );
+    }
 
     std::vector<std::string> labels;
     for (auto&& pair : label_counts) {
@@ -203,14 +196,11 @@ get_top_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotat
         label_counts.emplace_back(label_encoder.decode(i), 0);
     }
 
-    annotator.call_rows(
-        indices,
-        [&](auto&& label_indices) {
-            for (auto j : label_indices) {
-                label_counts[j].second++;
-            }
+    for (auto i : indices) {
+        for (auto j : annotator.get_label_codes(i)) {
+            label_counts[j].second++;
         }
-    );
+    }
 
     std::sort(label_counts.begin(), label_counts.end(),
               [](const auto &first, const auto &second) {
