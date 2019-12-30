@@ -37,15 +37,15 @@ class ConvertFromRowCompressed : public ::testing::Test {
         ASSERT_EQ(9u, annotation->num_relations());
 
         EXPECT_EQ(convert_to_set({"Label0", "Label2", "Label8"}),
-                  convert_to_set(annotation->get_labels(0)));
+                  convert_to_set(annotation->get(0)));
         EXPECT_EQ(std::vector<std::string>({}),
-                  annotation->get_labels(1));
+                  annotation->get(1));
         EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-                  convert_to_set(annotation->get_labels(2)));
+                  convert_to_set(annotation->get(2)));
         EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-                  convert_to_set(annotation->get_labels(3)));
+                  convert_to_set(annotation->get(3)));
         EXPECT_EQ(convert_to_set({"Label2"}),
-                  convert_to_set(annotation->get_labels(4)));
+                  convert_to_set(annotation->get(4)));
 
         delete initial_annotation;
         delete annotation;
@@ -88,8 +88,8 @@ class MergeAnnotators : public ::testing::Test {
     virtual void TearDown() {
         ASSERT_TRUE(merged_annotation);
         for(uint64_t i = 0; i < num_rows; ++i) {
-            auto row_expected = merged_annotation_expected->get_labels(i);
-            auto row = merged_annotation->get_labels(i);
+            auto row_expected = merged_annotation_expected->get(i);
+            auto row = merged_annotation->get(i);
             EXPECT_EQ(row_expected, row);
         }
 
@@ -127,15 +127,15 @@ class ConvertFromColumnCompressed : public ::testing::Test {
         ASSERT_EQ(9u, annotation->num_relations());
 
         EXPECT_EQ(convert_to_set({"Label0", "Label2", "Label8"}),
-                  convert_to_set(annotation->get_labels(0)));
+                  convert_to_set(annotation->get(0)));
         EXPECT_EQ(std::vector<std::string>({}),
-                  annotation->get_labels(1));
+                  annotation->get(1));
         EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-                  convert_to_set(annotation->get_labels(2)));
+                  convert_to_set(annotation->get(2)));
         EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-                  convert_to_set(annotation->get_labels(3)));
+                  convert_to_set(annotation->get(3)));
         EXPECT_EQ(convert_to_set({"Label2"}),
-                  convert_to_set(annotation->get_labels(4)));
+                  convert_to_set(annotation->get(4)));
 
         delete initial_annotation;
         delete annotation;

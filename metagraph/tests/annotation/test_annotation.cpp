@@ -29,15 +29,15 @@ TYPED_TEST(AnnotatorDynamicTest, EmptyRows) {
 
 TYPED_TEST(AnnotatorPresetTest, GetLabels) {
     EXPECT_EQ(convert_to_set({"Label0", "Label2", "Label8"}),
-              convert_to_set(this->annotation->get_labels(0)));
+              convert_to_set(this->annotation->get(0)));
     EXPECT_EQ(std::vector<std::string>({}),
-              this->annotation->get_labels(1));
+              this->annotation->get(1));
     EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(this->annotation->get_labels(2)));
+              convert_to_set(this->annotation->get(2)));
     EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-              convert_to_set(this->annotation->get_labels(3)));
+              convert_to_set(this->annotation->get(3)));
     EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(this->annotation->get_labels(4)));
+              convert_to_set(this->annotation->get(4)));
 }
 
 TYPED_TEST(AnnotatorTest, GetLabelsOneRow) {
@@ -45,7 +45,7 @@ TYPED_TEST(AnnotatorTest, GetLabelsOneRow) {
     column_annotator.add_labels(0, {"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"});
     this->set(std::move(column_annotator));
     EXPECT_EQ(convert_to_set({"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"}),
-              convert_to_set(this->annotation->get_labels(0)));
+              convert_to_set(this->annotation->get(0)));
 }
 
 TYPED_TEST(AnnotatorPresetTest, NumObjects) {
@@ -93,10 +93,10 @@ TYPED_TEST(AnnotatorPresetTest, HasLabel) {
     EXPECT_FALSE(this->annotation->has_label(3, "Label0"));
 
     EXPECT_TRUE(this->annotation->has_label(4, "Label2"))
-        << this->annotation->get_labels(4)[0];
+        << this->annotation->get(4)[0];
     EXPECT_FALSE(this->annotation->has_label(4, "Label0"));
     EXPECT_FALSE(this->annotation->has_label(4, "Label1"))
-        << this->annotation->get_labels(4)[0];
+        << this->annotation->get(4)[0];
     EXPECT_FALSE(this->annotation->has_label(4, "Label8"));
 }
 
@@ -113,7 +113,7 @@ TYPED_TEST(AnnotatorPresetTest, HasLabels) {
     EXPECT_FALSE(this->annotation->has_labels(3, { "Label1", "Label2", "Label8", "Label0" }));
 
     EXPECT_TRUE(this->annotation->has_labels(4, { "Label2" }))
-        << this->annotation->get_labels(4)[0];
+        << this->annotation->get(4)[0];
     EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0" }));
     EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0", "Label1" }));
     EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0", "Label1", "Label8" }));
@@ -373,10 +373,10 @@ TYPED_TEST(AnnotatorDynamicNoSparseTest, insert_first_column_to_empty_annotation
     this->annotation->insert_rows({ 0, });
     ASSERT_EQ(0u, this->annotation->num_labels());
 
-    this->annotation->set_labels(0, { "Label0", "Label2", "Label8" });
+    this->annotation->set(0, { "Label0", "Label2", "Label8" });
 
     ASSERT_EQ(3u, this->annotation->num_labels());
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
 }
 
 TYPED_TEST(AnnotatorDynamicTest, add_label_sequential) {
@@ -389,7 +389,7 @@ TYPED_TEST(AnnotatorDynamicTest, add_label_sequential) {
         annotation.add_label(i, "Label2");
     }
     for (size_t i = 0; i < 2 * graph_half_size; i+= 100) {
-        ASSERT_EQ(1u, annotation.get_labels(i).size());
+        ASSERT_EQ(1u, annotation.get(i).size());
     }
 }
 
@@ -403,138 +403,138 @@ TYPED_TEST(AnnotatorDynamicTest, add_label_random) {
         annotation.add_label(i, labels[i % 2]);
     }
     for (size_t i = 0; i < 2 * graph_half_size; i+= 100) {
-        ASSERT_EQ(1u, annotation.get_labels(i).size());
+        ASSERT_EQ(1u, annotation.get(i).size());
     }
 }
 
-TYPED_TEST(AnnotatorDynamicTest, set_labels) {
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+TYPED_TEST(AnnotatorDynamicTest, set) {
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
 }
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, insert_no_empty_rows) {
-    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
 
     this->annotation->insert_rows({});
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
 }
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, insert_one_empty_row) {
-    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
 
     this->annotation->insert_rows({ 4, });
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(4)));
-    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(5)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(5)));
 }
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, insert_first_row) {
-    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
 
     this->annotation->insert_rows({ 0, });
 
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(0)));
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(1)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(2)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(0)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(1)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(2)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(3)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(4)));
-    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(5)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(5)));
 }
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, insert_last_row) {
-    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
 
     this->annotation->insert_rows({ 5, });
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(5)));
 }
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, insert_empty_rows) {
-    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
 
     this->annotation->insert_rows({ 1, 2, 4, 5 });
     EXPECT_EQ(9u, this->annotation->num_objects());
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(2)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(4)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(5)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(6)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(6)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(7)));
-    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(8)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(8)));
 }
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, insert_empty_rows_many) {
     this->annotation.reset(new TypeParam(2'000'000));
     EXPECT_EQ(2'000'000u, this->annotation->num_objects());
-    this->annotation->set_labels(0, { "Label0", "Label2", "Label8" });
-    this->annotation->set_labels(2, { "Label1", "Label2" });
-    this->annotation->set_labels(4, { "Label8" });
+    this->annotation->set(0, { "Label0", "Label2", "Label8" });
+    this->annotation->set(2, { "Label1", "Label2" });
+    this->annotation->set(4, { "Label8" });
     std::vector<uint64_t> indices(1'000'000);
     std::iota(indices.begin(), indices.end(), 5);
     this->annotation->add_labels(indices, { "Label9" });
 
-    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(2)));
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(2)));
     ASSERT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
-    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(4)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(4)));
 
     this->annotation->insert_rows({ 1, 2, 4, 5 });
     EXPECT_EQ(2'000'004u, this->annotation->num_objects());
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(1)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(2)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(1)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(3)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(4)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(5)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get_labels(6)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(this->annotation->get(6)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(this->annotation->get(7)));
-    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get_labels(8)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(this->annotation->get(8)));
 
 
-    EXPECT_EQ(convert_to_set({ "Label9" }), convert_to_set(this->annotation->get_labels(9)));
-    EXPECT_EQ(convert_to_set({ "Label9" }), convert_to_set(this->annotation->get_labels(1'000'000)));
+    EXPECT_EQ(convert_to_set({ "Label9" }), convert_to_set(this->annotation->get(9)));
+    EXPECT_EQ(convert_to_set({ "Label9" }), convert_to_set(this->annotation->get(1'000'000)));
 }
 
 TYPED_TEST(AnnotatorPreset2Test, NoRenameColumns) {
@@ -571,9 +571,9 @@ TYPED_TEST(AnnotatorPreset2Test, SwapColumns) {
 
 TYPED_TEST(AnnotatorStaticTest, RenameColumnsMerge) {
     annotate::ColumnCompressed<> column_annotator(5);
-    column_annotator.set_labels(0, { "Label0", "Label2", "Label8" });
-    column_annotator.set_labels(2, { "Label1", "Label2" });
-    column_annotator.set_labels(4, { "Label8" });
+    column_annotator.set(0, { "Label0", "Label2", "Label8" });
+    column_annotator.set(2, { "Label1", "Label2" });
+    column_annotator.set(4, { "Label8" });
 
     this->set(std::move(column_annotator));
     ASSERT_DEATH(
@@ -585,9 +585,9 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMerge) {
 
 TYPED_TEST(AnnotatorStaticTest, RenameColumnsMergeAll) {
     annotate::ColumnCompressed<> column_annotator(5);
-    column_annotator.set_labels(0, { "Label0", "Label2", "Label8" });
-    column_annotator.set_labels(2, { "Label1", "Label2" });
-    column_annotator.set_labels(4, { "Label8" });
+    column_annotator.set(0, { "Label0", "Label2", "Label8" });
+    column_annotator.set(2, { "Label1", "Label2" });
+    column_annotator.set(4, { "Label8" });
 
     this->set(std::move(column_annotator));
     ASSERT_DEATH(
@@ -629,13 +629,13 @@ TYPED_TEST(AnnotatorStaticLargeTest, CheckCache) {
 
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < num_rows; i += 1000) {
-        rows.emplace_back(annotator.get_labels(i));
+        rows.emplace_back(annotator.get(i));
     }
 
     auto it = rows.begin();
     for (size_t i = 0; i < num_rows; i += 1000) {
         ASSERT_NE(rows.end(), it);
-        EXPECT_EQ(*it++, annotator.get_labels(i));
+        EXPECT_EQ(*it++, annotator.get(i));
     }
 }
 
@@ -671,7 +671,7 @@ TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
         annotator.reset_row_cache(cache_size);
         Timer timer;
         for (size_t i = 0; i < num_rows; ++i) {
-            annotator.get_labels(i);
+            annotator.get(i);
         }
         TEST_COUT << "Query all rows\t"
                   << "Cache size:\t" << cache_size << "\t\t"
@@ -683,7 +683,7 @@ TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
         Timer timer;
         for (size_t j = 0; j < 1000; ++j) {
             for (size_t i = 0; i < num_rows; i += 1000) {
-                annotator.get_labels(i);
+                annotator.get(i);
             }
         }
         TEST_COUT << "Query some rows repeatedly\t"

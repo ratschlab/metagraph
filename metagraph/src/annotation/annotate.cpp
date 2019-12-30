@@ -107,7 +107,7 @@ MultiLabelEncoded<IndexType, LabelType>::iterator() const {
 // calls get_label_codes(i)
 template <typename IndexType, typename LabelType>
 typename MultiLabelEncoded<IndexType, LabelType>::VLabels
-MultiLabelEncoded<IndexType, LabelType>::get_labels(Index i) const {
+MultiLabelEncoded<IndexType, LabelType>::get(Index i) const {
     assert(i < this->num_objects());
 
     const auto &label_codes = get_label_codes(i);

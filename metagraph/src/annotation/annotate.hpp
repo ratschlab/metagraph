@@ -41,19 +41,7 @@ class MultiLabelAnnotation
 
     virtual ~MultiLabelAnnotation() {}
 
-    /***************** Inherited member functions ****************/
-
-    virtual VLabels get(Index i) const override final {
-        return get_labels(i);
-    }
-    virtual void set(Index i, const VLabels &labels) override final {
-        set_labels(i, labels);
-    }
-
     /******************* General functionality *******************/
-
-    virtual void set_labels(Index i, const VLabels &labels) = 0;
-    virtual VLabels get_labels(Index i) const = 0;
 
     virtual void add_label(Index i, const Label &label) = 0;
     virtual void add_labels(Index i, const VLabels &labels) = 0;
@@ -138,7 +126,7 @@ class MultiLabelEncoded
 
     /******************* General functionality *******************/
 
-    virtual VLabels get_labels(Index i) const override final;
+    virtual VLabels get(Index i) const override final;
 
     virtual SetBitPositions get_label_codes(Index i) const = 0;
     virtual std::vector<SetBitPositions>

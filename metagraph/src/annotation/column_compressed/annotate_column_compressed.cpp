@@ -44,7 +44,7 @@ ColumnCompressed<Label>::~ColumnCompressed() {
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::set_labels(Index i, const VLabels &labels) {
+void ColumnCompressed<Label>::set(Index i, const VLabels &labels) {
     assert(i < num_rows_);
     // add new labels
     for (const auto &label : labels) {

@@ -50,7 +50,7 @@ void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
 }
 
 template <typename Label>
-void RowCompressed<Label>::set_labels(Index i, const VLabels &labels) {
+void RowCompressed<Label>::set(Index i, const VLabels &labels) {
     assert(i < matrix_->num_rows());
 
     matrix_->clear_row(i);

@@ -15,9 +15,9 @@ const std::string test_dump_basename_vec_good = test_dump_basename + "_row_compr
 TEST(RowCompressed, load_label_encoder) {
     {
         annotate::RowCompressed<> annotation(5, false);
-        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
-        annotation.set_labels(2, { "Label1", "Label2" });
-        annotation.set_labels(4, { "Label8" });
+        annotation.set(0, { "Label0", "Label2", "Label8" });
+        annotation.set(2, { "Label1", "Label2" });
+        annotation.set(4, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good);
     }
@@ -31,9 +31,9 @@ TEST(RowCompressed, load_label_encoder) {
 TEST(RowCompressed, stream_counts) {
     {
         annotate::RowCompressed<> annotation(5, false);
-        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
-        annotation.set_labels(2, { "Label1", "Label2" });
-        annotation.set_labels(4, { "Label8" });
+        annotation.set(0, { "Label0", "Label2", "Label8" });
+        annotation.set(2, { "Label1", "Label2" });
+        annotation.set(4, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good);
     }
@@ -49,9 +49,9 @@ TEST(RowCompressed, stream_counts) {
 TEST(RowCompressed, load_label_encoder_and_stream_counts) {
     {
         annotate::RowCompressed<> annotation(5, false);
-        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
-        annotation.set_labels(2, { "Label1", "Label2" });
-        annotation.set_labels(4, { "Label8" });
+        annotation.set(0, { "Label0", "Label2", "Label8" });
+        annotation.set(2, { "Label1", "Label2" });
+        annotation.set(4, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good);
     }
@@ -72,9 +72,9 @@ TEST(RowCompressed, load_label_encoder_and_stream_counts) {
 TEST(RowCompressed, stream_counts_and_load_label_encoder) {
     {
         annotate::RowCompressed<> annotation(5, false);
-        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
-        annotation.set_labels(2, { "Label1", "Label2" });
-        annotation.set_labels(4, { "Label8" });
+        annotation.set(0, { "Label0", "Label2", "Label8" });
+        annotation.set(2, { "Label1", "Label2" });
+        annotation.set(4, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good);
     }
@@ -95,9 +95,9 @@ TEST(RowCompressed, stream_counts_and_load_label_encoder) {
 TEST(RowCompressed, SerializationExtension) {
     {
         annotate::RowCompressed<> annotation(5, false);
-        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
-        annotation.set_labels(2, { "Label1", "Label2" });
-        annotation.set_labels(4, { "Label8" });
+        annotation.set(0, { "Label0", "Label2", "Label8" });
+        annotation.set(2, { "Label1", "Label2" });
+        annotation.set(4, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good
                                         + annotation.file_extension());
@@ -122,9 +122,9 @@ TEST(RowCompressed, SerializationExtension) {
 
 TEST(RowCompressed, RenameColumnsMerge) {
     annotate::RowCompressed<> annotation(5);
-    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
-    annotation.set_labels(2, { "Label1", "Label2" });
-    annotation.set_labels(4, { "Label8" });
+    annotation.set(0, { "Label0", "Label2", "Label8" });
+    annotation.set(2, { "Label1", "Label2" });
+    annotation.set(4, { "Label8" });
 
     ASSERT_DEATH(
         annotation.rename_labels({ { "Label2", "Merged" },
@@ -141,9 +141,9 @@ TEST(RowCompressed, RenameColumnsMerge) {
 
 TEST(RowCompressed, RenameColumnsMergeAll) {
     annotate::RowCompressed<> annotation(5);
-    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
-    annotation.set_labels(2, { "Label1", "Label2" });
-    annotation.set_labels(4, { "Label8" });
+    annotation.set(0, { "Label0", "Label2", "Label8" });
+    annotation.set(2, { "Label1", "Label2" });
+    annotation.set(4, { "Label8" });
 
     ASSERT_DEATH(
         annotation.rename_labels({ { "Label0", "Merged" },

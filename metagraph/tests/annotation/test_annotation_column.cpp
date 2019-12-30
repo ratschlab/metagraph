@@ -23,7 +23,7 @@ TEST(ColumnCompressed, add_label_random_with_caching) {
         annotation.add_label(i, labels[i % 2]);
     }
     for (size_t i = 0; i < 2 * graph_half_size; i+= 100) {
-        ASSERT_EQ(1u, annotation.get_labels(i).size());
+        ASSERT_EQ(1u, annotation.get(i).size());
     }
 }
 
