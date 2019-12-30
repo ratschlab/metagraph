@@ -146,9 +146,6 @@ inline const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
         block_indices = _mm256_srli_epi64(block_indices, 6);
         _mm256_store_si256((__m256i*)indices, block_indices);
 
-        // clean up after AVX2 instructions
-        _mm256_zeroupper();
-
         for (size_t j = 0; j < 4; ++j) {
             uint32_t k = 0;
 
@@ -268,9 +265,6 @@ batch_check_avx2(const BloomFilter &bloom,
         block_indices = restrict_to_mask_epi64(hashes_begin, size, BLOCK_MASK_OUT);
         block_indices = _mm256_srli_epi64(block_indices, 6);
         _mm256_store_si256((__m256i*)indices, block_indices);
-
-        // clean up after AVX2 instructions
-        _mm256_zeroupper();
 
         for (size_t j = 0; j < 4; ++j) {
             bool found = true;
