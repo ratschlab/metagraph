@@ -62,7 +62,6 @@ class RowCompressed : public MultiLabelEncoded<Label> {
                       std::function<void(Index)> callback) const;
 
     uint64_t num_objects() const;
-    size_t num_labels() const;
     uint64_t num_relations() const;
 
     std::string file_extension() const { return kExtension; }

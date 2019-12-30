@@ -245,12 +245,6 @@ uint64_t RowCompressed<Label>::num_objects() const {
 }
 
 template <typename Label>
-size_t RowCompressed<Label>::num_labels() const {
-    assert(label_encoder_.size() == matrix_->num_columns());
-    return label_encoder_.size();
-}
-
-template <typename Label>
 uint64_t RowCompressed<Label>::num_relations() const {
     return matrix_->num_relations();
 }

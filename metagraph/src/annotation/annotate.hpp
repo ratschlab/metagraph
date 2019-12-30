@@ -98,14 +98,14 @@ class LabelEncoder {
 
     const std::vector<Label>& get_labels() const { return decode_label_; }
 
+    void merge(const LabelEncoder<Label> &other);
+
     size_t size() const { return decode_label_.size(); }
+
+    void clear() { encode_label_.clear(); decode_label_.clear(); }
 
     bool load(std::istream &instream);
     void serialize(std::ostream &outstream) const;
-
-    void merge(const LabelEncoder<Label> &other);
-
-    void clear() { encode_label_.clear(); decode_label_.clear(); }
 
   private:
     std::unordered_map<Label, uint64_t> encode_label_;
@@ -131,20 +131,27 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     virtual std::vector<SetBitPositions>
     get_label_codes(const std::vector<Index> &indices) const;
 
+    virtual inline const LabelEncoder<Label>& get_label_encoder() const final {
+        return label_encoder_;
+    }
+
     // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
     // and merges all relations (*, L') with matching labels L', if supported.
     virtual void rename_labels(const std::unordered_map<Label, Label> &dict) override;
 
-    virtual bool label_exists(const Label &label) const override final {
-        return label_encoder_.label_exists(label);
+    /************************* Properties *************************/
+
+    virtual inline size_t num_labels() const override final {
+        // TODO: assert(label_encoder_.size() == get_matrix().num_columns());
+        return label_encoder_.size();
     }
 
     virtual const std::vector<Label>& get_all_labels() const override final {
         return label_encoder_.get_labels();
     }
 
-    virtual const LabelEncoder<Label>& get_label_encoder() const final {
-        return label_encoder_;
+    virtual inline bool label_exists(const Label &label) const override final {
+        return label_encoder_.label_exists(label);
     }
 
     /*********************** Special queries **********************/

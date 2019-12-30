@@ -68,7 +68,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     void rename_labels(const std::unordered_map<Label, Label> &dict) override;
 
     uint64_t num_objects() const override;
-    size_t num_labels() const override;
     uint64_t num_relations() const override;
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;

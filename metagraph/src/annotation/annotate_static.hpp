@@ -34,7 +34,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     bool dump_columns(const std::string &prefix, uint64_t num_threads = 1) const;
 
     uint64_t num_objects() const override;
-    size_t num_labels() const override;
     uint64_t num_relations() const override;
 
     void set(Index, const VLabels &) override { except_dyn(); }

@@ -67,7 +67,7 @@ ColumnCompressed<Label>::get_label_codes(Index i) const {
     assert(i < num_rows_);
 
     SetBitPositions label_indices;
-    for (size_t j = 0; j < num_labels(); ++j) {
+    for (size_t j = 0; j < this->num_labels(); ++j) {
         if (get_column(j)[i])
             label_indices.push_back(j);
     }
@@ -79,7 +79,7 @@ std::vector<typename ColumnCompressed<Label>::SetBitPositions>
 ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) const {
     std::vector<SetBitPositions> rows(indices.size());
 
-    for (size_t j = 0; j < num_labels(); ++j) {
+    for (size_t j = 0; j < this->num_labels(); ++j) {
         const auto &column = get_column(j);
 
         for (size_t i = 0; i < indices.size(); ++i) {
@@ -325,7 +325,7 @@ ColumnCompressed<Label>
                    [](const auto &pair) { return pair.first; });
 
     std::vector<std::pair<uint64_t, size_t>> label_counts;
-    label_counts.reserve(num_labels());
+    label_counts.reserve(this->num_labels());
 
     // TODO: get rid of label encoder from here
     for (const auto &label : this->get_all_labels()) {
@@ -413,15 +413,9 @@ uint64_t ColumnCompressed<Label>::num_objects() const {
 }
 
 template <typename Label>
-size_t ColumnCompressed<Label>::num_labels() const {
-    assert(bitmatrix_.size() == label_encoder_.size());
-    return label_encoder_.size();
-}
-
-template <typename Label>
 uint64_t ColumnCompressed<Label>::num_relations() const {
     uint64_t num_rels = 0;
-    for (size_t i = 0; i < num_labels(); ++i) {
+    for (size_t i = 0; i < this->num_labels(); ++i) {
         num_rels += get_column(i).num_set_bits();
     }
     return num_rels;
