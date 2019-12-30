@@ -7,8 +7,8 @@
 #include "common/serialization.hpp"
 
 // used to implement size % 512
-constexpr uint32_t BLOCK_MASK = 0b111111111;
-constexpr uint64_t BLOCK_MASK_OUT = ~static_cast<uint64_t>(BLOCK_MASK);
+constexpr uint64_t BLOCK_MASK = 0x1FF;
+constexpr uint64_t BLOCK_MASK_OUT = ~BLOCK_MASK;
 
 
 BloomFilter::BloomFilter(size_t filter_size, uint32_t num_hash_functions)
@@ -60,6 +60,13 @@ inline __m256i restrict_to_mask_epi64(const uint64_t *hashes,
                               restrict_to(hashes[1], size) & mask,
                               restrict_to(hashes[2], size) & mask,
                               restrict_to(hashes[3], size) & mask);
+    // return _mm256_and_si256(
+    //     _mm256_setr_epi64x(restrict_to(hashes[0], size),
+    //                        restrict_to(hashes[1], size),
+    //                        restrict_to(hashes[2], size),
+    //                        restrict_to(hashes[3], size)),
+    //     _mm256_set1_epi64x(mask)
+    // );
 }
 
 #endif
@@ -69,8 +76,12 @@ void BloomFilter::insert(uint64_t hash) {
     const size_t offset = restrict_to(hash, filter_.size()) & BLOCK_MASK_OUT;
 
     // split 64-bit hash into two 32-bit hashes
-    const uint32_t h1 = hash & 0xFFFFFFFF;
-    const uint32_t h2 = hash >> 32;
+    const uint64_t h_hi = hash >> 32;
+    const uint64_t h_lo = hash & 0xFFFFFFFF;
+
+    uint64_t id;
+
+    __builtin_prefetch(filter_.data() + (offset >> 6));
 
     /*
      * Use two 32-bit hashes to generate num_hash_functions hashes
@@ -78,9 +89,10 @@ void BloomFilter::insert(uint64_t hash) {
      * Less hashing, same performance: building a better bloom filter.
      * In European Symposium on Algorithms (pp. 456-467). Springer, Berlin, Heidelberg.
      */
-    for (uint32_t i = 0; i < num_hash_functions_; ++i) {
+    for (uint64_t i = 0; i < num_hash_functions_; ++i) {
         // set bits within block
-        filter_[offset + ((h1 + i * h2) & BLOCK_MASK)] = true;
+        id = offset + ((h_lo * i + h_hi) & BLOCK_MASK);
+        filter_.data()[id >> 6] |= 1llu << (id & 0x3F);
     }
 
     assert(check(hash));
@@ -91,12 +103,17 @@ bool BloomFilter::check(uint64_t hash) const {
     const size_t offset = restrict_to(hash, filter_.size()) & BLOCK_MASK_OUT;
 
     // split 64-bit hash into two 32-bit hashes
-    const uint32_t h1 = hash & 0xFFFFFFFF;
-    const uint32_t h2 = hash >> 32;
+    const uint64_t h_hi = hash >> 32;
+    const uint64_t h_lo = hash & 0xFFFFFFFF;
 
-    for (uint32_t i = 0; i < num_hash_functions_; ++i) {
+    uint64_t id;
+
+    __builtin_prefetch(filter_.data() + (offset >> 6));
+
+    for (uint64_t i = 0; i < num_hash_functions_; ++i) {
         // check bits within block
-        if (!filter_[offset + ((h1 + i * h2) & BLOCK_MASK)])
+        id = offset + ((h_lo * i + h_hi) & BLOCK_MASK);
+        if (!((filter_.data()[id >> 6] >> (id & 0x3F)) & 1))
             return false;
     }
 
@@ -107,110 +124,121 @@ bool BloomFilter::check(uint64_t hash) const {
 #ifdef __AVX2__
 
 // compute Bloom filter hashes in batches of 4
-inline const uint64_t* batch_insert_avx2(const BloomFilter &bloom,
-                                         sdsl::bit_vector &filter_,
-                                         const uint32_t num_hash_functions_,
-                                         const uint64_t *hs,
-                                         const uint64_t *end) {
-    // only used for assert
-    std::ignore = bloom;
+__always_inline const uint64_t* batch_insert_avx2(BloomFilter &bloom,
+                                                  const uint32_t num_hash_functions_,
+                                                  const uint64_t *hashes_begin,
+                                                  const uint64_t *hashes_end) {
+    assert(num_hash_functions_);
 
-    // used to restrict indices to the size of a block
-    const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
+    auto &filter_ = bloom.data();
 
-    // used to set offset from block start
-    const __m128i shift = _mm_setr_epi32(6, 6, 0, 0);
-
-    // used to select bit
-    const __m128i andmask = _mm_setr_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0x3F, 0x3F);
-
-    const __m128i ones = _mm_set1_epi64x(1);
+    static_assert(sizeof(long long int) == sizeof(uint64_t));
+    long long int *filter_cast = reinterpret_cast<long long int*>(filter_.data());
 
     const size_t size = filter_.size();
 
-    uint64_t indices[4] __attribute__ ((aligned (32)));
-    uint32_t ht[2] __attribute__ ((aligned (8)));
-    uint64_t updated_block[2] __attribute__ ((aligned (16)));
-    uint32_t *hh;
-    uint64_t *block;
-    uint32_t offset;
+    const __m256i block_mask = _mm256_set1_epi64x(BLOCK_MASK);
+    const __m256i mod_mask = _mm256_set1_epi64x(0x3F);
+    const __m256i ones = _mm256_set1_epi64x(1);
+    const __m256i add = _mm256_setr_epi64x(0, 1, 2, 3);
+    const __m256i numhash = _mm256_set1_epi64x(num_hash_functions_);
 
     __m256i block_indices;
-    __m128i hashes_init, hashes, mult;
-    __m64 *harray = (__m64*)&hashes;
 
-    for (; hs + 4 <= end; hs += 4) {
-        // check next batch to see if all hashes are absent
-        // compute offsets
-        block_indices = restrict_to_mask_epi64(hs, size, BLOCK_MASK_OUT);
-        block_indices = _mm256_srli_epi64(block_indices, 6);
-        _mm256_store_si256((__m256i*)indices, block_indices);
+    uint64_t ids_store[4] __attribute__ ((aligned (32)));
+    uint64_t updates_store[4] __attribute__ ((aligned (32)));
+    __m256i *ids_cast = reinterpret_cast<__m256i*>(&ids_store);
+    __m256i *updates_cast = reinterpret_cast<__m256i*>(&updates_store);
 
-        for (size_t j = 0; j < 4; ++j) {
-            uint32_t k = 0;
+    size_t block_index;
 
-            block = filter_.data() + indices[j];
+    // check four input elements (represented by hashes) at a time
+    for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
+        block_indices = restrict_to_mask_epi64(hashes_begin, size, BLOCK_MASK_OUT);
 
-            // ensure the start of the 512-bit block is prefetched, prepare for write
-            __builtin_prefetch(block, 1);
+        if (num_hash_functions_ > 1) {
+#if defined(__GNUC__ )
+            #pragma GCC unroll (4)
+#else
+            #pragma unroll (4)
+#endif
+            for (size_t j = 0; j < 4; ++j) {
+                __m256i hash_init = _mm256_set1_epi64x(hashes_begin[j]);
+                __m256i hash_init_hi = _mm256_srli_epi64(hash_init, 32);
 
-            hashes_init = _mm_set1_epi64x(hs[j]);
+                block_index = _mm256_extract_epi64(block_indices, j);
+                __m256i offset = _mm256_set1_epi64x(block_index);
 
-            // hash functions in pairs
-            for (; k + 2 <= num_hash_functions_; k += 2) {
-                // load hash
-                hashes = hashes_init;
+                __builtin_prefetch(filter_cast + (block_index >> 6), 0);
 
-                // compute hashes
-                // hash = (h1 + k * h2) & BLOCK_MASK
-                mult = _mm_setr_epi32(1, k, 1, k + 1);
-                hashes = _mm_mullo_epi32(hashes, mult);
-                hashes = _mm_hadd_epi32(hashes, hashes);
-                hashes = _mm_and_si128(hashes, blockmask);
+                // compute hash functions four at a time
+                for (uint32_t k = 0; k < num_hash_functions_; k += 4) {
+                    // hash = (h_hi + k * h_lo) & BLOCK_MASK
+                    __m256i mult = _mm256_add_epi64(_mm256_set1_epi64x(k), add);
+                    __m256i hash = _mm256_add_epi64(_mm256_and_si256(
+                        _mm256_add_epi64(_mm256_mul_epu32(hash_init, mult),
+                                         hash_init_hi),
+                        block_mask
+                    ), offset);
 
-                // add to filter
-                // block[hash / 64] |= 1llu << (hash % 64)
-                hashes = _mm_srlv_epi32(hashes, shift);
-                hashes = _mm_and_si128(hashes, andmask);
+                    _mm256_store_si256(ids_cast, _mm256_srli_epi64(hash, 6));
+                    _mm256_store_si256(
+                        updates_cast,
+                        _mm256_and_si256(
+                            _mm256_sllv_epi64(ones, _mm256_and_si256(hash, mod_mask)),
+                            _mm256_cmpgt_epi64(numhash, mult)
+                        )
+                    );
 
-                _mm_store_si128(
-                    (__m128i*)updated_block,
-                    _mm_sllv_epi64(ones, _mm_cvtepi32_epi64(_mm_set1_epi64(harray[1])))
-                );
-                _mm_store_si128((__m128i*)ht, hashes);
-
-                assert(ht[0] < 8);
-                assert(ht[1] < 8);
-
-                block[ht[0]] |= updated_block[0];
-                block[ht[1]] |= updated_block[1];
+                    // don't do these with vector operations since values in
+                    // ids_store may match
+                    filter_cast[ids_store[0]] |= updates_store[0];
+                    filter_cast[ids_store[1]] |= updates_store[1];
+                    filter_cast[ids_store[2]] |= updates_store[2];
+                    filter_cast[ids_store[3]] |= updates_store[3];
+                }
             }
 
-            // if num_hash_functions is odd, add the last one
-            if (num_hash_functions_ & 1) {
-                hh = (uint32_t*)&hs[j];
-                offset = (hh[0] + (num_hash_functions_ - 1) * hh[1]) & BLOCK_MASK;
-                block[offset >> 6] |= 1llu << (offset & 0x3F);
-            }
+        } else {
+            // insert all four elements in parallel
+            __m256i hash = _mm256_add_epi64(_mm256_and_si256(
+                _mm256_srli_epi64(_mm256_loadu_si256((__m256i*)hashes_begin), 32),
+                block_mask
+            ), block_indices);
+
+            _mm256_store_si256(ids_cast, _mm256_srli_epi64(hash, 6));
+            _mm256_store_si256(updates_cast,
+                               _mm256_sllv_epi64(ones, _mm256_and_si256(hash, mod_mask)));
+
+            // don't do these with vector operations since values in
+            // ids_store may match
+            filter_cast[ids_store[0]] |= updates_store[0];
+            filter_cast[ids_store[1]] |= updates_store[1];
+            filter_cast[ids_store[2]] |= updates_store[2];
+            filter_cast[ids_store[3]] |= updates_store[3];
         }
 
-        assert(std::all_of(hs, hs + 4, [&](uint64_t hash) { return bloom.check(hash); }));
+        assert(std::all_of(hashes_begin, hashes_begin + 4,
+                           [&](uint64_t h) { return bloom.check(h); }));
     }
 
-    return hs;
+    return hashes_begin;
 }
 
 #endif
 
 void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_end) {
+    if (!num_hash_functions_) {
+        assert(std::all_of(hashes_begin, hashes_end,
+                           [&](uint64_t hash) { return check(hash); }));
+
+        return;
+    }
+
     const uint64_t *it = hashes_begin;
 #ifdef __AVX2__
     // TODO: figure out why this fails on Mac
-    // it = batch_insert_avx2(*this,
-    //                        filter_,
-    //                        num_hash_functions_,
-    //                        it,
-    //                        hashes_end);
+    it = batch_insert_avx2(*this, num_hash_functions_, it, hashes_end);
 #endif
 
     // insert residual
@@ -220,103 +248,126 @@ void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_en
     }
 
     assert(std::all_of(hashes_begin, hashes_end,
-                       [&](uint64_t hash) { return this->check(hash); }));
+                       [&](uint64_t hash) { return check(hash); }));
 }
 
 #ifdef __AVX2__
 
 // compute Bloom filter hashes in batches of 4
-inline uint64_t
+__always_inline uint64_t
 batch_check_avx2(const BloomFilter &bloom,
                  const uint64_t *hashes_begin,
                  const uint64_t *hashes_end,
-                 const sdsl::bit_vector &filter_,
-                 const uint32_t num_hash_functions_,
+                 const uint64_t num_hash_functions_,
                  const std::function<void(size_t)> &present_index_callback) {
-    // only used for assert
-    std::ignore = bloom;
+    assert(num_hash_functions_);
 
-    // used to restrict indices to the size of a block
-    const __m128i blockmask = _mm_set1_epi32(BLOCK_MASK);
+    static_assert(sizeof(long long int) == sizeof(uint64_t));
+    const auto *filter_cast = reinterpret_cast<const long long int*>(bloom.data().data());
 
-    // used to set offset from block start
-    const __m128i shift = _mm_setr_epi32(6, 6, 0, 0);
+    const size_t size = bloom.size();
 
-    // used to select bit
-    const __m128i andmask = _mm_setr_epi32(0xFFFFFFFF, 0xFFFFFFFF, 0x3F, 0x3F);
-
-    const __m128i ones = _mm_set1_epi64x(1);
-
-    const size_t size = filter_.size();
-
-    uint64_t indices[4] __attribute__ ((aligned (32)));
-    uint32_t *hh;
-    const uint64_t *block;
-    uint32_t offset;
+    const __m256i block_mask = _mm256_set1_epi64x(BLOCK_MASK);
+    const __m256i mod_mask = _mm256_set1_epi64x(0x3F);
+    const __m256i ones = _mm256_set1_epi64x(1);
+    const __m256i all = _mm256_set1_epi64x(0xFFFFFFFFFFFFFFFF);
+    const __m256i add = _mm256_setr_epi64x(0, 1, 2, 3);
+    const __m256i numhash = _mm256_set1_epi64x(num_hash_functions_);
 
     __m256i block_indices;
-    __m128i hashes_init, hashes, mult;
-    __m64 *harray = (__m64*)&hashes;
 
+    // check four input elements (represented by hashes) at a time
+    size_t block_index;
     size_t i = 0;
-    const size_t num_elements = hashes_end - hashes_begin;
-    for (; i + 4 <= num_elements; i += 4) {
-        // copy hashes
+    for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
         block_indices = restrict_to_mask_epi64(hashes_begin, size, BLOCK_MASK_OUT);
-        block_indices = _mm256_srli_epi64(block_indices, 6);
-        _mm256_store_si256((__m256i*)indices, block_indices);
 
-        for (size_t j = 0; j < 4; ++j) {
-            bool found = true;
-            uint32_t k = 0;
+        if (num_hash_functions_ > 1) {
+            // this loop needs to be unrolled for the extract below to compile
+#if defined(__GNUC__ )
+            #pragma GCC unroll (4)
+#else
+            #pragma unroll (4)
+#endif
+            for (size_t j = 0; j < 4; ++j) {
+                __m256i hash_init = _mm256_set1_epi64x(hashes_begin[j]);
+                __m256i hash_init_hi = _mm256_srli_epi64(hash_init, 32);
 
-            block = filter_.data() + indices[j];
+                block_index = _mm256_extract_epi64(block_indices, j);
+                __m256i offset = _mm256_set1_epi64x(block_index);
 
-            // ensure the start of the 512-bit block is prefetched, prepare for read
-            __builtin_prefetch(block, 0);
+                __builtin_prefetch(filter_cast + (block_index >> 6), 0);
 
-            hashes_init = _mm_set1_epi64x(hashes_begin[j]);
+                // compute hash functions four at a time
+                bool found = true;
+                uint32_t k = 0;
+                for (; found && k < num_hash_functions_; k += 4) {
+                    // hash = offset + ((h_hi + k * h_lo) & BLOCK_MASK)
+                    __m256i mult = _mm256_add_epi64(_mm256_set1_epi64x(k), add);
+                    __m256i hash = _mm256_add_epi64(_mm256_and_si256(
+                        _mm256_add_epi64(_mm256_mul_epu32(hash_init, mult),
+                                         hash_init_hi),
+                        block_mask
+                    ), offset);
 
-            // hash functions in pairs
-            for (; found && k + 2 <= num_hash_functions_; k += 2) {
-                // load hash
-                hashes = hashes_init;
+                    // test all four hashes
+                    // word = filter[hash / 64] >> (hash % 64)
+                    found &= _mm256_testc_si256(
+                        _mm256_srlv_epi64(
+                            _mm256_mask_i64gather_epi64(
+                                all,
+                                filter_cast,
+                                _mm256_srli_epi64(hash, 6),
+                                _mm256_cmpgt_epi64(numhash, mult),
+                                8
+                            ),
+                            _mm256_and_si256(hash, mod_mask) // hash % 64
+                        ),
+                        ones
+                    );
+                }
 
-                // compute hashes
-                // hash = (h1 + k * h2) & BLOCK_MASK
-                mult = _mm_setr_epi32(1, k, 1, k + 1);
-                hashes = _mm_mullo_epi32(hashes, mult);
-                hashes = _mm_hadd_epi32(hashes, hashes);
-                hashes = _mm_and_si128(hashes, blockmask);
+                assert(found == bloom.check(hashes_begin[j]));
 
-                // check hashes
-                // found &= bool(block[hash / 64] & (1llu << (hash % 64)))
-                hashes = _mm_srlv_epi32(hashes, shift);
-                hashes = _mm_and_si128(hashes, andmask);
-                found &= _mm_testc_si128(
-                    _mm_srlv_epi64(
-                        _mm_i32gather_epi64((long long int*)block, hashes, 8),
-                        _mm_cvtepi32_epi64(_mm_set1_epi64(harray[1]))
-                    ),
-                    ones
-                );
+                if (found)
+                    present_index_callback(i + j);
             }
 
-            // if num_hash_functions is odd, check the last one
-            if (found && (num_hash_functions_ & 1)) {
-                hh = (uint32_t*)&hashes_begin[j];
-                offset = (hh[0] + (num_hash_functions_ - 1) * hh[1]) & BLOCK_MASK;
-                found = block[offset >> 6] & (1llu << (offset & 0x3F));
-            }
+        } else {
+            // check all four elements in parallel
+            __m256i hash = _mm256_add_epi64(_mm256_and_si256(
+                _mm256_srli_epi64(_mm256_loadu_si256((__m256i*)hashes_begin), 32),
+                block_mask
+            ), block_indices);
 
-            assert(found == bloom.check(hashes_begin[j]));
+            int32_t test = _mm256_movemask_epi8(_mm256_cmpeq_epi64(
+                _mm256_and_si256(_mm256_srlv_epi64(
+                    _mm256_i64gather_epi64(filter_cast, _mm256_srli_epi64(hash, 6), 8),
+                    _mm256_and_si256(hash, mod_mask)
+                ), ones),
+                ones
+            ));
 
-            if (found) {
-                present_index_callback(i + j);
-            }
+            assert(bool(test & 0x1) == bloom.check(hashes_begin[0]));
+            assert(bool(test & 0x100) == bloom.check(hashes_begin[1]));
+            assert(bool(test & 0x10000) == bloom.check(hashes_begin[2]));
+            assert(bool(test & 0x1000000) == bloom.check(hashes_begin[3]));
+
+            if (test & 0x1)
+                present_index_callback(i);
+
+            if (test & 0x100)
+                present_index_callback(i + 1);
+
+            if (test & 0x10000)
+                present_index_callback(i + 2);
+
+            if (test & 0x1000000)
+                present_index_callback(i + 3);
+
         }
 
-        hashes_begin += 4;
+        i += 4;
     }
 
     return i;
@@ -329,14 +380,22 @@ void BloomFilter::check(const uint64_t *hashes_begin,
                         const std::function<void(size_t)> &present_index_callback) const {
     assert(hashes_end >= hashes_begin);
 
-    size_t i = 0;
     const size_t num_elements = hashes_end - hashes_begin;
+
+    if (!num_hash_functions_) {
+        for (size_t i = 0; i < num_elements; ++i) {
+            present_index_callback(i);
+        }
+
+        return;
+    }
+
+    size_t i = 0;
 
 #ifdef __AVX2__
     i = batch_check_avx2(*this,
                          hashes_begin,
                          hashes_end,
-                         filter_,
                          num_hash_functions_,
                          present_index_callback);
 #endif

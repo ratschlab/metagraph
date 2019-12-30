@@ -86,6 +86,7 @@ class BloomFilter {
     uint32_t num_hash_functions() const { return num_hash_functions_; }
 
     const sdsl::bit_vector& data() const { return filter_; }
+    sdsl::bit_vector& data() { return filter_; }
 
     /**
      * Compute the optimal size of a Bloom filter given the parameters.
