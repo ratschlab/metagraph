@@ -50,8 +50,8 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
 
 // For each pair (first, second) in the dictionary, renames column |first|
 // to |second| and merges columns with matching names, if supported.
-template <typename IndexType, typename LabelType>
-void MultiLabelEncoded<IndexType, LabelType>
+template <typename LabelType>
+void MultiLabelEncoded<LabelType>
 ::rename_labels(const std::unordered_map<Label, Label> &dict) {
     // old labels
     std::vector<Label> index_to_label = label_encoder_.get_labels();
@@ -98,16 +98,16 @@ class IterateRowsByIndex : public Annotator::IterateRows {
     const Annotator &annotator_;
 };
 
-template <typename IndexType, typename LabelType>
-std::unique_ptr<typename MultiLabelEncoded<IndexType, LabelType>::IterateRows>
-MultiLabelEncoded<IndexType, LabelType>::iterator() const {
-    return std::make_unique<IterateRowsByIndex<MultiLabelEncoded<IndexType, LabelType>>>(*this);
+template <typename LabelType>
+std::unique_ptr<typename MultiLabelEncoded<LabelType>::IterateRows>
+MultiLabelEncoded<LabelType>::iterator() const {
+    return std::make_unique<IterateRowsByIndex<MultiLabelEncoded<LabelType>>>(*this);
 }
 
 // calls get_label_codes(i)
-template <typename IndexType, typename LabelType>
-typename MultiLabelEncoded<IndexType, LabelType>::VLabels
-MultiLabelEncoded<IndexType, LabelType>::get(Index i) const {
+template <typename LabelType>
+typename MultiLabelEncoded<LabelType>::VLabels
+MultiLabelEncoded<LabelType>::get(Index i) const {
     assert(i < this->num_objects());
 
     const auto &label_codes = get_label_codes(i);
@@ -121,9 +121,9 @@ MultiLabelEncoded<IndexType, LabelType>::get(Index i) const {
     return labels;
 }
 
-template <typename IndexType, typename LabelType>
+template <typename LabelType>
 std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-MultiLabelEncoded<IndexType, LabelType>
+MultiLabelEncoded<LabelType>
 ::count_labels(const std::unordered_map<Index, size_t> &index_counts,
                size_t min_count,
                size_t count_cap) const {
@@ -184,9 +184,9 @@ MultiLabelEncoded<IndexType, LabelType>
 }
 
 // calls get_label_codes(i)
-template <typename IndexType, typename LabelType>
-std::vector<typename MultiLabelEncoded<IndexType, LabelType>::SetBitPositions>
-MultiLabelEncoded<IndexType, LabelType>
+template <typename LabelType>
+std::vector<typename MultiLabelEncoded<LabelType>::SetBitPositions>
+MultiLabelEncoded<LabelType>
 ::get_label_codes(const std::vector<Index> &indices) const {
     std::vector<SetBitPositions> rows(indices.size());
 
@@ -199,7 +199,7 @@ MultiLabelEncoded<IndexType, LabelType>
     return rows;
 }
 
-template class MultiLabelEncoded<uint64_t, std::string>;
+template class MultiLabelEncoded<std::string>;
 
 template class LabelEncoder<std::string>;
 

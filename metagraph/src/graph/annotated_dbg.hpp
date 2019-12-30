@@ -11,7 +11,7 @@
 // TODO: rename to AnnotatedSequenceGraph
 class AnnotatedDBG {
   public:
-    typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+    typedef annotate::MultiLabelEncoded<std::string> Annotator;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 

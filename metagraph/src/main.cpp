@@ -52,7 +52,7 @@ using utils::get_verbose;
 using namespace mg::bitmap_graph;
 using namespace mg::succinct;
 
-typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+typedef annotate::MultiLabelEncoded<std::string> Annotator;
 
 static const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = false;

@@ -113,13 +113,12 @@ class LabelEncoder {
 };
 
 
-template <typename IndexType, typename LabelType>
-class MultiLabelEncoded
-      : public MultiLabelAnnotation<IndexType, LabelType> {
+template <typename LabelType>
+class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
   public:
-    using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
-    using Label = typename MultiLabelAnnotation<IndexType, LabelType>::Label;
-    using VLabels = typename MultiLabelAnnotation<IndexType, LabelType>::VLabels;
+    using Index = typename MultiLabelAnnotation<uint64_t, LabelType>::Index;
+    using Label = typename MultiLabelAnnotation<uint64_t, LabelType>::Label;
+    using VLabels = typename MultiLabelAnnotation<uint64_t, LabelType>::VLabels;
     typedef Vector<uint64_t> SetBitPositions;
 
     virtual ~MultiLabelEncoded() {}

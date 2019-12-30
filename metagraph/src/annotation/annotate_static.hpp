@@ -13,12 +13,12 @@
 namespace annotate {
 
 template <class BinaryMatrixType, typename Label = std::string>
-class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
+class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
   public:
     typedef BinaryMatrixType binary_matrix_type;
-    using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
-    using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
-    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
+    using Index = typename MultiLabelEncoded<Label>::Index;
+    using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     explicit StaticBinRelAnnotator(size_t row_cache_size = 0);
 
@@ -57,9 +57,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
 
     std::unique_ptr<BinaryMatrixType> matrix_;
 
-    LabelEncoder<Label> &label_encoder_ {
-        MultiLabelEncoded<uint64_t, Label>::label_encoder_
-    };
+    LabelEncoder<Label> &label_encoder_ { MultiLabelEncoded<Label>::label_encoder_ };
 
     SetBitPositions get_label_codes(Index i) const override;
     std::vector<SetBitPositions>

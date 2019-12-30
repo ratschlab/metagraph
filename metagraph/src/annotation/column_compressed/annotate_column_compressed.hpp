@@ -19,7 +19,7 @@ class RowCompressed;
 
 
 template <typename Label = std::string>
-class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
+class ColumnCompressed : public MultiLabelEncoded<Label> {
     template <class A, typename L>
     friend std::unique_ptr<A> convert(ColumnCompressed<L>&&);
 
@@ -27,10 +27,10 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t, size_t);
 
   public:
-    using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
-    using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
-    using IterateRows = typename MultiLabelEncoded<uint64_t, Label>::IterateRows;
-    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
+    using Index = typename MultiLabelEncoded<Label>::Index;
+    using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using IterateRows = typename MultiLabelEncoded<Label>::IterateRows;
+    using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
@@ -121,9 +121,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
                               bitmap_builder*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
-    LabelEncoder<Label> &label_encoder_ {
-        MultiLabelEncoded<uint64_t, Label>::label_encoder_
-    };
+    LabelEncoder<Label> &label_encoder_ { MultiLabelEncoded<Label>::label_encoder_ };
 
     bool verbose_;
 

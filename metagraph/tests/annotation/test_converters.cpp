@@ -20,7 +20,7 @@ class ConvertFromRowCompressed : public ::testing::Test {
   protected:
     static const uint64_t num_rows = 5;
     static annotate::RowCompressed<> *initial_annotation;
-    static annotate::MultiLabelEncoded<uint64_t, std::string> *annotation;
+    static annotate::MultiLabelEncoded<std::string> *annotation;
 
     virtual void SetUp() {
         initial_annotation = new annotate::RowCompressed<>(num_rows);
@@ -54,7 +54,7 @@ class ConvertFromRowCompressed : public ::testing::Test {
 
 const uint64_t ConvertFromRowCompressed::num_rows;
 annotate::RowCompressed<> *ConvertFromRowCompressed::initial_annotation = nullptr;
-annotate::MultiLabelEncoded<uint64_t, std::string> *ConvertFromRowCompressed::annotation = nullptr;
+annotate::MultiLabelEncoded<std::string> *ConvertFromRowCompressed::annotation = nullptr;
 
 class MergeAnnotators : public ::testing::Test {
   protected:
@@ -62,7 +62,7 @@ class MergeAnnotators : public ::testing::Test {
     static annotate::RowCompressed<> *input_annotation_1;
     static annotate::RowCompressed<> *input_annotation_2;
     static annotate::RowCompressed<> *merged_annotation_expected;
-    static annotate::MultiLabelEncoded<uint64_t, std::string> *merged_annotation;
+    static annotate::MultiLabelEncoded<std::string> *merged_annotation;
 
     virtual void SetUp() {
 
@@ -104,13 +104,13 @@ const uint64_t MergeAnnotators::num_rows;
 annotate::RowCompressed<> *MergeAnnotators::input_annotation_1 = nullptr;
 annotate::RowCompressed<> *MergeAnnotators::input_annotation_2 = nullptr;
 annotate::RowCompressed<> *MergeAnnotators::merged_annotation_expected = nullptr;
-annotate::MultiLabelEncoded<uint64_t, std::string> *MergeAnnotators::merged_annotation = nullptr;
+annotate::MultiLabelEncoded<std::string> *MergeAnnotators::merged_annotation = nullptr;
 
 
 class ConvertFromColumnCompressed : public ::testing::Test {
   protected:
     static annotate::ColumnCompressed<> *initial_annotation;
-    static annotate::MultiLabelEncoded<uint64_t, std::string> *annotation;
+    static annotate::MultiLabelEncoded<std::string> *annotation;
 
     virtual void SetUp() {
         initial_annotation = new annotate::ColumnCompressed<>(5);
@@ -144,7 +144,7 @@ class ConvertFromColumnCompressed : public ::testing::Test {
 };
 
 annotate::ColumnCompressed<> *ConvertFromColumnCompressed::initial_annotation = nullptr;
-annotate::MultiLabelEncoded<uint64_t, std::string> *ConvertFromColumnCompressed::annotation = nullptr;
+annotate::MultiLabelEncoded<std::string> *ConvertFromColumnCompressed::annotation = nullptr;
 
 
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT) {
@@ -350,7 +350,7 @@ TEST_F(MergeAnnotators, RowCompressed) {
 }
 
 TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
-    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<uint64_t, std::string>>> row_flat_annotators;
+    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<std::string>>> row_flat_annotators;
     {
         row_flat_annotators.push_back(annotate::convert<annotate::RowFlatAnnotator>(
             std::move(*input_annotation_1)
@@ -371,7 +371,7 @@ TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
 }
 
 TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
-    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<uint64_t, std::string>>> row_flat_annotators;
+    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<std::string>>> row_flat_annotators;
     {
         row_flat_annotators.push_back(annotate::convert<annotate::RowFlatAnnotator>(
             std::move(*input_annotation_1)
@@ -392,7 +392,7 @@ TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
 }
 
 TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
-    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<uint64_t, std::string>>> annotators;
+    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<std::string>>> annotators;
     std::vector<std::string> filenames;
     {
         auto annotator = annotate::convert<annotate::RowFlatAnnotator>(

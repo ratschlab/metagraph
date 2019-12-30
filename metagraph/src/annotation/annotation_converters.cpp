@@ -339,7 +339,7 @@ void merge_rows(const std::vector<const LabelEncoder<Label> *> &label_encoders,
 
 
 template <class ToAnnotation, typename Label>
-void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, Label>>>&& annotators,
+void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
            const std::string &outfile) {
     static_assert(std::is_same_v<typename ToAnnotation::Label, Label>);
@@ -357,7 +357,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, Label>>>&& an
     assert(num_rows);
 
     std::vector<const LEncoder*> label_encoders;
-    std::vector<std::unique_ptr<typename MultiLabelEncoded<uint64_t, Label>::IterateRows>> annotator_row_iterators;
+    std::vector<std::unique_ptr<typename MultiLabelEncoded<Label>::IterateRows>> annotator_row_iterators;
     for (const auto &annotator : annotators) {
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
@@ -404,7 +404,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, Label>>>&& an
 
 #define INSTANTIATE_MERGE(A, L) \
             template void \
-            merge<A, L>(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, L>>>&&, \
+            merge<A, L>(std::vector<std::unique_ptr<MultiLabelEncoded<L>>>&&, \
                         const std::vector<std::string>&, \
                         const std::string&);
 INSTANTIATE_MERGE(RowFlatAnnotator, std::string);
@@ -416,7 +416,7 @@ INSTANTIATE_MERGE(RowCompressed<>, std::string);
 
 template<>
 void merge<BRWTCompressed<>, std::string>(
-        std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, std::string>>>&& annotators,
+        std::vector<std::unique_ptr<MultiLabelEncoded<std::string>>>&& annotators,
         const std::vector<std::string> &filenames,
         const std::string &outfile) {
 
