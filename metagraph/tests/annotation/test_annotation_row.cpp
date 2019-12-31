@@ -126,7 +126,7 @@ TEST(RowCompressed, RenameColumnsMerge) {
     annotation.set(2, { "Label1", "Label2" });
     annotation.set(4, { "Label8" });
 
-    ASSERT_DEATH(
+    ASSERT_DEATH_SILENT(
         annotation.rename_labels({ { "Label2", "Merged" },
                                    { "Label8", "Merged" } }),
         ""
@@ -145,7 +145,7 @@ TEST(RowCompressed, RenameColumnsMergeAll) {
     annotation.set(2, { "Label1", "Label2" });
     annotation.set(4, { "Label8" });
 
-    ASSERT_DEATH(
+    ASSERT_DEATH_SILENT(
         annotation.rename_labels({ { "Label0", "Merged" },
                                    { "Label1", "Merged" },
                                    { "Label2", "Merged" },

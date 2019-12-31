@@ -576,7 +576,7 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMerge) {
     column_annotator.set(4, { "Label8" });
 
     this->set(std::move(column_annotator));
-    ASSERT_DEATH(
+    ASSERT_DEATH_SILENT(
         this->annotation->rename_labels({ { "Label2", "Merged" },
                                           { "Label8", "Merged" } }),
         ""
@@ -590,7 +590,7 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMergeAll) {
     column_annotator.set(4, { "Label8" });
 
     this->set(std::move(column_annotator));
-    ASSERT_DEATH(
+    ASSERT_DEATH_SILENT(
         this->annotation->rename_labels({ { "Label0", "Merged" },
                                           { "Label1", "Merged" },
                                           { "Label2", "Merged" },
