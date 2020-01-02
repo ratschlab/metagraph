@@ -7,6 +7,7 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/masked_graph.hpp"
 
 typedef std::function<size_t()> LabelCountCallback;
 
@@ -74,13 +75,13 @@ typedef VariantCallback<DeBruijnGraph::node_index,
 // These functions will callback nothing if graph is equal to the graph stored
 // in anno_graph
 
-void call_bubbles(const DeBruijnGraph &graph,
+void call_bubbles(const MaskedDeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
                   const VariantLabelCallback &callback,
                   ThreadPool *thread_pool = nullptr,
                   const std::function<bool()> &terminate = []() { return false; });
 
-void call_breakpoints(const DeBruijnGraph &graph,
+void call_breakpoints(const MaskedDeBruijnGraph &graph,
                       const AnnotatedDBG &anno_graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool = nullptr,
