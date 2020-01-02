@@ -18,7 +18,7 @@ class ColumnCompressed;
 
 
 template <typename Label = std::string>
-class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
+class RowCompressed : public MultiLabelEncoded<Label> {
     friend ColumnCompressed<Label>;
 
     template <class A, typename L>
@@ -26,15 +26,15 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     template <class A>
     friend std::unique_ptr<A> convert(const std::string&);
     template <class A, typename L>
-    friend void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, L>>>&&,
+    friend void merge(std::vector<std::unique_ptr<MultiLabelEncoded<L>>>&&,
                       const std::vector<std::string>&,
                       const std::string&);
 
   public:
-    using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
-    using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
-    using IterateRows = typename MultiLabelEncoded<uint64_t, Label>::IterateRows;
-    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
+    using Index = typename MultiLabelEncoded<Label>::Index;
+    using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using IterateRows = typename MultiLabelEncoded<Label>::IterateRows;
+    using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
@@ -43,10 +43,8 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                   const std::vector<Label> &labels,
                   std::function<void(CallRow)> call_rows);
 
-    void set_labels(Index i, const VLabels &labels);
+    void set(Index i, const VLabels &labels);
 
-    void add_label(Index i, const Label &label);
-    void add_labels(Index i, const VLabels &labels);
     void add_labels(const std::vector<Index> &indices, const VLabels &labels);
     void add_labels_fast(const std::vector<Index> &indices, const VLabels &labels);
 
@@ -62,7 +60,6 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                       std::function<void(Index)> callback) const;
 
     uint64_t num_objects() const;
-    size_t num_labels() const;
     uint64_t num_relations() const;
 
     std::string file_extension() const { return kExtension; }
@@ -76,9 +73,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     std::unique_ptr<BinaryMatrixRowDynamic> matrix_;
 
-    LabelEncoder<Label> &label_encoder_ {
-        MultiLabelEncoded<uint64_t, Label>::label_encoder_
-    };
+    LabelEncoder<Label> &label_encoder_ { MultiLabelEncoded<Label>::label_encoder_ };
 
     static std::unique_ptr<LabelEncoder<Label>>
     load_label_encoder(const std::string &filename);
@@ -101,9 +96,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
         std::unique_ptr<::StreamRows<RowType>> sr_;
     };
 
-    SetBitPositions get_label_codes(Index i) const {
-        return matrix_->get_row(i);
-    }
+    SetBitPositions get_label_codes(Index i) const { return matrix_->get_row(i); }
 
     static constexpr auto kExtension = kRowAnnotatorExtension;
 };

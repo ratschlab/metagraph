@@ -56,13 +56,13 @@ class AnnotatorTest : public ::testing::Test {
         } else if constexpr(std::is_same_v<Annotator, RowCompressedDynamic<>>) {
             annotation.reset(new RowCompressedDynamic<>(column_annotator.num_objects()));
             for (RowCompressedDynamic<>::Index i = 0; i < column_annotator.num_objects(); ++i) {
-                annotation->add_labels(i, std::move(column_annotator.get_labels(i)));
+                annotation->add_labels({ i }, std::move(column_annotator.get(i)));
             }
 
         } else if constexpr(std::is_same_v<Annotator, RowCompressedSparse<>>) {
             annotation.reset(new RowCompressedSparse<>(column_annotator.num_objects()));
             for (RowCompressedSparse<>::Index i = 0; i < column_annotator.num_objects(); ++i) {
-                annotation->add_labels(i, std::move(column_annotator.get_labels(i)));
+                annotation->add_labels({ i }, std::move(column_annotator.get(i)));
             }
 
         } else if constexpr(std::is_same_v<Annotator, annotate::ColumnCompressed<>>) {
@@ -70,7 +70,7 @@ class AnnotatorTest : public ::testing::Test {
             //annotation.reset(new annotate::ColumnCompressed<>(std::move(column_annotator)));
             annotation.reset(new annotate::ColumnCompressed<>(column_annotator.num_objects()));
             for (annotate::ColumnCompressed<>::Index i = 0; i < column_annotator.num_objects(); ++i) {
-                annotation->add_labels(i, std::move(column_annotator.get_labels(i)));
+                annotation->add_labels({ i }, std::move(column_annotator.get(i)));
             }
         } else {
             annotation = annotate::convert<Annotator>(std::move(column_annotator));
@@ -91,10 +91,10 @@ class AnnotatorPresetTest : public AnnotatorTest<Annotator> {
   public:
     virtual void SetUp() override {
         annotate::ColumnCompressed<> column_annotator(5);
-        column_annotator.add_labels(0, {"Label0", "Label2", "Label8"});
-        column_annotator.add_labels(2, {"Label1", "Label2"});
-        column_annotator.add_labels(3, {"Label1", "Label2", "Label8"});
-        column_annotator.add_labels(4, {"Label2"});
+        column_annotator.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        column_annotator.add_labels({ 2 }, {"Label1", "Label2"});
+        column_annotator.add_labels({ 3 }, {"Label1", "Label2", "Label8"});
+        column_annotator.add_labels({ 4 }, {"Label2"});
         this->set(std::move(column_annotator));
     }
 };
@@ -104,9 +104,9 @@ class AnnotatorPreset2Test : public AnnotatorTest<Annotator> {
   public:
     virtual void SetUp() override {
         annotate::ColumnCompressed<> column_annotator(5);
-        column_annotator.add_labels(0, { "Label0", "Label2", "Label8" });
-        column_annotator.add_labels(2, { "Label1", "Label2" });
-        column_annotator.add_labels(4, { "Label8" });
+        column_annotator.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+        column_annotator.add_labels({ 2 }, { "Label1", "Label2" });
+        column_annotator.add_labels({ 4 }, { "Label8" });
         this->set(std::move(column_annotator));
     }
 };
@@ -116,10 +116,10 @@ class AnnotatorPreset3Test : public AnnotatorTest<Annotator> {
   public:
     virtual void SetUp() override {
         annotate::ColumnCompressed<> column_annotator(5);
-        column_annotator.add_labels(0, {"Label0", "Label2", "Label8"});
-        column_annotator.add_labels(2, {"Label1", "Label2"});
-        column_annotator.add_labels(3, {"Label1", "Label2", "Label8"});
-        column_annotator.add_labels(4, {"Label2", "Label8"});
+        column_annotator.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        column_annotator.add_labels({ 2 }, {"Label1", "Label2"});
+        column_annotator.add_labels({ 3 }, {"Label1", "Label2", "Label8"});
+        column_annotator.add_labels({ 4 }, {"Label2", "Label8"});
         this->set(std::move(column_annotator));
     }
 };

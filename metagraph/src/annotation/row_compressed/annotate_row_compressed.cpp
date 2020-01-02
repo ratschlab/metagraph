@@ -50,22 +50,13 @@ void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
 }
 
 template <typename Label>
-void RowCompressed<Label>::set_labels(Index i, const VLabels &labels) {
+void RowCompressed<Label>::set(Index i, const VLabels &labels) {
     assert(i < matrix_->num_rows());
 
     matrix_->clear_row(i);
-    add_labels(i, labels);
-}
 
-template <typename Label>
-void RowCompressed<Label>::add_label(Index i, const Label &label) {
-    matrix_->set(i, label_encoder_.insert_and_encode(label));
-}
-
-template <typename Label>
-void RowCompressed<Label>::add_labels(Index i, const VLabels &labels) {
     for (const auto &label : labels) {
-        add_label(i, label);
+        matrix_->set(i, label_encoder_.insert_and_encode(label));
     }
 }
 
@@ -242,12 +233,6 @@ void RowCompressed<Label>
 template <typename Label>
 uint64_t RowCompressed<Label>::num_objects() const {
     return matrix_->num_rows();
-}
-
-template <typename Label>
-size_t RowCompressed<Label>::num_labels() const {
-    assert(label_encoder_.size() == matrix_->num_columns());
-    return label_encoder_.size();
 }
 
 template <typename Label>

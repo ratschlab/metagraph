@@ -13,12 +13,12 @@
 namespace annotate {
 
 template <class BinaryMatrixType, typename Label = std::string>
-class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
+class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
   public:
     typedef BinaryMatrixType binary_matrix_type;
-    using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
-    using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
-    using SetBitPositions = typename MultiLabelEncoded<uint64_t, Label>::SetBitPositions;
+    using Index = typename MultiLabelEncoded<Label>::Index;
+    using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     explicit StaticBinRelAnnotator(size_t row_cache_size = 0);
 
@@ -34,12 +34,9 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     bool dump_columns(const std::string &prefix, uint64_t num_threads = 1) const;
 
     uint64_t num_objects() const override;
-    size_t num_labels() const override;
     uint64_t num_relations() const override;
 
-    void set_labels(Index, const VLabels &) override { except_dyn(); }
-    void add_label(Index, const Label &) override { except_dyn(); }
-    void add_labels(Index, const VLabels &) override { except_dyn(); }
+    void set(Index, const VLabels &) override { except_dyn(); }
     void add_labels(const std::vector<Index> &, const VLabels &) override { except_dyn(); }
     void insert_rows(const std::vector<Index> &) override { except_dyn(); }
 
@@ -57,9 +54,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
 
     std::unique_ptr<BinaryMatrixType> matrix_;
 
-    LabelEncoder<Label> &label_encoder_ {
-        MultiLabelEncoded<uint64_t, Label>::label_encoder_
-    };
+    LabelEncoder<Label> &label_encoder_ { MultiLabelEncoded<Label>::label_encoder_ };
 
     SetBitPositions get_label_codes(Index i) const override;
     std::vector<SetBitPositions>

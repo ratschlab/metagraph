@@ -99,12 +99,6 @@ uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_objects() const {
 }
 
 template <class BinaryMatrixType, typename Label>
-size_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_labels() const {
-    assert(label_encoder_.size() == matrix_->num_columns());
-    return label_encoder_.size();
-}
-
-template <class BinaryMatrixType, typename Label>
 uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_relations() const {
     return matrix_->num_relations();
 }
@@ -163,7 +157,7 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::dump_columns(const std::string &prefix, uint64_t num_threads) const {
-    size_t m = num_labels();
+    size_t m = this->num_labels();
     bool success = true;
 
     #pragma omp parallel for num_threads(num_threads)

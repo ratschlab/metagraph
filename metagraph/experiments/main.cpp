@@ -221,7 +221,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     }
 }
 
-typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+typedef annotate::MultiLabelEncoded<std::string> Annotator;
 
 std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
                                                  size_t cache_size = 0) {

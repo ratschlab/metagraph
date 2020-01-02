@@ -44,7 +44,7 @@ ColumnCompressed<Label>::~ColumnCompressed() {
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::set_labels(Index i, const VLabels &labels) {
+void ColumnCompressed<Label>::set(Index i, const VLabels &labels) {
     assert(i < num_rows_);
     // add new labels
     for (const auto &label : labels) {
@@ -67,7 +67,7 @@ ColumnCompressed<Label>::get_label_codes(Index i) const {
     assert(i < num_rows_);
 
     SetBitPositions label_indices;
-    for (size_t j = 0; j < num_labels(); ++j) {
+    for (size_t j = 0; j < this->num_labels(); ++j) {
         if (get_column(j)[i])
             label_indices.push_back(j);
     }
@@ -79,7 +79,7 @@ std::vector<typename ColumnCompressed<Label>::SetBitPositions>
 ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) const {
     std::vector<SetBitPositions> rows(indices.size());
 
-    for (size_t j = 0; j < num_labels(); ++j) {
+    for (size_t j = 0; j < this->num_labels(); ++j) {
         const auto &column = get_column(j);
 
         for (size_t i = 0; i < indices.size(); ++i) {
@@ -91,20 +91,6 @@ ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) cons
     }
 
     return rows;
-}
-
-template <typename Label>
-void ColumnCompressed<Label>::add_label(Index i, const Label &label) {
-    assert(i < num_rows_);
-
-    set(i, label_encoder_.insert_and_encode(label), 1);
-}
-
-template <typename Label>
-void ColumnCompressed<Label>::add_labels(Index i, const VLabels &labels) {
-    for (const auto &label : labels) {
-        add_label(i, label);
-    }
 }
 
 template <typename Label>
@@ -325,7 +311,7 @@ ColumnCompressed<Label>
                    [](const auto &pair) { return pair.first; });
 
     std::vector<std::pair<uint64_t, size_t>> label_counts;
-    label_counts.reserve(num_labels());
+    label_counts.reserve(this->num_labels());
 
     // TODO: get rid of label encoder from here
     for (const auto &label : this->get_all_labels()) {
@@ -365,7 +351,7 @@ void ColumnCompressed<Label>
     for (const auto &pair : dict) {
         try {
             index_to_label[label_encoder_.encode(pair.first)] = pair.second;
-        } catch (const std::runtime_error&) {
+        } catch (const std::out_of_range &) {
             std::cerr << "Warning: label '" << pair.first << "' not"
                       << " found in annotation. Skipping instruction"
                       << " '" << pair.first << " -> " << pair.second << "'."
@@ -413,15 +399,9 @@ uint64_t ColumnCompressed<Label>::num_objects() const {
 }
 
 template <typename Label>
-size_t ColumnCompressed<Label>::num_labels() const {
-    assert(bitmatrix_.size() == label_encoder_.size());
-    return label_encoder_.size();
-}
-
-template <typename Label>
 uint64_t ColumnCompressed<Label>::num_relations() const {
     uint64_t num_rels = 0;
-    for (size_t i = 0; i < num_labels(); ++i) {
+    for (size_t i = 0; i < this->num_labels(); ++i) {
         num_rels += get_column(i).num_set_bits();
     }
     return num_rels;

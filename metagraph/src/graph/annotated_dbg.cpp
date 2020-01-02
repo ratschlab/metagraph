@@ -152,7 +152,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(node_index index) const {
     assert(check_compatibility());
     assert(index != SequenceGraph::npos);
 
-    return annotator_->get_labels(graph_to_anno_index(index));
+    return annotator_->get(graph_to_anno_index(index));
 }
 
 std::vector<StringCountPair>

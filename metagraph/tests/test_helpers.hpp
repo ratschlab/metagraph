@@ -3,22 +3,34 @@
 
 #include <set>
 
+#include "common/logger.hpp"
 
-// Disable death tests
+
 #ifdef _NO_DEATH_TEST
+// Disable death tests
 
 #ifdef ASSERT_DEATH
 #undef ASSERT_DEATH
-#define ASSERT_DEATH(a, b) (void)0
+#define ASSERT_DEATH(...) (void)0
+#define ASSERT_DEATH_SILENT(...) (void)0
 #endif
 
 #ifdef EXPECT_DEATH
 #undef EXPECT_DEATH
-#define EXPECT_DEATH(a, b) (void)0
+#define EXPECT_DEATH(...) (void)0
+#define EXPECT_DEATH_SILENT(...) (void)0
 #endif
 
-#endif // _NO_DEATH_TEST
+#else
+// Define death tests without error messages in log
+#define ASSERT_DEATH_SILENT(...) \
+    mg::common::logger->set_level(spdlog::level::critical); \
+    ASSERT_DEATH(__VA_ARGS__)
+#define EXPECT_DEATH_SILENT(...) \
+    mg::common::logger->set_level(spdlog::level::critical); \
+    EXPECT_DEATH(__VA_ARGS__)
 
+#endif // _NO_DEATH_TEST
 
 // Colored logging
 // https://stackoverflow.com/questions/16491675/how-to-send-custom-message-in-google-c-testing-framework
