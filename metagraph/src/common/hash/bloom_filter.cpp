@@ -144,42 +144,37 @@ __always_inline const uint64_t* batch_insert_avx2(BloomFilter &bloom,
     const __m256i numhash = _mm256_set1_epi64x(num_hash_functions_);
 
     __m256i block_indices;
+    const uint64_t *block_index_array = reinterpret_cast<const uint64_t*>(&block_indices);
 
     uint64_t ids_store[4] __attribute__ ((aligned (32)));
     uint64_t updates_store[4] __attribute__ ((aligned (32)));
     __m256i *ids_cast = reinterpret_cast<__m256i*>(&ids_store);
     __m256i *updates_cast = reinterpret_cast<__m256i*>(&updates_store);
 
-    size_t block_index;
-
     // check four input elements (represented by hashes) at a time
     for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
         block_indices = restrict_to_mask_epi64(hashes_begin, size, BLOCK_MASK_OUT);
 
         if (num_hash_functions_ > 1) {
-#if defined(__GNUC__ )
-            #pragma GCC unroll (4)
-#else
-            #pragma unroll (4)
-#endif
             for (size_t j = 0; j < 4; ++j) {
                 __m256i hash_init = _mm256_set1_epi64x(hashes_begin[j]);
                 __m256i hash_init_hi = _mm256_srli_epi64(hash_init, 32);
+                __m256i offset = _mm256_set1_epi64x(block_index_array[j]);
 
-                block_index = _mm256_extract_epi64(block_indices, j);
-                __m256i offset = _mm256_set1_epi64x(block_index);
-
-                __builtin_prefetch(filter_cast + (block_index >> 6), 0);
+                __builtin_prefetch(filter_cast + (block_index_array[j] >> 6), 0);
 
                 // compute hash functions four at a time
                 for (uint32_t k = 0; k < num_hash_functions_; k += 4) {
                     // hash = (h_hi + k * h_lo) & BLOCK_MASK
                     __m256i mult = _mm256_add_epi64(_mm256_set1_epi64x(k), add);
-                    __m256i hash = _mm256_add_epi64(_mm256_and_si256(
-                        _mm256_add_epi64(_mm256_mul_epu32(hash_init, mult),
-                                         hash_init_hi),
-                        block_mask
-                    ), offset);
+                    __m256i hash = _mm256_add_epi64(
+                        _mm256_and_si256(
+                            _mm256_add_epi64(_mm256_mul_epu32(hash_init, mult),
+                                             hash_init_hi),
+                            block_mask
+                        ),
+                        offset
+                    );
 
                     _mm256_store_si256(ids_cast, _mm256_srli_epi64(hash, 6));
                     _mm256_store_si256(
@@ -201,10 +196,13 @@ __always_inline const uint64_t* batch_insert_avx2(BloomFilter &bloom,
 
         } else {
             // insert all four elements in parallel
-            __m256i hash = _mm256_add_epi64(_mm256_and_si256(
-                _mm256_srli_epi64(_mm256_loadu_si256((__m256i*)hashes_begin), 32),
-                block_mask
-            ), block_indices);
+            __m256i hash = _mm256_add_epi64(
+                _mm256_and_si256(
+                    _mm256_srli_epi64(_mm256_loadu_si256((__m256i*)hashes_begin), 32),
+                    block_mask
+                ),
+                block_indices
+            );
 
             _mm256_store_si256(ids_cast, _mm256_srli_epi64(hash, 6));
             _mm256_store_si256(updates_cast,
@@ -275,28 +273,20 @@ batch_check_avx2(const BloomFilter &bloom,
     const __m256i numhash = _mm256_set1_epi64x(num_hash_functions_);
 
     __m256i block_indices;
+    const uint64_t *block_index_array = reinterpret_cast<const uint64_t*>(&block_indices);
 
     // check four input elements (represented by hashes) at a time
-    size_t block_index;
     size_t i = 0;
     for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
         block_indices = restrict_to_mask_epi64(hashes_begin, size, BLOCK_MASK_OUT);
 
         if (num_hash_functions_ > 1) {
-            // this loop needs to be unrolled for the extract below to compile
-#if defined(__GNUC__ )
-            #pragma GCC unroll (4)
-#else
-            #pragma unroll (4)
-#endif
             for (size_t j = 0; j < 4; ++j) {
                 __m256i hash_init = _mm256_set1_epi64x(hashes_begin[j]);
                 __m256i hash_init_hi = _mm256_srli_epi64(hash_init, 32);
+                __m256i offset = _mm256_set1_epi64x(block_index_array[j]);
 
-                block_index = _mm256_extract_epi64(block_indices, j);
-                __m256i offset = _mm256_set1_epi64x(block_index);
-
-                __builtin_prefetch(filter_cast + (block_index >> 6), 0);
+                __builtin_prefetch(filter_cast + (block_index_array[j] >> 6), 0);
 
                 // compute hash functions four at a time
                 bool found = true;
@@ -304,11 +294,14 @@ batch_check_avx2(const BloomFilter &bloom,
                 for (; found && k < num_hash_functions_; k += 4) {
                     // hash = offset + ((h_hi + k * h_lo) & BLOCK_MASK)
                     __m256i mult = _mm256_add_epi64(_mm256_set1_epi64x(k), add);
-                    __m256i hash = _mm256_add_epi64(_mm256_and_si256(
-                        _mm256_add_epi64(_mm256_mul_epu32(hash_init, mult),
-                                         hash_init_hi),
-                        block_mask
-                    ), offset);
+                    __m256i hash = _mm256_add_epi64(
+                        _mm256_and_si256(
+                            _mm256_add_epi64(_mm256_mul_epu32(hash_init, mult),
+                                             hash_init_hi),
+                            block_mask
+                        ),
+                        offset
+                    );
 
                     // test all four hashes
                     // word = filter[hash / 64] >> (hash % 64)
@@ -335,10 +328,13 @@ batch_check_avx2(const BloomFilter &bloom,
 
         } else {
             // check all four elements in parallel
-            __m256i hash = _mm256_add_epi64(_mm256_and_si256(
-                _mm256_srli_epi64(_mm256_loadu_si256((__m256i*)hashes_begin), 32),
-                block_mask
-            ), block_indices);
+            __m256i hash = _mm256_add_epi64(
+                _mm256_and_si256(
+                    _mm256_srli_epi64(_mm256_loadu_si256((__m256i*)hashes_begin), 32),
+                    block_mask
+                ),
+                block_indices
+            );
 
             int32_t test = _mm256_movemask_epi8(_mm256_cmpeq_epi64(
                 _mm256_and_si256(_mm256_srlv_epi64(
