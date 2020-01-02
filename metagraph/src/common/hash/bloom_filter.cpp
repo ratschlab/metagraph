@@ -124,10 +124,11 @@ bool BloomFilter::check(uint64_t hash) const {
 #ifdef __AVX2__
 
 // compute Bloom filter hashes in batches of 4
-__always_inline const uint64_t* batch_insert_avx2(BloomFilter &bloom,
-                                                  const uint32_t num_hash_functions_,
-                                                  const uint64_t *hashes_begin,
-                                                  const uint64_t *hashes_end) {
+__always_inline const uint64_t*
+batch_insert_avx2(BloomFilter &bloom,
+                  const uint32_t num_hash_functions_,
+                  const uint64_t *hashes_begin,
+                  const uint64_t *hashes_end) {
     assert(num_hash_functions_);
 
     auto &filter_ = bloom.data();
@@ -158,11 +159,12 @@ __always_inline const uint64_t* batch_insert_avx2(BloomFilter &bloom,
 
         if (num_hash_functions_ > 1) {
             for (size_t j = 0; j < 4; ++j) {
-                __m256i hash_init = _mm256_set1_epi64x(hashes_begin[j]);
-                __m256i hash_init_hi = _mm256_srli_epi64(hash_init, 32);
+                __m256i h = _mm256_set1_epi64x(hashes_begin[j]);
+                __m256i h_hi = _mm256_srli_epi64(h, 32);
 
                 offset = filter_cast + (block_index_array[j] >> 6);
 
+                // ensure that the entire 512-bit block is cached
                 __builtin_prefetch(offset, 0);
 
                 // compute hash functions four at a time
@@ -170,8 +172,7 @@ __always_inline const uint64_t* batch_insert_avx2(BloomFilter &bloom,
                     // hash = (h_hi + k * h_lo) & BLOCK_MASK
                     __m256i mult = _mm256_add_epi64(_mm256_set1_epi64x(k), add);
                     __m256i hash = _mm256_and_si256(
-                        _mm256_add_epi64(_mm256_mul_epu32(hash_init, mult),
-                                         hash_init_hi),
+                        _mm256_add_epi64(_mm256_mul_epu32(h, mult), h_hi),
                         block_mask
                     );
 
@@ -195,6 +196,7 @@ __always_inline const uint64_t* batch_insert_avx2(BloomFilter &bloom,
 
         } else {
             // insert all four elements in parallel
+            // hash = h_hi & BLOCK_MASK
             __m256i hash = _mm256_add_epi64(
                 _mm256_and_si256(
                     _mm256_srli_epi64(_mm256_loadu_si256((__m256i*)hashes_begin), 32),
@@ -222,33 +224,6 @@ __always_inline const uint64_t* batch_insert_avx2(BloomFilter &bloom,
     return hashes_begin;
 }
 
-#endif
-
-void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_end) {
-    if (!num_hash_functions_) {
-        assert(std::all_of(hashes_begin, hashes_end,
-                           [&](uint64_t hash) { return check(hash); }));
-
-        return;
-    }
-
-    const uint64_t *it = hashes_begin;
-#ifdef __AVX2__
-    // TODO: figure out why this fails on Mac
-    it = batch_insert_avx2(*this, num_hash_functions_, it, hashes_end);
-#endif
-
-    // insert residual
-    for (; it < hashes_end; ++it) {
-        insert(*it);
-        assert(check(*it));
-    }
-
-    assert(std::all_of(hashes_begin, hashes_end,
-                       [&](uint64_t hash) { return check(hash); }));
-}
-
-#ifdef __AVX2__
 
 // compute Bloom filter hashes in batches of 4
 __always_inline uint64_t
@@ -271,6 +246,8 @@ batch_check_avx2(const BloomFilter &bloom,
     const __m256i all = _mm256_set1_epi64x(0xFFFFFFFFFFFFFFFF);
     const __m256i add = _mm256_setr_epi64x(0, 1, 2, 3);
     const __m256i numhash = _mm256_set1_epi64x(num_hash_functions_);
+
+    // used with _mm256_castsi256_si128 to cast packed 64-bit indices to 32-bit
     const __m256i permute = _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7);
 
     __m256i block_indices;
@@ -283,11 +260,12 @@ batch_check_avx2(const BloomFilter &bloom,
 
         if (num_hash_functions_ > 1) {
             for (size_t j = 0; j < 4; ++j) {
-                __m256i hash_init = _mm256_set1_epi64x(hashes_begin[j]);
-                __m256i hash_init_hi = _mm256_srli_epi64(hash_init, 32);
+                __m256i h = _mm256_set1_epi64x(hashes_begin[j]);
+                __m256i h_hi = _mm256_srli_epi64(h, 32);
 
                 offset = filter_cast + (block_index_array[j] >> 6);
 
+                // ensure that the entire 512-bit block is cached
                 __builtin_prefetch(offset, 0);
 
                 // compute hash functions four at a time
@@ -297,13 +275,14 @@ batch_check_avx2(const BloomFilter &bloom,
                     // hash = (h_hi + k * h_lo) & BLOCK_MASK
                     __m256i mult = _mm256_add_epi64(_mm256_set1_epi64x(k), add);
                     __m256i hash = _mm256_and_si256(
-                        _mm256_add_epi64(_mm256_mul_epu32(hash_init, mult),
-                                         hash_init_hi),
+                        _mm256_add_epi64(_mm256_mul_epu32(h, mult), h_hi),
                         block_mask
                     );
 
                     // test all four hashes
                     // word = offset[uint32_t(hash / 64)] >> (hash % 64)
+                    // For hash indices greater than num_hash_functions_ - 1,
+                    // fill the word with -1 so that they test true
                     found &= _mm256_testc_si256(
                         _mm256_srlv_epi64(
                             _mm256_mask_i32gather_epi64(
@@ -338,6 +317,7 @@ batch_check_avx2(const BloomFilter &bloom,
                 block_indices
             );
 
+            // the ith byte is set to FF iff the ith input hash is present in the filter
             int32_t test = _mm256_movemask_epi8(_mm256_cmpeq_epi64(
                 _mm256_and_si256(_mm256_srlv_epi64(
                     _mm256_i64gather_epi64(filter_cast, _mm256_srli_epi64(hash, 6), 8),
@@ -372,6 +352,31 @@ batch_check_avx2(const BloomFilter &bloom,
 }
 
 #endif
+
+
+void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_end) {
+    if (!num_hash_functions_) {
+        assert(std::all_of(hashes_begin, hashes_end,
+                           [&](uint64_t hash) { return check(hash); }));
+
+        return;
+    }
+
+    const uint64_t *it = hashes_begin;
+#ifdef __AVX2__
+    // TODO: figure out why this fails on Mac
+    it = batch_insert_avx2(*this, num_hash_functions_, it, hashes_end);
+#endif
+
+    // insert residual
+    for (; it < hashes_end; ++it) {
+        insert(*it);
+        assert(check(*it));
+    }
+
+    assert(std::all_of(hashes_begin, hashes_end,
+                       [&](uint64_t hash) { return check(hash); }));
+}
 
 void BloomFilter::check(const uint64_t *hashes_begin,
                         const uint64_t *hashes_end,
