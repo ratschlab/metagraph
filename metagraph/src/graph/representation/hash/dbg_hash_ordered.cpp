@@ -11,6 +11,8 @@
 #include "kmer/kmer_extractor.hpp"
 
 
+#define _DBGHash_LINEAR_PATH_OPTIMIZATIONS 1
+
 template <typename KMER = KmerExtractor2Bit::Kmer64>
 class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     using Kmer = KMER;
@@ -144,15 +146,33 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
     std::vector<bool> skipped;
     skipped.reserve(sequence.size() - get_k() + 1);
 
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+    node_index prev_pos = kmers_.size();
+#endif
+
     for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
-        skipped.push_back(skip());
-        if (skipped.back() || !is_valid)
+        skipped.push_back(skip() || !is_valid);
+        if (skipped.back())
             continue;
 
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+        if (++prev_pos < kmers_.size() && *kmers_.nth(prev_pos) == kmer) {
+            skipped.back() = true;
+            continue;
+        }
+#endif
         auto index_insert = kmers_.insert(kmer);
 
-        if (index_insert.second && nodes_inserted)
-            nodes_inserted->insert_bit(kmers_.size() - 1, true);
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+        prev_pos = index_insert.first - kmers_.begin();
+#endif
+
+        if (index_insert.second) {
+            if (nodes_inserted)
+                nodes_inserted->insert_bit(kmers_.size() - 1, true);
+        } else {
+            skipped.back() = true;
+        }
     }
 
     if (!canonical_mode_)
@@ -163,12 +183,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
 
     auto it = skipped.end();
     for (const auto &[kmer, is_valid] : sequence_to_kmers(rev_comp)) {
-        if (*(--it) || !is_valid)
-            continue;
-
-        auto index_insert = kmers_.insert(kmer);
-
-        if (index_insert.second && nodes_inserted)
+        if (!*(--it) && kmers_.insert(kmer).second && nodes_inserted)
             nodes_inserted->insert_bit(kmers_.size() - 1, true);
     }
 }
@@ -183,11 +198,28 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
                               std::string::const_iterator end,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate) const {
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+    uint64_t n_nodes = num_nodes();
+    node_index prev_index = n_nodes;
+#endif
+
     for (const auto &[kmer, is_valid] : sequence_to_kmers({ begin, end })) {
         if (terminate())
             return;
 
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+        if (!is_valid) {
+            prev_index = n_nodes;
+            callback(npos);
+        } else if (prev_index < n_nodes && get_kmer(prev_index + 1) == kmer) {
+            // optimization for linear paths
+            callback(prev_index = prev_index + 1);
+        } else {
+            callback(prev_index = get_index(kmer));
+        }
+#else
         callback(is_valid ? get_index(kmer) : npos);
+#endif
     }
 }
 
@@ -197,11 +229,28 @@ template <typename KMER>
 void DBGHashOrderedImpl<KMER>::map_to_nodes(const std::string &sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+    uint64_t n_nodes = num_nodes();
+    node_index prev_index = n_nodes;
+#endif
+
     for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
         if (terminate())
             return;
 
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+        if (!is_valid) {
+            prev_index = n_nodes;
+            callback(npos);
+        } else if (prev_index < n_nodes && get_kmer(prev_index + 1) == kmer) {
+            // optimization for linear paths
+            callback(prev_index = prev_index + 1);
+        } else {
+            callback(prev_index = get_index(kmer));
+        }
+#else
         callback(is_valid ? get_index(kmer) : npos);
+#endif
     }
 }
 
@@ -246,6 +295,15 @@ DBGHashOrderedImpl<KMER>::traverse(node_index node, char next_char) const {
 
     auto kmer = get_kmer(node);
     kmer.to_next(k_, seq_encoder_.encode(next_char));
+
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+    if (node < num_nodes()) {
+        // optimization for linear paths
+        if (get_kmer(node + 1) == kmer)
+            return node + 1;
+    }
+#endif
+
     return get_index(kmer);
 }
 
@@ -256,6 +314,15 @@ DBGHashOrderedImpl<KMER>::traverse_back(node_index node, char prev_char) const {
 
     auto kmer = get_kmer(node);
     kmer.to_prev(k_, seq_encoder_.encode(prev_char));
+
+#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+    if (node > 1) {
+        // optimization for linear paths
+        if (get_kmer(node - 1) == kmer)
+            return node - 1;
+    }
+#endif
+
     return get_index(kmer);
 }
 
