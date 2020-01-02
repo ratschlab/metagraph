@@ -78,8 +78,8 @@ bool DeBruijnGraph::operator==(const DeBruijnGraph &) const {
 }
 
 void DeBruijnGraph::traverse(node_index start,
-                             const char* begin,
-                             const char* end,
+                             const char *begin,
+                             const char *end,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
     assert(start >= 1 && start <= max_index());
