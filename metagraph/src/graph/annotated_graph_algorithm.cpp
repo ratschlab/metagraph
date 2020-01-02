@@ -372,7 +372,7 @@ void call_breakpoints(const MaskedDeBruijnGraph &graph,
 
             MaskedDeBruijnGraph background_masked(
                 dbg_succ,
-                [&](const auto &i) { return i == first || !graph.in_graph(i); }
+                [&](const auto &i) { return i == first || !graph.in_subgraph(i); }
             );
 
             // if outgoing is empty, we don't have to check for it to be excluded
@@ -461,8 +461,8 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
                 var.end(),
                 [&](const auto &i) {
                     nodes.emplace_back(i);
-                    in_foreground &= foreground.in_graph(i);
-                    in_background &= background.in_graph(i);
+                    in_foreground &= foreground.in_subgraph(i);
+                    in_background &= background.in_subgraph(i);
                 },
                 [&]() { return !in_background; }
             );

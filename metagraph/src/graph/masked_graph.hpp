@@ -96,7 +96,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual const DeBruijnGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }
 
-    virtual inline bool in_graph(node_index node) const {
+    virtual inline bool in_subgraph(node_index node) const {
         assert(node > 0 && node <= graph_->max_index());
         assert(kmers_in_graph_.get());
 
