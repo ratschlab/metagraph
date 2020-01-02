@@ -68,7 +68,7 @@ bool DBGSuccinct::find(const std::string &sequence,
 
 // Traverse the outgoing edge
 node_index DBGSuccinct::traverse(node_index node, char next_char) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     // dbg node is a boss edge
     BOSS::edge_index edge = boss_graph_->fwd(kmer_to_boss_index(node));
@@ -79,7 +79,7 @@ node_index DBGSuccinct::traverse(node_index node, char next_char) const {
 
 // Traverse the incoming edge
 node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     // dbg node is a boss edge
     BOSS::edge_index edge = boss_graph_->bwd(kmer_to_boss_index(node));
@@ -109,7 +109,7 @@ inline void call_outgoing(const BOSS &boss,
 
 void DBGSuccinct::call_outgoing_kmers(node_index node,
                                       const OutgoingEdgeCallback &callback) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     call_outgoing(*boss_graph_, kmer_to_boss_index(node), [&](auto i) {
         auto next = boss_to_kmer_index(i);
@@ -121,7 +121,7 @@ void DBGSuccinct::call_outgoing_kmers(node_index node,
 
 void DBGSuccinct::call_incoming_kmers(node_index node,
                                       const IncomingEdgeCallback &callback) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto edge = kmer_to_boss_index(node);
 
@@ -144,7 +144,7 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
 
 void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
                                           const std::function<void(node_index)> &callback) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     call_outgoing(*boss_graph_, kmer_to_boss_index(node), [&](auto i) {
         auto next = boss_to_kmer_index(i);
@@ -155,7 +155,7 @@ void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
 
 void DBGSuccinct::adjacent_incoming_nodes(node_index node,
                                           const std::function<void(node_index)> &callback) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto edge = kmer_to_boss_index(node);
 
@@ -214,7 +214,7 @@ void DBGSuccinct::add_seq(const std::string &sequence,
 }
 
 std::string DBGSuccinct::get_node_sequence(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -374,7 +374,7 @@ void DBGSuccinct::traverse(node_index start,
                            const char *end,
                            const std::function<void(node_index)> &callback,
                            const std::function<bool()> &terminate) const {
-    assert(in_graph(start));
+    assert(start > 0 && start <= num_nodes());
     assert(end >= begin);
 
     if (terminate())
@@ -527,7 +527,7 @@ void DBGSuccinct
 }
 
 size_t DBGSuccinct::outdegree(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -551,7 +551,7 @@ size_t DBGSuccinct::outdegree(node_index node) const {
 }
 
 bool DBGSuccinct::has_single_outgoing(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -575,7 +575,7 @@ bool DBGSuccinct::has_single_outgoing(node_index node) const {
 }
 
 bool DBGSuccinct::has_multiple_outgoing(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -591,7 +591,7 @@ bool DBGSuccinct::has_multiple_outgoing(node_index node) const {
 }
 
 size_t DBGSuccinct::indegree(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -606,7 +606,7 @@ size_t DBGSuccinct::indegree(node_index node) const {
 }
 
 bool DBGSuccinct::has_no_incoming(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -621,7 +621,7 @@ bool DBGSuccinct::has_no_incoming(node_index node) const {
 }
 
 bool DBGSuccinct::has_single_incoming(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -879,13 +879,13 @@ void DBGSuccinct::reset_mask() {
     valid_edges_.reset();
 }
 
-uint64_t DBGSuccinct::kmer_to_boss_index(node_index kmer_index) const {
-    assert(in_graph(kmer_index));
+uint64_t DBGSuccinct::kmer_to_boss_index(node_index node) const {
+    assert(node > 0 && node <= num_nodes());
 
-    if (!valid_edges_.get() || !kmer_index)
-        return kmer_index;
+    if (!valid_edges_.get())
+        return node;
 
-    return valid_edges_->select1(kmer_index);
+    return valid_edges_->select1(node);
 }
 
 DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) const {
@@ -1002,10 +1002,4 @@ void DBGSuccinct::print(std::ostream &out) const {
 
         out << std::endl;
     }
-}
-
-bool DBGSuccinct::in_graph(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
-    std::ignore = node;
-    return true;
 }

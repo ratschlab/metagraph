@@ -66,7 +66,7 @@ DBGHashString::traverse(node_index node, char next_char) const {
 
 DBGHashString::node_index
 DBGHashString::traverse_back(node_index node, char prev_char) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
     auto kmer = node_to_kmer(node);
     kmer.pop_back();
     return kmer_to_node(std::string(1, prev_char) + kmer);
@@ -75,7 +75,7 @@ DBGHashString::traverse_back(node_index node, char prev_char) const {
 void DBGHashString
 ::adjacent_outgoing_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
 }
@@ -83,7 +83,7 @@ void DBGHashString
 void DBGHashString
 ::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
 }
@@ -91,7 +91,7 @@ void DBGHashString
 void DBGHashString
 ::call_outgoing_kmers(node_index node,
                       const OutgoingEdgeCallback &callback) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto prefix = node_to_kmer(node).substr(1);
 
@@ -105,7 +105,7 @@ void DBGHashString
 void DBGHashString
 ::call_incoming_kmers(node_index node,
                       const IncomingEdgeCallback &callback) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto suffix = node_to_kmer(node);
     suffix.pop_back();
@@ -118,7 +118,7 @@ void DBGHashString
 }
 
 size_t DBGHashString::outdegree(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     size_t outdegree = 0;
 
@@ -136,7 +136,7 @@ size_t DBGHashString::outdegree(node_index node) const {
 }
 
 bool DBGHashString::has_single_outgoing(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     bool outgoing_edge_detected = false;
 
@@ -158,7 +158,7 @@ bool DBGHashString::has_single_outgoing(node_index node) const {
 }
 
 bool DBGHashString::has_multiple_outgoing(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     bool outgoing_edge_detected = false;
 
@@ -180,7 +180,7 @@ bool DBGHashString::has_multiple_outgoing(node_index node) const {
 }
 
 size_t DBGHashString::indegree(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     size_t indegree = 0;
 
@@ -199,7 +199,7 @@ size_t DBGHashString::indegree(node_index node) const {
 }
 
 bool DBGHashString::has_no_incoming(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     auto prev = node_to_kmer(node);
     prev.pop_back();
@@ -216,7 +216,7 @@ bool DBGHashString::has_no_incoming(node_index node) const {
 }
 
 bool DBGHashString::has_single_incoming(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
 
     bool incoming_edge_detected = false;
 
@@ -257,7 +257,7 @@ DBGHashString::kmer_to_node(const std::string &kmer) const {
 }
 
 std::string DBGHashString::node_to_kmer(node_index node) const {
-    assert(in_graph(node));
+    assert(node > 0 && node <= num_nodes());
     assert((kmers_.begin() + (node - 1))->length() == k_);
     return *(kmers_.begin() + (node - 1));
 }
@@ -407,9 +407,3 @@ std::vector<std::string> DBGHashString::encode_sequence(const std::string &seque
 }
 
 const std::string& DBGHashString::alphabet() const { return alphabet_; }
-
-bool DBGHashString::in_graph(node_index node) const {
-    assert(node > 0 && node <= kmers_.size());
-    std::ignore = node;
-    return true;
-}

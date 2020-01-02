@@ -87,8 +87,6 @@ class DBGHashString : public DeBruijnGraph {
 
     const std::string& alphabet() const;
 
-    bool in_graph(node_index node) const;
-
     static constexpr auto kExtension = ".hashstrdbg";
 
   private:

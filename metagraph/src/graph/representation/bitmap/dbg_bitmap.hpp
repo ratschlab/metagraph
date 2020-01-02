@@ -80,8 +80,6 @@ class DBGBitmap : public DeBruijnGraph {
 
     uint64_t num_nodes() const;
 
-    bool in_graph(node_index node) const;
-
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
 

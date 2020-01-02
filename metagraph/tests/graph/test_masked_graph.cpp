@@ -256,7 +256,6 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 full_graph,
                 [&](const auto &index) {
                     return index != DeBruijnGraph::npos
-                        && full_graph->in_graph(index)
                         && full_graph->get_node_sequence(index) != first_kmer;
                 }
             );
@@ -316,7 +315,6 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 full_graph,
                 [&](const auto &index) {
                     return index != DeBruijnGraph::npos
-                        && full_graph->in_graph(index)
                         && full_graph->get_node_sequence(index) != first_kmer;
                 }
             );
