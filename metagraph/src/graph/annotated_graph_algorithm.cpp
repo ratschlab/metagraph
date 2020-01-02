@@ -316,7 +316,7 @@ call_paths_from_branch(const DeBruijnGraph &graph,
     );
 }
 
-void call_breakpoints(const DeBruijnGraph &graph,
+void call_breakpoints(const MaskedDeBruijnGraph &graph,
                       const AnnotatedDBG &anno_graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool,
@@ -427,8 +427,8 @@ void call_breakpoints(const DeBruijnGraph &graph,
         thread_pool->join();
 }
 
-void call_bubbles_from_path(const DeBruijnGraph &foreground,
-                            const DeBruijnGraph &background,
+void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
+                            const MaskedDeBruijnGraph &background,
                             const AnnotatedDBG &anno_graph,
                             node_index first,
                             const std::string &ref,
@@ -489,7 +489,7 @@ void call_bubbles_from_path(const DeBruijnGraph &foreground,
     );
 }
 
-void call_bubbles(const DeBruijnGraph &graph,
+void call_bubbles(const MaskedDeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
                   const VariantLabelCallback &callback,
                   ThreadPool *thread_pool,
@@ -537,9 +537,10 @@ void call_bubbles(const DeBruijnGraph &graph,
                 return;
 
             auto process_path = [&, first, sequence]() {
+                // TODO: does this make sense? Background is the full `*dbg_succ`
                 call_bubbles_from_path(
                     graph,
-                    *dbg_succ,
+                    MaskedDeBruijnGraph(dbg_succ, [&](auto) { return true; }),
                     anno_graph,
                     first,
                     sequence,
