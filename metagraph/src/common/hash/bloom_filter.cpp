@@ -123,6 +123,12 @@ bool BloomFilter::check(uint64_t hash) const {
 
 #ifdef __AVX2__
 
+/**
+ * If num_hash_functions_ == 1, then four elements can he inserted/checked at
+ * once. If num_hash_functions_ > 1, then each element is inserted/checked
+ * individually, but four hash functions at a time.
+ */
+
 // compute Bloom filter hashes in batches of 4
 __always_inline const uint64_t*
 batch_insert_avx2(BloomFilter &bloom,
