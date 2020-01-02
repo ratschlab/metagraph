@@ -34,12 +34,10 @@ inline TAlphabet encode(char s, const TAlphabet kCharToNucleotide[]) {
 }
 
 template <typename TAlphabet>
-inline std::vector<TAlphabet> encode(std::string::const_iterator begin,
-                                     std::string::const_iterator end,
+inline std::vector<TAlphabet> encode(std::string_view sequence,
                                      const TAlphabet kCharToNucleotide[]) {
-    assert(begin <= end);
-    std::vector<TAlphabet> seq_encoded(end - begin, 0);
-    std::transform(begin, end, seq_encoded.begin(),
+    std::vector<TAlphabet> seq_encoded(sequence.size(), 0);
+    std::transform(sequence.begin(), sequence.end(), seq_encoded.begin(),
         [&](char c) { return encode(c, kCharToNucleotide); }
     );
     return seq_encoded;
@@ -285,8 +283,8 @@ char KmerExtractorBOSS::decode(TAlphabet c) {
 }
 
 std::vector<KmerExtractorBOSS::TAlphabet>
-KmerExtractorBOSS::encode(const std::string &sequence) {
-    return extractor::encode(sequence.begin(), sequence.end(), kCharToNucleotide);
+KmerExtractorBOSS::encode(std::string_view sequence) {
+    return extractor::encode(sequence, kCharToNucleotide);
 }
 
 std::string KmerExtractorBOSS::decode(const std::vector<TAlphabet> &sequence) {
@@ -313,7 +311,7 @@ KmerExtractorBOSS::TAlphabet KmerExtractorBOSS::complement(TAlphabet c) {
  * reverse complement) k-mers
  */
 template <typename KMER>
-void KmerExtractorBOSS::sequence_to_kmers(const std::string &sequence,
+void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
                                           size_t k,
                                           const std::vector<TAlphabet> &suffix,
                                           Vector<KMER> *kmers,
@@ -371,19 +369,19 @@ void KmerExtractorBOSS::sequence_to_kmers(const std::string &sequence,
 }
 
 template
-void KmerExtractorBOSS::sequence_to_kmers(const std::string&,
+void KmerExtractorBOSS::sequence_to_kmers(std::string_view,
                                           size_t,
                                           const std::vector<TAlphabet>&,
                                           Vector<Kmer64>*,
                                           bool);
 template
-void KmerExtractorBOSS::sequence_to_kmers(const std::string&,
+void KmerExtractorBOSS::sequence_to_kmers(std::string_view,
                                           size_t,
                                           const std::vector<TAlphabet>&,
                                           Vector<Kmer128>*,
                                           bool);
 template
-void KmerExtractorBOSS::sequence_to_kmers(const std::string&,
+void KmerExtractorBOSS::sequence_to_kmers(std::string_view,
                                           size_t,
                                           const std::vector<TAlphabet>&,
                                           Vector<Kmer256>*,
@@ -438,8 +436,8 @@ KmerExtractor2BitTDecl(char)
 }
 
 KmerExtractor2BitTDecl(std::vector<typename KmerExtractor2BitT<LogSigma>::TAlphabet>)
-::encode(const std::string &sequence) const {
-    return extractor::encode(sequence.begin(), sequence.end(), char_to_code_);
+::encode(std::string_view sequence) const {
+    return extractor::encode(sequence, char_to_code_);
 }
 
 KmerExtractor2BitTDecl(std::string)
@@ -460,7 +458,7 @@ KmerExtractor2BitTDecl(std::vector<std::string>)
  * Break the sequence into kmers and add them to the kmer storage.
  */
 KmerExtractor2BitTDecl(template <typename T> void)
-::sequence_to_kmers(const std::string &sequence,
+::sequence_to_kmers(std::string_view sequence,
                     size_t k,
                     const std::vector<TAlphabet> &suffix,
                     Vector<Kmer<T>> *kmers,
@@ -497,7 +495,7 @@ KmerExtractor2BitTDecl(template <typename T> void)
 }
 
 KmerExtractor2BitTDecl(template <typename KMER> Vector<std::pair<KMER, bool>>)
-::sequence_to_kmers(const std::string &sequence,
+::sequence_to_kmers(std::string_view sequence,
                     size_t k,
                     bool canonical_mode,
                     const std::vector<TAlphabet> &suffix) const {
@@ -548,7 +546,7 @@ template class KmerExtractor2BitT<alphabets::kBitsPerCharDNA>;
 #define ExplicitInstantiation_sequence_to_kmers(T) \
 template \
 void KmerExtractor2Bit \
-::sequence_to_kmers<T>(const std::string&, \
+::sequence_to_kmers<T>(std::string_view, \
                        size_t, \
                        const std::vector<TAlphabet>&, \
                        Vector<Kmer<T>>*, \
@@ -561,7 +559,7 @@ ExplicitInstantiation_sequence_to_kmers(sdsl::uint256_t)
 #define ExplicitInstantiation_sequence_to_kmers_vector(T) \
 template \
 Vector<std::pair<KmerExtractor2Bit::Kmer<T>, bool>> KmerExtractor2Bit \
-::sequence_to_kmers<KmerExtractor2Bit::Kmer<T>>(const std::string&, \
+::sequence_to_kmers<KmerExtractor2Bit::Kmer<T>>(std::string_view, \
                                                 size_t, \
                                                 bool, \
                                                 const std::vector<TAlphabet>&) const;

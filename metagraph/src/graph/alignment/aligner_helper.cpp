@@ -1244,6 +1244,7 @@ template <typename NodeType>
 QueryAlignment<NodeType>::QueryAlignment(const std::string &query)
       : query_(query),
         query_rc_(query) {
+    // TODO: remove const_cast
     reverse_complement(const_cast<char*>(query_rc_.data()),
                        const_cast<char*>(query_rc_.data() + query_rc_.size()));
 }

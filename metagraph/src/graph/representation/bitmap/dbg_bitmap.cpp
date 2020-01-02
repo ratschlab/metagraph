@@ -34,7 +34,7 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 }
 
 
-void DBGBitmap::map_to_nodes(const std::string &sequence,
+void DBGBitmap::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
     for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
@@ -49,11 +49,10 @@ void DBGBitmap::map_to_nodes(const std::string &sequence,
 // and run callback for each node until the termination condition is satisfied.
 // Guarantees that nodes are called in the same order as the input sequence.
 // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-void DBGBitmap::map_to_nodes_sequentially(std::string::const_iterator begin,
-                                          std::string::const_iterator end,
+void DBGBitmap::map_to_nodes_sequentially(std::string_view sequence,
                                           const std::function<void(node_index)> &callback,
                                           const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers({ begin, end })) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
@@ -243,8 +242,7 @@ void DBGBitmap::adjacent_incoming_nodes(node_index node,
     call_incoming_kmers(node, [&](node_index parent, char) { callback(parent); });
 }
 
-DBGBitmap::node_index
-DBGBitmap::to_node(const Kmer &kmer) const {
+DBGBitmap::node_index DBGBitmap::to_node(const Kmer &kmer) const {
     auto index = kmer.data() + 1;
     assert(index < kmers_.size());
     assert(!complete_ || kmers_[index]);
@@ -254,8 +252,7 @@ DBGBitmap::to_node(const Kmer &kmer) const {
         : (kmers_[index] ? kmers_.rank1(index) - 1 : npos);
 }
 
-DBGBitmap::node_index
-DBGBitmap::kmer_to_node(const std::string &kmer) const {
+DBGBitmap::node_index DBGBitmap::kmer_to_node(std::string_view kmer) const {
     assert(kmer.size() == k_);
     return to_node(Kmer(seq_encoder_.encode(kmer)));
 }
@@ -348,7 +345,7 @@ bool DBGBitmap::load(const std::string &filename) {
 }
 
 Vector<std::pair<DBGBitmap::Kmer, bool>>
-DBGBitmap::sequence_to_kmers(const std::string &sequence, bool to_canonical) const {
+DBGBitmap::sequence_to_kmers(std::string_view sequence, bool to_canonical) const {
     return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, to_canonical);
 }
 
@@ -397,7 +394,7 @@ void DBGBitmap::print(std::ostream &out) const {
         return;
     }
 
-    auto vertex_header = std::string("Vertex");
+    std::string vertex_header = "Vertex";
     vertex_header.resize(get_k(), ' ');
 
     out << "Index"

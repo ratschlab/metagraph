@@ -26,20 +26,19 @@ class SequenceGraph {
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
     // to the number of nodes in graph.
-    virtual void add_sequence(const std::string &sequence,
+    virtual void add_sequence(std::string_view sequence,
                               bit_vector_dyn *nodes_inserted = NULL) = 0;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
-    virtual void map_to_nodes(const std::string &sequence,
+    virtual void map_to_nodes(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence
-    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                           std::string::const_iterator end,
+    virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
@@ -147,8 +146,7 @@ class DeBruijnGraph : public SequenceGraph {
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                           std::string::const_iterator end,
+    virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
@@ -195,8 +193,7 @@ class DeBruijnGraph : public SequenceGraph {
     virtual bool has_no_incoming(node_index node) const { return indegree(node) == 0; }
     virtual bool has_single_incoming(node_index node) const { return indegree(node) == 1; }
 
-    virtual node_index kmer_to_node(const char *begin) const;
-    virtual node_index kmer_to_node(const std::string &kmer) const;
+    virtual node_index kmer_to_node(std::string_view kmer) const;
 
     using OutgoingEdgeCallback = std::function<void(node_index /* target_kmer */,
                                                     char /* last_target_char */)>;
@@ -209,7 +206,7 @@ class DeBruijnGraph : public SequenceGraph {
                                      const IncomingEdgeCallback &callback) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
-    virtual bool find(const std::string &sequence, double discovery_fraction = 1) const;
+    virtual bool find(std::string_view sequence, double discovery_fraction = 1) const;
 
     virtual bool operator==(const DeBruijnGraph &other) const;
     virtual bool operator!=(const DeBruijnGraph &other) const { return !operator==(other); }
@@ -231,6 +228,6 @@ size_t incoming_edge_rank(const DeBruijnGraph &graph,
                           DeBruijnGraph::node_index target);
 
 std::vector<DeBruijnGraph::node_index>
-map_sequence_to_nodes(const DeBruijnGraph &graph, const std::string &sequence);
+map_sequence_to_nodes(const DeBruijnGraph &graph, std::string_view sequence);
 
 #endif // __SEQUENCE_GRAPH_HPP__

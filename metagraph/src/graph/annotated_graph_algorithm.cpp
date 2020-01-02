@@ -457,8 +457,7 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
             bool in_background = true;
             std::vector<DeBruijnGraph::node_index> nodes { first };
             anno_graph.get_graph().map_to_nodes_sequentially(
-                var.begin() + 1,
-                var.end(),
+                std::string_view(var).substr(1),
                 [&](const auto &i) {
                     nodes.emplace_back(i);
                     in_foreground &= foreground.in_subgraph(i);

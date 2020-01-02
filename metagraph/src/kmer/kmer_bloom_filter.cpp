@@ -14,17 +14,16 @@ typedef KmerDef::TAlphabet TAlphabet;
 
 template <class KmerBF, typename Callback>
 inline void call_kmers(const KmerBF &kmer_bloom,
-                       const char *begin,
-                       const char *end,
+                       std::string_view sequence,
                        Callback callback) {
     const auto k = kmer_bloom.get_k();
-    if (begin >= end || static_cast<size_t>(end - begin) < k)
+    if (sequence.size() < k)
         return;
 
     const auto max_encoded_val = KmerDef::alphabet.size();
 
-    std::vector<TAlphabet> coded(end - begin);
-    std::transform(begin, end,
+    std::vector<TAlphabet> coded(sequence.size());
+    std::transform(sequence.begin(), sequence.end(),
                    coded.begin(),
                    [](char c) { return KmerDef::encode(c); });
     auto invalid = utils::drag_and_mark_segments(
@@ -35,7 +34,7 @@ inline void call_kmers(const KmerBF &kmer_bloom,
     fwd.reset(coded.data());
 
     if (kmer_bloom.is_canonical_mode()) {
-        std::vector<TAlphabet> rc_coded(end - begin);
+        std::vector<TAlphabet> rc_coded(sequence.size());
         std::transform(coded.begin(), coded.end(),
                        rc_coded.rbegin(),
                        [](TAlphabet c) { return KmerDef::complement(c); });
@@ -90,15 +89,15 @@ inline void call_kmers(const KmerBF &kmer_bloom,
 
 template <class KmerHasher>
 void KmerBloomFilter<KmerHasher>
-::add_sequence(const char *begin, const char *end) {
-    assert(end >= begin && static_cast<size_t>(end - begin) >= k_);
+::add_sequence(std::string_view sequence) {
+    assert(sequence.size() >= k_);
 
 #ifndef NDEBUG
     uint64_t counter = 0;
 #endif
 
     // TODO: insert all hashes in arbitrary order in a single call
-    call_kmers(*this, begin, end, [&](size_t, auto hash1, auto hash2) {
+    call_kmers(*this, sequence, [&](size_t, auto hash1, auto hash2) {
         filter_.insert(hash1, hash2);
         assert(filter_.check(hash1, hash2));
 #ifndef NDEBUG
@@ -106,9 +105,9 @@ void KmerBloomFilter<KmerHasher>
 #endif
     });
 
-    assert(sdsl::util::cnt_one_bits(check_kmer_presence(begin, end)) == counter);
+    assert(sdsl::util::cnt_one_bits(check_kmer_presence(sequence)) == counter);
 #ifndef NDEBUG
-    std::string rev_comp(begin, end);
+    std::string rev_comp(sequence);
     reverse_complement(rev_comp.begin(), rev_comp.end());
     assert(!canonical_mode_
             || sdsl::util::cnt_one_bits(check_kmer_presence(rev_comp)) == counter);
@@ -117,12 +116,12 @@ void KmerBloomFilter<KmerHasher>
 
 template <class KmerHasher>
 sdsl::bit_vector KmerBloomFilter<KmerHasher>
-::check_kmer_presence(const char *begin, const char *end) const {
-    if (begin >= end || static_cast<size_t>(end - begin) < k_)
+::check_kmer_presence(std::string_view sequence) const {
+    if (sequence.size() < k_)
         return sdsl::bit_vector();
 
-    sdsl::bit_vector check_vec(end - begin - k_ + 1);
-    call_kmers(*this, begin, end, [&](size_t i, auto hash1, auto hash2) {
+    sdsl::bit_vector check_vec(sequence.size() - k_ + 1);
+    call_kmers(*this, sequence, [&](size_t i, auto hash1, auto hash2) {
         assert(i < check_vec.size());
 
         if (filter_.check(hash1, hash2))
@@ -164,21 +163,20 @@ template class KmerBloomFilter<>;
 
 
 std::function<bool()> get_missing_kmer_skipper(const KmerBloomFilter<> *bloom_filter,
-                                               const char *begin,
-                                               const char *end) {
+                                               std::string_view sequence) {
     if (!bloom_filter)
         return []() { return false; };
 
-    if (begin + bloom_filter->get_k() > end)
+    if (sequence.size() < bloom_filter->get_k())
         return []() { return true; };
 
     // use shared_ptr to prevent copying this vector and keep it alive for the
     // returned callback
     auto bloom_check = std::make_shared<sdsl::bit_vector>(
-        bloom_filter->check_kmer_presence(begin, end)
+        bloom_filter->check_kmer_presence(sequence)
     );
 
-    assert(begin + bloom_check->size() == end - bloom_filter->get_k() + 1);
+    assert(bloom_check->size() + bloom_filter->get_k() - 1 == sequence.size());
 
     auto it = bloom_check->begin();
 
