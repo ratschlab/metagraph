@@ -30,7 +30,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
     // to the number of nodes in graph.
-    void add_sequence(const std::string &sequence,
+    void add_sequence(std::string_view sequence,
                       bit_vector_dyn *nodes_inserted) {
         add_sequence(sequence, [](){ return false; }, nodes_inserted);
     }
@@ -40,13 +40,13 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     // to the number of nodes in graph.
     // `skip` is called before adding each k-mer into the graph and the k-mer
     // is skipped if `skip()` returns `false`.
-    void add_sequence(const std::string &sequence,
+    void add_sequence(std::string_view sequence,
                       const std::function<bool()> &skip,
                       bit_vector_dyn *nodes_inserted);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(const std::string &sequence,
+    void map_to_nodes(std::string_view sequence,
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate) const;
 
@@ -54,8 +54,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                   std::string::const_iterator end,
+    void map_to_nodes_sequentially(std::string_view sequence,
                                    const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &terminate) const;
 
@@ -85,7 +84,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     bool has_no_incoming(node_index) const;
     bool has_single_incoming(node_index) const;
 
-    node_index kmer_to_node(const std::string &kmer) const;
+    node_index kmer_to_node(std::string_view kmer) const;
 
     std::string get_node_sequence(node_index node) const;
 
@@ -107,7 +106,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
   private:
-    Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
+    Vector<std::pair<Kmer, bool>> sequence_to_kmers(std::string_view sequence,
                                                     bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
@@ -135,7 +134,7 @@ DBGHashOrderedImpl<KMER>::DBGHashOrderedImpl(size_t k,
         packed_serialization_(packed_serialization) {}
 
 template <typename KMER>
-void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
+void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
                                             const std::function<bool()> &skip,
                                             bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
@@ -178,7 +177,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
     if (!canonical_mode_)
         return;
 
-    auto rev_comp = sequence;
+    std::string rev_comp(sequence.begin(), sequence.end());
     reverse_complement(rev_comp.begin(), rev_comp.end());
 
     auto it = skipped.end();
@@ -194,8 +193,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
 // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
 template <typename KMER>
 void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
-                              std::string::const_iterator begin,
-                              std::string::const_iterator end,
+                              std::string_view sequence,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate) const {
 #if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
@@ -203,7 +201,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
     node_index prev_index = n_nodes;
 #endif
 
-    for (const auto &[kmer, is_valid] : sequence_to_kmers({ begin, end })) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
@@ -226,7 +224,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied
 template <typename KMER>
-void DBGHashOrderedImpl<KMER>::map_to_nodes(const std::string &sequence,
+void DBGHashOrderedImpl<KMER>::map_to_nodes(std::string_view sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
 #if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
@@ -472,7 +470,7 @@ bool DBGHashOrderedImpl<KMER>::has_single_incoming(node_index node) const {
 
 template <typename KMER>
 typename DBGHashOrderedImpl<KMER>::node_index
-DBGHashOrderedImpl<KMER>::kmer_to_node(const std::string &kmer) const {
+DBGHashOrderedImpl<KMER>::kmer_to_node(std::string_view kmer) const {
     assert(kmer.length() == k_);
 
     return get_index(seq_encoder_.encode(kmer));

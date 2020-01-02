@@ -72,12 +72,12 @@ class BOSS {
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
     // Invokes #callback with npos if a k-mer can't be mapped to the graph edges
-    void map_to_edges(const std::string &sequence,
+    void map_to_edges(std::string_view sequence,
                       const std::function<void(edge_index)> &callback,
                       const std::function<bool()> &terminate = ALWAYS_FALSE,
                       const std::function<bool()> &skip = ALWAYS_FALSE) const;
 
-    std::vector<edge_index> map_to_edges(const std::string &sequence) const;
+    std::vector<edge_index> map_to_edges(std::string_view sequence) const;
 
     // |seq_encoded| must have no sentinels (zeros)
     void map_to_edges(const std::vector<TAlphabet> &seq_encoded,
@@ -127,7 +127,7 @@ class BOSS {
      * If |try_extend| is true, search for the first k-mer in the graph
      * and extend it from that point. If the search fails, start from the dummy source.
      */
-    void add_sequence(const std::string &seq,
+    void add_sequence(std::string_view seq,
                       bool try_extend = false,
                       std::vector<uint64_t> *edges_inserted = NULL);
 
@@ -375,7 +375,7 @@ class BOSS {
     std::string decode(const std::vector<TAlphabet> &seq_encoded) const;
     // Given the alphabet character return its corresponding number
     TAlphabet encode(char s) const;
-    std::vector<TAlphabet> encode(const std::string &sequence) const;
+    std::vector<TAlphabet> encode(std::string_view sequence) const;
 
     /**
      * Given iterators to an input sequence, this function finds the index range

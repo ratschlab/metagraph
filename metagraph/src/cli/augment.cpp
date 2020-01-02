@@ -100,7 +100,7 @@ int augment_graph(Config *config) {
 
         parse_sequences(files, *config, timer,
             [&graph,&node_weights](std::string&& seq) {
-                graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
+                graph->map_to_nodes_sequentially(seq,
                     [&](auto node) { node_weights->add_weight(node, 1); }
                 );
             },
@@ -110,7 +110,7 @@ int augment_graph(Config *config) {
             [&graph,&node_weights](const auto &loop) {
                 loop([&graph,&node_weights](const char *seq) {
                     std::string seq_str(seq);
-                    graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
+                    graph->map_to_nodes_sequentially(seq_str,
                         [&](auto node) { node_weights->add_weight(node, 1); }
                     );
                 });

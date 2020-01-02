@@ -29,7 +29,7 @@ size_t DBGSuccinct::get_k() const {
 }
 
 // Check whether graph contains fraction of nodes from the sequence
-bool DBGSuccinct::find(const std::string &sequence,
+bool DBGSuccinct::find(std::string_view sequence,
                        double discovery_fraction) const {
     if (sequence.length() < get_k())
         return false;
@@ -40,9 +40,7 @@ bool DBGSuccinct::find(const std::string &sequence,
     size_t num_kmers_discovered = 0;
     size_t num_kmers_missing = 0;
 
-    auto is_invalid = get_missing_kmer_skipper(bloom_filter_.get(),
-                                               sequence.data(),
-                                               sequence.data() + sequence.size());
+    auto is_invalid = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
 
     boss_graph_->map_to_edges(sequence,
         [&](auto edge) {
@@ -174,13 +172,13 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
 // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
 // is passed. If passed, |nodes_inserted| must have length equal
 // to the number of nodes in graph.
-void DBGSuccinct::add_sequence(const std::string &sequence,
+void DBGSuccinct::add_sequence(std::string_view sequence,
                                bit_vector_dyn *nodes_inserted) {
     add_seq(sequence, nodes_inserted);
     if (canonical_mode_) {
         // insert reverse complement sequence as well,
         // to have all canonical k-mers in graph
-        std::string sequence_copy = sequence;
+        std::string sequence_copy(sequence.begin(), sequence.end());
         reverse_complement(sequence_copy.begin(), sequence_copy.end());
         add_seq(sequence_copy, nodes_inserted);
     }
@@ -189,7 +187,7 @@ void DBGSuccinct::add_sequence(const std::string &sequence,
         bloom_filter_->add_sequence(sequence);
 }
 
-void DBGSuccinct::add_seq(const std::string &sequence,
+void DBGSuccinct::add_seq(std::string_view sequence,
                           bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
@@ -226,18 +224,16 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
 // and run callback for each node until the termination condition is satisfied.
 // Guarantees that nodes are called in the same order as the input sequence.
 // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
-                                            std::string::const_iterator end,
+void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
-    if (begin + get_k() > end)
+    if (sequence.size() < get_k())
         return;
 
-    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(),
-                                               &*begin, &*begin + (end - begin));
+    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
 
     boss_graph_->map_to_edges(
-        std::string(begin, end),
+        sequence,
         [&](BOSS::edge_index i) { callback(boss_to_kmer_index(i)); },
         terminate,
         [&]() {
@@ -250,22 +246,20 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
     );
 }
 
-template <class StringIt>
 void DBGSuccinct
-::call_nodes_with_suffix(StringIt begin,
-                         StringIt end,
-                         const std::function<void(node_index, uint64_t /* match length */)>& callback,
+::call_nodes_with_suffix(std::string_view str,
+                         std::function<void(node_index, uint64_t /* match length */)> callback,
                          size_t min_match_length,
                          size_t max_num_allowed_matches) const {
-    if (begin >= end || !max_num_allowed_matches)
+    if (!max_num_allowed_matches)
         return;
 
-    assert(get_k() >= static_cast<size_t>(end - begin));
+    assert(str.size() <= get_k());
 
-    if (static_cast<size_t>(end - begin) < min_match_length)
+    if (str.size() < min_match_length)
         return;
 
-    auto encoded = boss_graph_->encode(std::string(begin, end));
+    auto encoded = boss_graph_->encode(str);
     auto index_range = boss_graph_->index_range(
         encoded.begin(),
         std::min(encoded.begin() + get_k() - 1, encoded.end())
@@ -287,8 +281,8 @@ void DBGSuccinct
         if (edge) {
             auto kmer_index = boss_to_kmer_index(edge);
             if (kmer_index != npos) {
-                assert(begin + get_k() == end);
-                assert(get_node_sequence(kmer_index) == std::string(begin, end));
+                assert(str.size() == get_k());
+                assert(get_node_sequence(kmer_index) == str);
                 callback(kmer_index, get_k());
                 return;
             }
@@ -311,7 +305,7 @@ void DBGSuccinct
                     auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
                     if (kmer_index != npos) {
                         assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
-                            == std::string(begin, begin + match_size));
+                            == str.substr(0, match_size));
                         nodes.emplace_back(kmer_index);
                     }
                 }
@@ -332,7 +326,7 @@ void DBGSuccinct
                     auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
                     if (kmer_index != npos) {
                         assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
-                            == std::string(begin, begin + match_size));
+                            == str.substr(0, match_size));
                         callback(kmer_index, match_size);
                     }
                 }
@@ -340,34 +334,6 @@ void DBGSuccinct
         }
     }
 }
-
-template void DBGSuccinct
-::call_nodes_with_suffix<const char*>(const char*,
-                                      const char*,
-                                      const std::function<void(node_index, uint64_t)>&,
-                                      size_t,
-                                      size_t) const;
-
-template void DBGSuccinct
-::call_nodes_with_suffix<char*>(char*,
-                                char*,
-                                const std::function<void(node_index, uint64_t)>&,
-                                size_t,
-                                size_t) const;
-
-template void DBGSuccinct
-::call_nodes_with_suffix<std::string::const_iterator>(std::string::const_iterator,
-                                                      std::string::const_iterator,
-                                                      const std::function<void(node_index, uint64_t)>&,
-                                                      size_t,
-                                                      size_t) const;
-
-template void DBGSuccinct
-::call_nodes_with_suffix<std::string::iterator>(std::string::iterator,
-                                                std::string::iterator,
-                                                const std::function<void(node_index, uint64_t)>&,
-                                                size_t,
-                                                size_t) const;
 
 void DBGSuccinct::traverse(node_index start,
                            const char *begin,
@@ -402,18 +368,16 @@ void DBGSuccinct::traverse(node_index start,
 
 // Map sequence k-mers to the canonical graph nodes
 // and run callback for each node until the termination condition is satisfied
-void DBGSuccinct::map_to_nodes(const std::string &sequence,
+void DBGSuccinct::map_to_nodes(std::string_view sequence,
                                const std::function<void(node_index)> &callback,
                                const std::function<bool()> &terminate) const {
     if (sequence.size() < get_k())
         return;
 
-    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(),
-                                               sequence.data(),
-                                               sequence.data() + sequence.size());
+    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
 
     if (canonical_mode_) {
-        std::string sequence_rev_compl = sequence;
+        std::string sequence_rev_compl(sequence.begin(), sequence.end());
         reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
 
         std::vector<BOSS::edge_index> boss_edges;
@@ -969,7 +933,7 @@ const std::string& DBGSuccinct::alphabet() const {
 }
 
 void DBGSuccinct::print(std::ostream &out) const {
-    auto vertex_header = std::string("Vertex");
+    std::string vertex_header = "Vertex";
     vertex_header.resize(get_k() - 1, ' ');
 
     out << "BOSS" << "\t" << "L"

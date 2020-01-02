@@ -59,12 +59,12 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
     // to the number of nodes in graph.
-    void add_sequence(const std::string &sequence,
+    void add_sequence(std::string_view sequence,
                       bit_vector_dyn *nodes_inserted);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(const std::string &sequence,
+    void map_to_nodes(std::string_view sequence,
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate) const;
 
@@ -72,8 +72,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                   std::string::const_iterator end,
+    void map_to_nodes_sequentially(std::string_view sequence,
                                    const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &terminate) const;
 
@@ -139,7 +138,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return indegree(node) == 1;
     }
 
-    node_index kmer_to_node(const std::string &kmer) const {
+    node_index kmer_to_node(std::string_view kmer) const {
         assert(kmer.length() == k_);
         return get_node_index(seq_encoder_.encode(kmer));
     }
@@ -188,7 +187,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return (flags >> ((node - 1) % kAlphabetSize)) & static_cast<Flags>(1);
     }
 
-    Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
+    Vector<std::pair<Kmer, bool>> sequence_to_kmers(std::string_view sequence,
                                                     bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
@@ -243,7 +242,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
 };
 
 template <typename KMER>
-void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
+void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
                                          bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == max_index() + 1);
 
@@ -288,7 +287,7 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
     add_seq(sequence);
 
     if (canonical_mode_) {
-        auto rev_comp = sequence;
+        std::string rev_comp(sequence.begin(), sequence.end());
         reverse_complement(rev_comp.begin(), rev_comp.end());
 
         add_seq(rev_comp);
@@ -301,11 +300,10 @@ void DBGHashFastImpl<KMER>::add_sequence(const std::string &sequence,
 // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
 template <typename KMER>
 void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
-                                std::string::const_iterator begin,
-                                std::string::const_iterator end,
+                                std::string_view sequence,
                                 const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers({ begin, end })) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
@@ -321,7 +319,7 @@ void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied
 template <typename KMER>
-void DBGHashFastImpl<KMER>::map_to_nodes(const std::string &sequence,
+void DBGHashFastImpl<KMER>::map_to_nodes(std::string_view sequence,
                                          const std::function<void(node_index)> &callback,
                                          const std::function<bool()> &terminate) const {
     for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {

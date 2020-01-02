@@ -809,14 +809,14 @@ std::string BOSS::get_node_str(edge_index k_node) const {
     return decode(get_node_seq(k_node));
 }
 
-void BOSS::map_to_edges(const std::string &sequence,
+void BOSS::map_to_edges(std::string_view sequence,
                         const std::function<void(edge_index)> &callback,
                         const std::function<bool()> &terminate,
                         const std::function<bool()> &skip) const {
     map_to_edges(encode(sequence), callback, terminate, skip);
 }
 
-std::vector<edge_index> BOSS::map_to_edges(const std::string &sequence) const {
+std::vector<edge_index> BOSS::map_to_edges(std::string_view sequence) const {
     return map_to_edges(encode(sequence));
 }
 
@@ -913,7 +913,7 @@ TAlphabet BOSS::encode(char s) const {
     return kmer_extractor_.encode(s);
 }
 
-std::vector<TAlphabet> BOSS::encode(const std::string &sequence) const {
+std::vector<TAlphabet> BOSS::encode(std::string_view sequence) const {
     std::vector<TAlphabet> seq_encoded = kmer_extractor_.encode(sequence);
     assert(std::all_of(seq_encoded.begin(), seq_encoded.end(),
                        [this](TAlphabet c) { return c <= alph_size; }));
@@ -986,7 +986,8 @@ void BOSS::print_internal_representation(std::ostream &os) const {
 
 void BOSS::print(std::ostream &os) const {
     assert(is_valid());
-    auto vertex_header = std::string("Vertex");
+
+    std::string vertex_header = "Vertex";
     vertex_header.resize(k_, ' ');
 
     os << "Index" << "\t" << "L"
@@ -1019,7 +1020,7 @@ void BOSS::print_adj_list(std::ostream &os) const {
 ///////////////
 
 // add a full sequence to the graph
-void BOSS::add_sequence(const std::string &seq,
+void BOSS::add_sequence(std::string_view seq,
                         bool try_extend,
                         std::vector<uint64_t> *edges_inserted) {
     if (seq.size() < k_ + 1)

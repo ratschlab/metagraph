@@ -32,21 +32,16 @@ void SequenceGraph::serialize_extensions(const std::string &filename) const {
 
 /*************** DeBruijnGraph ***************/
 
-node_index DeBruijnGraph::kmer_to_node(const char *begin) const {
-    return kmer_to_node(std::string(begin, get_k()));
-}
-
-node_index DeBruijnGraph::kmer_to_node(const std::string &kmer) const {
+node_index DeBruijnGraph::kmer_to_node(std::string_view kmer) const {
     assert(kmer.size() == get_k());
 
     node_index node = npos;
-    map_to_nodes_sequentially(kmer.begin(), kmer.end(),
-                              [&node](node_index i) { node = i; });
+    map_to_nodes_sequentially(kmer, [&node](node_index i) { node = i; });
     return node;
 }
 
 // Check whether graph contains fraction of nodes from the sequence
-bool DeBruijnGraph::find(const std::string &sequence,
+bool DeBruijnGraph::find(std::string_view sequence,
                          double discovery_fraction) const {
     if (sequence.length() < get_k())
         return false;
@@ -463,13 +458,13 @@ size_t incoming_edge_rank(const DeBruijnGraph &graph,
 }
 
 std::vector<DeBruijnGraph::node_index>
-map_sequence_to_nodes(const DeBruijnGraph &graph, const std::string &sequence) {
+map_sequence_to_nodes(const DeBruijnGraph &graph, std::string_view sequence) {
     assert(sequence.size() >= graph.get_k());
 
     std::vector<SequenceGraph::node_index> nodes;
     nodes.reserve(sequence.size() - graph.get_k() + 1);
 
-    graph.map_to_nodes_sequentially(sequence.begin(), sequence.end(),
+    graph.map_to_nodes_sequentially(sequence,
         [&nodes](auto node) { nodes.push_back(node); }
     );
 
