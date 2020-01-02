@@ -242,7 +242,6 @@ include_directories(
   external-libraries/ips4o
   external-libraries/eigen
   external-libraries/caches/include
-  external-libraries/sparsepp
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
