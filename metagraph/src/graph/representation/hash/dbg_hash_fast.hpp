@@ -42,7 +42,7 @@ class DBGHashFast : public DeBruijnGraph {
     }
 
     void call_nodes(const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &stop_early) const {
+                    const std::function<bool()> &stop_early = [](){ return false; }) const {
         hash_dbg_->call_nodes(callback, stop_early);
     }
 
