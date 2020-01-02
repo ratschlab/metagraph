@@ -82,7 +82,7 @@ void DeBruijnGraph::traverse(node_index start,
                              const char* end,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    assert(in_graph(start));
+    assert(start >= 1 && start <= max_index());
     assert(end >= begin);
     if (terminate())
         return;
@@ -116,7 +116,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          bool call_unitigs = false,
                          uint64_t min_tip_size = 0,
                          bool kmers_in_single_form = false) {
-    assert(graph.in_graph(start));
+    assert(start >= 1 && start <= graph.max_index());
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
     assert(visited);
@@ -440,8 +440,8 @@ std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
 size_t incoming_edge_rank(const DeBruijnGraph &graph,
                           DeBruijnGraph::node_index source,
                           DeBruijnGraph::node_index target) {
-    assert(graph.in_graph(source));
-    assert(graph.in_graph(target));
+    assert(source >= 1 && source <= graph.max_index());
+    assert(target >= 1 && target <= graph.max_index());
 
     assert(graph.get_node_sequence(source).substr(1)
                 == graph.get_node_sequence(target).substr(0, graph.get_k() - 1));

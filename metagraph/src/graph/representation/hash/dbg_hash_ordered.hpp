@@ -132,8 +132,6 @@ class DBGHashOrdered : public DeBruijnGraph {
 
     const std::string& alphabet() const { return hash_dbg_->alphabet(); }
 
-    bool in_graph(node_index node) const { return hash_dbg_->in_graph(node); }
-
     static constexpr auto kExtension = ".orhashdbg";
 
     class DBGHashOrderedInterface : public DeBruijnGraph {

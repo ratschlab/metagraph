@@ -11,11 +11,13 @@
 class MaskedDeBruijnGraph : public DeBruijnGraph {
   public:
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
-                        std::unique_ptr<bitmap>&& kmers_in_graph);
+                        std::unique_ptr<bitmap>&& kmers_in_graph,
+                        bool only_valid_nodes_in_mask = false);
 
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::function<bool(const DeBruijnGraph::node_index&)>&& callback,
-                        size_t num_set_bits = -1);
+                        size_t num_set_bits = -1,
+                        bool only_valid_nodes_in_mask = false);
 
     virtual ~MaskedDeBruijnGraph() {}
 
@@ -94,11 +96,11 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual const DeBruijnGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }
 
-    virtual inline bool in_graph(node_index node) const override {
+    virtual inline bool in_graph(node_index node) const {
         assert(node > 0 && node <= graph_->max_index());
         assert(kmers_in_graph_.get());
 
-        return (*kmers_in_graph_)[node] && graph_->in_graph(node);
+        return (*kmers_in_graph_)[node];
     }
 
     virtual bool operator==(const MaskedDeBruijnGraph &other) const;
@@ -111,6 +113,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
   private:
     std::shared_ptr<const DeBruijnGraph> graph_;
     std::unique_ptr<bitmap> kmers_in_graph_;
+    bool only_valid_nodes_in_mask_;
 };
 
 

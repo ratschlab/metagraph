@@ -179,6 +179,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
 
     const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
+  private:
     bool in_graph(node_index node) const {
         assert(node > 0 && node <= max_index());
 
@@ -187,7 +188,6 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return (flags >> ((node - 1) % kAlphabetSize)) & static_cast<Flags>(1);
     }
 
-  private:
     Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
                                                     bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
