@@ -49,24 +49,12 @@ inline uint64_t restrict_to(uint64_t h, size_t size) {
 
 #ifdef __AVX2__
 
-inline __m256i restrict_to_mask_epi64(const uint64_t *hashes,
-                                      size_t size,
-                                      uint64_t mask) {
-    // TODO: for some reason, doing the bitwise AND with _mm256_and_si256 leads
-    //       to the incorrect result, so this is a compromise. It may have to
-    //       do with -O3 optimizations
+inline __m256i restrict_to_mask_epi64(const uint64_t *hashes, size_t size, __m256i mask) {
     // TODO: is there a vectorized way of doing this?
-    return _mm256_setr_epi64x(restrict_to(hashes[0], size) & mask,
-                              restrict_to(hashes[1], size) & mask,
-                              restrict_to(hashes[2], size) & mask,
-                              restrict_to(hashes[3], size) & mask);
-    // return _mm256_and_si256(
-    //     _mm256_setr_epi64x(restrict_to(hashes[0], size),
-    //                        restrict_to(hashes[1], size),
-    //                        restrict_to(hashes[2], size),
-    //                        restrict_to(hashes[3], size)),
-    //     _mm256_set1_epi64x(mask)
-    // );
+    return _mm256_and_si256(_mm256_setr_epi64x(restrict_to(hashes[0], size),
+                                               restrict_to(hashes[1], size),
+                                               restrict_to(hashes[2], size),
+                                               restrict_to(hashes[3], size)), mask);
 }
 
 #endif
@@ -146,6 +134,7 @@ batch_insert_avx2(BloomFilter &bloom,
     const size_t size = filter_.size();
 
     const __m256i block_mask = _mm256_set1_epi64x(BLOCK_MASK);
+    const __m256i block_mask_out = _mm256_set1_epi64x(BLOCK_MASK_OUT);
     const __m256i mod_mask = _mm256_set1_epi64x(0x3F);
     const __m256i ones = _mm256_set1_epi64x(1);
     const __m256i add = _mm256_setr_epi64x(0, 1, 2, 3);
@@ -161,7 +150,7 @@ batch_insert_avx2(BloomFilter &bloom,
 
     // check four input elements (represented by hashes) at a time
     for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
-        block_indices = restrict_to_mask_epi64(hashes_begin, size, BLOCK_MASK_OUT);
+        block_indices = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
 
         if (num_hash_functions_ > 1) {
             for (size_t j = 0; j < 4; ++j) {
@@ -247,6 +236,7 @@ batch_check_avx2(const BloomFilter &bloom,
     const size_t size = bloom.size();
 
     const __m256i block_mask = _mm256_set1_epi64x(BLOCK_MASK);
+    const __m256i block_mask_out = _mm256_set1_epi64x(BLOCK_MASK_OUT);
     const __m256i mod_mask = _mm256_set1_epi64x(0x3F);
     const __m256i ones = _mm256_set1_epi64x(1);
     const __m256i all = _mm256_set1_epi64x(0xFFFFFFFFFFFFFFFF);
@@ -262,7 +252,7 @@ batch_check_avx2(const BloomFilter &bloom,
     // check four input elements (represented by hashes) at a time
     size_t i = 0;
     for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
-        block_indices = restrict_to_mask_epi64(hashes_begin, size, BLOCK_MASK_OUT);
+        block_indices = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
 
         if (num_hash_functions_ > 1) {
             for (size_t j = 0; j < 4; ++j) {
