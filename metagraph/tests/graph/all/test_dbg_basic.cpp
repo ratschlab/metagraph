@@ -30,6 +30,7 @@ TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
     auto graph = build_graph<TypeParam>(2);
 
     EXPECT_EQ(0u, graph->num_nodes());
+    EXPECT_TRUE(check_graph_nodes(*graph));
     EXPECT_FALSE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_FALSE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
     EXPECT_FALSE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
@@ -41,6 +42,7 @@ TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
         auto graph = build_graph<TypeParam>(20);
         ASSERT_EQ(0u, graph->num_nodes());
         graph->serialize(test_dump_basename);
+        EXPECT_TRUE(check_graph_nodes(*graph));
     }
 
     TypeParam graph(2);
@@ -54,6 +56,7 @@ TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
     EXPECT_FALSE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
     EXPECT_FALSE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
     EXPECT_FALSE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
+    EXPECT_TRUE(check_graph_nodes(graph));
 }
 
 TYPED_TEST(DeBruijnGraphTest, Serialize) {
@@ -71,6 +74,7 @@ TYPED_TEST(DeBruijnGraphTest, Serialize) {
         EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
 
         graph->serialize(test_dump_basename);
+        EXPECT_TRUE(check_graph_nodes(*graph));
     }
 
     TypeParam graph(2);
@@ -85,6 +89,7 @@ TYPED_TEST(DeBruijnGraphTest, Serialize) {
     EXPECT_FALSE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
     EXPECT_FALSE(graph.find("CATGTTTTTTTAATATATATATTTTTAGC"));
     EXPECT_FALSE(graph.find("GCTAAAAATATATATATTAAAAAAACATG"));
+    EXPECT_TRUE(check_graph_nodes(graph));
 }
 
 template <class Graph>
@@ -142,6 +147,7 @@ TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "CATGTACTAGCTGATCGTAGCTAGCTAGC"
     });
+    EXPECT_TRUE(check_graph_nodes(*graph));
 
     EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_TRUE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
@@ -176,6 +182,8 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         //TODO should throw if weights extension is present
         //bit_vector_dyn nodes_inserted(graph->max_index() + 1, 0);
         //graph->add_sequence(std::string(25, 'T'), &nodes_inserted);
+
+        EXPECT_TRUE(check_graph_nodes(*graph));
     }
 }
 
@@ -189,6 +197,7 @@ TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
     auto graph = build_graph<TypeParam>(20, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                                               "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
                                               "CATGTACTAGCTGATCGTAGCTAGCTAGC" });
+    EXPECT_TRUE(check_graph_nodes(*graph));
     EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_TRUE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
     EXPECT_TRUE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
@@ -281,6 +290,9 @@ TYPED_TEST(DeBruijnGraphTest, AddSequences) {
 TYPED_TEST(DeBruijnGraphTest, CallKmersEmptyGraph) {
     for (size_t k = 2; k <= 30; ++k) {
         auto empty = build_graph<TypeParam>(k);
+
+        EXPECT_TRUE(check_graph_nodes(*empty));
+
         size_t num_kmers = 0;
         empty->call_kmers([&](auto, const auto &sequence) {
             EXPECT_FALSE(true) << sequence;
@@ -296,6 +308,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTwoLoops) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') });
 
         ASSERT_EQ(1u, graph->num_nodes());
+        EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
         graph->call_kmers([&](auto, const auto &sequence) {
@@ -312,6 +325,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoops) {
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') });
         ASSERT_EQ(3u, graph->num_nodes());
+        EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
         graph->call_kmers([&](auto, const auto &sequence) {
@@ -329,6 +343,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoopsDynamic) {
         auto graph = build_graph_batch<TypeParam>(k, { std::string(100, 'A'),
                                                        std::string(100, 'G'),
                                                        std::string(100, 'C') });
+        EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
         graph->call_kmers([&](auto, const auto &sequence) {
@@ -346,6 +361,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPath) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(k - 1, 'C')
         });
+        EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
         graph->call_kmers([&](auto, const auto&) { num_kmers++; });
@@ -358,6 +374,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathACA) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(k - 1, 'C') + std::string(100, 'A')
         });
+        EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
         graph->call_kmers([&](auto, const auto&) { num_kmers++; });
@@ -369,6 +386,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathDisconnected) {
     for (size_t k = 2; k <= 20; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A'),
                                                  std::string(100, 'T') });
+        EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
         graph->call_kmers([&](auto, const auto&) { num_kmers++; });
@@ -380,6 +398,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathDisconnected2) {
     for (size_t k = 2; k <= 20; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'G'),
                                                  std::string(k - 1, 'A') + "T" });
+        EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
         graph->call_kmers([&](auto, const auto&) { num_kmers++; });
@@ -397,6 +416,8 @@ TYPED_TEST(DeBruijnGraphTest, call_source_nodes) {
     };
     for (int k = 8; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, sequences);
+
+        EXPECT_TRUE(check_graph_nodes(*graph));
 
         std::multiset<std::string> start_nodes {
             sequences[0].substr(0, k),
@@ -419,6 +440,7 @@ TYPED_TEST(DeBruijnGraphTest, get_node_sequence) {
     std::string query = "AGCT";
 
     auto graph = build_graph<TypeParam>(k, { reference });
+    EXPECT_TRUE(check_graph_nodes(*graph));
 
     std::string mapped_query = "";
     graph->map_to_nodes(query, [&](DeBruijnGraph::node_index node) {
@@ -436,6 +458,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(2, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -444,6 +467,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(3, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -452,6 +476,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(4, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -460,6 +485,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(5, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -468,6 +494,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(6, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -482,6 +509,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(2, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -490,6 +518,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(3, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -498,6 +527,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(4, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -506,6 +536,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(5, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -514,6 +545,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(6, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -522,6 +554,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(7, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -536,6 +569,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(2, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -544,6 +578,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(3, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -552,6 +587,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(4, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -560,6 +596,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(5, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -568,6 +605,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(6, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -582,6 +620,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(2, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -590,6 +629,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(3, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -598,6 +638,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(4, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
@@ -606,6 +647,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
         {
             std::multiset<std::string> nodes;
             auto graph = build_graph_batch<TypeParam>(5, sequences);
+            EXPECT_TRUE(check_graph_nodes(*graph));
             graph->call_source_nodes([&](const auto &node) {
                 nodes.insert(graph->get_node_sequence(node));
             });
