@@ -19,6 +19,16 @@ static_assert(!(kBlockSize & 0xFF));
 
 /*************** SequenceGraph ***************/
 
+void SequenceGraph::call_nodes(const std::function<void(node_index)> &callback,
+                               const std::function<bool()> &stop_early) const {
+    assert(num_nodes() == max_index());
+
+    const auto nnodes = num_nodes();
+    for (node_index i = 1; i <= nnodes && !stop_early(); ++i) {
+        callback(i);
+    }
+}
+
 void SequenceGraph::add_extension(std::shared_ptr<GraphExtension> extension) {
     assert(extension.get());
     extensions_.push_back(extension);
@@ -89,16 +99,6 @@ void DeBruijnGraph::traverse(node_index start,
             return;
 
         callback(start);
-    }
-}
-
-void DeBruijnGraph::call_nodes(const std::function<void(node_index)> &callback,
-                               const std::function<bool()> &stop_early) const {
-    assert(num_nodes() == max_index());
-
-    const auto nnodes = num_nodes();
-    for (node_index i = 1; i <= nnodes && !stop_early(); ++i) {
-        callback(i);
     }
 }
 
@@ -432,14 +432,11 @@ std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
 }
 
 // returns the edge rank, starting from zero
-size_t incoming_edge_rank(const DeBruijnGraph &graph,
-                          DeBruijnGraph::node_index source,
-                          DeBruijnGraph::node_index target) {
+size_t incoming_edge_rank(const SequenceGraph &graph,
+                          SequenceGraph::node_index source,
+                          SequenceGraph::node_index target) {
     assert(source >= 1 && source <= graph.max_index());
     assert(target >= 1 && target <= graph.max_index());
-
-    assert(graph.get_node_sequence(source).substr(1)
-                == graph.get_node_sequence(target).substr(0, graph.get_k() - 1));
 
     size_t edge_rank = 0;
     bool done = false;
@@ -457,18 +454,14 @@ size_t incoming_edge_rank(const DeBruijnGraph &graph,
     return edge_rank;
 }
 
-std::vector<DeBruijnGraph::node_index>
-map_sequence_to_nodes(const DeBruijnGraph &graph, std::string_view sequence) {
-    assert(sequence.size() >= graph.get_k());
-
+std::vector<SequenceGraph::node_index>
+map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
     std::vector<SequenceGraph::node_index> nodes;
-    nodes.reserve(sequence.size() - graph.get_k() + 1);
+    nodes.reserve(sequence.size());
 
     graph.map_to_nodes_sequentially(sequence,
         [&nodes](auto node) { nodes.push_back(node); }
     );
-
-    assert(nodes.size() == sequence.size() - graph.get_k() + 1);
 
     return nodes;
 }

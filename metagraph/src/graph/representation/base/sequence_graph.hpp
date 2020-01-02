@@ -49,6 +49,9 @@ class SequenceGraph {
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const = 0;
 
+    virtual void call_nodes(const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &stop_early = [](){ return false; }) const;
+
     virtual uint64_t num_nodes() const = 0;
     virtual uint64_t max_index() const { return num_nodes(); };
 
@@ -182,8 +185,6 @@ class DeBruijnGraph : public SequenceGraph {
                               bool kmers_in_single_form = false) const;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
-    virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual size_t outdegree(node_index) const = 0;
     virtual bool has_single_outgoing(node_index node) const { return outdegree(node) == 1; }
@@ -223,11 +224,11 @@ class DeBruijnGraph : public SequenceGraph {
 
 
 // returns the edge rank, starting from zero
-size_t incoming_edge_rank(const DeBruijnGraph &graph,
-                          DeBruijnGraph::node_index source,
-                          DeBruijnGraph::node_index target);
+size_t incoming_edge_rank(const SequenceGraph &graph,
+                          SequenceGraph::node_index source,
+                          SequenceGraph::node_index target);
 
-std::vector<DeBruijnGraph::node_index>
-map_sequence_to_nodes(const DeBruijnGraph &graph, std::string_view sequence);
+std::vector<SequenceGraph::node_index>
+map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence);
 
 #endif // __SEQUENCE_GRAPH_HPP__
