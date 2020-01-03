@@ -49,6 +49,8 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     std::string file_extension() const override;
 
+    const BinaryMatrix& get_matrix() const override { return *matrix_; };
+
   private:
     void except_dyn();
 

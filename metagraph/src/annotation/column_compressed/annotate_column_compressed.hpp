@@ -8,6 +8,7 @@
 #include "common/vectors/bit_vector.hpp"
 #include "common/vector.hpp"
 #include "annotation/annotate.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
 
 namespace annotate {
@@ -91,6 +92,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     const bitmap& get_column(const Label &label) const;
 
+    const BinaryMatrix& get_matrix() const override;
+
     std::string file_extension() const override { return kExtension; }
 
   private:
@@ -113,6 +116,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
+    ColumnMajor annotation_matrix_view_ = ColumnMajor::construct_view(bitmatrix_);
 
     caches::fixed_sized_cache<size_t,
                               bitmap_builder*,

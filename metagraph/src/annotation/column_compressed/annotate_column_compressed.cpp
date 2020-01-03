@@ -540,6 +540,12 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 }
 
 template <typename Label>
+const BinaryMatrix& ColumnCompressed<Label>::get_matrix() const {
+    flush();
+    return annotation_matrix_view_;
+}
+
+template <typename Label>
 void ColumnCompressed<Label>
 ::convert_to_row_annotator(const std::string &outfbase) const {
     flush();

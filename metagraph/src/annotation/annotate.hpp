@@ -1,6 +1,7 @@
 #ifndef __ANNOTATE_HPP__
 #define __ANNOTATE_HPP__
 
+#include <cassert>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -9,6 +10,7 @@
 #include <functional>
 
 #include "common/vector.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
 namespace annotate {
@@ -140,7 +142,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     /************************* Properties *************************/
 
     virtual inline size_t num_labels() const override final {
-        // TODO: assert(label_encoder_.size() == get_matrix().num_columns());
+        assert(label_encoder_.size() == get_matrix().num_columns());
         return label_encoder_.size();
     }
 
@@ -157,6 +159,8 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     // TODO: return a shared_ptr to const bitmap
     virtual void call_objects(const Label &label,
                               std::function<void(Index)> callback) const = 0;
+
+    virtual const BinaryMatrix& get_matrix() const = 0;
 
     class IterateRows {
       public:
