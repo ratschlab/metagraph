@@ -92,8 +92,8 @@ matrix_type_to_data(const std::string &file, MatrixType type) {
 
 
 template <typename BitVector>
-UniquePtrs<BitVector> convert_to(UniquePtrs<bit_vector>&& input) {
-    UniquePtrs<BitVector> result;
+UniquePtrs<bit_vector> convert_to(UniquePtrs<bit_vector>&& input) {
+    UniquePtrs<bit_vector> result;
     result.reserve(input.size());
 
     for (auto &vector : input) {

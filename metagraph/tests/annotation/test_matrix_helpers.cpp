@@ -87,7 +87,7 @@ BRWTOptimized build_matrix_from_columns<BRWTOptimized>(BitVectorPtrArray&& colum
 
 template <>
 ColumnMajor build_matrix_from_columns<ColumnMajor>(BitVectorPtrArray&& columns, uint64_t) {
-    std::vector<std::unique_ptr<bit_vector_sd>> columns_sd;
+    std::vector<std::unique_ptr<bit_vector>> columns_sd;
     columns_sd.reserve(columns.size());
     for (auto&& column : columns) {
         columns_sd.emplace_back(new bit_vector_sd(column->convert_to<bit_vector_sd>()));

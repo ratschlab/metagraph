@@ -3,14 +3,7 @@
 #include "common/serialization.hpp"
 
 
-ColumnMajor::ColumnMajor(const std::vector<std::unique_ptr<bit_vector_sd>> &columns) {
-    columns_.reserve(columns.size());
-    for (auto &column : columns) {
-        columns_.emplace_back(new bit_vector_sd(*column));
-    }
-}
-
-ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector_sd>>&& columns)
+ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)
       : columns_(std::move(columns)) {}
 
 uint64_t ColumnMajor::num_rows() const {
