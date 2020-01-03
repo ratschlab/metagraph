@@ -55,6 +55,13 @@ build_graph_iterative(uint64_t k,
 template <class Graph>
 bool check_graph(const std::string &alphabet, bool canonical, bool check_sequence);
 
+template <class Graph>
+bool check_graph_nodes(const Graph &graph) {
+    size_t num_nodes = 0;
+    graph.call_nodes([&](auto) { num_nodes++; });
+    return num_nodes == graph.num_nodes();
+}
+
 
 template <typename Graph>
 class DeBruijnGraphTest : public ::testing::Test { };

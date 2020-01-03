@@ -316,7 +316,7 @@ call_paths_from_branch(const DeBruijnGraph &graph,
     );
 }
 
-void call_breakpoints(const DeBruijnGraph &graph,
+void call_breakpoints(const MaskedDeBruijnGraph &graph,
                       const AnnotatedDBG &anno_graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool,
@@ -372,7 +372,7 @@ void call_breakpoints(const DeBruijnGraph &graph,
 
             MaskedDeBruijnGraph background_masked(
                 dbg_succ,
-                [&](const auto &i) { return i == first || !graph.in_graph(i); }
+                [&](const auto &i) { return i == first || !graph.in_subgraph(i); }
             );
 
             // if outgoing is empty, we don't have to check for it to be excluded
@@ -427,8 +427,8 @@ void call_breakpoints(const DeBruijnGraph &graph,
         thread_pool->join();
 }
 
-void call_bubbles_from_path(const DeBruijnGraph &foreground,
-                            const DeBruijnGraph &background,
+void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
+                            const MaskedDeBruijnGraph &background,
                             const AnnotatedDBG &anno_graph,
                             node_index first,
                             const std::string &ref,
@@ -457,12 +457,11 @@ void call_bubbles_from_path(const DeBruijnGraph &foreground,
             bool in_background = true;
             std::vector<DeBruijnGraph::node_index> nodes { first };
             anno_graph.get_graph().map_to_nodes_sequentially(
-                var.begin() + 1,
-                var.end(),
+                std::string_view(var).substr(1),
                 [&](const auto &i) {
                     nodes.emplace_back(i);
-                    in_foreground &= foreground.in_graph(i);
-                    in_background &= background.in_graph(i);
+                    in_foreground &= foreground.in_subgraph(i);
+                    in_background &= background.in_subgraph(i);
                 },
                 [&]() { return !in_background; }
             );
@@ -489,7 +488,7 @@ void call_bubbles_from_path(const DeBruijnGraph &foreground,
     );
 }
 
-void call_bubbles(const DeBruijnGraph &graph,
+void call_bubbles(const MaskedDeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
                   const VariantLabelCallback &callback,
                   ThreadPool *thread_pool,
@@ -537,9 +536,10 @@ void call_bubbles(const DeBruijnGraph &graph,
                 return;
 
             auto process_path = [&, first, sequence]() {
+                // TODO: does this make sense? Background is the full `*dbg_succ`
                 call_bubbles_from_path(
                     graph,
-                    *dbg_succ,
+                    MaskedDeBruijnGraph(dbg_succ, [&](auto) { return true; }),
                     anno_graph,
                     first,
                     sequence,

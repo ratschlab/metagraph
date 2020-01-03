@@ -19,7 +19,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual size_t get_k() const override final;
 
     // Check whether graph contains fraction of nodes from the sequence
-    virtual bool find(const std::string &sequence,
+    virtual bool find(std::string_view sequence,
                       double discovery_fraction = 1) const override final;
 
     // Traverse the outgoing edge
@@ -37,14 +37,14 @@ class DBGSuccinct : public DeBruijnGraph {
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
     // to the number of nodes in graph.
-    virtual void add_sequence(const std::string &sequence,
+    virtual void add_sequence(std::string_view sequence,
                               bit_vector_dyn *nodes_inserted = NULL) override final;
 
     virtual std::string get_node_sequence(node_index node) const override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
-    virtual void map_to_nodes(const std::string &sequence,
+    virtual void map_to_nodes(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const override;
 
@@ -52,8 +52,7 @@ class DBGSuccinct : public DeBruijnGraph {
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                           std::string::const_iterator end,
+    virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
@@ -66,14 +65,12 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
 
-    // Find a maximal suffix of the string delimited by begin and end such that
-    // a range of nodes matches it, and call all nodes. If more than max_num_allowed_matches
-    // are found, or if the length of the maximal suffix is less than min_match_length,
-    // return without calling.
-    template <class StringIt>
-    void call_nodes_with_suffix(StringIt begin,
-                                StringIt end,
-                                const std::function<void(node_index, uint64_t /* match length */)>& callback,
+    // Find a range of nodes with a common suffix matching the maximal prefix
+    // of the string |str|, and call these nodes. If more than |max_num_allowed_matches|
+    // are found, or if the maximal prefix is shorter than |min_match_length|, return
+    // without calling.
+    void call_nodes_with_suffix(std::string_view str,
+                                std::function<void(node_index, uint64_t /* match length */)> callback,
                                 size_t min_match_length = 1,
                                 size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
 
@@ -82,8 +79,8 @@ class DBGSuccinct : public DeBruijnGraph {
     // returns true, or if the sequence is exhausted.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
     virtual void traverse(node_index start,
-                          const char* begin,
-                          const char* end,
+                          const char *begin,
+                          const char *end,
                           const std::function<void(node_index)> &callback,
                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
@@ -124,9 +121,6 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void print(std::ostream &out) const override final;
 
-    // Check if the index is valid (there is a node assigned to it)
-    virtual bool in_graph(node_index node) const override final;
-
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
@@ -145,7 +139,7 @@ class DBGSuccinct : public DeBruijnGraph {
     static constexpr auto kBloomFilterExtension = ".bloom";
 
   private:
-    void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
+    void add_seq(std::string_view sequence, bit_vector_dyn *nodes_inserted);
 
     std::unique_ptr<BOSS> boss_graph_;
     // all edges in boss except dummy

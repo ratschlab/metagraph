@@ -27,35 +27,15 @@ class KmerBloomFilter {
             k_(k),
             hasher_(k_) {}
 
-    /**
-     * Insert the k-mers of a sequence into the Bloom filter.
-     */
-    void add_sequence(const char *begin, const char *end);
+    // Add the k-mers of the sequence to the Bloom filter
+    void add_sequence(std::string_view sequence);
 
-    /**
-     * Insert the k-mers of a sequence into the Bloom filter.
-     */
-    void add_sequence(const std::string &sequence) {
-        add_sequence(sequence.data(), sequence.data() + sequence.size());
-    }
-
-    /**
-     * Insert the k-mers of the generated sequences into the Bloom filter.
-     */
+    // Insert the k-mers of the generated sequences into the Bloom filter.
     typedef std::function<void(const std::string&)> CallString;
     void add_sequences(const std::function<void(const CallString&)> &generate_sequences);
 
-    /**
-     * Check the k-mers of a sequence for presence/absence in the Bloom filter
-     */
-    sdsl::bit_vector check_kmer_presence(const char *begin, const char *end) const;
-
-    /**
-     * Check the k-mers of a sequence for presence/absence in the Bloom filter
-     */
-    sdsl::bit_vector check_kmer_presence(const std::string &sequence) const {
-        return check_kmer_presence(sequence.data(), sequence.data() + sequence.size());
-    }
+    // Checks for k-mer presence in the Bloom filter
+    sdsl::bit_vector check_kmer_presence(std::string_view sequence) const;
 
     bool is_canonical_mode() const { return canonical_mode_; }
 
@@ -79,12 +59,11 @@ class KmerBloomFilter {
 
 
 /**
- * Construct a callback which can be called `end`-`begin`+1 times, where
- * the i-th call returns `true` if the i-th k-mer in sequence is invalid
- * and `false` otherwise.
+ * Construct a callback, where the i-th call returns `true` if the i-th k-mer
+ * in the sequence is not rejected by the Bloom filter and `false` otherwise.
+ * If `bloom_filter` is NULL, assume that none of the k-mers are missing.
  */
 std::function<bool()> get_missing_kmer_skipper(const KmerBloomFilter<> *bloom_filter,
-                                               const char *begin,
-                                               const char *end);
+                                               std::string_view sequence);
 
 #endif // __KMER_BLOOM_FILTER_HPP__

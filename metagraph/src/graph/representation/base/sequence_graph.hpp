@@ -26,20 +26,19 @@ class SequenceGraph {
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
     // to the number of nodes in graph.
-    virtual void add_sequence(const std::string &sequence,
+    virtual void add_sequence(std::string_view sequence,
                               bit_vector_dyn *nodes_inserted = NULL) = 0;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
-    virtual void map_to_nodes(const std::string &sequence,
+    virtual void map_to_nodes(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence
-    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                           std::string::const_iterator end,
+    virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
@@ -49,6 +48,9 @@ class SequenceGraph {
     // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const = 0;
+
+    virtual void call_nodes(const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual uint64_t num_nodes() const = 0;
     virtual uint64_t max_index() const { return num_nodes(); };
@@ -60,9 +62,6 @@ class SequenceGraph {
     // Get string corresponding to |node|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index node) const = 0;
-
-    // Check if the node index is a valid node in the graph
-    virtual bool in_graph(node_index node) const = 0;
 
     /********************************************************/
     /******************* graph extensions *******************/
@@ -150,18 +149,17 @@ class DeBruijnGraph : public SequenceGraph {
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                           std::string::const_iterator end,
+    virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
-    // Given a starting node, traverse the graph forward following the edge
-    // sequence delimited by begin and end. Terminate the traversal if terminate()
-    // returns true, or if the sequence is exhausted.
-    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    // Given a starting node and a sequence of edge labels, traverse the graph
+    // forward. The traversal is terminated once terminate() returns true or
+    // when the sequence is exhausted.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones.
     virtual void traverse(node_index start,
-                          const char* begin,
-                          const char* end,
+                          const char *begin,
+                          const char *end,
                           const std::function<void(node_index)> &callback,
                           const std::function<bool()> &terminate = [](){ return false; }) const;
 
@@ -187,8 +185,6 @@ class DeBruijnGraph : public SequenceGraph {
                               bool kmers_in_single_form = false) const;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
-    virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual size_t outdegree(node_index) const = 0;
     virtual bool has_single_outgoing(node_index node) const { return outdegree(node) == 1; }
@@ -198,8 +194,7 @@ class DeBruijnGraph : public SequenceGraph {
     virtual bool has_no_incoming(node_index node) const { return indegree(node) == 0; }
     virtual bool has_single_incoming(node_index node) const { return indegree(node) == 1; }
 
-    virtual node_index kmer_to_node(const char *begin) const;
-    virtual node_index kmer_to_node(const std::string &kmer) const;
+    virtual node_index kmer_to_node(std::string_view kmer) const;
 
     using OutgoingEdgeCallback = std::function<void(node_index /* target_kmer */,
                                                     char /* last_target_char */)>;
@@ -212,7 +207,7 @@ class DeBruijnGraph : public SequenceGraph {
                                      const IncomingEdgeCallback &callback) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
-    virtual bool find(const std::string &sequence, double discovery_fraction = 1) const;
+    virtual bool find(std::string_view sequence, double discovery_fraction = 1) const;
 
     virtual bool operator==(const DeBruijnGraph &other) const;
     virtual bool operator!=(const DeBruijnGraph &other) const { return !operator==(other); }
@@ -225,18 +220,15 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
-
-    // Check if the node index is a valid node in the graph
-    virtual bool in_graph(node_index node) const = 0;
 };
 
 
 // returns the edge rank, starting from zero
-size_t incoming_edge_rank(const DeBruijnGraph &graph,
-                          DeBruijnGraph::node_index source,
-                          DeBruijnGraph::node_index target);
+size_t incoming_edge_rank(const SequenceGraph &graph,
+                          SequenceGraph::node_index source,
+                          SequenceGraph::node_index target);
 
-std::vector<DeBruijnGraph::node_index>
-map_sequence_to_nodes(const DeBruijnGraph &graph, const std::string &sequence);
+std::vector<SequenceGraph::node_index>
+map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence);
 
 #endif // __SEQUENCE_GRAPH_HPP__

@@ -22,18 +22,17 @@ constexpr uint64_t npos = 0;
 
 template <class KmerBF>
 inline void call_kmers(const KmerBF &kmer_bloom,
-                       const char *begin,
-                       const char *end,
+                       std::string_view sequence,
                        const std::function<void(uint64_t /* hash */,
                                                 bool /* is valid */)> &callback) {
     const auto k = kmer_bloom.get_k();
-    if (begin >= end || static_cast<size_t>(end - begin) < k)
+    if (sequence.size() < k)
         return;
 
     const auto max_encoded_val = KmerDef::alphabet.size();
 
-    std::vector<TAlphabet> coded(end - begin);
-    std::transform(begin, end,
+    std::vector<TAlphabet> coded(sequence.size());
+    std::transform(sequence.begin(), sequence.end(),
                    coded.begin(),
                    [](char c) { return KmerDef::encode(c); });
 
@@ -43,7 +42,7 @@ inline void call_kmers(const KmerBF &kmer_bloom,
     fwd.reset(coded.data());
 
     if (kmer_bloom.is_canonical_mode()) {
-        std::vector<TAlphabet> rc_coded(end - begin);
+        std::vector<TAlphabet> rc_coded(sequence.size());
         std::transform(coded.begin(), coded.end(),
                        rc_coded.rbegin(),
                        [](TAlphabet c) { return KmerDef::complement(c); });
@@ -85,17 +84,16 @@ inline void call_kmers(const KmerBF &kmer_bloom,
 
 template <class KmerBF>
 inline void call_valid_kmers(const KmerBF &kmer_bloom,
-                             const char *begin,
-                             const char *end,
+                             std::string_view sequence,
                              const std::function<void(uint64_t)> &callback) {
     const auto k = kmer_bloom.get_k();
-    if (begin >= end || static_cast<size_t>(end - begin) < k)
+    if (sequence.size() < k)
         return;
 
     const auto max_encoded_val = KmerDef::alphabet.size();
 
-    std::vector<TAlphabet> coded(end - begin);
-    std::transform(begin, end,
+    std::vector<TAlphabet> coded(sequence.size());
+    std::transform(sequence.begin(), sequence.end(),
                    coded.begin(),
                    [](char c) { return KmerDef::encode(c); });
 
@@ -105,7 +103,7 @@ inline void call_valid_kmers(const KmerBF &kmer_bloom,
     fwd.reset(coded.data());
 
     if (kmer_bloom.is_canonical_mode()) {
-        std::vector<TAlphabet> rc_coded(end - begin);
+        std::vector<TAlphabet> rc_coded(sequence.size());
         std::transform(coded.begin(), coded.end(),
                        rc_coded.rbegin(),
                        [](TAlphabet c) { return KmerDef::complement(c); });
@@ -147,19 +145,19 @@ inline void call_valid_kmers(const KmerBF &kmer_bloom,
 
 template <class KmerHasher>
 void KmerBloomFilter<KmerHasher>
-::add_sequence(const char *begin, const char *end) {
-    assert(end >= begin && static_cast<size_t>(end - begin) >= k_);
+::add_sequence(std::string_view sequence) {
+    assert(sequence.size() >= k_);
 
     AlignedVector<uint64_t> hashes;
-    hashes.reserve(end - begin - k_ + 1);
-    call_valid_kmers(*this, begin, end, [&](uint64_t hash) { hashes.push_back(hash); });
+    hashes.reserve(sequence.size() - k_ + 1);
+    call_valid_kmers(*this, sequence, [&](uint64_t hash) { hashes.push_back(hash); });
     filter_.insert(hashes.data(), hashes.data() + hashes.size());
 
     // invalid k-mers may be false positives
-    assert(sdsl::util::cnt_one_bits(check_kmer_presence(begin, end)) >= hashes.size());
+    assert(sdsl::util::cnt_one_bits(check_kmer_presence(sequence)) >= hashes.size());
 
 #ifndef NDEBUG
-    std::string rev_comp(begin, end);
+    std::string rev_comp(sequence);
     reverse_complement(rev_comp.begin(), rev_comp.end());
     assert(!canonical_mode_
             || sdsl::util::cnt_one_bits(check_kmer_presence(rev_comp)) >= hashes.size());
@@ -182,8 +180,7 @@ void KmerBloomFilter<KmerHasher>
             buffer.clear();
         }
 
-        call_valid_kmers(*this, sequence.c_str(), sequence.c_str() + sequence.size(),
-                         [&](uint64_t hash) { buffer.push_back(hash); });
+        call_valid_kmers(*this, sequence, [&](uint64_t hash) { buffer.push_back(hash); });
     });
 
     filter_.insert(buffer.data(), buffer.data() + buffer.size());
@@ -191,14 +188,14 @@ void KmerBloomFilter<KmerHasher>
 
 template <class KmerHasher>
 sdsl::bit_vector KmerBloomFilter<KmerHasher>
-::check_kmer_presence(const char *begin, const char *end) const {
-    if (begin >= end || static_cast<size_t>(end - begin) < k_)
+::check_kmer_presence(std::string_view sequence) const {
+    if (sequence.size() < k_)
         return sdsl::bit_vector();
 
     // aggregate hashes, then batch check
     size_t i = 0;
-    AlignedVector<uint64_t> hashes(end - begin - k_ + 1);
-    call_kmers(*this, begin, end, [&](auto hash, bool) { hashes[i++] = hash; });
+    AlignedVector<uint64_t> hashes(sequence.size() - k_ + 1);
+    call_kmers(*this, sequence, [&](auto hash, bool) { hashes[i++] = hash; });
 
     assert(i == hashes.size());
 
@@ -237,21 +234,20 @@ template class KmerBloomFilter<>;
 
 
 std::function<bool()> get_missing_kmer_skipper(const KmerBloomFilter<> *bloom_filter,
-                                               const char *begin,
-                                               const char *end) {
+                                               std::string_view sequence) {
     if (!bloom_filter)
         return []() { return false; };
 
-    if (begin + bloom_filter->get_k() > end)
+    if (sequence.size() < bloom_filter->get_k())
         return []() { return true; };
 
     // use shared_ptr to prevent copying this vector and keep it alive for the
     // returned callback
     auto bloom_check = std::make_shared<sdsl::bit_vector>(
-        bloom_filter->check_kmer_presence(begin, end)
+        bloom_filter->check_kmer_presence(sequence)
     );
 
-    assert(begin + bloom_check->size() == end - bloom_filter->get_k() + 1);
+    assert(bloom_check->size() + bloom_filter->get_k() - 1 == sequence.size());
 
     auto it = bloom_check->begin();
 

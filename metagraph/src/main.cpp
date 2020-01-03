@@ -600,8 +600,7 @@ void map_sequences_in_file(const std::string &file,
             // TODO: make more efficient
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
                 dbg->call_nodes_with_suffix(
-                    read_stream->seq.s + i,
-                    read_stream->seq.s + i + config.alignment_length,
+                    std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
                         if (graphindices.empty())
                             graphindices.emplace_back(node);
@@ -640,18 +639,16 @@ void map_sequences_in_file(const std::string &file,
         if (config.alignment_length == graph.get_k()) {
             for (size_t i = 0; i < graphindices.size(); ++i) {
                 assert(i + config.alignment_length <= read_stream->seq.l);
-                std::cout << std::string(read_stream->seq.s + i, config.alignment_length)
+                std::cout << std::string_view(read_stream->seq.s + i, config.alignment_length)
                           << ": " << graphindices[i] << "\n";
             }
         } else {
             // map input subsequences to multiple nodes
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
                 // TODO: make more efficient
-                std::string subseq(read_stream->seq.s + i,
-                                   read_stream->seq.s + i + config.alignment_length);
+                std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
 
-                dbg->call_nodes_with_suffix(subseq.begin(),
-                                            subseq.end(),
+                dbg->call_nodes_with_suffix(subseq,
                                             [&](auto node, auto) {
                                                 std::cout << subseq << ": "
                                                           << node
@@ -693,8 +690,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         call_sequences([&graph,&dbg_succ](const std::string &sequence) {
             graph->add_sequence(sequence, get_missing_kmer_skipper(
                 dbg_succ->get_bloom_filter(),
-                sequence.data(),
-                sequence.data() + sequence.size()
+                sequence
             ));
         });
     } else {

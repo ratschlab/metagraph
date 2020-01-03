@@ -55,7 +55,7 @@ class KmerExtractorBOSS {
      * Adds only valid k-mers.
      */
     template <class KMER>
-    static void sequence_to_kmers(const std::string &sequence,
+    static void sequence_to_kmers(std::string_view sequence,
                                   size_t k,
                                   const std::vector<TAlphabet> &suffix,
                                   Vector<KMER> *kmers,
@@ -68,7 +68,7 @@ class KmerExtractorBOSS {
 
     // map input character to k-mer character
     static TAlphabet encode(char s);
-    static std::vector<TAlphabet> encode(const std::string &sequence);
+    static std::vector<TAlphabet> encode(std::string_view sequence);
     // map k-mer character to input character
     static char decode(TAlphabet c);
     static std::string decode(const std::vector<TAlphabet> &sequence);
@@ -117,7 +117,7 @@ class KmerExtractor2BitT {
      * not empty, only kmers with the given suffix are added.
      */
     template <class T>
-    void sequence_to_kmers(const std::string &sequence,
+    void sequence_to_kmers(std::string_view sequence,
                            size_t k,
                            const std::vector<TAlphabet> &suffix,
                            Vector<Kmer<T>> *kmers,
@@ -130,7 +130,7 @@ class KmerExtractor2BitT {
      */
     template <class KMER>
     Vector<std::pair<KMER, bool>>
-    sequence_to_kmers(const std::string &sequence,
+    sequence_to_kmers(std::string_view sequence,
                       size_t k,
                       bool canonical_mode = false,
                       const std::vector<TAlphabet> &suffix = {}) const;
@@ -142,7 +142,7 @@ class KmerExtractor2BitT {
 
     // map input character to k-mer character
     TAlphabet encode(char s) const;
-    std::vector<TAlphabet> encode(const std::string &sequence) const;
+    std::vector<TAlphabet> encode(std::string_view sequence) const;
     // map k-mer character to input character
     char decode(TAlphabet c) const;
     std::string decode(const std::vector<TAlphabet> &sequence) const;
