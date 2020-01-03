@@ -86,13 +86,13 @@ BRWTOptimized build_matrix_from_columns<BRWTOptimized>(BitVectorPtrArray&& colum
 }
 
 template <>
-ColMajorCompressed build_matrix_from_columns<ColMajorCompressed>(BitVectorPtrArray&& columns, uint64_t) {
+ColumnMajor build_matrix_from_columns<ColumnMajor>(BitVectorPtrArray&& columns, uint64_t) {
     std::vector<std::unique_ptr<bit_vector_sd>> columns_sd;
     columns_sd.reserve(columns.size());
     for (auto&& column : columns) {
         columns_sd.emplace_back(new bit_vector_sd(column->convert_to<bit_vector_sd>()));
     }
-    return ColMajorCompressed(std::move(columns_sd));
+    return ColumnMajor(std::move(columns_sd));
 }
 
 
@@ -194,15 +194,15 @@ build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_
 }
 
 template <>
-ColMajorCompressed
+ColumnMajor
 build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
                        uint64_t num_columns,
                        uint64_t num_rows,
                        uint64_t num_relations) {
-    return build_matrix_from_columns<ColMajorCompressed>(generate_rows,
-                                                         num_columns,
-                                                         num_rows,
-                                                         num_relations);
+    return build_matrix_from_columns<ColumnMajor>(generate_rows,
+                                                  num_columns,
+                                                  num_rows,
+                                                  num_relations);
 }
 
 template <typename BinMat>
@@ -222,7 +222,7 @@ BinMat build_matrix_from_rows(BitVectorPtrArray&& columns, uint64_t num_rows) {
 }
 template BRWT build_matrix_from_rows<BRWT>(BitVectorPtrArray&&, uint64_t);
 template BRWTOptimized build_matrix_from_rows<BRWTOptimized>(BitVectorPtrArray&&, uint64_t);
-template ColMajorCompressed build_matrix_from_rows<ColMajorCompressed>(BitVectorPtrArray&&, uint64_t);
+template ColumnMajor build_matrix_from_rows<ColumnMajor>(BitVectorPtrArray&&, uint64_t);
 template BinRelWT build_matrix_from_rows<BinRelWT>(BitVectorPtrArray&&, uint64_t);
 template BinRelWT_sdsl build_matrix_from_rows<BinRelWT_sdsl>(BitVectorPtrArray&&, uint64_t);
 template RowConcatenated<> build_matrix_from_rows<RowConcatenated<>>(BitVectorPtrArray&&, uint64_t);
@@ -383,7 +383,7 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
 
 template void test_matrix<BRWT>(const BRWT&, const BitVectorPtrArray &);
 template void test_matrix<BRWTOptimized>(const BRWTOptimized&, const BitVectorPtrArray &);
-template void test_matrix<ColMajorCompressed>(const ColMajorCompressed&, const BitVectorPtrArray &);
+template void test_matrix<ColumnMajor>(const ColumnMajor&, const BitVectorPtrArray &);
 template void test_matrix<BinRelWT>(const BinRelWT&, const BitVectorPtrArray &);
 template void test_matrix<BinRelWT_sdsl>(const BinRelWT_sdsl&, const BitVectorPtrArray &);
 template void test_matrix<RowConcatenated<>>(const RowConcatenated<>&, const BitVectorPtrArray &);

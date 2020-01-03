@@ -3,19 +3,17 @@
 #include "common/serialization.hpp"
 
 
-ColMajorCompressed
-::ColMajorCompressed(const std::vector<std::unique_ptr<bit_vector_sd>> &columns) {
+ColumnMajor::ColumnMajor(const std::vector<std::unique_ptr<bit_vector_sd>> &columns) {
     columns_.reserve(columns.size());
     for (auto &column : columns) {
         columns_.emplace_back(new bit_vector_sd(*column));
     }
 }
 
-ColMajorCompressed
-::ColMajorCompressed(std::vector<std::unique_ptr<bit_vector_sd>>&& columns)
+ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector_sd>>&& columns)
       : columns_(std::move(columns)) {}
 
-uint64_t ColMajorCompressed::num_rows() const {
+uint64_t ColumnMajor::num_rows() const {
     if (!columns_.size()) {
         return 0;
     } else {
@@ -24,15 +22,14 @@ uint64_t ColMajorCompressed::num_rows() const {
     }
 }
 
-bool ColMajorCompressed::get(Row row, Column column) const {
+bool ColumnMajor::get(Row row, Column column) const {
     assert(column < columns_.size());
     assert(columns_[column].get());
     assert(row < columns_[column]->size());
     return (*columns_[column])[row];
 }
 
-ColMajorCompressed::SetBitPositions
-ColMajorCompressed::get_row(Row row) const {
+ColumnMajor::SetBitPositions ColumnMajor::get_row(Row row) const {
     assert(row < num_rows());
 
     SetBitPositions result;
@@ -45,8 +42,8 @@ ColMajorCompressed::get_row(Row row) const {
     return result;
 }
 
-std::vector<ColMajorCompressed::SetBitPositions>
-ColMajorCompressed::get_rows(const std::vector<Row> &row_ids) const {
+std::vector<ColumnMajor::SetBitPositions>
+ColumnMajor::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
 
     for (size_t j = 0; j < columns_.size(); ++j) {
@@ -64,8 +61,7 @@ ColMajorCompressed::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-std::vector<ColMajorCompressed::Row>
-ColMajorCompressed::get_column(Column column) const {
+std::vector<ColumnMajor::Row> ColumnMajor::get_column(Column column) const {
     assert(column < columns_.size());
     assert(columns_[column].get());
 
@@ -74,7 +70,7 @@ ColMajorCompressed::get_column(Column column) const {
     return result;
 }
 
-bool ColMajorCompressed::load(std::istream &in) {
+bool ColumnMajor::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -97,7 +93,7 @@ bool ColMajorCompressed::load(std::istream &in) {
     }
 }
 
-void ColMajorCompressed::serialize(std::ostream &out) const {
+void ColumnMajor::serialize(std::ostream &out) const {
     serialize_number(out, columns_.size());
 
     for (const auto &column : columns_) {
@@ -107,7 +103,7 @@ void ColMajorCompressed::serialize(std::ostream &out) const {
 }
 
 // number of ones in the matrix
-uint64_t ColMajorCompressed::num_relations() const {
+uint64_t ColumnMajor::num_relations() const {
     uint64_t num_set_bits = 0;
 
     for (const auto &column : columns_) {
