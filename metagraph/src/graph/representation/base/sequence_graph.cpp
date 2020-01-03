@@ -5,7 +5,7 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
-#include "common/vectors/int_vector.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 
 namespace utils {
     bool get_verbose();

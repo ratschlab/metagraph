@@ -41,7 +41,7 @@
 #include "taxid_mapper.hpp"
 #include "reverse_complement.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vectors/int_vector.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 #include "seq_io/formats.hpp"
 #include "cli/build.hpp"
 #include "cli/augment.hpp"

@@ -1,5 +1,5 @@
-#ifndef __INT_VECTOR_HPP__
-#define __INT_VECTOR_HPP__
+#ifndef __INT_VECTOR_ALGORITHM_HPP__
+#define __INT_VECTOR_ALGORITHM_HPP__
 
 #include <functional>
 #include <cassert>
@@ -158,4 +158,4 @@ void call_nonzeros(const sdsl::int_vector<> &vector, Callback callback) {
     return call_nonzeros(vector, 0, vector.size(), callback);
 }
 
-#endif // __INT_VECTOR_HPP__
+#endif // __INT_VECTOR_ALGORITHM_HPP__
