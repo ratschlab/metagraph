@@ -7,32 +7,6 @@
 
 #include <sdsl/int_vector.hpp>
 
-template <class T>
-using VoidCall = std::function<void(T)>;
-
-
-sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
-
-void call_ones(const sdsl::bit_vector &vector,
-               const VoidCall<uint64_t> &callback);
-
-void call_ones(const sdsl::bit_vector &vector,
-               uint64_t begin, uint64_t end,
-               const VoidCall<uint64_t> &callback);
-
-uint64_t count_ones(const sdsl::bit_vector &vector,
-                    uint64_t begin, uint64_t end);
-
-void call_zeros(const sdsl::bit_vector &vector,
-                const VoidCall<uint64_t> &callback);
-
-void call_zeros(const sdsl::bit_vector &vector,
-                uint64_t begin, uint64_t end,
-                const VoidCall<uint64_t> &callback);
-
-uint64_t inner_prod(const sdsl::bit_vector &first,
-                    const sdsl::bit_vector &second);
-
 
 /**
  * An abstract interface for a bitmap constructor.
@@ -45,6 +19,9 @@ class bitmap_builder {
     virtual void add_ones(const uint64_t *begin, const uint64_t *end) {
         std::for_each(begin, end, [&](uint64_t pos) { add_one(pos); });
     }
+
+    template <class T>
+    using VoidCall = std::function<void(T)>;
 
     // Data for initializing a bitmap
     struct InitializationData {
@@ -213,29 +190,25 @@ class bitmap_adaptive : public bitmap_dyn {
 
 class bitmap_lazy : public bitmap {
   public:
-    typedef std::function<bool(uint64_t)> BoolCallback;
-
     explicit bitmap_lazy(size_t size = 0, bool value = false);
 
-    bitmap_lazy(BoolCallback callback,
-                size_t size = -1,
+    bitmap_lazy(std::function<bool(uint64_t)>&& callback,
+                size_t size,
                 size_t num_set_bits = -1) noexcept;
 
-    void set(uint64_t, bool) {
-        throw std::runtime_error("Not implemented.");
-    }
+    void set(uint64_t, bool) { throw std::runtime_error("Not implemented."); }
 
-    bool operator[](uint64_t id) const { return in_bitmap_(id); }
+    bool operator[](uint64_t id) const { return is_bit_set_(id); }
     uint64_t get_int(uint64_t id, uint32_t width) const;
 
-    uint64_t size() const;
+    uint64_t size() const { return size_; }
     uint64_t num_set_bits() const;
 
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const;
 
   private:
-    BoolCallback in_bitmap_;
+    std::function<bool(uint64_t)> is_bit_set_;
     size_t size_;
     size_t num_set_bits_;
 };

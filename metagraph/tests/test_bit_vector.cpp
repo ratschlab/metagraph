@@ -1,8 +1,9 @@
 #include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
-#include "bit_vector.hpp"
-#include "threading.hpp"
+#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/int_vector.hpp"
+#include "common/threads/threading.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
