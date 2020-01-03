@@ -1,9 +1,9 @@
 #include "test_dbg_helpers.hpp"
 
 #include "gtest/gtest.h"
-#include "boss.hpp"
-#include "boss_construct.hpp"
-#include "dbg_bitmap_construct.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 
 
 template <class Graph>

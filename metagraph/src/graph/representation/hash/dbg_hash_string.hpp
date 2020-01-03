@@ -4,7 +4,7 @@
 #include <iostream>
 #include <tsl/ordered_set.h>
 
-#include "sequence_graph.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 class DBGHashString : public DeBruijnGraph {

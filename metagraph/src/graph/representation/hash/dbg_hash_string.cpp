@@ -4,7 +4,7 @@
 #include <fstream>
 
 #include "common/serialization.hpp"
-#include "alphabets.hpp"
+#include "kmer/alphabets.hpp"
 
 
 #if _PROTEIN_GRAPH

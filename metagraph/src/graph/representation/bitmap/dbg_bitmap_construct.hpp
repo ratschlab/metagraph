@@ -2,7 +2,7 @@
 #define __DBG_BITMAP_CONSTRUCT_HPP__
 
 #include "dbg_bitmap.hpp"
-#include "dbg_construct.hpp"
+#include "graph/representation/base/dbg_construct.hpp"
 
 namespace mg {
 namespace bitmap_graph {

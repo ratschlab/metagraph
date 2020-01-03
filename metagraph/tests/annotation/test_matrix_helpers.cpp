@@ -10,7 +10,7 @@
 #include "bin_rel_wt.hpp"
 #include "bin_rel_wt_sdsl.hpp"
 #include "column_major.hpp"
-#include "bitmap_mergers.hpp"
+#include "common/vectors/bitmap_mergers.hpp"
 
 typedef BinaryMatrix::SetBitPositions RowSetBits;
 typedef std::function<void(const RowSetBits &)> RowCallback;

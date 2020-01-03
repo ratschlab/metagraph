@@ -4,7 +4,7 @@
 #include <fstream>
 #include <cmath>
 
-#include "serialization.hpp"
+#include "common/serialization.hpp"
 #include "dbg_bitmap_construct.hpp"
 
 namespace mg {

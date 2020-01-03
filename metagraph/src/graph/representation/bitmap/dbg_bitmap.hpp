@@ -3,9 +3,9 @@
 
 #include <iostream>
 
-#include "sequence_graph.hpp"
-#include "kmer_extractor.hpp"
-#include "bit_vector.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
+#include "kmer/kmer_extractor.hpp"
+#include "common/vectors/bit_vector.hpp"
 
 namespace mg {
 namespace bitmap_graph {

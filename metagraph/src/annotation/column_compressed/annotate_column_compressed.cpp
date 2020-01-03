@@ -5,10 +5,10 @@
 #include <stdexcept>
 
 #include "common/serialization.hpp"
-#include "string_utils.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/algorithms.hpp"
-#include "bitmap_builder.hpp"
-#include "bitmap_mergers.hpp"
+#include "common/vectors/bitmap_builder.hpp"
+#include "common/vectors/bitmap_mergers.hpp"
 #include "common/threads/threading.hpp"
 #include "annotate_row_compressed.hpp"
 

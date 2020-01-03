@@ -6,8 +6,8 @@
 #include <gtest/gtest.h>
 
 #include "../test_helpers.hpp"
-#include "dbg_bitmap.hpp"
-#include "dbg_bitmap_construct.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 
 namespace {
 using namespace mg::bitmap_graph;

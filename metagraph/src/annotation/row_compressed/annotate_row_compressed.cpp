@@ -5,8 +5,8 @@
 #include <stdexcept>
 #include <set>
 
-#include "serialization.hpp"
-#include "string_utils.hpp"
+#include "common/serialization.hpp"
+#include "common/utils/string_utils.hpp"
 #include "vector_row_binmat.hpp"
 #include "eigen_spmat.hpp"
 #include "binary_matrix.hpp"

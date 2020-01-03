@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-#include "sequence_graph.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 class DBGHashFast : public DeBruijnGraph {

@@ -3,12 +3,12 @@
 
 #include "annotate_column_compressed.hpp"
 #include "common/vector.hpp"
-#include "string_utils.hpp"
-#include "file_utils.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/algorithms.hpp"
-#include "bitmap_mergers.hpp"
-#include "threading.hpp"
-#include "bit_vector.hpp"
+#include "common/vectors/bitmap_mergers.hpp"
+#include "common/threads/threading.hpp"
+#include "common/vectors/bit_vector.hpp"
 #include "seq_io/formats.hpp"
 
 const std::string test_data_dir = "../tests/data";

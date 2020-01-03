@@ -13,11 +13,11 @@
 #define protected public
 #define private public
 
-#include "dbg_bitmap.hpp"
-#include "dbg_bitmap_construct.hpp"
-#include "string_utils.hpp"
-#include "reverse_complement.hpp"
-#include "sorted_set.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "common/sorted_set.hpp"
 #include "kmer/kmer_collector.hpp"
 
 namespace {
