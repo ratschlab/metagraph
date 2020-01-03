@@ -1,4 +1,4 @@
-#include "int_vector.hpp"
+#include "int_vector_algorithm.hpp"
 
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {

@@ -5,7 +5,7 @@
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/vector.hpp"
-#include "common/vectors/int_vector.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 #include "common/utils/template_utils.hpp"
 
 using namespace mg;
