@@ -7,7 +7,7 @@
 #include "kmer/alphabets.hpp"
 #include "annotation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/alignment/aligner_helper.hpp"
-#include "graph/masked_graph.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 namespace annotated_graph_algorithm {
 

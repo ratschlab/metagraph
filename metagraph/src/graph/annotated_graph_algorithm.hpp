@@ -7,7 +7,7 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/masked_graph.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 typedef std::function<size_t()> LabelCountCallback;
 
