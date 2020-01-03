@@ -1,7 +1,7 @@
 #include "aligner_methods.hpp"
 
 #include "common/algorithms.hpp"
-#include "dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 template <typename NodeType>

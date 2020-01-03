@@ -2,7 +2,7 @@
 #include <algorithm>
 
 #include "data_generation.hpp"
-#include "bitmap_mergers.hpp"
+#include "common/vectors/bitmap_mergers.hpp"
 
 std::vector<uint64_t>
 DataGenerator::generate_random_ints(uint64_t n, uint64_t begin, uint64_t end) {

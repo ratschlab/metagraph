@@ -3,7 +3,7 @@
 #include "../test_helpers.hpp"
 #include "all/test_dbg_helpers.hpp"
 
-#include "reverse_complement.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";

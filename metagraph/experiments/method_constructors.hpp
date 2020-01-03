@@ -7,7 +7,7 @@
 #include "data_generation.hpp"
 #include "vector_row_binmat.hpp"
 #include "partitionings.hpp"
-#include "bitmap_mergers.hpp"
+#include "common/vectors/bitmap_mergers.hpp"
 
 
 template <typename T>

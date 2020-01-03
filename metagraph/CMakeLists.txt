@@ -231,7 +231,7 @@ MACRO(SUBDIRLIST result curdir)
   SET(${result} ${dirlist})
 ENDMACRO()
 
-SUBDIRLIST(INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
+SUBDIRLIST(INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/annotation")
 
 include_directories(
   external-libraries/KMC/kmc_api
@@ -251,6 +251,7 @@ include_directories(
   external-libraries/nvbio/contrib/priority-deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
+  ${PROJECT_SOURCE_DIR}/src
   ${INCLUDE_DIRS}
 )
 

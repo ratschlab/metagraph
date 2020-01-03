@@ -1,7 +1,7 @@
 #ifndef __DATA_GENERATION_HPP__
 #define __DATA_GENERATION_HPP__
 
-#include "bit_vector.hpp"
+#include "common/vectors/bit_vector.hpp"
 
 
 class DataGenerator {

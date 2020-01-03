@@ -2,9 +2,9 @@
 
 #include <numeric>
 
-#include "kmer_extractor.hpp"
-#include "string_utils.hpp"
-#include "reverse_complement.hpp"
+#include "kmer/kmer_extractor.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 template <typename Kmer>

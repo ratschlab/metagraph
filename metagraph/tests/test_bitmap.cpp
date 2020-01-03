@@ -3,7 +3,7 @@
 #include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
-#include "threading.hpp"
+#include "common/threads/threading.hpp"
 
 #define private public
 #include "common/vectors/bitmap.hpp"

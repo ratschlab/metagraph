@@ -6,11 +6,11 @@
 #include <string>
 #include <vector>
 
-#include "dbg_succinct.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_hash_fast.hpp"
-#include "dbg_bitmap.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/hash/dbg_hash_string.hpp"
+#include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
 
 using namespace mg::bitmap_graph;
 

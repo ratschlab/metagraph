@@ -9,8 +9,8 @@
 #define private public
 #define protected public
 
-#include "kmer.hpp"
-#include "kmer_extractor.hpp"
+#include "kmer/kmer.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 typedef uint8_t TAlphabet;

@@ -8,7 +8,7 @@
 #include "BRWT.hpp"
 #include "BRWT_builders.hpp"
 #include "rainbowfish.hpp"
-#include "bit_vector.hpp"
+#include "common/vectors/bit_vector.hpp"
 
 
 class BRWTOptimized : public BRWT {
