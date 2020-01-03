@@ -21,7 +21,8 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
 
     virtual ~MaskedDeBruijnGraph() {}
 
-    virtual void add_sequence(std::string_view, bit_vector_dyn *) override {
+    virtual void add_sequence(std::string_view,
+                              const std::function<void(node_index)> &) override {
         throw std::runtime_error("Not implemented");
     }
 

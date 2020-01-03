@@ -1,7 +1,7 @@
 #ifndef __DBG_BITMAP_HPP__
 #define __DBG_BITMAP_HPP__
 
-#include <fstream>
+#include <iostream>
 
 #include "sequence_graph.hpp"
 #include "kmer_extractor.hpp"
@@ -29,7 +29,8 @@ class DBGBitmap : public DeBruijnGraph {
     // Initialize graph from builder
     explicit DBGBitmap(DBGBitmapConstructor *builder);
 
-    void add_sequence(std::string_view, bit_vector_dyn * = nullptr) {
+    void add_sequence(std::string_view,
+                      const std::function<void(node_index)> & = [](node_index) {}) {
         throw std::runtime_error("Not implemented");
     }
 
