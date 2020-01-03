@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <progress_bar.hpp>
+#include <sdsl/int_vector.hpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"

@@ -34,11 +34,13 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override final;
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
+    // Insert sequence to graph and invoke callback |on_insertion| for each new
+    // node index augmenting the range [1,...,max_index], including those not
+    // pointing to any real node in graph. That is, the callback is invoked for
+    // all new real nodes and all new dummy node indexes allocated in graph.
+    // In short: max_index[after] = max_index[before] + {num_invocations}.
     virtual void add_sequence(std::string_view sequence,
-                              bit_vector_dyn *nodes_inserted = NULL) override final;
+                              const std::function<void(node_index)> &on_insertion = [](node_index) {}) override final;
 
     virtual std::string get_node_sequence(node_index node) const override final;
 
@@ -139,8 +141,6 @@ class DBGSuccinct : public DeBruijnGraph {
     static constexpr auto kBloomFilterExtension = ".bloom";
 
   private:
-    void add_seq(std::string_view sequence, bit_vector_dyn *nodes_inserted);
-
     std::unique_ptr<BOSS> boss_graph_;
     // all edges in boss except dummy
     std::unique_ptr<bit_vector> valid_edges_;

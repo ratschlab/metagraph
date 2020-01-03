@@ -60,9 +60,9 @@ int augment_graph(Config *config) {
         }
     }
 
-    std::unique_ptr<bit_vector_dyn> inserted_edges;
+    std::unique_ptr<bit_vector_dyn> inserted_nodes;
     if (config->infbase_annotators.size() || node_weights)
-        inserted_edges.reset(new bit_vector_dyn(graph->max_index() + 1, 0));
+        inserted_nodes.reset(new bit_vector_dyn(graph->max_index() + 1, 0));
 
     timer.reset();
 
@@ -73,25 +73,30 @@ int augment_graph(Config *config) {
 
     config->canonical = graph->is_canonical_mode();
 
+    std::function<void(uint64_t)> on_node_insert = [](uint64_t) {};
+    if (inserted_nodes)
+        on_node_insert = [&](uint64_t new_node) { inserted_nodes->insert_bit(new_node, 1); };
+
     parse_sequences(files, *config, timer,
-        [&graph,&inserted_edges](std::string&& seq) {
-            graph->add_sequence(seq, inserted_edges.get());
+        [&](std::string&& seq) {
+            graph->add_sequence(seq, on_node_insert);
         },
-        [&graph,&inserted_edges](std::string&& kmer, uint32_t /*count*/) {
-            graph->add_sequence(kmer, inserted_edges.get());
+        [&](std::string&& kmer, uint32_t /*count*/) {
+            graph->add_sequence(kmer, on_node_insert);
         },
-        [&graph,&inserted_edges](const auto &loop) {
-            loop([&graph,&inserted_edges](const char *seq) {
-                graph->add_sequence(seq, inserted_edges.get());
+        [&](const auto &loop) {
+            loop([&](const char *seq) {
+                graph->add_sequence(seq, on_node_insert);
             });
         }
     );
+    assert(!inserted_nodes || inserted_nodes->size() == graph->max_index() + 1);
 
     logger->trace("Graph augmentation done in {} sec", timer.elapsed());
     timer.reset();
 
     if (node_weights) {
-        node_weights->insert_nodes(*inserted_edges);
+        node_weights->insert_nodes(*inserted_nodes);
 
         assert(node_weights->is_compatible(*graph));
 
@@ -148,10 +153,10 @@ int augment_graph(Config *config) {
 
     timer.reset();
 
-    assert(inserted_edges);
+    assert(inserted_nodes);
 
     if (annotation->num_objects() + 1
-            != inserted_edges->size() - inserted_edges->num_set_bits()) {
+            != inserted_nodes->size() - inserted_nodes->num_set_bits()) {
         logger->error("Graph and annotation are incompatible");
         exit(1);
     }
@@ -160,7 +165,7 @@ int augment_graph(Config *config) {
 
     // transform indexes of the inserved k-mers to the annotation format
     std::vector<uint64_t> inserted_rows;
-    inserted_edges->call_ones([&](auto i) {
+    inserted_nodes->call_ones([&](auto i) {
         inserted_rows.push_back(AnnotatedDBG::graph_to_anno_index(i));
     });
     annotation->insert_rows(inserted_rows);

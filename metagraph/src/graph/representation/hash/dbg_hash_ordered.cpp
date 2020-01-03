@@ -1,12 +1,12 @@
 #include "dbg_hash_ordered.hpp"
 
 #include <cassert>
+#include <fstream>
 
 #include <tsl/ordered_set.h>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
-#include "common/vectors/bit_vector.hpp"
 #include "common/hash/hash.hpp"
 #include "kmer/kmer_extractor.hpp"
 
@@ -27,22 +27,14 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
                                 bool canonical_mode,
                                 bool packed_serialization);
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
     void add_sequence(std::string_view sequence,
-                      bit_vector_dyn *nodes_inserted) {
-        add_sequence(sequence, [](){ return false; }, nodes_inserted);
+                      const std::function<void(node_index)> &on_insertion) {
+        add_sequence(sequence, [](){ return false; }, on_insertion);
     }
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
-    // `skip` is called before adding each k-mer into the graph and the k-mer
-    // is skipped if `skip()` returns `false`.
     void add_sequence(std::string_view sequence,
                       const std::function<bool()> &skip,
-                      bit_vector_dyn *nodes_inserted);
+                      const std::function<void(node_index)> &on_insertion);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -136,9 +128,7 @@ DBGHashOrderedImpl<KMER>::DBGHashOrderedImpl(size_t k,
 template <typename KMER>
 void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
                                             const std::function<bool()> &skip,
-                                            bit_vector_dyn *nodes_inserted) {
-    assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
-
+                                            const std::function<void(node_index)> &on_insertion) {
     if (sequence.size() < get_k())
         return;
 
@@ -167,8 +157,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
 #endif
 
         if (index_insert.second) {
-            if (nodes_inserted)
-                nodes_inserted->insert_bit(kmers_.size() - 1, true);
+            on_insertion(kmers_.size());
         } else {
             skipped.back() = true;
         }
@@ -182,8 +171,8 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
 
     auto it = skipped.end();
     for (const auto &[kmer, is_valid] : sequence_to_kmers(rev_comp)) {
-        if (!*(--it) && kmers_.insert(kmer).second && nodes_inserted)
-            nodes_inserted->insert_bit(kmers_.size() - 1, true);
+        if (!*(--it) && kmers_.insert(kmer).second)
+            on_insertion(kmers_.size());
     }
 }
 

@@ -1,7 +1,7 @@
 #ifndef __DBG_HASH_FAST_HPP__
 #define __DBG_HASH_FAST_HPP__
 
-#include <fstream>
+#include <iostream>
 
 #include "sequence_graph.hpp"
 
@@ -14,12 +14,14 @@ class DBGHashFast : public DeBruijnGraph {
         hash_dbg_ = initialize_graph(k, canonical_mode, packed_serialization);
     }
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
+    // Insert sequence to graph and invoke callback |on_insertion| for each new
+    // node index augmenting the range [1,...,max_index], including those not
+    // pointing to any real node in graph. That is, the callback is invoked for
+    // all new real nodes and all new dummy node indexes allocated in graph.
+    // In short: max_index[after] = max_index[before] + {num_invocations}.
     void add_sequence(std::string_view sequence,
-                      bit_vector_dyn *nodes_inserted = NULL) {
-        hash_dbg_->add_sequence(sequence, nodes_inserted);
+                      const std::function<void(node_index)> &on_insertion = [](node_index) {}) {
+        hash_dbg_->add_sequence(sequence, on_insertion);
     }
 
     // Traverse graph mapping sequence to the graph nodes

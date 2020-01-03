@@ -1,6 +1,7 @@
 #include "dbg_bitmap.hpp"
 
 #include <cassert>
+#include <fstream>
 #include <cmath>
 
 #include "serialization.hpp"
