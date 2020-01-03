@@ -60,7 +60,7 @@ std::unique_ptr<BinaryMatrix>
 matrix_type_to_data(const std::string &file, MatrixType type) {
     std::unique_ptr<BinaryMatrix> matrix_ptr;
     if (type == MatrixType::COLUMN) {
-        matrix_ptr.reset(new ColMajorCompressed());
+        matrix_ptr.reset(new ColumnMajor());
     } else if (type == MatrixType::ROW) {
         matrix_ptr.reset(new VectorRowBinMat());
     } else if (type == MatrixType::BRWT) {
@@ -146,7 +146,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
             break;
         }
         case MatrixType::COLUMN: {
-            binary_matrix.reset(new ColMajorCompressed(
+            binary_matrix.reset(new ColumnMajor(
                 convert_to<bit_vector_sd>(std::move(columns))
             ));
             break;

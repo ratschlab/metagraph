@@ -13,7 +13,7 @@ template <typename BinMat>
 class BinaryMatrixTest : public ::testing::Test { };
 typedef ::testing::Types<BRWT,
                          BRWTOptimized,
-                         ColMajorCompressed,
+                         ColumnMajor,
                          BinRelWT,
                          BinRelWT_sdsl,
                          RowConcatenated<>,

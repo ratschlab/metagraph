@@ -627,7 +627,7 @@ int main(int argc, char *argv[]) {
                             columns.erase(it--);
                     }
 
-                    ColMajorCompressed matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
+                    ColumnMajor matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
                     std::cout << "Reduced matrix from ("
                               << annotator.num_objects() << ", " << annotator.num_labels()
                               << ") to ("
