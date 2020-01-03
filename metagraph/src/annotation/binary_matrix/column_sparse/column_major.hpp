@@ -10,8 +10,7 @@
 class ColumnMajor : public BinaryMatrix {
   public:
     ColumnMajor() {}
-    ColumnMajor(const std::vector<std::unique_ptr<bit_vector_sd>> &columns);
-    ColumnMajor(std::vector<std::unique_ptr<bit_vector_sd>>&& columns);
+    ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns);
 
     ColumnMajor(const ColumnMajor &other) = default;
     ColumnMajor& operator=(const ColumnMajor &other) = default;
@@ -34,7 +33,7 @@ class ColumnMajor : public BinaryMatrix {
     uint64_t num_relations() const;
 
   private:
-    std::vector<std::unique_ptr<bit_vector_sd>> columns_;
+    std::vector<std::unique_ptr<bit_vector>> columns_;
 };
 
 #endif // __COLUMN_MAJOR_HPP__
