@@ -990,7 +990,7 @@ void print_stats(const Annotator &annotation) {
 
     } else if (dynamic_cast<const annotate::BRWTCompressed<std::string> *>(&annotation)) {
         std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
-        const auto &brwt = dynamic_cast<const annotate::BRWTCompressed<std::string> &>(annotation).data();
+        const auto &brwt = dynamic_cast<const annotate::BRWTCompressed<std::string> &>(annotation).get_matrix();
         std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
         std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
         std::cout << "avg arity: " << brwt.avg_arity() << std::endl;

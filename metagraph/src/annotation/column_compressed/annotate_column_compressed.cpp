@@ -67,7 +67,7 @@ ColumnCompressed<Label>::get_label_codes(Index i) const {
     assert(i < num_rows_);
 
     SetBitPositions label_indices;
-    for (size_t j = 0; j < this->num_labels(); ++j) {
+    for (size_t j = 0; j < num_labels(); ++j) {
         if (get_column(j)[i])
             label_indices.push_back(j);
     }
@@ -79,7 +79,7 @@ std::vector<typename ColumnCompressed<Label>::SetBitPositions>
 ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) const {
     std::vector<SetBitPositions> rows(indices.size());
 
-    for (size_t j = 0; j < this->num_labels(); ++j) {
+    for (size_t j = 0; j < num_labels(); ++j) {
         const auto &column = get_column(j);
 
         for (size_t i = 0; i < indices.size(); ++i) {
@@ -311,7 +311,7 @@ ColumnCompressed<Label>
                    [](const auto &pair) { return pair.first; });
 
     std::vector<std::pair<uint64_t, size_t>> label_counts;
-    label_counts.reserve(this->num_labels());
+    label_counts.reserve(num_labels());
 
     // TODO: get rid of label encoder from here
     for (const auto &label : this->get_all_labels()) {
@@ -401,7 +401,7 @@ uint64_t ColumnCompressed<Label>::num_objects() const {
 template <typename Label>
 uint64_t ColumnCompressed<Label>::num_relations() const {
     uint64_t num_rels = 0;
-    for (size_t i = 0; i < this->num_labels(); ++i) {
+    for (size_t i = 0; i < num_labels(); ++i) {
         num_rels += get_column(i).num_set_bits();
     }
     return num_rels;
@@ -565,6 +565,12 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 }
 
 template <typename Label>
+const ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
+    flush();
+    return annotation_matrix_view_;
+}
+
+template <typename Label>
 void ColumnCompressed<Label>
 ::convert_to_row_annotator(const std::string &outfbase) const {
     ProgressBar progress_bar(num_rows_, "Serialized rows", std::cerr, !utils::get_verbose());
@@ -586,7 +592,7 @@ void ColumnCompressed<Label>
                 assert(end <= num_rows_);
 
                 // TODO: use RowsFromColumnsTransformer
-                for (size_t j = 0; j < this->num_labels(); ++j) {
+                for (size_t j = 0; j < num_labels(); ++j) {
                     get_column(j).call_ones_in_range(begin, end,
                         [&](uint64_t idx) { rows[idx - begin].push_back(j); }
                     );
@@ -637,7 +643,7 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
     assert(end <= annotator->matrix_->num_rows());
 
     // TODO: use RowsFromColumnsTransformer
-    for (size_t j = 0; j < this->num_labels(); ++j) {
+    for (size_t j = 0; j < num_labels(); ++j) {
         get_column(j).call_ones_in_range(begin, end,
             [&](uint64_t idx) { annotator->matrix_->set(idx, j); }
         );
@@ -652,7 +658,7 @@ bool ColumnCompressed<Label>
     bool success = true;
 
     #pragma omp parallel for num_threads(num_threads)
-    for (uint64_t j = 0; j < this->num_labels(); ++j) {
+    for (uint64_t j = 0; j < num_labels(); ++j) {
         std::ofstream outstream(
             remove_suffix(prefix, kExtension)
                 + "." + std::to_string(j)

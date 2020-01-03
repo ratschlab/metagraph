@@ -10,6 +10,7 @@
 #include "common/vectors/bit_vector.hpp"
 #include "common/vector.hpp"
 #include "annotation/annotate.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
 
 namespace annotate {
@@ -73,6 +74,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     void rename_labels(const std::unordered_map<Label, Label> &dict) override;
 
     uint64_t num_objects() const override;
+    inline size_t num_labels() const override { return bitmatrix_.size(); }
     uint64_t num_relations() const override;
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
@@ -92,11 +94,11 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 
-    const auto& data() const { return bitmatrix_; };
-
     std::unique_ptr<IterateRows> iterator() const override;
 
     const bitmap& get_column(const Label &label) const;
+
+    const ColumnMajor& get_matrix() const override;
 
     std::string file_extension() const override { return kExtension; }
 
@@ -120,6 +122,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
+    ColumnMajor annotation_matrix_view_ = ColumnMajor::construct_view(bitmatrix_);
 
     mutable std::mutex bitmap_conversion_mu_;
     mutable bool flushed_ = true;
