@@ -7,23 +7,23 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <progress_bar.hpp>
 
-#include "method_constructors.hpp"
-#include "data_generation.hpp"
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
-#include "annotate_column_compressed.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/algorithms.hpp"
-#include "seq_io/kmc_parser.hpp"
-#include "kmer/alphabets.hpp"
-#include "graph/alignment/aligner_helper.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
-#include "annotate_row_compressed.hpp"
-#include "static_annotators_def.hpp"
-#include "cli/config/config.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/wavelet_tree.hpp"
 #include "common/utils/template_utils.hpp"
+#include "graph/alignment/aligner_helper.hpp"
+#include "kmer/alphabets.hpp"
+#include "seq_io/kmc_parser.hpp"
+#include "cli/config/config.hpp"
+#include "method_constructors.hpp"
+#include "data_generation.hpp"
 
 using namespace std::chrono_literals;
 
