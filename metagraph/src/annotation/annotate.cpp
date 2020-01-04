@@ -140,31 +140,22 @@ MultiLabelEncoded<LabelType>
     if (total_sum_count < min_count)
         return {};
 
-    std::vector<uint64_t> indices(index_counts.size());
-    std::transform(index_counts.begin(), index_counts.end(), indices.begin(),
-                   [](const auto &pair) { return pair.first; });
-
     std::vector<size_t> code_counts(this->num_labels(), 0);
     size_t max_matched = 0;
     size_t total_checked = 0;
 
-    auto it = index_counts.begin();
-    for (Index i : indices) {
-        assert(it != index_counts.end());
-
+    for (auto [i, count] : index_counts) {
         if (max_matched + (total_sum_count - total_checked) < min_count)
             break;
 
         for (size_t label_code : get_label_codes(i)) {
             assert(label_code < code_counts.size());
 
-            code_counts[label_code] += it->second;
+            code_counts[label_code] += count;
             max_matched = std::max(max_matched, code_counts[label_code]);
         }
 
-        total_checked += it->second;
-
-        ++it;
+        total_checked += count;
     }
 
     if (max_matched < min_count)
