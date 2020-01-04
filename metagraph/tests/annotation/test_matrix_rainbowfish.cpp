@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "test_matrix_helpers.hpp"
-#include "rainbowfish.hpp"
+#include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
 
 
 template <int BufferSize>

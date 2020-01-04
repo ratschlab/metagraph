@@ -2,7 +2,7 @@
 
 #include "../graph/all/test_dbg_helpers.hpp"
 
-#include "annotation_converters.hpp"
+#include "annotation/annotation_converters.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 
 using namespace mg::bitmap_graph;

@@ -10,8 +10,8 @@
 #define protected public
 #define private public
 #include "graph/annotated_dbg.hpp"
-#include "annotate_column_compressed.hpp"
-#include "static_annotators_def.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/hash/dbg_hash_string.hpp"

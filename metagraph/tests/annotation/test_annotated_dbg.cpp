@@ -6,7 +6,7 @@
 #include "../test_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
-#include "annotation_converters.hpp"
+#include "annotation/annotation_converters.hpp"
 
 
 void check_labels(const AnnotatedDBG &anno_graph,

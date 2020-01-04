@@ -1,7 +1,6 @@
 #include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
-#include "annotate_column_compressed.hpp"
 #include "common/vector.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"

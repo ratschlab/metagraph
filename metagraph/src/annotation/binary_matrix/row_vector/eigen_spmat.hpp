@@ -5,7 +5,7 @@
 
 #include <Eigen/Sparse>
 
-#include "binary_matrix/base/binary_matrix.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
 class EigenSpMat : public BinaryMatrixRowDynamic {
