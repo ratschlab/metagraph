@@ -7,7 +7,7 @@
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/vector.hpp"
-#include "annotation/annotate.hpp"
+#include "annotation/representation/base/annotation.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
 
@@ -80,6 +80,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
+    // TODO: move to all other converters
     void convert_to_row_annotator(const std::string &outfbase) const;
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
                                   size_t num_threads = 1) const;

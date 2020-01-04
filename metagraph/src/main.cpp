@@ -22,7 +22,7 @@
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
-#include "static_annotators_def.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation_converters.hpp"
 #include "seq_io/kmc_parser.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"

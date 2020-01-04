@@ -1,11 +1,11 @@
 #ifndef __STATIC_ANNOTATOR_DEFS_HPP__
 #define __STATIC_ANNOTATOR_DEFS_HPP__
 
-#include "annotate_static.hpp"
-#include "bin_rel_wt.hpp"
-#include "bin_rel_wt_sdsl.hpp"
-#include "rainbowfish.hpp"
-#include "BRWT.hpp"
+#include "annotation_matrix.hpp"
+#include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
+#include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
+#include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
+#include "annotation/binary_matrix/multi_brwt/BRWT.hpp"
 
 
 namespace annotate {

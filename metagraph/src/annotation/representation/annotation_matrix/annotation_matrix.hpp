@@ -1,5 +1,5 @@
-#ifndef __ANNOTATE_STATIC_HPP__
-#define __ANNOTATE_STATIC_HPP__
+#ifndef __ANNOTATION_MATRIX_HPP__
+#define __ANNOTATION_MATRIX_HPP__
 
 #include <memory>
 #include <vector>
@@ -7,7 +7,7 @@
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
-#include "annotate.hpp"
+#include "annotation/representation/base/annotation.hpp"
 
 
 namespace annotate {
@@ -72,4 +72,4 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
 } // namespace annotate
 
-#endif // __ANNOTATE_STATIC_HPP__
+#endif // __ANNOTATION_MATRIX_HPP__

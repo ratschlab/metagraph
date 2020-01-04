@@ -7,7 +7,7 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
 
-#include "annotation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "kmer/alphabets.hpp"
 
