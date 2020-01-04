@@ -9,7 +9,7 @@
 
 #include "method_constructors.hpp"
 #include "data_generation.hpp"
-#include "annotate_static.hpp"
+#include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
 #include "annotate_column_compressed.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"

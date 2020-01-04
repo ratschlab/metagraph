@@ -7,9 +7,8 @@
 
 #include "common/serialization.hpp"
 #include "common/utils/string_utils.hpp"
-#include "vector_row_binmat.hpp"
-#include "eigen_spmat.hpp"
-#include "binary_matrix.hpp"
+#include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
+#include "annotation/binary_matrix/row_vector/eigen_spmat.hpp"
 
 using utils::remove_suffix;
 

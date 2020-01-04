@@ -1,5 +1,5 @@
-#ifndef __ANNOTATE_HPP__
-#define __ANNOTATE_HPP__
+#ifndef __ANNOTATION_HPP__
+#define __ANNOTATION_HPP__
 
 #include <cassert>
 #include <cstdint>
@@ -186,4 +186,4 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
 
 } // namespace annotate
 
-#endif // __ANNOTATE_HPP__
+#endif // __ANNOTATION_HPP__

@@ -4,9 +4,9 @@
 
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
-#include "annotation/row_compressed/annotate_row_compressed.hpp"
-#include "annotation/column_compressed/annotate_column_compressed.hpp"
-#include "annotation/static_annotators_def.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "cli/config/config.hpp"
 
 

@@ -4,7 +4,7 @@
 #include <memory>
 
 #include "representation/base/sequence_graph.hpp"
-#include "annotation/annotate.hpp"
+#include "annotation/representation/base/annotation.hpp"
 #include "common/threads/threading.hpp"
 
 

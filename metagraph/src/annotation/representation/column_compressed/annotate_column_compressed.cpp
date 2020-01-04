@@ -10,7 +10,7 @@
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 #include "common/threads/threading.hpp"
-#include "annotate_row_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 using utils::remove_suffix;
 
