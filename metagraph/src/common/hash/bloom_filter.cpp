@@ -118,7 +118,7 @@ bool BloomFilter::check(uint64_t hash) const {
  */
 
 // compute Bloom filter hashes in batches of 4
-__always_inline const uint64_t*
+inline const uint64_t*
 batch_insert_avx2(BloomFilter &bloom,
                   const uint32_t num_hash_functions_,
                   const uint64_t *hashes_begin,
@@ -221,7 +221,7 @@ batch_insert_avx2(BloomFilter &bloom,
 
 
 // compute Bloom filter hashes in batches of 4
-__always_inline uint64_t
+inline uint64_t
 batch_check_avx2(const BloomFilter &bloom,
                  const uint64_t *hashes_begin,
                  const uint64_t *hashes_end,
@@ -359,8 +359,8 @@ void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_en
     }
 
     const uint64_t *it = hashes_begin;
+
 #ifdef __AVX2__
-    // TODO: figure out why this fails on Mac
     it = batch_insert_avx2(*this, num_hash_functions_, it, hashes_end);
 #endif
 

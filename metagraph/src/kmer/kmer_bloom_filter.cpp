@@ -23,8 +23,7 @@ constexpr uint64_t npos = 0;
 template <class KmerBF>
 inline void call_kmers(const KmerBF &kmer_bloom,
                        std::string_view sequence,
-                       const std::function<void(uint64_t /* hash */,
-                                                bool /* is valid */)> &callback) {
+                       const std::function<void(uint64_t)> &callback) {
     const auto k = kmer_bloom.get_k();
     if (sequence.size() < k)
         return;
@@ -35,8 +34,6 @@ inline void call_kmers(const KmerBF &kmer_bloom,
     std::transform(sequence.begin(), sequence.end(),
                    coded.begin(),
                    [](char c) { return KmerDef::encode(c); });
-
-    auto invalid = utils::drag_and_mark_segments(coded, max_encoded_val, k);
 
     auto fwd = kmer_bloom.get_hasher();
     fwd.reset(coded.data());
@@ -50,7 +47,7 @@ inline void call_kmers(const KmerBF &kmer_bloom,
         auto rev = kmer_bloom.get_hasher();
         rev.reset(rc_coded.data() + rc_coded.size() - k);
 
-        callback(std::min(uint64_t(fwd), uint64_t(rev)), !invalid[k - 1]);
+        callback(std::min(uint64_t(fwd), uint64_t(rev)));
 
         for (size_t i = k, j = coded.size() - k - 1; i < coded.size(); ++i, --j) {
             if (coded.at(i) < max_encoded_val) {
@@ -59,24 +56,21 @@ inline void call_kmers(const KmerBF &kmer_bloom,
                 fwd.next(coded.at(i));
                 rev.prev(rc_coded.at(j));
 
-                assert(invalid[i] || i + 1 >= k);
-                callback(std::min(uint64_t(fwd), uint64_t(rev)), !invalid[i]);
+                callback(std::min(uint64_t(fwd), uint64_t(rev)));
             } else {
-                callback(npos, false);
+                callback(npos);
             }
         }
 
     } else {
-        callback(fwd, !invalid[k - 1]);
+        callback(fwd);
 
         for (size_t i = k; i < coded.size(); ++i) {
             if (coded.at(i) < max_encoded_val) {
                 fwd.next(coded.at(i));
-
-                assert(invalid[i] || i + 1 >= k);
-                callback(fwd, !invalid[i]);
+                callback(fwd);
             } else {
-                callback(npos, false);
+                callback(npos);
             }
         }
     }
@@ -195,7 +189,7 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
     // aggregate hashes, then batch check
     size_t i = 0;
     AlignedVector<uint64_t> hashes(sequence.size() - k_ + 1);
-    call_kmers(*this, sequence, [&](auto hash, bool) { hashes[i++] = hash; });
+    call_kmers(*this, sequence, [&](auto hash) { hashes[i++] = hash; });
 
     assert(i == hashes.size());
 
