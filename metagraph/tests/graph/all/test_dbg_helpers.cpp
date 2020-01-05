@@ -1,9 +1,9 @@
 #include "test_dbg_helpers.hpp"
 
 #include "gtest/gtest.h"
-#include "boss.hpp"
-#include "boss_construct.hpp"
-#include "dbg_bitmap_construct.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 
 
 template <class Graph>
@@ -12,9 +12,15 @@ build_graph(uint64_t k,
             const std::vector<std::string> &sequences,
             bool canonical) {
     std::shared_ptr<DeBruijnGraph> graph { new Graph(k, canonical) };
+
+    uint64_t max_index = graph->max_index();
+
     for (const auto &sequence : sequences) {
-        graph->add_sequence(sequence);
+        graph->add_sequence(sequence, [&](auto i) { ASSERT_TRUE(i <= ++max_index); });
     }
+
+    [&]() { ASSERT_EQ(max_index, graph->max_index()); }();
+
     return graph;
 }
 
@@ -32,9 +38,15 @@ build_graph<DBGHashString>(uint64_t k,
             const std::vector<std::string> &sequences,
             bool) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGHashString(k) };
+
+    uint64_t max_index = graph->max_index();
+
     for (const auto &sequence : sequences) {
-        graph->add_sequence(sequence);
+        graph->add_sequence(sequence, [&](auto i) { ASSERT_TRUE(i <= ++max_index); });
     }
+
+    [&]() { ASSERT_EQ(max_index, graph->max_index()); }();
+
     return graph;
 }
 
@@ -56,9 +68,15 @@ build_graph<DBGSuccinct>(uint64_t k,
                          const std::vector<std::string> &sequences,
                          bool canonical) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(k, canonical) };
+
+    uint64_t max_index = graph->max_index();
+
     for (const auto &sequence : sequences) {
-        graph->add_sequence(std::string(sequence));
+        graph->add_sequence(sequence, [&](auto i) { ASSERT_TRUE(i <= ++max_index); });
     }
+
+    [&]() { ASSERT_EQ(max_index, graph->max_index()); }();
+
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
     return graph;
 }
@@ -109,11 +127,7 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch(uint64_t k,
                   const std::vector<std::string> &sequences,
                   bool canonical) {
-    std::shared_ptr<DeBruijnGraph> graph { new Graph(k, canonical) };
-    for (const auto &sequence : sequences) {
-        graph->add_sequence(std::string(sequence));
-    }
-    return graph;
+    return build_graph<Graph>(k, sequences, canonical);
 }
 
 template
@@ -124,17 +138,9 @@ template
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGHashFast>(uint64_t, const std::vector<std::string> &, bool);
 
-template <>
+template
 std::shared_ptr<DeBruijnGraph>
-build_graph_batch<DBGHashString>(uint64_t k,
-                                 const std::vector<std::string> &sequences,
-                                 bool) {
-    std::shared_ptr<DeBruijnGraph> graph { new DBGHashString(k) };
-    for (const auto &sequence : sequences) {
-        graph->add_sequence(std::string(sequence));
-    }
-    return graph;
-}
+build_graph_batch<DBGHashString>(uint64_t, const std::vector<std::string> &, bool);
 
 template <>
 std::shared_ptr<DeBruijnGraph>

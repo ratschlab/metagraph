@@ -1,9 +1,9 @@
 #ifndef __DBG_HASH_ORDERED_HPP__
 #define __DBG_HASH_ORDERED_HPP__
 
-#include <fstream>
+#include <iostream>
 
-#include "sequence_graph.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 class DBGHashOrdered : public DeBruijnGraph {
@@ -12,23 +12,21 @@ class DBGHashOrdered : public DeBruijnGraph {
                             bool canonical_mode = false,
                             bool packed_serialization = false);
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
+    // Insert sequence to graph and invoke callback |on_insertion| for each new
+    // node created in the graph.
     void add_sequence(std::string_view sequence,
-                      bit_vector_dyn *nodes_inserted = NULL) {
-        hash_dbg_->add_sequence(sequence, nodes_inserted);
+                      const std::function<void(node_index)> &on_insertion = [](node_index) {}) {
+        hash_dbg_->add_sequence(sequence, on_insertion);
     }
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
+    // Insert sequence to graph and invoke callback |on_insertion| for each new
+    // node created in the graph.
     // `skip` is called before adding each k-mer into the graph and the k-mer
     // is skipped if `skip()` returns `false`.
     void add_sequence(std::string_view sequence,
                       const std::function<bool()> &skip,
-                      bit_vector_dyn *nodes_inserted = NULL) {
-        hash_dbg_->add_sequence(sequence, skip, nodes_inserted);
+                      const std::function<void(node_index)> &on_insertion = [](node_index) {}) {
+        hash_dbg_->add_sequence(sequence, skip, on_insertion);
     }
 
     // Traverse graph mapping sequence to the graph nodes
@@ -125,10 +123,10 @@ class DBGHashOrdered : public DeBruijnGraph {
       public:
         virtual ~DBGHashOrderedInterface() {}
         virtual void add_sequence(std::string_view sequence,
-                                  bit_vector_dyn *nodes_inserted) = 0;
+                                  const std::function<void(node_index)> &on_insertion) = 0;
         virtual void add_sequence(std::string_view sequence,
                                   const std::function<bool()> &skip,
-                                  bit_vector_dyn *nodes_inserted) = 0;
+                                  const std::function<void(node_index)> &on_insertion) = 0;
         virtual void serialize(std::ostream &out) const = 0;
         virtual void serialize(const std::string &filename) const = 0;
         virtual bool load(std::istream &in) = 0;

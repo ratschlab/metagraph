@@ -6,18 +6,16 @@
 #include <filesystem>
 #include <progress_bar.hpp>
 
-#include "annotate.hpp"
-#include "static_annotators_def.hpp"
-#include "annotate_column_compressed.hpp"
-#include "BRWT_builders.hpp"
-#include "partitionings.hpp"
-#include "string_utils.hpp"
-#include "template_utils.hpp"
 #include "common/algorithms.hpp"
-#include "bitmap_mergers.hpp"
-#include "binary_matrix.hpp"
-#include "annotate_row_compressed.hpp"
-#include "vector_row_binmat.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/utils/template_utils.hpp"
+#include "common/vectors/bitmap_mergers.hpp"
+#include "binary_matrix/row_vector/vector_row_binmat.hpp"
+#include "binary_matrix/multi_brwt/BRWT_builders.hpp"
+#include "binary_matrix/multi_brwt/partitionings.hpp"
+#include "representation/annotation_matrix/static_annotators_def.hpp"
+#include "representation/column_compressed/annotate_column_compressed.hpp"
+#include "representation/row_compressed/annotate_row_compressed.hpp"
 
 
 namespace annotate {

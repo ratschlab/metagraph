@@ -5,7 +5,7 @@
 
 #define private public
 #include "test_matrix_helpers.hpp"
-#include "unix_tools.hpp"
+#include "common/unix_tools.hpp"
 
 
 TYPED_TEST(AnnotatorTest, EmptyConstructor) {

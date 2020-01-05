@@ -1,10 +1,10 @@
 #include "dbg_hash_string.hpp"
 
 #include <cassert>
+#include <fstream>
 
 #include "common/serialization.hpp"
-#include "common/vectors/bit_vector.hpp"
-#include "alphabets.hpp"
+#include "kmer/alphabets.hpp"
 
 
 #if _PROTEIN_GRAPH
@@ -23,17 +23,15 @@
 #endif
 
 void DBGHashString::add_sequence(std::string_view sequence,
-                                 bit_vector_dyn *nodes_inserted) {
-    assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
-
+                                 const std::function<void(node_index)> &on_insertion) {
     for (const auto &seq_encoded : encode_sequence(sequence)) {
         assert(sequence.size() >= k_);
 
         for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
             auto index_insert = kmers_.insert(seq_encoded.substr(i, k_));
 
-            if (index_insert.second && nodes_inserted)
-                nodes_inserted->insert_bit(kmers_.size() - 1, true);
+            if (index_insert.second)
+                on_insertion(kmers_.size());
         }
     }
 }

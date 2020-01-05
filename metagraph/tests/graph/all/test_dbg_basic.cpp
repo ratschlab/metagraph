@@ -7,7 +7,7 @@
 
 #include "../../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
-#include "node_weights.hpp"
+#include "graph/graph_extensions/node_weights.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";

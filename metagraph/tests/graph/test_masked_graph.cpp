@@ -5,7 +5,7 @@
 #include "../test_helpers.hpp"
 #include "all/test_dbg_helpers.hpp"
 
-#include "masked_graph.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 
 template <typename Graph>

@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include "int_vector.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 #include "test_helpers.hpp"
 
 

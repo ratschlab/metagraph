@@ -1,8 +1,8 @@
 #ifndef __GRAPH_CLEANING_HPP__
 #define __GRAPH_CLEANING_HPP__
 
-#include "sequence_graph.hpp"
-#include "node_weights.hpp"
+#include "representation/base/sequence_graph.hpp"
+#include "graph_extensions/node_weights.hpp"
 
 
 bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,

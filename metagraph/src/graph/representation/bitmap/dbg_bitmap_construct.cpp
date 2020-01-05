@@ -7,7 +7,7 @@
 #include "common/sorted_multiset.hpp"
 #include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
-#include "node_weights.hpp"
+#include "graph/graph_extensions/node_weights.hpp"
 
 namespace mg {
 namespace bitmap_graph {

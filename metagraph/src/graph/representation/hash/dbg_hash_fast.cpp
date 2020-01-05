@@ -1,14 +1,13 @@
 #include "dbg_hash_fast.hpp"
 
 #include <cassert>
+#include <fstream>
 #include <limits>
 
 #include <tsl/ordered_set.h>
-#include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
-#include "common/vectors/bit_vector.hpp"
 #include "common/algorithms.hpp"
 #include "common/hash/hash.hpp"
 #include "common/utils/string_utils.hpp"
@@ -56,11 +55,8 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         bits_.reserve(reserve);
     }
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
     void add_sequence(std::string_view sequence,
-                      bit_vector_dyn *nodes_inserted);
+                      const std::function<void(node_index)> &on_insertion);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -241,11 +237,14 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     static constexpr uint8_t kBitsPerChar = KMER::kBitsPerChar;
 };
 
+// Insert sequence to graph and invoke callback |on_insertion| for each new
+// node index augmenting the range [1,...,max_index], including those not
+// pointing to any real node in graph. That is, the callback is invoked for
+// all new real nodes and all new dummy node indexes allocated in graph.
+// In short: max_index[after] = max_index[before] + {num_invocations}.
 template <typename KMER>
 void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
-                                         bit_vector_dyn *nodes_inserted) {
-    assert(!nodes_inserted || nodes_inserted->size() == max_index() + 1);
-
+                                         const std::function<void(node_index)> &on_insertion) {
     auto add_seq = [&](const auto &sequence) {
         bool previous_valid = false;
 
@@ -262,25 +261,27 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
             // TODO: if previous k-mer wasn't inserted (and hence, had
             // been inserted earlier), compare the current k-mer with get_next.
 
-            Flags *val;
+            Flags char_flag = Flags(1) << kmer[k_ - 1];
+
             if (inserted) {
-                bits_.push_back(0);
-                val = &bits_.back();
+                bits_.push_back(previous_valid ? char_flag
+                                               : char_flag | kMayBeSourceKmer);
+                // call all indexes inserted (only one of them is a real node)
+                uint64_t offset = 1 + (iter - kmers_.begin()) * kAlphabetSize;
+                for (TAlphabet c = 0; c < kAlphabetSize; ++c) {
+                    on_insertion(offset + c);
+                }
             } else {
-                val = &bits_[iter - kmers_.begin()];
+                auto &flags = bits_[iter - kmers_.begin()];
+                flags |= char_flag;
+                if (previous_valid)
+                    flags &= ~kMayBeSourceKmer;
             }
-            *val |= (Flags(1) << kmer[k_ - 1]) | kMayBeSourceKmer;
+
+            previous_valid = true;
 
             assert(iter != kmers_.end());
             assert(iter == kmers_.find(key));
-
-            if (previous_valid)
-                *val &= ~kMayBeSourceKmer;
-
-            if (nodes_inserted && iter != kmers_.end())
-                nodes_inserted->insert_bit(kmers_.size() - 1, true);
-
-            previous_valid = true;
         }
     };
 

@@ -3,9 +3,9 @@
 
 #include <memory>
 
-#include "sequence_graph.hpp"
-#include "annotate.hpp"
-#include "threading.hpp"
+#include "representation/base/sequence_graph.hpp"
+#include "annotation/representation/base/annotation.hpp"
+#include "common/threads/threading.hpp"
 
 
 // TODO: rename to AnnotatedSequenceGraph

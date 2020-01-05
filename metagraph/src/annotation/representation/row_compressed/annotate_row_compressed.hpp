@@ -5,8 +5,7 @@
 
 #include <Eigen/Sparse>
 
-#include "annotate.hpp"
-#include "binary_matrix.hpp"
+#include "annotation/representation/base/annotation.hpp"
 
 
 namespace annotate {
@@ -17,6 +16,8 @@ template <typename Label>
 class ColumnCompressed;
 
 
+// TODO: implement this as an annotation matrix
+// StaticBinRelAnnotator<VectorRowBinMat>
 template <typename Label = std::string>
 class RowCompressed : public MultiLabelEncoded<Label> {
     friend ColumnCompressed<Label>;
@@ -64,9 +65,12 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     std::string file_extension() const { return kExtension; }
 
+    // TODO: move to BinaryMatrixRowDynamic
     static void write_rows(std::string filename,
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void(BinaryMatrix::RowCallback)> &call_rows);
+
+    const BinaryMatrix& get_matrix() const { return *matrix_; };
 
   private:
     void reinitialize(uint64_t num_rows);

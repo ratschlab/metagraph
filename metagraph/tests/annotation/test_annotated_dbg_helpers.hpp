@@ -9,16 +9,16 @@
 
 #define protected public
 #define private public
-#include "annotated_dbg.hpp"
-#include "annotate_column_compressed.hpp"
-#include "static_annotators_def.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
-#include "dbg_succinct.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_hash_fast.hpp"
-#include "dbg_bitmap.hpp"
-#include "masked_graph.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/hash/dbg_hash_string.hpp"
+#include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 using namespace mg::bitmap_graph;
 

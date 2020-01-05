@@ -2,6 +2,7 @@
 
 #include "common/algorithms.hpp"
 #include "bit_vector.hpp"
+#include "int_vector_algorithm.hpp"
 
 
 // since std::set needs 32 bytes per element
@@ -11,144 +12,6 @@ const size_t bitmap_adaptive::kNumIndicesMargin = 2;
 const size_t bitmap_adaptive::kRowCutoff = 1'000'000;
 
 const size_t SPARSE_DENSE_FACTOR = 128;
-
-
-sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
-    sdsl::bit_vector result(vector.size(), 0);
-    for (size_t i = 0; i < vector.size(); ++i) {
-        if (vector[i])
-            result[i] = 1;
-    }
-    return result;
-}
-
-void call_ones(const sdsl::bit_vector &vector,
-               uint64_t begin, uint64_t end,
-               const VoidCall<uint64_t> &callback) {
-    assert(begin <= end);
-    assert(end <= vector.size());
-
-    uint64_t i = begin;
-    for (; i < end && i & 0x3F; ++i) {
-        if (vector[i])
-            callback(i);
-    }
-    uint64_t word;
-    for (uint64_t j = i + 64; j <= end; j += 64) {
-        word = vector.get_int(i);
-        if (!word) {
-            i += 64;
-            continue;
-        }
-
-        i += sdsl::bits::lo(word);
-        callback(i++);
-
-        for (; i < j; ++i) {
-            if (vector[i])
-                callback(i);
-        }
-    }
-    for (; i < end; ++i) {
-        if (vector[i])
-            callback(i);
-    }
-}
-
-void call_ones(const sdsl::bit_vector &vector,
-               const VoidCall<uint64_t> &callback) {
-    call_ones(vector, 0, vector.size(), callback);
-}
-
-uint64_t count_ones(const sdsl::bit_vector &vector,
-                    uint64_t begin, uint64_t end) {
-    assert(begin <= end);
-    assert(end <= vector.size());
-
-    if (begin == end)
-        return 0;
-
-    if (end - begin <= 64)
-        return sdsl::bits::cnt(vector.get_int(begin, end - begin));
-
-    const uint64_t *data = vector.data() + (begin >> 6);
-    const uint64_t *data_end = vector.data() + ((end + 63) >> 6);
-
-    uint64_t count = 0;
-
-    if (begin & 0x3F) {
-        count += sdsl::bits::cnt((*data++) & (~sdsl::bits::lo_set[begin & 0x3F]));
-    }
-
-    while (data < data_end) {
-        count += sdsl::bits::cnt(*data++);
-    }
-
-    if (end & 0x3F)
-        count -= sdsl::bits::cnt((*(--data)) & (~sdsl::bits::lo_set[end & 0x3F]));
-
-    return count;
-}
-
-void call_zeros(const sdsl::bit_vector &vector,
-                uint64_t begin, uint64_t end,
-                const VoidCall<uint64_t> &callback) {
-    assert(begin <= end);
-    assert(end <= vector.size());
-
-    uint64_t i = begin;
-    for (; i < end && i & 0x3F; ++i) {
-        if (!vector[i])
-            callback(i);
-    }
-    uint64_t word;
-    for (uint64_t j = i + 64; j <= end; j += 64) {
-        word = ~vector.get_int(i);
-        if (!word) {
-            i += 64;
-            continue;
-        }
-
-        i += sdsl::bits::lo(word);
-        callback(i++);
-
-        for (; i < j; ++i) {
-            if (!vector[i])
-                callback(i);
-        }
-    }
-    for (; i < end; ++i) {
-        if (!vector[i])
-            callback(i);
-    }
-}
-
-void call_zeros(const sdsl::bit_vector &vector,
-                const VoidCall<uint64_t> &callback) {
-    call_zeros(vector, 0, vector.size(), callback);
-}
-
-uint64_t inner_prod(const sdsl::bit_vector &first,
-                    const sdsl::bit_vector &second) {
-    assert(first.size() == second.size());
-
-    if (first.empty())
-        return 0;
-
-    const uint64_t *first_data = first.data();
-    const uint64_t *second_data = second.data();
-
-    uint64_t result = sdsl::bits::cnt((*first_data) & (*second_data));
-
-    for (typename sdsl::bit_vector::size_type i = 1; i < (first.capacity() >> 6); ++i) {
-        result += sdsl::bits::cnt(*(++first_data) & *(++second_data));
-    }
-    if (first.bit_size() & 0x3F) {
-        result -= sdsl::bits::cnt((*first_data) & (*second_data)
-                                    & (~sdsl::bits::lo_set[first.bit_size() & 0x3F]));
-    }
-    return result;
-}
 
 
 ////////////////////////////////////////////////////////////////
@@ -461,10 +324,10 @@ void bitmap_adaptive::to_set() {
 bitmap_lazy::bitmap_lazy(size_t size, bool value)
       : bitmap_lazy([value](auto) { return value; }, size, size * value) {}
 
-bitmap_lazy::bitmap_lazy(BoolCallback callback,
+bitmap_lazy::bitmap_lazy(std::function<bool(uint64_t)>&& callback,
                          size_t size,
                          size_t num_set_bits) noexcept
-      : in_bitmap_(callback),
+      : is_bit_set_(std::move(callback)),
         size_(size),
         num_set_bits_(num_set_bits) {}
 
@@ -483,16 +346,9 @@ uint64_t bitmap_lazy::get_int(uint64_t id, uint32_t width) const {
     return (word << 1) | operator[](id);
 }
 
-uint64_t bitmap_lazy::size() const {
-    if (size_ == static_cast<size_t>(-1)) {
-        throw std::runtime_error("Size not predefined");
-    }
-
-    return size_;
-}
 uint64_t bitmap_lazy::num_set_bits() const {
     if (num_set_bits_ == static_cast<size_t>(-1)) {
-        throw std::runtime_error("Number of set bits not predefined");
+        throw std::runtime_error("Number of set bits not pre-computed");
     }
 
     return num_set_bits_;

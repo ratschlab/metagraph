@@ -4,8 +4,8 @@
 
 #include "test_matrix_helpers.hpp"
 
-#include "BRWT.hpp"
-#include "BRWT_builders.hpp"
+#include "annotation/binary_matrix/multi_brwt/BRWT.hpp"
+#include "annotation/binary_matrix/multi_brwt/BRWT_builders.hpp"
 
 
 template <typename BinMat>

@@ -7,23 +7,23 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <progress_bar.hpp>
 
+#include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "common/unix_tools.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/algorithms.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "common/serialization.hpp"
+#include "common/vectors/wavelet_tree.hpp"
+#include "common/utils/template_utils.hpp"
+#include "graph/alignment/aligner_helper.hpp"
+#include "kmer/alphabets.hpp"
+#include "seq_io/kmc_parser.hpp"
+#include "cli/config/config.hpp"
 #include "method_constructors.hpp"
 #include "data_generation.hpp"
-#include "annotate_static.hpp"
-#include "annotate_column_compressed.hpp"
-#include "unix_tools.hpp"
-#include "string_utils.hpp"
-#include "common/algorithms.hpp"
-#include "kmc_parser.hpp"
-#include "alphabets.hpp"
-#include "aligner_helper.hpp"
-#include "reverse_complement.hpp"
-#include "annotate_row_compressed.hpp"
-#include "static_annotators_def.hpp"
-#include "config.hpp"
-#include "serialization.hpp"
-#include "wavelet_tree.hpp"
-#include "common/utils/template_utils.hpp"
 
 using namespace std::chrono_literals;
 
@@ -627,7 +627,7 @@ int main(int argc, char *argv[]) {
                             columns.erase(it--);
                     }
 
-                    ColMajorCompressed matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
+                    ColumnMajor matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
                     std::cout << "Reduced matrix from ("
                               << annotator.num_objects() << ", " << annotator.num_labels()
                               << ") to ("

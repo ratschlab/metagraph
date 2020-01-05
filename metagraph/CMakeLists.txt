@@ -220,25 +220,11 @@ link_directories(
   external-libraries/sdsl-lite/lib
 )
 
-MACRO(SUBDIRLIST result curdir)
-  FILE(GLOB children RELATIVE ${curdir} ${curdir}/* ${curdir}/*/* ${curdir}/*/*/*)
-  SET(dirlist "${curdir}")
-  FOREACH(child ${children})
-    IF(IS_DIRECTORY ${curdir}/${child})
-      LIST(APPEND dirlist ${curdir}/${child})
-    ENDIF()
-  ENDFOREACH()
-  SET(${result} ${dirlist})
-ENDMACRO()
-
-SUBDIRLIST(INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
-
 include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
   external-libraries/DYNAMIC/include
   external-libraries/sdsl-lite/include
-  external-libraries/rollinghashcpp
   external-libraries/ips4o
   external-libraries/eigen
   external-libraries/caches/include
@@ -251,7 +237,7 @@ include_directories(
   external-libraries/nvbio/contrib/priority-deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
-  ${INCLUDE_DIRS}
+  ${PROJECT_SOURCE_DIR}/src
 )
 
 # makes ASIO not depend on boost
@@ -445,8 +431,6 @@ file(GLOB experiment_files
 list(FILTER experiment_files EXCLUDE REGEX ".*\\._.*")
 
 include_directories(
-  .
-  ${INCLUDE_DIRS}
   experiments
   external-libraries/tclap/include
 )
@@ -526,10 +510,6 @@ list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 if (CMAKE_VERSION VERSION_LESS 2.8.11)
   include_directories("${gtest_SOURCE_DIR}/include")
 endif()
-
-include_directories(
-  ${INCLUDE_DIRS}
-)
 
 link_directories(
   ${CMAKE_BINARY_DIR}

@@ -7,7 +7,8 @@
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/vector.hpp"
-#include "annotation/annotate.hpp"
+#include "annotation/representation/base/annotation.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
 
 namespace annotate {
@@ -79,6 +80,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
+    // TODO: move to all other converters
     void convert_to_row_annotator(const std::string &outfbase) const;
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
                                   size_t num_threads = 1) const;
@@ -90,6 +92,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     std::unique_ptr<IterateRows> iterator() const override;
 
     const bitmap& get_column(const Label &label) const;
+
+    const BinaryMatrix& get_matrix() const override;
 
     std::string file_extension() const override { return kExtension; }
 
@@ -113,6 +117,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
+    ColumnMajor annotation_matrix_view_ = ColumnMajor::construct_view(bitmatrix_);
 
     caches::fixed_sized_cache<size_t,
                               bitmap_builder*,

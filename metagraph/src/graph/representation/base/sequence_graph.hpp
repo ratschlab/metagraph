@@ -7,8 +7,6 @@
 #include <iostream>
 #include <memory>
 
-class bit_vector_dyn;
-
 namespace utils {
     std::string remove_suffix(const std::string &str, const std::string &suffix);
 }
@@ -23,11 +21,13 @@ class SequenceGraph {
 
     virtual ~SequenceGraph() {}
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
+    // Insert sequence to graph and invoke callback |on_insertion| for each new
+    // node index augmenting the range [1,...,max_index], including those not
+    // pointing to any real node in graph. That is, the callback is invoked for
+    // all new real nodes and all new dummy node indexes allocated in graph.
+    // In short: max_index[after] = max_index[before] + {num_invocations}.
     virtual void add_sequence(std::string_view sequence,
-                              bit_vector_dyn *nodes_inserted = NULL) = 0;
+                              const std::function<void(node_index)> &on_insertion = [](uint64_t) {}) = 0;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied

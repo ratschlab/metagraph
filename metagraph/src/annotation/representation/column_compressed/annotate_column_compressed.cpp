@@ -5,12 +5,12 @@
 #include <stdexcept>
 
 #include "common/serialization.hpp"
-#include "string_utils.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/algorithms.hpp"
-#include "bitmap_builder.hpp"
-#include "bitmap_mergers.hpp"
+#include "common/vectors/bitmap_builder.hpp"
+#include "common/vectors/bitmap_mergers.hpp"
 #include "common/threads/threading.hpp"
-#include "annotate_row_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 using utils::remove_suffix;
 
@@ -537,6 +537,12 @@ const bitmap& ColumnCompressed<Label>::get_column(size_t j) const {
 template <typename Label>
 const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
     return get_column(label_encoder_.encode(label));
+}
+
+template <typename Label>
+const BinaryMatrix& ColumnCompressed<Label>::get_matrix() const {
+    flush();
+    return annotation_matrix_view_;
 }
 
 template <typename Label>

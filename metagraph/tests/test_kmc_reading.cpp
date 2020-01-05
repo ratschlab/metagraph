@@ -3,7 +3,7 @@
 #include <unordered_set>
 #include <string>
 
-#include "kmc_parser.hpp"
+#include "seq_io/kmc_parser.hpp"
 
 using kmc::read_kmers;
 

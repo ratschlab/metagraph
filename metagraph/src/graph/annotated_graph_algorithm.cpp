@@ -3,11 +3,11 @@
 #include <unordered_set>
 
 #include "common/algorithms.hpp"
-#include "common/vectors/int_vector.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 #include "kmer/alphabets.hpp"
-#include "annotation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/alignment/aligner_helper.hpp"
-#include "graph/masked_graph.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 namespace annotated_graph_algorithm {
 

@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include "annotation/annotate.hpp"
+#include "annotation/representation/base/annotation.hpp"
 #include "cli/config/config.hpp"
 
 

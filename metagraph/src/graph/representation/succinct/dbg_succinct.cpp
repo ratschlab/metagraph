@@ -169,46 +169,43 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
     );
 }
 
-// Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-// is passed. If passed, |nodes_inserted| must have length equal
-// to the number of nodes in graph.
 void DBGSuccinct::add_sequence(std::string_view sequence,
-                               bit_vector_dyn *nodes_inserted) {
-    add_seq(sequence, nodes_inserted);
+                               const std::function<void(node_index)> &on_insertion) {
+    if (sequence.size() < get_k())
+        return;
+
+    std::vector<uint64_t> boss_edges_inserted;
+    boss_edges_inserted.reserve((sequence.size() - get_k() + 1)
+                                        * (1 + canonical_mode_));
+
+    // insert forward sequence
+    boss_graph_->add_sequence(sequence, true, &boss_edges_inserted);
+
     if (canonical_mode_) {
         // insert reverse complement sequence as well,
         // to have all canonical k-mers in graph
-        std::string sequence_copy(sequence.begin(), sequence.end());
-        reverse_complement(sequence_copy.begin(), sequence_copy.end());
-        add_seq(sequence_copy, nodes_inserted);
+        std::string rev_compl(sequence.begin(), sequence.end());
+        reverse_complement(rev_compl.begin(), rev_compl.end());
+
+        boss_graph_->add_sequence(rev_compl, true, &boss_edges_inserted);
     }
 
-    if (bloom_filter_)
-        bloom_filter_->add_sequence(sequence);
-}
+    for (uint64_t new_boss_edge : boss_edges_inserted) {
+        // update bitmask with valid k-mers -- assume all inserted k-mers valid
+        // TODO: detect dummy BOSS edges and insert zeros to mask them out
+        if (valid_edges_)
+            valid_edges_->insert_bit(new_boss_edge, 1);
 
-void DBGSuccinct::add_seq(std::string_view sequence,
-                          bit_vector_dyn *nodes_inserted) {
-    assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
-
-    if (nodes_inserted) {
-        std::vector<uint64_t> inserted_indexes;
-        inserted_indexes.reserve(sequence.size());
-
-        boss_graph_->add_sequence(sequence, true, &inserted_indexes);
-
-        for (auto i : inserted_indexes) {
-            if (valid_edges_.get())
-                valid_edges_->insert_bit(i, true);
-            if (nodes_inserted)
-                nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
-        }
-
-    } else {
-        boss_graph_->add_sequence(sequence, true);
+        // Call all new nodes inserted including the dummy ones, unless they
+        // are masked out.
+        on_insertion(boss_to_kmer_index(new_boss_edge));
     }
 
     assert(!valid_edges_.get() || !(*valid_edges_)[0]);
+    assert(!valid_edges_.get() || valid_edges_->size() == boss_graph_->num_edges() + 1);
+
+    if (bloom_filter_)
+        bloom_filter_->add_sequence(sequence);
 }
 
 std::string DBGSuccinct::get_node_sequence(node_index node) const {

@@ -3,7 +3,7 @@
 #include <vector>
 #include <deque>
 
-#include "ring_buffer.hpp"
+#include "common/ring_buffer.hpp"
 
 
 void test_buffer_back(RingBuffer<int> &buffer, size_t size) {

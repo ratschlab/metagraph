@@ -1,7 +1,6 @@
 #include "annotated_dbg.hpp"
 
-#include "common/vectors/bit_vector.hpp"
-#include "annotate_row_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
 

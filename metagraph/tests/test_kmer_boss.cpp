@@ -9,8 +9,8 @@
 #define private public
 #define protected public
 
-#include "kmer_boss.hpp"
-#include "kmer_extractor.hpp"
+#include "kmer/kmer_boss.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 template <typename T>
