@@ -37,13 +37,19 @@ get_outgoing_columns(const DeBruijnGraph &graph,
         [&](auto next_node, char c) {
             auto find = dp_table.find(next_node);
             if (find == dp_table.end()) {
+                std::vector<NodeType> in_nodes;
+                graph.adjacent_incoming_nodes(
+                    next_node,
+                    [&](auto i) { in_nodes.emplace_back(i); }
+                );
+
                 find = dp_table.emplace(
                     next_node,
-                    Column { std::vector<score_t>(size, min_cell_score),
-                             std::vector<Cigar::Operator>(size),
-                             std::vector<NodeType>(size, DeBruijnGraph::npos),
-                             c,
-                             best_pos + 1 != size ? best_pos + 1 : best_pos }
+                    Column(size,
+                           min_cell_score,
+                           c,
+                           std::move(in_nodes),
+                           best_pos + 1 != size ? best_pos + 1 : best_pos)
                 ).first;
             }
 
@@ -57,18 +63,20 @@ get_outgoing_columns(const DeBruijnGraph &graph,
 
 template <typename NodeType>
 inline std::pair<size_t, size_t>
-get_column_boundaries(const DeBruijnGraph &graph,
-                      const NodeType &node,
-                      DPTable<NodeType> &dp_table,
+get_column_boundaries(const NodeType &node,
+                      const DPTable<NodeType> &dp_table,
                       std::vector<NodeType> &in_nodes,
                       size_t size,
                       size_t prev_best_pos,
                       size_t bandwidth) {
     in_nodes.clear();
-    graph.adjacent_incoming_nodes(node, [&](auto i) {
-        if (dp_table.find(i) != dp_table.end())
-            in_nodes.push_back(i);
-    });
+    assert(dp_table.find(node) != dp_table.end());
+
+    const auto &incoming = dp_table.find(node)->second.incoming;
+    std::copy_if(incoming.begin(),
+                 incoming.end(),
+                 std::back_inserter(in_nodes),
+                 [&](auto i) { return dp_table.find(i) != dp_table.end(); });
 
     size_t overall_begin = size;
     size_t overall_end = 0;
@@ -403,7 +411,8 @@ DefaultColumnExtender<NodeType, Compare>
                          std::vector<typename DPTable::value_type*>,
                          ColumnPriorityFunction> columns_to_update(config_.queue_size);
 
-    DPTable dp_table(path.back(),
+    DPTable dp_table(graph_,
+                     path.back(),
                      *(align_start - 1),
                      path.get_score(),
                      config_.min_cell_score,
@@ -445,7 +454,6 @@ DefaultColumnExtender<NodeType, Compare>
             auto &next_column = iter->second;
 
             auto [overall_begin, overall_end] = get_column_boundaries(
-                graph_,
                 next_node,
                 dp_table,
                 in_nodes,
@@ -455,7 +463,7 @@ DefaultColumnExtender<NodeType, Compare>
             );
 
             update_scores.assign(overall_end - overall_begin, config_.min_cell_score);
-            update_prevs.assign(overall_end - overall_begin, DeBruijnGraph::npos);
+            update_prevs.assign(overall_end - overall_begin, SequenceGraph::npos);
             update_ops.assign(overall_end - overall_begin, Cigar::Operator::CLIPPED);
 
             compute_match_scores(align_start + overall_begin,
@@ -562,7 +570,7 @@ DefaultColumnExtender<NodeType, Compare>
     assert(start_node->second.best_score() > config_.min_cell_score);
 
     // no good path found
-    if (UNLIKELY(start_node->first == DeBruijnGraph::npos
+    if (UNLIKELY(start_node->first == SequenceGraph::npos
             || (start_node->first == path.back() && !start_node->second.best_pos)
             || start_node->second.best_score() < min_path_score))
         return {};
