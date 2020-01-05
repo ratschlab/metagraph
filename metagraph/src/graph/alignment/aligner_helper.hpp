@@ -184,13 +184,13 @@ class DBGAlignerConfig {
 };
 
 
-template <typename NodeType = DeBruijnGraph::node_index>
+template <typename NodeType = SequenceGraph::node_index>
 class DPTable;
 
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
-template <typename NodeType = DeBruijnGraph::node_index>
+template <typename NodeType = SequenceGraph::node_index>
 class Alignment {
   public:
     typedef NodeType node_index;
@@ -366,7 +366,7 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
 }
 
 
-template <typename NodeType = DeBruijnGraph::node_index>
+template <typename NodeType = SequenceGraph::node_index>
 class QueryAlignment {
   public:
     typedef Alignment<NodeType> value_type;
@@ -442,10 +442,23 @@ class DPTable {
     typedef ::score_t score_t;
 
     struct Column {
+        Column(size_t size,
+               score_t min_score,
+               char start_char,
+               std::vector<NodeType>&& in_nodes,
+               size_t pos = 0)
+              : scores(size, min_score),
+                ops(size),
+                prev_nodes(size),
+                last_char(start_char),
+                incoming(std::move(in_nodes)),
+                best_pos(pos) {}
+
         std::vector<score_t> scores;
         std::vector<Cigar::Operator> ops;
         std::vector<NodeType> prev_nodes;
         char last_char;
+        const std::vector<NodeType> incoming;
         size_t best_pos;
 
         const score_t& best_score() const { return scores.at(best_pos); }
@@ -457,7 +470,8 @@ class DPTable {
         }
     };
 
-    explicit DPTable(NodeType start_node,
+    explicit DPTable(const SequenceGraph &graph,
+                     NodeType start_node,
                      char start_char,
                      score_t initial_score,
                      score_t min_score,
