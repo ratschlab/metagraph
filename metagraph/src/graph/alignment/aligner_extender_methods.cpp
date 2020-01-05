@@ -61,31 +61,30 @@ get_outgoing_columns(const DeBruijnGraph &graph,
     return out_columns;
 }
 
-template <typename NodeType>
+template <typename NodeType, typename DPTableIt>
 inline std::pair<size_t, size_t>
-get_column_boundaries(const NodeType &node,
+get_column_boundaries(const DPTableIt *node_it,
                       const DPTable<NodeType> &dp_table,
-                      std::vector<NodeType> &in_nodes,
+                      std::vector<const DPTableIt*> &in_nodes,
                       size_t size,
                       size_t prev_best_pos,
                       size_t bandwidth) {
     in_nodes.clear();
-    assert(dp_table.find(node) != dp_table.end());
 
-    const auto &incoming = dp_table.find(node)->second.incoming;
-    std::copy_if(incoming.begin(),
-                 incoming.end(),
-                 std::back_inserter(in_nodes),
-                 [&](auto i) { return dp_table.find(i) != dp_table.end(); });
+    for (NodeType i : node_it->second.incoming) {
+        auto find = dp_table.find(i);
+
+        if (find != dp_table.end())
+            in_nodes.emplace_back(&*find);
+    }
 
     size_t overall_begin = size;
     size_t overall_end = 0;
 
     // find incoming nodes to check for alignment extension
     // set boundaries for vertical band
-    for (const auto &prev_node : in_nodes) {
-        assert(dp_table.find(prev_node) != dp_table.end());
-        size_t best_pos = dp_table.find(prev_node)->second.best_pos;
+    for (const auto *prev_node_it : in_nodes) {
+        size_t best_pos = prev_node_it->second.best_pos;
 
         if (overall_begin) {
             overall_begin = std::min(
@@ -434,7 +433,7 @@ DefaultColumnExtender<NodeType, Compare>
     // for storage of intermediate values
     std::vector<int8_t> char_scores;
     std::vector<Cigar::Operator> match_ops;
-    std::vector<node_index> in_nodes;
+    std::vector<const typename DPTable::value_type*> in_nodes;
 
     AlignedVector<score_t> update_scores;
     AlignedVector<Cigar::Operator> update_ops;
@@ -443,8 +442,8 @@ DefaultColumnExtender<NodeType, Compare>
     // dynamic programming
     // keep track of node and position in column to start backtracking
     // store raw pointer since they are not invalidated by emplace
-    auto *start_node = &*dp_table.begin();
-    columns_to_update.emplace(start_node);
+    const auto *start_node = &*dp_table.begin();
+    columns_to_update.emplace(&*dp_table.begin());
     while (columns_to_update.size()) {
         const auto* cur_col = columns_to_update.pop_top();
         auto cur_node = cur_col->first;
@@ -458,12 +457,12 @@ DefaultColumnExtender<NodeType, Compare>
                                                 config_.min_cell_score);
 
         // update columns
-        for (const auto &iter : out_columns) {
+        for (auto *iter : out_columns) {
             auto next_node = iter->first;
             auto &next_column = iter->second;
 
             auto [overall_begin, overall_end] = get_column_boundaries(
-                next_node,
+                iter,
                 dp_table,
                 in_nodes,
                 size,
@@ -482,9 +481,8 @@ DefaultColumnExtender<NodeType, Compare>
                                  Cigar::get_op_row(next_column.last_char));
 
             // match and deletion scores
-            for (const auto &prev_node : in_nodes) {
-                assert(dp_table.find(prev_node) != dp_table.end());
-                const auto &incoming = dp_table.find(prev_node)->second;
+            for (const auto *prev_node_it : in_nodes) {
+                const auto &incoming = prev_node_it->second;
 
                 size_t begin = incoming.best_pos >= config_.bandwidth
                     ? incoming.best_pos - config_.bandwidth : 0;
@@ -498,7 +496,7 @@ DefaultColumnExtender<NodeType, Compare>
                     update_scores.data() + (begin - overall_begin),
                     update_prevs.data() + (begin - overall_begin),
                     update_ops.data() + (begin - overall_begin),
-                    prev_node,
+                    prev_node_it->first,
                     incoming.scores.data() + begin,
                     incoming.ops.data() + begin,
                     char_scores.data() + (begin - overall_begin),
