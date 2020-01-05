@@ -41,8 +41,24 @@ inline uint64_t restrict_to(uint64_t h, size_t size) {
 
     return (static_cast<__uint128_t>(h) * size) >> 64;
 #else
-    // TODO: include a backup implementation here
-    static_assert(false);
+    // adapted from:
+    // https://stackoverflow.com/questions/28868367/getting-the-high-part-of-64-bit-integer-multiplication
+
+    const uint64_t x0 = static_cast<uint32_t>(h);
+    const uint64_t x1 = h >> 32;
+    const uint64_t y0 = static_cast<uint32_t>(size);
+    const uint64_t y1 = size >> 32;
+
+    const uint64_t p11 = x1 * y1;
+    const uint64_t p01 = x0 * y1;
+    const uint64_t p10 = x1 * y0;
+    const uint64_t p00 = x0 * y0;
+
+    const uint64_t middle = p10 + (p00 >> 32) + static_cast<uint32_t>(p01);
+
+    assert(p11 + (middle >> 32) + (p01 >> 32) < size);
+
+    return p11 + (middle >> 32) + (p01 >> 32);
 #endif
 }
 
