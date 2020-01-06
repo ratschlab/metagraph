@@ -75,6 +75,8 @@ void annotate_data(const std::vector<std::string> &files,
 
     Timer timer;
 
+    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
+
     // iterate over input files
     for (const auto &file : files) {
         Timer data_reading_timer;
@@ -97,7 +99,13 @@ void annotate_data(const std::vector<std::string> &files,
                     labels.insert(labels.end(),
                                   variant_labels.begin(), variant_labels.end());
 
-                    anno_graph->annotate_sequence(std::move(seq), labels);
+                    thread_pool.enqueue(
+                        [anno_graph](const std::string &sequence, const auto &labels) {
+                            anno_graph->annotate_sequence(sequence, labels);
+                        },
+                        std::move(seq),
+                        labels
+                    );
 
                     total_seqs += 1;
 
@@ -116,7 +124,13 @@ void annotate_data(const std::vector<std::string> &files,
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence) {
-                    anno_graph->annotate_sequence(std::move(sequence), labels);
+                    thread_pool.enqueue(
+                        [anno_graph](const std::string &sequence, const auto &labels) {
+                            anno_graph->annotate_sequence(sequence, labels);
+                        },
+                        std::move(sequence),
+                        labels
+                    );
 
                     total_seqs += 1;
 
@@ -150,7 +164,13 @@ void annotate_data(const std::vector<std::string> &files,
                         }
                     }
 
-                    anno_graph->annotate_sequence(read_stream->seq.s, labels);
+                    thread_pool.enqueue(
+                        [anno_graph](const std::string &sequence, const auto &labels) {
+                            anno_graph->annotate_sequence(sequence, labels);
+                        },
+                        std::string(read_stream->seq.s),
+                        labels
+                    );
 
                     total_seqs += 1;
 
@@ -173,8 +193,7 @@ void annotate_data(const std::vector<std::string> &files,
                       file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
     }
 
-    // join threads if any were initialized
-    anno_graph->join();
+    thread_pool.join();
 }
 
 
@@ -187,6 +206,8 @@ void annotate_coordinates(const std::vector<std::string> &files,
     Timer timer;
 
     const size_t k = dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k();
+
+    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
 
     // iterate over input files
     for (const auto &file : files) {
@@ -219,11 +240,16 @@ void annotate_coordinates(const std::vector<std::string> &files,
                             static_cast<size_t>(sequence.size() - i),
                             static_cast<size_t>(genome_bin_size + k - 1)
                         );
-                        anno_graph->annotate_sequence(
+                        thread_pool.enqueue(
+                            [anno_graph](const std::string &sequence, const auto &labels) {
+                                anno_graph->annotate_sequence(
+                                    sequence, { utils::join_strings(labels, "\1"), }
+                                );
+                            },
                             forward_strand
                                 ? sequence.substr(i, bin_size)
                                 : sequence.substr(sequence.size() - i - bin_size, bin_size),
-                            { utils::join_strings(labels, "\1"), }
+                            labels
                         );
                     }
 
@@ -252,8 +278,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                       file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
     }
 
-    // join threads if any were initialized
-    anno_graph->join();
+    thread_pool.join();
 }
 
 void execute_query(const std::string &seq_name,
@@ -344,8 +369,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
     // load graph
     auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph),
-                                                     std::move(annotation_temp),
-                                                     get_num_threads());
+                                                     std::move(annotation_temp));
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");
@@ -1206,7 +1230,6 @@ int main(int argc, char *argv[]) {
             // load graph
             AnnotatedDBG anno_graph(graph_temp,
                                     std::move(annotation_temp),
-                                    get_num_threads(),
                                     config->fast);
 
             if (!anno_graph.check_compatibility()) {
