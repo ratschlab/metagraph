@@ -71,7 +71,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     // For each pair (first, second) in the dictionary, renames
     // column |first| with |second| and merges the columns with matching names.
-    void rename_labels(const std::unordered_map<Label, Label> &dict) override;
+    void rename_labels(const tsl::hopscotch_map<Label, Label> &dict) override;
 
     uint64_t num_objects() const override;
     inline size_t num_labels() const override { return bitmatrix_.size(); }
@@ -84,7 +84,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
      * Stop counting if count is greater than |count_cap|.
      */
     std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-    count_labels(const std::unordered_map<Index, size_t> &index_counts,
+    count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
