@@ -63,7 +63,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     return annotated_graph_algorithm::mask_nodes_by_unitig(
         dbg,
         [&](const auto &, const auto &path) {
-            std::unordered_map<row_index, size_t> index_counts;
+            tsl::hopscotch_map<row_index, size_t> index_counts;
             for (const auto i : path) {
                 index_counts[anno_graph.graph_to_anno_index(i)]++;
             }

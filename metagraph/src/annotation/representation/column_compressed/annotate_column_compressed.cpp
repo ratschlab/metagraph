@@ -113,33 +113,6 @@ bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
 }
 
 template <typename Label>
-void ColumnCompressed<Label>
-::call_relations(const std::vector<Index> &indices,
-                 const Label &label,
-                 std::function<void(Index, bool)> callback,
-                 std::function<bool()> terminate) const {
-    try {
-        const auto &column = get_column(label);
-
-        for (Index i : indices) {
-            if (terminate())
-                return;
-
-            callback(i, column[i]);
-        }
-
-    } catch (...) {
-
-        for (Index i : indices) {
-            if (terminate())
-                return;
-
-            callback(i, false);
-        }
-    }
-}
-
-template <typename Label>
 bool ColumnCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
     for (const auto &label : labels) {
         if (!has_label(i, label))
@@ -290,7 +263,7 @@ void ColumnCompressed<Label>
 template <typename Label>
 std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 ColumnCompressed<Label>
-::count_labels(const std::unordered_map<Index, size_t> &index_counts,
+::count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
                size_t min_count,
                size_t count_cap) const {
 
@@ -306,32 +279,26 @@ ColumnCompressed<Label>
     if (total_sum_count < min_count)
         return {};
 
-    std::vector<uint64_t> indices(index_counts.size());
-    std::transform(index_counts.begin(), index_counts.end(), indices.begin(),
-                   [](const auto &pair) { return pair.first; });
-
     std::vector<std::pair<uint64_t, size_t>> label_counts;
     label_counts.reserve(this->num_labels());
 
-    // TODO: get rid of label encoder from here
-    for (const auto &label : this->get_all_labels()) {
+    for (size_t j = 0; j < this->num_labels(); ++j) {
         size_t total_checked = 0;
         size_t total_matched = 0;
-        call_relations(
-            indices,
-            label,
-            [&](auto i, bool matched) {
-                auto count = index_counts.at(i);
-                total_checked += count;
-                total_matched += count * matched;
-            },
-            [&]() { return total_matched >= count_cap
-                        || total_matched + (total_sum_count - total_checked) < min_count; }
-        );
+
+        const auto &column = get_column(j);
+
+        for (auto [i, count] : index_counts) {
+            total_checked += count;
+            total_matched += count * column[i];
+
+            if (total_matched >= count_cap
+                    || total_matched + (total_sum_count - total_checked) < min_count)
+                break;
+        }
 
         if (total_matched >= min_count)
-            label_counts.emplace_back(label_encoder_.encode(label),
-                                      std::min(total_matched, count_cap));
+            label_counts.emplace_back(j, std::min(total_matched, count_cap));
     }
 
     return label_counts;
@@ -341,7 +308,7 @@ ColumnCompressed<Label>
 // column |first| with |second| and merges the columns with matching names.
 template <typename Label>
 void ColumnCompressed<Label>
-::rename_labels(const std::unordered_map<Label, Label> &dict) {
+::rename_labels(const tsl::hopscotch_map<Label, Label> &dict) {
     std::vector<Label> index_to_label(label_encoder_.size());
     // old labels
     for (size_t i = 0; i < index_to_label.size(); ++i) {
@@ -360,7 +327,7 @@ void ColumnCompressed<Label>
     }
 
     std::vector<Label> new_index_to_label;
-    std::unordered_map<Label, std::set<size_t>> old_columns;
+    tsl::hopscotch_map<Label, std::set<size_t>> old_columns;
     for (size_t i = 0; i < index_to_label.size(); ++i) {
         if (!old_columns.count(index_to_label[i]))
             new_index_to_label.push_back(index_to_label[i]);

@@ -60,7 +60,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
@@ -92,7 +92,7 @@ std::vector<std::string> AnnotatedDBG
     assert(check_compatibility());
     assert(sequences.size() == weights.size());
 
-    std::unordered_map<uint64_t, double> index_weights;
+    tsl::hopscotch_map<uint64_t, double> index_weights;
     double weighted_num_missing_kmers = 0;
     double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
 
@@ -106,7 +106,7 @@ std::vector<std::string> AnnotatedDBG
         });
     }
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
 
     size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
     size_t num_present_kmers = 0;
@@ -128,7 +128,7 @@ std::vector<std::string> AnnotatedDBG
 }
 
 std::vector<std::string>
-AnnotatedDBG::get_labels(const std::unordered_map<row_index, size_t> &index_counts,
+AnnotatedDBG::get_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
                          size_t min_count) const {
     assert(check_compatibility());
 
@@ -162,7 +162,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
@@ -194,7 +194,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
     assert(check_compatibility());
     assert(sequences.size() == weights.size());
 
-    std::unordered_map<uint64_t, double> index_weights;
+    tsl::hopscotch_map<uint64_t, double> index_weights;
     double weighted_num_missing_kmers = 0;
     double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
 
@@ -208,7 +208,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
         });
     }
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
 
     size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
     size_t num_present_kmers = 0;
@@ -230,7 +230,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
 }
 
 std::vector<StringCountPair>
-AnnotatedDBG::get_top_labels(const std::unordered_map<node_index, size_t> &index_counts,
+AnnotatedDBG::get_top_labels(const tsl::hopscotch_map<node_index, size_t> &index_counts,
                              size_t num_top_labels,
                              size_t min_count) const {
     assert(check_compatibility());

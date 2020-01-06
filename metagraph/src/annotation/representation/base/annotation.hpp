@@ -5,9 +5,10 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <unordered_map>
 #include <memory>
 #include <functional>
+
+#include <tsl/hopscotch_map.h>
 
 #include "common/vector.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
@@ -55,7 +56,7 @@ class MultiLabelAnnotation
 
     // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
     // and merges all relations (*, L') with matching labels L', if supported.
-    virtual void rename_labels(const std::unordered_map<Label, Label> &dict) = 0;
+    virtual void rename_labels(const tsl::hopscotch_map<Label, Label> &dict) = 0;
 
     /************************* Properties *************************/
 
@@ -108,7 +109,7 @@ class LabelEncoder {
     void serialize(std::ostream &outstream) const;
 
   private:
-    std::unordered_map<Label, uint64_t> encode_label_;
+    tsl::hopscotch_map<Label, uint64_t> encode_label_;
     std::vector<Label> decode_label_;
 };
 
@@ -137,7 +138,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
 
     // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
     // and merges all relations (*, L') with matching labels L', if supported.
-    virtual void rename_labels(const std::unordered_map<Label, Label> &dict) override;
+    virtual void rename_labels(const tsl::hopscotch_map<Label, Label> &dict) override;
 
     /************************* Properties *************************/
 
@@ -176,7 +177,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
      * Stop counting if count is greater than |count_cap|.
      */
     virtual std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-    count_labels(const std::unordered_map<Index, size_t> &index_counts,
+    count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const;
 

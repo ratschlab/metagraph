@@ -96,7 +96,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
 std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }
@@ -274,7 +274,7 @@ get_top_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotato
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }
