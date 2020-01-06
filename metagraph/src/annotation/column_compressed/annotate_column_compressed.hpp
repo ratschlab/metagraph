@@ -1,6 +1,8 @@
 #ifndef __ANNOTATE_COLUMN_COMPRESSED_HPP__
 #define __ANNOTATE_COLUMN_COMPRESSED_HPP__
 
+#include <mutex>
+
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 #include <progress_bar.hpp>
@@ -18,6 +20,11 @@ template <typename Label>
 class RowCompressed;
 
 
+/**
+ * Multithreading:
+ *  The non-const methods must be called sequentially.
+ *  Then, any subset of the public const methods can be called concurrently.
+ */
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<Label> {
     template <class A, typename L>
@@ -113,6 +120,9 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
+
+    mutable std::mutex bitmap_conversion_mu_;
+    mutable bool flushed_ = true;
 
     caches::fixed_sized_cache<size_t,
                               bitmap_builder*,
