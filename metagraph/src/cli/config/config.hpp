@@ -179,7 +179,8 @@ class Config {
     AnnotationType anno_type = ColumnCompressed;
     GraphType graph_type = SUCCINCT;
 
-    mg::kmer::ContainerType container;
+    mg::kmer::ContainerType container = mg::kmer::ContainerType::VECTOR;
+
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 
     static std::string annotype_to_string(AnnotationType state);
