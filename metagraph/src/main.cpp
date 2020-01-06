@@ -5,6 +5,7 @@
 #include <ips4o.hpp>
 #include <json/json.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <tsl/hopscotch_map.h>
 
 #include "common/logger.hpp"
 
@@ -1709,7 +1710,7 @@ int main(int argc, char *argv[]) {
                 assert(graph->max_index() + 1 == weights.size());
 
                 // compute clean count histogram
-                std::unordered_map<uint64_t, uint64_t> count_hist;
+                tsl::hopscotch_map<uint64_t, uint64_t> count_hist;
 
                 if (config->min_unitig_median_kmer_abundance != 1 || config->min_tip_size > 1) {
                     // cleaning required
@@ -1917,7 +1918,7 @@ int main(int argc, char *argv[]) {
             /********************************************************/
 
             if (config->rename_instructions_file.size()) {
-                std::unordered_map<std::string, std::string> dict;
+                tsl::hopscotch_map<std::string, std::string> dict;
                 std::ifstream instream(config->rename_instructions_file);
                 if (!instream.is_open()) {
                     logger->error("Cannot open file '{}'", config->rename_instructions_file);

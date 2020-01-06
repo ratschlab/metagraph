@@ -290,7 +290,7 @@ void ColumnCompressed<Label>
 template <typename Label>
 std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 ColumnCompressed<Label>
-::count_labels(const std::unordered_map<Index, size_t> &index_counts,
+::count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
                size_t min_count,
                size_t count_cap) const {
 
@@ -341,7 +341,7 @@ ColumnCompressed<Label>
 // column |first| with |second| and merges the columns with matching names.
 template <typename Label>
 void ColumnCompressed<Label>
-::rename_labels(const std::unordered_map<Label, Label> &dict) {
+::rename_labels(const tsl::hopscotch_map<Label, Label> &dict) {
     std::vector<Label> index_to_label(label_encoder_.size());
     // old labels
     for (size_t i = 0; i < index_to_label.size(); ++i) {
@@ -360,7 +360,7 @@ void ColumnCompressed<Label>
     }
 
     std::vector<Label> new_index_to_label;
-    std::unordered_map<Label, std::set<size_t>> old_columns;
+    tsl::hopscotch_map<Label, std::set<size_t>> old_columns;
     for (size_t i = 0; i < index_to_label.size(); ++i) {
         if (!old_columns.count(index_to_label[i]))
             new_index_to_label.push_back(index_to_label[i]);
