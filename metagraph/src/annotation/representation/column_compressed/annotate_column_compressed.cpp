@@ -282,7 +282,7 @@ ColumnCompressed<Label>
     std::vector<std::pair<uint64_t, size_t>> label_counts;
     label_counts.reserve(num_labels());
 
-    for (size_t j = 0; j < this->num_labels(); ++j) {
+    for (size_t j = 0; j < num_labels(); ++j) {
         size_t total_checked = 0;
         size_t total_matched = 0;
 
@@ -595,10 +595,8 @@ void ColumnCompressed<Label>
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
-        this->add_labels(i,
-                         std::min(i + kNumRowsInBlock, num_rows_),
-                         annotator,
-                         &progress_bar);
+        add_labels(i, std::min(i + kNumRowsInBlock, num_rows_),
+                   annotator, &progress_bar);
     }
 }
 
