@@ -40,9 +40,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     void add_labels(const std::vector<Index> &, const VLabels &) override { except_dyn(); }
     void insert_rows(const std::vector<Index> &) override { except_dyn(); }
 
-    void call_objects(const Label &label,
-                      std::function<void(Index)> callback) const override;
-
     void reset_row_cache(size_t size);
 
     std::string file_extension() const override;

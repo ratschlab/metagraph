@@ -84,6 +84,17 @@ void MultiLabelEncoded<LabelType>
     }
 }
 
+template <typename LabelType>
+void MultiLabelEncoded<LabelType>
+::call_objects(const Label &label, std::function<void(Index)> callback) const {
+    if (!label_exists(label))
+        return;
+
+    for (Index index : get_matrix().get_column(label_encoder_.encode(label))) {
+        callback(index);
+    }
+}
+
 template <class Annotator>
 class IterateRowsByIndex : public Annotator::IterateRows {
   public:

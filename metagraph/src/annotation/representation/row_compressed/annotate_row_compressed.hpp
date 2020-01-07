@@ -57,9 +57,6 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     void insert_rows(const std::vector<Index> &rows);
 
-    void call_objects(const Label &label,
-                      std::function<void(Index)> callback) const;
-
     uint64_t num_objects() const;
     uint64_t num_relations() const;
 
