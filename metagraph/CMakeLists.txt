@@ -318,7 +318,7 @@ message(STATUS "Compile flags used:"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
 )
 
-file(GLOB src_files
+file(GLOB metagraph_core_files
   "src/*.cpp"
   "src/*/*.cpp"
   "src/*/*/*.cpp"
@@ -326,12 +326,21 @@ file(GLOB src_files
 )
 
 # for compiling faster
-list(REVERSE src_files)
+list(REVERSE metagraph_core_files)
 
-list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
-list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*\\._.*")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*main.cpp")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*/cli/.*")
 
-add_library(metagraph-core STATIC ${src_files})
+add_library(metagraph-core STATIC ${metagraph_core_files})
+
+file(GLOB metagraph_cli_files
+  "src/cli/*.cpp"
+  "src/cli/*/*.cpp"
+  "src/cli/*/*/*.cpp"
+)
+add_library(metagraph-cli STATIC ${metagraph_cli_files})
+
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
@@ -406,13 +415,9 @@ if(NOT CPPNOFS)
   endif()
 endif()
 
-target_link_libraries(
-  metagraph-core ${METALIBS}
-)
-
-target_link_libraries(
-  metagraph metagraph-core ${METALIBS}
-)
+target_link_libraries(metagraph-core ${METALIBS})
+target_link_libraries(metagraph-cli metagraph-core ${METALIBS})
+target_link_libraries(metagraph metagraph-core metagraph-cli)
 
 add_custom_target(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E
