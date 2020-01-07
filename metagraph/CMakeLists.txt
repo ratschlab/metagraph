@@ -467,7 +467,8 @@ install(TARGETS metagraph DESTINATION bin)
 #-------------------
 # Unit Tests
 #-------------------
-# There is an old gtest library attached to sdsl, remove it as we are using a more recent one
+# There is an old gtest library shipped with sdsl.
+# Remove it as we are going to use a more recent one.
 execute_process(COMMAND rm -rf ${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/include/gtest)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FROM_ALL)
