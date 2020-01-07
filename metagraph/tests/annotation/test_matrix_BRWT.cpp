@@ -11,7 +11,7 @@
 template <typename BinMat>
 class BinaryMatrixBRWTTest : public ::testing::Test { };
 typedef ::testing::Types<BRWT, BRWTOptimized> BinMatColumnTypes;
-TYPED_TEST_CASE(BinaryMatrixBRWTTest, BinMatColumnTypes);
+TYPED_TEST_SUITE(BinaryMatrixBRWTTest, BinMatColumnTypes);
 
 TYPED_TEST(BinaryMatrixBRWTTest, ArityEmpty) {
     TypeParam matrix;

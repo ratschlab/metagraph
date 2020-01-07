@@ -19,7 +19,7 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::RowFlatAnnotator,
                          annotate::ColumnCompressed<>> AnnotatorDumpTestTypes;
 
-TYPED_TEST_CASE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
+TYPED_TEST_SUITE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
 
 
 TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextEmpty) {

@@ -14,7 +14,7 @@ typedef ::testing::Types<KMer<uint64_t, KmerExtractor2Bit::bits_per_char>,
                          KMer<sdsl::uint128_t, KmerExtractor2Bit::bits_per_char>,
                          KMer<sdsl::uint256_t, KmerExtractor2Bit::bits_per_char>> KmerTypes;
 
-TYPED_TEST_CASE(ExtractKmers2Bit, KmerTypes);
+TYPED_TEST_SUITE(ExtractKmers2Bit, KmerTypes);
 
 #define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractor2Bit::bits_per_char )
 

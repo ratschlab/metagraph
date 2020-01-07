@@ -17,7 +17,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashFast,
                          DBGSuccinct,
                          DBGSuccinctBloom<4, 1>> CanonicalGraphTypes;
-TYPED_TEST_CASE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
+TYPED_TEST_SUITE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CheckGraph) {

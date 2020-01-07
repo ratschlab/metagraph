@@ -263,8 +263,8 @@ typedef ::testing::Types<bitmap_vector,
                          bitmap_set,
                          bitmap_adaptive> BitmapDynTypes;
 
-TYPED_TEST_CASE(BitmapTest, BitmapTypes);
-TYPED_TEST_CASE(BitmapDynTest, BitmapDynTypes);
+TYPED_TEST_SUITE(BitmapTest, BitmapTypes);
+TYPED_TEST_SUITE(BitmapDynTest, BitmapDynTypes);
 
 
 TYPED_TEST(BitmapTest, queries) {

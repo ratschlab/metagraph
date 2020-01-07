@@ -10,7 +10,7 @@
 
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
-TYPED_TEST_CASE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
+TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 
 // TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
 //     size_t k = 4;

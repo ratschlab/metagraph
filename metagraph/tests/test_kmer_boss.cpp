@@ -78,7 +78,7 @@ class KmerBOSS : public ::testing::Test { };
 typedef ::testing::Types<uint64_t,
                          sdsl::uint128_t,
                          sdsl::uint256_t> IntTypes;
-TYPED_TEST_CASE(KmerBOSS, IntTypes);
+TYPED_TEST_SUITE(KmerBOSS, IntTypes);
 
 TYPED_TEST(KmerBOSS, nucleotide_alphabet_pack) {
     const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAN";

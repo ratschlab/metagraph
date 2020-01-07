@@ -467,7 +467,8 @@ install(TARGETS metagraph DESTINATION bin)
 #-------------------
 # Unit Tests
 #-------------------
-if(FALSE) # there is one gtest version attached with sdsl
+if(TRUE) # there is one gtest version attached with sdsl
+execute_process(COMMAND rm -rf external-libraries/sdsl-lite/include/gtest)
 # Download and unpack googletest at configure time
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/googletest-download)
   configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
