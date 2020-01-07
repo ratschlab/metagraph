@@ -40,8 +40,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     void add_labels(const std::vector<Index> &, const VLabels &) override { except_dyn(); }
     void insert_rows(const std::vector<Index> &) override { except_dyn(); }
 
-    const BinaryMatrixType& data() const { return *matrix_; }
-
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
 
@@ -49,7 +47,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     std::string file_extension() const override;
 
-    const BinaryMatrix& get_matrix() const override { return *matrix_; };
+    const BinaryMatrixType& get_matrix() const override { return *matrix_; };
 
   private:
     void except_dyn();

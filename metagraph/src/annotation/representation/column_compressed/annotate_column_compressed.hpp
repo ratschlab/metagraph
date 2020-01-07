@@ -1,6 +1,8 @@
 #ifndef __ANNOTATE_COLUMN_COMPRESSED_HPP__
 #define __ANNOTATE_COLUMN_COMPRESSED_HPP__
 
+#include <mutex>
+
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 #include <progress_bar.hpp>
@@ -19,6 +21,11 @@ template <typename Label>
 class RowCompressed;
 
 
+/**
+ * Multithreading:
+ *  The non-const methods must be called sequentially.
+ *  Then, any subset of the public const methods can be called concurrently.
+ */
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<Label> {
     template <class A, typename L>
@@ -48,13 +55,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                     const VLabels &labels) override;
 
     bool has_label(Index i, const Label &label) const override;
-
-    // For each index i in indices, check if i has the label.
-    void call_relations(const std::vector<Index> &indices,
-                        const Label &label,
-                        std::function<void(Index, bool)> callback,
-                        std::function<bool()> terminate = []() { return false; }) const;
-
     bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;
@@ -64,9 +64,10 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     // For each pair (first, second) in the dictionary, renames
     // column |first| with |second| and merges the columns with matching names.
-    void rename_labels(const std::unordered_map<Label, Label> &dict) override;
+    void rename_labels(const tsl::hopscotch_map<Label, Label> &dict) override;
 
     uint64_t num_objects() const override;
+    inline size_t num_labels() const override { return bitmatrix_.size(); }
     uint64_t num_relations() const override;
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
@@ -76,7 +77,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
      * Stop counting if count is greater than |count_cap|.
      */
     std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-    count_labels(const std::unordered_map<Index, size_t> &index_counts,
+    count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
@@ -87,13 +88,11 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 
-    const auto& data() const { return bitmatrix_; };
-
     std::unique_ptr<IterateRows> iterator() const override;
 
     const bitmap& get_column(const Label &label) const;
 
-    const BinaryMatrix& get_matrix() const override;
+    const ColumnMajor& get_matrix() const override;
 
     std::string file_extension() const override { return kExtension; }
 
@@ -118,6 +117,9 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
     ColumnMajor annotation_matrix_view_ = ColumnMajor::construct_view(bitmatrix_);
+
+    mutable std::mutex bitmap_conversion_mu_;
+    mutable bool flushed_ = true;
 
     caches::fixed_sized_cache<size_t,
                               bitmap_builder*,

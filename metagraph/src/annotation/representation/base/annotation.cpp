@@ -52,7 +52,7 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
 // to |second| and merges columns with matching names, if supported.
 template <typename LabelType>
 void MultiLabelEncoded<LabelType>
-::rename_labels(const std::unordered_map<Label, Label> &dict) {
+::rename_labels(const tsl::hopscotch_map<Label, Label> &dict) {
     // old labels
     std::vector<Label> index_to_label = label_encoder_.get_labels();
 
@@ -124,7 +124,7 @@ MultiLabelEncoded<LabelType>::get(Index i) const {
 template <typename LabelType>
 std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 MultiLabelEncoded<LabelType>
-::count_labels(const std::unordered_map<Index, size_t> &index_counts,
+::count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
                size_t min_count,
                size_t count_cap) const {
 

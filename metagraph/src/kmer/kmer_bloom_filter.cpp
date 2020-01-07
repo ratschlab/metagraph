@@ -20,10 +20,10 @@ using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 constexpr uint64_t npos = 0;
 
 
-template <class KmerBF>
+template <class KmerBF, class Callback>
 inline void call_kmers(const KmerBF &kmer_bloom,
                        std::string_view sequence,
-                       const std::function<void(uint64_t)> &callback) {
+                       Callback callback) {
     const auto k = kmer_bloom.get_k();
     if (sequence.size() < k)
         return;

@@ -259,7 +259,7 @@ void relax_BRWT<BRWTCompressed<>>(BRWTCompressed<> *annotation,
                                   size_t relax_max_arity,
                                   size_t num_threads) {
     if (relax_max_arity > 1)
-        BRWTOptimizer::relax(const_cast<BRWT*>(&annotation->data()),
+        BRWTOptimizer::relax(const_cast<BRWT*>(&annotation->get_matrix()),
                              relax_max_arity,
                              num_threads);
 }
@@ -445,7 +445,7 @@ void merge<BRWTCompressed<>, std::string>(
         }
 
         brwts.push_back(std::move(const_cast<BRWT&>(
-            dynamic_cast<BRWTCompressed<>&>(*annotator).data()
+            dynamic_cast<BRWTCompressed<>&>(*annotator).get_matrix()
         )));
 
         annotator.reset();

@@ -70,7 +70,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void(BinaryMatrix::RowCallback)> &call_rows);
 
-    const BinaryMatrix& get_matrix() const { return *matrix_; };
+    const BinaryMatrixRowDynamic& get_matrix() const { return *matrix_; };
 
   private:
     void reinitialize(uint64_t num_rows);

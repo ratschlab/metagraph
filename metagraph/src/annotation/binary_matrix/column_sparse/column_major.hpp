@@ -39,6 +39,8 @@ class ColumnMajor : public BinaryMatrix {
         return view;
     }
 
+    const auto& data() const { return *columns_; }
+
   private:
     std::vector<std::unique_ptr<bit_vector>> data_;
     const std::vector<std::unique_ptr<bit_vector>> *columns_ = &data_;

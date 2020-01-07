@@ -58,9 +58,9 @@ std::unique_ptr<bitmap>
 mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
                          const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
-                         std::function<bool(DeBruijnGraph::node_index,
-                                            LabelCountCallback, /* get_num_labels_in */
-                                            LabelCountCallback /* get_num_labels_out */)> is_node_in_mask,
+                         const std::function<bool(DeBruijnGraph::node_index,
+                                                  const LabelCountCallback & /* get_num_labels_in */,
+                                                  const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,
                          double min_frequency_for_frequent_label = 0.05);
 
 template <class Index, typename... Args>
