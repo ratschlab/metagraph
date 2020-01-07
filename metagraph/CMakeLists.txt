@@ -468,7 +468,7 @@ install(TARGETS metagraph DESTINATION bin)
 # Unit Tests
 #-------------------
 if(TRUE) # there is one gtest version attached with sdsl
-execute_process(COMMAND rm -rf external-libraries/sdsl-lite/include/gtest)
+execute_process(COMMAND rm -rf ${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/include/gtest)
 # Download and unpack googletest at configure time
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/googletest-download)
   configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
@@ -494,6 +494,8 @@ add_subdirectory(
   ${CMAKE_BINARY_DIR}/googletest-build
   EXCLUDE_FROM_ALL
 )
+target_compile_options(gtest_main PRIVATE -w)
+target_compile_options(gtest PRIVATE -w)
 endif()
 
 if(NOT DEFINED DEATH_TEST)
