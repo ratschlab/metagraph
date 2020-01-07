@@ -14,9 +14,6 @@
 
 namespace annotate {
 
-const char kColumnAnnotatorExtension[] = ".column.annodbg";
-
-
 /**
  * Multithreading:
  *  The non-const methods must be called sequentially.
@@ -84,6 +81,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     std::string file_extension() const override { return kExtension; }
 
+    static constexpr auto kExtension = ".column.annodbg";
+
   private:
     void set(Index i, size_t j, bool value);
     void flush() const;
@@ -111,8 +110,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     LabelEncoder<Label> &label_encoder_ { MultiLabelEncoded<Label>::label_encoder_ };
 
     bool verbose_;
-
-    static constexpr auto kExtension = kColumnAnnotatorExtension;
 };
 
 } // namespace annotate

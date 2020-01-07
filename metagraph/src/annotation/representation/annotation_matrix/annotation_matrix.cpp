@@ -9,17 +9,6 @@ using utils::remove_suffix;
 
 namespace annotate {
 
-template <>
-const std::string RowFlatAnnotator::kExtension = kRowPackedExtension;
-template <>
-const std::string RainbowfishAnnotator::kExtension = kRainbowfishExtension;
-template <>
-const std::string BRWTCompressed<std::string>::kExtension = kBRWTExtension;
-template <>
-const std::string BinRelWT_sdslAnnotator::kExtension = kBinRelWT_sdslExtension;
-template <>
-const std::string BinRelWTAnnotator::kExtension = kBinRelWTExtension;
-
 template <class BinaryMatrixType, typename Label>
 std::string
 StaticBinRelAnnotator<BinaryMatrixType, Label>

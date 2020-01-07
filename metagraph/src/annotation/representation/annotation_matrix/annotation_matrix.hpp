@@ -42,9 +42,11 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     void reset_row_cache(size_t size);
 
+    const BinaryMatrixType& get_matrix() const override { return *matrix_; };
+
     std::string file_extension() const override;
 
-    const BinaryMatrixType& get_matrix() const override { return *matrix_; };
+    static const std::string kExtension;
 
   private:
     void except_dyn();
@@ -61,8 +63,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
                                       SetBitPositions,
                                       caches::LRUCachePolicy<Index>> RowCacheType;
     mutable std::unique_ptr<RowCacheType> cached_rows_;
-
-    static const std::string kExtension;
 };
 
 } // namespace annotate

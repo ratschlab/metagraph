@@ -10,23 +10,26 @@
 
 namespace annotate {
 
-const char kRowPackedExtension[] = ".flat.annodbg";
-const char kRainbowfishExtension[] = ".rbfish.annodbg";
-const char kBRWTExtension[] = ".brwt.annodbg";
-const char kBinRelWT_sdslExtension[] = ".bin_rel_wt_sdsl.annodbg";
-const char kBinRelWTExtension[] = ".bin_rel_wt.annodbg";
-
-
 typedef StaticBinRelAnnotator<RowConcatenated<>, std::string> RowFlatAnnotator;
 
 typedef StaticBinRelAnnotator<Rainbowfish, std::string> RainbowfishAnnotator;
 
-template <typename Label = std::string>
-using BRWTCompressed = StaticBinRelAnnotator<BRWT, Label>;
+typedef StaticBinRelAnnotator<BRWT, std::string> MultiBRWTAnnotator;
 
 typedef StaticBinRelAnnotator<BinRelWT_sdsl, std::string> BinRelWT_sdslAnnotator;
 
 typedef StaticBinRelAnnotator<BinRelWT, std::string> BinRelWTAnnotator;
+
+template <>
+inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
+template <>
+inline const std::string RainbowfishAnnotator::kExtension = ".rbfish.annodbg";
+template <>
+inline const std::string MultiBRWTAnnotator::kExtension = ".brwt.annodbg";
+template <>
+inline const std::string BinRelWT_sdslAnnotator::kExtension = ".bin_rel_wt_sdsl.annodbg";
+template <>
+inline const std::string BinRelWTAnnotator::kExtension = ".bin_rel_wt.annodbg";
 
 } // namespace annotate
 

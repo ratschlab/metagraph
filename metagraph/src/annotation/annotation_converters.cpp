@@ -231,11 +231,11 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
 }
 
 template <>
-std::unique_ptr<BRWTCompressed<>>
-convert_to_greedy_BRWT<BRWTCompressed<>, std::string>(ColumnCompressed<std::string>&& annotation,
-                                                      size_t num_parallel_nodes,
-                                                      size_t num_threads) {
-    return convert_to_BRWT<BRWTCompressed<>>(
+std::unique_ptr<MultiBRWTAnnotator>
+convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotation,
+                                                        size_t num_parallel_nodes,
+                                                        size_t num_threads) {
+    return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
         get_parallel_binary_grouping_greedy(num_threads),
         num_parallel_nodes,
@@ -244,12 +244,12 @@ convert_to_greedy_BRWT<BRWTCompressed<>, std::string>(ColumnCompressed<std::stri
 }
 
 template <>
-std::unique_ptr<BRWTCompressed<>>
-convert_to_simple_BRWT<BRWTCompressed<>, std::string>(ColumnCompressed<std::string>&& annotation,
-                                                      size_t grouping_arity,
-                                                      size_t num_parallel_nodes,
-                                                      size_t num_threads) {
-    return convert_to_BRWT<BRWTCompressed<>>(
+std::unique_ptr<MultiBRWTAnnotator>
+convert_to_simple_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotation,
+                                                        size_t grouping_arity,
+                                                        size_t num_parallel_nodes,
+                                                        size_t num_threads) {
+    return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
         BRWTBottomUpBuilder::get_basic_partitioner(grouping_arity),
         num_parallel_nodes,
@@ -258,9 +258,9 @@ convert_to_simple_BRWT<BRWTCompressed<>, std::string>(ColumnCompressed<std::stri
 }
 
 template <>
-void relax_BRWT<BRWTCompressed<>>(BRWTCompressed<> *annotation,
-                                  size_t relax_max_arity,
-                                  size_t num_threads) {
+void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,
+                                    size_t relax_max_arity,
+                                    size_t num_threads) {
     if (relax_max_arity > 1)
         BRWTOptimizer::relax(const_cast<BRWT*>(&annotation->get_matrix()),
                              relax_max_arity,
@@ -457,7 +457,7 @@ INSTANTIATE_MERGE(RowCompressed<>, std::string);
 
 
 template<>
-void merge<BRWTCompressed<>, std::string>(
+void merge<MultiBRWTAnnotator, std::string>(
         std::vector<std::unique_ptr<MultiLabelEncoded<std::string>>>&& annotators,
         const std::vector<std::string> &filenames,
         const std::string &outfile) {
@@ -475,7 +475,7 @@ void merge<BRWTCompressed<>, std::string>(
     std::vector<BRWT> brwts;
 
     for (auto&& annotator : annotators) {
-        if (!dynamic_cast<BRWTCompressed<>*>(annotator.get()))
+        if (!dynamic_cast<MultiBRWTAnnotator*>(annotator.get()))
             throw std::runtime_error("merging of arbitrary annotations into BRWT is not implemented");
 
         if (annotator->num_objects() != num_rows)
@@ -489,13 +489,13 @@ void merge<BRWTCompressed<>, std::string>(
         }
 
         brwts.push_back(std::move(const_cast<BRWT&>(
-            dynamic_cast<BRWTCompressed<>&>(*annotator).get_matrix()
+            dynamic_cast<MultiBRWTAnnotator&>(*annotator).get_matrix()
         )));
 
         annotator.reset();
     }
 
-    BRWTCompressed<> annotation(
+    MultiBRWTAnnotator annotation(
         std::make_unique<BRWT>(BRWTBottomUpBuilder::merge(
             std::move(brwts),
             BRWTBottomUpBuilder::get_basic_partitioner(-1),

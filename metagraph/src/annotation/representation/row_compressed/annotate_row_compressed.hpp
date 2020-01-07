@@ -10,9 +10,6 @@
 
 namespace annotate {
 
-const char kRowAnnotatorExtension[] = ".row.annodbg";
-
-
 // TODO: implement this as an annotation matrix
 // StaticBinRelAnnotator<VectorRowBinMat>
 template <typename Label = std::string>
@@ -54,14 +51,16 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     uint64_t num_objects() const;
     uint64_t num_relations() const;
 
-    std::string file_extension() const { return kExtension; }
-
     // TODO: move to BinaryMatrixRowDynamic
     static void write_rows(std::string filename,
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void(BinaryMatrix::RowCallback)> &call_rows);
 
     const BinaryMatrixRowDynamic& get_matrix() const { return *matrix_; };
+
+    std::string file_extension() const { return kExtension; }
+
+    static constexpr auto kExtension = ".row.annodbg";
 
   private:
     void reinitialize(uint64_t num_rows);
@@ -92,8 +91,6 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     };
 
     SetBitPositions get_label_codes(Index i) const { return matrix_->get_row(i); }
-
-    static constexpr auto kExtension = kRowAnnotatorExtension;
 };
 
 } // namespace annotate

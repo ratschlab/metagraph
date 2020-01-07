@@ -40,8 +40,8 @@ class AnnotatorTest : public ::testing::Test {
     std::unique_ptr<Annotator> annotation;
 
     virtual void set(annotate::ColumnCompressed<>&& column_annotator) {
-        if constexpr(std::is_same_v<Annotator, annotate::BRWTCompressed<>>) {
-            annotation = annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
+        if constexpr(std::is_same_v<Annotator, annotate::MultiBRWTAnnotator>) {
+            annotation = annotate::convert_to_simple_BRWT<annotate::MultiBRWTAnnotator>(
                 std::move(column_annotator)
             );
 
@@ -133,7 +133,7 @@ class AnnotatorDynamicNoSparseTest : public AnnotatorPreset2Test<Annotator> { };
 
 typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
-                         annotate::BRWTCompressed<>,
+                         annotate::MultiBRWTAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
                          annotate::ColumnCompressed<>,
@@ -145,8 +145,8 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
-                         annotate::BRWTCompressed<>> AnnotatorStaticTypes;
-typedef ::testing::Types<annotate::BRWTCompressed<>> AnnotatorStaticLargeTypes;
+                         annotate::MultiBRWTAnnotator> AnnotatorStaticTypes;
+typedef ::testing::Types<annotate::MultiBRWTAnnotator> AnnotatorStaticLargeTypes;
 typedef ::testing::Types<annotate::ColumnCompressed<>,
                          annotate::RowCompressed<>,
                          RowCompressedParallel<>,

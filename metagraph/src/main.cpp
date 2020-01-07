@@ -1013,9 +1013,9 @@ void print_stats(const Annotator &annotation) {
     } else if (dynamic_cast<const annotate::RowCompressed<std::string> *>(&annotation)) {
         std::cout << Config::annotype_to_string(Config::RowCompressed) << std::endl;
 
-    } else if (dynamic_cast<const annotate::BRWTCompressed<std::string> *>(&annotation)) {
+    } else if (dynamic_cast<const annotate::MultiBRWTAnnotator *>(&annotation)) {
         std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
-        const auto &brwt = dynamic_cast<const annotate::BRWTCompressed<std::string> &>(annotation).get_matrix();
+        const auto &brwt = dynamic_cast<const annotate::MultiBRWTAnnotator &>(annotation).get_matrix();
         std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
         std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
         std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
@@ -1285,7 +1285,7 @@ int main(int argc, char *argv[]) {
             } else if (config->anno_type == Config::BinRelWT) {
                 annotate::merge<annotate::BinRelWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::BRWT) {
-                annotate::merge<annotate::BRWTCompressed<>>(std::move(annotators), stream_files, config->outfbase);
+                annotate::merge<annotate::MultiBRWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else {
                 logger->error("Merging of annotations to '{}' representation is not implemented",
                               config->annotype_to_string(config->anno_type));
@@ -1923,8 +1923,8 @@ int main(int argc, char *argv[]) {
                         annotation.get()
                     )->dump_columns(config->outfbase, get_num_threads());
                 } else if (input_anno_type == Config::BRWT) {
-                    assert(dynamic_cast<annotate::BRWTCompressed<>*>(annotation.get()));
-                    dynamic_cast<annotate::BRWTCompressed<>*>(
+                    assert(dynamic_cast<annotate::MultiBRWTAnnotator*>(annotation.get()));
+                    dynamic_cast<annotate::MultiBRWTAnnotator*>(
                         annotation.get()
                     )->dump_columns(config->outfbase, get_num_threads());
                 } else {
@@ -2104,11 +2104,11 @@ int main(int argc, char *argv[]) {
                     }
                     case Config::BRWT: {
                         auto brwt_annotator = config->greedy_brwt
-                            ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+                            ? annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
                                 std::move(*annotator),
                                 config->parallel_nodes,
                                 get_num_threads())
-                            : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
+                            : annotate::convert_to_simple_BRWT<annotate::MultiBRWTAnnotator>(
                                 std::move(*annotator),
                                 config->arity_brwt,
                                 config->parallel_nodes,
@@ -2320,7 +2320,7 @@ int main(int argc, char *argv[]) {
 
             Timer timer;
 
-            auto annotator = std::make_unique<annotate::BRWTCompressed<>>();
+            auto annotator = std::make_unique<annotate::MultiBRWTAnnotator>();
 
             logger->trace("Loading annotator...");
 
@@ -2332,9 +2332,9 @@ int main(int argc, char *argv[]) {
 
             logger->trace("Relaxing BRWT tree...");
 
-            annotate::relax_BRWT<annotate::BRWTCompressed<>>(annotator.get(),
-                                                             config->relax_arity_brwt,
-                                                             get_num_threads());
+            annotate::relax_BRWT<annotate::MultiBRWTAnnotator>(annotator.get(),
+                                                               config->relax_arity_brwt,
+                                                               get_num_threads());
 
             annotator->serialize(config->outfbase);
             logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

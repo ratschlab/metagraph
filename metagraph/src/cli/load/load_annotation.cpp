@@ -11,25 +11,25 @@
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
-    if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
+    if (utils::ends_with(filename, annotate::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
-    } else if (utils::ends_with(filename, annotate::kRowAnnotatorExtension)) {
+    } else if (utils::ends_with(filename, annotate::RowCompressed<>::kExtension)) {
         return Config::AnnotationType::RowCompressed;
 
-    } else if (utils::ends_with(filename, annotate::kBRWTExtension)) {
+    } else if (utils::ends_with(filename, annotate::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
 
-    } else if (utils::ends_with(filename, annotate::kBinRelWT_sdslExtension)) {
+    } else if (utils::ends_with(filename, annotate::BinRelWT_sdslAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT_sdsl;
 
-    } else if (utils::ends_with(filename, annotate::kBinRelWTExtension)) {
+    } else if (utils::ends_with(filename, annotate::BinRelWTAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT;
 
-    } else if (utils::ends_with(filename, annotate::kRowPackedExtension)) {
+    } else if (utils::ends_with(filename, annotate::RowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowFlat;
 
-    } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
+    } else if (utils::ends_with(filename, annotate::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
     } else {
@@ -58,7 +58,7 @@ initialize_annotation(Config::AnnotationType anno_type,
             break;
         }
         case Config::BRWT: {
-            annotation.reset(new annotate::BRWTCompressed<>(config.row_cache_size));
+            annotation.reset(new annotate::MultiBRWTAnnotator(config.row_cache_size));
             break;
         }
         case Config::BinRelWT_sdsl: {

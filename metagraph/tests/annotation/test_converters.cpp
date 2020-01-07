@@ -213,7 +213,7 @@ TEST_F(ConvertFromColumnCompressed, to_RainbowfishAnnotator) {
 
 // TEST(ConvertFromColumnCompressedEmpty, to_GreedyBRWT) {
 //     annotate::ColumnCompressed<> empty_column_annotator(5);
-//     auto empty_annotation = annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+//     auto empty_annotation = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
 //         std::move(empty_column_annotator)
 //     );
 //     EXPECT_EQ(0u, empty_annotation->num_labels());
@@ -222,7 +222,7 @@ TEST_F(ConvertFromColumnCompressed, to_RainbowfishAnnotator) {
 // }
 
 TEST_F(ConvertFromColumnCompressed, to_GreedyBRWT) {
-    annotation = annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+    annotation = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
         std::move(*initial_annotation)
     ).release();
 }
@@ -286,7 +286,7 @@ TEST_F(ConvertFromRowCompressed, stream_to_RowFlat) {
 
 TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
     const auto rowflat_filename = test_dump_basename_row_compressed_to_rowflat
-                                                + annotate::kRowAnnotatorExtension;
+                                                + annotate::RowCompressed<>::kExtension;
 
     initial_annotation->serialize(rowflat_filename);
 
@@ -313,7 +313,7 @@ TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
 
 // TEST(ConvertFromRowCompressedEmpty, to_GreedyBRWT) {
 //     annotate::RowCompressed<> empty_column_annotator(5);
-//     auto empty_annotation = annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+//     auto empty_annotation = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
 //         std::move(empty_column_annotator)
 //     );
 //     EXPECT_EQ(0u, empty_annotation->num_labels());
@@ -322,7 +322,7 @@ TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
 // }
 
 // TEST_F(ConvertFromRowCompressed, to_GreedyBRWT) {
-//     annotation = annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+//     annotation = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
 //         std::move(*initial_annotation)
 //     ).release();
 // }
@@ -332,12 +332,12 @@ TEST_F(MergeAnnotators, RowCompressed) {
     {
         const std::string filename = test_dump_basename_row_compressed_merge + "_1";
         input_annotation_1->serialize(filename);
-        filenames.push_back(filename + annotate::kRowAnnotatorExtension);
+        filenames.push_back(filename + annotate::RowCompressed<>::kExtension);
     }
     {
         const std::string filename = test_dump_basename_row_compressed_merge + "_2";
         input_annotation_2->serialize(filename);
-        filenames.push_back(filename + annotate::kRowAnnotatorExtension);
+        filenames.push_back(filename + annotate::RowCompressed<>::kExtension);
     }
 
     annotate::merge<annotate::RowCompressed<>, std::string>(
@@ -424,7 +424,7 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
         annotation->add_labels({ 3 }, {"Label1"});
         annotation->add_labels({ 4 }, {"Label2"});
         annotation->serialize(filename);
-        filenames.push_back(filename + annotate::kRowAnnotatorExtension);
+        filenames.push_back(filename + annotate::RowCompressed<>::kExtension);
     }
 
     const auto outfile = test_dump_basename_rowflat_merge + "_mixed_to_rowflat";
