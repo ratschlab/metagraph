@@ -55,7 +55,12 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
 
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
     tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
+
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
@@ -158,7 +163,12 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
 
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
     tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
+
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
