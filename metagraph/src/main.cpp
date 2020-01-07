@@ -94,7 +94,7 @@ void annotate_data(const std::vector<std::string> &files,
             read_vcf_file_with_annotations_critical(
                 file,
                 ref_sequence_path,
-                dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k(),
+                anno_graph->get_graph().get_k(),
                 [&](auto&& seq, const auto &variant_labels) {
                     labels.insert(labels.end(),
                                   variant_labels.begin(), variant_labels.end());
@@ -141,7 +141,7 @@ void annotate_data(const std::vector<std::string> &files,
                             total_seqs, fmt::join(labels, "><"), timer.elapsed());
                     }
                 },
-                !dynamic_cast<const DeBruijnGraph&>(anno_graph->get_graph()).is_canonical_mode(),
+                !anno_graph->get_graph().is_canonical_mode(),
                 min_count,
                 max_count
             );
@@ -205,7 +205,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
 
     Timer timer;
 
-    const size_t k = dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k();
+    const size_t k = anno_graph->get_graph().get_k();
 
     ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
 
@@ -697,7 +697,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       std::function<void(SequenceCallback)> call_sequences,
                       double discovery_fraction,
                       size_t num_threads) {
-    const auto *full_dbg = dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph());
+    const auto *full_dbg = &anno_graph.get_graph();
     if (!full_dbg)
         throw std::runtime_error("Error: batch queries are supported only for de Bruijn graphs");
 

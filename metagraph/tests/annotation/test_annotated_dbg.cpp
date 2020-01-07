@@ -6,6 +6,7 @@
 #include "../test_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
+#include "common/threads/threading.hpp"
 #include "annotation/annotation_converters.hpp"
 
 
@@ -218,7 +219,7 @@ TEST(AnnotatedDBG, Transform) {
         anno_graph->annotate_sequence(std::string(seq_second), { "Second" });
 
         anno_graph = std::make_unique<AnnotatedDBG>(
-            std::move(anno_graph->graph_),
+            graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
                 annotate::convert<annotate::RowFlatAnnotator>(
                     std::move(dynamic_cast<annotate::ColumnCompressed<>&>(
