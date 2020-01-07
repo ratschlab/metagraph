@@ -20,6 +20,9 @@
 
 namespace annotate {
 
+size_t kNumRowsInBlock = 50'000;
+
+
 typedef LabelEncoder<std::string> LEncoder;
 
 void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
@@ -504,5 +507,108 @@ void merge<BRWTCompressed<>, std::string>(
 
     annotation.serialize(outfile);
 }
+
+template <typename Label>
+void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
+                              const std::string &outfbase,
+                              size_t num_threads) {
+    uint64_t num_rows = annotator.num_objects();
+
+    ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !utils::get_verbose());
+
+    RowCompressed<Label>::write_rows(
+        outfbase,
+        annotator.get_label_encoder(),
+        [&](BinaryMatrix::RowCallback write_row) {
+
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+
+                uint64_t begin = i;
+                uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+
+                std::vector<typename ColumnCompressed<Label>::SetBitPositions> rows(end - begin);
+
+                assert(begin <= end);
+                assert(end <= num_rows);
+
+                // TODO: use RowsFromColumnsTransformer
+                for (const auto &label : annotator.get_all_labels()) {
+                    size_t j = annotator.get_label_encoder().encode(label);
+                    annotator.get_column(label).call_ones_in_range(begin, end,
+                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
+                    );
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto &row : rows) {
+                        write_row(row);
+                        ++progress_bar;
+                    }
+                }
+            }
+        }
+    );
+}
+
+template
+void convert_to_row_annotator(const ColumnCompressed<std::string> &annotator,
+                              const std::string &outfbase,
+                              size_t num_threads);
+
+template <typename Label>
+void convert_to_row_annotator(const ColumnCompressed<Label> &source,
+                              RowCompressed<Label> *annotator,
+                              size_t num_threads) {
+    assert(annotator);
+    assert(source.num_objects() == annotator->get_matrix().num_rows());
+
+    uint64_t num_rows = source.num_objects();
+
+    ProgressBar progress_bar(num_rows, "Rows processed", std::cerr, !utils::get_verbose());
+
+    const_cast<LabelEncoder<Label>&>(annotator->get_label_encoder())
+            = source.get_label_encoder();
+
+    if (num_threads <= 1) {
+        add_labels(source, 0, num_rows,
+                   const_cast<BinaryMatrixRowDynamic*>(&annotator->get_matrix()),
+                   &progress_bar);
+        return;
+    }
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+        add_labels(source, i, std::min(i + kNumRowsInBlock, num_rows),
+                   const_cast<BinaryMatrixRowDynamic*>(&annotator->get_matrix()),
+                   &progress_bar);
+    }
+}
+
+template <typename Label>
+void add_labels(const ColumnCompressed<Label> &source,
+                uint64_t begin, uint64_t end,
+                BinaryMatrixRowDynamic *matrix,
+                ProgressBar *progress_bar) {
+    assert(matrix);
+    assert(begin <= end);
+    assert(end <= matrix->num_rows());
+
+    // TODO: use RowsFromColumnsTransformer
+    for (const auto &label : source.get_all_labels()) {
+        size_t j = source.get_label_encoder().encode(label);
+        source.get_column(label).call_ones_in_range(begin, end,
+            [&](uint64_t idx) { matrix->set(idx, j); }
+        );
+    }
+    if (progress_bar)
+        *progress_bar += end - begin;
+}
+
+template
+void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
+                              RowCompressed<std::string> *annotator,
+                              size_t num_threads);
 
 } // namespace annotate

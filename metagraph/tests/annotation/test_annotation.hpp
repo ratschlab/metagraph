@@ -46,12 +46,12 @@ class AnnotatorTest : public ::testing::Test {
             );
 
         } else if constexpr(std::is_same_v<Annotator, annotate::RowCompressed<>>) {
-            annotation.reset(new annotate::RowCompressed<>(0));
-            column_annotator.convert_to_row_annotator(annotation.get());
+            annotation.reset(new annotate::RowCompressed<>(column_annotator.num_objects()));
+            convert_to_row_annotator(column_annotator, annotation.get());
 
         } else if constexpr(std::is_same_v<Annotator, RowCompressedParallel<>>) {
-            annotation.reset(new RowCompressedParallel<>(0));
-            column_annotator.convert_to_row_annotator(annotation.get(), 10);
+            annotation.reset(new RowCompressedParallel<>(column_annotator.num_objects()));
+            convert_to_row_annotator(column_annotator, annotation.get(), 10);
 
         } else if constexpr(std::is_same_v<Annotator, RowCompressedDynamic<>>) {
             annotation.reset(new RowCompressedDynamic<>(column_annotator.num_objects()));

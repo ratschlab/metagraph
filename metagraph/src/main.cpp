@@ -2080,9 +2080,10 @@ int main(int argc, char *argv[]) {
                     }
                     case Config::RowCompressed: {
                         if (config->fast) {
-                            annotate::RowCompressed<> row_annotator(0);
-                            annotator->convert_to_row_annotator(&row_annotator,
-                                                                get_num_threads());
+                            annotate::RowCompressed<> row_annotator(annotator->num_objects());
+                            convert_to_row_annotator(*annotator,
+                                                     &row_annotator,
+                                                     get_num_threads());
                             annotator.reset();
 
                             logger->trace("Annotation converted in {} sec", timer.elapsed());
@@ -2093,7 +2094,9 @@ int main(int argc, char *argv[]) {
                             logger->trace("Serialization done in {} sec", timer.elapsed());
 
                         } else {
-                            annotator->convert_to_row_annotator(config->outfbase);
+                            convert_to_row_annotator(*annotator,
+                                                     config->outfbase,
+                                                     get_num_threads());
                             logger->trace("Annotation converted and serialized in {} sec",
                                           timer.elapsed());
                         }

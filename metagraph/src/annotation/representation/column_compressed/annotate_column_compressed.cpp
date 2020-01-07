@@ -10,11 +10,9 @@
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 #include "common/threads/threading.hpp"
-#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 using utils::remove_suffix;
 
-size_t kNumRowsInBlock = 50'000;
 size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
 
 
@@ -535,86 +533,6 @@ template <typename Label>
 const ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
     flush();
     return annotation_matrix_view_;
-}
-
-template <typename Label>
-void ColumnCompressed<Label>
-::convert_to_row_annotator(const std::string &outfbase) const {
-    ProgressBar progress_bar(num_rows_, "Serialized rows", std::cerr, !utils::get_verbose());
-
-    RowCompressed<Label>::write_rows(
-        outfbase,
-        label_encoder_,
-        [&](BinaryMatrix::RowCallback write_row) {
-
-            #pragma omp parallel for ordered schedule(dynamic) num_threads(get_num_threads())
-            for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
-
-                uint64_t begin = i;
-                uint64_t end = std::min(i + kNumRowsInBlock, num_rows_);
-
-                std::vector<SetBitPositions> rows(end - begin);
-
-                assert(begin <= end);
-                assert(end <= num_rows_);
-
-                // TODO: use RowsFromColumnsTransformer
-                for (size_t j = 0; j < num_labels(); ++j) {
-                    get_column(j).call_ones_in_range(begin, end,
-                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
-                    );
-                }
-
-                #pragma omp ordered
-                {
-                    for (const auto &row : rows) {
-                        write_row(row);
-                        ++progress_bar;
-                    }
-                }
-            }
-        }
-    );
-}
-
-template <typename Label>
-void ColumnCompressed<Label>
-::convert_to_row_annotator(RowCompressed<Label> *annotator,
-                           size_t num_threads) const {
-    assert(annotator);
-
-    ProgressBar progress_bar(num_rows_, "Processed rows", std::cerr, !utils::get_verbose());
-
-    annotator->reinitialize(num_rows_);
-    annotator->label_encoder_ = label_encoder_;
-
-    if (num_threads <= 1) {
-        add_labels(0, num_rows_, annotator, &progress_bar);
-        return;
-    }
-
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
-        add_labels(i, std::min(i + kNumRowsInBlock, num_rows_),
-                   annotator, &progress_bar);
-    }
-}
-
-template <typename Label>
-void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
-                                         RowCompressed<Label> *annotator,
-                                         ProgressBar *progress_bar) const {
-    assert(begin <= end);
-    assert(end <= annotator->matrix_->num_rows());
-
-    // TODO: use RowsFromColumnsTransformer
-    for (size_t j = 0; j < num_labels(); ++j) {
-        get_column(j).call_ones_in_range(begin, end,
-            [&](uint64_t idx) { annotator->matrix_->set(idx, j); }
-        );
-    }
-    if (progress_bar)
-        *progress_bar += end - begin;
 }
 
 template <typename Label>

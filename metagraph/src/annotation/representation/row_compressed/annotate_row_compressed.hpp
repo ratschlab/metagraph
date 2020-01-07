@@ -12,16 +12,11 @@ namespace annotate {
 
 const char kRowAnnotatorExtension[] = ".row.annodbg";
 
-template <typename Label>
-class ColumnCompressed;
-
 
 // TODO: implement this as an annotation matrix
 // StaticBinRelAnnotator<VectorRowBinMat>
 template <typename Label = std::string>
 class RowCompressed : public MultiLabelEncoded<Label> {
-    friend ColumnCompressed<Label>;
-
     template <class A, typename L>
     friend std::unique_ptr<A> convert(RowCompressed<L>&&);
     template <class A>

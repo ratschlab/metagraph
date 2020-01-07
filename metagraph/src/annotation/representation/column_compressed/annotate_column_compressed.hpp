@@ -5,7 +5,6 @@
 
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
-#include <progress_bar.hpp>
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/vector.hpp"
@@ -16,9 +15,6 @@
 namespace annotate {
 
 const char kColumnAnnotatorExtension[] = ".column.annodbg";
-
-template <typename Label>
-class RowCompressed;
 
 
 /**
@@ -80,11 +76,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
-    // TODO: move to all other converters
-    void convert_to_row_annotator(const std::string &outfbase) const;
-    void convert_to_row_annotator(RowCompressed<Label> *annotator,
-                                  size_t num_threads = 1) const;
-
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 
     const bitmap& get_column(const Label &label) const;
@@ -95,11 +86,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
   private:
     void set(Index i, size_t j, bool value);
-
-    void add_labels(uint64_t begin, uint64_t end,
-                    RowCompressed<Label> *annotator,
-                    ProgressBar *progress_bar) const;
-    void release();
     void flush() const;
     void flush(size_t j, const bitmap_builder &column_builder);
     bitmap_builder& decompress_builder(size_t j);
