@@ -467,36 +467,12 @@ install(TARGETS metagraph DESTINATION bin)
 #-------------------
 # Unit Tests
 #-------------------
-if(TRUE) # there is one gtest version attached with sdsl
+# There is an old gtest library attached to sdsl, remove it as we are using a more recent one
 execute_process(COMMAND rm -rf ${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/include/gtest)
-# Download and unpack googletest at configure time
-if(NOT EXISTS ${CMAKE_BINARY_DIR}/googletest-download)
-  configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
-  execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
-    RESULT_VARIABLE result
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest-download )
-  if(result)
-    message(FATAL_ERROR "CMake step for googletest failed: ${result}")
-  endif()
-  execute_process(COMMAND ${CMAKE_COMMAND} --build .
-    RESULT_VARIABLE result
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest-download )
-  if(result)
-    message(FATAL_ERROR "Build step for googletest failed: ${result}")
-  endif()
-endif()
 
-# Prevent overriding the parent project's compiler/linker settings on Windows
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-
-add_subdirectory(
-  ${CMAKE_BINARY_DIR}/googletest-src
-  ${CMAKE_BINARY_DIR}/googletest-build
-  EXCLUDE_FROM_ALL
-)
+add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FROM_ALL)
 target_compile_options(gtest_main PRIVATE -w)
 target_compile_options(gtest PRIVATE -w)
-endif()
 
 if(NOT DEFINED DEATH_TEST)
   set(DEATH_TEST TRUE)
