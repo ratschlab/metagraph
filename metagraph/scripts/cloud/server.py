@@ -230,7 +230,7 @@ def load_file_dict(filename):
                 assert len(tokens) == 2, f'Invalid line in downloads sras {line}'
                 result[tokens[0]] = tokens[1]
     except FileNotFoundError:  # no downloaded sras yet, that's fine
-        return
+        return result
     return result
 
 def init_state():
@@ -243,9 +243,9 @@ def init_state():
                 raise
     global downloaded_sras, created_sras, cleaned_sras, transferred_sras, to_create_sras, to_clean_sras, to_transfer_sras
     downloaded_sras = load_file_dict(filename)
-    created_sras = load_file_dict(args.output_dir, 'created_sras')
-    cleaned_sras = load_file_dict(args.output_dir, 'cleaned_sras')
-    transferred_sras = load_file_dict(args.output_dir, 'transferred_sras')
+    created_sras = load_file_dict(os.path.join(args.output_dir, 'created_sras'))
+    cleaned_sras = load_file_dict(os.path.join(args.output_dir, 'cleaned_sras'))
+    transferred_sras = load_file_dict(os.path.join(args.output_dir, 'transferred_sras'))
 
     to_create_sras = { k : downloaded_sras[k] for k in set(downloaded_sras) - set(created_sras) }
     to_clean_sras = {k: created_sras[k] for k in set(created_sras) - set(cleaned_sras)}
