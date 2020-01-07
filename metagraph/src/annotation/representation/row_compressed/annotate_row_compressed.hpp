@@ -34,7 +34,6 @@ class RowCompressed : public MultiLabelEncoded<Label> {
   public:
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
-    using IterateRows = typename MultiLabelEncoded<Label>::IterateRows;
     using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);

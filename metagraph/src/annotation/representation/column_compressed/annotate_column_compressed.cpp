@@ -649,30 +649,6 @@ bool ColumnCompressed<Label>
     return success;
 }
 
-template <class Annotator>
-class IterateTransposed : public Annotator::IterateRows {
-  public:
-    IterateTransposed(std::unique_ptr<utils::RowsFromColumnsTransformer> transformer)
-          : row_iterator_(std::move(transformer)) {}
-
-    typename Annotator::SetBitPositions next_row() override final {
-        return row_iterator_.next_row<typename Annotator::SetBitPositions>();
-    }
-
-  private:
-    utils::RowsFromColumnsIterator row_iterator_;
-};
-
-template <typename Label>
-std::unique_ptr<typename ColumnCompressed<Label>::IterateRows>
-ColumnCompressed<Label>::iterator() const {
-    flush();
-
-    return std::make_unique<IterateTransposed<ColumnCompressed<Label>>>(
-        std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_)
-    );
-};
-
 template class ColumnCompressed<std::string>;
 
 } // namespace annotate

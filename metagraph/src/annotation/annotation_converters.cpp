@@ -335,6 +335,44 @@ void merge_rows(const std::vector<const LabelEncoder<Label> *> &label_encoders,
     );
 }
 
+// TODO: move row iterators to BinaryMatrix
+template <class T>
+class Iterate {
+  public:
+    virtual ~Iterate() {}
+    virtual T next() = 0;
+};
+
+template <class Annotator>
+class IterateRows : public Iterate<typename Annotator::SetBitPositions> {
+  public:
+    IterateRows(const Annotator &annotator) : annotator_(annotator) {};
+
+    typename Annotator::SetBitPositions next() override {
+        return annotator_.get_label_codes(i_++);
+    };
+
+  private:
+    typename Annotator::Index i_ = 0;
+    const Annotator &annotator_;
+};
+
+// TODO: remove this if not crucial.
+// Support only merge with streaming and only converted to row-major.
+template <>
+class IterateRows<ColumnCompressed<std::string>>
+            : public Iterate<ColumnCompressed<std::string>::SetBitPositions> {
+  public:
+    IterateRows(const ColumnCompressed<std::string> &annotator)
+          : row_iterator_(std::make_unique<utils::RowsFromColumnsTransformer>(annotator.get_matrix().data())) {}
+
+    ColumnCompressed<std::string>::SetBitPositions next() override {
+        return row_iterator_.next_row<ColumnCompressed<std::string>::SetBitPositions>();
+    }
+
+  private:
+    utils::RowsFromColumnsIterator row_iterator_;
+};
 
 template <class ToAnnotation, typename Label>
 void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
@@ -355,13 +393,16 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
     assert(num_rows);
 
     std::vector<const LEncoder*> label_encoders;
-    std::vector<std::unique_ptr<typename MultiLabelEncoded<Label>::IterateRows>> annotator_row_iterators;
+    using RowType = typename MultiLabelEncoded<Label>::SetBitPositions;
+    std::vector<std::unique_ptr<Iterate<RowType>>> annotator_row_iterators;
     for (const auto &annotator : annotators) {
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
 
         label_encoders.push_back(&annotator->get_label_encoder());
-        annotator_row_iterators.push_back(annotator->iterator());
+        annotator_row_iterators.push_back(
+            std::make_unique<IterateRows<MultiLabelEncoded<Label>>>(*annotator)
+        );
     }
 
     std::vector<std::unique_ptr<const LEncoder> > loaded_label_encoders;
@@ -385,7 +426,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
         label_encoders,
         [&](uint64_t annotator_idx) -> const BinaryMatrix::SetBitPositions {
             if (annotator_idx < annotators.size()) {
-                return annotator_row_iterators.at(annotator_idx)->next_row();
+                return annotator_row_iterators.at(annotator_idx)->next();
             } else {
                 return *streams[annotator_idx-annotators.size()]->next_row();
             }

@@ -164,15 +164,6 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
 
     virtual const BinaryMatrix& get_matrix() const = 0;
 
-    class IterateRows {
-      public:
-        virtual ~IterateRows() {}
-        virtual SetBitPositions next_row() = 0;
-    };
-
-    // TODO: remove this and return reference to BinaryMatrix instead
-    virtual std::unique_ptr<IterateRows> iterator() const;
-
     /*********************** Special queries **********************/
 
     /**

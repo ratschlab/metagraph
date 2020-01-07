@@ -37,7 +37,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
   public:
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
-    using IterateRows = typename MultiLabelEncoded<Label>::IterateRows;
     using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     ColumnCompressed(uint64_t num_rows = 0,
@@ -87,8 +86,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                                   size_t num_threads = 1) const;
 
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
-
-    std::unique_ptr<IterateRows> iterator() const override;
 
     const bitmap& get_column(const Label &label) const;
 
