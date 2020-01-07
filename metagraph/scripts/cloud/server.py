@@ -277,8 +277,6 @@ if __name__ == '__main__':
     init_state()
 
     sra_download_gen = Sra(data_files).next_item()
-    sra_create_gen = Sra(data_files).next_item()
-    sra_clean_gen = Sra(data_files).next_item()
 
     httpd = http.server.HTTPServer(('localhost', args.port), SimpleHTTPRequestHandler)
     print(f'Starting server on port {args.port}')
