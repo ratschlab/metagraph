@@ -554,11 +554,10 @@ bool ColumnCompressed<Label>
             continue;
         }
 
-        outstream << num_objects() << " ";
-
         const auto &column = get_column(j);
 
-        outstream << column.num_set_bits() << "\n";
+        outstream << num_objects() << " " << column.num_set_bits() << "\n";
+
         column.call_ones([&](const auto &pos) {
             outstream << pos << "\n";
         });

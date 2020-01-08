@@ -73,6 +73,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
+    // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 
     const bitmap& get_column(const Label &label) const;
