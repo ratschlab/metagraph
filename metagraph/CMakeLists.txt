@@ -492,10 +492,6 @@ file(GLOB unit_tests_files
 )
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
-if (CMAKE_VERSION VERSION_LESS 2.8.11)
-  include_directories("${gtest_SOURCE_DIR}/include")
-endif()
-
 link_directories(
   ${CMAKE_BINARY_DIR}
 )
