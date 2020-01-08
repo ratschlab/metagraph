@@ -20,15 +20,13 @@ using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 constexpr uint64_t npos = 0;
 
 
-template <class KmerBF>
+template <class KmerBF, class Callback>
 inline void call_kmers(const KmerBF &kmer_bloom,
                        std::string_view sequence,
-                       const std::function<void(uint64_t)> &callback) {
+                       const Callback &callback) {
     const auto k = kmer_bloom.get_k();
     if (sequence.size() < k)
         return;
-
-    const auto max_encoded_val = KmerDef::alphabet.size();
 
     std::vector<TAlphabet> coded(sequence.size());
     std::transform(sequence.begin(), sequence.end(),
@@ -50,36 +48,25 @@ inline void call_kmers(const KmerBF &kmer_bloom,
         callback(std::min(uint64_t(fwd), uint64_t(rev)));
 
         for (size_t i = k, j = coded.size() - k - 1; i < coded.size(); ++i, --j) {
-            if (coded.at(i) < max_encoded_val) {
-                assert(rc_coded.at(j) < max_encoded_val);
-
-                fwd.next(coded.at(i));
-                rev.prev(rc_coded.at(j));
-
-                callback(std::min(uint64_t(fwd), uint64_t(rev)));
-            } else {
-                callback(npos);
-            }
+            fwd.next(coded.at(i));
+            rev.prev(rc_coded.at(j));
+            callback(std::min(uint64_t(fwd), uint64_t(rev)));
         }
 
     } else {
         callback(fwd);
 
         for (size_t i = k; i < coded.size(); ++i) {
-            if (coded.at(i) < max_encoded_val) {
-                fwd.next(coded.at(i));
-                callback(fwd);
-            } else {
-                callback(npos);
-            }
+            fwd.next(coded.at(i));
+            callback(fwd);
         }
     }
 }
 
-template <class KmerBF>
+template <class KmerBF, class Callback>
 inline void call_valid_kmers(const KmerBF &kmer_bloom,
                              std::string_view sequence,
-                             const std::function<void(uint64_t)> &callback) {
+                             const Callback &callback) {
     const auto k = kmer_bloom.get_k();
     if (sequence.size() < k)
         return;
@@ -150,7 +137,7 @@ void KmerBloomFilter<KmerHasher>
     // invalid k-mers may be false positives
     assert(sdsl::util::cnt_one_bits(check_kmer_presence(sequence)) >= hashes.size());
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) and (_DNA_CASE_SENSITIVE_GRAPH or _DNA5_GRAPH or _DNA_GRAPH)
     std::string rev_comp(sequence);
     reverse_complement(rev_comp.begin(), rev_comp.end());
     assert(!canonical_mode_
