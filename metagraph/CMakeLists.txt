@@ -416,7 +416,7 @@ if(NOT CPPNOFS)
 endif()
 
 target_link_libraries(metagraph-core ${METALIBS})
-target_link_libraries(metagraph-cli metagraph-core ${METALIBS})
+target_link_libraries(metagraph-cli PRIVATE metagraph-core)
 target_link_libraries(metagraph metagraph-core metagraph-cli)
 
 add_custom_target(link_target ALL
@@ -446,9 +446,7 @@ link_directories(
 )
 add_executable(run_experiments ${experiment_files})
 
-target_link_libraries(
-  run_experiments metagraph-core ${METALIBS}
-)
+target_link_libraries(run_experiments metagraph-core)
 
 #-------------------
 # install library
@@ -498,10 +496,7 @@ link_directories(
 
 add_executable(unit_tests ${unit_tests_files})
 target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(unit_tests gtest_main gtest
-  metagraph-core
-  ${METALIBS}
-)
+target_link_libraries(unit_tests gtest_main gtest metagraph-core)
 
 target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
