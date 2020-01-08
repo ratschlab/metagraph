@@ -263,7 +263,7 @@ void RowCompressed<Label>::load_shape(const std::string &filename,
     num_objects = 0;
     num_relations = 0;
 
-    StreamRows<> sr(filename);
+    auto sr = get_row_streamer(filename);
 
     while (auto *row = sr.next_row()) {
         num_objects++;
@@ -272,17 +272,15 @@ void RowCompressed<Label>::load_shape(const std::string &filename,
 }
 
 template <typename Label>
-template <typename RowType>
-RowCompressed<Label>::StreamRows<RowType>::StreamRows(std::string filename) {
-    filename = remove_suffix(filename, kExtension) + kExtension;
+StreamRows<BinaryMatrix::SetBitPositions>
+RowCompressed<Label>::get_row_streamer(const std::string &filebase) {
+    std::string filename = remove_suffix(filebase, kExtension) + kExtension;
     std::ifstream instream(filename, std::ios::binary);
     // skip header
     load_label_encoder(instream);
     // rows
-    sr_ = std::make_unique<::StreamRows<RowType>>(filename, instream.tellg());
+    return StreamRows<BinaryMatrix::SetBitPositions>(filename, instream.tellg());
 }
-
-template class RowCompressed<std::string>::StreamRows<BinaryMatrix::SetBitPositions>;
 
 template <typename Label>
 void RowCompressed<Label>

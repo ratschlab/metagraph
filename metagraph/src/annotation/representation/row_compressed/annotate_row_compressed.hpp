@@ -55,17 +55,8 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     static std::unique_ptr<LabelEncoder<Label>>
     load_label_encoder(const std::string &filename);
 
-    template <typename RowType = BinaryMatrix::SetBitPositions>
-    class StreamRows {
-      public:
-        explicit StreamRows(std::string filename);
-
-        // return null after all rows have been called
-        RowType* next_row() { return sr_->next_row(); }
-
-      private:
-        std::unique_ptr<::StreamRows<RowType>> sr_;
-    };
+    static StreamRows<BinaryMatrix::SetBitPositions>
+    get_row_streamer(const std::string &filename);
 
     // TODO: move to BinaryMatrixRowDynamic
     static void write_rows(std::string filename,
