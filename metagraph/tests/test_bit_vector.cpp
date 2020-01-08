@@ -20,7 +20,7 @@ typedef ::testing::Types<bit_vector_stat,
                          bit_vector_smart>
         BitVectorTypes;
 
-TYPED_TEST_CASE(BitVectorTest, BitVectorTypes);
+TYPED_TEST_SUITE(BitVectorTest, BitVectorTypes);
 
 
 void test_next_subvector(const bit_vector &vector, uint64_t idx) {

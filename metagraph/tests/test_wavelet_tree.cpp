@@ -17,7 +17,7 @@ typedef ::testing::Types<wavelet_tree_stat,
                          wavelet_tree_small>
         WaveletTreeTypes;
 
-TYPED_TEST_CASE(WaveletTreeTest, WaveletTreeTypes);
+TYPED_TEST_SUITE(WaveletTreeTest, WaveletTreeTypes);
 
 
 void test_next(const wavelet_tree &vector) {

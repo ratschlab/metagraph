@@ -982,9 +982,9 @@ class AnnotatedDBGWithNTest : public ::testing::Test {};
 template <typename GraphAnnotationPair>
 class AnnotatedDBGNoNTest : public ::testing::Test {};
 
-TYPED_TEST_CASE(AnnotatedDBGTest, GraphAnnotationPairTypes);
-TYPED_TEST_CASE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
-TYPED_TEST_CASE(AnnotatedDBGNoNTest, GraphNoNAnnotationPairTypes);
+TYPED_TEST_SUITE(AnnotatedDBGTest, GraphAnnotationPairTypes);
+TYPED_TEST_SUITE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
+TYPED_TEST_SUITE(AnnotatedDBGNoNTest, GraphNoNAnnotationPairTypes);
 
 TYPED_TEST(AnnotatedDBGWithNTest, check_labels) {
     for (size_t k = 1; k < 10; ++k) {

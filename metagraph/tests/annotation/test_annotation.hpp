@@ -158,13 +158,13 @@ typedef ::testing::Types<annotate::ColumnCompressed<>,
                          RowCompressedDynamic<>> AnnotatorDynamicNoSparseTypes;
 
 
-TYPED_TEST_CASE(AnnotatorTest, AnnotatorTypes);
-TYPED_TEST_CASE(AnnotatorPresetTest, AnnotatorTypes);
-TYPED_TEST_CASE(AnnotatorPreset2Test, AnnotatorTypes);
-TYPED_TEST_CASE(AnnotatorPreset3Test, AnnotatorTypes);
-TYPED_TEST_CASE(AnnotatorStaticTest, AnnotatorStaticTypes);
-TYPED_TEST_CASE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
-TYPED_TEST_CASE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
-TYPED_TEST_CASE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
+TYPED_TEST_SUITE(AnnotatorTest, AnnotatorTypes);
+TYPED_TEST_SUITE(AnnotatorPresetTest, AnnotatorTypes);
+TYPED_TEST_SUITE(AnnotatorPreset2Test, AnnotatorTypes);
+TYPED_TEST_SUITE(AnnotatorPreset3Test, AnnotatorTypes);
+TYPED_TEST_SUITE(AnnotatorStaticTest, AnnotatorStaticTypes);
+TYPED_TEST_SUITE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
+TYPED_TEST_SUITE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
+TYPED_TEST_SUITE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
 
 #endif // __TEST_ANNOTATION_HPP__

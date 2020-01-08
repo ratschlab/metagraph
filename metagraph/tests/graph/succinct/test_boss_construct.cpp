@@ -62,15 +62,15 @@ typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, true>,
                          BOSSConfigurationType<KmerExtractorBOSS::Kmer128, true>,
                          BOSSConfigurationType<KmerExtractorBOSS::Kmer256, true>> KmerWeightedTypes;
 
-TYPED_TEST_CASE(BOSSConstruct, KmerAndWeightedTypes);
-TYPED_TEST_CASE(WeightedBOSSConstruct, KmerWeightedTypes);
+TYPED_TEST_SUITE(BOSSConstruct, KmerAndWeightedTypes);
+TYPED_TEST_SUITE(WeightedBOSSConstruct, KmerWeightedTypes);
 
 typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
                          KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
                          KMerBOSS<sdsl::uint256_t, KmerExtractorBOSS::bits_per_char>> KmerTypes;
 
-TYPED_TEST_CASE(CollectKmers, KmerTypes);
-TYPED_TEST_CASE(CountKmers, KmerTypes);
+TYPED_TEST_SUITE(CollectKmers, KmerTypes);
+TYPED_TEST_SUITE(CountKmers, KmerTypes);
 
 #define kMaxK ( sizeof(typename TypeParam::Kmer) * 8 / KmerExtractorBOSS::bits_per_char )
 

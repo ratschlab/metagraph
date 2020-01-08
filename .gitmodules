@@ -55,3 +55,6 @@
 [submodule "metagraph/external-libraries/spdlog"]
 	path = metagraph/external-libraries/spdlog
 	url = https://github.com/gabime/spdlog
+[submodule "metagraph/external-libraries/googletest"]
+	path = metagraph/external-libraries/googletest
+	url = https://github.com/google/googletest.git
