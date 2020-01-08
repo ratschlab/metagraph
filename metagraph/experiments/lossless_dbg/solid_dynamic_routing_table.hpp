@@ -12,11 +12,9 @@
 #include <tsl/hopscotch_map.h>
 
 #include "graph_patch.hpp"
-//#include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
 #include "wavelet_tree.hpp"
-//#include "dynamic.hpp"
 
 volatile bool always_false = false;
 
@@ -155,8 +153,6 @@ public:
         return block_offset;
     }
 
-    // Todo change from magic number to some define elsewhere
-    const static int64_t delimiter_encoded = 6;
     EntryT routing_table;
     int64_t total_size;
 };

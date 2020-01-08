@@ -38,8 +38,7 @@ public:
 
     history_t gather_history(const string& str_history) {
         // todo: add function to gather only consistent history (with strong aka first class, 0-th order support),
-        //       now we are gathering reads that are inconsistent with longest path
-        // todo: separate in two
+        //       now we are gathering reads that are inconsistent with longest path #future-work
         node_index node = this->graph.kmer_to_node(str_history.substr(0,this->graph.get_k()));
         assert(node);
         auto history = get_initial_history(node);
@@ -86,7 +85,7 @@ public:
 
 
     next_nodes_with_extended_info_t get_next_nodes_with_support(node_index node,history_t& history) {
-        // todo: merge ranges for successive joining reads
+        // todo: merge ranges for successive joining reads #future-work
         next_nodes_with_extended_info_t result;
         if (this->node_is_split(node)) {
             int64_t range_score = 0;
@@ -130,8 +129,7 @@ public:
 
     vector<path_id> get_paths_going_through(node_index node) const   {
         //catch: relative indices in node can be from the same sequence if the read is going there multiple times
-        //use set to filter out duplicates or be smarter and stop when arrived to the starting node again
-        //todo: improve speed by not getting global path for the same reads
+        // todo: be smarter and stop when arrived to the starting node again #future-work
         auto coverage = get_coverage(node);
         set<path_id> out;
         for(int64_t position=0;position<coverage;position++) {

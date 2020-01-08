@@ -39,9 +39,6 @@ using namespace std;
 const uint64_t STATS_JOINS_HISTOGRAM (1u << 0u);
 const uint64_t STATS_SPLITS_HISTOGRAM (1u << 1u);
 
-// todo find a tool that removes this relative namespacing issue
-// say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
-
 template <typename StaticTable>
 class DynamicVersion {
 
@@ -106,14 +103,17 @@ public:
                 routing_table_array_local.push_back('#');// to always start a block with #
                 if (PathDatabaseDynamicCore<DRT, DIT>::node_is_split(node)) {
                     auto &dynamic_table = PathDatabaseDynamicCore<DRT, DIT>::routing_table;
-                    // TODO: remove also other assertions that assume full coverage
-                    //alt_assert(dynamic_table.size(node));
-                    //int encoded = 0;
+#ifdef DEBUG_ASSUME_ALL_KMERS_COVERED
+                    alt_assert(dynamic_table.size(node));
+#endif
+                    int encoded = 0;
                     for(int64_t i = 0; i < dynamic_table.size(node); i++) {
                         routing_table_array_local.push_back(dynamic_table.get(node, i));
-                    //    encoded++;
+                        encoded++;
                     }
-                    //alt_assert(encoded);
+#ifdef DEBUG_ASSUME_ALL_KMERS_COVERED
+                    alt_assert(encoded);
+#endif
                 }
             }
 

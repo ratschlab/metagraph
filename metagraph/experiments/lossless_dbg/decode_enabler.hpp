@@ -57,7 +57,10 @@ public:
 #endif
             }
             else {
-                assert((this->graph.outdegree(node) == 1 || [&]() { PRINT_VAR(this->graph.outdegree(node)); return false;}()));
+                assert((this->graph.outdegree(node) == 1 || [&]() {
+                    this->routing_table.print_content();
+                    PRINT_VAR(this->graph.outdegree(node));
+                    return false;}()));
                 this->graph.call_outgoing_kmers(node,[&base](node_index ,char edge_label ) { base = edge_label;});
                 encoded_base = base; // same
             }

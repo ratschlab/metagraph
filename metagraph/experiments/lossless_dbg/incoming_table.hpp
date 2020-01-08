@@ -63,9 +63,11 @@ public:
     }
 
     bool has_new_reads(node_index node) const {
-        // todo : remove or after the indegree bug is fixed and use assertion
-        // assert(!(graph->indegree(node) < 2 and size(node)) or size(node) > graph->indegree(node));
         // indegree smaller than two with nonempty incoming table implies that node has new reads
+#ifdef DEBUG_ASSUME_ALL_KMERS_COVERED
+        // todo : test if right #low-priority
+        assert(!(graph->indegree(node) < 2 and size(node)) or size(node) > (int64_t) graph->indegree(node));
+#endif
 #ifndef FULL_INCOMING_TABLE
         return size(node) == (int64_t )graph->indegree(node) or ((int64_t )graph->indegree(node) < (int64_t )2 and size(node));
 #else

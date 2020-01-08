@@ -211,7 +211,7 @@ int main_compressor(int argc, char *argv[]) {
 	auto input_filename = inputArg.getValue();
 	auto statistics_filename = statisticsArg.getValue();
 	bool use_transformations = pathReroutingArg.getValue() == "yes";
-	// TODO: Don't read all reads to memory
+    // TODO: Don't read all reads to memory #noted
     Timer read_timer;
     cerr << "Started loading the reads." << endl;
 	auto reads = read_reads_from_fasta(input_filename);

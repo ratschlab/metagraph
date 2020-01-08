@@ -36,9 +36,15 @@ make install # to install path_encoder_toolbox
 
 
 
+
 #### Work in Progress
 
+## Defines
+`DEBUG_ASSUME_ALL_KMERS_COVERED` that enables additional assertions under the assumption that for every kmer there is at least one path going through it (covering it)
 
+`DEBUG_ASSUME_NO_TRANSFORMATIONS` enables additional assertions under the assumption that no path transformation is happening
+
+`DEBUG_ADDITIONAL_INFORMATION` more detailed error reports with better insights (beware: slows down the execution as it stores additional information) 
 
 ### Unsorted examples
 

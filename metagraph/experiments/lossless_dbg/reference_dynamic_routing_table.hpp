@@ -16,8 +16,8 @@ public:
     ReferenceDynamicRoutingTable() = default;
     ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> ) {}
 
-    template<typename MockA,typename MockB> // TODO rename MockA to decl...bit_vector
-    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> /* graph */, MockA* is_element,MockB* rank_element, ll /* chunks = DefaultChunks */) : routing_table(is_element,rank_element) {
+    template<typename BitVector,typename RankSupport>
+    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> /* graph */, BitVector* is_element,RankSupport* rank_element, ll /* chunks = DefaultChunks */) : routing_table(is_element,rank_element) {
 
     }
 
@@ -62,6 +62,16 @@ public:
         auto table_size = size(node);
         for (int i=0;i<table_size;i++) {
             out << get(node, i);
+        }
+        out << endl;
+        cerr << out.str();
+        return out.str();
+    }
+
+    string print_content() const {
+        stringstream out;
+        for (int64_t i=0;i<routing_table.size();i++) {
+            out << routing_table[i];
         }
         out << endl;
         cerr << out.str();

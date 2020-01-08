@@ -37,6 +37,10 @@ public:
         return elements[underlying_position(n)];
     }
 
+    const T& operator[](int64_t n) const {
+        return elements[underlying_position(n)];
+    }
+
     const T& at(int64_t n) const {
         return elements.at(underlying_position(n));
     }
@@ -48,6 +52,10 @@ public:
 
     T* ptr_to(int64_t n) {
         return &elements[underlying_position(n)];
+    }
+
+    int64_t size() const {
+        return elements.size();
     }
 
 
@@ -64,22 +72,23 @@ public:
     ChunkedDenseHashMap() = default;
 
     ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,int64_t chunks=DefaultChunks) {
+        assert(chunks>0);
         int64_t total_num_elements = rank->rank(rank->size());
         chunks = min(chunks,total_num_elements);
         this->is_element = isElement;
         this->rank = rank;
-        divisor = get_divisor(total_num_elements,chunks);
+        chunk_size = get_chunk_size(total_num_elements,chunks);
 
 
         if constexpr (supply_size) {
-            this->elements = decltype(this->elements)(chunks, T(divisor));//todo fix that last is not full
+            this->elements = decltype(this->elements)(chunks, T(chunk_size));//note: the last chunk will be padded
         }
         else {
             this->elements = decltype(this->elements)(chunks);
         }
     }
 
-    static int64_t get_divisor(int64_t num_elements,int64_t chunks) {
+    static int64_t get_chunk_size(int64_t num_elements,int64_t chunks) {
         return (num_elements+chunks-1)/chunks;
     }
 
@@ -89,11 +98,11 @@ public:
     }
 
     int64_t chunk(int64_t n) const {
-        return unchunked_position(n)/divisor;
+        return unchunked_position(n)/chunk_size;
     }
 
     int64_t position_in_chunk(int64_t n) const {
-        return unchunked_position(n) % divisor;
+        return unchunked_position(n) % chunk_size;
     }
 
     int64_t underlying_position(int64_t n) const {
@@ -120,7 +129,7 @@ public:
         return &(this->elements[underlying_position(n)]);
     }
 
-    int64_t divisor = 0;
+    int64_t chunk_size = 0;
 };
 
 #endif // __DENSE_HASHMAP_HPP__

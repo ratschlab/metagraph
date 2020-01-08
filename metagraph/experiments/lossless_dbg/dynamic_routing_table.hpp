@@ -74,6 +74,15 @@ public:
         return chunk.print_content(chunks.position_in_chunk(location));
     }
 
+    string print_content() const {
+        stringstream out;
+        for(int64_t chunk_id = 0; chunk_id < chunks.size(); chunk_id++) {
+            auto &chunk = chunks.at(chunk_id);
+            out << chunk.print_content();
+        }
+        return out.str();
+    }
+
     char traversed_base(int64_t location, ll position) const {
         auto &chunk = chunks.at(location);
         return chunk.traversed_base(chunks.position_in_chunk(location), position);

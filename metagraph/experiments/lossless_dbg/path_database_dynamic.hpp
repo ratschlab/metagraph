@@ -41,13 +41,14 @@ public:
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph, int64_t chunk_size=DefaultChunks) :
+    explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph, int64_t chunks=DefaultChunks) :
             graph_(graph),
             graph(*graph_),
             incoming_table(graph_),
             routing_table(graph_),// weak
-            chunks(chunk_size)
+            chunks(chunks)
             {
+                assert(chunks>0);
             }
 
 
@@ -72,10 +73,6 @@ public:
         // - when multiple reads start at a same symbol, sort them so they share longest prefix
         // sort them so we have fixed relative ordering
         // probably not need to sort globally as we want only relative ordering
-
-        // use std::conditional<has transformations,vector<string>&,vector<string>> transformed_sequences = transformed_sequences;
-        // problem is that transform_sequence will additionally copy & replace it so we are getting additional overhead
-//        vector<string> transformed_sequences = sequences;
 
         //decide if the transformed sequences will be different or not and either copy or point to original sequences.
         typename std::conditional<has_member_transformations<RoutingTableT>::value,
@@ -147,8 +144,8 @@ public:
             vector<int64_t> debug_relative_position_history;
             bool debug_transformation_used = sequence != path_for_sequence;
 #endif
-            // TODO: use map_to_nodes_sequentially when implemented
-            graph.map_to_nodes(path_for_sequence, [&](node_index node) {
+
+            graph.map_to_nodes_sequentially(all(path_for_sequence), [&](node_index node) {
                 assert(node || [&](){
                     auto pn = [&](int64_t offset) {
                         PRINT_VAR(sequence.substr(offset,graph.get_k()));
@@ -157,7 +154,7 @@ public:
                         PRINT_VAR(graph.kmer_to_node(path_for_sequence.substr(offset,graph.get_k())));
                     };
                     pn(kmer_begin);
-                    return false; }() && "sequence doesn't represent walk");
+                    return false; }() && "sequence doesn't represent a walk");
 
 #ifdef DEBUG_ADDITIONAL_INFORMATION
                 debug_list_of_nodes.push_back(node);
@@ -318,9 +315,6 @@ public:
         is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
         is_join = decltype(is_join)(graph.num_nodes() + 1);
         is_bifurcation = decltype(is_join)(graph.num_nodes() + 1);
-        if (chunks == 0) {
-            chunks = 1000; // todo: make proper fix
-        }
         uint64_t chunk_size = (graph.num_nodes() + 1)/ chunks + 64ull;
         chunk_size &= ~63ull;
         vector<omp_lock_t> node_locks(chunks);
@@ -402,27 +396,16 @@ public:
         return encoded_paths;
     };
 
-    json get_statistics(uint64_t /* verbosity = ~0u */) const {
+    json get_statistics([[maybe_unused]] uint64_t verbosity = ~0u) const {
         //auto result = PathDatabase<pair<node_index,int>,GraphT>::get_statistics(verbosity);
         //result.update(statistics);
         //return result;
         return statistics;
     }
 
-
-    //todo put to proper place
     string transform_sequence(const string& sequence) const {
         string result = sequence;
-        size_t kmer_end = graph.get_k();
-        static_assert(has_member_transformations<RoutingTableT>::value == std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value);
-        if constexpr (std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value) {
-            graph.map_to_nodes(sequence, [&](node_index node) {
-                if (kmer_end < sequence.size()) {
-                    result[kmer_end] = routing_table.transform(node, result[kmer_end]);
-                }
-                kmer_end++;
-            });
-        }
+        transform_sequence_inplace(result);
         return result;
     }
 
@@ -430,7 +413,7 @@ public:
         size_t kmer_end = graph.get_k();
         static_assert(has_member_transformations<RoutingTableT>::value == std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value);
         if constexpr (std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value) {
-            graph.map_to_nodes(sequence, [&](node_index node) {
+            graph.map_to_nodes_sequentially(all(sequence), [&](node_index node) {
                 if (kmer_end < sequence.size()) {
                     sequence[kmer_end] = routing_table.transform(node, sequence[kmer_end]);
                 }

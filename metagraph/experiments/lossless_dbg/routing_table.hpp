@@ -97,10 +97,21 @@ public:
         for (int64_t i=0;i<table_size;i++) {
             out << get(node, i);
         }
+        cerr << out.str();
+        return out.str();
+    }
+
+    string print_content() const {
+        stringstream out;
+        for (uint64_t i=0;i<routing_table.size();i++) {
+            out << decode(routing_table[i]);
+        }
         out << endl;
         cerr << out.str();
         return out.str();
     }
+
+
 
     char traversed_base(node_index node, int64_t position) const {
         return get(node,position);

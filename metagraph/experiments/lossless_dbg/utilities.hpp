@@ -162,13 +162,14 @@ inline void append_vectors(std::vector<T>& output,std::vector<T>& input)
     std::vector<bool> : \
     append_vectors(omp_out, omp_in))
 
+const static int64_t delimiter_encoded = 6;
 inline int8_t encode(char c) {
-    if (c == '#') return 6;//alphabet_decoder.alph_size;
+    if (c == '#') return delimiter_encoded;//alphabet_decoder.alph_size;
     if (c == '$') return 0;
     return KmerExtractorBOSS::encode(c);
 }
 inline char decode(int8_t c) {
-    if (c == 6) return '#';
+    if (c == delimiter_encoded) return '#';
     if (c == 0) return '$';
     return KmerExtractorBOSS::decode(c);
 }
@@ -533,7 +534,7 @@ public:
 
     CREATE_MEMBER_CHECK(print_content);
     template<typename ...Args>
-    void print_content(Args... args) {
+    void print_content(Args... args) const {
         // not thread safe, needs additional lock here
         if constexpr (has_member_print_content<Reference>::value) {
             Reference::print_content(args...);

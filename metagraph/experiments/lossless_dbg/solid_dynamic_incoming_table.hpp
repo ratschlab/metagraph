@@ -53,7 +53,7 @@ public:
         else {
             result = it->second.at(encoded);
         }
-        assert(result>=0);// todo change if dealing with branches that are skipped
+        assert(result>=0);
         return result;
     }
 
