@@ -95,7 +95,7 @@ public:
     }
 
 
-    shared_ptr<const BetterDBGSuccinct> graph;
+    shared_ptr<const DBGSuccinct> graph;
     ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
 };
 

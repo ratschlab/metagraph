@@ -33,17 +33,25 @@ public:
     template<class Container>
     void initialize_content(const Container& routing_table_array) {
         // can't use int_vector<3> as the construction of routing table fails (routing table is malformed)
-        sdsl::int_vector<> routing_table_array_encoded(routing_table_array.size(),0,3);
+        // now even (routing_table_array.size(),0,3) is malformed
+        //int8_t* routing_table_array_encoded = new int8_t[routing_table_array.size()]; // also fails
+        // DEP_TODO: change to use only 3 bits (dep: https://github.com/simongog/sdsl-lite/issues/422 needs to be solved OR https://github.com/xxsds/sdsl-lite/issues/71 solved & change to xxsds/sdsl-lite)
+        sdsl::int_vector<8> routing_table_array_encoded(routing_table_array.size());//,0,8); // 3->8
         for(uint64_t i=0;i<routing_table_array.size();i++) {
             routing_table_array_encoded[i] = encode(routing_table_array[i]);
         }
+
         construct_im(routing_table,routing_table_array_encoded,0);
+        assert(routing_table.size()==routing_table_array_encoded.size());
+        for(uint64_t i=0;i<routing_table_array.size();i++) {
+            assert(routing_table[i]==routing_table_array_encoded[i]);
+        }
     }
 
     template<class Container>
     explicit RoutingTableCore(const shared_ptr<const DBGSuccinct> graph, const Container& routing_table_array) :
         RoutingTableCore(graph)
-     {
+    {
         initialize_content(routing_table_array);
     }
 

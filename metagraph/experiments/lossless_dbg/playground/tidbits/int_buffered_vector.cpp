@@ -46,7 +46,7 @@ int main(int argc, char* argv[])
     size_t size = 10000000;
 
         // create an int_vector_buffer
-        int_vector_buffer<> ivb(tmp_file,      // filename
+        int_vector_buffer<> test(tmp_file,      // filename
                                 std::ios::out, // we do not want to open an existing file, but create a new one
                                 1024*1024,     // use a buffer of about 1MB
                                 2,            // use 64bit for each integer
@@ -55,9 +55,9 @@ int main(int argc, char* argv[])
         // write sequentially random values to disk
         for (uint64_t i=0; i<size; ++i) {
             for(int j = 0; j < 100; i++, j++) {
-                ivb.push_back(0);
+                test.push_back(0);
             }
-            ivb.push_back(1);
+            test.push_back(1);
         }
 
     memory_monitor::start();
@@ -76,7 +76,7 @@ int main(int argc, char* argv[])
     memory_monitor::write_memory_log<HTML_FORMAT>(cstofs);
     cstofs.close();
     util::clear(cst);
-    ivb.close(true); // close buffer and (3) remove the file
+    test.close(true); // close buffer and (3) remove the file
 
     return 0;
 }

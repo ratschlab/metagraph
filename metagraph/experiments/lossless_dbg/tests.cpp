@@ -218,14 +218,14 @@ TEST(PathDatabase,DummyTest) {
     PRINT_VAR(sizeof(variant<vector<char>,wavelet_tree_dyn>));
 }
 TEST(PathDatabase,RightDecode) {
-    PathDatabaseWavelet<> pd({"ACTAGGA","ACTCGGA"},3);
-    ASSERT_EQ(pd.graph.encode('$'),0);
-    ASSERT_EQ(pd.graph.encode('A'),1);
-    ASSERT_EQ(pd.graph.encode('C'),2);
-    ASSERT_EQ(pd.graph.encode('G'),3);
-    ASSERT_EQ(pd.graph.encode('T'),4);
-    ASSERT_EQ(pd.graph.encode('N'),5);
-    ASSERT_EQ(pd.graph.encode('#'),6);
+    //PathDatabaseWavelet<> pd({"ACTAGGA","ACTCGGA"},3);
+    ASSERT_EQ(encode('$'),0);
+    ASSERT_EQ(encode('A'),1);
+    ASSERT_EQ(encode('C'),2);
+    ASSERT_EQ(encode('G'),3);
+    ASSERT_EQ(encode('T'),4);
+    ASSERT_EQ(encode('N'),5);
+    ASSERT_EQ(encode('#'),6);
 }
 
 TEST(PathDatabase,IncomingTable) {
@@ -266,6 +266,8 @@ TEST(PathDatabase,DynamicAlternativeRoute) {
 }
 
 TEST(PathDatabase,AlternativeRoute) {
+    // routing table: #########$#$####GA##########TG#####
+    // incoming table: ??
     check_compression_decompression<PathDatabaseWavelet<>>(alternative_reads,5);
 
 }

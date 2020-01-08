@@ -77,7 +77,7 @@ public:
         bool increment = has_new_reads(node);
         int64_t result;
         if (prev_node) {
-            result = incoming_edge_rank(*graph,node,prev_node);
+            result = incoming_edge_rank(*graph,prev_node,node);
         }
         else {
             result = -1; // starting branch is before all other branches

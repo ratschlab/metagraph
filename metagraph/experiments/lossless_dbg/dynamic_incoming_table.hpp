@@ -64,7 +64,7 @@ public:
         return chunk.print_content(chunks.position_in_chunk(location));
     }
 
-    shared_ptr<const BetterDBGSuccinct> graph;
+    shared_ptr<const DBGSuccinct> graph;
     ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
 };
 

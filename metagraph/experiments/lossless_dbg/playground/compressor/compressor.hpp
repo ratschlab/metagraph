@@ -73,7 +73,7 @@ Database compressReadsDeprecated(ValueArg<string> &compressedArg,
 template<class DatabaseT>
 void compress_store_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
                     ValueArg<std::string> &compressedArg, const string &statistics_filename,
-                    const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph, int chunks, uint64_t stat_verbosity) {
+                    const vector<string> &reads, int64_t kmer_length, shared_ptr<DBGSuccinct> &graph, int chunks, uint64_t stat_verbosity) {
     unique_ptr<DatabaseT> pd;
         Timer timer;
         cerr << "Started loading the graph" << endl;
@@ -102,7 +102,7 @@ void compress_store_reads(ValueArg<std::string> &graphArg, const ValueArg<std::s
 template<class DatabaseT>
 void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
 					const string &statistics_filename,
-					const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph, uint64_t stat_verbosity) {
+					const vector<string> &reads, int64_t kmer_length, shared_ptr<DBGSuccinct> &graph, uint64_t stat_verbosity) {
 	unique_ptr<DatabaseT> pd;
 		Timer timer;
 		cerr << "Started loading the graph" << endl;
