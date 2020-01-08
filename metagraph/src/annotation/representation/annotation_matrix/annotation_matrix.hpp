@@ -29,8 +29,13 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 
+    SetBitPositions get_label_codes(Index i) const override;
+    std::vector<SetBitPositions>
+    get_label_codes(const std::vector<Index> &indices) const override;
+
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
+    // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, uint64_t num_threads = 1) const;
 
     uint64_t num_objects() const override;
@@ -53,11 +58,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     std::unique_ptr<BinaryMatrixType> matrix_;
 
-    LabelEncoder<Label> &label_encoder_ { MultiLabelEncoded<Label>::label_encoder_ };
-
-    SetBitPositions get_label_codes(Index i) const override;
-    std::vector<SetBitPositions>
-    get_label_codes(const std::vector<Index> &indices) const override;
+    using MultiLabelEncoded<Label>::label_encoder_;
 
     typedef caches::fixed_sized_cache<Index,
                                       SetBitPositions,
