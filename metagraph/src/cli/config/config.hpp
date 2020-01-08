@@ -74,6 +74,7 @@ class Config {
     unsigned int port = 5555;
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
+    unsigned int count_width = 8;
 
     // Alignment options
     bool alignment_seed_unimems = false;
