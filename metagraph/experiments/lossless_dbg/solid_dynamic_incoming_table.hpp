@@ -14,7 +14,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "graph_patch.hpp"
-#include "cxx-prettyprint.hpp"
+#include <prettyprint.hpp>
 //#include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
@@ -28,7 +28,7 @@ public:
     explicit SolidDynamicIncomingTable(ll size) : total_size(size) {}
 
     int64_t branch_offset(node_index node, edge_identifier_t incoming) const {
-        assert(node < total_size);
+        assert((int64_t )node < total_size);
         int64_t result = 0;
         for (char base : "$ACGTN") {
             if (base < incoming) {
@@ -44,7 +44,7 @@ public:
     }
 
     int64_t branch_size(node_index node, edge_identifier_t incoming) const {
-        assert(node < total_size);
+        assert((int64_t )node < total_size);
         int64_t result = 0;
         int64_t encoded = encode(incoming);
         auto it = incoming_table.find(node);
@@ -68,7 +68,7 @@ public:
 
     int64_t branch_offset_and_increment(node_index node,
                                     edge_identifier_t incoming) {
-        assert(node < total_size);
+        assert((int64_t )node < total_size);
         assert(incoming == '$' or
                incoming == 'A' or
                incoming == 'C' or
@@ -98,7 +98,7 @@ public:
 
 
     string print_content(node_index node) const {
-        assert(node < total_size);
+        assert((int64_t )node < total_size);
         stringstream out;
         for(char c : "$ACGTN") {
             out << c << ":" << branch_size(node,c) << endl;

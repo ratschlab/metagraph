@@ -12,7 +12,7 @@
 #include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
-#include "cxx-prettyprint.hpp"
+#include <prettyprint.hpp>
 
 #include "dbg_succinct.hpp"
 using node_index = SequenceGraph::node_index;

@@ -19,16 +19,10 @@
 #include "exit_barrier.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
-//#include "utils.hpp"
 #include "utilities.hpp"
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
-// TODO: Never use 'using namespace std;' in .hpp files
-// todo find a tool that removes this relative namespacing issue
-//using namespace std;
-
-// say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 using node_index = DeBruijnGraph::node_index;
 
 
@@ -408,7 +402,7 @@ public:
         return encoded_paths;
     };
 
-    json get_statistics(uint64_t verbosity = ~0u) const {
+    json get_statistics(uint64_t /* verbosity = ~0u */) const {
         //auto result = PathDatabase<pair<node_index,int>,GraphT>::get_statistics(verbosity);
         //result.update(statistics);
         //return result;
@@ -445,7 +439,7 @@ public:
         }
     }
 
-    void serialize(const fs::path& folder) const {};
+    void serialize(const fs::path& ) const {};
 
 //protected:
     json statistics;

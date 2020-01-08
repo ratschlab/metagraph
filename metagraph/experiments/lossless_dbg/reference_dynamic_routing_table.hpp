@@ -14,10 +14,10 @@ template<typename DummyT=int>
 class ReferenceDynamicRoutingTable {
 public:
     ReferenceDynamicRoutingTable() = default;
-    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> graph) {}
+    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> ) {}
 
     template<typename MockA,typename MockB> // TODO rename MockA to decl...bit_vector
-    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> graph, MockA* is_element,MockB* rank_element, ll chunks = DefaultChunks) : routing_table(is_element,rank_element) {
+    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> /* graph */, MockA* is_element,MockB* rank_element, ll /* chunks = DefaultChunks */) : routing_table(is_element,rank_element) {
 
     }
 
@@ -79,7 +79,7 @@ public:
         return base_rank;
     }
 
-    int new_relative_position(node_index node, int position, ll hint_block_offset) const {
+    int new_relative_position(node_index node, int position, ll /* hint_block_offset */) const {
         return new_relative_position(node,position);
     }
 

@@ -67,7 +67,7 @@ public:
         // assert(!(graph->indegree(node) < 2 and size(node)) or size(node) > graph->indegree(node));
         // indegree smaller than two with nonempty incoming table implies that node has new reads
 #ifndef FULL_INCOMING_TABLE
-        return size(node) == graph->indegree(node) or (graph->indegree(node) < 2 and size(node));
+        return size(node) == (int64_t )graph->indegree(node) or ((int64_t )graph->indegree(node) < (int64_t )2 and size(node));
 #else
         return (size(node) > graph->indegree(node)) or (graph->indegree(node) < 2 and size(node));
 #endif

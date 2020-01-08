@@ -31,8 +31,6 @@ const int64_t DEFAULT_K_KMER = 21;
 // Stores reads in a compressed format
 class PathDatabaseListBC : public PathDatabase<int64_t> {
   public:
-    // TODO: read about lvalues, rvalues, etc
-    // http://thbecker.net/articles/rvalue_references/section_01.html
     // const value
     // PathDatabaseListBC(const vector<string> &raw_reads)
     // non-const pointer to modify
@@ -103,15 +101,15 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
     }
 
     // returns ids of all paths that go through sequence |str|
-    std::vector<path_id> get_paths_going_through(const std::string &str) const override {}
-    std::vector<path_id> get_paths_going_through(node_index node) const override {}
+    std::vector<path_id> get_paths_going_through(const std::string &) const override {}
+    std::vector<path_id> get_paths_going_through(node_index) const override {}
 
     // make one traversal step through the selected path
-    node_index get_next_node(node_index node, path_id path) const override {}
+    node_index get_next_node(node_index, path_id) const override {}
 
     // transition to the next node consistent with the history
     // return npos if there is no transition consistent with the history
-    node_index get_next_consistent_node(const std::string &history) const override {}
+    node_index get_next_consistent_node(const std::string &) const override {}
 
     std::string decode(path_id path) const override {
         return decode_read(compressed_reads_[path]);
@@ -146,7 +144,7 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
         auto node = graph_->kmer_to_node(starting_kmer);
         string read = starting_kmer;
         char next_char;
-        while (read.size() < read_length) {
+        while ((int64_t )read.size() < read_length) {
             int64_t outgoing_degree = 0;
             graph_->call_outgoing_kmers(node,[&](node_index next_node, char character) {
                 outgoing_degree++;
@@ -171,7 +169,7 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
         return read;
     }
 
-    void serialize(const fs::path& folder) const override {};
+    void serialize(const fs::path&) const override {};
 
 
     std::vector<compressed_read_t> compressed_reads_;

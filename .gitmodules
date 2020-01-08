@@ -58,3 +58,6 @@
 [submodule "metagraph/external-libraries/spdlog"]
 	path = metagraph/external-libraries/spdlog
 	url = https://github.com/gabime/spdlog
+[submodule "metagraph/external-libraries/cxx-prettyprint"]
+	path = metagraph/external-libraries/cxx-prettyprint
+	url = https://github.com/louisdx/cxx-prettyprint.git

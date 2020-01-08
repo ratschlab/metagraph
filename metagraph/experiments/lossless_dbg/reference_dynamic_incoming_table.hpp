@@ -4,9 +4,6 @@
 
 #ifndef __REFERENCE_DYNAMIC_INCOMING_TABLE_HPP__
 #define __REFERENCE_DYNAMIC_INCOMING_TABLE_HPP__
-//
-// Created by Jan Studený on 2019-06-04.
-//
 
 #include "utilities.hpp"
 
@@ -14,10 +11,10 @@ template <typename GraphT=DBGSuccinct,typename _edge_identifier_t=char>
 class ReferenceDynamicIncomingTable {
 public:
     using edge_identifier_t = _edge_identifier_t;
-    explicit ReferenceDynamicIncomingTable(shared_ptr<const GraphT> graph) {}
+    explicit ReferenceDynamicIncomingTable(shared_ptr<const GraphT> /* graph */) {}
 
     template<typename MockA,typename MockB> // TODO rename MockA to decl...bit_vector
-    ReferenceDynamicIncomingTable(shared_ptr<const DBGSuccinct> graph, MockA* is_element,MockB* rank_element, ll chunks = DefaultChunks) : incoming_table(is_element,rank_element) {}
+    ReferenceDynamicIncomingTable(shared_ptr<const DBGSuccinct> /* graph */, MockA* is_element,MockB* rank_element, ll /* chunks = DefaultChunks */) : incoming_table(is_element,rank_element) { }
 
 
     int branch_offset(node_index node, edge_identifier_t incoming) const {

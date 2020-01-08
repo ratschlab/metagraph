@@ -82,7 +82,7 @@ public:
     DeterministicSampler(vector<string> samples, int64_t reference_size) : _reference_size(reference_size), samples(std::move(samples)) {};
     string sample(int64_t sample_length) override {
         string sample = samples[current_sample];
-        assert(sample_length==sample.length());
+        assert(sample_length==(int64_t )sample.length());
         current_sample = (current_sample + 1) % samples.size();
         return sample;
     }

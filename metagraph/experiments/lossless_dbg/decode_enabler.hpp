@@ -58,7 +58,7 @@ public:
             }
             else {
                 assert((this->graph.outdegree(node) == 1 || [&]() { PRINT_VAR(this->graph.outdegree(node)); return false;}()));
-                this->graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
+                this->graph.call_outgoing_kmers(node,[&base](node_index ,char edge_label ) { base = edge_label;});
                 encoded_base = base; // same
             }
             assert(base);
@@ -151,7 +151,7 @@ public:
         }
         else {
             assert(this->graph.indegree(node) == 1);
-            this->graph.call_incoming_kmers(node,[&](node_index possible_node,char c) { //mine
+            this->graph.call_incoming_kmers(node,[&](node_index possible_node,char ) { //mine
                 prev_node = possible_node;
             });
         }

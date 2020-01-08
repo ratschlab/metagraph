@@ -121,7 +121,7 @@ public:
         return routing_table.load(in);
     }
 
-    json get_statistics(int64_t verbosity=0) const {
+    json get_statistics(int64_t) const {
         return {{"dummy", "true"}}; // throws exception if updating with empty value
     }
 

@@ -58,7 +58,7 @@ TEST(SamplerTest,SampleCoverage) {
     auto sequence = "ADFAGADFDS"s;
     auto sampler = NoisySampler(sequence,generator);
     auto reads = sampler.sample_coverage(sequence.length()/2, 1);
-    ASSERT_EQ(reads.size(), 2);
+    ASSERT_EQ((int64_t )reads.size(), (int64_t ) 2);
 }
 TEST(SamplerTest,SubSample) {
     auto state = stringstream(random_generator_state);
@@ -67,21 +67,21 @@ TEST(SamplerTest,SubSample) {
     auto sequence = "ADFAGADFDSAFDAGDGDASGDSFADSGDSVBABDFDASFDSAFADAFDSFASDVCZVCXFDAF"s;
     auto sampler = SubSampler(sequence,10,generator);
     auto reads = sampler.sample_coverage(5, 1);
-    ASSERT_EQ(reads.size(), 2);
+    ASSERT_EQ((int64_t ) reads.size(), (int64_t ) 2);
 }
 
 TEST(WaveletTree,BasicTest) {
     wavelet_tree_dyn wt2(7);
     wt2.insert(0,6);
     wt2.insert(0,6);
-    EXPECT_EQ(wt2.rank(6,1),2);
-    EXPECT_EQ(wt2.select(6,1),0);
+    EXPECT_EQ((int64_t )wt2.rank(6,1),2);
+    EXPECT_EQ((int64_t )wt2.select(6,1),0);
 
     standardized_wavelet_tree wt(7);
     wt.insert(0,6);
     wt.insert(0,6);
-    EXPECT_EQ(wt.rank(2,6),2);
-    EXPECT_EQ(wt.select(1,6),0);
+    EXPECT_EQ((int64_t )wt.rank(2,6),2);
+    EXPECT_EQ((int64_t )wt.select(1,6),0);
 }
 
 TEST(RoutingTable,BasicTest) {
@@ -92,13 +92,13 @@ TEST(RoutingTable,BasicTest) {
     //EXPECT_EQ(rt.size(0),0);
     rt.insert(2,0,'A');
     //EXPECT_EQ(rt.size(0),0);
-    EXPECT_EQ(rt.chunks.elements[0].routing_table[0],encode('#'));
-    EXPECT_EQ(rt.chunks.elements[0].routing_table[1],encode('A'));
-    EXPECT_EQ(rt.chunks.elements[0].routing_table[2],encode('#'));
-    EXPECT_EQ(rt.chunks.elements[0].routing_table.size(),3);
-    EXPECT_EQ(rt.size(3),0);
-    EXPECT_EQ(rt.size(2),1);
-    EXPECT_EQ(rt.get(2,0),'A');
+    EXPECT_EQ((int64_t )rt.chunks.elements[0].routing_table[0],(int64_t )encode('#'));
+    EXPECT_EQ((int64_t )rt.chunks.elements[0].routing_table[1],(int64_t )encode('A'));
+    EXPECT_EQ((int64_t )rt.chunks.elements[0].routing_table[2],(int64_t )encode('#'));
+    EXPECT_EQ((int64_t )rt.chunks.elements[0].routing_table.size(),(int64_t )3);
+    EXPECT_EQ(rt.size(3),(int64_t )0);
+    EXPECT_EQ(rt.size(2),(int64_t )1);
+    EXPECT_EQ(rt.get(2,0), 'A');
 }
 // Depends on large file -> tested and works
 //TEST(CompressingReads,GetChromosomeWorks) {
@@ -187,7 +187,7 @@ void check_small_get_next_consistent_node() {
     auto split_node = db.graph.kmer_to_node("TGCGT");
     ASSERT_EQ(db.get_next_consistent_node(split_node,"C" + middle),db.graph.kmer_to_node("GCGT"s + "T"s));
     ASSERT_EQ(db.get_next_consistent_node(split_node,"A" + middle),db.graph.kmer_to_node("GCGT"s + "G"s));
-    ASSERT_EQ(db.get_next_consistent_node(split_node,middle),0);
+    ASSERT_EQ(db.get_next_consistent_node(split_node,middle),0ul);
 }
 
 
@@ -311,7 +311,7 @@ TEST(GraphPreprocessor,WeakSplits) {
     PathDatabaseWavelet<> pd({"ACTAGGA","ACTCGGA"},3);
     GraphPreprocessor gp(pd.graph);
     auto splits = gp.find_weak_splits();
-    ASSERT_EQ(splits.size(),1);
+    ASSERT_EQ((int64_t )splits.size(),(int64_t )1);
     for(auto&[node,transformations] : splits) {
         ASSERT_EQ(node,pd.graph.kmer_to_node("ACT"));
         ASSERT_EQ(set<char>({'A','C'}),set<char>({transformations.first,transformations.second}));

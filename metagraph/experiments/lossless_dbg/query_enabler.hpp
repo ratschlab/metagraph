@@ -150,7 +150,7 @@ public:
         }
 
         char base;
-        this->graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
+        this->graph.call_outgoing_kmers(node,[&base](node_index, char edge_label ) { base = edge_label;});
 
         auto new_node = this->graph.traverse(node,base);
 

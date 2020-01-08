@@ -96,8 +96,6 @@ string(APPEND CMAKE_CXX_FLAGS
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   #  -Wno-unused-variable + -Wno-sign-compare added provisionally
   string(APPEND CMAKE_CXX_FLAGS " \
-    -Wno-unused-parameter \
-    -Wno-sign-compare \
     -Wno-exit-time-destructors \
     -Wno-unused-function \
     -Wno-old-style-cast \
@@ -255,6 +253,7 @@ include_directories(
   external-libraries/nvbio/contrib/priority-deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
+  external-libraries/cxx-prettyprint
   ${INCLUDE_DIRS}
 )
 

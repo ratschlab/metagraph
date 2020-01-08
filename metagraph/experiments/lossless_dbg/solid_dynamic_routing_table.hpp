@@ -67,7 +67,7 @@ public:
     }
 
     int64_t offset(node_index node) const {
-        assert(node < total_size);
+        assert((int64_t )node < total_size);
         return routing_table.select(node+1, delimiter_encoded) + 1; } // node+1 as select is one based
 
     int64_t select_unchecked(node_index node, int64_t occurrence, int64_t encoded_symbol) const {

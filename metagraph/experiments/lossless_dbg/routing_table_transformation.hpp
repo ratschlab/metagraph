@@ -63,7 +63,7 @@ public:
         return transform(node,base);
     }
 
-//TODO: Merge with hinted version
+// TODO: Merge with hinted version
     int64_t new_relative_position(node_index node, int64_t position) const {
         auto base = this->get(node,position);
         auto base_rank = this->rank(node,position,base);

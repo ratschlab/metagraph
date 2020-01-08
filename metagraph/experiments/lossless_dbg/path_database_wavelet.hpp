@@ -19,7 +19,7 @@
 
 //#include "utils.hpp"
 #include "alphabets.hpp"
-#include "cxx-prettyprint.hpp"
+#include <prettyprint.hpp>
 
 #include "path_database.hpp"
 #include "path_database_dynamic.hpp"
@@ -106,10 +106,10 @@ public:
                 routing_table_array_local.push_back('#');// to always start a block with #
                 if (PathDatabaseDynamicCore<DRT, DIT>::node_is_split(node)) {
                     auto &dynamic_table = PathDatabaseDynamicCore<DRT, DIT>::routing_table;
-                    // todo: remove also other assertions that assume full coverage
+                    // TODO: remove also other assertions that assume full coverage
                     //alt_assert(dynamic_table.size(node));
                     //int encoded = 0;
-                    for(uint64_t i = 0; i < dynamic_table.size(node); i++) {
+                    for(int64_t i = 0; i < dynamic_table.size(node); i++) {
                         routing_table_array_local.push_back(dynamic_table.get(node, i));
                     //    encoded++;
                     }
@@ -172,7 +172,7 @@ public:
                     }
                 }
 #else
-                this->graph.call_incoming_kmers(node,[&,this](node_index prev_node,char c) { //mine
+                this->graph.call_incoming_kmers(node,[&,this](node_index /* prev_node */,char c) { //mine
                     auto branch_size = c == '$' ? 0 : PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,c); // if dummy kmers (fix proper test)
                     incoming_table_builder_local.push_back(branch_size);
                     current_table_size++;

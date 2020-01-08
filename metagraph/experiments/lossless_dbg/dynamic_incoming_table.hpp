@@ -15,7 +15,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "graph_patch.hpp"
-#include "cxx-prettyprint.hpp"
+#include <prettyprint.hpp>
 //#include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"

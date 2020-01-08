@@ -12,11 +12,6 @@ using namespace std;
 #ifndef __waiting_queue_HPP__
 #define __waiting_queue_HPP__
 
-//struct exit_barrier_element_t {
-//    int64_t relative_position;
-//    uint64_t edge;// node + last 8 bits is traversed edge
-//    friend ostream& operator<<(ostream& os, const exit_barrier_element_t& dt);
-//};
 #define edges first
 #define relative_positions second
 constexpr int max_threads = 32;
@@ -133,7 +128,7 @@ public:
         return my_relative_position + offset_change;
     }
 
-    void print_content(uint64_t node, uint64_t tid=0) {
+    void print_content(uint64_t node) {
         cout << exit_barriers[node] << endl;
     }
 
@@ -256,7 +251,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
         return relative_position;
     }
 
-    void print_content(uint64_t node, uint64_t tid=0) {
+    void print_content(uint64_t node) {
         cout << waiting_threads[node] << endl;
     }
 
