@@ -335,17 +335,15 @@ TEST(PathDatabase,GetStatistics) {
 
 
 TEST(PathDatabase,RoutingTableInternal) {
-    //TODO: restore back (ReferenceDynamicRoutingTable update with hinted version)
-//    short_identity_test<PathDatabaseDynamic<IdentityComparator<DynamicRoutingTableCore<>,ReferenceDynamicRoutingTable<>>,
-//                                            IdentityComparator<DynamicIncomingTable<>,ReferenceDynamicIncomingTable<>>
-//                                            >
-//                                            >();
+    short_identity_test<PathDatabaseDynamic<IdentityComparator<DynamicRoutingTableCore<>,ReferenceDynamicRoutingTable<>>,
+                                            IdentityComparator<DynamicIncomingTable<>,ReferenceDynamicIncomingTable<>>
+                                            >
+                                            >();
 
 }
 
 // TODO: delete
 #if false
-
 template <typename T>
 void long_identity_test() {
     string reads_filename = "/cluster/home/studenyj/genomic_data/human_chr10_artifical_reads.fasta";
@@ -359,7 +357,4 @@ TEST(PathDatabase,LongTestCompressedReads) {
 TEST(PathDatabase,LongTestBaseline) {
     long_identity_test<PathDatabaseDynamic<>>();
 }
-
-
-
 #endif

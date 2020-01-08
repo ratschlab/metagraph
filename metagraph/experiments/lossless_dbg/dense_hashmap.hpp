@@ -28,7 +28,7 @@ public:
 
     int64_t underlying_position(int64_t n) const {
         assert(n >= 0);
-        assert(n < is_element->size());
+        assert(n < (int64_t ) is_element->size());
         assert((*is_element)[n]);
         return rank->rank(n);
     }
@@ -42,7 +42,7 @@ public:
     }
 
     bool count(int64_t n) const {
-        assert(n < is_element->size());
+        assert(n < (int64_t ) is_element->size());
         return (*is_element)[n];
     }
 

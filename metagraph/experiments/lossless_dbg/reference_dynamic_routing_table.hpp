@@ -27,11 +27,11 @@ public:
 
 protected:
     // rank [0..position)
-    int rank(node_index node, int position, char symbol) const {
+    int rank(node_index node, int position, char symbol, [[maybe_unused]] ll hint_block_offset=-1) const {
         int result = 0;
         const auto &node_entry = routing_table.at(node);
-        assert(position <= node_entry.size());
-        for (size_t i = 0; i < position; ++i) {
+        assert(position <= (int64_t ) node_entry.size());
+        for (int64_t  i = 0; i < position; ++i) {
             result += node_entry[i] == symbol;
         }
         return result;
@@ -53,7 +53,7 @@ public:
         }
         return INT_MAX;
     }
-    char get(node_index node, int position) const {
+    char get(node_index node, int position, [[maybe_unused]] ll hint_block_offset=-1) const {
         return routing_table.at(node).at(position);
     }
 
@@ -73,14 +73,10 @@ public:
         return get(node,position);
     }
 
-    int new_relative_position(node_index node, int position) const {
+    int new_relative_position(node_index node, int position, [[maybe_unused]] ll hint_block_offset=-1) const {
         auto base = get(node,position);
         auto base_rank = rank(node,position,base);
         return base_rank;
-    }
-
-    int new_relative_position(node_index node, int position, ll /* hint_block_offset */) const {
-        return new_relative_position(node,position);
     }
 
     int size(node_index node) const {

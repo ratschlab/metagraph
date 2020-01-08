@@ -94,7 +94,6 @@ string(APPEND CMAKE_CXX_FLAGS
 )
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  #  -Wno-unused-variable + -Wno-sign-compare added provisionally
   string(APPEND CMAKE_CXX_FLAGS " \
     -Wno-exit-time-destructors \
     -Wno-unused-function \
