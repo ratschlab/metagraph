@@ -127,57 +127,57 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             to_transfer_sras, downloaded_sras, created_sras, cleaned_sras, transferred_sras),
                         {'Content-type': 'text/html'})
 
-    def handle_ack_download(self, postvars):
-        sra_id = postvars.get(b'id')
-        location = postvars.get(b'location')
+    def handle_ack(self, operation, post_vars, add_maps, remove_map):
+        sra_id = post_vars.get(b'id')
+        location = post_vars.get(b'location')
         if None in (sra_id, location):
             self.send_reply(400, 'id or location not specified')
             return
-        filename = os.path.join(args.output_dir, 'downloaded_sras')
+        filename = os.path.join(args.output_dir, f'{operation}ed_sras')
         sra_id_str = sra_id[0].decode('utf-8')
         location_str = location[0].decode('utf-8')
         with open(filename, 'a') as fp:
             fp.write(f'{sra_id_str} {location_str}\n')
-        downloaded_sras[sra_id_str] = location_str
-        to_create_sras[sra_id_str] = location_str
+        for m in add_maps:
+            m[sra_id_str] = location_str
         self.send_reply(200, "")
         try:
-            pending_downloads.remove(sra_id_str)
+            remove_map.remove(sra_id_str)
         except KeyError:
-            logger.warning(f'Acknowledging nonexistent pending download {sra_id_str}')
+            logger.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
+
+    def handle_nack(self, operation, post_vars, remove_map):
+        sra_id = post_vars.get(b'id')
+        if sra_id is None:
+            self.send_reply(400, 'id not specified')
+            return
+        filename = os.path.join(args.output_dir, f'failed_{operation}.id')
+        sra_id_str = sra_id[0].decode('utf-8')
+        with open(filename, 'a') as fp:
+            fp.write(f'{sra_id_str}\n')
+        self.send_reply(200, "")
+        try:
+            remove_map.remove(sra_id_str)
+        except KeyError:
+            logger.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
+
+    def handle_ack_download(self, postvars):
+        self.handle_ack('download', postvars, [downloaded_sras, to_create_sras], pending_downloads)
 
     def handle_ack_create(self, postvars):
-        sra_id = postvars.get(b'id')
-        location = postvars.get(b'location')
-        if None in (sra_id, location):
-            self.send_reply(400, 'id or location not specified')
-            return
-        filename = os.path.join(args.output_dir, 'created_sras')
-        sra_id_str = sra_id[0].decode('utf-8')
-        location_str = location[0].decode('utf-8')
-        with open(filename, 'a') as fp:
-            fp.write(f'{sra_id_str} {location_str}\n')
-        created_sras[sra_id_str] = location_str
-        to_clean_sras[sra_id_str] = location_str
-        self.send_reply(200, "")
-
-        pending_creates.remove(sra_id_str)
+        self.handle_ack('create', postvars, [created_sras, to_clean_sras], pending_creates)
 
     def handle_ack_clean(self, postvars):
-        sra_id = postvars.get(b'id')
-        location = postvars.get(b'location')
-        if None in (sra_id, location):
-            self.send_reply(400, 'id or location not specified')
-            return
-        filename = os.path.join(args.output_dir, 'cleaned_sras')
-        sra_id_str = sra_id[0].decode('utf-8')
-        location_str = location[0].decode('utf-8')
-        with open(filename, 'a') as fp:
-            fp.write(f'{sra_id_str} {location_str}\n')
-        cleaned_sras[sra_id_str] = location_str
-        self.send_reply(200, "")
+        self.handle_ack('clean', postvars, [cleaned_sras, to_transfer_sras], pending_cleans)
 
-        pending_cleans.remove(sra_id_str)
+    def handle_nack_download(self, postvars):
+        self.handle_nack('download', postvars, pending_downloads)
+
+    def handle_nack_create(self, postvars):
+        self.handle_nack('create', postvars, pending_creates)
+
+    def handle_nack_clean(self, postvars):
+        self.handle_nack('clean', postvars, pending_cleans)
 
     def send_reply(self, code, message, headers={}):
         self.send_response(code)
@@ -217,9 +217,15 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.handle_ack_create(postvars)
         elif parsed_url.path == '/jobs/ack/clean':
             self.handle_ack_clean(postvars)
-            self.handle_ack_transfer(postvars)
+        if parsed_url.path == '/jobs/nack/download':
+            self.handle_nack_download(postvars)
+        elif parsed_url.path == '/jobs/nack/create':
+            self.handle_nack_create(postvars)
+        elif parsed_url.path == '/jobs/nack/clean':
+            self.handle_nack_clean(postvars)
         else:
             self.send_reply(404, f'Invalid path: {self.path}\n')
+
 
 def load_file_dict(filename):
     result = {}
@@ -232,6 +238,7 @@ def load_file_dict(filename):
     except FileNotFoundError:  # no downloaded sras yet, that's fine
         return result
     return result
+
 
 def init_state():
     filename = os.path.join(args.output_dir, 'downloaded_sras')
@@ -247,7 +254,7 @@ def init_state():
     cleaned_sras = load_file_dict(os.path.join(args.output_dir, 'cleaned_sras'))
     transferred_sras = load_file_dict(os.path.join(args.output_dir, 'transferred_sras'))
 
-    to_create_sras = { k : downloaded_sras[k] for k in set(downloaded_sras) - set(created_sras) }
+    to_create_sras = {k: downloaded_sras[k] for k in set(downloaded_sras) - set(created_sras)}
     to_clean_sras = {k: created_sras[k] for k in set(created_sras) - set(cleaned_sras)}
     to_transfer_sras = {k: cleaned_sras[k] for k in set(cleaned_sras) - set(transferred_sras)}
 
