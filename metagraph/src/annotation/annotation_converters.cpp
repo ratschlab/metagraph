@@ -313,7 +313,7 @@ void merge_rows(const std::vector<const LabelEncoder<Label> *> &label_encoders,
         label_mappings.push_back(v);
     }
 
-    RowCompressed<Label>::write_rows(
+    RowCompressed<Label>::serialize(
         outfile,
         merged_label_enc,
         [&](BinaryMatrix::RowCallback write_row) {
@@ -511,7 +511,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !utils::get_verbose());
 
-    RowCompressed<Label>::write_rows(
+    RowCompressed<Label>::serialize(
         outfbase,
         annotator.get_label_encoder(),
         [&](BinaryMatrix::RowCallback write_row) {

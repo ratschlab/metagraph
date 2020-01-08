@@ -284,10 +284,10 @@ RowCompressed<Label>::get_row_streamer(const std::string &filebase) {
 
 template <typename Label>
 void RowCompressed<Label>
-::write_rows(std::string filename,
-             const LabelEncoder<Label> &label_encoder,
-             const std::function<void(BinaryMatrix::RowCallback)> &call_rows) {
-    filename = remove_suffix(filename, kExtension) + kExtension;
+::serialize(const std::string &filebase,
+            const LabelEncoder<Label> &label_encoder,
+            const std::function<void(BinaryMatrix::RowCallback)> &call_rows) {
+    auto filename = remove_suffix(filebase, kExtension) + kExtension;
 
     std::ofstream outstream(filename, std::ios::binary);
     if (!outstream.good())
