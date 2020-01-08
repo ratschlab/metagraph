@@ -48,9 +48,9 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     void serialize(const std::string &filename) const;
     bool merge_load(const std::vector<std::string> &filenames);
 
-    static void stream_counts(const std::string &filename,
-                              uint64_t *num_objects,
-                              uint64_t *num_relations);
+    static void load_shape(const std::string &filename,
+                           uint64_t *num_objects,
+                           uint64_t *num_relations);
 
     static std::unique_ptr<LabelEncoder<Label>>
     load_label_encoder(const std::string &filename);

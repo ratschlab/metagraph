@@ -253,9 +253,9 @@ RowCompressed<Label>::load_label_encoder(std::istream &instream) {
 }
 
 template <typename Label>
-void RowCompressed<Label>::stream_counts(const std::string &filename,
-                                         uint64_t *num_objects_,
-                                         uint64_t *num_relations_) {
+void RowCompressed<Label>::load_shape(const std::string &filename,
+                                      uint64_t *num_objects_,
+                                      uint64_t *num_relations_) {
     assert(num_objects_);
     assert(num_relations_);
     uint64_t &num_objects = *num_objects_;

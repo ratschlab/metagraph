@@ -129,7 +129,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
 
     uint64_t num_rows;
     uint64_t num_relations;
-    RowCompressed<Label>::stream_counts(filename, &num_rows, &num_relations);
+    RowCompressed<Label>::load_shape(filename, &num_rows, &num_relations);
 
     constexpr size_t num_passes = std::is_same_v<MatrixType, Rainbowfish> ? 2u : 1u;
     ProgressBar progress_bar(num_rows * num_passes, "Processing rows", std::cerr, !utils::get_verbose());
@@ -387,7 +387,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
     if (annotators.size()) {
         num_rows = annotators.at(0)->num_objects();
     } else {
-        RowCompressed<Label>::stream_counts(filenames.at(0), &num_rows, &num_relations);
+        RowCompressed<Label>::load_shape(filenames.at(0), &num_rows, &num_relations);
     }
     assert(num_rows);
 
