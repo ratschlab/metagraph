@@ -6,8 +6,8 @@
 //  Copyright © 2019 Jan Studený. All rights reserved.
 //
 
-#ifndef utils_h
-#define utils_h
+#ifndef __UTILS_HPP__
+#define __UTILS_HPP__
 
 #include <vector>
 #include <iostream>
@@ -572,4 +572,4 @@ inline BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
     return new BOSS(&graph_constructor);
 }
 
-#endif /* utils_h */
+#endif /* __UTILS_HPP__ */

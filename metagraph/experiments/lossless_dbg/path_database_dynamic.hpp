@@ -5,8 +5,8 @@
 //  Created by Jan Studený on 21/03/2019.
 //
 
-#ifndef path_database_baseline_hpp
-#define path_database_baseline_hpp
+#ifndef __PATH_DATABASE_DYNAMIC_HPP__
+#define __PATH_DATABASE_DYNAMIC_HPP__
 
 #include <iostream>
 #include <set>
@@ -485,4 +485,4 @@ class PathDatabaseDynamic : public DecodeEnabler<PathDatabaseDynamicCore<Routing
 
 
 
-#endif /* path_database_baseline_hpp */
+#endif /* __PATH_DATABASE_DYNAMIC_HPP__ */

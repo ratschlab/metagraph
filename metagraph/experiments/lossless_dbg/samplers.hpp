@@ -6,8 +6,8 @@
 //  Copyright © 2019 Jan Studený. All rights reserved.
 //
 
-#ifndef samplers_h
-#define samplers_h
+#ifndef __SAMPLERS_HPP__
+#define __SAMPLERS_HPP__
 #include <utility>
 #include <iostream>
 #include <map>
@@ -94,4 +94,4 @@ public:
     int64_t current_sample = 0;
 };
 
-#endif /* samplers_h */
+#endif /* __SAMPLERS_HPP__ */

@@ -6,8 +6,8 @@
 //  Created by Jan Studený on 21/03/2019.
 //
 
-#ifndef path_database_baseline_wavelet_hpp
-#define path_database_baseline_wavelet_hpp
+#ifndef __PATH_DATABASE_WAVELET_HPP__
+#define __PATH_DATABASE_WAVELET_HPP__
 
 #include <iostream>
 #include <set>

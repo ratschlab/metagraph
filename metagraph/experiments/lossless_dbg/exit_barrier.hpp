@@ -9,8 +9,8 @@
 #include "dense_hashmap.hpp"
 using namespace std;
 
-#ifndef __waiting_queue_HPP__
-#define __waiting_queue_HPP__
+#ifndef __EXIT_BARRIER_HPP__
+#define __EXIT_BARRIER_HPP__
 
 #define edges first
 #define relative_positions second
@@ -259,4 +259,4 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
     ChunkedDenseHashMap<omp_lock_t,BitVector,RankSupport,false> waiting_queue_locks;
 };
 
-#endif // __waiting_queue_HPP__
+#endif // __EXIT_BARRIER_HPP__

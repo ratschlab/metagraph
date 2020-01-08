@@ -14,7 +14,6 @@
 #include "path_database.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
-//#include "utils.hpp"
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
@@ -56,8 +55,7 @@ public:
     }
 
     node_index get_next_consistent_node(node_index node) {
-        history_t history = get_initial_history(node);
-        return get_next_consistent_node(node,history);
+        return get_next_consistent_node(node,this->graph.kmer);
     }
 
     node_index get_next_consistent_node(node_index node,const string& str_history) {
@@ -88,7 +86,6 @@ public:
 
 
     next_nodes_with_extended_info_t get_next_nodes_with_support(node_index node,history_t& history) {
-
         // todo: merge ranges for successive joining reads
         next_nodes_with_extended_info_t result;
         if (this->node_is_split(node)) {
