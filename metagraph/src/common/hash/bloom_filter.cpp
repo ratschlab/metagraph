@@ -49,16 +49,14 @@ inline uint64_t restrict_to(uint64_t h, size_t size) {
     const uint64_t y0 = static_cast<uint32_t>(size);
     const uint64_t y1 = size >> 32;
 
-    const uint64_t p11 = x1 * y1;
     const uint64_t p01 = x0 * y1;
-    const uint64_t p10 = x1 * y0;
-    const uint64_t p00 = x0 * y0;
 
-    const uint64_t middle = p10 + (p00 >> 32) + static_cast<uint32_t>(p01);
+    const uint64_t middle_hi = (x1 * y0
+        + ((x0 * y0) >> 32)
+        + static_cast<uint32_t>(p01)) >> 32;
 
-    assert(p11 + (middle >> 32) + (p01 >> 32) < size);
-
-    return p11 + (middle >> 32) + (p01 >> 32);
+    assert(x1 * y1 + middle_hi + (p01 >> 32) < size);
+    return x1 * y1 + middle_hi + (p01 >> 32);
 #endif
 }
 
