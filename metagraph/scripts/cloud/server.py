@@ -109,16 +109,15 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 download_done = True  # nothing else to download
         create_jobs_int = int(create_jobs[0])
         clean_jobs_int = int(clean_jobs[0])
-        if not to_create_sras or (0 < clean_jobs_int < 4):  # there is room for more clean jobs
-            if to_clean_sras:
-                sra_id, dbg_file = to_clean_sras.popitem()
-                response['clean'] = {'id': sra_id, 'location': dbg_file}
-                pending_cleans.add(sra_id)
-        elif create_jobs_int == 0:
-            if to_create_sras:
+        if create_jobs_int == 0:
+            if to_create_sras and clean_jobs_int == 0:
                 sra_id, directory = to_create_sras.popitem()
                 response['create'] = {'id': sra_id, 'location': directory}
                 pending_creates.add(sra_id)
+            elif to_clean_sras and (0 <= clean_jobs_int < 4):  # there is room for more clean jobs
+                sra_id, dbg_file = to_clean_sras.popitem()
+                response['clean'] = {'id': sra_id, 'location': dbg_file}
+                pending_cleans.add(sra_id)
         self.send_reply(200, json.dumps(response), {'Content-type': 'application/json'})
 
     def handle_get_status(self):
@@ -132,7 +131,7 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         location = post_vars.get(b'location')
         if None in (sra_id, location):
             self.send_reply(400, 'id or location not specified')
-            return
+            return False
         filename = os.path.join(args.output_dir, f'{operation}ed_sras')
         sra_id_str = sra_id[0].decode('utf-8')
         location_str = location[0].decode('utf-8')
@@ -145,6 +144,7 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             remove_map.remove(sra_id_str)
         except KeyError:
             logger.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
+        return True
 
     def handle_nack(self, operation, post_vars, remove_map):
         sra_id = post_vars.get(b'id')
@@ -168,7 +168,11 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.handle_ack('create', post_vars, [created_sras, to_clean_sras], pending_creates)
 
     def handle_ack_clean(self, post_vars):
-        self.handle_ack('clean', post_vars, [cleaned_sras, to_transfer_sras], pending_cleans)
+        if self.handle_ack('clean', post_vars, [cleaned_sras, to_transfer_sras], pending_cleans):
+            pending_transfers[post_vars.get(b'id')] = post_vars.get(b'location')
+
+    def handle_ack_transfer(self, post_vars):
+        self.handle_ack('transfer', post_vars, [transferred_sras], pending_transfers)
 
     def handle_nack_download(self, post_vars):
         self.handle_nack('download', post_vars, pending_downloads)
@@ -178,6 +182,9 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def handle_nack_clean(self, post_vars):
         self.handle_nack('clean', post_vars, pending_cleans)
+
+    def handle_nack_transfer(self, post_vars):
+        self.handle_nack('transfer', post_vars, pending_transfers)
 
     def send_reply(self, code, message, headers={}):
         self.send_response(code)

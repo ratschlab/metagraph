@@ -32,11 +32,6 @@ fi
 
 sra_number=$1
 input_file=$2
-output_dir=$3
-
-# for reasons I don't understand glob expansion doesn't work, so doing it manually by concatenating all downloaded fastq.gz files
-input_filenames=""
-for i in $(ls -p "${output_dir}/${sra_number}/"); do
-  input_filenames="$input_filenames ${output_dir}/${sra_number}/$i"
-done
-execute metagraph clean -v -p 4 --prune-unitigs 0 --fallback 3 --prune-tips 20 --unitigs --to-fasta -o "${output_dir}" "${input_file}"
+output_file=$3
+# --prune-unitigs 0 --fallback 3
+execute metagraph clean -v -p 1  --prune-tips 20 --to-fasta -o "${output_file}" "${input_file}"

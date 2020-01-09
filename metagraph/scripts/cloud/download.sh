@@ -61,5 +61,5 @@ else
   SUBFOLDER=""
 fi
 FOLDER="/vol1/fastq/${sra_number:0:6}$SUBFOLDER"
-execute ascp -QT -k1 -q -P "$PORT" -i "$ASPERA_SSH" era-fasp@fasp.sra.ebi.ac.uk:"${FOLDER}/${sra_number}/" "${download_dir}"
+execute ascp -QT -k1 -d -P "$PORT" -i "$ASPERA_SSH" era-fasp@fasp.sra.ebi.ac.uk:"${FOLDER}/${sra_number}/" "${download_dir}"
 

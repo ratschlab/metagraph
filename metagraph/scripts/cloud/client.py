@@ -1,4 +1,5 @@
 import argparse
+import http
 import json
 import logging
 import os
@@ -34,6 +35,9 @@ def get_work():
                 logging.warning(f'Server returned response code {response.getcode()} for {url}')
                 time.sleep(5)  # avoid overwhelming the server
         except urllib.error.URLError as e:
+            logging.error(f'Failed to open URL {url} Reason: {e.reason}')
+            time.sleep(5)  # wait a bit and try again
+        except http.client.RemoteDisconnected as e:
             logging.error(f'Failed to open URL {url} Reason: {e.reason}')
             time.sleep(5)  # wait a bit and try again
     return {}
@@ -98,7 +102,12 @@ def start_clean(sra_id, location):
     else:
         logging.info('Luckily the files to use for building the graph already are on this machine.')
     input_file = create_file(sra_id)
-    clean_processes[sra_id] = subprocess.Popen(['./clean.sh', sra_id, input_file, clean_dir()])
+    output_file = os.path.join(clean_dir(), sra_id)
+    clean_processes[sra_id] = subprocess.Popen(['./clean.sh', sra_id, input_file, output_file])
+
+
+def start_transfer(sra_id, cleaned_graph_location):
+    transfer_processes[sra_id] = subprocess.Popen(['scp', '-r', cleaned_graph_location, args.destination])
 
 
 def is_full():
@@ -153,15 +162,15 @@ def check_status():
     for sra_id, download_process in download_processes.items():
         return_code = download_process.poll()
         if return_code is not None:
+            completed_downloads.add(sra_id)
             if return_code == 0:
-                logging.info("Download for SRA id {sra_id} completed successfully.")
-                completed_downloads.add(sra_id)
+                logging.info(f'Download for SRA id {sra_id} completed successfully.')
                 location = os.path.join(f'{internal_ip()}:{download_dir()}', sra_id)
 
                 if not ack('download', sra_id, location):  # all done, yay!
                     return False;
             else:
-                logging.warning("Download for SRA id {sra_id} failed.")
+                logging.warning(f'Download for SRA id {sra_id} failed.')
                 if not nack('download', sra_id):
                     return False  # this shouldn't happen, as we still have work to do
     for d in completed_downloads:
@@ -174,7 +183,7 @@ def check_status():
             completed_creates.add(sra_id)
             if return_code == 0:
                 logging.info(f'Building graph for SRA id {sra_id} completed successfully.')
-                location = f'{internal_ip()}:{create_file()}'
+                location = f'{internal_ip()}:{create_file(sra_id)}'
 
                 if not ack('create', sra_id, location):  # all done, yay!
                     return False;
@@ -192,18 +201,34 @@ def check_status():
             completed_cleans.add(sra_id)
             if return_code == 0:
                 logging.info('Cleaning graph for SRA id {sra_id} completed successfully.')
-                location = f'{internal_ip()}:{clean_file()}'
+                location = f'{internal_ip()}:{clean_file(sra_id)}'
 
                 if not ack('clean', sra_id, location):  # all done, yay!
-                    return False;
+                    return False
 
-                # TODO:transfer the cleaned file onto leomed
+                start_transfer(sra_id, clean_file(sra_id))
             else:
                 logging.warning('Cleaning graph for SRA id {sra_id} failed.')
                 if not nack('clean', sra_id):
                     return False  # this shouldn't happen, as we still have work to do
     for d in completed_cleans:
         del clean_processes[d]
+
+    completed_transfers = set()
+    for sra_id, transfer_process in transfer_processes.items():
+        return_code = transfer_process.poll()
+        if return_code is not None:
+            completed_transfers.add(sra_id)
+            if return_code == 0:
+                logging.info('Transferring graph for SRA id {sra_id} completed successfully.')
+                if not ack('transfer', sra_id, args.destination):  # all done, yay!
+                    return False
+            else:
+                logging.warning('Transferring cleaned graph for SRA id {sra_id} failed.')
+                if not nack('transfer', sra_id):
+                    return False  # this shouldn't happen, as we still have work to do
+    for d in completed_transfers:
+        del transfer_processes[d]
 
     return True
 
@@ -259,7 +284,7 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination_host', default='hex.ethz.ch',
+    parser.add_argument('--destination', default='leomed:/cluster/work/grlab/projects/metagenome/scratch/cloud',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
     args = parser.parse_args()
 

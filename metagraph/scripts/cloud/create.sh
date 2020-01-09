@@ -39,4 +39,6 @@ input_filenames=""
 for i in $(ls -p "${input_dir}"); do
   input_filenames="$input_filenames ${input_dir}/$i"
 done
-execute metagraph build -v -p 1 -k 10 --canonical --count-kmers -o "${output_dir}${sra_number}"  $input_filenames
+
+# -k 31
+execute metagraph build -v -p 4 -k 4 --canonical --count-kmers -o "${output_dir}${sra_number}"  $input_filenames
