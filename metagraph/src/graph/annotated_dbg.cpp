@@ -7,17 +7,17 @@ typedef std::pair<std::string, size_t> StringCountPair;
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
                            std::unique_ptr<Annotator>&& annotation,
-                           size_t num_threads,
                            bool force_fast)
       : graph_(dbg), annotator_(std::move(annotation)),
-        thread_pool_(num_threads > 1 ? num_threads : 0),
         force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
 }
 
-void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
-                                                 const std::vector<std::string> &labels) {
+void AnnotatedDBG::annotate_sequence(const std::string &sequence,
+                                     const std::vector<std::string> &labels) {
+    assert(check_compatibility());
+
     std::vector<uint64_t> indices;
     indices.reserve(sequence.size());
 
@@ -40,18 +40,6 @@ void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
     }
 
     annotator_->add_labels(indices, labels);
-}
-
-void AnnotatedDBG::annotate_sequence(std::string&& sequence,
-                                     const std::vector<std::string> &labels) {
-    assert(check_compatibility());
-
-    thread_pool_.enqueue(
-        [this](const auto&... args) {
-            this->annotate_sequence_thread_safe(args...);
-        },
-        std::move(sequence), labels
-    );
 }
 
 std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,

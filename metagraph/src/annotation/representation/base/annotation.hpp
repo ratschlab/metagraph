@@ -142,7 +142,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
 
     /************************* Properties *************************/
 
-    virtual inline size_t num_labels() const override final {
+    virtual inline size_t num_labels() const override {
         assert(label_encoder_.size() == get_matrix().num_columns());
         return label_encoder_.size();
     }

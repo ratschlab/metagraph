@@ -612,7 +612,7 @@ int main(int argc, char *argv[]) {
                 if (compressor == MatrixType::COLUMN) {
                     annotate::ColumnCompressed<> annotator(0, 1, false);
                     annotator.merge_load({ file });
-                    const auto &source_columns = annotator.data();
+                    const auto &source_columns = annotator.get_matrix().data();
                     assert(annotator.num_labels() == source_columns.size());
 
                     auto columns = subsample_rows(
@@ -661,7 +661,7 @@ int main(int argc, char *argv[]) {
                     std::cout << "loading\n";
                     annotator.merge_load({ file });
                     std::cout << "done\n";
-                    const auto &rows = annotator.data().data();
+                    const auto &rows = annotator.get_matrix().data();
                     std::ofstream sdout(file + ".sd", std::ios::binary);
                     rows.serialize(sdout);
                     const auto serialized_size = sdout.tellp();
@@ -675,7 +675,7 @@ int main(int argc, char *argv[]) {
                     std::cout << "loading\n";
                     annotator.merge_load({ file });
                     std::cout << "done\n";
-                    const auto &rainbowfish = annotator.data();
+                    const auto &rainbowfish = annotator.get_matrix();
                     const auto &row_codes = rainbowfish.get_row_codes();
                     const auto &row_code_delimiters = rainbowfish.get_row_code_delimiters();
                     const auto &distinct_rows = rainbowfish.get_distinct_rows();
@@ -815,9 +815,9 @@ int main(int argc, char *argv[]) {
                     ? file
                     : out_prefix + "/" + utils::split_string(file, "/").back();
                 annotator.load(file);
-                for (size_t i = 0; i < annotator.data().size(); ++i) {
+                for (size_t i = 0; i < annotator.get_matrix().data().size(); ++i) {
                     dump_column_slice(
-                        *annotator.data()[i],
+                        *annotator.get_matrix().data()[i],
                         begin,
                         end,
                         outbase + "."
