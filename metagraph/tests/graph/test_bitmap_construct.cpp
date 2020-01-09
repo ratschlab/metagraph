@@ -401,10 +401,10 @@ TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
 TEST(DBGBitmapMergeChunks, DumpedChunked) {
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "A"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "C"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "G"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "T"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -459,10 +459,10 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
 TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "A"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "C"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "G"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "T"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -519,10 +519,10 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
 
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "A", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "C", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "G", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "T", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "A", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "C", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "G", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "T", num_threads));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -582,10 +582,10 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
 
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "A", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "C", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "G", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "T", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "A", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "C", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "G", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "T", num_threads));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");

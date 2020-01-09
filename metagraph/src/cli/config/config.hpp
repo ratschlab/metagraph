@@ -75,6 +75,8 @@ class Config {
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
 
+    uint8_t count_width = 8;
+
     // Alignment options
     bool alignment_seed_unimems = false;
     bool alignment_edit_distance = false;
