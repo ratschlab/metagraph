@@ -27,5 +27,4 @@ function check_metagraph {
 
 ############ Main Script ###############
 check_ascp
-check_key
 check_metagraph

@@ -8,7 +8,6 @@ import subprocess
 import time
 import urllib.request
 
-logger = logging.getLogger('metagraph-client')
 args = None
 
 download_processes = {}
@@ -32,20 +31,20 @@ def get_work():
             elif response.getcode() == 204:
                 return None
             else:
-                logger.warning(f'Server returned response code {response.getcode()} for {url}')
+                logging.warning(f'Server returned response code {response.getcode()} for {url}')
                 time.sleep(5)  # avoid overwhelming the server
         except urllib.error.URLError as e:
-            print(f'Failed to open URL {url} Reason: {e.reason}')
+            logging.error(f'Failed to open URL {url} Reason: {e.reason}')
             time.sleep(5)  # wait a bit and try again
     return {}
 
 
 def download_dir():
-    return f'{args.output_dir}/downloads/'
+    return os.path.join(args.output_dir, 'downloads/')
 
 
 def create_dir():
-    return f'{args.output_dir}/graphs/'
+    return os.path.join(args.output_dir, 'graphs/')
 
 
 def create_file(sra_id):
@@ -53,7 +52,7 @@ def create_file(sra_id):
 
 
 def clean_dir():
-    return f'{args.output_dir}/cleaned_graphs/'
+    return os.path.join(args.output_dir, 'cleaned_graphs/')
 
 
 def clean_file(sra_id):
@@ -73,15 +72,15 @@ def internal_ip():
 
 def start_create(sra_id, location):
     if not location.startswith(internal_ip()):
-        logger.info(f'Copying from {location}')
+        logging.info(f'Copying from {location}')
         return_code = subprocess.call(['scp', '-r', location, download_dir()])
         if return_code != 0:
-            logger.warning(f'Copying from {location} failed')
+            logging.warning(f'Copying from {location} failed')
             return False
         else:
-            logger.info(f'Copying from {location} completed successfully')
+            logging.info(f'Copying from {location} completed successfully')
     else:
-        logger.info('Luckily the files to use for building the graph already are on this machine.')
+        logging.info('Luckily the files to use for building the graph already are on this machine.')
     input_dir = os.path.join(download_dir(), sra_id)
     create_processes[sra_id] = subprocess.Popen(['./create.sh', sra_id, input_dir, create_dir()])
     return True
@@ -89,15 +88,15 @@ def start_create(sra_id, location):
 
 def start_clean(sra_id, location):
     if not location.startswith(internal_ip()):
-        logger.info(f'Copying from {location}')
+        logging.info(f'Copying from {location}')
         return_code = subprocess.call(['scp', '-r', location, args.output_dir])
         if return_code != 0:
-            logger.warning('Copying from {location} failed')
+            logging.warning('Copying from {location} failed')
             return False
         else:
-            logger.info('Copying from {location} completed successfully')
+            logging.info('Copying from {location} completed successfully')
     else:
-        logger.info('Luckily the files to use for building the graph already are on this machine.')
+        logging.info('Luckily the files to use for building the graph already are on this machine.')
     input_file = create_file(sra_id)
     clean_processes[sra_id] = subprocess.Popen(['./clean.sh', sra_id, input_file, clean_dir()])
 
@@ -121,10 +120,10 @@ def ack(operation, sra_id, location):
             elif response.getcode() == 204:
                 return False
             else:
-                logger.warning(f'Server returned response code {response.getcode()} for {url}')
+                logging.warning(f'Server returned response code {response.getcode()} for {url}')
                 time.sleep(5)  # avoid overwhelming the server
         except urllib.error.URLError as e:
-            print(f'Failed to open URL {url} Reason: {e.reason}')
+            logging.error(f'Failed to open URL {url} Reason: {e.reason}')
             time.sleep(5)  # wait a bit and try again
 
 
@@ -142,10 +141,10 @@ def nack(operation, sra_id):
             elif response.getcode() == 204:
                 return False
             else:
-                logger.warning(f'Server returned response code {response.getcode()} for {url}')
+                logging.warning(f'Server returned response code {response.getcode()} for {url}')
                 time.sleep(5)  # avoid overwhelming the server
         except urllib.error.URLError as e:
-            print(f'Failed to open URL {url} Reason: {e.reason}')
+            logging.error(f'Failed to open URL {url} Reason: {e.reason}')
             time.sleep(5)  # wait a bit and try again
 
 
@@ -155,15 +154,15 @@ def check_status():
         return_code = download_process.poll()
         if return_code is not None:
             if return_code == 0:
-                logger.info("Download for SRA id {sra_id} completed successfully.")
+                logging.info("Download for SRA id {sra_id} completed successfully.")
                 completed_downloads.add(sra_id)
                 location = os.path.join(f'{internal_ip()}:{download_dir()}', sra_id)
 
                 if not ack('download', sra_id, location):  # all done, yay!
                     return False;
             else:
-                logger.warning("Download for SRA id {sra_id} failed.")
-                if not nack(sra_id, 'download'):
+                logging.warning("Download for SRA id {sra_id} failed.")
+                if not nack('download', sra_id):
                     return False  # this shouldn't happen, as we still have work to do
     for d in completed_downloads:
         del download_processes[d]
@@ -174,14 +173,14 @@ def check_status():
         if return_code is not None:
             completed_creates.add(sra_id)
             if return_code == 0:
-                logger.info("Bulding graph for SRA id {sra_id} completed successfully.")
+                logging.info(f'Building graph for SRA id {sra_id} completed successfully.')
                 location = f'{internal_ip()}:{create_file()}'
 
                 if not ack('create', sra_id, location):  # all done, yay!
                     return False;
             else:
-                logger.warning("Building graph for SRA id {sra_id} failed.")
-                if not nack(sra_id, 'create'):
+                logging.warning(f'Building graph for SRA id {sra_id} failed.')
+                if not nack('create', sra_id):
                     return False  # this shouldn't happen, as we still have work to do
     for d in completed_creates:
         del create_processes[d]
@@ -192,7 +191,7 @@ def check_status():
         if return_code is not None:
             completed_cleans.add(sra_id)
             if return_code == 0:
-                logger.info("Cleaning graph for SRA id {sra_id} completed successfully.")
+                logging.info('Cleaning graph for SRA id {sra_id} completed successfully.')
                 location = f'{internal_ip()}:{clean_file()}'
 
                 if not ack('clean', sra_id, location):  # all done, yay!
@@ -200,8 +199,8 @@ def check_status():
 
                 # TODO:transfer the cleaned file onto leomed
             else:
-                logger.warning("Cleaning graph for SRA id {sra_id} failed.")
-                if not nack(sra_id, 'clean'):
+                logging.warning('Cleaning graph for SRA id {sra_id} failed.')
+                if not nack('clean', sra_id):
                     return False  # this shouldn't happen, as we still have work to do
     for d in completed_cleans:
         del clean_processes[d]
@@ -212,7 +211,7 @@ def check_status():
 def do_work():
     while True:
         work_response = get_work()
-        print(f'Response is {work_response}')
+        logging.debug(f'Response is {work_response}')
         if work_response is None:
             break
         if 'download' in work_response:
@@ -229,10 +228,18 @@ def do_work():
 
 
 def check_env():
-    rc = subprocess.call('prereq.sh')
-    if rc != 0:
-        logger.error("Some pre-requisites are not satisfied, bailing out")
+    """ Make sure all the necessary software is in place to successfully run the client and create working
+    directories """
+
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
+    file_handler = logging.FileHandler("{0}/{1}.log".format(args.output_dir, 'client'))
+    file_handler.setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(file_handler)
+
+    if subprocess.call(['./prereq.sh']) != 0:
+        logging.error("Some prerequisites are missing on this machines. Bailing out.")
         exit(1)
+
     pathlib.Path(download_dir()).mkdir(parents=True, exist_ok=True)
     pathlib.Path(create_dir()).mkdir(parents=True, exist_ok=True)
     pathlib.Path(clean_dir()).mkdir(parents=True, exist_ok=True)
@@ -252,13 +259,16 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-
+    parser.add_argument('--destination_host', default='hex.ethz.ch',
+                        help='Host/directory where the cleaned BOSS graphs are copied to')
     args = parser.parse_args()
+
     if not os.path.isabs(args.data_dir):
-        logger.error(f'data_dir must be an absolute path, not {args.data_dir}')
+        logging.error(f'data_dir must be an absolute path, not {args.data_dir}')
         exit(1)
     if not args.server_host:
-        logger.error('missing --server_host. Can\'t connect to server without it!')
+        logging.error('missing --server_host. Can\'t connect to server without it!')
         exit(1)
+    check_env()
 
     do_work()

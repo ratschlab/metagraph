@@ -76,7 +76,7 @@ class Sra:
                 for line in fp:
                     line = line.rstrip()
                     if line in downloaded_sras:  # already processed
-                        print(f'Lone {line} already downloaded')
+                        print(f'{line} already downloaded - assuming it\'s ready for processing')
                         continue
                     yield line
         return None
@@ -161,23 +161,23 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         except KeyError:
             logger.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
 
-    def handle_ack_download(self, postvars):
-        self.handle_ack('download', postvars, [downloaded_sras, to_create_sras], pending_downloads)
+    def handle_ack_download(self, post_vars):
+        self.handle_ack('download', post_vars, [downloaded_sras, to_create_sras], pending_downloads)
 
-    def handle_ack_create(self, postvars):
-        self.handle_ack('create', postvars, [created_sras, to_clean_sras], pending_creates)
+    def handle_ack_create(self, post_vars):
+        self.handle_ack('create', post_vars, [created_sras, to_clean_sras], pending_creates)
 
-    def handle_ack_clean(self, postvars):
-        self.handle_ack('clean', postvars, [cleaned_sras, to_transfer_sras], pending_cleans)
+    def handle_ack_clean(self, post_vars):
+        self.handle_ack('clean', post_vars, [cleaned_sras, to_transfer_sras], pending_cleans)
 
-    def handle_nack_download(self, postvars):
-        self.handle_nack('download', postvars, pending_downloads)
+    def handle_nack_download(self, post_vars):
+        self.handle_nack('download', post_vars, pending_downloads)
 
-    def handle_nack_create(self, postvars):
-        self.handle_nack('create', postvars, pending_creates)
+    def handle_nack_create(self, post_vars):
+        self.handle_nack('create', post_vars, pending_creates)
 
-    def handle_nack_clean(self, postvars):
-        self.handle_nack('clean', postvars, pending_cleans)
+    def handle_nack_clean(self, post_vars):
+        self.handle_nack('clean', post_vars, pending_cleans)
 
     def send_reply(self, code, message, headers={}):
         self.send_response(code)
@@ -188,10 +188,10 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(message.encode('utf-8'))
         self.wfile.flush()
 
-    def get_postvars(self):
+    def get_post_vars(self):
         ctype, pdict = cgi.parse_header(self.headers['content-type'])
         if ctype != 'application/x-www-form-urlencoded':
-            self.send_reply(400, "Bad content-type, only x-www-form-urlencoded accepted")
+            self.send_reply(400, "Bad content-type, only application/x-www-form-urlencoded accepted")
             return None
         length = int(self.headers['content-length'])
         return urllib.parse.parse_qs(self.rfile.read(length), keep_blank_values=True)
@@ -208,21 +208,21 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
-        postvars = self.get_postvars()
-        if not postvars:
+        post_vars = self.get_post_vars()
+        if not post_vars:
             return
         if parsed_url.path == '/jobs/ack/download':
-            self.handle_ack_download(postvars)
+            self.handle_ack_download(post_vars)
         elif parsed_url.path == '/jobs/ack/create':
-            self.handle_ack_create(postvars)
+            self.handle_ack_create(post_vars)
         elif parsed_url.path == '/jobs/ack/clean':
-            self.handle_ack_clean(postvars)
+            self.handle_ack_clean(post_vars)
         if parsed_url.path == '/jobs/nack/download':
-            self.handle_nack_download(postvars)
+            self.handle_nack_download(post_vars)
         elif parsed_url.path == '/jobs/nack/create':
-            self.handle_nack_create(postvars)
+            self.handle_nack_create(post_vars)
         elif parsed_url.path == '/jobs/nack/clean':
-            self.handle_nack_clean(postvars)
+            self.handle_nack_clean(post_vars)
         else:
             self.send_reply(404, f'Invalid path: {self.path}\n')
 

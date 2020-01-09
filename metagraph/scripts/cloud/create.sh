@@ -21,7 +21,8 @@ function execute {
 ############ Main Script ###############
 # Arguments:
 #  - the SRA id to be downloaded using aspera
-#  - the location where the download will be placed
+#  - the location of the downloaded files
+#  - the location where the graph will be placed
 
 # check the command-line arguments
 if [ "$#" -ne 3 ]; then
@@ -36,6 +37,6 @@ output_dir=$3
 # for reasons I don't understand glob expansion doesn't work, so doing it manually by concatenating all downloaded fastq.gz files
 input_filenames=""
 for i in $(ls -p "${input_dir}"); do
-  input_filenames="$input_filenames ${output_dir}/${sra_number}/$i"
+  input_filenames="$input_filenames ${input_dir}/$i"
 done
-execute metagraph build -v -p 1 -k 10 --canonical --count-kmers -o "${output_dir}/dbg/${sra_number}"  $input_filenames
+execute metagraph build -v -p 1 -k 10 --canonical --count-kmers -o "${output_dir}${sra_number}"  $input_filenames

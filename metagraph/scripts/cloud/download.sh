@@ -61,9 +61,5 @@ else
   SUBFOLDER=""
 fi
 FOLDER="/vol1/fastq/${sra_number:0:6}$SUBFOLDER"
-if [ -d "$download_dir/$sra_number" ]; then
-  echo "Submission $sra_number already downloaded. Skipping"
-else
-  execute ascp -QT -P "$PORT" -i "$ASPERA_SSH" era-fasp@fasp.sra.ebi.ac.uk:"${FOLDER}/${sra_number}/" "${download_dir}"
-fi
+execute ascp -QT -k1 -q -P "$PORT" -i "$ASPERA_SSH" era-fasp@fasp.sra.ebi.ac.uk:"${FOLDER}/${sra_number}/" "${download_dir}"
 
