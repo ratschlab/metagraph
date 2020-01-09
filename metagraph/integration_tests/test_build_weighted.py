@@ -241,16 +241,16 @@ class TestBuildWeighted(unittest.TestCase):
 
     @parameterized.expand(
         itertools.product(GRAPH_TYPES,
-        [
-            (2, 3),
-            (3, 7),
-            (6, 63),
-            (8, 255),
-            (12, 3507.17),
-            (16, 5811.04),
-            (32, 5811.04),
-        ]
-    ))
+                          [
+                              (2, 3),
+                              (3, 7),
+                              (6, 63),
+                              (8, 255),
+                              (12, 3507.17),
+                              (16, 5811.04),
+                              (32, 5811.04),
+                          ]
+                          ))
     def test_kmer_count_width(self, representation, width_result):
         count_width, avg_count_expected = width_result
 
@@ -281,30 +281,30 @@ class TestBuildWeighted(unittest.TestCase):
 
     @parameterized.expand(itertools.chain(
         itertools.product(GRAPH_TYPES,
-            [
-                (4, 2, 3),
-                (4, 6, 63),
-                (4, 8, 255),
-                (4, 12, 4095),
-                (4, 16, 65535),
-                (4, 32, 999998),
+                          [
+                              (4, 2, 3),
+                              (4, 6, 63),
+                              (4, 8, 255),
+                              (4, 12, 4095),
+                              (4, 16, 65535),
+                              (4, 32, 999998),
 
-                (29, 8, 255),
-                (29, 16, 65535),
-                (29, 32, 999986)
-            ]
-        ),
+                              (29, 8, 255),
+                              (29, 16, 65535),
+                              (29, 32, 999986)
+                          ]
+                          ),
         itertools.product([repr for repr in GRAPH_TYPES if repr != 'bitmap'],
-            [
-                (35, 8, 255),
-                (35, 16, 65535),
-                (35, 32, 999983),
+                          [
+                              (35, 8, 255),
+                              (35, 16, 65535),
+                              (35, 32, 999983),
 
-                (70, 8, 255),
-                (70, 16, 65535),
-                (70, 32, 999966),
-            ]
-        )
+                              (70, 8, 255),
+                              (70, 16, 65535),
+                              (70, 32, 999966),
+                          ]
+                          )
     ))
     def test_kmer_count_width_large(self, representation, k_width_result):
         k, count_width, avg_count_expected = k_width_result
