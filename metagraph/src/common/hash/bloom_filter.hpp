@@ -118,6 +118,11 @@ class BloomFilter {
             : static_cast<uint32_t>(-1);
     }
 
+    /**
+     * A fast map of h uniformly to the region [0, size)
+     */
+    static uint64_t restrict_to(uint64_t h, size_t size);
+
   private:
     sdsl::bit_vector filter_;
     uint32_t num_hash_functions_;

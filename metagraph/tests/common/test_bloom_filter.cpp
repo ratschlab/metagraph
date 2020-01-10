@@ -9,6 +9,28 @@
 #include <cmath>
 
 
+TEST(BloomFilter, restrict_to) {
+    // test multiples of powers of two
+    for (uint64_t i = 0; i < 64; ++i) {
+        for (uint64_t j = 0; j < 64; ++j) {
+            ASSERT_EQ(i + j >= 64 ? std::exp2(i + j - 64) : 0,
+                      BloomFilter::restrict_to(std::exp2(i), std::exp2(j)));
+        }
+    }
+
+    // test multiples of powers of 10
+    constexpr double log10maxull = 19.2659197225;
+    for (uint64_t i = 0; i < 11; ++i) {
+        for (uint64_t j = 0; j < 11; ++j) {
+            // compute upper half of product in log10 space
+            ASSERT_EQ(i + j >= log10maxull
+                          ? std::floor(std::pow(10, i + j - log10maxull))
+                          : 0,
+                      BloomFilter::restrict_to(std::pow(10, i), std::pow(10, j)));
+        }
+    }
+}
+
 // Note: std::hash<uint64_t> is not required by the specification to be a
 //       cryographic hash, so use this to generate random numbers as hashes
 const struct {
