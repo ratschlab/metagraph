@@ -7,8 +7,7 @@ import logging
 import os
 import urllib
 
-# TODO:
-# - handle retries for pending jobs
+# TODO: - maybe handle retries for pending jobs
 
 args = None  # the parsed command line arguments
 
@@ -32,8 +31,6 @@ pending_transfers = set()
 
 # set to true when all download ids were read
 download_done = False
-
-logger = logging.getLogger('metagraph-server')
 
 status_str = f"""
 <html>
@@ -143,7 +140,7 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             remove_map.remove(sra_id_str)
         except KeyError:
-            logger.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
+            logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
         return True
 
     def handle_nack(self, operation, post_vars, remove_map):
@@ -159,7 +156,7 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             remove_map.remove(sra_id_str)
         except KeyError:
-            logger.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
+            logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
 
     def handle_ack_download(self, post_vars):
         self.handle_ack('download', post_vars, [downloaded_sras, to_create_sras], pending_downloads)
@@ -266,7 +263,15 @@ def init_state():
     to_transfer_sras = {k: cleaned_sras[k] for k in set(cleaned_sras) - set(transferred_sras)}
 
 
+def init_logging():
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
+    file_handler = logging.FileHandler("{0}/{1}.log".format(args.output_dir, 'server'))
+    file_handler.setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(file_handler)
+
+
 if __name__ == '__main__':
+    init_logging()
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -285,7 +290,7 @@ if __name__ == '__main__':
                   os.path.isfile(os.path.join(args.data_dir, f)) and f.endswith('ids')]
 
     if len(data_files) == 0:
-        print(f"No files found in '{args.data_dir}'. Exiting.")
+        logging.fatal(f"No files found in '{args.data_dir}'. Exiting.")
         exit(1)
 
     init_state()

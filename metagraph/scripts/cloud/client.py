@@ -235,6 +235,9 @@ def check_status():
 
 def do_work():
     while True:
+        if is_full():
+            time.sleep(5)
+            continue
         work_response = get_work()
         logging.debug(f'Response is {work_response}')
         if work_response is None:
