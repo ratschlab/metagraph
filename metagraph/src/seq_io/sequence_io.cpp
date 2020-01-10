@@ -38,6 +38,68 @@ void FastaWriter::write(const std::string &sequence) {
 }
 
 
+template <typename T>
+ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
+                                            const std::string &feature_name,
+                                            uint32_t kmer_length,
+                                            const std::string &header,
+                                            bool enumerate_sequences)
+      : kmer_length_(kmer_length),
+        header_(header),
+        enumerate_sequences_(enumerate_sequences) {
+    assert(feature_name.size());
+
+    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+
+    fasta_gz_out_ = gzopen(filename.c_str(), "w");
+    if (fasta_gz_out_ == Z_NULL) {
+        std::cerr << "ERROR: Can't write to " << filename << std::endl;
+        exit(1);
+    }
+
+    filename = utils::remove_suffix(filebase, ".gz", ".fasta") + "." + feature_name + ".gz";
+
+    feature_gz_out_ = gzopen(filename.c_str(), "w");
+    if (feature_gz_out_ == Z_NULL
+            || gzwrite(feature_gz_out_, &kmer_length_, 4) != sizeof(kmer_length_)) {
+        std::cerr << "ERROR: Can't write to " << filename << std::endl;
+        exit(1);
+    }
+}
+
+template <typename T>
+ExtendedFastaWriter<T>::~ExtendedFastaWriter() {
+    gzclose(fasta_gz_out_);
+    gzclose(feature_gz_out_);
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::write(const std::string &sequence,
+                                   const std::vector<feature_type> &kmer_features) {
+    assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
+
+    if (!write_fasta(fasta_gz_out_,
+                     enumerate_sequences_ ? header_ + std::to_string(++count_)
+                                          : header_,
+                     sequence)) {
+        std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
+        exit(1);
+    }
+
+    if (gzwrite(feature_gz_out_, kmer_features.data(),
+                                 kmer_features.size() * sizeof(feature_type))
+            != static_cast<int>(kmer_features.size() * sizeof(feature_type))) {
+        std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump k-mer features" << std::endl;
+        exit(1);
+    }
+}
+
+template class ExtendedFastaWriter<uint8_t>;
+template class ExtendedFastaWriter<uint16_t>;
+template class ExtendedFastaWriter<uint32_t>;
+template class ExtendedFastaWriter<uint64_t>;
+
+
 bool write_fasta(gzFile gz_out, const kseq_t &kseq) {
     return gzputc(gz_out, '>') == '>'
         && gzwrite(gz_out, kseq.name.s, kseq.name.l)

@@ -41,7 +41,8 @@ int clean_graph(Config *config) {
             || config->max_count < std::numeric_limits<unsigned int>::max()
             || config->min_unitig_median_kmer_abundance != 1
             || config->count_slice_quantiles[0] != 0
-            || config->count_slice_quantiles[1] != 1) {
+            || config->count_slice_quantiles[1] != 1
+            || config->dump_counts) {
         // load k-mer counts
         auto node_weights = graph->load_extension<NodeWeights>(files.at(0));
 
@@ -121,8 +122,31 @@ int clean_graph(Config *config) {
 
     assert(config->count_slice_quantiles.size() >= 2);
 
-    if (config->count_slice_quantiles[0] == 0
-            && config->count_slice_quantiles[1] == 1) {
+    if (config->dump_counts) {
+        ExtendedFastaWriter<uint32_t> writer(config->outfbase,
+                                             "kmer_counts",
+                                             graph->get_k(),
+                                             config->header,
+                                             config->enumerate_out_sequences);
+
+        const auto &node_weights = *graph->get_extension<NodeWeights>();
+        if (!node_weights.is_compatible(*graph)) {
+            logger->error("k-mer counts are not compatible with the subgraph");
+            exit(1);
+        }
+
+        std::vector<uint32_t> kmer_counts;
+
+        call_clean_contigs([&](const std::string &contig, const auto &path) {
+            for (auto node : path) {
+                kmer_counts.push_back(node_weights[node]);
+            }
+            writer.write(contig, kmer_counts);
+            kmer_counts.resize(0);
+        });
+
+    } else if (config->count_slice_quantiles[0] == 0
+                && config->count_slice_quantiles[1] == 1) {
         FastaWriter writer(config->outfbase, config->header,
                            config->enumerate_out_sequences);
 

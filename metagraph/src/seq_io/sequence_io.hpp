@@ -14,7 +14,7 @@ KSEQ_INIT(gzFile, gzread);
 class FastaWriter {
   public:
     FastaWriter(const std::string &filebase,
-                const std::string &header,
+                const std::string &header = "",
                 bool enumerate_sequences = false);
 
     ~FastaWriter();
@@ -23,6 +23,31 @@ class FastaWriter {
 
   public:
     gzFile gz_out_;
+    const std::string header_;
+    bool enumerate_sequences_;
+    uint64_t count_ = 0;
+};
+
+template <typename T = uint32_t>
+class ExtendedFastaWriter {
+  public:
+    typedef T feature_type;
+
+    ExtendedFastaWriter(const std::string &filebase,
+                        const std::string &feature_name,
+                        uint32_t kmer_length,
+                        const std::string &header = "",
+                        bool enumerate_sequences = false);
+
+    ~ExtendedFastaWriter();
+
+    void write(const std::string &sequence,
+               const std::vector<feature_type> &kmer_features);
+
+  public:
+    gzFile fasta_gz_out_;
+    gzFile feature_gz_out_;
+    uint32_t kmer_length_;
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;

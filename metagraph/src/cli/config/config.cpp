@@ -166,6 +166,8 @@ Config::Config(int argc, char *argv[]) {
             for (const auto &border : utils::split_string(get_value(i++), " ")) {
                 count_slice_quantiles.push_back(std::stod(border));
             }
+        } else if (!strcmp(argv[i], "--dump-counts")) {
+            dump_counts = true;
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
@@ -754,10 +756,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
             fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
                             "\t                         \t\tthan this value (0: auto) [1]\n");
             fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be determined [1]\n");
+            fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-bins-q [FLOAT ...] \tbinning quantiles for partitioning k-mers with\n"
                             "\t                              \t\tdifferent abundance levels ['0 1']\n"
                             "\t                              \t\tExample: --count-bins-q '0 0.33 0.66 1'\n");
@@ -766,6 +770,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --unitigs \t\t\textract unitigs instead of contigs [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\t\tdump clean sequences to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\t\tenumerate sequences in FASTA [off]\n");
+            fprintf(stderr, "\t   --dump-counts \t\tdump k-mer counts for clean sequences [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case EXTEND: {
