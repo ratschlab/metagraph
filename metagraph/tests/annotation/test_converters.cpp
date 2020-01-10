@@ -213,7 +213,7 @@ TEST_F(ConvertFromColumnCompressed, to_RainbowfishAnnotator) {
 
 // TEST(ConvertFromColumnCompressedEmpty, to_GreedyBRWT) {
 //     annotate::ColumnCompressed<> empty_column_annotator(5);
-//     auto empty_annotation = annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+//     auto empty_annotation = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
 //         std::move(empty_column_annotator)
 //     );
 //     EXPECT_EQ(0u, empty_annotation->num_labels());
@@ -222,7 +222,7 @@ TEST_F(ConvertFromColumnCompressed, to_RainbowfishAnnotator) {
 // }
 
 TEST_F(ConvertFromColumnCompressed, to_GreedyBRWT) {
-    annotation = annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+    annotation = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
         std::move(*initial_annotation)
     ).release();
 }
@@ -286,7 +286,7 @@ TEST_F(ConvertFromRowCompressed, stream_to_RowFlat) {
 
 TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
     const auto rowflat_filename = test_dump_basename_row_compressed_to_rowflat
-                                                + annotate::kRowAnnotatorExtension;
+                                                + annotate::RowCompressed<>::kExtension;
 
     initial_annotation->serialize(rowflat_filename);
 
@@ -313,7 +313,7 @@ TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
 
 // TEST(ConvertFromRowCompressedEmpty, to_GreedyBRWT) {
 //     annotate::RowCompressed<> empty_column_annotator(5);
-//     auto empty_annotation = annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+//     auto empty_annotation = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
 //         std::move(empty_column_annotator)
 //     );
 //     EXPECT_EQ(0u, empty_annotation->num_labels());
@@ -322,7 +322,7 @@ TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
 // }
 
 // TEST_F(ConvertFromRowCompressed, to_GreedyBRWT) {
-//     annotation = annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+//     annotation = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
 //         std::move(*initial_annotation)
 //     ).release();
 // }
@@ -332,12 +332,12 @@ TEST_F(MergeAnnotators, RowCompressed) {
     {
         const std::string filename = test_dump_basename_row_compressed_merge + "_1";
         input_annotation_1->serialize(filename);
-        filenames.push_back(filename + annotate::kRowAnnotatorExtension);
+        filenames.push_back(filename + annotate::RowCompressed<>::kExtension);
     }
     {
         const std::string filename = test_dump_basename_row_compressed_merge + "_2";
         input_annotation_2->serialize(filename);
-        filenames.push_back(filename + annotate::kRowAnnotatorExtension);
+        filenames.push_back(filename + annotate::RowCompressed<>::kExtension);
     }
 
     annotate::merge<annotate::RowCompressed<>, std::string>(
@@ -424,7 +424,7 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
         annotation->add_labels({ 3 }, {"Label1"});
         annotation->add_labels({ 4 }, {"Label2"});
         annotation->serialize(filename);
-        filenames.push_back(filename + annotate::kRowAnnotatorExtension);
+        filenames.push_back(filename + annotate::RowCompressed<>::kExtension);
     }
 
     const auto outfile = test_dump_basename_rowflat_merge + "_mixed_to_rowflat";
@@ -433,4 +433,280 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
     merged_annotation = new annotate::RowFlatAnnotator();
     merged_annotation->merge_load({ outfile });
     EXPECT_EQ(num_rows, merged_annotation->num_objects());
+}
+
+TEST(ColumnCompressed, ToRowAnnotator) {
+    {
+        annotate::ColumnCompressed<> annotation(0);
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator);
+    }
+    {
+        annotate::ColumnCompressed<> annotation(1);
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator);
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColumnCompressed<> annotation(1);
+        annotation.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator);
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColumnCompressed<> annotation(6);
+        annotation.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        annotation.add_labels({ 2 }, {"Label1", "Label2"});
+        annotation.add_labels({ 3 }, {});
+        annotation.add_labels({ 4 }, {"Label1", "Label2", "Label8"});
+        annotation.add_labels({ 5 }, {"Label2"});
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator);
+
+        for (size_t i = 0; i < 6; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        const size_t num_rows = 20'000'000;
+        annotate::ColumnCompressed<> annotation(num_rows, 5);
+        for (size_t i = 0; i < num_rows; ++i) {
+            annotation.add_labels({ 0 }, {"Label0", "Label2"});
+        }
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator);
+
+        for (size_t i = 0; i < num_rows; i += 1000) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+}
+
+TEST(ColumnCompressed, ToRowAnnotatorParallel) {
+    {
+        annotate::ColumnCompressed<> annotation(0);
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator, 10);
+    }
+    {
+        annotate::ColumnCompressed<> annotation(1);
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator, 10);
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColumnCompressed<> annotation(1);
+        annotation.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator, 10);
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColumnCompressed<> annotation(6);
+        annotation.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        annotation.add_labels({ 2 }, {"Label1", "Label2"});
+        annotation.add_labels({ 3 }, {});
+        annotation.add_labels({ 4 }, {"Label1", "Label2", "Label8"});
+        annotation.add_labels({ 5 }, {"Label2"});
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator, 10);
+
+        for (size_t i = 0; i < 6; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        const size_t num_rows = 20'000'000;
+        annotate::ColumnCompressed<> annotation(num_rows, 5);
+        for (size_t i = 0; i < num_rows; ++i) {
+            annotation.add_labels({ 0 }, {"Label0", "Label2"});
+        }
+
+        annotate::RowCompressed<> row_annotator(annotation.num_objects());
+        convert_to_row_annotator(annotation, &row_annotator, 10);
+
+        for (size_t i = 0; i < num_rows; i += 1000) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+}
+
+TEST(ColumnCompressed, ToRowAnnotatorStreaming) {
+    {
+        annotate::ColumnCompressed<> annotation(0);
+
+        convert_to_row_annotator(annotation, test_dump_basename);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        ASSERT_EQ(0u, row_annotator.num_objects());
+        ASSERT_EQ(0u, row_annotator.num_labels());
+    }
+    {
+        annotate::ColumnCompressed<> annotation(1);
+
+        convert_to_row_annotator(annotation, test_dump_basename);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColumnCompressed<> annotation(1);
+        annotation.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+
+        convert_to_row_annotator(annotation, test_dump_basename);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColumnCompressed<> annotation(6);
+        annotation.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        annotation.add_labels({ 2 }, {"Label1", "Label2"});
+        annotation.add_labels({ 3 }, {});
+        annotation.add_labels({ 4 }, {"Label1", "Label2", "Label8"});
+        annotation.add_labels({ 5 }, {"Label2"});
+
+        convert_to_row_annotator(annotation, test_dump_basename);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        for (size_t i = 0; i < 6; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        const size_t num_rows = 20'000'000;
+        annotate::ColumnCompressed<> annotation(num_rows, 5);
+        for (size_t i = 0; i < num_rows; ++i) {
+            annotation.add_labels({ 0 }, {"Label0", "Label2"});
+        }
+        convert_to_row_annotator(annotation, test_dump_basename);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        for (size_t i = 0; i < num_rows; i += 1000) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+}
+
+TEST(ColumnCompressed, ToRowAnnotatorStreamingParallel) {
+    {
+        annotate::ColumnCompressed<> annotation(0);
+
+        convert_to_row_annotator(annotation, test_dump_basename, 10);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        ASSERT_EQ(0u, row_annotator.num_objects());
+        ASSERT_EQ(0u, row_annotator.num_labels());
+    }
+    {
+        annotate::ColumnCompressed<> annotation(1);
+
+        convert_to_row_annotator(annotation, test_dump_basename, 10);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColumnCompressed<> annotation(1);
+        annotation.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+
+        convert_to_row_annotator(annotation, test_dump_basename, 10);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColumnCompressed<> annotation(6);
+        annotation.add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+        annotation.add_labels({ 2 }, {"Label1", "Label2"});
+        annotation.add_labels({ 3 }, {});
+        annotation.add_labels({ 4 }, {"Label1", "Label2", "Label8"});
+        annotation.add_labels({ 5 }, {"Label2"});
+
+        convert_to_row_annotator(annotation, test_dump_basename, 10);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        for (size_t i = 0; i < 6; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        const size_t num_rows = 20'000'000;
+        annotate::ColumnCompressed<> annotation(num_rows, 5);
+        for (size_t i = 0; i < num_rows; ++i) {
+            annotation.add_labels({ 0 }, {"Label0", "Label2"});
+        }
+        convert_to_row_annotator(annotation, test_dump_basename, 10);
+
+        annotate::RowCompressed<> row_annotator(0);
+        ASSERT_TRUE(row_annotator.load(test_dump_basename));
+
+        for (size_t i = 0; i < num_rows; i += 1000) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
 }

@@ -40,18 +40,18 @@ class AnnotatorTest : public ::testing::Test {
     std::unique_ptr<Annotator> annotation;
 
     virtual void set(annotate::ColumnCompressed<>&& column_annotator) {
-        if constexpr(std::is_same_v<Annotator, annotate::BRWTCompressed<>>) {
-            annotation = annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
+        if constexpr(std::is_same_v<Annotator, annotate::MultiBRWTAnnotator>) {
+            annotation = annotate::convert_to_simple_BRWT<annotate::MultiBRWTAnnotator>(
                 std::move(column_annotator)
             );
 
         } else if constexpr(std::is_same_v<Annotator, annotate::RowCompressed<>>) {
-            annotation.reset(new annotate::RowCompressed<>(0));
-            column_annotator.convert_to_row_annotator(annotation.get());
+            annotation.reset(new annotate::RowCompressed<>(column_annotator.num_objects()));
+            convert_to_row_annotator(column_annotator, annotation.get());
 
         } else if constexpr(std::is_same_v<Annotator, RowCompressedParallel<>>) {
-            annotation.reset(new RowCompressedParallel<>(0));
-            column_annotator.convert_to_row_annotator(annotation.get(), 10);
+            annotation.reset(new RowCompressedParallel<>(column_annotator.num_objects()));
+            convert_to_row_annotator(column_annotator, annotation.get(), 10);
 
         } else if constexpr(std::is_same_v<Annotator, RowCompressedDynamic<>>) {
             annotation.reset(new RowCompressedDynamic<>(column_annotator.num_objects()));
@@ -133,7 +133,7 @@ class AnnotatorDynamicNoSparseTest : public AnnotatorPreset2Test<Annotator> { };
 
 typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
-                         annotate::BRWTCompressed<>,
+                         annotate::MultiBRWTAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
                          annotate::ColumnCompressed<>,
@@ -145,8 +145,8 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
-                         annotate::BRWTCompressed<>> AnnotatorStaticTypes;
-typedef ::testing::Types<annotate::BRWTCompressed<>> AnnotatorStaticLargeTypes;
+                         annotate::MultiBRWTAnnotator> AnnotatorStaticTypes;
+typedef ::testing::Types<annotate::MultiBRWTAnnotator> AnnotatorStaticLargeTypes;
 typedef ::testing::Types<annotate::ColumnCompressed<>,
                          annotate::RowCompressed<>,
                          RowCompressedParallel<>,
@@ -158,13 +158,13 @@ typedef ::testing::Types<annotate::ColumnCompressed<>,
                          RowCompressedDynamic<>> AnnotatorDynamicNoSparseTypes;
 
 
-TYPED_TEST_CASE(AnnotatorTest, AnnotatorTypes);
-TYPED_TEST_CASE(AnnotatorPresetTest, AnnotatorTypes);
-TYPED_TEST_CASE(AnnotatorPreset2Test, AnnotatorTypes);
-TYPED_TEST_CASE(AnnotatorPreset3Test, AnnotatorTypes);
-TYPED_TEST_CASE(AnnotatorStaticTest, AnnotatorStaticTypes);
-TYPED_TEST_CASE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
-TYPED_TEST_CASE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
-TYPED_TEST_CASE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
+TYPED_TEST_SUITE(AnnotatorTest, AnnotatorTypes);
+TYPED_TEST_SUITE(AnnotatorPresetTest, AnnotatorTypes);
+TYPED_TEST_SUITE(AnnotatorPreset2Test, AnnotatorTypes);
+TYPED_TEST_SUITE(AnnotatorPreset3Test, AnnotatorTypes);
+TYPED_TEST_SUITE(AnnotatorStaticTest, AnnotatorStaticTypes);
+TYPED_TEST_SUITE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
+TYPED_TEST_SUITE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
+TYPED_TEST_SUITE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
 
 #endif // __TEST_ANNOTATION_HPP__

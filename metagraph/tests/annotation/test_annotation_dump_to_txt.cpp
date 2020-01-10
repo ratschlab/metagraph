@@ -14,12 +14,12 @@ class AnnotatorPresetDumpTest : public AnnotatorPreset2Test<Annotator> { };
 
 typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
-                         annotate::BRWTCompressed<>,
+                         annotate::MultiBRWTAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
                          annotate::ColumnCompressed<>> AnnotatorDumpTestTypes;
 
-TYPED_TEST_CASE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
+TYPED_TEST_SUITE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
 
 
 TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextEmpty) {

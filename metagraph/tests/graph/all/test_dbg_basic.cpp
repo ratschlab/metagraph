@@ -14,7 +14,7 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 const size_t kBitsPerCount = 8;
 
-TYPED_TEST_CASE(DeBruijnGraphTest, GraphTypes);
+TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {

@@ -10,7 +10,6 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <libmaus2/util/StringSerialisation.hpp>
 #include <sdsl/int_vector.hpp>
-#include <sdsl/sd_vector.hpp>
 
 using libmaus2::util::NumberSerialisation;
 using libmaus2::util::StringSerialisation;

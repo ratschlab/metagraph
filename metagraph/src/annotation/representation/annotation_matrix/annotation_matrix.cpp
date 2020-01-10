@@ -9,17 +9,6 @@ using utils::remove_suffix;
 
 namespace annotate {
 
-template <>
-const std::string RowFlatAnnotator::kExtension = kRowPackedExtension;
-template <>
-const std::string RainbowfishAnnotator::kExtension = kRainbowfishExtension;
-template <>
-const std::string BRWTCompressed<std::string>::kExtension = kBRWTExtension;
-template <>
-const std::string BinRelWT_sdslAnnotator::kExtension = kBinRelWT_sdslExtension;
-template <>
-const std::string BinRelWTAnnotator::kExtension = kBinRelWTExtension;
-
 template <class BinaryMatrixType, typename Label>
 std::string
 StaticBinRelAnnotator<BinaryMatrixType, Label>
@@ -101,22 +90,6 @@ uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_objects() const {
 template <class BinaryMatrixType, typename Label>
 uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_relations() const {
     return matrix_->num_relations();
-}
-
-template <class BinaryMatrixType, typename Label>
-void StaticBinRelAnnotator<BinaryMatrixType, Label>
-::call_objects(const Label &label,
-               std::function<void(Index)> callback) const {
-    uint64_t encoding;
-    try {
-        encoding = label_encoder_.encode(label);
-    } catch (...) {
-        return;
-    }
-
-    for (Index index : matrix_->get_column(encoding)) {
-        callback(index);
-    }
 }
 
 template <class BinaryMatrixType, typename Label>

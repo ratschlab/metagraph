@@ -13,7 +13,7 @@ KSEQ_INIT(gzFile, gzread);
 
 class FastaWriter {
   public:
-    FastaWriter(const std::string &filename,
+    FastaWriter(const std::string &filebase,
                 const std::string &header,
                 bool write_counts = true);
 

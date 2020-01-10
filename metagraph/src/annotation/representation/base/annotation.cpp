@@ -84,24 +84,15 @@ void MultiLabelEncoded<LabelType>
     }
 }
 
-template <class Annotator>
-class IterateRowsByIndex : public Annotator::IterateRows {
-  public:
-    IterateRowsByIndex(const Annotator &annotator) : annotator_(annotator) {};
-
-    typename Annotator::SetBitPositions next_row() override final {
-        return annotator_.get_label_codes(i_++);
-    };
-
-  private:
-    typename Annotator::Index i_ = 0;
-    const Annotator &annotator_;
-};
-
 template <typename LabelType>
-std::unique_ptr<typename MultiLabelEncoded<LabelType>::IterateRows>
-MultiLabelEncoded<LabelType>::iterator() const {
-    return std::make_unique<IterateRowsByIndex<MultiLabelEncoded<LabelType>>>(*this);
+void MultiLabelEncoded<LabelType>
+::call_objects(const Label &label, std::function<void(Index)> callback) const {
+    if (!label_exists(label))
+        return;
+
+    for (Index index : get_matrix().get_column(label_encoder_.encode(label))) {
+        callback(index);
+    }
 }
 
 // calls get_label_codes(i)

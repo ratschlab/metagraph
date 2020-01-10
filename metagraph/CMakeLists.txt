@@ -318,7 +318,7 @@ message(STATUS "Compile flags used:"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
 )
 
-file(GLOB src_files
+file(GLOB metagraph_core_files
   "src/*.cpp"
   "src/*/*.cpp"
   "src/*/*/*.cpp"
@@ -326,12 +326,21 @@ file(GLOB src_files
 )
 
 # for compiling faster
-list(REVERSE src_files)
+list(REVERSE metagraph_core_files)
 
-list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
-list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*\\._.*")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*main.cpp")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*/cli/.*")
 
-add_library(metagraph-core STATIC ${src_files})
+add_library(metagraph-core STATIC ${metagraph_core_files})
+
+file(GLOB metagraph_cli_files
+  "src/cli/*.cpp"
+  "src/cli/*/*.cpp"
+  "src/cli/*/*/*.cpp"
+)
+add_library(metagraph-cli STATIC ${metagraph_cli_files})
+
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
@@ -406,13 +415,9 @@ if(NOT CPPNOFS)
   endif()
 endif()
 
-target_link_libraries(
-  metagraph-core ${METALIBS}
-)
-
-target_link_libraries(
-  metagraph metagraph-core ${METALIBS}
-)
+target_link_libraries(metagraph-core ${METALIBS})
+target_link_libraries(metagraph-cli PRIVATE metagraph-core)
+target_link_libraries(metagraph metagraph-core metagraph-cli)
 
 add_custom_target(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E
@@ -441,9 +446,7 @@ link_directories(
 )
 add_executable(run_experiments ${experiment_files})
 
-target_link_libraries(
-  run_experiments metagraph-core ${METALIBS}
-)
+target_link_libraries(run_experiments metagraph-core)
 
 #-------------------
 # install library
@@ -462,33 +465,13 @@ install(TARGETS metagraph DESTINATION bin)
 #-------------------
 # Unit Tests
 #-------------------
-if(FALSE) # there is one gtest version attached with sdsl
-# Download and unpack googletest at configure time
-if(NOT EXISTS ${CMAKE_BINARY_DIR}/googletest-download)
-  configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
-  execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
-    RESULT_VARIABLE result
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest-download )
-  if(result)
-    message(FATAL_ERROR "CMake step for googletest failed: ${result}")
-  endif()
-  execute_process(COMMAND ${CMAKE_COMMAND} --build .
-    RESULT_VARIABLE result
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest-download )
-  if(result)
-    message(FATAL_ERROR "Build step for googletest failed: ${result}")
-  endif()
-endif()
+# There is an old gtest library shipped with sdsl.
+# Remove it as we are going to use a more recent one.
+execute_process(COMMAND rm -rf ${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/include/gtest)
 
-# Prevent overriding the parent project's compiler/linker settings on Windows
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-
-add_subdirectory(
-  ${CMAKE_BINARY_DIR}/googletest-src
-  ${CMAKE_BINARY_DIR}/googletest-build
-  EXCLUDE_FROM_ALL
-)
-endif()
+add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FROM_ALL)
+target_compile_options(gtest_main PRIVATE -w)
+target_compile_options(gtest PRIVATE -w)
 
 if(NOT DEFINED DEATH_TEST)
   set(DEATH_TEST TRUE)
@@ -507,20 +490,13 @@ file(GLOB unit_tests_files
 )
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
-if (CMAKE_VERSION VERSION_LESS 2.8.11)
-  include_directories("${gtest_SOURCE_DIR}/include")
-endif()
-
 link_directories(
   ${CMAKE_BINARY_DIR}
 )
 
 add_executable(unit_tests ${unit_tests_files})
 target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(unit_tests gtest_main gtest
-  metagraph-core
-  ${METALIBS}
-)
+target_link_libraries(unit_tests gtest_main gtest metagraph-core)
 
 target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 

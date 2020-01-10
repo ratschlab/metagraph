@@ -18,7 +18,7 @@ typedef ::testing::Types<BRWT,
                          BinRelWT_sdsl,
                          RowConcatenated<>,
                          Rainbowfish> BinMatTypes;
-TYPED_TEST_CASE(BinaryMatrixTest, BinMatTypes);
+TYPED_TEST_SUITE(BinaryMatrixTest, BinMatTypes);
 
 
 TYPED_TEST(BinaryMatrixTest, DefaultConstructor) {

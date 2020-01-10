@@ -51,6 +51,16 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
            const std::string &outfile);
 
+template <typename Label>
+void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
+                              const std::string &outfbase,
+                              size_t num_threads = 1);
+
+template <typename Label>
+void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
+                              RowCompressed<Label> *target,
+                              size_t num_threads = 1);
+
 } // namespace annotate
 
 #endif // __ANNOTATION_CONVERTERS_HPP__

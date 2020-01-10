@@ -293,6 +293,8 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
             common::SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
+            common::SortedMultiset<KMER, uint16_t, Vector<std::pair<KMER, uint16_t>>>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, \
             common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER>>; \
 

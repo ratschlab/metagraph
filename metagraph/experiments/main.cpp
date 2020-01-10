@@ -193,25 +193,25 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
-    if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
+    if (utils::ends_with(filename, annotate::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
-    } else if (utils::ends_with(filename, annotate::kRowAnnotatorExtension)) {
+    } else if (utils::ends_with(filename, annotate::RowCompressed<>::kExtension)) {
         return Config::AnnotationType::RowCompressed;
 
-    } else if (utils::ends_with(filename, annotate::kBRWTExtension)) {
+    } else if (utils::ends_with(filename, annotate::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
 
-    } else if (utils::ends_with(filename, annotate::kBinRelWT_sdslExtension)) {
+    } else if (utils::ends_with(filename, annotate::BinRelWT_sdslAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT_sdsl;
 
-    } else if (utils::ends_with(filename, annotate::kBinRelWTExtension)) {
+    } else if (utils::ends_with(filename, annotate::BinRelWTAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT;
 
-    } else if (utils::ends_with(filename, annotate::kRowPackedExtension)) {
+    } else if (utils::ends_with(filename, annotate::RowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowFlat;
 
-    } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
+    } else if (utils::ends_with(filename, annotate::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
     } else {
@@ -237,7 +237,7 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
             break;
         }
         case Config::BRWT: {
-            annotation.reset(new annotate::BRWTCompressed<>(cache_size));
+            annotation.reset(new annotate::MultiBRWTAnnotator(cache_size));
             break;
         }
         case Config::BinRelWT_sdsl: {

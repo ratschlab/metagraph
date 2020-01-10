@@ -315,6 +315,14 @@ template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerE
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>> &, uint8_t);
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>> &, uint8_t);
 
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint16_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint16_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint16_t>> &, uint8_t);
+
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint32_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint32_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint32_t>> &, uint8_t);
+
 void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     assert(W < 2 * alph_size_);
     assert(F < alph_size_);

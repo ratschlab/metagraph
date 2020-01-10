@@ -29,8 +29,13 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 
+    SetBitPositions get_label_codes(Index i) const override;
+    std::vector<SetBitPositions>
+    get_label_codes(const std::vector<Index> &indices) const override;
+
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
+    // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, uint64_t num_threads = 1) const;
 
     uint64_t num_objects() const override;
@@ -40,32 +45,25 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     void add_labels(const std::vector<Index> &, const VLabels &) override { except_dyn(); }
     void insert_rows(const std::vector<Index> &) override { except_dyn(); }
 
-    void call_objects(const Label &label,
-                      std::function<void(Index)> callback) const override;
-
     void reset_row_cache(size_t size);
+
+    const BinaryMatrixType& get_matrix() const override { return *matrix_; };
 
     std::string file_extension() const override;
 
-    const BinaryMatrixType& get_matrix() const override { return *matrix_; };
+    static const std::string kExtension;
 
   private:
     void except_dyn();
 
     std::unique_ptr<BinaryMatrixType> matrix_;
 
-    LabelEncoder<Label> &label_encoder_ { MultiLabelEncoded<Label>::label_encoder_ };
-
-    SetBitPositions get_label_codes(Index i) const override;
-    std::vector<SetBitPositions>
-    get_label_codes(const std::vector<Index> &indices) const override;
+    using MultiLabelEncoded<Label>::label_encoder_;
 
     typedef caches::fixed_sized_cache<Index,
                                       SetBitPositions,
                                       caches::LRUCachePolicy<Index>> RowCacheType;
     mutable std::unique_ptr<RowCacheType> cached_rows_;
-
-    static const std::string kExtension;
 };
 
 } // namespace annotate

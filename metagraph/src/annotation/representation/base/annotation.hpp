@@ -26,6 +26,7 @@ class AnnotationCategory {
 
     virtual void serialize(const std::string &filename) const = 0;
     virtual bool load(const std::string &filename) { return merge_load({ filename }); }
+    // TODO: remove merge_load and merge by annotation converters/mergers?
     virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
 };
 
@@ -66,6 +67,9 @@ class MultiLabelAnnotation
     virtual const std::vector<Label>& get_all_labels() const = 0;
 
     virtual bool label_exists(const Label &label) const = 0;
+
+    virtual void call_objects(const Label &label,
+                              std::function<void(Index)> callback) const = 0;
 
     virtual std::string file_extension() const = 0;
 };
@@ -155,22 +159,13 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
         return label_encoder_.label_exists(label);
     }
 
-    /*********************** Special queries **********************/
-
     // TODO: return a shared_ptr to const bitmap
     virtual void call_objects(const Label &label,
-                              std::function<void(Index)> callback) const = 0;
+                              std::function<void(Index)> callback) const override;
 
     virtual const BinaryMatrix& get_matrix() const = 0;
 
-    class IterateRows {
-      public:
-        virtual ~IterateRows() {}
-        virtual SetBitPositions next_row() = 0;
-    };
-
-    // TODO: remove this and return reference to BinaryMatrix instead
-    virtual std::unique_ptr<IterateRows> iterator() const;
+    /*********************** Special queries **********************/
 
     /**
      * Return all labels for which counts are greater than or equal to |min_count|.

@@ -40,8 +40,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                             double label_mask_in_fraction,
                             double label_mask_out_fraction,
                             double label_other_fraction) {
-    assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
-    const auto &dbg = dynamic_cast<const DeBruijnGraph&>(anno_graph.get_graph());
+    const auto &dbg = anno_graph.get_graph();
     const auto &annotation = anno_graph.get_annotation();
     const auto &label_encoder = annotation.get_label_encoder();
 

@@ -116,7 +116,7 @@ class DBGAlignerTest : public DeBruijnGraphTest<Graph> {
     void SetUp() { Cigar::initialize_opt_table(alphabet, alphabet_encoding); }
 };
 
-TYPED_TEST_CASE(DBGAlignerTest, GraphTypes);
+TYPED_TEST_SUITE(DBGAlignerTest, GraphTypes);
 
 TYPED_TEST(DBGAlignerTest, bad_min_cell_score) {
     auto graph = build_graph_batch<TypeParam>(3, {});
