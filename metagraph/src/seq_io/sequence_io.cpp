@@ -4,15 +4,18 @@
 #include <fstream>
 
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/utils/string_utils.hpp"
 #include "vcf_parser.hpp"
 
 const char kDefaultFastQualityChar = 'I';
 
 
-FastaWriter::FastaWriter(const std::string &filename,
+FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
                          bool write_counts) : header_(header),
                                               write_counts_(write_counts) {
+    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+
     gz_out_ = gzopen(filename.c_str(), "w");
     if (gz_out_ == Z_NULL) {
         std::cerr << "ERROR: Can't write to " << filename << std::endl;

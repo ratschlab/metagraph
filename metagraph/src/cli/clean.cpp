@@ -33,7 +33,7 @@ int clean_graph(Config *config) {
     }
 
     Timer timer;
-    logger->trace("Graph loading...");
+    logger->trace("Loading graph...");
 
     auto graph = load_critical_dbg(files.at(0));
 
@@ -46,8 +46,7 @@ int clean_graph(Config *config) {
         auto node_weights = graph->load_extension<NodeWeights>(files.at(0));
 
         if (!(node_weights)) {
-            logger->error("Cannot load k-mer counts from file '{}'",
-                          files.at(0));
+            logger->error("Cannot load k-mer counts from file '{}'", files.at(0));
             exit(1);
         }
 
@@ -55,8 +54,7 @@ int clean_graph(Config *config) {
             dbg_succ->reset_mask();
 
         if (!node_weights->is_compatible(*graph)) {
-            logger->error("k-mer counts are not compatible with graph '{}'",
-                          files.at(0));
+            logger->error("k-mer counts are not compatible with graph '{}'", files.at(0));
             exit(1);
         }
 
@@ -125,8 +123,7 @@ int clean_graph(Config *config) {
 
     if (config->count_slice_quantiles[0] == 0
             && config->count_slice_quantiles[1] == 1) {
-        FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
-                           config->header, true);
+        FastaWriter writer(config->outfbase, config->header, true);
 
         call_clean_contigs([&](const std::string &contig, const auto &) {
             writer.write(contig);
@@ -191,7 +188,7 @@ int clean_graph(Config *config) {
 
             FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta")
                                 + "." + std::to_string(config->count_slice_quantiles[i - 1])
-                                + "." + std::to_string(config->count_slice_quantiles[i]) + ".fasta.gz",
+                                + "." + std::to_string(config->count_slice_quantiles[i]),
                                config->header, true);
 
             if (!count_hist_v.size())
@@ -206,7 +203,7 @@ int clean_graph(Config *config) {
 
             logger->info("k-mer count thresholds:\n"
                          "min (including): {}\n"
-                         "max (excluding): ", min_count, max_count);
+                         "max (excluding): {}", min_count, max_count);
 
             assert(node_weights->is_compatible(*graph));
 
