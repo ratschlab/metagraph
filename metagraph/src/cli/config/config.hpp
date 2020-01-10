@@ -26,6 +26,7 @@ class Config {
     bool annotate_sequence_headers = false;
     bool to_adj_list = false;
     bool to_fasta = false;
+    bool enumerate_out_sequences = false;
     bool to_gfa = false;
     bool unitigs = false;
     bool kmers_in_single_form = false;

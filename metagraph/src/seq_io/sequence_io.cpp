@@ -12,8 +12,8 @@ const char kDefaultFastQualityChar = 'I';
 
 FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
-                         bool write_counts) : header_(header),
-                                              write_counts_(write_counts) {
+                         bool enumerate_sequences)
+      : header_(header), enumerate_sequences_(enumerate_sequences) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
     gz_out_ = gzopen(filename.c_str(), "w");
@@ -29,8 +29,8 @@ FastaWriter::~FastaWriter() {
 
 void FastaWriter::write(const std::string &sequence) {
     if (!write_fasta(gz_out_,
-                     write_counts_ ? header_ + std::to_string(++count_)
-                                   : header_,
+                     enumerate_sequences_ ? header_ + std::to_string(++count_)
+                                          : header_,
                      sequence)) {
         std::cerr << "ERROR: FastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
         exit(1);

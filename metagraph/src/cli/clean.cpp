@@ -123,7 +123,8 @@ int clean_graph(Config *config) {
 
     if (config->count_slice_quantiles[0] == 0
             && config->count_slice_quantiles[1] == 1) {
-        FastaWriter writer(config->outfbase, config->header, true);
+        FastaWriter writer(config->outfbase, config->header,
+                           config->enumerate_out_sequences);
 
         call_clean_contigs([&](const std::string &contig, const auto &) {
             writer.write(contig);
@@ -189,7 +190,8 @@ int clean_graph(Config *config) {
             FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta")
                                 + "." + std::to_string(config->count_slice_quantiles[i - 1])
                                 + "." + std::to_string(config->count_slice_quantiles[i]),
-                               config->header, true);
+                               config->header,
+                               config->enumerate_out_sequences);
 
             if (!count_hist_v.size())
                 continue;

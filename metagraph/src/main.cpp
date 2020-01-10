@@ -2100,7 +2100,8 @@ int main(int argc, char *argv[]) {
                 );
             }
 
-            FastaWriter writer(config->outfbase, config->header, true);
+            FastaWriter writer(config->outfbase, config->header,
+                               config->enumerate_out_sequences);
 
             if (config->unitigs || config->min_tip_size > 1) {
                 graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); },

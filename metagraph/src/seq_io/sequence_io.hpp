@@ -15,7 +15,7 @@ class FastaWriter {
   public:
     FastaWriter(const std::string &filebase,
                 const std::string &header,
-                bool write_counts = true);
+                bool enumerate_sequences = false);
 
     ~FastaWriter();
 
@@ -24,7 +24,7 @@ class FastaWriter {
   public:
     gzFile gz_out_;
     const std::string header_;
-    bool write_counts_;
+    bool enumerate_sequences_;
     uint64_t count_ = 0;
 };
 
