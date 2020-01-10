@@ -10,13 +10,19 @@
 
 
 TEST(BloomFilter, restrict_to) {
-    // test multiples of powers of two
+    // test multiples of powers of two, and powers of two minus 1
     for (uint64_t i = 0; i < 64; ++i) {
         for (uint64_t j = 0; j < 64; ++j) {
-            ASSERT_EQ(i + j >= 64 ? std::exp2(i + j - 64) : 0,
-                      BloomFilter::restrict_to(std::exp2(i), std::exp2(j)));
+            ASSERT_EQ(i + j >= 64 ? 1llu << (i + j - 64) : 0,
+                      BloomFilter::restrict_to(1llu << i, 1llu << j));
         }
     }
+
+    ASSERT_EQ(0, BloomFilter::restrict_to(0, 0));
+    ASSERT_EQ(0, BloomFilter::restrict_to(0, 0xFFFFFFFFFFFFFFFF));
+    ASSERT_EQ(0, BloomFilter::restrict_to(0xFFFFFFFFFFFFFFFF, 0));
+    ASSERT_EQ(0xFFFFFFFFFFFFFFFE,
+              BloomFilter::restrict_to(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF));
 
     // test multiples of powers of 10
     constexpr double log10maxull = 19.2659197225;

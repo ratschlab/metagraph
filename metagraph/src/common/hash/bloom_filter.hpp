@@ -120,6 +120,7 @@ class BloomFilter {
 
     /**
      * A fast map of h uniformly to the region [0, size)
+     * Returns floor((h * size) / 2^64)
      */
     static uint64_t restrict_to(uint64_t h, size_t size);
 

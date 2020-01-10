@@ -48,13 +48,13 @@ inline uint64_t restrict_to_fallback(uint64_t h, size_t size) {
         + ((x0 * y0) >> 32)
         + static_cast<uint32_t>(p01)) >> 32;
 
-    assert(x1 * y1 + middle_hi + (p01 >> 32) < size);
+    assert(!size || x1 * y1 + middle_hi + (p01 >> 32) < size);
     return x1 * y1 + middle_hi + (p01 >> 32);
 }
 
 #ifdef __SIZEOF_INT128__
 inline uint64_t restrict_to_int128_fallback(uint64_t h, size_t size) {
-    assert(((static_cast<__uint128_t>(h) * size) >> 64) < size);
+    assert(!size || ((static_cast<__uint128_t>(h) * size) >> 64) < size);
     assert(restrict_to_fallback(h, size) == ((static_cast<__uint128_t>(h) * size) >> 64));
 
     return (static_cast<__uint128_t>(h) * size) >> 64;
@@ -74,7 +74,7 @@ inline uint64_t restrict_to_bmi2(uint64_t h, size_t size) {
     static_assert(sizeof(long long unsigned int) == sizeof(uint64_t));
     _mulx_u64(h, size, reinterpret_cast<long long unsigned int*>(&h));
 
-    assert(h < size);
+    assert(!size || h < size);
     assert(h_fallback1 == h);
 
 #ifdef __SIZEOF_INT128__
