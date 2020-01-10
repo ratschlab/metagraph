@@ -3,6 +3,8 @@
 
 #include <set>
 
+#include <gtest/gtest.h>
+
 #include "common/logger.hpp"
 
 
