@@ -17,8 +17,6 @@ typedef KmerDef::TAlphabet TAlphabet;
 template <typename T>
 using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
-constexpr uint64_t npos = 0;
-
 
 template <class KmerBF, class Callback>
 inline void call_kmers(const KmerBF &kmer_bloom,
