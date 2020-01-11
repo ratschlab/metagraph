@@ -82,7 +82,7 @@ int build_graph(Config *config) {
 
             parse_sequences(files, *config, timer,
                 [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
-                [&](std::string&& kmer, uint32_t count) { constructor->add_sequence(std::move(kmer), count); },
+                [&](std::string&& seq, uint32_t count) { constructor->add_sequence(std::move(seq), count); },
                 [&](const auto &loop) { constructor->add_sequences(loop); }
             );
 
@@ -155,7 +155,7 @@ int build_graph(Config *config) {
 
             parse_sequences(files, *config, timer,
                 [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
-                [&](std::string&& kmer, uint32_t count) { constructor->add_sequence(std::move(kmer), count); },
+                [&](std::string&& seq, uint32_t count) { constructor->add_sequence(std::move(seq), count); },
                 [&](const auto &loop) { constructor->add_sequences(loop); }
             );
 
@@ -239,8 +239,8 @@ int build_graph(Config *config) {
             [&graph](std::string&& seq) {
                 graph->add_sequence(std::move(seq));
             },
-            [&graph](std::string&& kmer, uint32_t /*count*/) {
-                graph->add_sequence(std::move(kmer));
+            [&graph](std::string&& seq, uint32_t /*count*/) {
+                graph->add_sequence(std::move(seq));
             },
             [&graph](const auto &loop) {
                 loop([&graph](const char *seq) { graph->add_sequence(seq); });
@@ -262,8 +262,10 @@ int build_graph(Config *config) {
                         [&](auto node) { node_weights->add_weight(node, 1); }
                     );
                 },
-                [&graph,&node_weights](std::string&& kmer, uint32_t count) {
-                    node_weights->add_weight(graph->kmer_to_node(kmer), count);
+                [&graph,&node_weights](std::string&& seq, uint32_t count) {
+                    graph->map_to_nodes_sequentially(seq,
+                        [&](auto node) { node_weights->add_weight(node, count); }
+                    );
                 },
                 [&graph,&node_weights](const auto &loop) {
                     loop([&graph,&node_weights](const char *seq) {

@@ -33,6 +33,14 @@ class ExtendedFastaWriter {
   public:
     typedef T feature_type;
 
+    /**
+     * Write sequences to fasta file `<filebase>.fasta.gz` and dump
+     * features for their respective k-mers (such as k-mer counts)
+     * to `<filebase>.<feature_name>.gz`.
+     * The features are dumped to a compressed array of `T`.
+     * Each sequence dumped must contain at least one k-mer, that
+     * is, must be at least |kmer_length| in length.
+     */
     ExtendedFastaWriter(const std::string &filebase,
                         const std::string &feature_name,
                         uint32_t kmer_length,
@@ -41,6 +49,9 @@ class ExtendedFastaWriter {
 
     ~ExtendedFastaWriter();
 
+    /**
+     * Features are compressed with gzip before dumping to the target file.
+     */
     void write(const std::string &sequence,
                const std::vector<feature_type> &kmer_features);
 
@@ -63,6 +74,16 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq);
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
                               bool with_reverse = false);
+
+/**
+ * Read fasta/fastq file with sequences and parse their corresponding k-mer's
+ * reatures from <filebase>.<feature_name>.gz written by ExtendedFastaWriter.
+ */
+template <typename T>
+void read_extended_fasta_file_critical(const std::string &filebase,
+                                       const std::string &feature_name,
+                                       std::function<void(size_t k, const kseq_t*, const T*)> callback,
+                                       bool with_reverse = false);
 
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,

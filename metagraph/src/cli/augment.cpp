@@ -81,8 +81,8 @@ int augment_graph(Config *config) {
         [&](std::string&& seq) {
             graph->add_sequence(seq, on_node_insert);
         },
-        [&](std::string&& kmer, uint32_t /*count*/) {
-            graph->add_sequence(kmer, on_node_insert);
+        [&](std::string&& seq, uint32_t /*count*/) {
+            graph->add_sequence(seq, on_node_insert);
         },
         [&](const auto &loop) {
             loop([&](const char *seq) {
@@ -109,8 +109,10 @@ int augment_graph(Config *config) {
                     [&](auto node) { node_weights->add_weight(node, 1); }
                 );
             },
-            [&graph,&node_weights](std::string&& kmer, uint32_t count) {
-                node_weights->add_weight(graph->kmer_to_node(kmer), count);
+            [&graph,&node_weights](std::string&& seq, uint32_t count) {
+                graph->map_to_nodes_sequentially(seq,
+                    [&](auto node) { node_weights->add_weight(node, count); }
+                );
             },
             [&graph,&node_weights](const auto &loop) {
                 loop([&graph,&node_weights](const char *seq) {

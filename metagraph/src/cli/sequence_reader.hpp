@@ -3,12 +3,14 @@
 
 #include <string>
 #include <vector>
+#include <filesystem>
 
 #include <ips4o.hpp>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "seq_io/formats.hpp"
@@ -17,12 +19,12 @@
 #include "config/config.hpp"
 
 
-template <class Callback, class CountedKmer, class Loop>
+template <class Callback, class CallWeighted, class Loop>
 void parse_sequences(const std::vector<std::string> &files,
                      const Config &config,
                      const Timer &timer,
                      Callback call_sequence,
-                     CountedKmer call_kmer,
+                     CallWeighted call_weighted_sequence,
                      Loop call_sequences) {
     // iterate over input files
     for (const auto &file : files) {
@@ -77,25 +79,65 @@ void parse_sequences(const std::vector<std::string> &files,
                 file,
                 [&](std::string&& sequence, uint32_t count) {
                     if (!warning_different_k && sequence.size() != config.k) {
-                            mg::common::logger->warn("k-mers parsed from KMC database '{}' have "
-                                                     "length {} but graph is constructed for k={}",
-                                                     file, sequence.size(), config.k);
-                            warning_different_k = true;
-                        }
-                        if (config.forward_and_reverse) {
-                            std::string reverse = sequence;
-                            reverse_complement(reverse.begin(), reverse.end());
-                            call_kmer(std::move(sequence), count);
-                            call_kmer(std::move(reverse), count);
-                        } else {
-                            call_kmer(std::move(sequence), count);
-                        }
-                    },
-                    !config.canonical && !config.forward_and_reverse, min_count, max_count);
+                        mg::common::logger->warn("k-mers parsed from KMC database '{}' have "
+                                                 "length {} but graph is constructed for k={}",
+                                                 file, sequence.size(), config.k);
+                        warning_different_k = true;
+                    }
+                    if (config.forward_and_reverse) {
+                        std::string reverse = sequence;
+                        reverse_complement(reverse.begin(), reverse.end());
+                        call_weighted_sequence(std::move(sequence), count);
+                        call_weighted_sequence(std::move(reverse), count);
+                    } else {
+                        call_weighted_sequence(std::move(sequence), count);
+                    }
+                },
+                !config.canonical && !config.forward_and_reverse, min_count, max_count
+            );
 
         } else if (file_format(file) == "FASTA"
                     || file_format(file) == "FASTQ") {
-            if (files.size() >= get_num_threads()) {
+
+            if (std::filesystem::exists(utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz")) {
+
+                mg::common::logger->trace("Parsing k-mer counts from '{}'",
+                    utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"
+                );
+                read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
+                    [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
+                        if (k != config.k) {
+                            mg::common::logger->error("File '{}' contains counts for k-mers of "
+                                                      "length {} but graph is constructed with k={}",
+                                                      file, k, config.k);
+                            exit(1);
+                        }
+                        assert(read_stream->seq.l >= k && "sequences can't be shorter than k-mers");
+
+                        const uint32_t *kmer_counts_end = kmer_counts + read_stream->seq.l - k + 1;
+                        const uint32_t *same_counts_end;
+
+                        const char *seq = read_stream->seq.s;
+
+                        do {
+                            same_counts_end = std::find_if(kmer_counts, kmer_counts_end,
+                                [&](auto count) { return count != *kmer_counts; }
+                            );
+                            size_t segment_size = same_counts_end - kmer_counts;
+
+                            call_weighted_sequence(std::string(seq, k + segment_size - 1), *kmer_counts);
+
+                            kmer_counts += segment_size;
+                            seq += segment_size;
+
+                        } while (kmer_counts < kmer_counts_end);
+
+                        assert(seq + k - 1 == read_stream->seq.s + read_stream->seq.l);
+                    },
+                    config.forward_and_reverse
+                );
+
+            } else if (files.size() >= get_num_threads()) {
                 auto forward_and_reverse = config.forward_and_reverse;
 
                 // capture all required values by copying to be able
