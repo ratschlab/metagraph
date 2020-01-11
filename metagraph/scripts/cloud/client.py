@@ -64,7 +64,11 @@ def clean_file(sra_id):
 
 
 def start_download(sra_id):
-    download_processes[sra_id] = subprocess.Popen(['./download.sh', sra_id, download_dir()])
+    if args.source == 'ena':
+        download_processes[sra_id] = subprocess.Popen(['./download.sh', sra_id, download_dir()])
+    else:
+        # TODO: deal with bucket numbers
+        download_processes[sra_id] = subprocess.Popen(['./download_ncbi.sh', '1', sra_id, download_dir()])
 
 
 def internal_ip():
@@ -265,7 +269,7 @@ def check_env():
     logging.getLogger().addHandler(file_handler)
 
     if subprocess.call(['./prereq.sh']) != 0:
-        logging.error("Some prerequisites are missing on this machines. Bailing out.")
+        logging.error("Some prerequisites are missing on this machine. Bailing out.")
         exit(1)
 
     pathlib.Path(download_dir()).mkdir(parents=True, exist_ok=True)
@@ -277,6 +281,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--source', help='Where to download the data from: ena or ncbi', choices=('ena', 'nbcbi'))
     parser.add_argument('--server_host', help='HTTP server name or ip')
     parser.add_argument('--server_port', default=8000, help='HTTP Port on which the server runs')
     parser.add_argument(
