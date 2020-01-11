@@ -1,7 +1,12 @@
 #ifndef __TEST_HELPERS_HPP__
 #define __TEST_HELPERS_HPP__
 
+#include <set>
+
+#include <gtest/gtest.h>
+
 #include "common/logger.hpp"
+
 
 #ifdef _NO_DEATH_TEST
 // Disable death tests
