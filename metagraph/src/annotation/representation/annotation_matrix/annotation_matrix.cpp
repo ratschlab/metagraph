@@ -1,24 +1,13 @@
-#include "annotate_static.hpp"
+#include "annotation_matrix.hpp"
 
-#include "string_utils.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/serialization.hpp"
 #include "static_annotators_def.hpp"
-#include "serialization.hpp"
 
 using utils::remove_suffix;
 
 
 namespace annotate {
-
-template <>
-const std::string RowFlatAnnotator::kExtension = kRowPackedExtension;
-template <>
-const std::string RainbowfishAnnotator::kExtension = kRainbowfishExtension;
-template <>
-const std::string BRWTCompressed<std::string>::kExtension = kBRWTExtension;
-template <>
-const std::string BinRelWT_sdslAnnotator::kExtension = kBinRelWT_sdslExtension;
-template <>
-const std::string BinRelWTAnnotator::kExtension = kBinRelWTExtension;
 
 template <class BinaryMatrixType, typename Label>
 std::string
@@ -99,30 +88,8 @@ uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_objects() const {
 }
 
 template <class BinaryMatrixType, typename Label>
-size_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_labels() const {
-    assert(label_encoder_.size() == matrix_->num_columns());
-    return label_encoder_.size();
-}
-
-template <class BinaryMatrixType, typename Label>
 uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_relations() const {
     return matrix_->num_relations();
-}
-
-template <class BinaryMatrixType, typename Label>
-void StaticBinRelAnnotator<BinaryMatrixType, Label>
-::call_objects(const Label &label,
-               std::function<void(Index)> callback) const {
-    uint64_t encoding;
-    try {
-        encoding = label_encoder_.encode(label);
-    } catch (...) {
-        return;
-    }
-
-    for (Index index : matrix_->get_column(encoding)) {
-        callback(index);
-    }
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -163,7 +130,7 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::dump_columns(const std::string &prefix, uint64_t num_threads) const {
-    size_t m = num_labels();
+    size_t m = this->num_labels();
     bool success = true;
 
     #pragma omp parallel for num_threads(num_threads)

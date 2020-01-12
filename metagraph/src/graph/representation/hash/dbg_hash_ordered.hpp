@@ -1,9 +1,9 @@
 #ifndef __DBG_HASH_ORDERED_HPP__
 #define __DBG_HASH_ORDERED_HPP__
 
-#include <fstream>
+#include <iostream>
 
-#include "sequence_graph.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 class DBGHashOrdered : public DeBruijnGraph {
@@ -12,28 +12,26 @@ class DBGHashOrdered : public DeBruijnGraph {
                             bool canonical_mode = false,
                             bool packed_serialization = false);
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
-    void add_sequence(const std::string &sequence,
-                      bit_vector_dyn *nodes_inserted = NULL) {
-        hash_dbg_->add_sequence(sequence, nodes_inserted);
+    // Insert sequence to graph and invoke callback |on_insertion| for each new
+    // node created in the graph.
+    void add_sequence(std::string_view sequence,
+                      const std::function<void(node_index)> &on_insertion = [](node_index) {}) {
+        hash_dbg_->add_sequence(sequence, on_insertion);
     }
 
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
+    // Insert sequence to graph and invoke callback |on_insertion| for each new
+    // node created in the graph.
     // `skip` is called before adding each k-mer into the graph and the k-mer
     // is skipped if `skip()` returns `false`.
-    void add_sequence(const std::string &sequence,
+    void add_sequence(std::string_view sequence,
                       const std::function<bool()> &skip,
-                      bit_vector_dyn *nodes_inserted = NULL) {
-        hash_dbg_->add_sequence(sequence, skip, nodes_inserted);
+                      const std::function<void(node_index)> &on_insertion = [](node_index) {}) {
+        hash_dbg_->add_sequence(sequence, skip, on_insertion);
     }
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(const std::string &sequence,
+    void map_to_nodes(std::string_view sequence,
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate = [](){ return false; }) const {
         hash_dbg_->map_to_nodes(sequence, callback, terminate);
@@ -43,23 +41,10 @@ class DBGHashOrdered : public DeBruijnGraph {
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                   std::string::const_iterator end,
+    void map_to_nodes_sequentially(std::string_view sequence,
                                    const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &terminate = [](){ return false; }) const {
-        hash_dbg_->map_to_nodes_sequentially(begin, end, callback, terminate);
-    }
-
-    // Given a starting node, traverse the graph forward following the edge
-    // sequence delimited by begin and end. Terminate the traversal if terminate()
-    // returns true, or if the sequence is exhausted.
-    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void traverse(node_index start,
-                  const char* begin,
-                  const char* end,
-                  const std::function<void(node_index)> &callback,
-                  const std::function<bool()> &terminate = [](){ return false; }) const {
-        hash_dbg_->traverse(start, begin, end, callback, terminate);
+        hash_dbg_->map_to_nodes_sequentially(sequence, callback, terminate);
     }
 
     void call_outgoing_kmers(node_index node,
@@ -102,7 +87,7 @@ class DBGHashOrdered : public DeBruijnGraph {
     bool has_no_incoming(node_index node) const { return hash_dbg_->has_no_incoming(node); }
     bool has_single_incoming(node_index node) const { return hash_dbg_->has_single_incoming(node); }
 
-    node_index kmer_to_node(const std::string &kmer) const {
+    node_index kmer_to_node(std::string_view kmer) const {
         return hash_dbg_->kmer_to_node(kmer);
     }
 
@@ -132,18 +117,16 @@ class DBGHashOrdered : public DeBruijnGraph {
 
     const std::string& alphabet() const { return hash_dbg_->alphabet(); }
 
-    bool in_graph(node_index node) const { return hash_dbg_->in_graph(node); }
-
     static constexpr auto kExtension = ".orhashdbg";
 
     class DBGHashOrderedInterface : public DeBruijnGraph {
       public:
         virtual ~DBGHashOrderedInterface() {}
-        virtual void add_sequence(const std::string &sequence,
-                                  bit_vector_dyn *nodes_inserted) = 0;
-        virtual void add_sequence(const std::string &sequence,
+        virtual void add_sequence(std::string_view sequence,
+                                  const std::function<void(node_index)> &on_insertion) = 0;
+        virtual void add_sequence(std::string_view sequence,
                                   const std::function<bool()> &skip,
-                                  bit_vector_dyn *nodes_inserted) = 0;
+                                  const std::function<void(node_index)> &on_insertion) = 0;
         virtual void serialize(std::ostream &out) const = 0;
         virtual void serialize(const std::string &filename) const = 0;
         virtual bool load(std::istream &in) = 0;

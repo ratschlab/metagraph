@@ -7,6 +7,7 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 typedef std::function<size_t()> LabelCountCallback;
 
@@ -57,9 +58,9 @@ std::unique_ptr<bitmap>
 mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
                          const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
-                         std::function<bool(DeBruijnGraph::node_index,
-                                            LabelCountCallback, /* get_num_labels_in */
-                                            LabelCountCallback /* get_num_labels_out */)> is_node_in_mask,
+                         const std::function<bool(DeBruijnGraph::node_index,
+                                                  const LabelCountCallback & /* get_num_labels_in */,
+                                                  const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,
                          double min_frequency_for_frequent_label = 0.05);
 
 template <class Index, typename... Args>
@@ -74,13 +75,13 @@ typedef VariantCallback<DeBruijnGraph::node_index,
 // These functions will callback nothing if graph is equal to the graph stored
 // in anno_graph
 
-void call_bubbles(const DeBruijnGraph &graph,
+void call_bubbles(const MaskedDeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
                   const VariantLabelCallback &callback,
                   ThreadPool *thread_pool = nullptr,
                   const std::function<bool()> &terminate = []() { return false; });
 
-void call_breakpoints(const DeBruijnGraph &graph,
+void call_breakpoints(const MaskedDeBruijnGraph &graph,
                       const AnnotatedDBG &anno_graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool = nullptr,

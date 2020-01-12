@@ -4,6 +4,7 @@
 #include <progress_bar.hpp>
 
 #include "common/algorithms.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 
 const uint64_t kBlockSize = 1'000'000 / 64 * 64;
 

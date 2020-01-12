@@ -22,9 +22,6 @@ using namespace mg::succinct;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
-// TODO: make a variable parameter
-const size_t kBitsPerCount = 8;
-
 
 int build_graph(Config *config) {
     assert(config);
@@ -76,7 +73,7 @@ int build_graph(Config *config) {
             auto constructor = IBOSSChunkConstructor::initialize(
                 boss_graph->get_k(),
                 config->canonical,
-                config->count_kmers,
+                config->count_width,
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
@@ -108,7 +105,7 @@ int build_graph(Config *config) {
         }
 
         if (config->count_kmers) {
-            sdsl::int_vector<> kmer_counts(0, 0, kBitsPerCount);
+            sdsl::int_vector<> kmer_counts;
             graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
             graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
             graph->add_extension(std::make_shared<NodeWeights>(std::move(kmer_counts)));
@@ -149,7 +146,7 @@ int build_graph(Config *config) {
                 new DBGBitmapConstructor(
                     config->k,
                     config->canonical,
-                    config->count_kmers ? kBitsPerCount : 0,
+                    config->count_width,
                     suffix,
                     get_num_threads(),
                     config->memory_available * kBytesInGigabyte
@@ -251,7 +248,8 @@ int build_graph(Config *config) {
         );
 
         if (config->count_kmers) {
-            graph->add_extension(std::make_shared<NodeWeights>(graph->max_index() + 1, kBitsPerCount));
+            graph->add_extension(std::make_shared<NodeWeights>(graph->max_index() + 1,
+                                                               config->count_width));
             auto node_weights = graph->get_extension<NodeWeights>();
             assert(node_weights->is_compatible(*graph));
 
@@ -260,7 +258,7 @@ int build_graph(Config *config) {
 
             parse_sequences(files, *config, timer,
                 [&graph,&node_weights](std::string&& seq) {
-                    graph->map_to_nodes_sequentially(seq.begin(), seq.end(),
+                    graph->map_to_nodes_sequentially(seq,
                         [&](auto node) { node_weights->add_weight(node, 1); }
                     );
                 },
@@ -270,7 +268,7 @@ int build_graph(Config *config) {
                 [&graph,&node_weights](const auto &loop) {
                     loop([&graph,&node_weights](const char *seq) {
                         std::string seq_str(seq);
-                        graph->map_to_nodes_sequentially(seq_str.begin(), seq_str.end(),
+                        graph->map_to_nodes_sequentially(seq_str,
                             [&](auto node) { node_weights->add_weight(node, 1); }
                         );
                     });

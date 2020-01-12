@@ -5,45 +5,47 @@
 #include <ips4o.hpp>
 #include <json/json.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <tsl/hopscotch_map.h>
 
 #include "common/logger.hpp"
 
-#include "unix_tools.hpp"
-#include "config.hpp"
-#include "sequence_io.hpp"
-#include "boss_construct.hpp"
-#include "boss_chunk.hpp"
-#include "boss_merge.hpp"
-#include "annotated_dbg.hpp"
-#include "annotate_row_compressed.hpp"
-#include "annotate_column_compressed.hpp"
-#include "serialization.hpp"
+#include "common/unix_tools.hpp"
+#include "cli/config/config.hpp"
+#include "seq_io/sequence_io.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/boss_chunk.hpp"
+#include "graph/representation/succinct/boss_merge.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/annotation_converters.hpp"
+#include "common/serialization.hpp"
 #include "common/algorithms.hpp"
-#include "string_utils.hpp"
-#include "file_utils.hpp"
-#include "threading.hpp"
-#include "static_annotators_def.hpp"
-#include "annotation_converters.hpp"
-#include "kmc_parser.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_fast.hpp"
-#include "dbg_bitmap.hpp"
-#include "dbg_bitmap_construct.hpp"
-#include "dbg_succinct.hpp"
-#include "graph_cleaning.hpp"
-#include "dbg_aligner.hpp"
-#include "aligner_methods.hpp"
-#include "server.hpp"
-#include "node_weights.hpp"
-#include "masked_graph.hpp"
-#include "annotated_graph_algorithm.hpp"
-#include "taxid_mapper.hpp"
-#include "reverse_complement.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
+#include "common/threads/threading.hpp"
+#include "seq_io/kmc_parser.hpp"
+#include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/hash/dbg_hash_string.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_methods.hpp"
+#include "common/network/server.hpp"
+#include "graph/graph_extensions/node_weights.hpp"
+#include "graph/representation/masked_graph.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
+#include "common/taxid_mapper.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 #include "seq_io/formats.hpp"
 #include "cli/build.hpp"
 #include "cli/augment.hpp"
+#include "cli/clean.hpp"
 #include "cli/load/load_graph.hpp"
 #include "cli/load/load_annotation.hpp"
 
@@ -52,7 +54,7 @@ using utils::get_verbose;
 using namespace mg::bitmap_graph;
 using namespace mg::succinct;
 
-typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+typedef annotate::MultiLabelEncoded<std::string> Annotator;
 
 static const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = false;
@@ -73,6 +75,8 @@ void annotate_data(const std::vector<std::string> &files,
 
     Timer timer;
 
+    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
+
     // iterate over input files
     for (const auto &file : files) {
         Timer data_reading_timer;
@@ -90,12 +94,18 @@ void annotate_data(const std::vector<std::string> &files,
             read_vcf_file_with_annotations_critical(
                 file,
                 ref_sequence_path,
-                dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k(),
+                anno_graph->get_graph().get_k(),
                 [&](auto&& seq, const auto &variant_labels) {
                     labels.insert(labels.end(),
                                   variant_labels.begin(), variant_labels.end());
 
-                    anno_graph->annotate_sequence(std::move(seq), labels);
+                    thread_pool.enqueue(
+                        [anno_graph](const std::string &sequence, const auto &labels) {
+                            anno_graph->annotate_sequence(sequence, labels);
+                        },
+                        std::move(seq),
+                        labels
+                    );
 
                     total_seqs += 1;
 
@@ -114,7 +124,13 @@ void annotate_data(const std::vector<std::string> &files,
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence) {
-                    anno_graph->annotate_sequence(std::move(sequence), labels);
+                    thread_pool.enqueue(
+                        [anno_graph](const std::string &sequence, const auto &labels) {
+                            anno_graph->annotate_sequence(sequence, labels);
+                        },
+                        std::move(sequence),
+                        labels
+                    );
 
                     total_seqs += 1;
 
@@ -125,7 +141,7 @@ void annotate_data(const std::vector<std::string> &files,
                             total_seqs, fmt::join(labels, "><"), timer.elapsed());
                     }
                 },
-                !dynamic_cast<const DeBruijnGraph&>(anno_graph->get_graph()).is_canonical_mode(),
+                !anno_graph->get_graph().is_canonical_mode(),
                 min_count,
                 max_count
             );
@@ -148,7 +164,13 @@ void annotate_data(const std::vector<std::string> &files,
                         }
                     }
 
-                    anno_graph->annotate_sequence(read_stream->seq.s, labels);
+                    thread_pool.enqueue(
+                        [anno_graph](const std::string &sequence, const auto &labels) {
+                            anno_graph->annotate_sequence(sequence, labels);
+                        },
+                        std::string(read_stream->seq.s),
+                        labels
+                    );
 
                     total_seqs += 1;
 
@@ -171,8 +193,7 @@ void annotate_data(const std::vector<std::string> &files,
                       file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
     }
 
-    // join threads if any were initialized
-    anno_graph->join();
+    thread_pool.join();
 }
 
 
@@ -184,7 +205,9 @@ void annotate_coordinates(const std::vector<std::string> &files,
 
     Timer timer;
 
-    const size_t k = dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k();
+    const size_t k = anno_graph->get_graph().get_k();
+
+    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
 
     // iterate over input files
     for (const auto &file : files) {
@@ -217,11 +240,16 @@ void annotate_coordinates(const std::vector<std::string> &files,
                             static_cast<size_t>(sequence.size() - i),
                             static_cast<size_t>(genome_bin_size + k - 1)
                         );
-                        anno_graph->annotate_sequence(
+                        thread_pool.enqueue(
+                            [anno_graph](const std::string &sequence, const auto &labels) {
+                                anno_graph->annotate_sequence(
+                                    sequence, { utils::join_strings(labels, "\1"), }
+                                );
+                            },
                             forward_strand
                                 ? sequence.substr(i, bin_size)
                                 : sequence.substr(sequence.size() - i - bin_size, bin_size),
-                            { utils::join_strings(labels, "\1"), }
+                            labels
                         );
                     }
 
@@ -250,8 +278,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                       file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
     }
 
-    // join threads if any were initialized
-    anno_graph->join();
+    thread_pool.join();
 }
 
 void execute_query(const std::string &seq_name,
@@ -342,8 +369,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
     // load graph
     auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph),
-                                                     std::move(annotation_temp),
-                                                     get_num_threads());
+                                                     std::move(annotation_temp));
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");
@@ -600,8 +626,7 @@ void map_sequences_in_file(const std::string &file,
             // TODO: make more efficient
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
                 dbg->call_nodes_with_suffix(
-                    read_stream->seq.s + i,
-                    read_stream->seq.s + i + config.alignment_length,
+                    std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
                         if (graphindices.empty())
                             graphindices.emplace_back(node);
@@ -640,18 +665,16 @@ void map_sequences_in_file(const std::string &file,
         if (config.alignment_length == graph.get_k()) {
             for (size_t i = 0; i < graphindices.size(); ++i) {
                 assert(i + config.alignment_length <= read_stream->seq.l);
-                std::cout << std::string(read_stream->seq.s + i, config.alignment_length)
+                std::cout << std::string_view(read_stream->seq.s + i, config.alignment_length)
                           << ": " << graphindices[i] << "\n";
             }
         } else {
             // map input subsequences to multiple nodes
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
                 // TODO: make more efficient
-                std::string subseq(read_stream->seq.s + i,
-                                   read_stream->seq.s + i + config.alignment_length);
+                std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
 
-                dbg->call_nodes_with_suffix(subseq.begin(),
-                                            subseq.end(),
+                dbg->call_nodes_with_suffix(subseq,
                                             [&](auto node, auto) {
                                                 std::cout << subseq << ": "
                                                           << node
@@ -674,7 +697,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       std::function<void(SequenceCallback)> call_sequences,
                       double discovery_fraction,
                       size_t num_threads) {
-    const auto *full_dbg = dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph());
+    const auto *full_dbg = &anno_graph.get_graph();
     if (!full_dbg)
         throw std::runtime_error("Error: batch queries are supported only for de Bruijn graphs");
 
@@ -693,8 +716,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         call_sequences([&graph,&dbg_succ](const std::string &sequence) {
             graph->add_sequence(sequence, get_missing_kmer_skipper(
                 dbg_succ->get_bloom_filter(),
-                sequence.data(),
-                sequence.data() + sequence.size()
+                sequence
             ));
         });
     } else {
@@ -991,9 +1013,9 @@ void print_stats(const Annotator &annotation) {
     } else if (dynamic_cast<const annotate::RowCompressed<std::string> *>(&annotation)) {
         std::cout << Config::annotype_to_string(Config::RowCompressed) << std::endl;
 
-    } else if (dynamic_cast<const annotate::BRWTCompressed<std::string> *>(&annotation)) {
+    } else if (dynamic_cast<const annotate::MultiBRWTAnnotator *>(&annotation)) {
         std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
-        const auto &brwt = dynamic_cast<const annotate::BRWTCompressed<std::string> &>(annotation).data();
+        const auto &brwt = dynamic_cast<const annotate::MultiBRWTAnnotator &>(annotation).get_matrix();
         std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
         std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
         std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
@@ -1208,7 +1230,6 @@ int main(int argc, char *argv[]) {
             // load graph
             AnnotatedDBG anno_graph(graph_temp,
                                     std::move(annotation_temp),
-                                    get_num_threads(),
                                     config->fast);
 
             if (!anno_graph.check_compatibility()) {
@@ -1264,7 +1285,7 @@ int main(int argc, char *argv[]) {
             } else if (config->anno_type == Config::BinRelWT) {
                 annotate::merge<annotate::BinRelWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else if (config->anno_type == Config::BRWT) {
-                annotate::merge<annotate::BRWTCompressed<>>(std::move(annotators), stream_files, config->outfbase);
+                annotate::merge<annotate::MultiBRWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
             } else {
                 logger->error("Merging of annotations to '{}' representation is not implemented",
                               config->annotype_to_string(config->anno_type));
@@ -1588,205 +1609,7 @@ int main(int argc, char *argv[]) {
             return 0;
         }
         case Config::CLEAN: {
-            assert(files.size() == 1);
-            assert(config->outfbase.size());
-
-            config->min_count = std::max(1u, config->min_count);
-
-            if (!config->to_fasta) {
-                logger->error("Clean graph can be serialized only in form "
-                              "of its contigs or unitigs. Add flag --to-fasta");
-                exit(1);
-            }
-
-            Timer timer;
-            logger->trace("Graph loading...");
-
-            auto graph = load_critical_dbg(files.at(0));
-
-            if (config->min_count > 1
-                    || config->max_count < std::numeric_limits<unsigned int>::max()
-                    || config->min_unitig_median_kmer_abundance != 1
-                    || config->count_slice_quantiles[0] != 0
-                    || config->count_slice_quantiles[1] != 1) {
-                // load k-mer counts
-                auto node_weights = graph->load_extension<NodeWeights>(files.at(0));
-
-                if (!(node_weights)) {
-                    logger->error("Cannot load k-mer counts from file '{}'",
-                                  files.at(0));
-                    exit(1);
-                }
-
-                if (auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get()))
-                    dbg_succ->reset_mask();
-
-                if (!node_weights->is_compatible(*graph)) {
-                    logger->error("k-mer counts are not compatible with graph '{}'",
-                                  files.at(0));
-                    exit(1);
-                }
-
-                if (config->min_count > 1
-                        || config->max_count < std::numeric_limits<unsigned int>::max()) {
-                    const auto &weights = *graph->get_extension<NodeWeights>();
-
-                    graph = std::make_shared<MaskedDeBruijnGraph>(graph,
-                        [&](auto i) { return weights[i] >= config->min_count
-                                            && weights[i] <= config->max_count; });
-                    graph->add_extension(node_weights);
-
-                    assert(node_weights->is_compatible(*graph));
-                }
-
-                if (config->min_unitig_median_kmer_abundance == 0) {
-                    // skip zero k-mer counts for dummy k-mers in DBGSuccinct
-                    const auto _graph = dynamic_cast<DBGSuccinct*>(graph.get())
-                            ? std::make_shared<MaskedDeBruijnGraph>(graph, [&](auto i) { return (*node_weights)[i] > 0; })
-                            : graph;
-
-                    config->min_unitig_median_kmer_abundance
-                        = estimate_min_kmer_abundance(*_graph, *node_weights,
-                                                      config->fallback_abundance_cutoff);
-                }
-            }
-
-            logger->trace("Graph loaded in {} sec", timer.elapsed());
-
-            if (dynamic_cast<const MaskedDeBruijnGraph *>(graph.get())) {
-                logger->trace("Extracting sequences from subgraph...");
-            } else {
-                logger->trace("Extracting sequences from graph...");
-            }
-
-            timer.reset();
-
-            auto call_clean_contigs = [&](auto callback) {
-                if (config->min_unitig_median_kmer_abundance != 1) {
-                    auto node_weights = graph->get_extension<NodeWeights>();
-                    assert(node_weights);
-                    if (!node_weights->is_compatible(*graph)) {
-                        logger->error("k-mer counts are not compatible with the subgraph");
-                        exit(1);
-                    }
-
-                    logger->info("Threshold for median k-mer abundance in unitigs: {}",
-                                 config->min_unitig_median_kmer_abundance);
-
-                    graph->call_unitigs([&](const std::string &unitig, const auto &path) {
-                        if (!is_unreliable_unitig(path,
-                                                  *node_weights,
-                                                  config->min_unitig_median_kmer_abundance))
-                            callback(unitig, path);
-                    }, config->min_tip_size);
-
-                } else if (config->unitigs || config->min_tip_size > 1) {
-                    graph->call_unitigs(callback, config->min_tip_size);
-
-                } else {
-                    graph->call_sequences(callback);
-                }
-            };
-
-            assert(config->count_slice_quantiles.size() >= 2);
-
-            if (config->count_slice_quantiles[0] == 0
-                    && config->count_slice_quantiles[1] == 1) {
-                FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
-                                   config->header, true);
-
-                call_clean_contigs([&](const std::string &contig, const auto &) {
-                    writer.write(contig);
-                });
-
-            } else {
-                auto node_weights = graph->get_extension<NodeWeights>();
-                if (!node_weights) {
-                    logger->error("Need k-mer counts for binning k-mers by abundance");
-                    exit(1);
-                }
-                assert(node_weights->is_compatible(*graph));
-
-                auto &weights = node_weights->get_data();
-
-                assert(graph->max_index() + 1 == weights.size());
-
-                // compute clean count histogram
-                std::unordered_map<uint64_t, uint64_t> count_hist;
-
-                if (config->min_unitig_median_kmer_abundance != 1 || config->min_tip_size > 1) {
-                    // cleaning required
-                    sdsl::bit_vector removed_nodes(weights.size(), 1);
-
-                    call_clean_contigs([&](const std::string&, const auto &path) {
-                        for (auto i : path) {
-                            assert(weights[i]);
-                            count_hist[weights[i]]++;
-                            removed_nodes[i] = 0;
-                        }
-                    });
-
-                    call_ones(removed_nodes, [&weights](auto i) { weights[i] = 0; });
-
-                } else if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph)) {
-                    // use entire graph without dummy BOSS edges
-                    graph->call_nodes([&](auto i) {
-                        if (uint64_t count = weights[i])
-                            count_hist[count]++;
-                    });
-                } else {
-                    // use entire graph
-                    graph->call_nodes([&](auto i) {
-                        assert(weights[i]);
-                        count_hist[weights[i]]++;
-                    });
-                }
-                // must not have any zero weights
-                assert(!count_hist.count(0));
-
-                std::vector<std::pair<uint64_t, uint64_t>> count_hist_v(count_hist.begin(),
-                                                                        count_hist.end());
-                count_hist.clear();
-
-                ips4o::parallel::sort(count_hist_v.begin(), count_hist_v.end(),
-                                      utils::LessFirst(), get_num_threads());
-
-                #pragma omp parallel for num_threads(get_num_threads())
-                for (size_t i = 1; i < config->count_slice_quantiles.size(); ++i) {
-                    // extract sequences for k-mer counts bin |i|
-                    assert(config->count_slice_quantiles[i - 1] < config->count_slice_quantiles[i]);
-
-                    FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta")
-                                        + "." + std::to_string(config->count_slice_quantiles[i - 1])
-                                        + "." + std::to_string(config->count_slice_quantiles[i]) + ".fasta.gz",
-                                       config->header, true);
-
-                    if (!count_hist_v.size())
-                        continue;
-
-                    uint64_t min_count = config->count_slice_quantiles[i - 1] > 0
-                        ? utils::get_quantile(count_hist_v, config->count_slice_quantiles[i - 1])
-                        : 1;
-                    uint64_t max_count = config->count_slice_quantiles[i] < 1
-                        ? utils::get_quantile(count_hist_v, config->count_slice_quantiles[i])
-                        : std::numeric_limits<uint64_t>::max();
-
-                    logger->info("k-mer count thresholds:\n"
-                                 "min (including): {}\n"
-                                 "max (excluding): ", min_count, max_count);
-
-                    assert(node_weights->is_compatible(*graph));
-
-                    MaskedDeBruijnGraph graph_slice(graph,
-                        [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; });
-
-                    graph_slice.call_unitigs([&](const auto &contig, auto&&) { writer.write(contig); });
-                }
-            }
-
-            logger->trace("Graph cleaning finished in {} sec", timer.elapsed());
-
-            return 0;
+            return clean_graph(config.get());
         }
         case Config::STATS: {
             for (const auto &file : files) {
@@ -1902,8 +1725,8 @@ int main(int argc, char *argv[]) {
                         annotation.get()
                     )->dump_columns(config->outfbase, get_num_threads());
                 } else if (input_anno_type == Config::BRWT) {
-                    assert(dynamic_cast<annotate::BRWTCompressed<>*>(annotation.get()));
-                    dynamic_cast<annotate::BRWTCompressed<>*>(
+                    assert(dynamic_cast<annotate::MultiBRWTAnnotator*>(annotation.get()));
+                    dynamic_cast<annotate::MultiBRWTAnnotator*>(
                         annotation.get()
                     )->dump_columns(config->outfbase, get_num_threads());
                 } else {
@@ -1920,7 +1743,7 @@ int main(int argc, char *argv[]) {
             /********************************************************/
 
             if (config->rename_instructions_file.size()) {
-                std::unordered_map<std::string, std::string> dict;
+                tsl::hopscotch_map<std::string, std::string> dict;
                 std::ifstream instream(config->rename_instructions_file);
                 if (!instream.is_open()) {
                     logger->error("Cannot open file '{}'", config->rename_instructions_file);
@@ -2059,9 +1882,10 @@ int main(int argc, char *argv[]) {
                     }
                     case Config::RowCompressed: {
                         if (config->fast) {
-                            annotate::RowCompressed<> row_annotator(0);
-                            annotator->convert_to_row_annotator(&row_annotator,
-                                                                get_num_threads());
+                            annotate::RowCompressed<> row_annotator(annotator->num_objects());
+                            convert_to_row_annotator(*annotator,
+                                                     &row_annotator,
+                                                     get_num_threads());
                             annotator.reset();
 
                             logger->trace("Annotation converted in {} sec", timer.elapsed());
@@ -2072,7 +1896,9 @@ int main(int argc, char *argv[]) {
                             logger->trace("Serialization done in {} sec", timer.elapsed());
 
                         } else {
-                            annotator->convert_to_row_annotator(config->outfbase);
+                            convert_to_row_annotator(*annotator,
+                                                     config->outfbase,
+                                                     get_num_threads());
                             logger->trace("Annotation converted and serialized in {} sec",
                                           timer.elapsed());
                         }
@@ -2080,11 +1906,11 @@ int main(int argc, char *argv[]) {
                     }
                     case Config::BRWT: {
                         auto brwt_annotator = config->greedy_brwt
-                            ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+                            ? annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
                                 std::move(*annotator),
                                 config->parallel_nodes,
                                 get_num_threads())
-                            : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
+                            : annotate::convert_to_simple_BRWT<annotate::MultiBRWTAnnotator>(
                                 std::move(*annotator),
                                 config->arity_brwt,
                                 config->parallel_nodes,
@@ -2274,8 +2100,7 @@ int main(int argc, char *argv[]) {
                 );
             }
 
-            FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz",
-                               config->header, true);
+            FastaWriter writer(config->outfbase, config->header, true);
 
             if (config->unitigs || config->min_tip_size > 1) {
                 graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); },
@@ -2296,7 +2121,7 @@ int main(int argc, char *argv[]) {
 
             Timer timer;
 
-            auto annotator = std::make_unique<annotate::BRWTCompressed<>>();
+            auto annotator = std::make_unique<annotate::MultiBRWTAnnotator>();
 
             logger->trace("Loading annotator...");
 
@@ -2308,9 +2133,9 @@ int main(int argc, char *argv[]) {
 
             logger->trace("Relaxing BRWT tree...");
 
-            annotate::relax_BRWT<annotate::BRWTCompressed<>>(annotator.get(),
-                                                             config->relax_arity_brwt,
-                                                             get_num_threads());
+            annotate::relax_BRWT<annotate::MultiBRWTAnnotator>(annotator.get(),
+                                                               config->relax_arity_brwt,
+                                                               get_num_threads());
 
             annotator->serialize(config->outfbase);
             logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

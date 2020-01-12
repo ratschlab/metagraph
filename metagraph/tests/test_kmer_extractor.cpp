@@ -2,9 +2,9 @@
 
 #include <numeric>
 
-#include "kmer_extractor.hpp"
-#include "string_utils.hpp"
-#include "reverse_complement.hpp"
+#include "kmer/kmer_extractor.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 template <typename Kmer>
@@ -14,7 +14,7 @@ typedef ::testing::Types<KMer<uint64_t, KmerExtractor2Bit::bits_per_char>,
                          KMer<sdsl::uint128_t, KmerExtractor2Bit::bits_per_char>,
                          KMer<sdsl::uint256_t, KmerExtractor2Bit::bits_per_char>> KmerTypes;
 
-TYPED_TEST_CASE(ExtractKmers2Bit, KmerTypes);
+TYPED_TEST_SUITE(ExtractKmers2Bit, KmerTypes);
 
 #define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractor2Bit::bits_per_char )
 

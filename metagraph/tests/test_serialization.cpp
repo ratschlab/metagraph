@@ -4,7 +4,7 @@
 #include <brwt/bit_vector.h>
 #include <brwt/int_vector.h>
 
-#include "serialization.hpp"
+#include "common/serialization.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/vector_dump_test";

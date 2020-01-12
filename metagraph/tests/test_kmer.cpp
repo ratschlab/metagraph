@@ -9,8 +9,8 @@
 #define private public
 #define protected public
 
-#include "kmer.hpp"
-#include "kmer_extractor.hpp"
+#include "kmer/kmer.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 typedef uint8_t TAlphabet;
@@ -43,11 +43,11 @@ class Kmer : public ::testing::Test { };
 typedef ::testing::Types<uint64_t,
                          sdsl::uint128_t,
                          sdsl::uint256_t> IntTypes;
-TYPED_TEST_CASE(Kmer, IntTypes);
+TYPED_TEST_SUITE(Kmer, IntTypes);
 
 template <class IntType>
 class Integer : public ::testing::Test { };
-TYPED_TEST_CASE(Integer, IntTypes);
+TYPED_TEST_SUITE(Integer, IntTypes);
 
 TYPED_TEST(Integer, compare0) {
     TypeParam value = 0;

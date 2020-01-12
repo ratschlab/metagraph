@@ -5,16 +5,16 @@
 #include "../test_helpers.hpp"
 #include "all/test_dbg_helpers.hpp"
 
-#include "masked_graph.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 
 template <typename Graph>
 class MaskedDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
-TYPED_TEST_CASE(MaskedDeBruijnGraphTest, GraphTypes);
+TYPED_TEST_SUITE(MaskedDeBruijnGraphTest, GraphTypes);
 
 template <typename Graph>
 class MaskedStableDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
-TYPED_TEST_CASE(MaskedStableDeBruijnGraphTest, StableGraphTypes);
+TYPED_TEST_SUITE(MaskedStableDeBruijnGraphTest, StableGraphTypes);
 
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
@@ -28,10 +28,12 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
                     std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
             auto graph = build_graph_batch<TypeParam>(k, sequences);
+            MaskedDeBruijnGraph masked(graph, [](auto) { return true; });
+            // EXPECT_TRUE(check_graph_nodes(masked));
 
             auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
-                graph->call_sequences([&](const auto &seq, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, seq));
+                masked.call_sequences([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(masked, seq));
                     callback(seq);
                 });
             });
@@ -53,10 +55,12 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsNoMask) {
                     std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
             auto graph = build_graph_batch<TypeParam>(k, sequences);
+            MaskedDeBruijnGraph masked(graph, [](auto) { return true; });
+            // EXPECT_TRUE(check_graph_nodes(masked));
 
             auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
-                graph->call_unitigs([&](const auto &seq, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, seq));
+                masked.call_unitigs([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(masked, seq));
                     callback(seq);
                 });
             });
@@ -78,12 +82,14 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
                     std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
             auto graph = build_graph_batch<TypeParam>(k, sequences);
+            MaskedDeBruijnGraph masked(graph, [](auto) { return true; });
+            // EXPECT_TRUE(check_graph_nodes(masked));
 
             auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
 
             auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
-                graph->call_sequences([&](const auto &seq, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, seq));
+                masked.call_sequences([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(masked, seq));
                     callback(seq);
                 });
             });
@@ -105,12 +111,14 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
                     std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
             auto graph = build_graph_batch<TypeParam>(k, sequences);
+            MaskedDeBruijnGraph masked(graph, [](auto) { return true; });
+            // EXPECT_TRUE(check_graph_nodes(masked));
 
             auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
 
             auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
-                graph->call_unitigs([&](const auto &seq, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, seq));
+                masked.call_unitigs([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(masked, seq));
                     callback(seq);
                 });
             });
@@ -141,6 +149,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                         && full_graph->get_node_sequence(index) != first_kmer;
                 }
             );
+            // EXPECT_TRUE(check_graph_nodes(graph));
 
             auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
                 graph.call_sequences([&](const auto &seq, const auto &path) {
@@ -200,6 +209,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                         && full_graph->get_node_sequence(index) != first_kmer;
                 }
             );
+            // EXPECT_TRUE(check_graph_nodes(graph));
 
             auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
                 graph.call_unitigs([&](const auto &seq, const auto &path) {
@@ -256,10 +266,10 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 full_graph,
                 [&](const auto &index) {
                     return index != DeBruijnGraph::npos
-                        && full_graph->in_graph(index)
                         && full_graph->get_node_sequence(index) != first_kmer;
                 }
             );
+            // EXPECT_TRUE(check_graph_nodes(graph));
 
             auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
                 graph.call_sequences([&](const auto &seq, const auto &path) {
@@ -316,10 +326,10 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 full_graph,
                 [&](const auto &index) {
                     return index != DeBruijnGraph::npos
-                        && full_graph->in_graph(index)
                         && full_graph->get_node_sequence(index) != first_kmer;
                 }
             );
+            // EXPECT_TRUE(check_graph_nodes(graph));
 
             auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
                 graph.call_unitigs([&](const auto &seq, const auto &path) {
@@ -376,8 +386,9 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
                 [&](const auto &index) { mask->set(index, false); }
             );
 
-            MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+            MaskedDeBruijnGraph graph(full_graph, std::move(mask), true);
             EXPECT_EQ(*full_graph, graph.get_graph());
+            EXPECT_TRUE(check_graph_nodes(graph));
 
             size_t counter = 0;
             graph.map_to_nodes(
@@ -473,7 +484,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
                 graph.map_to_nodes(
                     unitig,
                     [&](const auto &index) {
-                        EXPECT_TRUE(graph.in_graph(index));
+                        EXPECT_TRUE(graph.in_subgraph(index));
                         EXPECT_NE(DeBruijnGraph::npos, index);
                     }
                 );
@@ -507,13 +518,14 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckNodes) {
             );
 
             MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+            EXPECT_TRUE(check_graph_nodes(graph));
 
             std::multiset<MaskedDeBruijnGraph::node_index> nodes;
             graph.call_nodes([&](const auto &node) { nodes.insert(node); });
 
             std::multiset<MaskedDeBruijnGraph::node_index> ref_nodes;
             full_graph->call_nodes([&](auto i) {
-                if (graph.in_graph(i))
+                if (graph.in_subgraph(i))
                     ref_nodes.insert(i);
             });
 
@@ -545,6 +557,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckNonExistant) {
             );
 
             MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+            EXPECT_TRUE(check_graph_nodes(graph));
 
             graph.map_to_nodes(nonexistant, [&](auto node) {
                 EXPECT_EQ(DeBruijnGraph::npos, node);
@@ -579,6 +592,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckOutgoingNodes) {
             );
 
             MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+            EXPECT_TRUE(check_graph_nodes(graph));
 
             graph.call_nodes(
                 [&](const auto &node) {
@@ -589,9 +603,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckOutgoingNodes) {
                     full_graph->adjacent_outgoing_nodes(node, [&](auto i) { outnodes_full.push_back(i); });
                     outnodes_full.erase(std::remove_if(outnodes_full.begin(),
                                                        outnodes_full.end(),
-                                                       [&](auto i) {
-                                                           return !graph.in_graph(i);
-                                                       }),
+                                                       [&](auto i) { return !graph.in_subgraph(i); }),
                                         outnodes_full.end());
                     EXPECT_EQ(convert_to_set(outnodes_full), convert_to_set(outnodes));
                 }
@@ -622,6 +634,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckIncomingNodes) {
             );
 
             MaskedDeBruijnGraph graph(full_graph, std::move(mask));
+            EXPECT_TRUE(check_graph_nodes(graph));
 
             graph.call_nodes(
                 [&](const auto &node) {
@@ -632,9 +645,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckIncomingNodes) {
                     full_graph->adjacent_incoming_nodes(node, [&](auto i) { innodes_full.push_back(i); });
                     innodes_full.erase(std::remove_if(innodes_full.begin(),
                                                       innodes_full.end(),
-                                                      [&](auto i) {
-                                                          return !graph.in_graph(i);
-                                                      }),
+                                                      [&](auto i) { return !graph.in_subgraph(i); }),
                                         innodes_full.end());
                     EXPECT_EQ(convert_to_set(innodes_full), convert_to_set(innodes));
                 }

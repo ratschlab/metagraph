@@ -5,11 +5,10 @@
 #include <stdexcept>
 #include <set>
 
-#include "serialization.hpp"
-#include "string_utils.hpp"
-#include "vector_row_binmat.hpp"
-#include "eigen_spmat.hpp"
-#include "binary_matrix.hpp"
+#include "common/serialization.hpp"
+#include "common/utils/string_utils.hpp"
+#include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
+#include "annotation/binary_matrix/row_vector/eigen_spmat.hpp"
 
 using utils::remove_suffix;
 
@@ -50,22 +49,13 @@ void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
 }
 
 template <typename Label>
-void RowCompressed<Label>::set_labels(Index i, const VLabels &labels) {
+void RowCompressed<Label>::set(Index i, const VLabels &labels) {
     assert(i < matrix_->num_rows());
 
     matrix_->clear_row(i);
-    add_labels(i, labels);
-}
 
-template <typename Label>
-void RowCompressed<Label>::add_label(Index i, const Label &label) {
-    matrix_->set(i, label_encoder_.insert_and_encode(label));
-}
-
-template <typename Label>
-void RowCompressed<Label>::add_labels(Index i, const VLabels &labels) {
     for (const auto &label : labels) {
-        add_label(i, label);
+        matrix_->set(i, label_encoder_.insert_and_encode(label));
     }
 }
 
@@ -224,30 +214,8 @@ void RowCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
 }
 
 template <typename Label>
-void RowCompressed<Label>
-::call_objects(const Label &label,
-               std::function<void(Index)> callback) const {
-    uint64_t col;
-    try {
-        col = label_encoder_.encode(label);
-    } catch (...) {
-        return;
-    }
-
-    for (Index index : matrix_->get_column(col)) {
-        callback(index);
-    }
-}
-
-template <typename Label>
 uint64_t RowCompressed<Label>::num_objects() const {
     return matrix_->num_rows();
-}
-
-template <typename Label>
-size_t RowCompressed<Label>::num_labels() const {
-    assert(label_encoder_.size() == matrix_->num_columns());
-    return label_encoder_.size();
 }
 
 template <typename Label>
@@ -285,9 +253,9 @@ RowCompressed<Label>::load_label_encoder(std::istream &instream) {
 }
 
 template <typename Label>
-void RowCompressed<Label>::stream_counts(const std::string &filename,
-                                         uint64_t *num_objects_,
-                                         uint64_t *num_relations_) {
+void RowCompressed<Label>::load_shape(const std::string &filename,
+                                      uint64_t *num_objects_,
+                                      uint64_t *num_relations_) {
     assert(num_objects_);
     assert(num_relations_);
     uint64_t &num_objects = *num_objects_;
@@ -295,7 +263,7 @@ void RowCompressed<Label>::stream_counts(const std::string &filename,
     num_objects = 0;
     num_relations = 0;
 
-    StreamRows<> sr(filename);
+    auto sr = get_row_streamer(filename);
 
     while (auto *row = sr.next_row()) {
         num_objects++;
@@ -304,24 +272,22 @@ void RowCompressed<Label>::stream_counts(const std::string &filename,
 }
 
 template <typename Label>
-template <typename RowType>
-RowCompressed<Label>::StreamRows<RowType>::StreamRows(std::string filename) {
-    filename = remove_suffix(filename, kExtension) + kExtension;
+StreamRows<BinaryMatrix::SetBitPositions>
+RowCompressed<Label>::get_row_streamer(const std::string &filebase) {
+    std::string filename = remove_suffix(filebase, kExtension) + kExtension;
     std::ifstream instream(filename, std::ios::binary);
     // skip header
     load_label_encoder(instream);
     // rows
-    sr_ = std::make_unique<::StreamRows<RowType>>(filename, instream.tellg());
+    return StreamRows<BinaryMatrix::SetBitPositions>(filename, instream.tellg());
 }
-
-template class RowCompressed<std::string>::StreamRows<BinaryMatrix::SetBitPositions>;
 
 template <typename Label>
 void RowCompressed<Label>
-::write_rows(std::string filename,
-             const LabelEncoder<Label> &label_encoder,
-             const std::function<void(BinaryMatrix::RowCallback)> &call_rows) {
-    filename = remove_suffix(filename, kExtension) + kExtension;
+::serialize(const std::string &filebase,
+            const LabelEncoder<Label> &label_encoder,
+            const std::function<void(BinaryMatrix::RowCallback)> &call_rows) {
+    auto filename = remove_suffix(filebase, kExtension) + kExtension;
 
     std::ofstream outstream(filename, std::ios::binary);
     if (!outstream.good())

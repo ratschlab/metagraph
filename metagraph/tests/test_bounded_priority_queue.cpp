@@ -1,4 +1,4 @@
-#include "bounded_priority_queue.hpp"
+#include "common/bounded_priority_queue.hpp"
 
 #include <gtest/gtest.h>
 #include <algorithm>

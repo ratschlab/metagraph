@@ -2,7 +2,7 @@
 #define __DBG_BITMAP_CONSTRUCT_HPP__
 
 #include "dbg_bitmap.hpp"
-#include "dbg_construct.hpp"
+#include "graph/representation/base/dbg_construct.hpp"
 
 namespace mg {
 namespace bitmap_graph {
@@ -14,7 +14,7 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
 
     static IBitmapChunkConstructor* initialize(size_t k,
                                                bool canonical_mode = false,
-                                               bool count_kmers = false,
+                                               uint8_t bits_per_count = 0,
                                                const std::string &filter_suffix = "",
                                                size_t num_threads = 1,
                                                double memory_preallocated = 0);

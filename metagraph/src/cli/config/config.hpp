@@ -75,6 +75,8 @@ class Config {
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
 
+    uint8_t count_width = 8;
+
     // Alignment options
     bool alignment_seed_unimems = false;
     bool alignment_edit_distance = false;
@@ -179,7 +181,8 @@ class Config {
     AnnotationType anno_type = ColumnCompressed;
     GraphType graph_type = SUCCINCT;
 
-    mg::kmer::ContainerType container;
+    mg::kmer::ContainerType container = mg::kmer::ContainerType::VECTOR;
+
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 
     static std::string annotype_to_string(AnnotationType state);

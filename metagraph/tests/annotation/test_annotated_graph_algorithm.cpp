@@ -10,7 +10,7 @@
 
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
-TYPED_TEST_CASE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
+TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 
 // TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
 //     size_t k = 4;
@@ -260,7 +260,7 @@ void test_find_bubbles(size_t pool_size = 0) {
     const std::vector<std::string> outgroup { };
 
     for (size_t k = 3; k < 7; ++k) {
-        std::unordered_map<char, char> complement { { 'A', 'T' },
+        tsl::hopscotch_map<char, char> complement { { 'A', 'T' },
                                                     { 'T', 'A' },
                                                     { 'C', 'G' },
                                                     { 'G', 'C' } };
@@ -327,7 +327,7 @@ void test_find_bubbles_incomplete(size_t pool_size = 0) {
     const std::vector<std::string> outgroup { };
 
     for (size_t k = 3; k < 7; ++k) {
-        std::unordered_map<char, char> complement { { 'A', 'T' },
+        tsl::hopscotch_map<char, char> complement { { 'A', 'T' },
                                                     { 'T', 'A' },
                                                     { 'C', 'G' },
                                                     { 'G', 'C' } };

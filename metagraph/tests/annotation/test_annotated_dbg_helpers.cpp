@@ -2,8 +2,8 @@
 
 #include "../graph/all/test_dbg_helpers.hpp"
 
-#include "annotation_converters.hpp"
-#include "annotated_graph_algorithm.hpp"
+#include "annotation/annotation_converters.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 
 using namespace mg::bitmap_graph;
 
@@ -19,7 +19,7 @@ build_anno_graph(uint64_t k,
     uint64_t max_index = graph->max_index();
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
-        std::move(graph),
+        graph,
         std::make_unique<annotate::ColumnCompressed<>>(max_index)
     );
 
@@ -29,7 +29,7 @@ build_anno_graph(uint64_t k,
 
     if (!std::is_same<Annotation, annotate::ColumnCompressed<>>::value)
         anno_graph = std::make_unique<AnnotatedDBG>(
-            std::move(anno_graph->graph_),
+            graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
                 annotate::convert<Annotation>(
                     std::move(dynamic_cast<annotate::ColumnCompressed<>&>(

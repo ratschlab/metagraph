@@ -157,13 +157,13 @@ class DBGAligner : public IDBGAligner {
         assert(config_.get_row(*(query_end - 1))[*(query_end - 1)] == partial_sum.back());
 
         std::vector<DBGAlignment> next_paths;
-        for (auto it = query_begin; it + graph_.get_k() <= query_end; ++it) {
+        for (const char *it = query_begin; it + graph_.get_k() <= query_end; ++it) {
             if (partial_sum[it - query_begin] < min_path_score)
                 break;
 
             bool full_seed = false;
 
-            auto seeds = seeder(it, query_end, it - query_begin, orientation);
+            auto seeds = seeder({ it, size_t(query_end - it) }, it - query_begin, orientation);
             assert(seeds.size() <= config_.max_num_seeds_per_locus);
 
             for (auto&& seed : seeds) {

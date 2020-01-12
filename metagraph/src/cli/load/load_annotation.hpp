@@ -3,13 +3,13 @@
 
 #include <string>
 
-#include "annotation/annotate.hpp"
+#include "annotation/representation/base/annotation.hpp"
 #include "cli/config/config.hpp"
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename);
 
-std::unique_ptr<annotate::MultiLabelEncoded<uint64_t, std::string>>
+std::unique_ptr<annotate::MultiLabelEncoded<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
                       const Config &config,
                       uint64_t num_rows);

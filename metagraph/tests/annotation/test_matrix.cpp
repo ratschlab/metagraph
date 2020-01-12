@@ -4,21 +4,21 @@
 
 #include "test_matrix_helpers.hpp"
 
-#include "bin_rel_wt.hpp"
-#include "bin_rel_wt_sdsl.hpp"
-#include "column_major.hpp"
+#include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
+#include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
 
 template <typename BinMat>
 class BinaryMatrixTest : public ::testing::Test { };
 typedef ::testing::Types<BRWT,
                          BRWTOptimized,
-                         ColMajorCompressed,
+                         ColumnMajor,
                          BinRelWT,
                          BinRelWT_sdsl,
                          RowConcatenated<>,
                          Rainbowfish> BinMatTypes;
-TYPED_TEST_CASE(BinaryMatrixTest, BinMatTypes);
+TYPED_TEST_SUITE(BinaryMatrixTest, BinMatTypes);
 
 
 TYPED_TEST(BinaryMatrixTest, DefaultConstructor) {

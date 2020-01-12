@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include "vcf_parser.hpp"
+#include "seq_io/vcf_parser.hpp"
 
 #include <set>
 

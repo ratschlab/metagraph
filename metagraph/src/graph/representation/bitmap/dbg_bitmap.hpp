@@ -1,11 +1,11 @@
 #ifndef __DBG_BITMAP_HPP__
 #define __DBG_BITMAP_HPP__
 
-#include <fstream>
+#include <iostream>
 
-#include "sequence_graph.hpp"
-#include "kmer_extractor.hpp"
-#include "bit_vector.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
+#include "kmer/kmer_extractor.hpp"
+#include "common/vectors/bit_vector.hpp"
 
 namespace mg {
 namespace bitmap_graph {
@@ -29,13 +29,14 @@ class DBGBitmap : public DeBruijnGraph {
     // Initialize graph from builder
     explicit DBGBitmap(DBGBitmapConstructor *builder);
 
-    void add_sequence(const std::string &, bit_vector_dyn * = nullptr) {
+    void add_sequence(std::string_view,
+                      const std::function<void(node_index)> & = [](node_index) {}) {
         throw std::runtime_error("Not implemented");
     }
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(const std::string &sequence,
+    void map_to_nodes(std::string_view sequence,
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate = [](){ return false; }) const;
 
@@ -43,8 +44,7 @@ class DBGBitmap : public DeBruijnGraph {
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                   std::string::const_iterator end,
+    void map_to_nodes_sequentially(std::string_view sequence,
                                    const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &terminate = [](){ return false; }) const;
 
@@ -71,7 +71,7 @@ class DBGBitmap : public DeBruijnGraph {
     bool has_no_incoming(node_index) const;
     bool has_single_incoming(node_index) const;
 
-    node_index kmer_to_node(const std::string &kmer) const;
+    node_index kmer_to_node(std::string_view kmer) const;
 
     std::string get_node_sequence(node_index node) const;
 
@@ -79,8 +79,6 @@ class DBGBitmap : public DeBruijnGraph {
     inline bool is_canonical_mode() const { return canonical_mode_; }
 
     uint64_t num_nodes() const;
-
-    bool in_graph(node_index node) const;
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -111,7 +109,7 @@ class DBGBitmap : public DeBruijnGraph {
   private:
     using Kmer = KmerExtractor2Bit::Kmer64;
 
-    Vector<std::pair<Kmer, bool>> sequence_to_kmers(const std::string &sequence,
+    Vector<std::pair<Kmer, bool>> sequence_to_kmers(std::string_view sequence,
                                                     bool canonical = false) const;
 
     uint64_t node_to_index(node_index node) const;

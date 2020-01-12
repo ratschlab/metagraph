@@ -6,7 +6,7 @@
 #include "../../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 
-TYPED_TEST_CASE(DeBruijnGraphTest, GraphTypes);
+TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, FindSequence1) {

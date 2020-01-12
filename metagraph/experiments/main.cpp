@@ -7,23 +7,23 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <progress_bar.hpp>
 
+#include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "common/unix_tools.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/algorithms.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "common/serialization.hpp"
+#include "common/vectors/wavelet_tree.hpp"
+#include "common/utils/template_utils.hpp"
+#include "graph/alignment/aligner_helper.hpp"
+#include "kmer/alphabets.hpp"
+#include "seq_io/kmc_parser.hpp"
+#include "cli/config/config.hpp"
 #include "method_constructors.hpp"
 #include "data_generation.hpp"
-#include "annotate_static.hpp"
-#include "annotate_column_compressed.hpp"
-#include "unix_tools.hpp"
-#include "string_utils.hpp"
-#include "common/algorithms.hpp"
-#include "kmc_parser.hpp"
-#include "alphabets.hpp"
-#include "aligner_helper.hpp"
-#include "reverse_complement.hpp"
-#include "annotate_row_compressed.hpp"
-#include "static_annotators_def.hpp"
-#include "config.hpp"
-#include "serialization.hpp"
-#include "wavelet_tree.hpp"
-#include "common/utils/template_utils.hpp"
 
 using namespace std::chrono_literals;
 
@@ -193,25 +193,25 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
-    if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
+    if (utils::ends_with(filename, annotate::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
-    } else if (utils::ends_with(filename, annotate::kRowAnnotatorExtension)) {
+    } else if (utils::ends_with(filename, annotate::RowCompressed<>::kExtension)) {
         return Config::AnnotationType::RowCompressed;
 
-    } else if (utils::ends_with(filename, annotate::kBRWTExtension)) {
+    } else if (utils::ends_with(filename, annotate::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
 
-    } else if (utils::ends_with(filename, annotate::kBinRelWT_sdslExtension)) {
+    } else if (utils::ends_with(filename, annotate::BinRelWT_sdslAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT_sdsl;
 
-    } else if (utils::ends_with(filename, annotate::kBinRelWTExtension)) {
+    } else if (utils::ends_with(filename, annotate::BinRelWTAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT;
 
-    } else if (utils::ends_with(filename, annotate::kRowPackedExtension)) {
+    } else if (utils::ends_with(filename, annotate::RowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowFlat;
 
-    } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
+    } else if (utils::ends_with(filename, annotate::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
     } else {
@@ -221,7 +221,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     }
 }
 
-typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+typedef annotate::MultiLabelEncoded<std::string> Annotator;
 
 std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
                                                  size_t cache_size = 0) {
@@ -237,7 +237,7 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
             break;
         }
         case Config::BRWT: {
-            annotation.reset(new annotate::BRWTCompressed<>(cache_size));
+            annotation.reset(new annotate::MultiBRWTAnnotator(cache_size));
             break;
         }
         case Config::BinRelWT_sdsl: {
@@ -612,7 +612,7 @@ int main(int argc, char *argv[]) {
                 if (compressor == MatrixType::COLUMN) {
                     annotate::ColumnCompressed<> annotator(0, 1, false);
                     annotator.merge_load({ file });
-                    const auto &source_columns = annotator.data();
+                    const auto &source_columns = annotator.get_matrix().data();
                     assert(annotator.num_labels() == source_columns.size());
 
                     auto columns = subsample_rows(
@@ -627,7 +627,7 @@ int main(int argc, char *argv[]) {
                             columns.erase(it--);
                     }
 
-                    ColMajorCompressed matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
+                    ColumnMajor matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
                     std::cout << "Reduced matrix from ("
                               << annotator.num_objects() << ", " << annotator.num_labels()
                               << ") to ("
@@ -661,7 +661,7 @@ int main(int argc, char *argv[]) {
                     std::cout << "loading\n";
                     annotator.merge_load({ file });
                     std::cout << "done\n";
-                    const auto &rows = annotator.data().data();
+                    const auto &rows = annotator.get_matrix().data();
                     std::ofstream sdout(file + ".sd", std::ios::binary);
                     rows.serialize(sdout);
                     const auto serialized_size = sdout.tellp();
@@ -675,7 +675,7 @@ int main(int argc, char *argv[]) {
                     std::cout << "loading\n";
                     annotator.merge_load({ file });
                     std::cout << "done\n";
-                    const auto &rainbowfish = annotator.data();
+                    const auto &rainbowfish = annotator.get_matrix();
                     const auto &row_codes = rainbowfish.get_row_codes();
                     const auto &row_code_delimiters = rainbowfish.get_row_code_delimiters();
                     const auto &distinct_rows = rainbowfish.get_distinct_rows();
@@ -815,9 +815,9 @@ int main(int argc, char *argv[]) {
                     ? file
                     : out_prefix + "/" + utils::split_string(file, "/").back();
                 annotator.load(file);
-                for (size_t i = 0; i < annotator.data().size(); ++i) {
+                for (size_t i = 0; i < annotator.get_matrix().data().size(); ++i) {
                     dump_column_slice(
-                        *annotator.data()[i],
+                        *annotator.get_matrix().data()[i],
                         begin,
                         end,
                         outbase + "."

@@ -3,11 +3,11 @@
 #include <unordered_set>
 
 #include "common/algorithms.hpp"
-#include "common/vectors/int_vector.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 #include "kmer/alphabets.hpp"
-#include "annotation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/alignment/aligner_helper.hpp"
-#include "graph/masked_graph.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 namespace annotated_graph_algorithm {
 
@@ -40,8 +40,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                             double label_mask_in_fraction,
                             double label_mask_out_fraction,
                             double label_other_fraction) {
-    assert(dynamic_cast<const DeBruijnGraph*>(anno_graph.get_graph_ptr().get()));
-    const auto &dbg = dynamic_cast<const DeBruijnGraph&>(anno_graph.get_graph());
+    const auto &dbg = anno_graph.get_graph();
     const auto &annotation = anno_graph.get_annotation();
     const auto &label_encoder = annotation.get_label_encoder();
 
@@ -63,7 +62,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     return annotated_graph_algorithm::mask_nodes_by_unitig(
         dbg,
         [&](const auto &, const auto &path) {
-            std::unordered_map<row_index, size_t> index_counts;
+            tsl::hopscotch_map<row_index, size_t> index_counts;
             for (const auto i : path) {
                 index_counts[anno_graph.graph_to_anno_index(i)]++;
             }
@@ -122,13 +121,12 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
     return counts;
 }
 
-std::function<uint64_t(SequenceGraph::node_index i)>
+std::function<uint64_t(SequenceGraph::node_index)>
 build_label_counter(const AnnotatedDBG &anno_graph,
                     const std::vector<Label> &labels_to_check) {
     return [&anno_graph, labels_to_check](auto i) {
-        return i == SequenceGraph::npos ? 0 : std::count_if(
-            labels_to_check.begin(),
-            labels_to_check.end(),
+        assert(i != SequenceGraph::npos);
+        return std::count_if(labels_to_check.begin(), labels_to_check.end(),
             [&](const auto &label) { return anno_graph.has_label(i, label); }
         );
     };
@@ -138,12 +136,12 @@ std::unique_ptr<bitmap>
 mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          const std::vector<Label> &labels_in,
                          const std::vector<Label> &labels_out,
-                         std::function<bool(DeBruijnGraph::node_index,
-                                            LabelCountCallback, /* get_num_labels_in */
-                                            LabelCountCallback /* get_num_labels_out */)> is_node_in_mask,
+                         const std::function<bool(DeBruijnGraph::node_index,
+                                                  const LabelCountCallback & /* get_num_labels_in */,
+                                                  const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,
                          double min_frequency_for_frequent_label) {
     if (!anno_graph.get_graph().num_nodes())
-        return std::make_unique<bitmap_lazy>([](auto) { return false; },
+        return std::make_unique<bitmap_lazy>([](uint64_t) { return false; },
                                              anno_graph.get_graph().max_index() + 1,
                                              0);
 
@@ -184,9 +182,9 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
         // If at least one infrequent label exists, construct a count vector to
         // reduce calls to the annotator
         if (labels_in_infrequent.size() || labels_out_infrequent.size()) {
-            auto counts = fill_count_vector(anno_graph,
-                                            labels_in_infrequent,
-                                            labels_out_infrequent);
+            sdsl::int_vector<> counts = fill_count_vector(anno_graph,
+                                                          labels_in_infrequent,
+                                                          labels_out_infrequent);
 
             // the width of counts is double, since it's both in and out counts interleaved
             auto width = counts.width() >> 1;
@@ -215,7 +213,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
             auto count_frequent_out_labels = build_label_counter(anno_graph,
                                                                  labels_out_frequent);
             return std::make_unique<bitmap_lazy>(
-                [=](auto i) {
+                [=](uint64_t i) {
                     auto count = counts[i];
                     return i != DeBruijnGraph::npos
                         && is_node_in_mask(i,
@@ -231,7 +229,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     auto count_frequent_out_labels = build_label_counter(anno_graph, labels_out);
 
     return std::make_unique<bitmap_lazy>(
-        [=](auto i) {
+        [=](uint64_t i) {
             return i != DeBruijnGraph::npos
                 && is_node_in_mask(i,
                         [&]() { return count_frequent_in_labels(i); },
@@ -251,13 +249,13 @@ call_paths_from_branch(const DeBruijnGraph &graph,
 
     bool stop = false;
     graph.call_nodes(
-        [&](auto start) {
+        [&](node_index start) {
             if (visited[start] || full_graph.outdegree(start) <= 1)
                 return;
 
             visited[start] = true;
 
-            auto node_seq = graph.get_node_sequence(start);
+            std::string node_seq = graph.get_node_sequence(start);
 
             if (stop_path(start, start, node_seq)) {
                 if (!(stop = terminate()))
@@ -316,7 +314,7 @@ call_paths_from_branch(const DeBruijnGraph &graph,
     );
 }
 
-void call_breakpoints(const DeBruijnGraph &graph,
+void call_breakpoints(const MaskedDeBruijnGraph &graph,
                       const AnnotatedDBG &anno_graph,
                       const VariantLabelCallback &callback,
                       ThreadPool *thread_pool,
@@ -359,7 +357,7 @@ void call_breakpoints(const DeBruijnGraph &graph,
     call_paths_from_branch(
         graph,
         *dbg_succ,
-        [&](auto first, auto, auto&& sequence) {
+        [&](node_index first, node_index, std::string&& sequence) {
             assert(sequence.size() == graph.get_k());
 
             std::vector<std::pair<DeBruijnGraph::node_index, char>> outgoing;
@@ -372,7 +370,7 @@ void call_breakpoints(const DeBruijnGraph &graph,
 
             MaskedDeBruijnGraph background_masked(
                 dbg_succ,
-                [&](const auto &i) { return i == first || !graph.in_graph(i); }
+                [&](const auto &i) { return i == first || !graph.in_subgraph(i); }
             );
 
             // if outgoing is empty, we don't have to check for it to be excluded
@@ -427,8 +425,8 @@ void call_breakpoints(const DeBruijnGraph &graph,
         thread_pool->join();
 }
 
-void call_bubbles_from_path(const DeBruijnGraph &foreground,
-                            const DeBruijnGraph &background,
+void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
+                            const MaskedDeBruijnGraph &background,
                             const AnnotatedDBG &anno_graph,
                             node_index first,
                             const std::string &ref,
@@ -450,19 +448,18 @@ void call_bubbles_from_path(const DeBruijnGraph &foreground,
                 return;
 
             // For each outgoing edge, traverse path and intersect labels
-            auto var = ref;
+            std::string var = ref;
             var[foreground.get_k()] = c;
 
             bool in_foreground = true;
             bool in_background = true;
             std::vector<DeBruijnGraph::node_index> nodes { first };
             anno_graph.get_graph().map_to_nodes_sequentially(
-                var.begin() + 1,
-                var.end(),
-                [&](const auto &i) {
+                std::string_view(var).substr(1),
+                [&](node_index i) {
                     nodes.emplace_back(i);
-                    in_foreground &= foreground.in_graph(i);
-                    in_background &= background.in_graph(i);
+                    in_foreground &= foreground.in_subgraph(i);
+                    in_background &= background.in_subgraph(i);
                 },
                 [&]() { return !in_background; }
             );
@@ -489,7 +486,7 @@ void call_bubbles_from_path(const DeBruijnGraph &foreground,
     );
 }
 
-void call_bubbles(const DeBruijnGraph &graph,
+void call_bubbles(const MaskedDeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
                   const VariantLabelCallback &callback,
                   ThreadPool *thread_pool,
@@ -532,17 +529,18 @@ void call_bubbles(const DeBruijnGraph &graph,
     call_paths_from_branch(
         graph,
         *dbg_succ,
-        [&](auto first, auto last, auto&& sequence) {
+        [&](node_index first, node_index last, std::string&& sequence) {
             if (sequence.size() != path_length || dbg_succ->indegree(last) <= 1)
                 return;
 
-            auto process_path = [&, first, sequence]() {
+            auto process_path = [&, first, seq{std::move(sequence)}]() {
+                // TODO: does this make sense? Background is the full `*dbg_succ`
                 call_bubbles_from_path(
                     graph,
-                    *dbg_succ,
+                    MaskedDeBruijnGraph(dbg_succ, [&](auto) { return true; }),
                     anno_graph,
                     first,
-                    sequence,
+                    seq,
                     callback,
                     terminate,
                     variant_config
@@ -555,7 +553,9 @@ void call_bubbles(const DeBruijnGraph &graph,
                 process_path();
             }
         },
-        [&](auto, auto, auto&& sequence) { return sequence.size() >= path_length; },
+        [&](node_index, node_index, const std::string &sequence) {
+            return sequence.size() >= path_length;
+        },
         terminate
     );
 

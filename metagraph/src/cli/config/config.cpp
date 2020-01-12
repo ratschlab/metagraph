@@ -112,6 +112,8 @@ Config::Config(int argc, char *argv[]) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
+        } else if (!strcmp(argv[i], "--count-width")) {
+            count_width = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fwd-and-reverse")) {
             forward_and_reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
@@ -369,6 +371,20 @@ Config::Config(int argc, char *argv[]) {
     if (!count_slice_quantiles.size()) {
         count_slice_quantiles.push_back(0);
         count_slice_quantiles.push_back(1);
+    }
+
+    if (count_width <= 1) {
+        std::cerr << "Error: bad value for count-width, need at least 2 bits"
+                     " to represent k-mer abundance" << std::endl;
+        print_usage_and_exit = true;
+    }
+    if (!count_kmers)
+        count_width = 0;
+
+    if (count_width > 32) {
+        std::cerr << "Error: bad value for count-width, can use maximum 32 bits"
+                     " to represent k-mer abundance" << std::endl;
+        print_usage_and_exit = true;
     }
 
     for (size_t i = 1; i < count_slice_quantiles.size(); ++i) {
@@ -718,6 +734,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
+            fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");

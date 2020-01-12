@@ -3,11 +3,12 @@
 #include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
-#include "threading.hpp"
+#include "common/threads/threading.hpp"
 
 #define private public
-#include "bitmap.hpp"
-#include "bit_vector.hpp"
+#include "common/vectors/bitmap.hpp"
+#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";
@@ -262,8 +263,8 @@ typedef ::testing::Types<bitmap_vector,
                          bitmap_set,
                          bitmap_adaptive> BitmapDynTypes;
 
-TYPED_TEST_CASE(BitmapTest, BitmapTypes);
-TYPED_TEST_CASE(BitmapDynTest, BitmapDynTypes);
+TYPED_TEST_SUITE(BitmapTest, BitmapTypes);
+TYPED_TEST_SUITE(BitmapDynTest, BitmapDynTypes);
 
 
 TYPED_TEST(BitmapTest, queries) {
