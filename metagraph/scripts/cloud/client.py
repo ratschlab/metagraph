@@ -88,7 +88,7 @@ def start_create(sra_id, location):
         else:
             logging.info(f'Copying from {location} completed successfully')
     else:
-        logging.info('Luckily the files to use for building the graph already are on this machine.')
+        logging.info(f'Luckily {location} already is on this machine.')
     input_dir = os.path.join(download_dir(), sra_id)
     create_processes[sra_id] = subprocess.Popen(['./create.sh', sra_id, input_dir, create_dir()])
     return True
@@ -281,7 +281,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--source', help='Where to download the data from: ena or ncbi', choices=('ena', 'nbcbi'))
+    parser.add_argument('--source', help='Where to download the data from: ena or ncbi', choices=('ena', 'ncbi'))
     parser.add_argument('--server_host', help='HTTP server name or ip')
     parser.add_argument('--server_port', default=8000, help='HTTP Port on which the server runs')
     parser.add_argument(

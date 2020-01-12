@@ -21,14 +21,24 @@ sra_bucket=$1
 sra_number=$2
 download_dir=$3
 
+download_dir=${download_dir%/}  # remove trailing slash, if present
+
 sra_dir="${download_dir}/sra"
 
 if ! [ -d $download_dir ]; then
 	mkdir -p $download_dir
 	mkdir -p ${sra_dir}
+	mkdir -p "${download_dir}/{sra_number}"
 fi
-gsutil -u metagraph  cp -r "gs://sra-pub-run-${bucket}/${sra_number}" "${sra_dir}/"
-for sra_file in $(ls -p ${sra_dir}); do
-  fasterq-dump ${sra_file} -f -e 10  -O "${download_dir}"
+
+if ! [ -f "${sra_dir}/${sra_number}" ]; then
+  echo "${sra_dir}/${sra_number} Doesn't exist :("
+  execute gsutil -u metagraph  cp -r "gs://sra-pub-run-${sra_bucket}/${sra_number}" "${sra_dir}/"
+else
+  echo "${sra_number} already downloaded"
+fi
+
+for sra_file in $(ls -p "${sra_dir}/${sra_number}"); do
+  execute fasterq-dump "${sra_dir}/${sra_number}/${sra_file}" -f -e 10  -O "${download_dir}/${sra_number}"
 done
-rm -rf ${sra_dir}
+# rm -rf ${sra_dir} # TODO: enable this

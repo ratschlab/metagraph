@@ -271,7 +271,6 @@ def init_logging():
 
 
 if __name__ == '__main__':
-    init_logging()
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -286,6 +285,7 @@ if __name__ == '__main__':
         help='Location of the directory containing the input data')
 
     args = parser.parse_args()
+    init_logging()
     data_files = [os.path.join(args.data_dir, f) for f in os.listdir(args.data_dir) if
                   os.path.isfile(os.path.join(args.data_dir, f)) and f.endswith('ids')]
 
