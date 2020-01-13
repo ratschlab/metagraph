@@ -88,7 +88,7 @@ void read_extended_fasta_file_critical(const std::string &filebase,
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,
                             size_t k,
-                            std::function<void(std::string&&)> callback,
+                            std::function<void(std::string_view)> callback,
                             bool with_reverse = false);
 
 void read_vcf_file_with_annotations_critical(const std::string &filename,

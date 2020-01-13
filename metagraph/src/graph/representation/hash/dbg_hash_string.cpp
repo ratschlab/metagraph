@@ -243,7 +243,7 @@ DBGHashString::node_index
 DBGHashString::kmer_to_node(std::string_view kmer) const {
     assert(kmer.length() == k_);
 
-    auto find = kmers_.find(std::string(kmer.begin(), kmer.end()));
+    auto find = kmers_.find(std::string(kmer));
     if (find == kmers_.end())
         return npos;
 

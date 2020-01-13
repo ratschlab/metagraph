@@ -318,16 +318,16 @@ void read_fasta_from_string(const std::string &fasta_flat,
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,
                             size_t k,
-                            std::function<void(std::string&&)> callback,
+                            std::function<void(std::string_view)> callback,
                             bool with_reverse) {
     VCFParser vcf(ref_filename, filename, k);
 
     if (with_reverse) {
         vcf.call_sequences(
             [&](auto&& sequence) {
-                callback(std::string(sequence.begin(), sequence.end()));
+                callback(sequence);
                 reverse_complement(sequence.begin(), sequence.end());
-                callback(std::move(sequence));
+                callback(sequence);
             }
         );
     } else {

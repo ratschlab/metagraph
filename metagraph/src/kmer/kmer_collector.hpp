@@ -57,7 +57,7 @@ class KmerCollector {
 
     inline size_t suffix_length() const { return filter_suffix_encoded_.size(); }
 
-    void add_sequence(std::string&& sequence, uint64_t count = 1);
+    void add_sequence(std::string_view sequence, uint64_t count = 1);
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
     void add_sequences(const std::function<void(CallStringCount)> &generate_sequences);

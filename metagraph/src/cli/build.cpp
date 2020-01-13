@@ -81,8 +81,8 @@ int build_graph(Config *config) {
             );
 
             parse_sequences(files, *config, timer,
-                [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
-                [&](std::string&& seq, uint32_t count) { constructor->add_sequence(std::move(seq), count); },
+                [&](std::string_view seq) { constructor->add_sequence(seq); },
+                [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); },
                 [&](const auto &loop) { constructor->add_sequences(loop); }
             );
 
@@ -154,8 +154,8 @@ int build_graph(Config *config) {
             );
 
             parse_sequences(files, *config, timer,
-                [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
-                [&](std::string&& seq, uint32_t count) { constructor->add_sequence(std::move(seq), count); },
+                [&](std::string_view seq) { constructor->add_sequence(seq); },
+                [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); },
                 [&](const auto &loop) { constructor->add_sequences(loop); }
             );
 
@@ -236,11 +236,11 @@ int build_graph(Config *config) {
         assert(graph);
 
         parse_sequences(files, *config, timer,
-            [&graph](std::string&& seq) {
-                graph->add_sequence(std::move(seq));
+            [&graph](std::string_view seq) {
+                graph->add_sequence(seq);
             },
-            [&graph](std::string&& seq, uint32_t /*count*/) {
-                graph->add_sequence(std::move(seq));
+            [&graph](std::string_view seq, uint32_t /*count*/) {
+                graph->add_sequence(seq);
             },
             [&graph](const auto &loop) {
                 loop([&graph](const char *seq) { graph->add_sequence(seq); });
@@ -257,12 +257,12 @@ int build_graph(Config *config) {
                 config->forward_and_reverse = true;
 
             parse_sequences(files, *config, timer,
-                [&graph,&node_weights](std::string&& seq) {
+                [&graph,&node_weights](std::string_view seq) {
                     graph->map_to_nodes_sequentially(seq,
                         [&](auto node) { node_weights->add_weight(node, 1); }
                     );
                 },
-                [&graph,&node_weights](std::string&& seq, uint32_t count) {
+                [&graph,&node_weights](std::string_view seq, uint32_t count) {
                     graph->map_to_nodes_sequentially(seq,
                         [&](auto node) { node_weights->add_weight(node, count); }
                     );

@@ -36,9 +36,7 @@ void parse_sequences(const std::vector<std::string> &files,
             read_vcf_file_critical(file,
                                    config.refpath,
                                    config.k,
-                                   [&](std::string&& sequence) {
-                                       call_sequence(std::move(sequence));
-                                   },
+                                   call_sequence,
                                    config.forward_and_reverse);
 
         } else if (file_format(file) == "KMC") {
@@ -51,7 +49,7 @@ void parse_sequences(const std::vector<std::string> &files,
                 std::unordered_map<uint64_t, uint64_t> count_hist;
                 kmc::read_kmers(
                     file,
-                    [&](std::string&&, uint32_t count) {
+                    [&](std::string_view, uint32_t count) {
                         count_hist[count] += (1 + config.forward_and_reverse);
                     },
                     !config.canonical && !config.forward_and_reverse
@@ -77,7 +75,7 @@ void parse_sequences(const std::vector<std::string> &files,
 
             kmc::read_kmers(
                 file,
-                [&](std::string&& sequence, uint32_t count) {
+                [&](std::string_view sequence, uint32_t count) {
                     if (!warning_different_k && sequence.size() != config.k) {
                         mg::common::logger->warn("k-mers parsed from KMC database '{}' have "
                                                  "length {} but graph is constructed for k={}",
@@ -85,12 +83,12 @@ void parse_sequences(const std::vector<std::string> &files,
                         warning_different_k = true;
                     }
                     if (config.forward_and_reverse) {
-                        std::string reverse = sequence;
+                        std::string reverse(sequence);
                         reverse_complement(reverse.begin(), reverse.end());
-                        call_weighted_sequence(std::move(sequence), count);
-                        call_weighted_sequence(std::move(reverse), count);
+                        call_weighted_sequence(sequence, count);
+                        call_weighted_sequence(reverse, count);
                     } else {
-                        call_weighted_sequence(std::move(sequence), count);
+                        call_weighted_sequence(sequence, count);
                     }
                 },
                 !config.canonical && !config.forward_and_reverse, min_count, max_count
@@ -125,7 +123,7 @@ void parse_sequences(const std::vector<std::string> &files,
                             );
                             size_t segment_size = same_counts_end - kmer_counts;
 
-                            call_weighted_sequence(std::string(seq, k + segment_size - 1), *kmer_counts);
+                            call_weighted_sequence(std::string_view(seq, segment_size + k - 1), *kmer_counts);
 
                             kmer_counts += segment_size;
                             seq += segment_size;
@@ -151,7 +149,8 @@ void parse_sequences(const std::vector<std::string> &files,
             } else {
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     // add read to the graph constructor as a callback
-                    call_sequence(read_stream->seq.s);
+                    call_sequence(std::string_view(read_stream->seq.s,
+                                                   read_stream->seq.l));
                 }, config.forward_and_reverse);
             }
         } else {

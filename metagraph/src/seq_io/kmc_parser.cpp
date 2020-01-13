@@ -10,13 +10,13 @@ namespace kmc {
 const auto kFileSuffixes = { ".kmc_suf", ".kmc_pre" };
 
 void read_kmers(const std::string &kmc_filename,
-                const std::function<void(std::string&&)> &callback,
+                const std::function<void(std::string_view)> &callback,
                 bool call_both_from_canonical,
                 uint64_t min_count,
                 uint64_t max_count) {
     read_kmers(kmc_filename,
-               [&](std::string&& sequence, uint64_t) {
-                   callback(std::move(sequence));
+               [&](std::string_view sequence, uint64_t) {
+                   callback(sequence);
                },
                call_both_from_canonical,
                min_count,
@@ -24,7 +24,7 @@ void read_kmers(const std::string &kmc_filename,
 }
 
 void read_kmers(const std::string &kmc_filename,
-                const std::function<void(std::string&&, uint64_t)> &callback,
+                const std::function<void(std::string_view, uint64_t)> &callback,
                 bool call_both_from_canonical,
                 uint64_t min_count,
                 uint64_t max_count) {
@@ -38,20 +38,23 @@ void read_kmers(const std::string &kmc_filename,
 
     CKMCFile kmc_database;
     if (!kmc_database.OpenForListing(kmc_base_filename))
-        throw std::runtime_error(
-                std::string("Error: Can't open KMC database ") + kmc_base_filename);
+        throw std::runtime_error("Error: Can't open KMC database " + kmc_base_filename);
 
     kmc_database.SetMinCount(min_count);
     kmc_database.SetMaxCount(max_count - 1);
 
-    CKmerAPI kmer(kmc_database.KmerLength());
+    size_t k = kmc_database.KmerLength();
+    CKmerAPI kmer(k);
+    std::string kmer_str(k, '\0');
     uint64 count;
 
     while (kmc_database.ReadNextKmer(kmer, count)) {
-        callback(kmer.to_string(), count);
+        kmer.to_string(kmer_str.data());
+        callback(kmer_str, count);
         if (call_both_from_canonical && kmc_database.GetBothStrands()) {
             kmer.reverse();
-            callback(kmer.to_string(), count);
+            kmer.to_string(kmer_str.data());
+            callback(kmer_str, count);
         }
     }
     kmc_database.Close();

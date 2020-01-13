@@ -404,7 +404,7 @@ void DeBruijnGraph
 }
 
 void DeBruijnGraph::print(std::ostream &out) const {
-    auto vertex_header = std::string("Vertex");
+    std::string vertex_header("Vertex");
     vertex_header.resize(get_k(), ' ');
 
     out << "Index"

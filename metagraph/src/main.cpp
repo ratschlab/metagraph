@@ -123,12 +123,12 @@ void annotate_data(const std::vector<std::string> &files,
         } else if (file_format(file) == "KMC") {
             kmc::read_kmers(
                 file,
-                [&](std::string&& sequence) {
+                [&](std::string_view sequence) {
                     thread_pool.enqueue(
                         [anno_graph](const std::string &sequence, const auto &labels) {
                             anno_graph->annotate_sequence(sequence, labels);
                         },
-                        std::move(sequence),
+                        std::string(sequence),
                         labels
                     );
 

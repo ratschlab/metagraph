@@ -78,10 +78,10 @@ int augment_graph(Config *config) {
         on_node_insert = [&](uint64_t new_node) { inserted_nodes->insert_bit(new_node, 1); };
 
     parse_sequences(files, *config, timer,
-        [&](std::string&& seq) {
+        [&](std::string_view seq) {
             graph->add_sequence(seq, on_node_insert);
         },
-        [&](std::string&& seq, uint32_t /*count*/) {
+        [&](std::string_view seq, uint32_t /*count*/) {
             graph->add_sequence(seq, on_node_insert);
         },
         [&](const auto &loop) {
@@ -104,12 +104,12 @@ int augment_graph(Config *config) {
             config->forward_and_reverse = true;
 
         parse_sequences(files, *config, timer,
-            [&graph,&node_weights](std::string&& seq) {
+            [&graph,&node_weights](std::string_view seq) {
                 graph->map_to_nodes_sequentially(seq,
                     [&](auto node) { node_weights->add_weight(node, 1); }
                 );
             },
-            [&graph,&node_weights](std::string&& seq, uint32_t count) {
+            [&graph,&node_weights](std::string_view seq, uint32_t count) {
                 graph->map_to_nodes_sequentially(seq,
                     [&](auto node) { node_weights->add_weight(node, count); }
                 );

@@ -222,12 +222,12 @@ KmerCollector<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
-::add_sequence(std::string&& sequence, uint64_t count) {
+::add_sequence(std::string_view sequence, uint64_t count) {
     if (sequence.size() < k_)
         return;
 
     // push read to the processing queue
-    batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, std::move(sequence), count);
+    batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, sequence, count);
 }
 
 template <typename KMER, class KmerExtractor, class Container>

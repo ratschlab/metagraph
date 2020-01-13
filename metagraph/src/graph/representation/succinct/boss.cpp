@@ -1370,7 +1370,7 @@ void traverse_dummy_edges(const BOSS &graph,
     );
     *num_dummy_traversed += num_edges_traversed;
     if (verbose) {
-        std::cout << std::string("Source dummy edges traversed: ")
+        std::cout << "Source dummy edges traversed: "
                         + std::to_string(*num_dummy_traversed) + "\n" << std::flush;
     }
     assert(redundant_path.empty());
