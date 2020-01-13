@@ -109,13 +109,13 @@ int clean_graph(Config *config) {
                                           *node_weights,
                                           config->min_unitig_median_kmer_abundance))
                     callback(unitig, path);
-            }, config->min_tip_size);
+            }, config->min_tip_size, graph->is_canonical_mode());
 
         } else if (config->unitigs || config->min_tip_size > 1) {
-            graph->call_unitigs(callback, config->min_tip_size);
+            graph->call_unitigs(callback, config->min_tip_size, graph->is_canonical_mode());
 
         } else {
-            graph->call_sequences(callback);
+            graph->call_sequences(callback, graph->is_canonical_mode());
         }
     };
 
