@@ -166,8 +166,6 @@ Config::Config(int argc, char *argv[]) {
             for (const auto &border : utils::split_string(get_value(i++), " ")) {
                 count_slice_quantiles.push_back(std::stod(border));
             }
-        } else if (!strcmp(argv[i], "--dump-counts")) {
-            dump_counts = true;
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
@@ -770,7 +768,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --unitigs \t\t\textract unitigs instead of contigs [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\t\tdump clean sequences to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\t\tenumerate sequences in FASTA [off]\n");
-            fprintf(stderr, "\t   --dump-counts \t\tdump k-mer counts for clean sequences [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case EXTEND: {

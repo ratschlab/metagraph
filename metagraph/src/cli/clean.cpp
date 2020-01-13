@@ -36,26 +36,26 @@ int clean_graph(Config *config) {
     logger->trace("Loading graph...");
 
     auto graph = load_critical_dbg(files.at(0));
+    // try loading k-mer counts
+    auto node_weights = graph->load_extension<NodeWeights>(files.at(0));
+
+    if (node_weights) {
+        if (auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get()))
+            dbg_succ->reset_mask();
+
+        if (!node_weights->is_compatible(*graph)) {
+            logger->error("Loaded k-mer counts not compatible with graph '{}'", files.at(0));
+            exit(1);
+        }
+    }
 
     if (config->min_count > 1
             || config->max_count < std::numeric_limits<unsigned int>::max()
             || config->min_unitig_median_kmer_abundance != 1
             || config->count_slice_quantiles[0] != 0
-            || config->count_slice_quantiles[1] != 1
-            || config->dump_counts) {
-        // load k-mer counts
-        auto node_weights = graph->load_extension<NodeWeights>(files.at(0));
-
+            || config->count_slice_quantiles[1] != 1) {
         if (!(node_weights)) {
             logger->error("Cannot load k-mer counts from file '{}'", files.at(0));
-            exit(1);
-        }
-
-        if (auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get()))
-            dbg_succ->reset_mask();
-
-        if (!node_weights->is_compatible(*graph)) {
-            logger->error("k-mer counts are not compatible with graph '{}'", files.at(0));
             exit(1);
         }
 
@@ -95,7 +95,6 @@ int clean_graph(Config *config) {
 
     auto call_clean_contigs = [&](auto callback) {
         if (config->min_unitig_median_kmer_abundance != 1) {
-            auto node_weights = graph->get_extension<NodeWeights>();
             assert(node_weights);
             if (!node_weights->is_compatible(*graph)) {
                 logger->error("k-mer counts are not compatible with the subgraph");
@@ -120,42 +119,45 @@ int clean_graph(Config *config) {
         }
     };
 
+    auto dump_contigs_to_fasta = [&](const std::string &outfbase, auto call_contigs) {
+        if (node_weights) {
+            if (!node_weights->is_compatible(*graph)) {
+                logger->error("k-mer counts are not compatible with the subgraph");
+                exit(1);
+            }
+
+            ExtendedFastaWriter<uint32_t> writer(outfbase,
+                                                 "kmer_counts",
+                                                 graph->get_k(),
+                                                 config->header,
+                                                 config->enumerate_out_sequences);
+            std::vector<uint32_t> kmer_counts;
+
+            call_contigs([&](const std::string &contig, const auto &path) {
+                for (auto node : path) {
+                    kmer_counts.push_back((*node_weights)[node]);
+                }
+                writer.write(contig, kmer_counts);
+                kmer_counts.resize(0);
+            });
+
+        } else {
+            FastaWriter writer(outfbase, config->header,
+                               config->enumerate_out_sequences);
+
+            call_contigs([&](const std::string &contig, const auto &) {
+                writer.write(contig);
+            });
+        }
+    };
+
     assert(config->count_slice_quantiles.size() >= 2);
 
-    if (config->dump_counts) {
-        ExtendedFastaWriter<uint32_t> writer(config->outfbase,
-                                             "kmer_counts",
-                                             graph->get_k(),
-                                             config->header,
-                                             config->enumerate_out_sequences);
-
-        const auto &node_weights = *graph->get_extension<NodeWeights>();
-        if (!node_weights.is_compatible(*graph)) {
-            logger->error("k-mer counts are not compatible with the subgraph");
-            exit(1);
-        }
-
-        std::vector<uint32_t> kmer_counts;
-
-        call_clean_contigs([&](const std::string &contig, const auto &path) {
-            for (auto node : path) {
-                kmer_counts.push_back(node_weights[node]);
-            }
-            writer.write(contig, kmer_counts);
-            kmer_counts.resize(0);
-        });
-
-    } else if (config->count_slice_quantiles[0] == 0
-                && config->count_slice_quantiles[1] == 1) {
-        FastaWriter writer(config->outfbase, config->header,
-                           config->enumerate_out_sequences);
-
-        call_clean_contigs([&](const std::string &contig, const auto &) {
-            writer.write(contig);
-        });
+    if (config->count_slice_quantiles[0] == 0
+            && config->count_slice_quantiles[1] == 1) {
+        dump_contigs_to_fasta(config->outfbase, call_clean_contigs);
 
     } else {
-        auto node_weights = graph->get_extension<NodeWeights>();
         if (!node_weights) {
             logger->error("Need k-mer counts for binning k-mers by abundance");
             exit(1);
@@ -211,14 +213,14 @@ int clean_graph(Config *config) {
             // extract sequences for k-mer counts bin |i|
             assert(config->count_slice_quantiles[i - 1] < config->count_slice_quantiles[i]);
 
-            FastaWriter writer(utils::remove_suffix(config->outfbase, ".gz", ".fasta")
-                                + "." + std::to_string(config->count_slice_quantiles[i - 1])
-                                + "." + std::to_string(config->count_slice_quantiles[i]),
-                               config->header,
-                               config->enumerate_out_sequences);
+            auto filebase = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
+                    + "." + std::to_string(config->count_slice_quantiles[i - 1])
+                    + "." + std::to_string(config->count_slice_quantiles[i]);
 
-            if (!count_hist_v.size())
+            if (!count_hist_v.size()) {
+                dump_contigs_to_fasta(filebase, [](auto) {});
                 continue;
+            }
 
             uint64_t min_count = config->count_slice_quantiles[i - 1] > 0
                 ? utils::get_quantile(count_hist_v, config->count_slice_quantiles[i - 1])
@@ -236,7 +238,12 @@ int clean_graph(Config *config) {
             MaskedDeBruijnGraph graph_slice(graph,
                 [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; });
 
-            graph_slice.call_unitigs([&](const auto &contig, auto&&) { writer.write(contig); });
+            dump_contigs_to_fasta(filebase, [&](auto dump_sequence) {
+                graph_slice.call_unitigs([&](const std::string &contig,
+                                             const auto &path) {
+                    dump_sequence(contig, path);
+                });
+            });
         }
     }
 

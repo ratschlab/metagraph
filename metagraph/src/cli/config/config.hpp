@@ -29,7 +29,6 @@ class Config {
     bool enumerate_out_sequences = false;
     bool to_gfa = false;
     bool unitigs = false;
-    bool dump_counts = false;
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
     bool count_kmers = false;
