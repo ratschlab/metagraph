@@ -125,6 +125,15 @@ endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
+# Check if 128 bit integers are supported
+try_compile(MODE_TI
+  "${PROJECT_BINARY_DIR}"
+  "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
+)
+if(MODE_TI)
+  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI")
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   file(STRINGS "/proc/cpuinfo" _cpuinfo)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")

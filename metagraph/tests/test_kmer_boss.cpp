@@ -72,32 +72,35 @@ std::string decode_nucleotide(const KMerBOSS<G, L> &kmer, size_t k) {
     return kmer.to_string(k, "ACGTN");
 }
 
-
+// Workaround to avoid the issues with the uint128_t type traits undefined in AppleClang
+struct UINT64_ { typedef uint64_t type; };
+struct UINT128_ { typedef sdsl::uint128_t type; };
+struct UINT256_ { typedef sdsl::uint256_t type; };
+typedef ::testing::Types<UINT64_,
+                         UINT128_,
+                         UINT256_> IntTypes;
 template <class KMER>
 class KmerBOSS : public ::testing::Test { };
-typedef ::testing::Types<uint64_t,
-                         sdsl::uint128_t,
-                         sdsl::uint256_t> IntTypes;
 TYPED_TEST_SUITE(KmerBOSS, IntTypes);
 
 TYPED_TEST(KmerBOSS, nucleotide_alphabet_pack) {
     const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAN";
     const auto encoded = encode_nucleotide(sequence);
 
-    for (uint64_t k = 2; k < sizeof(TypeParam) * 8 / 3; ++k) {
+    for (uint64_t k = 2; k < sizeof(typename TypeParam::type) * 8 / 3; ++k) {
         if (k > encoded.size())
             break;
 
         ASSERT_LE(k, encoded.size());
-        std::vector<KMerBOSS<TypeParam, 3>> kmers;
-        KMerBOSS<TypeParam, 3> kmer_packed(encoded.data(), k);
+        std::vector<KMerBOSS<typename TypeParam::type, 3>> kmers;
+        KMerBOSS<typename TypeParam::type, 3> kmer_packed(encoded.data(), k);
         for (uint64_t i = 0; i + k <= encoded.size(); ++i) {
             kmers.emplace_back(std::vector<TAlphabet>(encoded.begin() + i,
                                                       encoded.begin() + i + k));
-            auto decoded = decode_nucleotide<TypeParam, 3>(kmers.back(), k);
+            auto decoded = decode_nucleotide<typename TypeParam::type, 3>(kmers.back(), k);
             EXPECT_EQ(sequence.substr(i, k), decoded) << k << " " << i;
 
-            KMerBOSS<TypeParam, 3> kmer_alt(encoded.data() + i, k);
+            KMerBOSS<typename TypeParam::type, 3> kmer_alt(encoded.data() + i, k);
             EXPECT_EQ(kmers.back(), kmer_alt) << k << " " << i;
 
             EXPECT_EQ(kmers.back(), kmer_packed) << k << " " << i;
@@ -111,10 +114,10 @@ TYPED_TEST(KmerBOSS, nucleotide_alphabet_pack) {
 //typedef uint64_t KMerBaseType;
 const size_t kBitsPerChar = KmerExtractorBOSS::bits_per_char;
 
-template <typename TypeParam>
-using KMER = KMerBOSS<TypeParam, kBitsPerChar>;
+template <typename T>
+using KMER = KMerBOSS<T, kBitsPerChar>;
 
-#define kSizeOfKmer ( sizeof(TypeParam) )
+#define kSizeOfKmer ( sizeof(typename TypeParam::type) )
 //typedef KMerBOSS<KMerBaseType, kBitsPerChar> KMER;
 //const size_t kSizeOfKmer = sizeof(KMerBaseType);
 
@@ -131,16 +134,16 @@ std::string kmer_codec(const std::string &test_kmer) {
     return KMER(kmer).to_string(test_kmer.length(), KmerExtractorBOSS::alphabet);
 }
 
-template <typename TypeParam>
+template <typename T>
 void test_kmer_codec(const std::string &test_kmer,
                      const std::string &test_compare_kmer) {
     ASSERT_EQ(test_kmer.length(), test_compare_kmer.length());
-    ASSERT_EQ(test_compare_kmer.length(), kmer_codec<KMER<TypeParam>>(test_kmer).length());
-    EXPECT_EQ(test_compare_kmer, kmer_codec<KMER<TypeParam>>(test_kmer));
+    ASSERT_EQ(test_compare_kmer.length(), kmer_codec<KMER<T>>(test_kmer).length());
+    EXPECT_EQ(test_compare_kmer, kmer_codec<KMER<T>>(test_kmer));
 }
 
 TYPED_TEST(KmerBOSS, Invertible) {
-    test_kmer_codec<TypeParam>("ATGG", "ATGG");
+    test_kmer_codec<typename TypeParam::type>("ATGG", "ATGG");
 }
 
 TYPED_TEST(KmerBOSS, BitShiftBuild) {
@@ -150,7 +153,7 @@ TYPED_TEST(KmerBOSS, BitShiftBuild) {
     }
     long_seq = long_seq.substr(0, kSizeOfKmer * 8 / kBitsPerChar);
     //test bit shifting
-    KMER<TypeParam> kmer_builtup(KmerExtractorBOSS::encode(
+    KMER<typename TypeParam::type> kmer_builtup(KmerExtractorBOSS::encode(
         std::string(long_seq.rbegin() + 1,
                     long_seq.rbegin() + 3)
     ));
@@ -163,15 +166,15 @@ TYPED_TEST(KmerBOSS, BitShiftBuild) {
     std::string dec = kmer_builtup.to_string(long_seq.length(), KmerExtractorBOSS::alphabet);
     ASSERT_EQ(long_seq, dec);
 
-    test_kmer_codec<TypeParam>(long_seq, long_seq);
+    test_kmer_codec<typename TypeParam::type>(long_seq, long_seq);
 }
 
 TYPED_TEST(KmerBOSS, UpdateKmer) {
-    KMER<TypeParam> kmer[2] = {
-        KMER<TypeParam>(KmerExtractorBOSS::encode("ATGC")),
-        KMER<TypeParam>(KmerExtractorBOSS::encode("TGCT"))
+    KMER<typename TypeParam::type> kmer[2] = {
+        KMER<typename TypeParam::type>(KmerExtractorBOSS::encode("ATGC")),
+        KMER<typename TypeParam::type>(KmerExtractorBOSS::encode("TGCT"))
     };
-    KMER<TypeParam> updated = kmer[0];
+    KMER<typename TypeParam::type> updated = kmer[0];
     updated.to_next(4, KmerExtractorBOSS::encode('T'), KmerExtractorBOSS::encode('C'));
     EXPECT_EQ(kmer[1], updated);
     auto prev = kmer[1];
@@ -180,9 +183,9 @@ TYPED_TEST(KmerBOSS, UpdateKmer) {
 }
 
 TYPED_TEST(KmerBOSS, NextPrevKmer) {
-    KMER<TypeParam> kmer[2] = {
-        KMER<TypeParam>(KmerExtractorBOSS::encode("ATGC")),
-        KMER<TypeParam>(KmerExtractorBOSS::encode("TGCT"))
+    KMER<typename TypeParam::type> kmer[2] = {
+        KMER<typename TypeParam::type>(KmerExtractorBOSS::encode("ATGC")),
+        KMER<typename TypeParam::type>(KmerExtractorBOSS::encode("TGCT"))
     };
 
     auto prev = kmer[1];
@@ -200,9 +203,9 @@ TYPED_TEST(KmerBOSS, UpdateKmerLong) {
     long_seq = long_seq.substr(0, kSizeOfKmer * 8 / kBitsPerChar);
     std::string long_seq_alt(long_seq.substr(1));
     long_seq_alt.push_back('T');
-    KMER<TypeParam> kmer[2] = {
-        KMER<TypeParam>(KmerExtractorBOSS::encode(long_seq)),
-        KMER<TypeParam>(KmerExtractorBOSS::encode(long_seq_alt))
+    KMER<typename TypeParam::type> kmer[2] = {
+        KMER<typename TypeParam::type>(KmerExtractorBOSS::encode(long_seq)),
+        KMER<typename TypeParam::type>(KmerExtractorBOSS::encode(long_seq_alt))
     };
     kmer[0].to_next(long_seq.length(), KmerExtractorBOSS::encode('T'),
                                        KmerExtractorBOSS::encode(long_seq.back()));
@@ -219,7 +222,7 @@ TYPED_TEST(KmerBOSS, UpdateKmerVsConstruct) {
     long_seq1.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
                               long_seq0.size()));
     auto seq0 = KmerExtractorBOSS::encode(long_seq0);
-    KMER<TypeParam> kmer0(seq0.begin(), seq0.size());
+    KMER<typename TypeParam::type> kmer0(seq0.begin(), seq0.size());
     kmer0.to_next(long_seq0.length(), KmerExtractorBOSS::encode(long_seq1.back()),
                                       KmerExtractorBOSS::encode(long_seq0.back()));
     std::string reconst_seq1 = kmer0.to_string(long_seq0.length(),
@@ -227,34 +230,34 @@ TYPED_TEST(KmerBOSS, UpdateKmerVsConstruct) {
     EXPECT_EQ(long_seq1, reconst_seq1);
 
     seq0.emplace_back(KmerExtractorBOSS::encode(long_seq1.back()));
-    KMER<TypeParam> kmer1(seq0.begin() + 1, seq0.size() - 1);
+    KMER<typename TypeParam::type> kmer1(seq0.begin() + 1, seq0.size() - 1);
     std::string reconst_seq2 = kmer1.to_string(long_seq1.length(),
                                                KmerExtractorBOSS::alphabet);
     EXPECT_EQ(long_seq1, reconst_seq2);
 }
 
 TYPED_TEST(KmerBOSS, InvertibleEndDol) {
-    test_kmer_codec<TypeParam>("ATG$", "ATG$");
+    test_kmer_codec<typename TypeParam::type>("ATG$", "ATG$");
 }
 
 TYPED_TEST(KmerBOSS, InvertibleStartDol) {
-    test_kmer_codec<TypeParam>("$ATGG", "$ATGG");
+    test_kmer_codec<typename TypeParam::type>("$ATGG", "$ATGG");
 }
 
 TYPED_TEST(KmerBOSS, InvertibleBothDol) {
-    test_kmer_codec<TypeParam>("$ATG$", "$ATG$");
+    test_kmer_codec<typename TypeParam::type>("$ATG$", "$ATG$");
 }
 
 TYPED_TEST(KmerBOSS, InvalidChars) {
 #if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-    test_kmer_codec<TypeParam>("ATGH", "ATGN");
-    test_kmer_codec<TypeParam>("ATGЯ", "ATGNN");
+    test_kmer_codec<typename TypeParam::type>("ATGH", "ATGN");
+    test_kmer_codec<typename TypeParam::type>("ATGЯ", "ATGNN");
 #elif _PROTEIN_GRAPH
-    test_kmer_codec<TypeParam>("ATGH", "ATGH");
-    test_kmer_codec<TypeParam>("ATGЯ", "ATGXX");
+    test_kmer_codec<typename TypeParam::type>("ATGH", "ATGH");
+    test_kmer_codec<typename TypeParam::type>("ATGЯ", "ATGXX");
 #elif _DNA_GRAPH
-    ASSERT_DEATH(test_kmer_codec<TypeParam>("ATGH", "ATGN"), "");
-    ASSERT_DEATH(test_kmer_codec<TypeParam>("ATGЯ", "ATGNN"), "");
+    ASSERT_DEATH(test_kmer_codec<typename TypeParam::type>("ATGH", "ATGN"), "");
+    ASSERT_DEATH(test_kmer_codec<typename TypeParam::type>("ATGЯ", "ATGNN"), "");
 #else
     static_assert(false,
         "Add a unit test for checking behavior with invalid characters"
@@ -262,53 +265,53 @@ TYPED_TEST(KmerBOSS, InvalidChars) {
 #endif
 }
 
-template <typename TypeParam>
+template <typename T>
 void test_kmer_less(const std::string &k1,
                     const std::string &k2, bool truth) {
-    KMER<TypeParam> kmer[2] = {
-        KMER<TypeParam>(KmerExtractorBOSS::encode(k1)),
-        KMER<TypeParam>(KmerExtractorBOSS::encode(k2))
+    KMER<T> kmer[2] = {
+        KMER<T>(KmerExtractorBOSS::encode(k1)),
+        KMER<T>(KmerExtractorBOSS::encode(k2))
     };
     ASSERT_EQ(truth, kmer[0] < kmer[1]);
 }
 
 TYPED_TEST(KmerBOSS, LessEdge) {
-    test_kmer_less<TypeParam>("ATGC", "ATGG", true);
+    test_kmer_less<typename TypeParam::type>("ATGC", "ATGG", true);
 }
 
 TYPED_TEST(KmerBOSS, Less) {
-    test_kmer_less<TypeParam>("ACTG", "GCTG", true);
+    test_kmer_less<typename TypeParam::type>("ACTG", "GCTG", true);
 }
 
 TYPED_TEST(KmerBOSS, LessLong) {
-    test_kmer_less<TypeParam>(
+    test_kmer_less<typename TypeParam::type>(
         std::string(kSizeOfKmer * 8 / kBitsPerChar - 1, 'A') +  "C",
         std::string(kSizeOfKmer * 8 / kBitsPerChar - 1, 'A') +  "T",
         true
     );
 
-    test_kmer_less<TypeParam>(
+    test_kmer_less<typename TypeParam::type>(
         std::string(kSizeOfKmer * 8 / kBitsPerChar - 2, 'A') + "CA",
         std::string(kSizeOfKmer * 8 / kBitsPerChar - 2, 'A') + "TA",
         true
     );
 }
 
-template <typename TypeParam>
+template <typename T>
 void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
-    KMER<TypeParam> kmer[2] = {
-        KMER<TypeParam>(KmerExtractorBOSS::encode(k1)),
-        KMER<TypeParam>(KmerExtractorBOSS::encode(k2))
+    KMER<T> kmer[2] = {
+        KMER<T>(KmerExtractorBOSS::encode(k1)),
+        KMER<T>(KmerExtractorBOSS::encode(k2))
     };
-    ASSERT_EQ(truth, KMER<TypeParam>::compare_suffix(kmer[0], kmer[1], 1));
+    ASSERT_EQ(truth, KMER<T>::compare_suffix(kmer[0], kmer[1], 1));
 }
 
 TYPED_TEST(KmerBOSS, CompareSuffixTrue) {
-    test_kmer_suffix<TypeParam>("ACTG", "GCTG", true);
+    test_kmer_suffix<typename TypeParam::type>("ACTG", "GCTG", true);
 }
 
 TYPED_TEST(KmerBOSS, CompareSuffixFalse) {
-    test_kmer_suffix<TypeParam>("ATTG", "ACTG", false);
+    test_kmer_suffix<typename TypeParam::type>("ATTG", "ACTG", false);
 }
 
 TYPED_TEST(KmerBOSS, CompareSuffixTrueLong) {
@@ -320,11 +323,11 @@ TYPED_TEST(KmerBOSS, CompareSuffixTrueLong) {
     std::string long_seq_alt(long_seq);
 
     long_seq_alt[0] = 'T';
-    KMER<TypeParam> kmer[2] = {
-        KMER<TypeParam>(KmerExtractorBOSS::encode(long_seq)),
-        KMER<TypeParam>(KmerExtractorBOSS::encode(long_seq_alt))
+    KMER<typename TypeParam::type> kmer[2] = {
+        KMER<typename TypeParam::type>(KmerExtractorBOSS::encode(long_seq)),
+        KMER<typename TypeParam::type>(KmerExtractorBOSS::encode(long_seq_alt))
     };
-    ASSERT_TRUE(KMER<TypeParam>::compare_suffix(kmer[0], kmer[1], 1));
+    ASSERT_TRUE(KMER<typename TypeParam::type>::compare_suffix(kmer[0], kmer[1], 1));
 
     //shift, then compare
     long_seq_alt[kSizeOfKmer * 8 / kBitsPerChar - 2] = 'T';
@@ -333,11 +336,11 @@ TYPED_TEST(KmerBOSS, CompareSuffixTrueLong) {
         = kmer[0].seq_ >> static_cast<int>((kSizeOfKmer * 8 / kBitsPerChar - 2)
                                                 * kBitsPerChar);
 
-    kmer[1] = KMER<TypeParam>(KmerExtractorBOSS::encode(
+    kmer[1] = KMER<typename TypeParam::type>(KmerExtractorBOSS::encode(
         long_seq_alt.substr(kSizeOfKmer * 8 / kBitsPerChar - 2)
     ));
 
-    ASSERT_TRUE(KMER<TypeParam>::compare_suffix(kmer[0], kmer[1], 1));
+    ASSERT_TRUE(KMER<typename TypeParam::type>::compare_suffix(kmer[0], kmer[1], 1));
 }
 
 TYPED_TEST(KmerBOSS, CompareSuffixFalseLong) {
@@ -350,11 +353,11 @@ TYPED_TEST(KmerBOSS, CompareSuffixFalseLong) {
 
     long_seq_alt[1] = 'T';
 
-    test_kmer_suffix<TypeParam>(long_seq, long_seq_alt, false);
+    test_kmer_suffix<typename TypeParam::type>(long_seq, long_seq_alt, false);
 }
 
 TYPED_TEST(KmerBOSS, SizeOfClass) {
-    EXPECT_EQ(kSizeOfKmer, sizeof(KMER<TypeParam>));
+    EXPECT_EQ(kSizeOfKmer, sizeof(KMER<typename TypeParam::type>));
 }
 
 

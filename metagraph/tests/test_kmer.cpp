@@ -38,11 +38,15 @@ void test_kmer_packed_codec(const std::string &test_kmer,
     EXPECT_EQ(test_compare_kmer, kmer_packed_codec<IntType>(test_kmer));
 }
 
+// Workaround to avoid the issues with the uint128_t type traits undefined in AppleClang
+struct UINT64_ { typedef uint64_t type; };
+struct UINT128_ { typedef sdsl::uint128_t type; };
+struct UINT256_ { typedef sdsl::uint256_t type; };
+typedef ::testing::Types<UINT64_,
+                         UINT128_,
+                         UINT256_> IntTypes;
 template <class IntType>
 class Kmer : public ::testing::Test { };
-typedef ::testing::Types<uint64_t,
-                         sdsl::uint128_t,
-                         sdsl::uint256_t> IntTypes;
 TYPED_TEST_SUITE(Kmer, IntTypes);
 
 template <class IntType>
@@ -50,7 +54,7 @@ class Integer : public ::testing::Test { };
 TYPED_TEST_SUITE(Integer, IntTypes);
 
 TYPED_TEST(Integer, compare0) {
-    TypeParam value = 0;
+    typename TypeParam::type value = 0;
 
     ASSERT_TRUE(value < 7ull);
     ASSERT_TRUE(value < 6ull);
@@ -72,7 +76,7 @@ TYPED_TEST(Integer, compare0) {
 }
 
 TYPED_TEST(Integer, compare7) {
-    TypeParam value = 7;
+    typename TypeParam::type value = 7;
 
     ASSERT_TRUE(value >= 7ull);
     ASSERT_TRUE(value >= 6ull);
@@ -82,7 +86,7 @@ TYPED_TEST(Integer, compare7) {
 }
 
 TYPED_TEST(Integer, int_compare0) {
-    TypeParam value = 0;
+    typename TypeParam::type value = 0;
 
     ASSERT_TRUE(7ull > value);
     ASSERT_TRUE(6ull > value);
@@ -104,7 +108,7 @@ TYPED_TEST(Integer, int_compare0) {
 }
 
 TYPED_TEST(Integer, int_compare7) {
-    TypeParam value = 7;
+    typename TypeParam::type value = 7;
 
     ASSERT_TRUE(7ull <= value);
     ASSERT_TRUE(6ull <= value);
@@ -114,22 +118,22 @@ TYPED_TEST(Integer, int_compare7) {
 }
 
 TYPED_TEST(Integer, Minus) {
-    TypeParam value = 0;
+    typename TypeParam::type value = 0;
     value -= 1llu;
-    ASSERT_TRUE(value == (TypeParam(0) - 1llu));
-    ASSERT_TRUE(TypeParam(0) == ~value);
+    ASSERT_TRUE(value == (typename TypeParam::type(0) - 1llu));
+    ASSERT_TRUE(typename TypeParam::type(0) == ~value);
 }
 
 TYPED_TEST(Integer, Plus) {
-    TypeParam value = 0;
+    typename TypeParam::type value = 0;
     value += sdsl::bits::lo_set[64];
-    ASSERT_TRUE(TypeParam(0) + sdsl::bits::lo_set[64] == value);
-    ASSERT_TRUE(TypeParam(sdsl::bits::lo_set[64]) == value);
+    ASSERT_TRUE(typename TypeParam::type(0) + sdsl::bits::lo_set[64] == value);
+    ASSERT_TRUE(typename TypeParam::type(sdsl::bits::lo_set[64]) == value);
     ASSERT_TRUE(sdsl::bits::lo_set[64] == value);
 }
 
 TYPED_TEST(Integer, Plus1) {
-    TypeParam value = sdsl::bits::lo_set[31];
+    typename TypeParam::type value = sdsl::bits::lo_set[31];
     value <<= 32;
     value += sdsl::bits::lo_set[32];
     value += 1;
@@ -138,7 +142,7 @@ TYPED_TEST(Integer, Plus1) {
 }
 
 TYPED_TEST(Integer, And1) {
-    TypeParam value = sdsl::bits::lo_set[32];
+    typename TypeParam::type value = sdsl::bits::lo_set[32];
     ASSERT_TRUE(sdsl::bits::lo_set[32] == (value & sdsl::bits::lo_set[32]));
     value &= sdsl::bits::lo_set[32];
     ASSERT_TRUE(sdsl::bits::lo_set[32] == value);
@@ -147,89 +151,89 @@ TYPED_TEST(Integer, And1) {
     value &= sdsl::bits::lo_set[64];
     ASSERT_TRUE(sdsl::bits::lo_unset[32] == value);
 
-    ASSERT_TRUE(0llu == ((value << (sizeof(TypeParam) * 8 - 64)) & 0));
+    ASSERT_TRUE(0llu == ((value << (sizeof(typename TypeParam::type) * 8 - 64)) & 0));
     ASSERT_TRUE(0llu != value);
-    value <<= sizeof(TypeParam) * 8 - 64;
+    value <<= sizeof(typename TypeParam::type) * 8 - 64;
     ASSERT_TRUE(0llu != value);
     value &= 0llu;
     ASSERT_TRUE(0llu == value);
 }
 
 TYPED_TEST(Integer, LeftShift) {
-    TypeParam value = sdsl::bits::lo_set[32];
+    typename TypeParam::type value = sdsl::bits::lo_set[32];
     value <<= 32;
-    ASSERT_TRUE(TypeParam(sdsl::bits::lo_set[32]) << 32 == value);
-    ASSERT_TRUE(TypeParam(uint64_t(sdsl::bits::lo_set[32]) << 32) == value);
+    ASSERT_TRUE(typename TypeParam::type(sdsl::bits::lo_set[32]) << 32 == value);
+    ASSERT_TRUE(typename TypeParam::type(uint64_t(sdsl::bits::lo_set[32]) << 32) == value);
     ASSERT_TRUE((uint64_t(sdsl::bits::lo_set[32]) << 32) == value);
 
     // Avoid warning "shift count >= width of type"
-    ASSERT_TRUE(((value << (sizeof(TypeParam) * 8 - 1)) << 1) == 0llu);
+    ASSERT_TRUE(((value << (sizeof(typename TypeParam::type) * 8 - 1)) << 1) == 0llu);
     // Avoid warning "shift count >= width of type"
-    value <<= sizeof(TypeParam) * 8 - 1;
+    value <<= sizeof(typename TypeParam::type) * 8 - 1;
     value <<= 1;
     ASSERT_TRUE(0llu == value);
 
     value = sdsl::bits::lo_unset[32];
-    ASSERT_TRUE(0llu != (value << (sizeof(TypeParam) * 8 - 64)));
-    value <<= sizeof(TypeParam) * 8 - 64;
+    ASSERT_TRUE(0llu != (value << (sizeof(typename TypeParam::type) * 8 - 64)));
+    value <<= sizeof(typename TypeParam::type) * 8 - 64;
     ASSERT_TRUE(0llu != value);
 }
 
 TYPED_TEST(Integer, RightShift) {
-    TypeParam value = uint64_t(sdsl::bits::lo_set[32]) << 32;
+    typename TypeParam::type value = uint64_t(sdsl::bits::lo_set[32]) << 32;
     value >>= 32;
-    ASSERT_TRUE((TypeParam(uint64_t(sdsl::bits::lo_set[32]) << 32) >> 32) == value);
-    ASSERT_TRUE(TypeParam(sdsl::bits::lo_set[32]) == value);
+    ASSERT_TRUE((typename TypeParam::type(uint64_t(sdsl::bits::lo_set[32]) << 32) >> 32) == value);
+    ASSERT_TRUE(typename TypeParam::type(sdsl::bits::lo_set[32]) == value);
     ASSERT_TRUE(sdsl::bits::lo_set[32] == value);
     value >>= 32;
     ASSERT_TRUE(0llu == value);
 }
 
 TYPED_TEST(Integer, LeftRightShift) {
-    TypeParam value = sdsl::bits::lo_set[32];
+    typename TypeParam::type value = sdsl::bits::lo_set[32];
 
-    value <<= sizeof(TypeParam) * 8 - 32;
-    value >>= sizeof(TypeParam) * 8 - 32;
-    ASSERT_TRUE(TypeParam(sdsl::bits::lo_set[32]) == value);
+    value <<= sizeof(typename TypeParam::type) * 8 - 32;
+    value >>= sizeof(typename TypeParam::type) * 8 - 32;
+    ASSERT_TRUE(typename TypeParam::type(sdsl::bits::lo_set[32]) == value);
     ASSERT_TRUE(sdsl::bits::lo_set[32] == value);
 
-    value <<= sizeof(TypeParam) * 8 - 31;
-    value >>= sizeof(TypeParam) * 8 - 31;
-    ASSERT_TRUE(TypeParam(sdsl::bits::lo_set[31]) == value);
+    value <<= sizeof(typename TypeParam::type) * 8 - 31;
+    value >>= sizeof(typename TypeParam::type) * 8 - 31;
+    ASSERT_TRUE(typename TypeParam::type(sdsl::bits::lo_set[31]) == value);
     ASSERT_TRUE(sdsl::bits::lo_set[31] == value);
 
-    value <<= sizeof(TypeParam) * 8 - 28;
-    value >>= sizeof(TypeParam) * 8 - 28;
-    ASSERT_TRUE(TypeParam(sdsl::bits::lo_set[28]) == value);
+    value <<= sizeof(typename TypeParam::type) * 8 - 28;
+    value >>= sizeof(typename TypeParam::type) * 8 - 28;
+    ASSERT_TRUE(typename TypeParam::type(sdsl::bits::lo_set[28]) == value);
     ASSERT_TRUE(sdsl::bits::lo_set[28] == value);
 
-    value <<= sizeof(TypeParam) * 8 - 3;
-    value >>= sizeof(TypeParam) * 8 - 3;
-    ASSERT_TRUE(TypeParam(sdsl::bits::lo_set[3]) == value);
+    value <<= sizeof(typename TypeParam::type) * 8 - 3;
+    value >>= sizeof(typename TypeParam::type) * 8 - 3;
+    ASSERT_TRUE(typename TypeParam::type(sdsl::bits::lo_set[3]) == value);
     ASSERT_TRUE(sdsl::bits::lo_set[3] == value);
 }
 
 TYPED_TEST(Kmer, Simple) {
-    KMer<TypeParam, kBitsPerChar> kmer(
-        std::vector<uint64_t>(sizeof(TypeParam) * 8 / kBitsPerChar, 0)
+    KMer<typename TypeParam::type, kBitsPerChar> kmer(
+        std::vector<uint64_t>(sizeof(typename TypeParam::type) * 8 / kBitsPerChar, 0)
     );
-    for (size_t i = 0; i < sizeof(TypeParam) * 8 / kBitsPerChar; ++i) {
+    for (size_t i = 0; i < sizeof(typename TypeParam::type) * 8 / kBitsPerChar; ++i) {
         ASSERT_EQ(0llu, kmer[i]);
     }
 }
 
 TYPED_TEST(Kmer, Invertible) {
-    test_kmer_packed_codec<TypeParam>("ATGG", "ATGG");
+    test_kmer_packed_codec<typename TypeParam::type>("ATGG", "ATGG");
 }
 
 TYPED_TEST(Kmer, BitShiftBuild) {
     std::string long_seq = "ATGCCTGA";
-    while (long_seq.length() < sizeof(TypeParam) * 8 / kBitsPerChar) {
+    while (long_seq.length() < sizeof(typename TypeParam::type) * 8 / kBitsPerChar) {
         long_seq += long_seq;
     }
-    long_seq = long_seq.substr(0, sizeof(TypeParam) * 8 / kBitsPerChar);
+    long_seq = long_seq.substr(0, sizeof(typename TypeParam::type) * 8 / kBitsPerChar);
     //test bit shifting
-    KMer<TypeParam, kBitsPerChar> kmer_builtup(0u);
+    KMer<typename TypeParam::type, kBitsPerChar> kmer_builtup(0u);
     size_t k = 0;
     //ASSERT_EQ(k, kmer_builtup.get_k());
     ASSERT_EQ(k * kBitsPerChar, sdsl::bits::hi(kmer_builtup.seq_));
@@ -242,15 +246,15 @@ TYPED_TEST(Kmer, BitShiftBuild) {
                                              kmer_extractor.alphabet);
     ASSERT_EQ(long_seq, dec);
 
-    test_kmer_packed_codec<TypeParam>(long_seq, long_seq);
+    test_kmer_packed_codec<typename TypeParam::type>(long_seq, long_seq);
 }
 
 TYPED_TEST(Kmer, UpdateKmer) {
-    KMer<TypeParam, kBitsPerChar> kmer[2] = {
-        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode("ATGC")),
-        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode("TGCT"))
+    KMer<typename TypeParam::type, kBitsPerChar> kmer[2] = {
+        KMer<typename TypeParam::type, kBitsPerChar>(kmer_extractor.encode("ATGC")),
+        KMer<typename TypeParam::type, kBitsPerChar>(kmer_extractor.encode("TGCT"))
     };
-    KMer<TypeParam, kBitsPerChar> updated = kmer[0];
+    KMer<typename TypeParam::type, kBitsPerChar> updated = kmer[0];
     updated.to_next(4, kmer_extractor.encode('T'));
     EXPECT_EQ(kmer[1], updated);
     auto prev = kmer[1];
@@ -259,9 +263,9 @@ TYPED_TEST(Kmer, UpdateKmer) {
 }
 
 TYPED_TEST(Kmer, NextPrevKmer) {
-    KMer<TypeParam, kBitsPerChar> kmer[2] = {
-        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode("ATGC")),
-        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode("TGCT"))
+    KMer<typename TypeParam::type, kBitsPerChar> kmer[2] = {
+        KMer<typename TypeParam::type, kBitsPerChar>(kmer_extractor.encode("ATGC")),
+        KMer<typename TypeParam::type, kBitsPerChar>(kmer_extractor.encode("TGCT"))
     };
 
     auto prev = kmer[1];
@@ -273,15 +277,15 @@ TYPED_TEST(Kmer, NextPrevKmer) {
 
 TYPED_TEST(Kmer, UpdateKmerLong) {
     std::string long_seq = "ATGCCTGA";
-    while (long_seq.length() < sizeof(TypeParam) * 8 / kBitsPerChar) {
+    while (long_seq.length() < sizeof(typename TypeParam::type) * 8 / kBitsPerChar) {
         long_seq += long_seq;
     }
-    long_seq = long_seq.substr(0, sizeof(TypeParam) * 8 / kBitsPerChar);
+    long_seq = long_seq.substr(0, sizeof(typename TypeParam::type) * 8 / kBitsPerChar);
     std::string long_seq_alt(long_seq.substr(1));
     long_seq_alt.push_back('T');
-    KMer<TypeParam, kBitsPerChar> kmer[2] = {
-        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode(long_seq)),
-        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode(long_seq_alt))
+    KMer<typename TypeParam::type, kBitsPerChar> kmer[2] = {
+        KMer<typename TypeParam::type, kBitsPerChar>(kmer_extractor.encode(long_seq)),
+        KMer<typename TypeParam::type, kBitsPerChar>(kmer_extractor.encode(long_seq_alt))
     };
 
     kmer[0].to_next(long_seq.length(), kmer_extractor.encode('T'));
@@ -293,13 +297,13 @@ TYPED_TEST(Kmer, UpdateKmerLong) {
 
 TYPED_TEST(Kmer, UpdateKmerVsConstruct) {
     std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA";
-    long_seq0.resize(std::min(sizeof(TypeParam) * 8 / kBitsPerChar,
+    long_seq0.resize(std::min(sizeof(typename TypeParam::type) * 8 / kBitsPerChar,
                               long_seq0.size()));
     std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAT";
-    long_seq1.resize(std::min(sizeof(TypeParam) * 8 / kBitsPerChar,
+    long_seq1.resize(std::min(sizeof(typename TypeParam::type) * 8 / kBitsPerChar,
                               long_seq0.size()));
     auto seq0 = kmer_extractor.encode(long_seq0);
-    KMer<TypeParam, kBitsPerChar> kmer0(seq0.begin(), seq0.size());
+    KMer<typename TypeParam::type, kBitsPerChar> kmer0(seq0.begin(), seq0.size());
 
     kmer0.to_next(long_seq0.length(), kmer_extractor.encode(long_seq1.back()));
 
@@ -308,29 +312,29 @@ TYPED_TEST(Kmer, UpdateKmerVsConstruct) {
     EXPECT_EQ(long_seq1, reconst_seq1);
 
     seq0.emplace_back(kmer_extractor.encode(long_seq1.back()));
-    KMer<TypeParam, kBitsPerChar> kmer1(seq0.begin() + 1, seq0.size() - 1);
+    KMer<typename TypeParam::type, kBitsPerChar> kmer1(seq0.begin() + 1, seq0.size() - 1);
     std::string reconst_seq2 = kmer1.to_string(long_seq1.length(),
                                                kmer_extractor.alphabet);
     EXPECT_EQ(long_seq1, reconst_seq2);
 }
 
 TYPED_TEST(Kmer, InvertibleEndDol) {
-    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("ATG$", "ATGA"), "");
+    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("ATG$", "ATGA"), "");
 }
 
 TYPED_TEST(Kmer, InvertibleStartDol) {
-    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("$ATGG", "AATGG"), "");
+    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("$ATGG", "AATGG"), "");
 }
 
 TYPED_TEST(Kmer, InvertibleBothDol) {
-    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("$ATG$", "AATGA"), "");
+    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("$ATG$", "AATGA"), "");
 }
 
 TYPED_TEST(Kmer, InvalidChars) {
-    KMer<TypeParam, kBitsPerChar> kmer(kmer_extractor.encode("ATGC"));
+    KMer<typename TypeParam::type, kBitsPerChar> kmer(kmer_extractor.encode("ATGC"));
 
-    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("ATGH", "ATGA"), "");
-    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("ATGЯ", "ATGAA"), "");
+    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("ATGH", "ATGA"), "");
+    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("ATGЯ", "ATGAA"), "");
 
     ASSERT_DEATH(kmer.to_next(4, kmer_extractor.encode('N')), "");
     ASSERT_DEATH(kmer.to_next(4, kmer_extractor.encode("Я")[0]), "");
@@ -347,23 +351,23 @@ void test_kmer_packed_less(const std::string &k1,
 }
 
 TYPED_TEST(Kmer, LessEdge) {
-    test_kmer_packed_less<TypeParam>("ATGC", "ATGG", true);
+    test_kmer_packed_less<typename TypeParam::type>("ATGC", "ATGG", true);
 }
 
 TYPED_TEST(Kmer, Less) {
-    test_kmer_packed_less<TypeParam>("ACTG", "GCTG", true);
+    test_kmer_packed_less<typename TypeParam::type>("ACTG", "GCTG", true);
 }
 
 TYPED_TEST(Kmer, LessLong) {
-    test_kmer_packed_less<TypeParam>(
-        std::string(sizeof(TypeParam) * 8 / kBitsPerChar - 1, 'A') +  "C",
-        std::string(sizeof(TypeParam) * 8 / kBitsPerChar - 1, 'A') +  "T",
+    test_kmer_packed_less<typename TypeParam::type>(
+        std::string(sizeof(typename TypeParam::type) * 8 / kBitsPerChar - 1, 'A') +  "C",
+        std::string(sizeof(typename TypeParam::type) * 8 / kBitsPerChar - 1, 'A') +  "T",
         true
     );
 
-    test_kmer_packed_less<TypeParam>(
-        std::string(sizeof(TypeParam) * 8 / kBitsPerChar - 2, 'A') + "CA",
-        std::string(sizeof(TypeParam) * 8 / kBitsPerChar - 2, 'A') + "TA",
+    test_kmer_packed_less<typename TypeParam::type>(
+        std::string(sizeof(typename TypeParam::type) * 8 / kBitsPerChar - 2, 'A') + "CA",
+        std::string(sizeof(typename TypeParam::type) * 8 / kBitsPerChar - 2, 'A') + "TA",
         true
     );
 }
@@ -456,10 +460,10 @@ void test_kmer_codec(const std::string &sequence) {
 
 TYPED_TEST(Kmer, nucleotide_alphabet_pack_6_2Bit) {
     const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
-    test_kmer_codec<TypeParam, 2>(sequence);
+    test_kmer_codec<typename TypeParam::type, 2>(sequence);
 }
 
 TYPED_TEST(Kmer, nucleotide_alphabet_pack_6) {
     const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
-    test_kmer_codec<TypeParam, 3>(sequence);
+    test_kmer_codec<typename TypeParam::type, 3>(sequence);
 }
