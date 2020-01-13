@@ -7,8 +7,7 @@ import logging
 import os
 import urllib
 
-# TODO:
-# - handle retries for pending jobs
+# TODO: - maybe handle retries for pending jobs
 
 args = None  # the parsed command line arguments
 
@@ -32,8 +31,6 @@ pending_transfers = set()
 
 # set to true when all download ids were read
 download_done = False
-
-logger = logging.getLogger('metagraph-server')
 
 status_str = f"""
 <html>
@@ -76,7 +73,7 @@ class Sra:
                 for line in fp:
                     line = line.rstrip()
                     if line in downloaded_sras:  # already processed
-                        print(f'Lone {line} already downloaded')
+                        print(f'{line} already downloaded - assuming it\'s ready for processing')
                         continue
                     yield line
         return None
@@ -109,16 +106,15 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 download_done = True  # nothing else to download
         create_jobs_int = int(create_jobs[0])
         clean_jobs_int = int(clean_jobs[0])
-        if not to_create_sras or (0 < clean_jobs_int < 4):  # there is room for more clean jobs
-            if to_clean_sras:
-                sra_id, dbg_file = to_clean_sras.popitem()
-                response['clean'] = {'id': sra_id, 'location': dbg_file}
-                pending_cleans.add(sra_id)
-        elif create_jobs_int == 0:
-            if to_create_sras:
+        if create_jobs_int == 0:
+            if to_create_sras and clean_jobs_int == 0:
                 sra_id, directory = to_create_sras.popitem()
                 response['create'] = {'id': sra_id, 'location': directory}
                 pending_creates.add(sra_id)
+            elif to_clean_sras and (0 <= clean_jobs_int < 4):  # there is room for more clean jobs
+                sra_id, dbg_file = to_clean_sras.popitem()
+                response['clean'] = {'id': sra_id, 'location': dbg_file}
+                pending_cleans.add(sra_id)
         self.send_reply(200, json.dumps(response), {'Content-type': 'application/json'})
 
     def handle_get_status(self):
@@ -127,57 +123,65 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             to_transfer_sras, downloaded_sras, created_sras, cleaned_sras, transferred_sras),
                         {'Content-type': 'text/html'})
 
-    def handle_ack_download(self, postvars):
-        sra_id = postvars.get(b'id')
-        location = postvars.get(b'location')
+    def handle_ack(self, operation, post_vars, add_maps, remove_map):
+        sra_id = post_vars.get(b'id')
+        location = post_vars.get(b'location')
         if None in (sra_id, location):
             self.send_reply(400, 'id or location not specified')
-            return
-        filename = os.path.join(args.output_dir, 'downloaded_sras')
+            return False
+        filename = os.path.join(args.output_dir, f'{operation}ed_sras')
         sra_id_str = sra_id[0].decode('utf-8')
         location_str = location[0].decode('utf-8')
         with open(filename, 'a') as fp:
             fp.write(f'{sra_id_str} {location_str}\n')
-        downloaded_sras[sra_id_str] = location_str
-        to_create_sras[sra_id_str] = location_str
+        for m in add_maps:
+            m[sra_id_str] = location_str
         self.send_reply(200, "")
         try:
-            pending_downloads.remove(sra_id_str)
+            remove_map.remove(sra_id_str)
         except KeyError:
-            logger.warning(f'Acknowledging nonexistent pending download {sra_id_str}')
+            logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
+        return True
 
-    def handle_ack_create(self, postvars):
-        sra_id = postvars.get(b'id')
-        location = postvars.get(b'location')
-        if None in (sra_id, location):
-            self.send_reply(400, 'id or location not specified')
+    def handle_nack(self, operation, post_vars, remove_map):
+        sra_id = post_vars.get(b'id')
+        if sra_id is None:
+            self.send_reply(400, 'id not specified')
             return
-        filename = os.path.join(args.output_dir, 'created_sras')
+        filename = os.path.join(args.output_dir, f'failed_{operation}.id')
         sra_id_str = sra_id[0].decode('utf-8')
-        location_str = location[0].decode('utf-8')
         with open(filename, 'a') as fp:
-            fp.write(f'{sra_id_str} {location_str}\n')
-        created_sras[sra_id_str] = location_str
-        to_clean_sras[sra_id_str] = location_str
+            fp.write(f'{sra_id_str}\n')
         self.send_reply(200, "")
+        try:
+            remove_map.remove(sra_id_str)
+        except KeyError:
+            logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
 
-        pending_creates.remove(sra_id_str)
+    def handle_ack_download(self, post_vars):
+        self.handle_ack('download', post_vars, [downloaded_sras, to_create_sras], pending_downloads)
 
-    def handle_ack_clean(self, postvars):
-        sra_id = postvars.get(b'id')
-        location = postvars.get(b'location')
-        if None in (sra_id, location):
-            self.send_reply(400, 'id or location not specified')
-            return
-        filename = os.path.join(args.output_dir, 'cleaned_sras')
-        sra_id_str = sra_id[0].decode('utf-8')
-        location_str = location[0].decode('utf-8')
-        with open(filename, 'a') as fp:
-            fp.write(f'{sra_id_str} {location_str}\n')
-        cleaned_sras[sra_id_str] = location_str
-        self.send_reply(200, "")
+    def handle_ack_create(self, post_vars):
+        self.handle_ack('create', post_vars, [created_sras, to_clean_sras], pending_creates)
 
-        pending_cleans.remove(sra_id_str)
+    def handle_ack_clean(self, post_vars):
+        if self.handle_ack('clean', post_vars, [cleaned_sras, to_transfer_sras], pending_cleans):
+            pending_transfers[post_vars.get(b'id')] = post_vars.get(b'location')
+
+    def handle_ack_transfer(self, post_vars):
+        self.handle_ack('transfer', post_vars, [transferred_sras], pending_transfers)
+
+    def handle_nack_download(self, post_vars):
+        self.handle_nack('download', post_vars, pending_downloads)
+
+    def handle_nack_create(self, post_vars):
+        self.handle_nack('create', post_vars, pending_creates)
+
+    def handle_nack_clean(self, post_vars):
+        self.handle_nack('clean', post_vars, pending_cleans)
+
+    def handle_nack_transfer(self, post_vars):
+        self.handle_nack('transfer', post_vars, pending_transfers)
 
     def send_reply(self, code, message, headers={}):
         self.send_response(code)
@@ -188,10 +192,10 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(message.encode('utf-8'))
         self.wfile.flush()
 
-    def get_postvars(self):
+    def get_post_vars(self):
         ctype, pdict = cgi.parse_header(self.headers['content-type'])
         if ctype != 'application/x-www-form-urlencoded':
-            self.send_reply(400, "Bad content-type, only x-www-form-urlencoded accepted")
+            self.send_reply(400, "Bad content-type, only application/x-www-form-urlencoded accepted")
             return None
         length = int(self.headers['content-length'])
         return urllib.parse.parse_qs(self.rfile.read(length), keep_blank_values=True)
@@ -208,18 +212,24 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
-        postvars = self.get_postvars()
-        if not postvars:
+        post_vars = self.get_post_vars()
+        if not post_vars:
             return
         if parsed_url.path == '/jobs/ack/download':
-            self.handle_ack_download(postvars)
+            self.handle_ack_download(post_vars)
         elif parsed_url.path == '/jobs/ack/create':
-            self.handle_ack_create(postvars)
+            self.handle_ack_create(post_vars)
         elif parsed_url.path == '/jobs/ack/clean':
-            self.handle_ack_clean(postvars)
-            self.handle_ack_transfer(postvars)
+            self.handle_ack_clean(post_vars)
+        if parsed_url.path == '/jobs/nack/download':
+            self.handle_nack_download(post_vars)
+        elif parsed_url.path == '/jobs/nack/create':
+            self.handle_nack_create(post_vars)
+        elif parsed_url.path == '/jobs/nack/clean':
+            self.handle_nack_clean(post_vars)
         else:
             self.send_reply(404, f'Invalid path: {self.path}\n')
+
 
 def load_file_dict(filename):
     result = {}
@@ -232,6 +242,7 @@ def load_file_dict(filename):
     except FileNotFoundError:  # no downloaded sras yet, that's fine
         return result
     return result
+
 
 def init_state():
     filename = os.path.join(args.output_dir, 'downloaded_sras')
@@ -247,9 +258,16 @@ def init_state():
     cleaned_sras = load_file_dict(os.path.join(args.output_dir, 'cleaned_sras'))
     transferred_sras = load_file_dict(os.path.join(args.output_dir, 'transferred_sras'))
 
-    to_create_sras = { k : downloaded_sras[k] for k in set(downloaded_sras) - set(created_sras) }
+    to_create_sras = {k: downloaded_sras[k] for k in set(downloaded_sras) - set(created_sras)}
     to_clean_sras = {k: created_sras[k] for k in set(created_sras) - set(cleaned_sras)}
     to_transfer_sras = {k: cleaned_sras[k] for k in set(cleaned_sras) - set(transferred_sras)}
+
+
+def init_logging():
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
+    file_handler = logging.FileHandler("{0}/{1}.log".format(args.output_dir, 'server'))
+    file_handler.setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(file_handler)
 
 
 if __name__ == '__main__':
@@ -267,18 +285,17 @@ if __name__ == '__main__':
         help='Location of the directory containing the input data')
 
     args = parser.parse_args()
+    init_logging()
     data_files = [os.path.join(args.data_dir, f) for f in os.listdir(args.data_dir) if
                   os.path.isfile(os.path.join(args.data_dir, f)) and f.endswith('ids')]
 
     if len(data_files) == 0:
-        print(f"No files found in '{args.data_dir}'. Exiting.")
+        logging.fatal(f"No files found in '{args.data_dir}'. Exiting.")
         exit(1)
 
     init_state()
 
     sra_download_gen = Sra(data_files).next_item()
-    sra_create_gen = Sra(data_files).next_item()
-    sra_clean_gen = Sra(data_files).next_item()
 
     httpd = http.server.HTTPServer(('localhost', args.port), SimpleHTTPRequestHandler)
     print(f'Starting server on port {args.port}')
