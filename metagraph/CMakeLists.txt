@@ -125,22 +125,26 @@ endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
-if(NOT DEFINED WITH_AVX)
-set(WITH_AVX TRUE)
-endif()
-if(WITH_AVX)
-string(APPEND CMAKE_CXX_FLAGS " -mavx -mavx2 -mfma -mbmi -mbmi2")
-else()
-message(STATUS "Compiling without AVX instructions!")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  file(STRINGS "/proc/cpuinfo" _cpuinfo)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  execute_process(COMMAND sysctl -n machdep.cpu.features
+                  OUTPUT_VARIABLE _cpuinfo OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(COMMAND sysctl -n machdep.cpu.leaf7_features
+                  OUTPUT_VARIABLE _cpuinfo2 OUTPUT_STRIP_TRAILING_WHITESPACE)
+  set(_cpuinfo "${_cpuinfo} ${_cpuinfo2}")
 endif()
 
-if(NOT DEFINED WITH_MSSE42)
-set(WITH_MSSE42 TRUE)
-endif()
-if(WITH_MSSE42)
+if(WITH_MSSE42 OR (NOT DEFINED WITH_MSSE42 AND _cpuinfo MATCHES "(sse4_2)|(sse4a)|(SSE4.2)"))
 string(APPEND CMAKE_CXX_FLAGS " -msse4.2")
 else()
-message(STATUS "Compiling without msse4.2 instructions!")
+message(WARNING "Compiling without msse4.2 instructions!")
+endif()
+
+if(WITH_AVX OR (NOT DEFINED WITH_AVX AND _cpuinfo MATCHES "(avx2)|(AVX2)"))
+string(APPEND CMAKE_CXX_FLAGS " -mavx -mavx2 -mfma -mbmi -mbmi2")
+else()
+message(WARNING "Compiling without AVX instructions!")
 endif()
 
 #-------------------
