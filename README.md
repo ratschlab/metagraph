@@ -11,6 +11,11 @@
 
 All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (does not require root)
 
+#### For compiling with AppleClang:
+```
+brew install libomp cmake make htslib boost folly
+```
+
 #### For compiling with GNU GCC:
 ```
 brew install gcc autoconf automake libtool cmake make htslib
