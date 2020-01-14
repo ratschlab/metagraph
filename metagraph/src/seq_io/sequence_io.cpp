@@ -4,15 +4,18 @@
 #include <fstream>
 
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/utils/string_utils.hpp"
 #include "vcf_parser.hpp"
 
 const char kDefaultFastQualityChar = 'I';
 
 
-FastaWriter::FastaWriter(const std::string &filename,
+FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
-                         bool write_counts) : header_(header),
-                                              write_counts_(write_counts) {
+                         bool enumerate_sequences)
+      : header_(header), enumerate_sequences_(enumerate_sequences) {
+    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+
     gz_out_ = gzopen(filename.c_str(), "w");
     if (gz_out_ == Z_NULL) {
         std::cerr << "ERROR: Can't write to " << filename << std::endl;
@@ -26,13 +29,75 @@ FastaWriter::~FastaWriter() {
 
 void FastaWriter::write(const std::string &sequence) {
     if (!write_fasta(gz_out_,
-                     write_counts_ ? header_ + std::to_string(++count_)
-                                   : header_,
+                     enumerate_sequences_ ? header_ + std::to_string(++count_)
+                                          : header_,
                      sequence)) {
         std::cerr << "ERROR: FastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
         exit(1);
     }
 }
+
+
+template <typename T>
+ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
+                                            const std::string &feature_name,
+                                            uint32_t kmer_length,
+                                            const std::string &header,
+                                            bool enumerate_sequences)
+      : kmer_length_(kmer_length),
+        header_(header),
+        enumerate_sequences_(enumerate_sequences) {
+    assert(feature_name.size());
+
+    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+
+    fasta_gz_out_ = gzopen(filename.c_str(), "w");
+    if (fasta_gz_out_ == Z_NULL) {
+        std::cerr << "ERROR: Can't write to " << filename << std::endl;
+        exit(1);
+    }
+
+    filename = utils::remove_suffix(filebase, ".gz", ".fasta") + "." + feature_name + ".gz";
+
+    feature_gz_out_ = gzopen(filename.c_str(), "w");
+    if (feature_gz_out_ == Z_NULL
+            || gzwrite(feature_gz_out_, &kmer_length_, 4) != sizeof(kmer_length_)) {
+        std::cerr << "ERROR: Can't write to " << filename << std::endl;
+        exit(1);
+    }
+}
+
+template <typename T>
+ExtendedFastaWriter<T>::~ExtendedFastaWriter() {
+    gzclose(fasta_gz_out_);
+    gzclose(feature_gz_out_);
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::write(const std::string &sequence,
+                                   const std::vector<feature_type> &kmer_features) {
+    assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
+
+    if (!write_fasta(fasta_gz_out_,
+                     enumerate_sequences_ ? header_ + std::to_string(++count_)
+                                          : header_,
+                     sequence)) {
+        std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
+        exit(1);
+    }
+
+    if (gzwrite(feature_gz_out_, kmer_features.data(),
+                                 kmer_features.size() * sizeof(feature_type))
+            != static_cast<int>(kmer_features.size() * sizeof(feature_type))) {
+        std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump k-mer features" << std::endl;
+        exit(1);
+    }
+}
+
+template class ExtendedFastaWriter<uint8_t>;
+template class ExtendedFastaWriter<uint16_t>;
+template class ExtendedFastaWriter<uint32_t>;
+template class ExtendedFastaWriter<uint64_t>;
 
 
 bool write_fasta(gzFile gz_out, const kseq_t &kseq) {
@@ -90,9 +155,9 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
         && gzputc(gz_out, '\n') == '\n';
 }
 
-
+template <class Callback>
 void read_fasta_file_critical(gzFile input_p,
-                              std::function<void(kseq_t*)> callback,
+                              Callback callback,
                               bool with_reverse) {
     size_t seq_count = 0;
 
@@ -134,6 +199,89 @@ void read_fasta_file_critical(const std::string &filename,
     gzclose(input_p);
 }
 
+template <typename T>
+void read_extended_fasta_file_critical(const std::string &filebase,
+                                       const std::string &feature_name,
+                                       std::function<void(size_t, const kseq_t*, const T*)> callback,
+                                       bool with_reverse) {
+    assert(feature_name.size());
+
+    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+
+    gzFile fasta_p = gzopen(filename.c_str(), "r");
+    if (fasta_p == Z_NULL) {
+        std::cerr << "ERROR: Cannot read from file " << filename << std::endl;
+        exit(1);
+    }
+
+    filename = utils::remove_suffix(filebase, ".gz", ".fasta") + "." + feature_name + ".gz";
+    uint32_t kmer_length;
+
+    gzFile features_p = gzopen(filename.c_str(), "r");
+    if (features_p == Z_NULL
+            || gzread(features_p, &kmer_length, 4) != sizeof(kmer_length)) {
+        std::cerr << "ERROR: Cannot read from file " << filename << std::endl;
+        exit(1);
+    }
+
+    std::vector<T> counts;
+    // read sequences from fasta file
+    read_fasta_file_critical(fasta_p,
+        [&](kseq_t *read_stream) {
+            if (read_stream->seq.l < kmer_length) {
+                std::cerr << "ERROR: Bad fasta file. Found sequence shorter"
+                             " than k-mer length " << kmer_length << std::endl;
+                exit(1);
+            }
+            counts.resize(read_stream->seq.l - kmer_length + 1);
+            // read the features of k-mers in sequence |read_stream|
+            if (gzread(features_p, counts.data(), sizeof(T) * counts.size())
+                    != static_cast<int>(sizeof(T) * counts.size())) {
+                std::cerr << "ERROR: Cannot read k-mer features" << std::endl;
+                exit(1);
+            }
+
+            callback(kmer_length, read_stream, counts.data());
+
+            if (with_reverse) {
+                reverse_complement(read_stream->seq);
+                std::reverse(counts.begin(), counts.end());
+                callback(kmer_length, read_stream, counts.data());
+            }
+        },
+        false
+    );
+
+    if (!gzeof(fasta_p) || gzgetc(features_p) != -1 || !gzeof(features_p)) {
+        std::cerr << "ERROR: There are features left in extension unread" << std::endl;
+        exit(1);
+    }
+
+    gzclose(fasta_p);
+    gzclose(features_p);
+}
+
+template
+void read_extended_fasta_file_critical(const std::string &filebase,
+                                       const std::string &feature_name,
+                                       std::function<void(size_t, const kseq_t*, const uint8_t*)> callback,
+                                       bool with_reverse);
+template
+void read_extended_fasta_file_critical(const std::string &filebase,
+                                       const std::string &feature_name,
+                                       std::function<void(size_t, const kseq_t*, const uint16_t*)> callback,
+                                       bool with_reverse);
+template
+void read_extended_fasta_file_critical(const std::string &filebase,
+                                       const std::string &feature_name,
+                                       std::function<void(size_t, const kseq_t*, const uint32_t*)> callback,
+                                       bool with_reverse);
+template
+void read_extended_fasta_file_critical(const std::string &filebase,
+                                       const std::string &feature_name,
+                                       std::function<void(size_t, const kseq_t*, const uint64_t*)> callback,
+                                       bool with_reverse);
+
 void read_fasta_from_string(const std::string &fasta_flat,
                             std::function<void(kseq_t*)> callback,
                             bool with_reverse) {
@@ -170,16 +318,16 @@ void read_fasta_from_string(const std::string &fasta_flat,
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,
                             size_t k,
-                            std::function<void(std::string&&)> callback,
+                            std::function<void(std::string_view)> callback,
                             bool with_reverse) {
     VCFParser vcf(ref_filename, filename, k);
 
     if (with_reverse) {
         vcf.call_sequences(
             [&](auto&& sequence) {
-                callback(std::string(sequence.begin(), sequence.end()));
+                callback(sequence);
                 reverse_complement(sequence.begin(), sequence.end());
-                callback(std::move(sequence));
+                callback(sequence);
             }
         );
     } else {

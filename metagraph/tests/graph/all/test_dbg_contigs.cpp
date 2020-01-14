@@ -8,8 +8,8 @@
 #include "../../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 
-TYPED_TEST_CASE(DeBruijnGraphTest, GraphTypes);
-TYPED_TEST_CASE(StableDeBruijnGraphTest, StableGraphTypes);
+TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
+TYPED_TEST_SUITE(StableDeBruijnGraphTest, StableGraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {

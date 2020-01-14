@@ -6,9 +6,9 @@
 #define private public
 #define protected public
 
-#include "kmer_extractor.hpp"
-#include "string_utils.hpp"
-#include "reverse_complement.hpp"
+#include "kmer/kmer_extractor.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 template <typename Kmer>
@@ -18,7 +18,7 @@ typedef ::testing::Types<KmerExtractorBOSS::Kmer64,
                          KmerExtractorBOSS::Kmer128,
                          KmerExtractorBOSS::Kmer256> KmerTypes;
 
-TYPED_TEST_CASE(ExtractKmers, KmerTypes);
+TYPED_TEST_SUITE(ExtractKmers, KmerTypes);
 
 #define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractorBOSS::bits_per_char )
 

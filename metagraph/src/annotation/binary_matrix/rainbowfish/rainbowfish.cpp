@@ -11,7 +11,7 @@
 #include "common/threads/threading.hpp"
 #include "common/hash/hash.hpp"
 #include "common/utils/template_utils.hpp"
-#include "binary_matrix/base/binary_matrix.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,

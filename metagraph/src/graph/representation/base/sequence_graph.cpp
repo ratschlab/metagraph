@@ -2,10 +2,11 @@
 
 #include <cassert>
 #include <progress_bar.hpp>
+#include <sdsl/int_vector.hpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
-#include "common/vectors/bitmap.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 
 namespace utils {
     bool get_verbose();
@@ -18,6 +19,16 @@ static_assert(!(kBlockSize & 0xFF));
 
 
 /*************** SequenceGraph ***************/
+
+void SequenceGraph::call_nodes(const std::function<void(node_index)> &callback,
+                               const std::function<bool()> &stop_early) const {
+    assert(num_nodes() == max_index());
+
+    const auto nnodes = num_nodes();
+    for (node_index i = 1; i <= nnodes && !stop_early(); ++i) {
+        callback(i);
+    }
+}
 
 void SequenceGraph::add_extension(std::shared_ptr<GraphExtension> extension) {
     assert(extension.get());
@@ -32,21 +43,16 @@ void SequenceGraph::serialize_extensions(const std::string &filename) const {
 
 /*************** DeBruijnGraph ***************/
 
-node_index DeBruijnGraph::kmer_to_node(const char *begin) const {
-    return kmer_to_node(std::string(begin, get_k()));
-}
-
-node_index DeBruijnGraph::kmer_to_node(const std::string &kmer) const {
+node_index DeBruijnGraph::kmer_to_node(std::string_view kmer) const {
     assert(kmer.size() == get_k());
 
     node_index node = npos;
-    map_to_nodes_sequentially(kmer.begin(), kmer.end(),
-                              [&node](node_index i) { node = i; });
+    map_to_nodes_sequentially(kmer, [&node](node_index i) { node = i; });
     return node;
 }
 
 // Check whether graph contains fraction of nodes from the sequence
-bool DeBruijnGraph::find(const std::string &sequence,
+bool DeBruijnGraph::find(std::string_view sequence,
                          double discovery_fraction) const {
     if (sequence.length() < get_k())
         return false;
@@ -78,11 +84,11 @@ bool DeBruijnGraph::operator==(const DeBruijnGraph &) const {
 }
 
 void DeBruijnGraph::traverse(node_index start,
-                             const char* begin,
-                             const char* end,
+                             const char *begin,
+                             const char *end,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    assert(in_graph(start));
+    assert(start >= 1 && start <= max_index());
     assert(end >= begin);
     if (terminate())
         return;
@@ -97,16 +103,6 @@ void DeBruijnGraph::traverse(node_index start,
     }
 }
 
-void DeBruijnGraph::call_nodes(const std::function<void(node_index)> &callback,
-                               const std::function<bool()> &stop_early) const {
-    assert(num_nodes() == max_index());
-
-    const auto nnodes = num_nodes();
-    for (node_index i = 1; i <= nnodes && !stop_early(); ++i) {
-        callback(i);
-    }
-}
-
 void call_sequences_from(const DeBruijnGraph &graph,
                          node_index start,
                          const DeBruijnGraph::CallPath &callback,
@@ -116,7 +112,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          bool call_unitigs = false,
                          uint64_t min_tip_size = 0,
                          bool kmers_in_single_form = false) {
-    assert(graph.in_graph(start));
+    assert(start >= 1 && start <= graph.max_index());
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
     assert(visited);
@@ -408,7 +404,7 @@ void DeBruijnGraph
 }
 
 void DeBruijnGraph::print(std::ostream &out) const {
-    auto vertex_header = std::string("Vertex");
+    std::string vertex_header("Vertex");
     vertex_header.resize(get_k(), ' ');
 
     out << "Index"
@@ -437,14 +433,11 @@ std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
 }
 
 // returns the edge rank, starting from zero
-size_t incoming_edge_rank(const DeBruijnGraph &graph,
-                          DeBruijnGraph::node_index source,
-                          DeBruijnGraph::node_index target) {
-    assert(graph.in_graph(source));
-    assert(graph.in_graph(target));
-
-    assert(graph.get_node_sequence(source).substr(1)
-                == graph.get_node_sequence(target).substr(0, graph.get_k() - 1));
+size_t incoming_edge_rank(const SequenceGraph &graph,
+                          SequenceGraph::node_index source,
+                          SequenceGraph::node_index target) {
+    assert(source >= 1 && source <= graph.max_index());
+    assert(target >= 1 && target <= graph.max_index());
 
     size_t edge_rank = 0;
     bool done = false;
@@ -462,18 +455,14 @@ size_t incoming_edge_rank(const DeBruijnGraph &graph,
     return edge_rank;
 }
 
-std::vector<DeBruijnGraph::node_index>
-map_sequence_to_nodes(const DeBruijnGraph &graph, const std::string &sequence) {
-    assert(sequence.size() >= graph.get_k());
-
+std::vector<SequenceGraph::node_index>
+map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
     std::vector<SequenceGraph::node_index> nodes;
-    nodes.reserve(sequence.size() - graph.get_k() + 1);
+    nodes.reserve(sequence.size());
 
-    graph.map_to_nodes_sequentially(sequence.begin(), sequence.end(),
+    graph.map_to_nodes_sequentially(sequence,
         [&nodes](auto node) { nodes.push_back(node); }
     );
-
-    assert(nodes.size() == sequence.size() - graph.get_k() + 1);
 
     return nodes;
 }

@@ -1,37 +1,38 @@
 #ifndef __TEST_HELPERS_HPP__
 #define __TEST_HELPERS_HPP__
 
+#include <set>
 
-// Disable death tests
+#include <gtest/gtest.h>
+
+#include "common/logger.hpp"
+
+
 #ifdef _NO_DEATH_TEST
+// Disable death tests
 
 #ifdef ASSERT_DEATH
 #undef ASSERT_DEATH
-#define ASSERT_DEATH(a, b) (void)0
+#define ASSERT_DEATH(...) (void)0
+#define ASSERT_DEATH_SILENT(...) (void)0
 #endif
 
 #ifdef EXPECT_DEATH
 #undef EXPECT_DEATH
-#define EXPECT_DEATH(a, b) (void)0
+#define EXPECT_DEATH(...) (void)0
+#define EXPECT_DEATH_SILENT(...) (void)0
 #endif
 
+#else
+// Define death tests without error messages in log
+#define ASSERT_DEATH_SILENT(...) \
+    mg::common::logger->set_level(spdlog::level::critical); \
+    ASSERT_DEATH(__VA_ARGS__)
+#define EXPECT_DEATH_SILENT(...) \
+    mg::common::logger->set_level(spdlog::level::critical); \
+    EXPECT_DEATH(__VA_ARGS__)
+
 #endif // _NO_DEATH_TEST
-
-
-// Colored logging
-// https://stackoverflow.com/questions/16491675/how-to-send-custom-message-in-google-c-testing-framework
-namespace testing {
-    namespace internal {
-        enum GTestColor {
-            COLOR_DEFAULT,
-            COLOR_RED,
-            COLOR_GREEN,
-            COLOR_YELLOW
-        };
-
-        extern void ColoredPrintf(GTestColor color, const char* fmt, ...);
-    }
-}
 
 #define GTEST_LOG_COLOR testing::internal::COLOR_GREEN
 

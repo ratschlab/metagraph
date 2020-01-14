@@ -1,36 +1,33 @@
 #include "aligner_methods.hpp"
 
 #include "common/algorithms.hpp"
-#include "dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 template <typename NodeType>
 std::vector<Alignment<NodeType>> ExactSeeder<NodeType>
-::operator()(const char *seed_begin,
-             const char *seed_end,
+::operator()(std::string_view seed,
              size_t clipping,
              bool orientation) const {
-    assert(seed_end >= seed_begin);
-
-    const size_t length = seed_end - seed_begin;
+    const size_t length = seed.size();
 
     if (length < graph_.get_k()
             || config_.min_seed_length > graph_.get_k()
             || config_.max_seed_length < graph_.get_k())
         return {};
 
-    auto exact = graph_.kmer_to_node(std::string(seed_begin, seed_begin + graph_.get_k()));
+    auto exact = graph_.kmer_to_node(seed.substr(0, graph_.get_k()));
 
     if (exact == DeBruijnGraph::npos)
         return {};
 
-    auto match_score = config_.match_score(seed_begin, seed_begin + graph_.get_k());
+    auto match_score = config_.match_score(seed.begin(), seed.begin() + graph_.get_k());
 
     if (match_score <= config_.min_cell_score)
         return {};
 
-    return { Alignment<NodeType>(seed_begin,
-                                 seed_begin + graph_.get_k(),
+    return { Alignment<NodeType>(seed.begin(),
+                                 seed.begin() + graph_.get_k(),
                                  { exact },
                                  match_score,
                                  clipping,
@@ -39,8 +36,7 @@ std::vector<Alignment<NodeType>> ExactSeeder<NodeType>
 
 template <typename NodeType>
 std::vector<Alignment<NodeType>> SuffixSeeder<NodeType>
-::operator()(const char *seed_begin,
-             const char *seed_end,
+::operator()(std::string_view seed,
              size_t clipping,
              bool orientation) const {
     if (!dynamic_cast<const DBGSuccinct*>(&get_graph()))
@@ -49,13 +45,12 @@ std::vector<Alignment<NodeType>> SuffixSeeder<NodeType>
     const auto &graph = dynamic_cast<const DBGSuccinct&>(get_graph());
     const auto &config = get_config();
 
-    assert(seed_end >= seed_begin);
-    const size_t length = seed_end - seed_begin;
+    const size_t length = seed.size();
 
     if (config.min_seed_length > std::min(graph.get_k(), length))
         return {};
 
-    auto seeds = exact_seeder_(seed_begin, seed_end, clipping, orientation);
+    auto seeds = exact_seeder_(seed, clipping, orientation);
 
     if (seeds.size())
         return seeds;
@@ -65,16 +60,15 @@ std::vector<Alignment<NodeType>> SuffixSeeder<NodeType>
     );
 
     graph.call_nodes_with_suffix(
-        seed_begin,
-        seed_begin + max_seed_length,
+        seed.substr(0, max_seed_length),
         [&](auto node, uint64_t seed_length) {
             assert(node != DeBruijnGraph::npos);
 
-            auto match_score = config.match_score(seed_begin, seed_begin + seed_length);
+            auto match_score = config.match_score(seed.begin(), seed.begin() + seed_length);
 
             if (match_score > get_config().min_cell_score) {
-                seeds.emplace_back(seed_begin,
-                                   seed_begin + seed_length,
+                seeds.emplace_back(seed.begin(),
+                                   seed.begin() + seed_length,
                                    std::vector<NodeType>{ node },
                                    match_score,
                                    clipping,
@@ -94,8 +88,7 @@ std::vector<Alignment<NodeType>> SuffixSeeder<NodeType>
 // TODO: make this work with unmasked DBGSuccinct
 template <typename NodeType>
 std::vector<Alignment<NodeType>> MEMSeeder<NodeType>
-::operator()(const char *seed_begin,
-             const char *seed_end,
+::operator()(std::string_view seed,
              size_t clipping,
              bool orientation) const {
     if (query_nodes_.empty())
@@ -104,8 +97,7 @@ std::vector<Alignment<NodeType>> MEMSeeder<NodeType>
     if (orientation != orientation_)
         throw std::runtime_error("wrong orientation passed");
 
-    assert(seed_end >= seed_begin);
-    const size_t length = seed_end - seed_begin;
+    const size_t length = seed.size();
 
     if (!length)
         return {};
@@ -134,22 +126,22 @@ std::vector<Alignment<NodeType>> MEMSeeder<NodeType>
     assert(next != start);
 
     auto end_it = next == query_nodes_.end()
-        ? seed_end
-        : seed_begin + (next - query_nodes_.begin() - clipping) + graph_.get_k() - 1;
+        ? seed.end()
+        : seed.begin() + (next - query_nodes_.begin() - clipping) + graph_.get_k() - 1;
 
-    assert(end_it >= seed_begin);
-    assert(end_it <= seed_end);
-    assert(static_cast<size_t>(end_it - seed_begin) >= graph_.get_k());
+    assert(end_it >= seed.begin());
+    assert(end_it <= seed.end());
+    assert(static_cast<size_t>(end_it - seed.begin()) >= graph_.get_k());
 
-    auto match_score = config_.match_score(seed_begin, end_it);
+    auto match_score = config_.match_score(seed.begin(), end_it);
 
     if (match_score <= config_.min_cell_score)
         return {};
 
-    return { Alignment<NodeType>(seed_begin,
+    return { Alignment<NodeType>(seed.begin(),
                                  end_it,
                                  std::vector<NodeType>(start, next),
-                                 config_.match_score(seed_begin, end_it),
+                                 config_.match_score(seed.begin(), end_it),
                                  clipping,
                                  orientation) };
 }

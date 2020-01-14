@@ -28,8 +28,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
-    static_assert(utils::is_instance<Container, common::SortedSet>{}
-                  || utils::is_instance<Container, common::SortedSetDisk>{});
+    static_assert(std::is_same_v<KMER, typename Container::value_type>);
     static_assert(std::is_same_v<KMER, typename Container::key_type>);
 
     Vector<KMER> temp_storage;
@@ -222,19 +221,8 @@ KmerCollector<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
-::add_sequence(std::string&& sequence, uint64_t count) {
-    if (sequence.size() < k_)
-        return;
-
-    // push read to the processing queue
-    batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, std::move(sequence), count);
-}
-
-template <typename KMER, class KmerExtractor, class Container>
-void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
-    if constexpr (utils::is_instance<Container, common::SortedSet>{}
-                  || utils::is_instance<Container, common::SortedSetDisk>{}) {
+    if constexpr (std::is_same_v<KMER, typename Container::value_type>) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>, generate_sequences,
                              k_, both_strands_mode_, &kmers_, filter_suffix_encoded_, true);
     } else {
@@ -252,8 +240,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-    if constexpr (utils::is_instance<Container, common::SortedSet>{}
-                  || utils::is_instance<Container, common::SortedSetDisk>{}) {
+    if constexpr (std::is_same_v<KMER, typename Container::value_type>) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallString callback) {
                                  generate_sequences([&](const std::string &seq, uint64_t) {
@@ -292,6 +279,8 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
     template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSet<KMER, Vector<KMER>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
             common::SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, \
+            common::SortedMultiset<KMER, uint16_t, Vector<std::pair<KMER, uint16_t>>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
             common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER>>; \

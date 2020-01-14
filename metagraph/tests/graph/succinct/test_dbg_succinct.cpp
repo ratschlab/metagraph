@@ -167,7 +167,7 @@ TEST(DBGSuccinct, CallNodesWithSuffix) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
     graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
+        query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
             nodes.insert(node);
@@ -205,7 +205,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixMinLength) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
     graph->call_nodes_with_suffix(
-        query.begin(), std::min(query.end(), query.begin() + 4),
+        { query.data(), std::min(size_t(query.size()), size_t(4)) },
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
             nodes.insert(node);
@@ -232,7 +232,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixK) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
     graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
+        query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
             nodes.insert(node);
@@ -266,7 +266,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixKEarlyCutoff) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
     graph->call_nodes_with_suffix(
-        query.begin(), std::min(query.end(), query.begin() + 2),
+        { query.data(), std::min(size_t(query.size()), size_t(2)) },
         [&](auto node, auto length) {
             EXPECT_EQ(2u, length);
             nodes.insert(node);
@@ -304,7 +304,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixEarlyCutoffKMinusOne) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
     graph->call_nodes_with_suffix(
-        query.begin(), std::min(query.end(), query.begin() + 3),
+        { query.data(), std::min(size_t(query.size()), size_t(3)) },
         [&](auto node, auto length) {
             EXPECT_EQ(3u, length);
             nodes.insert(node);
@@ -340,7 +340,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixKMinusOne) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
     graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
+        query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
             nodes.insert(node);
@@ -374,7 +374,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixKMinusOneBeginning) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
     graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
+        query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
             nodes.insert(node);
@@ -400,7 +400,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixMinusTwoBeginning) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
     graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
+        query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
             nodes.insert(node);
@@ -434,7 +434,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixMultipleOut) {
     std::multiset<std::string> node_str;
 
     graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
+        query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
             nodes.insert(node);
@@ -482,7 +482,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixMultipleInOut) {
     std::multiset<std::string> node_str;
 
     graph->call_nodes_with_suffix(
-        query.begin(), query.end(),
+        query,
         [&](auto node, auto length) {
             EXPECT_EQ(2u, length);
             nodes.insert(node);

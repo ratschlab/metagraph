@@ -26,6 +26,7 @@ class Config {
     bool annotate_sequence_headers = false;
     bool to_adj_list = false;
     bool to_fasta = false;
+    bool enumerate_out_sequences = false;
     bool to_gfa = false;
     bool unitigs = false;
     bool kmers_in_single_form = false;
@@ -73,6 +74,9 @@ class Config {
     unsigned int fallback_abundance_cutoff = 1;
     unsigned int port = 5555;
     unsigned int bloom_max_num_hash_functions = 10;
+    unsigned int num_columns_cached = 10;
+
+    uint8_t count_width = 8;
 
     // Alignment options
     bool alignment_seed_unimems = false;
@@ -104,7 +108,7 @@ class Config {
     double bloom_bpk = 4.0;
     std::vector<double> count_slice_quantiles;
 
-    std::vector<std::string> fname;
+    std::vector<std::string> fnames;
     std::vector<std::string> anno_labels;
     std::vector<std::string> infbase_annotators;
     std::vector<std::string> label_mask_in;
@@ -178,7 +182,8 @@ class Config {
     AnnotationType anno_type = ColumnCompressed;
     GraphType graph_type = SUCCINCT;
 
-    mg::kmer::ContainerType container;
+    mg::kmer::ContainerType container = mg::kmer::ContainerType::VECTOR;
+
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 
     static std::string annotype_to_string(AnnotationType state);

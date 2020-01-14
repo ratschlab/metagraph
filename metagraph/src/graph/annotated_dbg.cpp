@@ -1,24 +1,30 @@
 #include "annotated_dbg.hpp"
 
-#include "common/vectors/bit_vector.hpp"
-#include "annotate_row_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
 
 
-AnnotatedDBG::AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
-                           std::unique_ptr<Annotator>&& annotation,
-                           size_t num_threads,
-                           bool force_fast)
-      : graph_(dbg), annotator_(std::move(annotation)),
-        thread_pool_(num_threads > 1 ? num_threads : 0),
+AnnotatedSequenceGraph
+::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
+                         std::unique_ptr<Annotator>&& annotation,
+                         bool force_fast)
+      : graph_(graph), annotator_(std::move(annotation)),
         force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
 }
 
-void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
-                                                 const std::vector<std::string> &labels) {
+AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
+                           std::unique_ptr<Annotator>&& annotation,
+                           bool force_fast)
+      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg) {}
+
+void AnnotatedSequenceGraph
+::annotate_sequence(const std::string &sequence,
+                    const std::vector<std::string> &labels) {
+    assert(check_compatibility());
+
     std::vector<uint64_t> indices;
     indices.reserve(sequence.size());
 
@@ -43,25 +49,18 @@ void AnnotatedDBG::annotate_sequence_thread_safe(const std::string &sequence,
     annotator_->add_labels(indices, labels);
 }
 
-void AnnotatedDBG::annotate_sequence(std::string&& sequence,
-                                     const std::vector<std::string> &labels) {
-    assert(check_compatibility());
-
-    thread_pool_.enqueue(
-        [this](const auto&... args) {
-            this->annotate_sequence_thread_safe(args...);
-        },
-        std::move(sequence), labels
-    );
-}
-
 std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
                                                   double presence_ratio) const {
     assert(presence_ratio >= 0.);
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
+
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
@@ -93,7 +92,7 @@ std::vector<std::string> AnnotatedDBG
     assert(check_compatibility());
     assert(sequences.size() == weights.size());
 
-    std::unordered_map<uint64_t, double> index_weights;
+    tsl::hopscotch_map<uint64_t, double> index_weights;
     double weighted_num_missing_kmers = 0;
     double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
 
@@ -107,7 +106,7 @@ std::vector<std::string> AnnotatedDBG
         });
     }
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
 
     size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
     size_t num_present_kmers = 0;
@@ -129,7 +128,7 @@ std::vector<std::string> AnnotatedDBG
 }
 
 std::vector<std::string>
-AnnotatedDBG::get_labels(const std::unordered_map<row_index, size_t> &index_counts,
+AnnotatedDBG::get_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
                          size_t min_count) const {
     assert(check_compatibility());
 
@@ -148,11 +147,12 @@ AnnotatedDBG::get_labels(const std::unordered_map<row_index, size_t> &index_coun
     return labels;
 }
 
-std::vector<std::string> AnnotatedDBG::get_labels(node_index index) const {
+std::vector<std::string>
+AnnotatedSequenceGraph::get_labels(node_index index) const {
     assert(check_compatibility());
     assert(index != SequenceGraph::npos);
 
-    return annotator_->get_labels(graph_to_anno_index(index));
+    return annotator_->get(graph_to_anno_index(index));
 }
 
 std::vector<StringCountPair>
@@ -163,7 +163,12 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
+
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
@@ -195,7 +200,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
     assert(check_compatibility());
     assert(sequences.size() == weights.size());
 
-    std::unordered_map<uint64_t, double> index_weights;
+    tsl::hopscotch_map<uint64_t, double> index_weights;
     double weighted_num_missing_kmers = 0;
     double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
 
@@ -209,7 +214,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
         });
     }
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
 
     size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
     size_t num_present_kmers = 0;
@@ -231,7 +236,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
 }
 
 std::vector<StringCountPair>
-AnnotatedDBG::get_top_labels(const std::unordered_map<node_index, size_t> &index_counts,
+AnnotatedDBG::get_top_labels(const tsl::hopscotch_map<node_index, size_t> &index_counts,
                              size_t num_top_labels,
                              size_t min_count) const {
     assert(check_compatibility());
@@ -265,18 +270,18 @@ AnnotatedDBG::get_top_labels(const std::unordered_map<node_index, size_t> &index
     return label_counts;
 }
 
-bool AnnotatedDBG::label_exists(const std::string &label) const {
+bool AnnotatedSequenceGraph::label_exists(const std::string &label) const {
     return annotator_->label_exists(label);
 }
 
-bool AnnotatedDBG::has_label(node_index index, const std::string &label) const {
+bool AnnotatedSequenceGraph::has_label(node_index index, const std::string &label) const {
     assert(check_compatibility());
     assert(index != SequenceGraph::npos);
 
     return annotator_->has_label(graph_to_anno_index(index), label);
 }
 
-void AnnotatedDBG
+void AnnotatedSequenceGraph
 ::call_annotated_nodes(const std::string &label,
                        std::function<void(node_index)> callback) const {
     assert(check_compatibility());
@@ -287,17 +292,6 @@ void AnnotatedDBG
     );
 }
 
-AnnotatedDBG::row_index
-AnnotatedDBG::graph_to_anno_index(node_index kmer_index) {
-    assert(kmer_index);
-    return kmer_index - 1;
-}
-
-AnnotatedDBG::node_index
-AnnotatedDBG::anno_to_graph_index(row_index anno_index) {
-    return anno_index + 1;
-}
-
-bool AnnotatedDBG::check_compatibility() const {
+bool AnnotatedSequenceGraph::check_compatibility() const {
     return graph_->max_index() == annotator_->num_objects();
 }

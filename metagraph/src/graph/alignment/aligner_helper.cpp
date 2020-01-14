@@ -438,7 +438,8 @@ const DBGAlignerConfig::ScoreMatrix DBGAlignerConfig::score_matrix_blosum62
 
 
 template <typename NodeType>
-DPTable<NodeType>::DPTable(NodeType start_node,
+DPTable<NodeType>::DPTable(const SequenceGraph &graph,
+                           NodeType start_node,
                            char start_char,
                            score_t initial_score,
                            score_t min_score,
@@ -446,18 +447,17 @@ DPTable<NodeType>::DPTable(NodeType start_node,
                            int8_t gap_opening_penalty,
                            int8_t gap_extension_penalty) {
     // Initialize first column
+    std::vector<NodeType> in_nodes;
+    graph.adjacent_incoming_nodes(start_node, [&](auto i) { in_nodes.emplace_back(i); });
+
     auto& table_init = dp_table_.emplace(
         start_node,
-        Column { std::vector<score_t>(size, min_score),
-                 std::vector<Cigar::Operator>(size),
-                 std::vector<NodeType>(size),
-                 start_char,
-                 0 }
+        Column(size, min_score, start_char, std::move(in_nodes))
     ).first->second;
 
     table_init.scores.front() = initial_score;
     table_init.ops.front() = Cigar::Operator::MATCH;
-    table_init.prev_nodes.front() = DeBruijnGraph::npos;
+    table_init.prev_nodes.front() = SequenceGraph::npos;
 
     if (size > 1 && table_init.scores.front() + gap_opening_penalty > min_score) {
         table_init.scores[1] = table_init.scores.front() + gap_opening_penalty;
@@ -601,11 +601,11 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     const auto* op = &column->second.ops.at(i);
     const auto* prev_node = &column->second.prev_nodes.at(i);
 
-    if (!i && *prev_node == DeBruijnGraph::npos)
+    if (!i && *prev_node == SequenceGraph::npos)
         return;
 
     std::vector<const typename DPTable::value_type*> out_columns;
-    while (*prev_node != DeBruijnGraph::npos) {
+    while (*prev_node != SequenceGraph::npos) {
         cigar_.append(*op);
 
         if (*op != Cigar::Operator::INSERTION)
@@ -1244,6 +1244,7 @@ template <typename NodeType>
 QueryAlignment<NodeType>::QueryAlignment(const std::string &query)
       : query_(query),
         query_rc_(query) {
+    // TODO: remove const_cast
     reverse_complement(const_cast<char*>(query_rc_.data()),
                        const_cast<char*>(query_rc_.data() + query_rc_.size()));
 }

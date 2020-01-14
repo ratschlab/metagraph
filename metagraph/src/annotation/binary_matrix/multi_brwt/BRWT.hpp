@@ -7,7 +7,7 @@
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/range_partition.hpp"
-#include "binary_matrix/base/binary_matrix.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
 // Compress sparse binary matrix (binary relations)

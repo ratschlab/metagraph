@@ -31,42 +31,6 @@ bool check_if_writable(const std::string &filename) {
     return true;
 }
 
-/**
- *  Returns the input file type, given a filename
- *  One of: [KMC|VCF|FASTQ|FASTA].
- *  If filetype is unknown, return empty string "".
- */
-std::string get_filetype(const std::string &fname) {
-    size_t dotind = fname.rfind(".");
-    if (dotind == std::string::npos)
-        return "";
-
-    std::string ext = fname.substr(dotind);
-
-    if (ext == ".kmc_pre" || ext == ".kmc_suf")
-        return "KMC";
-
-    if (ext == ".gz" || ext == ".bgz") {
-        size_t nextind = fname.substr(0, dotind - 1).rfind(".");
-        if (nextind == std::string::npos)
-            return "";
-
-        ext = fname.substr(nextind, dotind - nextind);
-    }
-
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-
-    if (ext == ".vcf") {
-        return "VCF";
-
-    } else if ((ext == ".fq") || (ext == ".fastq")) {
-        return "FASTQ";
-
-    } else {
-        return "FASTA";
-    }
-}
-
 
 TempFile::TempFile(const std::string &tmp_dir)
       : tmp_file_name_((tmp_dir.size()

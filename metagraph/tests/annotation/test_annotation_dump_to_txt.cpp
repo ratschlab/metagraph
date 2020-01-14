@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "test_annotation.hpp"
-#include "serialization.hpp"
+#include "common/serialization.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -14,12 +14,12 @@ class AnnotatorPresetDumpTest : public AnnotatorPreset2Test<Annotator> { };
 
 typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
-                         annotate::BRWTCompressed<>,
+                         annotate::MultiBRWTAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
                          annotate::ColumnCompressed<>> AnnotatorDumpTestTypes;
 
-TYPED_TEST_CASE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
+TYPED_TEST_SUITE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
 
 
 TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextEmpty) {
@@ -50,7 +50,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextEmpty) {
         while (num_set_bits--) {
             fin >> pos;
             ASSERT_GT(this->annotation->num_objects(), pos);
-            loaded.add_labels(pos, { labels[i] });
+            loaded.add_labels({ pos }, { labels[i] });
         }
     }
 }
@@ -79,7 +79,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadText) {
         while (num_set_bits--) {
             fin >> pos;
             ASSERT_GT(this->annotation->num_objects(), pos);
-            loaded.add_labels(pos, { labels[i] });
+            loaded.add_labels({ pos }, { labels[i] });
         }
     }
 
@@ -114,7 +114,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextParallel) {
         while (num_set_bits--) {
             fin >> pos;
             ASSERT_GT(this->annotation->num_objects(), pos);
-            loaded.add_labels(pos, { labels[i] });
+            loaded.add_labels({ pos }, { labels[i] });
         }
     }
 

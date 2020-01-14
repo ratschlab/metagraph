@@ -1,13 +1,13 @@
 #ifndef __METHOD_CONSTRUCTORS_HPP__
 #define __METHOD_CONSTRUCTORS_HPP__
 
-#include "static_annotators_def.hpp"
-#include "BRWT_builders.hpp"
-#include "column_major.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/binary_matrix/multi_brwt/BRWT_builders.hpp"
+#include "annotation/binary_matrix/multi_brwt/partitionings.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
+#include "common/vectors/bitmap_mergers.hpp"
 #include "data_generation.hpp"
-#include "vector_row_binmat.hpp"
-#include "partitionings.hpp"
-#include "bitmap_mergers.hpp"
 
 
 template <typename T>
@@ -60,7 +60,7 @@ std::unique_ptr<BinaryMatrix>
 matrix_type_to_data(const std::string &file, MatrixType type) {
     std::unique_ptr<BinaryMatrix> matrix_ptr;
     if (type == MatrixType::COLUMN) {
-        matrix_ptr.reset(new ColMajorCompressed());
+        matrix_ptr.reset(new ColumnMajor());
     } else if (type == MatrixType::ROW) {
         matrix_ptr.reset(new VectorRowBinMat());
     } else if (type == MatrixType::BRWT) {
@@ -92,8 +92,8 @@ matrix_type_to_data(const std::string &file, MatrixType type) {
 
 
 template <typename BitVector>
-UniquePtrs<BitVector> convert_to(UniquePtrs<bit_vector>&& input) {
-    UniquePtrs<BitVector> result;
+UniquePtrs<bit_vector> convert_to(UniquePtrs<bit_vector>&& input) {
+    UniquePtrs<bit_vector> result;
     result.reserve(input.size());
 
     for (auto &vector : input) {
@@ -146,7 +146,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
             break;
         }
         case MatrixType::COLUMN: {
-            binary_matrix.reset(new ColMajorCompressed(
+            binary_matrix.reset(new ColumnMajor(
                 convert_to<bit_vector_sd>(std::move(columns))
             ));
             break;

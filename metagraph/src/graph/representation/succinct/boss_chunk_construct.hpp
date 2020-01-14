@@ -20,13 +20,13 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
     static std::unique_ptr<IBOSSChunkConstructor>
     initialize(size_t k,
                bool canonical_mode = false,
-               bool count_kmers = false,
+               uint8_t bits_per_count = 0,
                const std::string &filter_suffix = "",
                size_t num_threads = 1,
                double memory_preallocated = 0,
                mg::kmer::ContainerType container_type = mg::kmer::ContainerType::VECTOR);
 
-    virtual void add_sequence(std::string&& sequence, uint64_t count = 1) = 0;
+    virtual void add_sequence(std::string_view sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual BOSS::Chunk* build_chunk() = 0;

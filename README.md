@@ -11,6 +11,11 @@
 
 All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (does not require root)
 
+#### For compiling with AppleClang:
+```
+brew install libomp cmake make htslib boost folly
+```
+
 #### For compiling with GNU GCC:
 ```
 brew install gcc autoconf automake libtool cmake make htslib
@@ -93,8 +98,8 @@ popd
 - `-DLINK_OPT=[ON|OFF]` -- enable link time optimization (`OFF` by default)
 - `-DPYTHON_INTERFACE=[ON|OFF]` -- compile python interface (requires shared libraries, `OFF` by default)
 - `-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (`ON` by default)
-- `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default)
-- `-DWITH_MSSE42=[ON|OFF]` -- compile with support for the msse4.2 instructions (`ON` by default)
+- `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default, if available)
+- `-DWITH_MSSE42=[ON|OFF]` -- compile with support for the msse4.2 instructions (`ON` by default, if available)
 - `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
 
 ## Typical workflow

@@ -37,13 +37,19 @@ get_outgoing_columns(const DeBruijnGraph &graph,
         [&](auto next_node, char c) {
             auto find = dp_table.find(next_node);
             if (find == dp_table.end()) {
+                std::vector<NodeType> in_nodes;
+                graph.adjacent_incoming_nodes(
+                    next_node,
+                    [&](auto i) { in_nodes.emplace_back(i); }
+                );
+
                 find = dp_table.emplace(
                     next_node,
-                    Column { std::vector<score_t>(size, min_cell_score),
-                             std::vector<Cigar::Operator>(size),
-                             std::vector<NodeType>(size, DeBruijnGraph::npos),
-                             c,
-                             best_pos + 1 != size ? best_pos + 1 : best_pos }
+                    Column(size,
+                           min_cell_score,
+                           c,
+                           std::move(in_nodes),
+                           best_pos + 1 != size ? best_pos + 1 : best_pos)
                 ).first;
             }
 
@@ -55,29 +61,30 @@ get_outgoing_columns(const DeBruijnGraph &graph,
     return out_columns;
 }
 
-template <typename NodeType>
+template <typename NodeType, typename DPTableIt>
 inline std::pair<size_t, size_t>
-get_column_boundaries(const DeBruijnGraph &graph,
-                      const NodeType &node,
-                      DPTable<NodeType> &dp_table,
-                      std::vector<NodeType> &in_nodes,
+get_column_boundaries(const DPTableIt *node_it,
+                      const DPTable<NodeType> &dp_table,
+                      std::vector<const DPTableIt*> &in_nodes,
                       size_t size,
                       size_t prev_best_pos,
                       size_t bandwidth) {
     in_nodes.clear();
-    graph.adjacent_incoming_nodes(node, [&](auto i) {
-        if (dp_table.find(i) != dp_table.end())
-            in_nodes.push_back(i);
-    });
+
+    for (NodeType i : node_it->second.incoming) {
+        auto find = dp_table.find(i);
+
+        if (find != dp_table.end())
+            in_nodes.emplace_back(&*find);
+    }
 
     size_t overall_begin = size;
     size_t overall_end = 0;
 
     // find incoming nodes to check for alignment extension
     // set boundaries for vertical band
-    for (const auto &prev_node : in_nodes) {
-        assert(dp_table.find(prev_node) != dp_table.end());
-        size_t best_pos = dp_table.find(prev_node)->second.best_pos;
+    for (const auto *prev_node_it : in_nodes) {
+        size_t best_pos = prev_node_it->second.best_pos;
 
         if (overall_begin) {
             overall_begin = std::min(
@@ -141,6 +148,7 @@ inline void compute_match_scores(const char *align_begin,
 }
 
 #ifdef __AVX2__
+
 inline void compute_match_delete_updates_avx2(size_t &i,
                                               size_t length,
                                               int64_t prev_node,
@@ -153,20 +161,29 @@ inline void compute_match_delete_updates_avx2(size_t &i,
                                               const int32_t *&incoming_ops,
                                               const int8_t *&char_scores,
                                               const int32_t *&match_ops) {
-    __m256i prev_packed = _mm256_set1_epi64x(prev_node);
-    __m256i del_packed = _mm256_set1_epi32(Cigar::Operator::DELETION);
-    __m256i gap_open_packed = _mm256_set1_epi32(gap_opening_penalty);
-    __m256i gap_extend_packed = _mm256_set1_epi32(gap_extension_penalty);
+    const __m256i prev_packed = _mm256_set1_epi64x(prev_node);
+    const __m256i del_packed = _mm256_set1_epi32(Cigar::Operator::DELETION);
+    const __m256i gap_open_packed = _mm256_set1_epi32(gap_opening_penalty);
+    const __m256i gap_extend_packed = _mm256_set1_epi32(gap_extension_penalty);
+    const __m256i r_rotate = _mm256_setr_epi32(1, 2, 3, 4, 5, 6, 7, 0);
 
     for (; i + 8 <= length; i += 8) {
+        __m256i incoming_packed = _mm256_loadu_si256((__m256i*)(incoming_scores - 1));
+
         // compute match and delete scores
         __m256i match_scores_packed = _mm256_add_epi32(
-            _mm256_cvtepi8_epi32(_mm_loadl_epi64((__m128i*)char_scores)),
-            _mm256_loadu_si256((__m256i*)(incoming_scores - 1))
+            _mm256_cvtepi8_epi32(_mm256_castsi256_si128(_mm256_insert_epi64(
+                _mm256_undefined_si256(),
+                *(uint64_t*)char_scores,
+                0
+            ))),
+            incoming_packed
         );
 
         __m256i delete_scores_packed = _mm256_add_epi32(
-            _mm256_loadu_si256((__m256i*)incoming_scores), // TODO: avoid a reload
+            _mm256_insert_epi32(_mm256_permutevar8x32_epi32(incoming_packed, r_rotate),
+                                incoming_scores[7],
+                                7),
             _mm256_blendv_epi8(gap_open_packed,
                                gap_extend_packed,
                                _mm256_cmpeq_epi32(
@@ -213,10 +230,8 @@ inline void compute_match_delete_updates_avx2(size_t &i,
         char_scores += 8;
         match_ops += 8;
     }
-
-    // clean up after AVX2 instructions
-    _mm256_zeroupper();
 }
+
 #endif
 
 template <typename NodeType,
@@ -307,6 +322,7 @@ inline void compute_match_delete_updates(const DBGAlignerConfig &config,
 }
 
 #ifdef __AVX2__
+
 template <typename NodeType,
           typename score_t = typename Alignment<NodeType>::score_t,
           typename Column = typename DPTable<NodeType>::Column>
@@ -345,11 +361,8 @@ inline size_t update_column_avx2(bool &updated,
         updated |= bool(_mm256_movemask_epi8(cmp));
 
         // store updates in column
-        _mm256_maskstore_epi32(next_column_scores,
-                               cmp,
-                               updates);
-        _mm256_maskstore_epi32(next_column_ops,
-                               cmp,
+        _mm256_maskstore_epi32(next_column_scores, cmp, updates);
+        _mm256_maskstore_epi32(next_column_ops, cmp,
                                _mm256_load_si256((__m256i*)&update_ops[i]));
 
         // TODO: this can be done with one AVX512 instruction
@@ -368,11 +381,9 @@ inline size_t update_column_avx2(bool &updated,
         next_column_ops += 8;
     }
 
-    // clean up after AVX2 instructions
-    _mm256_zeroupper();
-
     return i;
 }
+
 #endif
 
 
@@ -408,7 +419,8 @@ DefaultColumnExtender<NodeType, Compare>
                          std::vector<typename DPTable::value_type*>,
                          ColumnPriorityFunction> columns_to_update(config_.queue_size);
 
-    DPTable dp_table(path.back(),
+    DPTable dp_table(graph_,
+                     path.back(),
                      *(align_start - 1),
                      path.get_score(),
                      config_.min_cell_score,
@@ -421,7 +433,7 @@ DefaultColumnExtender<NodeType, Compare>
     // for storage of intermediate values
     std::vector<int8_t> char_scores;
     std::vector<Cigar::Operator> match_ops;
-    std::vector<node_index> in_nodes;
+    std::vector<const typename DPTable::value_type*> in_nodes;
 
     AlignedVector<score_t> update_scores;
     AlignedVector<Cigar::Operator> update_ops;
@@ -430,8 +442,8 @@ DefaultColumnExtender<NodeType, Compare>
     // dynamic programming
     // keep track of node and position in column to start backtracking
     // store raw pointer since they are not invalidated by emplace
-    auto *start_node = &*dp_table.begin();
-    columns_to_update.emplace(start_node);
+    const auto *start_node = &*dp_table.begin();
+    columns_to_update.emplace(&*dp_table.begin());
     while (columns_to_update.size()) {
         const auto* cur_col = columns_to_update.pop_top();
         auto cur_node = cur_col->first;
@@ -445,13 +457,12 @@ DefaultColumnExtender<NodeType, Compare>
                                                 config_.min_cell_score);
 
         // update columns
-        for (const auto &iter : out_columns) {
+        for (auto *iter : out_columns) {
             auto next_node = iter->first;
             auto &next_column = iter->second;
 
             auto [overall_begin, overall_end] = get_column_boundaries(
-                graph_,
-                next_node,
+                iter,
                 dp_table,
                 in_nodes,
                 size,
@@ -460,7 +471,7 @@ DefaultColumnExtender<NodeType, Compare>
             );
 
             update_scores.assign(overall_end - overall_begin, config_.min_cell_score);
-            update_prevs.assign(overall_end - overall_begin, DeBruijnGraph::npos);
+            update_prevs.assign(overall_end - overall_begin, SequenceGraph::npos);
             update_ops.assign(overall_end - overall_begin, Cigar::Operator::CLIPPED);
 
             compute_match_scores(align_start + overall_begin,
@@ -470,9 +481,8 @@ DefaultColumnExtender<NodeType, Compare>
                                  Cigar::get_op_row(next_column.last_char));
 
             // match and deletion scores
-            for (const auto &prev_node : in_nodes) {
-                assert(dp_table.find(prev_node) != dp_table.end());
-                const auto &incoming = dp_table.find(prev_node)->second;
+            for (const auto *prev_node_it : in_nodes) {
+                const auto &incoming = prev_node_it->second;
 
                 size_t begin = incoming.best_pos >= config_.bandwidth
                     ? incoming.best_pos - config_.bandwidth : 0;
@@ -486,7 +496,7 @@ DefaultColumnExtender<NodeType, Compare>
                     update_scores.data() + (begin - overall_begin),
                     update_prevs.data() + (begin - overall_begin),
                     update_ops.data() + (begin - overall_begin),
-                    prev_node,
+                    prev_node_it->first,
                     incoming.scores.data() + begin,
                     incoming.ops.data() + begin,
                     char_scores.data() + (begin - overall_begin),
@@ -567,7 +577,7 @@ DefaultColumnExtender<NodeType, Compare>
     assert(start_node->second.best_score() > config_.min_cell_score);
 
     // no good path found
-    if (UNLIKELY(start_node->first == DeBruijnGraph::npos
+    if (UNLIKELY(start_node->first == SequenceGraph::npos
             || (start_node->first == path.back() && !start_node->second.best_pos)
             || start_node->second.best_score() < min_path_score))
         return {};

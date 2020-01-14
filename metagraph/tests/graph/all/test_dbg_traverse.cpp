@@ -8,7 +8,7 @@
 #include "../../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 
-TYPED_TEST_CASE(DeBruijnGraphTest, GraphTypes);
+TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, traverse_string) {
@@ -298,13 +298,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
                                                + std::string(100, 'G') });
         std::vector<DeBruijnGraph::node_index> adjacent_nodes;
 
-        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
-            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
-        };
-
         // AA, AAAAA
         auto it = graph->kmer_to_node(std::string(k, 'A'));
-        map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { EXPECT_EQ(it, i); });
+        graph->map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { EXPECT_EQ(it, i); });
         ASSERT_NE(DeBruijnGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
@@ -330,7 +326,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // CC, CCCCC
         it = graph->kmer_to_node(std::string(k, 'C'));
-        map_to_nodes_sequentially(std::string(k, 'C'), [&](auto i) { EXPECT_EQ(it, i); });
+        graph->map_to_nodes_sequentially(std::string(k, 'C'), [&](auto i) { EXPECT_EQ(it, i); });
         ASSERT_NE(DeBruijnGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
@@ -355,7 +351,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // GGGGG
         it = graph->kmer_to_node(std::string(k, 'G'));
-        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { EXPECT_EQ(it, i); });
+        graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { EXPECT_EQ(it, i); });
         ASSERT_NE(DeBruijnGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(1u, adjacent_nodes.size());

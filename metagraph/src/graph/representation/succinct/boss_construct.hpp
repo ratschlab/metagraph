@@ -12,8 +12,8 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     BOSSConstructor(const Args&... args)
       : constructor_(mg::succinct::IBOSSChunkConstructor::initialize(args...)) {}
 
-    void add_sequence(std::string&& sequence, uint64_t count = 1) {
-        constructor_->add_sequence(std::move(sequence), count);
+    void add_sequence(std::string_view sequence, uint64_t count = 1) {
+        constructor_->add_sequence(sequence, count);
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {

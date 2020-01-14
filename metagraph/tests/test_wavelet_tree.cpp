@@ -1,8 +1,8 @@
 #include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
-#include "wavelet_tree.hpp"
-#include "threading.hpp"
+#include "common/vectors/wavelet_tree.hpp"
+#include "common/threads/threading.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
@@ -17,7 +17,7 @@ typedef ::testing::Types<wavelet_tree_stat,
                          wavelet_tree_small>
         WaveletTreeTypes;
 
-TYPED_TEST_CASE(WaveletTreeTest, WaveletTreeTypes);
+TYPED_TEST_SUITE(WaveletTreeTest, WaveletTreeTypes);
 
 
 void test_next(const wavelet_tree &vector) {

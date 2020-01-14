@@ -10,7 +10,7 @@ namespace annotate {
 template <typename Label>
 class RowCompressed;
 
-template <typename IndexType, typename LabelType>
+template <typename LabelType>
 class MultiLabelEncoded;
 
 
@@ -47,9 +47,19 @@ void relax_BRWT(StaticAnnotation *annotation,
                 size_t num_threads = 1);
 
 template <class ToAnnotation, typename Label>
-void merge(std::vector<std::unique_ptr<MultiLabelEncoded<uint64_t, Label>>>&& annotators,
+void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
            const std::string &outfile);
+
+template <typename Label>
+void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
+                              const std::string &outfbase,
+                              size_t num_threads = 1);
+
+template <typename Label>
+void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
+                              RowCompressed<Label> *target,
+                              size_t num_threads = 1);
 
 } // namespace annotate
 

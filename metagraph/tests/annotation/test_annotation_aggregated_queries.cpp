@@ -4,7 +4,7 @@
 #include "test_annotation.hpp"
 
 
-std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotator,
+std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<std::string> &annotator,
                                     const std::vector<uint64_t> &indices,
                                     double min_label_frequency = 0.0) {
     const auto& label_encoder = annotator.get_label_encoder();
@@ -16,18 +16,11 @@ std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<uint64_t, 
         label_counts.emplace_back(label_encoder.decode(j), 0);
     }
 
-    annotator.call_rows(
-        indices,
-        [&](auto&& label_indices) {
-            for (auto j : label_indices) {
-                label_counts[j].second++;
-            }
-        },
-        [&]() {
-            return std::all_of(label_counts.begin(), label_counts.end(),
-                               [&](const auto &pair) { return pair.second >= min_count; });
+    for (auto i : indices) {
+        for (auto j : annotator.get_label_codes(i)) {
+            label_counts[j].second++;
         }
-    );
+    }
 
     std::vector<std::string> labels;
     for (auto&& pair : label_counts) {
@@ -100,10 +93,10 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
               convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
 }
 
-std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotator,
+std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }
@@ -190,7 +183,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels_by_label) {
 
 
 std::vector<std::pair<std::string, size_t>>
-get_top_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotator,
+get_top_labels(const annotate::MultiLabelEncoded<std::string> &annotator,
                const std::vector<uint64_t> &indices,
                size_t num_top_labels = static_cast<size_t>(-1),
                double min_label_frequency = 0.0) {
@@ -203,14 +196,11 @@ get_top_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotat
         label_counts.emplace_back(label_encoder.decode(i), 0);
     }
 
-    annotator.call_rows(
-        indices,
-        [&](auto&& label_indices) {
-            for (auto j : label_indices) {
-                label_counts[j].second++;
-            }
+    for (auto i : indices) {
+        for (auto j : annotator.get_label_codes(i)) {
+            label_counts[j].second++;
         }
-    );
+    }
 
     std::sort(label_counts.begin(), label_counts.end(),
               [](const auto &first, const auto &second) {
@@ -277,14 +267,14 @@ TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels) {
 }
 
 std::vector<std::pair<std::string, size_t>>
-get_top_labels_by_label(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotator,
+get_top_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotator,
                         const std::vector<uint64_t> &indices,
                         size_t num_top_labels = static_cast<size_t>(-1),
                         double min_label_frequency = 0.0) {
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    std::unordered_map<uint64_t, size_t> index_counts;
+    tsl::hopscotch_map<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }

@@ -21,8 +21,6 @@ namespace succinct {
 using namespace mg;
 using common::logger;
 
-const static uint8_t kBitsPerCount = 8;
-
 
 template <class Array>
 void sort_and_remove_duplicates(Array *array,
@@ -362,6 +360,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
   private:
     BOSSChunkConstructor(size_t k,
                          bool canonical_mode = false,
+                         uint8_t bits_per_count = 0,
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
                          double memory_preallocated = 0)
@@ -369,14 +368,15 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                             canonical_mode,
                             encode_filter_suffix_boss(filter_suffix),
                             num_threads,
-                            memory_preallocated) {
+                            memory_preallocated),
+            bits_per_count_(bits_per_count) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
 
-    void add_sequence(std::string&& sequence, uint64_t count) {
-        kmer_collector_.add_sequence(std::move(sequence), count);
+    void add_sequence(std::string_view sequence, uint64_t count) {
+        kmer_collector_.add_sequence(sequence, count);
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {
@@ -408,7 +408,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                      kmer_collector_.get_k() - 1,
                                      kmer_collector_.is_both_strands_mode(),
                                      kmers,
-                                     kBitsPerCount);
+                                     bits_per_count_);
         } else {
             // kmer_collector stores (BOSS::k_ + 1)-mers
             result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
@@ -425,6 +425,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     uint64_t get_k() const { return kmer_collector_.get_k() - 1; }
 
     KmerCollector kmer_collector_;
+    uint8_t bits_per_count_;
     /** Used as an async executor for merging chunks from disk */
     ThreadPool async_worker_ = ThreadPool(1, 1);
 };
@@ -453,10 +454,22 @@ using KmerSetVector
                               common::SortedSet<KMER, Vector<KMER>>>;
 
 template <typename KMER>
-using KmerMultsetVector
+using KmerMultsetVector8
         = kmer::KmerCollector<KMER, KmerExtractorBOSS,
                               common::SortedMultiset<KMER, uint8_t,
                                                      Vector<std::pair<KMER, uint8_t>>>>;
+
+template <typename KMER>
+using KmerMultsetVector16
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
+                              common::SortedMultiset<KMER, uint16_t,
+                                                     Vector<std::pair<KMER, uint16_t>>>>;
+
+template <typename KMER>
+using KmerMultsetVector32
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
+                              common::SortedMultiset<KMER, uint32_t,
+                                                     Vector<std::pair<KMER, uint32_t>>>>;
 
 template <typename KMER>
 using KmerSetDisk
@@ -467,16 +480,14 @@ std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor
 ::initialize(size_t k,
              bool canonical_mode,
-             bool count_kmers,
+             uint8_t bits_per_count,
              const std::string &filter_suffix,
              size_t num_threads,
              double memory_preallocated,
              kmer::ContainerType container_type) {
-#define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated
+#define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, num_threads, memory_preallocated
 
-    if (count_kmers) {
-        return initialize_boss_chunk_constructor<KmerMultsetVector>(OTHER_ARGS);
-    } else {
+    if (!bits_per_count) {
         switch (container_type) {
             case kmer::ContainerType::VECTOR_DISK:
                 return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
@@ -486,6 +497,14 @@ IBOSSChunkConstructor
                 logger->error("Invalid container type {}", container_type);
                 std::exit(1);
         }
+    } else if (bits_per_count <= 8) {
+        return initialize_boss_chunk_constructor<KmerMultsetVector8>(OTHER_ARGS);
+    } else if (bits_per_count <= 16) {
+        return initialize_boss_chunk_constructor<KmerMultsetVector16>(OTHER_ARGS);
+    } else if (bits_per_count <= 32) {
+        return initialize_boss_chunk_constructor<KmerMultsetVector32>(OTHER_ARGS);
+    } else {
+        throw std::runtime_error("Error: trying to allocate too many bits per k-mer count");
     }
 }
 

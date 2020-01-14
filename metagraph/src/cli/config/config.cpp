@@ -9,6 +9,7 @@
 #include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
+#include "seq_io/formats.hpp"
 
 using namespace mg;
 
@@ -111,6 +112,8 @@ Config::Config(int argc, char *argv[]) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
+        } else if (!strcmp(argv[i], "--count-width")) {
+            count_width = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fwd-and-reverse")) {
             forward_and_reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
@@ -135,6 +138,8 @@ Config::Config(int argc, char *argv[]) {
             suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--sparse")) {
             sparse = true;
+        } else if (!strcmp(argv[i], "--cache")) {
+            num_columns_cached = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
@@ -258,6 +263,8 @@ Config::Config(int argc, char *argv[]) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "--to-fasta")) {
             to_fasta = true;
+        } else if (!strcmp(argv[i], "--enumerate")) {
+            enumerate_out_sequences = true;
         } else if (!strcmp(argv[i], "--to-gfa")) {
             to_gfa = true;
         } else if (!strcmp(argv[i], "--json")) {
@@ -330,7 +337,7 @@ Config::Config(int argc, char *argv[]) {
             print_usage(argv[0], identity);
             exit(-1);
         } else {
-            fname.push_back(argv[i]);
+            fnames.push_back(argv[i]);
         }
     }
 
@@ -344,13 +351,13 @@ Config::Config(int argc, char *argv[]) {
     // this still allows for the same file to be included multiple times
     std::unordered_set<std::string> kmc_file_set;
 
-    for (auto it = fname.begin(); it != fname.end(); ++it) {
-        if (utils::get_filetype(*it) == "KMC"
+    for (auto it = fnames.begin(); it != fnames.end(); ++it) {
+        if (file_format(*it) == "KMC"
                 && !kmc_file_set.insert(utils::remove_suffix(*it, ".kmc_pre", ".kmc_suf")).second)
-            fname.erase(it--);
+            fnames.erase(it--);
     }
 
-    if (!fname.size() && identity != STATS
+    if (!fnames.size() && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
                       && !(identity == CALL_VARIANTS)
@@ -359,13 +366,27 @@ Config::Config(int argc, char *argv[]) {
         std::string line;
         while (std::getline(std::cin, line)) {
             if (line.size())
-                fname.push_back(line);
+                fnames.push_back(line);
         }
     }
 
     if (!count_slice_quantiles.size()) {
         count_slice_quantiles.push_back(0);
         count_slice_quantiles.push_back(1);
+    }
+
+    if (count_width <= 1) {
+        std::cerr << "Error: bad value for count-width, need at least 2 bits"
+                     " to represent k-mer abundance" << std::endl;
+        print_usage_and_exit = true;
+    }
+    if (!count_kmers)
+        count_width = 0;
+
+    if (count_width > 32) {
+        std::cerr << "Error: bad value for count-width, can use maximum 32 bits"
+                     " to represent k-mer abundance" << std::endl;
+        print_usage_and_exit = true;
     }
 
     for (size_t i = 1; i < count_slice_quantiles.size(); ++i) {
@@ -400,10 +421,10 @@ Config::Config(int argc, char *argv[]) {
             && !(identity == BUILD && complete)
             && !(identity == CALL_VARIANTS)
             && !(identity == PARSE_TAXONOMY)
-            && !fname.size())
+            && !fnames.size())
         print_usage_and_exit = true;
 
-    if (identity == CONCATENATE && !(fname.empty() ^ infbase.empty())) {
+    if (identity == CONCATENATE && !(fnames.empty() ^ infbase.empty())) {
         std::cerr << "Error: Either set all chunk filenames"
                   << " or use the -i and -l options" << std::endl;
         print_usage_and_exit = true;
@@ -464,7 +485,7 @@ Config::Config(int argc, char *argv[]) {
             || identity == CLEAN
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
-                    && fname.size() != 1)
+                    && fnames.size() != 1)
         print_usage_and_exit = true;
 
     if ((identity == TRANSFORM
@@ -483,10 +504,10 @@ Config::Config(int argc, char *argv[]) {
             ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
         print_usage_and_exit = true;
 
-    if (identity == MERGE && fname.size() < 2)
+    if (identity == MERGE && fnames.size() < 2)
         print_usage_and_exit = true;
 
-    if (identity == COMPARE && fname.size() != 2)
+    if (identity == COMPARE && fnames.size() != 2)
         print_usage_and_exit = true;
 
     if (discovery_fraction < 0 || discovery_fraction > 1)
@@ -715,6 +736,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
+            fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
@@ -732,10 +754,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
             fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
                             "\t                         \t\tthan this value (0: auto) [1]\n");
             fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be determined [1]\n");
+            fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-bins-q [FLOAT ...] \tbinning quantiles for partitioning k-mers with\n"
                             "\t                              \t\tdifferent abundance levels ['0 1']\n"
                             "\t                              \t\tExample: --count-bins-q '0 0.33 0.66 1'\n");
@@ -743,6 +767,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --unitigs \t\t\textract unitigs instead of contigs [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\t\tdump clean sequences to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --enumerate \t\t\tenumerate sequences in FASTA [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case EXTEND: {
@@ -836,6 +861,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
             fprintf(stderr, "\t   --initialize-bloom \tconstruct a Bloom filter for faster detection of non-existing k-mers [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --primary-kmers \toutput each k-mer only in one if its forms (canonical/non-canonical) [off]\n");
@@ -855,6 +881,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --unitigs \t\textract unitigs [off]\n");
+            fprintf(stderr, "\t   --enumerate \t\tenumerate sequences assembled and dumped to FASTA [off]\n");
             fprintf(stderr, "\t   --primary-kmers \toutput each k-mer only in one if its forms (canonical/non-canonical) [off]\n");
             fprintf(stderr, "\t   --to-gfa \t\tdump graph layout to GFA [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
@@ -893,6 +920,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation: column / row [column]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
+            fprintf(stderr, "\t   --cache \t\tnumber of columns in cache (for column representation only) [10]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file [<GRAPH>]\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");

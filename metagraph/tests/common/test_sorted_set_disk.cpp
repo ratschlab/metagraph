@@ -14,7 +14,7 @@ class SortedSetDiskTest : public ::testing::Test {};
 
 typedef ::testing::Types<uint64_t, int32_t> SortedDiskElementTypes;
 
-TYPED_TEST_CASE(SortedSetDiskTest, SortedDiskElementTypes);
+TYPED_TEST_SUITE(SortedSetDiskTest, SortedDiskElementTypes);
 
 
 template <typename TypeParam>

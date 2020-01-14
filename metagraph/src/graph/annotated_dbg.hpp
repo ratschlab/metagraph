@@ -1,46 +1,76 @@
 #ifndef __ANNOTATED_DBG_HPP__
 #define __ANNOTATED_DBG_HPP__
 
+#include <cassert>
 #include <memory>
+#include <mutex>
 
-#include "sequence_graph.hpp"
-#include "annotate.hpp"
-#include "threading.hpp"
+#include "representation/base/sequence_graph.hpp"
+#include "annotation/representation/base/annotation.hpp"
 
 
-// TODO: rename to AnnotatedSequenceGraph
-class AnnotatedDBG {
+class AnnotatedSequenceGraph {
   public:
-    typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
+    typedef annotate::MultiLabelEncoded<std::string> Annotator;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
-    AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
-                 std::unique_ptr<Annotator>&& annotation,
-                 size_t num_threads = 0,
-                 bool force_fast = false);
+    AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graphh,
+                           std::unique_ptr<Annotator>&& annotation,
+                           bool force_fast = false);
 
-    std::vector<std::string> get_labels(node_index index) const;
+    virtual ~AnnotatedSequenceGraph() {}
 
-    bool has_label(node_index index,
-                   const std::string &label) const;
+    virtual std::vector<std::string> get_labels(node_index index) const;
 
-    void annotate_sequence(std::string&& sequence,
-                           const std::vector<std::string> &labels);
+    virtual bool has_label(node_index index, const std::string &label) const;
 
-    void call_annotated_nodes(const std::string &label,
-                              std::function<void(node_index)> callback) const;
+    // thread-safe, can be called from multiple threads concurrently
+    virtual void annotate_sequence(const std::string &sequence,
+                                   const std::vector<std::string> &labels);
 
-    void join() { thread_pool_.join(); }
+    virtual void call_annotated_nodes(const std::string &label,
+                                      std::function<void(node_index)> callback) const;
 
-    bool label_exists(const std::string &label) const;
+    virtual bool label_exists(const std::string &label) const;
 
-    bool check_compatibility() const;
+    virtual bool check_compatibility() const;
 
-    const SequenceGraph& get_graph() const { return *graph_; }
+    virtual const SequenceGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
 
-    const Annotator& get_annotation() const { return *annotator_; }
+    virtual const Annotator& get_annotation() const { return *annotator_; }
+
+    static row_index graph_to_anno_index(node_index kmer_index) {
+        assert(kmer_index);
+        return kmer_index - 1;
+    }
+    static node_index anno_to_graph_index(row_index anno_index) {
+        return anno_index + 1;
+    }
+
+  protected:
+    std::shared_ptr<SequenceGraph> graph_;
+    std::unique_ptr<Annotator> annotator_;
+
+    std::mutex mutex_;
+    bool force_fast_;
+};
+
+
+class AnnotatedDBG : public AnnotatedSequenceGraph {
+  public:
+    typedef annotate::MultiLabelEncoded<std::string> Annotator;
+    using node_index = DeBruijnGraph::node_index;
+    using row_index = Annotator::Index;
+
+    AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
+                 std::unique_ptr<Annotator>&& annotation,
+                 bool force_fast = false);
+
+    using AnnotatedSequenceGraph::get_labels;
+
+    const DeBruijnGraph& get_graph() const { return dbg_; }
 
     /*********************** Special queries **********************/
 
@@ -51,7 +81,7 @@ class AnnotatedDBG {
     std::vector<std::string> get_labels(const std::vector<std::string> &sequences,
                                         const std::vector<double> &weights,
                                         double presence_ratio) const;
-    std::vector<std::string> get_labels(const std::unordered_map<row_index, size_t> &index_counts,
+    std::vector<std::string> get_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
                                         size_t min_count) const;
 
     // return top |num_top_labels| labels with their counts
@@ -68,23 +98,12 @@ class AnnotatedDBG {
                    double presence_ratio = 0.0) const;
 
     std::vector<std::pair<std::string, size_t>>
-    get_top_labels(const std::unordered_map<row_index, size_t> &index_counts,
+    get_top_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
                    size_t num_top_labels,
                    size_t min_count = 0) const;
 
-    static row_index graph_to_anno_index(node_index kmer_index);
-    static node_index anno_to_graph_index(row_index anno_index);
-
   private:
-    void annotate_sequence_thread_safe(const std::string &sequence,
-                                       const std::vector<std::string> &labels);
-
-    std::shared_ptr<SequenceGraph> graph_;
-    std::unique_ptr<Annotator> annotator_;
-
-    ThreadPool thread_pool_;
-    std::mutex mutex_;
-    bool force_fast_;
+    DeBruijnGraph &dbg_;
 };
 
 #endif // __ANNOTATED_DBG_HPP__

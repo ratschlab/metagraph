@@ -6,11 +6,11 @@
 #include <string>
 #include <vector>
 
-#include "dbg_succinct.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_hash_fast.hpp"
-#include "dbg_bitmap.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/hash/dbg_hash_string.hpp"
+#include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
 
 using namespace mg::bitmap_graph;
 
@@ -54,6 +54,13 @@ build_graph_iterative(uint64_t k,
 
 template <class Graph>
 bool check_graph(const std::string &alphabet, bool canonical, bool check_sequence);
+
+template <class Graph>
+bool check_graph_nodes(const Graph &graph) {
+    size_t num_nodes = 0;
+    graph.call_nodes([&](auto) { num_nodes++; });
+    return num_nodes == graph.num_nodes();
+}
 
 
 template <typename Graph>

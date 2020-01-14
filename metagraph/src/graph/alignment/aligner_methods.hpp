@@ -11,11 +11,11 @@ class Seeder {
     virtual ~Seeder() {}
 
     virtual std::vector<Alignment<NodeType>>
-    operator()(const char *begin, const char *end,
+    operator()(std::string_view seed,
                size_t clipping = 0,
                bool orientation = false) const = 0;
 
-    virtual void initialize(const std::string& /* query string */,
+    virtual void initialize(std::string_view /* query string */,
                             bool /* orientation */) {}
 };
 
@@ -25,7 +25,7 @@ class ExactSeeder : public Seeder<NodeType> {
     ExactSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
 
-    std::vector<Alignment<NodeType>> operator()(const char *begin, const char *end,
+    std::vector<Alignment<NodeType>> operator()(std::string_view seed,
                                                 size_t clipping = 0,
                                                 bool orientation = false) const;
 
@@ -43,7 +43,7 @@ class SuffixSeeder : public Seeder<NodeType> {
     SuffixSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : exact_seeder_(graph, config) {}
 
-    std::vector<Alignment<NodeType>> operator()(const char *begin, const char *end,
+    std::vector<Alignment<NodeType>> operator()(std::string_view seed,
                                                 size_t clipping = 0,
                                                 bool orientation = false) const;
 
@@ -57,16 +57,15 @@ class SuffixSeeder : public Seeder<NodeType> {
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class MEMSeeder : public Seeder<NodeType> {
   public:
-    std::vector<Alignment<NodeType>> operator()(const char *begin, const char *end,
+    std::vector<Alignment<NodeType>> operator()(std::string_view seed,
                                                 size_t clipping = 0,
                                                 bool orientation = false) const override;
 
-    virtual void initialize(const std::string &query, bool orientation) override final {
+    virtual void initialize(std::string_view query, bool orientation) override final {
         orientation_ = orientation;
         query_nodes_.clear();
         query_nodes_.reserve(query.size() - graph_.get_k() + 1);
-        graph_.map_to_nodes_sequentially(query.begin(), query.end(),
-                                         [&](auto i) { query_nodes_.push_back(i); });
+        graph_.map_to_nodes_sequentially(query, [&](auto i) { query_nodes_.push_back(i); });
     }
 
     const DeBruijnGraph& get_graph() const { return graph_; }

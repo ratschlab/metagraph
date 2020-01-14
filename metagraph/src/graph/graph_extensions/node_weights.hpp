@@ -6,8 +6,8 @@
 
 #include <sdsl/int_vector.hpp>
 
-#include "sequence_graph.hpp"
-#include "bitmap.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
+#include "common/vectors/bitmap.hpp"
 
 
 class NodeWeights : public SequenceGraph::GraphExtension {
