@@ -30,6 +30,9 @@ if [ "$#" -ne 3 ]; then
 	    exit 1
 fi
 
+# exit on error
+set -e
+
 sra_number=$1
 input_dir=$2
 output_dir=$3
@@ -40,5 +43,11 @@ for i in $(ls -p "${input_dir}"); do
   input_filenames="$input_filenames ${input_dir}/$i"
 done
 
-# -k 31
-execute metagraph build -v -p 4 -k 4 --canonical --count-kmers -o "${output_dir}${sra_number}"  $input_filenames
+if [[ -z "${input_filenames// }" ]]; then
+  echo_err "No input files given. Good-bye."
+  exit 1
+fi
+mkdir -p "$output_dir"
+# -k 31; using 10 until building on disk works properly
+execute metagraph build -v -p 4 -k 10 --canonical --count-kmers -o "${output_dir}/${sra_number}"  $input_filenames
+echo "Create script finished."
