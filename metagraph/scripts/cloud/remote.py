@@ -20,6 +20,9 @@ def count_pending_operations(compute, project, zone, operation_ids):
 
 
 def wait_for_all_operations(compute, project, zone, ids):
+    if not ids:
+        print('There are no operations to wait for to finish. This is probably an error.')
+        return
     print('Waiting for *all* operations to finish...', end='', flush=True)
     sleep_time_sec = 1
     while True:
@@ -123,8 +126,8 @@ def send_create_request(compute, project, zone, name, startup_script_name, serve
     """ Send a request to creates a new instance with the given parameters """
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
-    image_response = compute.images().getFromFamily(
-        project='metagraph', family='metagraph2').execute()
+    # image_response = compute.images().getFromFamily(project='metagraph', family='metagraph2').execute()
+    image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph4').execute()
     source_disk_image = image_response['selfLink']
 
     # Configure the machine: 1vCPU, 3.75GB of RAM
@@ -156,7 +159,7 @@ def send_create_request(compute, project, zone, name, startup_script_name, serve
                 'boot': True,
                 'autoDelete': True,  # disk will be deleted together with instance
                 'initializeParams': {
-                    'sourceImage': source_disk_image,
+                    'sourceSnapshot': source_disk_image,
                 }
             }
         ],
@@ -228,7 +231,7 @@ if __name__ == '__main__':
     parser.add_argument('--project_id', default='metagraph', help='Google Cloud project ID.')
     parser.add_argument(
         '--zone',
-        default='europe-west3-a',
+        default='europe-west1-d',  # Belgium; this seems to be the cheapest in EU; 107USD/4vCPU instance/month
         help='Compute Engine zone to deploy to.')
     parser.add_argument(
         '--name', default='', help='Name (or prefix) of instances to perform the action on')
@@ -238,14 +241,14 @@ if __name__ == '__main__':
                         help='Optional name of script to run at creation time')
     parser.add_argument('-u', '--user', default='ddanciu',
                         help='User to run comands under (for action==run)')
-    parser.add_argument('--server_ip', default='127.0.0.1',
+    parser.add_argument('--server_host', default='34.65.126.54',
                         help='The IP/hostname of the REST server that distributes jobs')
 
     args = parser.parse_args()
 
     compute = googleapiclient.discovery.build('compute', 'v1')
     if args.action == 'create' or args.action == 'c':
-        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script)
+        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script, args.server_host)
     elif args.action == 'delete' or args.action == 'd':
         delete_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
     elif args.action == 'list' or args.action == 'l':

@@ -10,7 +10,7 @@ our instances are located now (in Zurich!).
 ### Usage
 #### Creating instances
 ```
-python ./main.py create --name=mg-test -n=2
+python ./main.py create --name=mg-test -n=2 --script=<startup_script>
 ```
 This creates `n` instances (running Ubuntu 18.04) with the persistent disk `metagraph-sample`, which contains all the code, 
 binaries and deps needed to run `metagraph`. 

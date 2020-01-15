@@ -2,11 +2,20 @@
 # script that gets excecuted when a cloud instance is started
 
 # get the id of the instance from the metadata server and place it into a file
-curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/instance_id -H "Metadata-Flavor: Google" > /tmp/instance_id
-curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/server_host -H "Metadata-Flavor: Google" > /tmp/server_host
-
-instance_id=$(cat /tmp/instance_id)
-current_instance=$(cat /tmp/server_host)
+response=$(curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/instance_id -H "Metadata-Flavor: Google" --write-out  %{http_code} --silent --output /dev/null)
+if ((response == 200)); then
+  curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/instance_id -H "Metadata-Flavor: Google" > /tmp/instance_id
+  instance_id=$(cat /tmp/instance_id)
+else
+  instance_id='-1'
+fi
+response=$(curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/server_host -H "Metadata-Flavor: Google" --write-out  %{http_code} --silent --output /dev/null)
+if ((response == 200)); then
+  curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/server_host -H "Metadata-Flavor: Google" > /tmp/server_host
+  server_host=$(cat /tmp/server_host)
+else
+  server_host='127.0.0.1'
+fi
 
 metagraph_path="$HOME/projects2014-metagenome/metagraph"
 cd "$metagraph_path"
@@ -16,7 +25,7 @@ git pull origin dd/cloud
 mkdir -p build
 cd build
 cmake ..
-make -j
+make -j metagraph
 
 cd "$metagraph_path/scripts/cloud"
-python3 ./client.py --server_host="${current_instance}" --client_id="${instance_id}"
+python3 ./client.py --server_host="${server_host}" --client_id="${instance_id}"
