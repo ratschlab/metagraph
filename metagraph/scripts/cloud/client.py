@@ -23,7 +23,7 @@ MAX_CLEAN_PROCESSES = 4
 
 def get_work():
     url = f'http://{args.server_host}:{args.server_port}/jobs?download={len(download_processes)}&' \
-          f'create={len(create_processes)}&clean={len(clean_processes)}'
+          f'create={len(create_processes)}&clean={len(clean_processes)}&client_id={args.client_id}'
     for i in range(10):
         try:
             response = urllib.request.urlopen(url)
@@ -139,7 +139,7 @@ def is_full():
 
 def ack(operation, sra_id, location):
     url = f'http://{args.server_host}:{args.server_port}/jobs/ack/{operation}'
-    data = f'id={sra_id}&location={location}'
+    data = f'id={sra_id}&location={location}&client_id={args.client_id}'
     while True:
         try:
             request = urllib.request.Request(url, data=data.encode('UTF-8'),
@@ -160,7 +160,7 @@ def ack(operation, sra_id, location):
 
 def nack(operation, sra_id):
     url = f'http://{args.server_host}:{args.server_port}/jobs/nack/{operation}'
-    data = f'id={sra_id}'
+    data = f'id={sra_id}&client_id={args.client_id}'
     while True:
         try:
             request = urllib.request.Request(url, data=data.encode('UTF-8'),
@@ -313,6 +313,8 @@ if __name__ == '__main__':
         help='Location of the directory containing the input data')
     parser.add_argument('--destination', default='leomed:/cluster/work/grlab/projects/metagenome/scratch/cloud',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
+    parser.add_argument('--client_id', default='-1',
+                        help='Unique id for each client, used to identify clients for logging purposes')
     args = parser.parse_args()
 
     if not os.path.isabs(args.data_dir):

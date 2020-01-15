@@ -119,7 +119,7 @@ def stop_instances(compute, project, zone, name, count):
     wait_for_all_operations(compute, project, zone, ids)
 
 
-def send_create_request(compute, project, zone, name, startup_script_name, count):
+def send_create_request(compute, project, zone, name, startup_script_name, server_host):
     """ Send a request to creates a new instance with the given parameters """
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
@@ -135,8 +135,8 @@ def send_create_request(compute, project, zone, name, startup_script_name, count
             'value': name.split('-')[-1]
         },
         {
-            'key': 'num_instances',
-            'value': count
+            'key': 'server_host',
+            'value': server_host
         }
     ]
     if startup_script_name != '':
@@ -166,7 +166,7 @@ def send_create_request(compute, project, zone, name, startup_script_name, count
         'networkInterfaces': [{
             'network': 'global/networks/default',
             'accessConfigs': [
-            #    {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
+                #    {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
             ]
         }],
 
@@ -199,11 +199,10 @@ def send_create_request(compute, project, zone, name, startup_script_name, count
     return None
 
 
-
-def create_instances(compute, project, zone, name, count, startup_script):
+def create_instances(compute, project, zone, name, count, startup_script, server_host):
     ids = []
     for i in range(count):
-        operation = send_create_request(compute, project, zone, name + '-' + str(i), startup_script, count)
+        operation = send_create_request(compute, project, zone, name + '-' + str(i), startup_script, server_host)
         if operation:
             ids.append(operation['id'])
 
@@ -217,7 +216,7 @@ def run_command(compute, project, zone, user, name, count, startup_script_name):
         command = ['gcloud', 'compute', 'ssh', user + '@' + instance, '--zone', zone, '--command', startup_script]
         print(f'Running command\n{command}')
         out_file = open('/tmp/log-' + instance, 'w')
-        time.sleep(1) # needed because gcloud crashes miserably if run in quick succession
+        time.sleep(1)  # needed because gcloud crashes miserably if run in quick succession
         subprocess.Popen(command, stdout=out_file, stderr=subprocess.STDOUT)
 
 
@@ -239,6 +238,8 @@ if __name__ == '__main__':
                         help='Optional name of script to run at creation time')
     parser.add_argument('-u', '--user', default='ddanciu',
                         help='User to run comands under (for action==run)')
+    parser.add_argument('--server_ip', default='127.0.0.1',
+                        help='The IP/hostname of the REST server that distributes jobs')
 
     args = parser.parse_args()
 

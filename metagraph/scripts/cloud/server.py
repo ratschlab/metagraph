@@ -302,7 +302,9 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         post_vars = self.get_post_vars()
+        print(f'POST {parsed_url} {post_vars}')
         if not post_vars:
+            self.send_reply(400, f'No POST parameters specified.')
             return
         if parsed_url.path == '/jobs/ack/download':
             self.handle_ack_download(post_vars)
