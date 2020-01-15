@@ -16,6 +16,9 @@ if [ "$#" -ne 3 ]; then
 	    exit 1
 fi
 
+# exit on error
+set -e
+
 trap "exit" INT
 sra_bucket=$1
 sra_number=$2
@@ -23,22 +26,24 @@ download_dir=$3
 
 download_dir=${download_dir%/}  # remove trailing slash, if present
 
-sra_dir="${download_dir}/sra"
+sra_dir="${download_dir}/sra/${sra_number}"
 
 if ! [ -d $download_dir ]; then
 	mkdir -p $download_dir
-	mkdir -p ${sra_dir}
-	mkdir -p "${download_dir}/{sra_number}"
 fi
+mkdir -p "${sra_dir}"
+mkdir -p "${download_dir}/${sra_number}"
 
-if ! [ -f "${sra_dir}/${sra_number}" ]; then
-  echo "${sra_dir}/${sra_number} Doesn't exist :("
-  execute gsutil -u metagraph  cp -r "gs://sra-pub-run-${sra_bucket}/${sra_number}" "${sra_dir}/"
+
+if ! [ -f "${sra_dir}" ]; then
+  execute gsutil -q -u metagraph  cp "gs://sra-pub-run-${sra_bucket}/${sra_number}/*" "${sra_dir}/"
 else
   echo "${sra_number} already downloaded"
 fi
-
-for sra_file in $(ls -p "${sra_dir}/${sra_number}"); do
-  execute fasterq-dump "${sra_dir}/${sra_number}/${sra_file}" -f -e 10  -O "${download_dir}/${sra_number}"
+tmp_dir="/tmp/sra/${sra_dir}"
+mkdir -p "${tmp_dir}"
+for sra_file in $(ls -p "${sra_dir}"); do
+  execute fasterq-dump "${sra_dir}/${sra_file}" -f -e 4  -O "${download_dir}/${sra_number} -t ${tmp_dir}"
 done
 # rm -rf ${sra_dir} # TODO: enable this
+# rm -rf ${tmp_dir}

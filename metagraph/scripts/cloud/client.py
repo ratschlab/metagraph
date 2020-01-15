@@ -43,16 +43,24 @@ def get_work():
     return {}
 
 
-def download_dir():
+def download_dir_base():
     return os.path.join(args.output_dir, 'downloads/')
 
 
-def create_dir():
-    return os.path.join(args.output_dir, 'graphs/')
+def download_dir(sra_id):
+    return os.path.join(download_dir_base(), sra_id)
+
+
+def create_dir_base():
+    return os.path.join(args.output_dir, 'graphs')
+
+
+def create_dir(sra_id):
+    return os.path.join(create_dir_base(), sra_id)
 
 
 def create_file(sra_id):
-    return os.path.join(create_dir(), f'{sra_id}.dbg')
+    return os.path.join(create_dir(sra_id), f'{sra_id}.dbg')
 
 
 def clean_dir():
@@ -60,15 +68,16 @@ def clean_dir():
 
 
 def clean_file(sra_id):
-    return os.path.join(clean_dir(), f'{sra_id}.dbg')  # TODO: figure out the proper file name
+    return os.path.join(clean_dir(), f'{sra_id}.fasta.gz')
 
 
-def start_download(sra_id):
+def start_download(download_resp):
+    sra_id = download_resp['id']
     if args.source == 'ena':
-        download_processes[sra_id] = subprocess.Popen(['./download.sh', sra_id, download_dir()])
+        download_processes[sra_id] = subprocess.Popen(['./download_ena.sh', sra_id, download_dir_base()])
     else:
-        # TODO: deal with bucket numbers
-        download_processes[sra_id] = subprocess.Popen(['./download_ncbi.sh', '1', sra_id, download_dir()])
+        download_processes[sra_id] = subprocess.Popen(
+            ['./download_ncbi.sh', download_resp['bucket'], sra_id, download_dir_base()])
 
 
 def internal_ip():
@@ -79,35 +88,44 @@ def internal_ip():
 
 
 def start_create(sra_id, location):
+    input_dir_base = download_dir_base()
     if not location.startswith(internal_ip()):
-        logging.info(f'Copying from {location}')
-        return_code = subprocess.call(['scp', '-r', location, download_dir()])
+        return_code = subprocess.call(['scp', '-r', location, input_dir_base])
         if return_code != 0:
-            logging.warning(f'Copying from {location} failed')
+            logging.warning(f'Copying from {location} to {input_dir_base} failed')
             return False
         else:
-            logging.info(f'Copying from {location} completed successfully')
+            logging.info(f'Copying from {location} to {input_dir_base} completed successfully')
     else:
         logging.info(f'Luckily {location} already is on this machine.')
-    input_dir = os.path.join(download_dir(), sra_id)
-    create_processes[sra_id] = subprocess.Popen(['./create.sh', sra_id, input_dir, create_dir()])
+    input_dir = download_dir(sra_id)
+    output_dir = create_dir(sra_id)
+    create_processes[sra_id] = subprocess.Popen(['./create.sh', sra_id, input_dir, output_dir])
     return True
 
 
+def make_dir_if_needed(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+    except FileExistsError:
+        pass
+
+
 def start_clean(sra_id, location):
+    input_dir = create_dir_base()
     if not location.startswith(internal_ip()):
-        logging.info(f'Copying from {location}')
-        return_code = subprocess.call(['scp', '-r', location, args.output_dir])
+        return_code = subprocess.call(['scp', '-r', location, input_dir])
         if return_code != 0:
-            logging.warning('Copying from {location} failed')
+            logging.warning(f'Copying from {location} to {input_dir} failed')
             return False
         else:
-            logging.info('Copying from {location} completed successfully')
+            logging.info(f'Copying from {location} to {input_dir} completed successfully')
     else:
         logging.info('Luckily the files to use for building the graph already are on this machine.')
     input_file = create_file(sra_id)
     output_file = os.path.join(clean_dir(), sra_id)
     clean_processes[sra_id] = subprocess.Popen(['./clean.sh', sra_id, input_file, output_file])
+    return True
 
 
 def start_transfer(sra_id, cleaned_graph_location):
@@ -169,7 +187,7 @@ def check_status():
             completed_downloads.add(sra_id)
             if return_code == 0:
                 logging.info(f'Download for SRA id {sra_id} completed successfully.')
-                location = os.path.join(f'{internal_ip()}:{download_dir()}', sra_id)
+                location = os.path.join(f'{internal_ip()}:{download_dir_base()}', sra_id)
 
                 if not ack('download', sra_id, location):  # all done, yay!
                     return False;
@@ -187,7 +205,7 @@ def check_status():
             completed_creates.add(sra_id)
             if return_code == 0:
                 logging.info(f'Building graph for SRA id {sra_id} completed successfully.')
-                location = f'{internal_ip()}:{create_file(sra_id)}'
+                location = f'{internal_ip()}:{create_dir(sra_id)}'
 
                 if not ack('create', sra_id, location):  # all done, yay!
                     return False;
@@ -204,7 +222,7 @@ def check_status():
         if return_code is not None:
             completed_cleans.add(sra_id)
             if return_code == 0:
-                logging.info('Cleaning graph for SRA id {sra_id} completed successfully.')
+                logging.info(f'Cleaning graph for SRA id {sra_id} completed successfully.')
                 location = f'{internal_ip()}:{clean_file(sra_id)}'
 
                 if not ack('clean', sra_id, location):  # all done, yay!
@@ -212,7 +230,7 @@ def check_status():
 
                 start_transfer(sra_id, clean_file(sra_id))
             else:
-                logging.warning('Cleaning graph for SRA id {sra_id} failed.')
+                logging.warning(f'Cleaning graph for SRA id {sra_id} failed.')
                 if not nack('clean', sra_id):
                     return False  # this shouldn't happen, as we still have work to do
     for d in completed_cleans:
@@ -224,11 +242,11 @@ def check_status():
         if return_code is not None:
             completed_transfers.add(sra_id)
             if return_code == 0:
-                logging.info('Transferring graph for SRA id {sra_id} completed successfully.')
+                logging.info(f'Transferring graph for SRA id {sra_id} completed successfully.')
                 if not ack('transfer', sra_id, args.destination):  # all done, yay!
                     return False
             else:
-                logging.warning('Transferring cleaned graph for SRA id {sra_id} failed.')
+                logging.warning(f'Transferring cleaned graph for SRA id {sra_id} failed.')
                 if not nack('transfer', sra_id):
                     return False  # this shouldn't happen, as we still have work to do
     for d in completed_transfers:
@@ -239,6 +257,8 @@ def check_status():
 
 def do_work():
     while True:
+        if not check_status():
+            break
         if is_full():
             time.sleep(5)
             continue
@@ -247,15 +267,13 @@ def do_work():
         if work_response is None:
             break
         if 'download' in work_response:
-            start_download(work_response['download']['id'])
+            start_download(work_response['download'])
         if 'create' in work_response:
             if not start_create(work_response['create']['id'], work_response['create']['location']):
                 nack('create', work_response['create']['id'])
         if 'clean' in work_response:
             if not start_clean(work_response['clean']['id'], work_response['clean']['location']):
                 nack('clean', work_response['clean']['id'])
-        if not check_status():
-            break
         time.sleep(5)
 
 
@@ -272,16 +290,17 @@ def check_env():
         logging.error("Some prerequisites are missing on this machine. Bailing out.")
         exit(1)
 
-    pathlib.Path(download_dir()).mkdir(parents=True, exist_ok=True)
-    pathlib.Path(create_dir()).mkdir(parents=True, exist_ok=True)
-    pathlib.Path(clean_dir()).mkdir(parents=True, exist_ok=True)
+    make_dir_if_needed(download_dir_base())
+    make_dir_if_needed(create_dir_base())
+    make_dir_if_needed(clean_dir())
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--source', help='Where to download the data from: ena or ncbi', choices=('ena', 'ncbi'))
+    parser.add_argument('--source', help='Where to download the data from: ena or ncbi', choices=('ena', 'ncbi'),
+                        default='ena')
     parser.add_argument('--server_host', help='HTTP server name or ip')
     parser.add_argument('--server_port', default=8000, help='HTTP Port on which the server runs')
     parser.add_argument(

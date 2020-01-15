@@ -1,6 +1,7 @@
 import argparse
 import cgi
 import errno
+import fileinput
 import http.server
 import json
 import logging
@@ -60,23 +61,110 @@ status_str = f"""
 """
 
 
+def convert_bucket():
+    """ Converts the original gs://... bucket urls in bucket1..bucket9 to sra_id bucket_no pairs for faster parsing """
+    logging.info('Converting bucket files to a faster to parse format...')
+    fileout = os.path.join(args.data_dir, 'buckets')
+
+    for i in range(1, 9):
+        fileout = os.path.join(args.data_dir, f'bucket_proc{i}')
+        with open(fileout, 'w') as fpout:
+            file = os.path.join(args.data_dir, f'bucket{i}')
+            try:
+                logging.debug(f'Converting {file}')
+                with open(file) as fp:
+                    for line in fp:
+                        parsed = urllib.parse.urlparse(line)
+                        sra_id = parsed.path[1:-2]
+                        fpout.write(f'{sra_id}\n')
+            except FileNotFoundError:
+                logging.fatal(f'Could not find {file} in {args.data_dir}. Please copy it there, otherwise I can\'t '
+                              f'figure out which GCloud bucket each sra id is in. Look, I\'m trying to be helpful.')
+                exit(1)
+
+
 class Sra:
     """ Reads a list of files containing SRA ids and returns the ids one by one for further processing """
 
     def __init__(self, data_files):
         self.data_files = data_files
+        self.sraid_to_bucket = {}
+        self.add_buckets()
 
     def next_item(self):
         """Lazy function (generator) to read a sequence of files line by line."""
-        for file in data_files:
+        for file in self.data_files:
             with open(file) as fp:
                 for line in fp:
-                    line = line.rstrip()
-                    if line in downloaded_sras:  # already processed
-                        print(f'{line} already downloaded - assuming it\'s ready for processing')
+                    line = line.rstrip().split()
+                    if line[0] in downloaded_sras:  # already processed
+                        print(f'{line[0]} already downloaded - assuming it\'s ready for processing')
                         continue
                     yield line
         return None
+
+    def load_sraid_to_bucket(self):
+        if self.sraid_to_bucket:
+            return  # already loaded
+        for i in range(1, 9):
+            bucket_file = os.path.join(args.data_dir, f'bucket_proc{i}')
+            if not os.path.exists(bucket_file):
+                convert_bucket()
+            logging.debug(f'Loading {bucket_file} ...')
+            with open(bucket_file) as fp:
+                for line in fp:
+                    self.sraid_to_bucket[line.strip()] = i
+
+    def add_buckets(self):
+        """ NCBI data on Google cloud is stored in 9 buckets, named gs://sra-pub-run-1..9
+            So for each SRA id, we need to know in which bucket to find it. This function looks at the files in
+            args.data_dir and if the ids don't contain a bucket id, it adds it.
+        """
+        if not args.add_gcloud_bucket:
+            return
+        logging.info('Checking if input files contain bucket information...')
+        must_convert = False
+        for file in self.data_files:
+            with open(file) as fp:
+                for line in fp:
+                    line = line.rstrip()
+                    tokens = line.split()
+                    if len(tokens) == 1:
+                        must_convert = True
+                        break
+            if must_convert:
+                break
+        if not must_convert:
+            logging.info('Yup, all good, bucket information is all there')
+            return
+        logging.info('Bucket information is missing in at least one line. Adding it now...')
+        self.load_sraid_to_bucket()
+        logging.info('Loaded bucket map')
+        total_sras = 0
+        skipped_sras = 0
+        for file in self.data_files:
+            logging.debug(f'Processing {file}')
+            for line in fileinput.input(file, inplace=True):
+                tokens = line.rstrip().split()
+                if len(tokens) == 0:
+                    continue
+                total_sras += 1
+                if not (tokens[0] in self.sraid_to_bucket):
+                    logging.warning(f'Sra {tokens[0]} is not found in any bucket, skipping')
+                    skipped_sras += 1
+                    continue
+                print(f'{tokens[0]} {self.sraid_to_bucket[tokens[0]]}')
+
+        logging.info(f'Bucket information added to {len(self.data_files)} files. Skipped {skipped_sras} out of'
+                     f' {total_sras} sras.')
+        del self.sraid_to_bucket
+
+
+def get_var(post_vars, var):
+    var_list = post_vars.get(var.encode('ascii'))
+    if not var_list:
+        return None
+    return var_list[0].decode('utf-8')
 
 
 class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -99,9 +187,11 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         response = {}
         if download_jobs[0] == '0':
             try:
-                sra_id = next(sra_download_gen)
-                response['download'] = {'id': sra_id}
-                pending_downloads.add(sra_id)
+                sra_id_line = next(sra_download_gen)
+                response['download'] = {'id': sra_id_line[0]}
+                if len(sra_id_line) == 2:
+                    response['download']['bucket'] = sra_id_line[1]
+                pending_downloads.add(sra_id_line[0])
             except StopIteration:
                 download_done = True  # nothing else to download
         create_jobs_int = int(create_jobs[0])
@@ -123,40 +213,37 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             to_transfer_sras, downloaded_sras, created_sras, cleaned_sras, transferred_sras),
                         {'Content-type': 'text/html'})
 
-    def handle_ack(self, operation, post_vars, add_maps, remove_map):
-        sra_id = post_vars.get(b'id')
-        location = post_vars.get(b'location')
+    def handle_ack(self, operation, post_vars, add_maps, pending_operations):
+        sra_id = get_var(post_vars, 'id')
+        location = get_var(post_vars, 'location')
         if None in (sra_id, location):
             self.send_reply(400, 'id or location not specified')
             return False
-        filename = os.path.join(args.output_dir, f'{operation}ed_sras')
-        sra_id_str = sra_id[0].decode('utf-8')
-        location_str = location[0].decode('utf-8')
+        filename = os.path.join(args.output_dir, f'succeed_{operation}.id')
         with open(filename, 'a') as fp:
-            fp.write(f'{sra_id_str} {location_str}\n')
+            fp.write(f'{sra_id} {location}\n')
         for m in add_maps:
-            m[sra_id_str] = location_str
+            m[sra_id] = location
         self.send_reply(200, "")
         try:
-            remove_map.remove(sra_id_str)
+            pending_operations.remove(sra_id)
         except KeyError:
-            logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
+            logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id}')
         return True
 
-    def handle_nack(self, operation, post_vars, remove_map):
-        sra_id = post_vars.get(b'id')
+    def handle_nack(self, operation, post_vars, pending_operations):
+        sra_id = get_var(post_vars, 'id')
         if sra_id is None:
             self.send_reply(400, 'id not specified')
             return
         filename = os.path.join(args.output_dir, f'failed_{operation}.id')
-        sra_id_str = sra_id[0].decode('utf-8')
         with open(filename, 'a') as fp:
-            fp.write(f'{sra_id_str}\n')
+            fp.write(f'{sra_id}\n')
         self.send_reply(200, "")
         try:
-            remove_map.remove(sra_id_str)
+            pending_operations.remove(sra_id)
         except KeyError:
-            logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id_str}')
+            logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id}')
 
     def handle_ack_download(self, post_vars):
         self.handle_ack('download', post_vars, [downloaded_sras, to_create_sras], pending_downloads)
@@ -166,10 +253,12 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def handle_ack_clean(self, post_vars):
         if self.handle_ack('clean', post_vars, [cleaned_sras, to_transfer_sras], pending_cleans):
-            pending_transfers[post_vars.get(b'id')] = post_vars.get(b'location')
+            # a transfer is automatically started after a clean operation by the client
+            pending_transfers.add(get_var(post_vars, 'id'))
 
     def handle_ack_transfer(self, post_vars):
         self.handle_ack('transfer', post_vars, [transferred_sras], pending_transfers)
+        del to_transfer_sras[get_var(post_vars, 'id')]
 
     def handle_nack_download(self, post_vars):
         self.handle_nack('download', post_vars, pending_downloads)
@@ -221,7 +310,9 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.handle_ack_create(post_vars)
         elif parsed_url.path == '/jobs/ack/clean':
             self.handle_ack_clean(post_vars)
-        if parsed_url.path == '/jobs/nack/download':
+        elif parsed_url.path == '/jobs/ack/transfer':
+            self.handle_ack_transfer(post_vars)
+        elif parsed_url.path == '/jobs/nack/download':
             self.handle_nack_download(post_vars)
         elif parsed_url.path == '/jobs/nack/create':
             self.handle_nack_create(post_vars)
@@ -245,7 +336,25 @@ def load_file_dict(filename):
 
 
 def init_state():
-    filename = os.path.join(args.output_dir, 'downloaded_sras')
+    args.data_dir = os.path.expanduser(args.data_dir)
+    if os.path.isfile(args.data_dir):
+        logging.error(
+            f' --data_dir must point to a directory (containing files with SRA ids), not to a file (e.g. {os.path.dirname(args.data_dir)} instead of {args.data_dir})')
+        exit(1)
+    if not os.path.exists(args.data_dir):
+        logging.error(
+            f' Directory {args.data_dir} does not exists. Please specify a valid input directory via the --data_dir flag')
+        exit(1)
+    data_files = [os.path.join(args.data_dir, f) for f in os.listdir(args.data_dir) if
+                  os.path.isfile(os.path.join(args.data_dir, f)) and f.endswith('ids')]
+
+    if len(data_files) == 0:
+        logging.fatal(f"No files found in '{args.data_dir}'. Exiting.")
+        exit(1)
+    global sra_download_gen
+    sra_download_gen = Sra(data_files).next_item()
+
+    filename = os.path.join(args.output_dir, 'succeed_download.id')
     if not os.path.exists(os.path.dirname(filename)):
         try:
             os.makedirs(os.path.dirname(filename))
@@ -254,23 +363,34 @@ def init_state():
                 raise
     global downloaded_sras, created_sras, cleaned_sras, transferred_sras, to_create_sras, to_clean_sras, to_transfer_sras
     downloaded_sras = load_file_dict(filename)
-    created_sras = load_file_dict(os.path.join(args.output_dir, 'created_sras'))
-    cleaned_sras = load_file_dict(os.path.join(args.output_dir, 'cleaned_sras'))
-    transferred_sras = load_file_dict(os.path.join(args.output_dir, 'transferred_sras'))
+    created_sras = load_file_dict(os.path.join(args.output_dir, 'succeed_create.id'))
+    cleaned_sras = load_file_dict(os.path.join(args.output_dir, 'succeed_clean.id'))
+    transferred_sras = load_file_dict(os.path.join(args.output_dir, 'succeed_transfer.id'))
 
     to_create_sras = {k: downloaded_sras[k] for k in set(downloaded_sras) - set(created_sras)}
     to_clean_sras = {k: created_sras[k] for k in set(created_sras) - set(cleaned_sras)}
     to_transfer_sras = {k: cleaned_sras[k] for k in set(cleaned_sras) - set(transferred_sras)}
 
+    # TODO: this incorrect because we need the create paths, not the clean path; need to implement transfer jobs
+    to_clean_sras.update(to_transfer_sras)  # because we don't support transfer only jobs
+    to_transfer_sras = {}
+
 
 def init_logging():
+    args.output_dir = os.path.expanduser(args.output_dir)
+    if not os.path.exists(args.output_dir):
+        try:
+            os.makedirs(args.output_dir)
+        except OSError as exc:  # Guard against race condition
+            if exc.errno != errno.EEXIST:
+                raise
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
     file_handler = logging.FileHandler("{0}/{1}.log".format(args.output_dir, 'server'))
     file_handler.setLevel(logging.DEBUG)
     logging.getLogger().addHandler(file_handler)
 
 
-if __name__ == '__main__':
+def parse_args():
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -283,20 +403,20 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
+    parser.add_argument('--add_gcloud_bucket', default=True,
+                        help='Whether to add the NCBI gcloud bucket id for each sra')
 
+    global args
     args = parser.parse_args()
-    init_logging()
-    data_files = [os.path.join(args.data_dir, f) for f in os.listdir(args.data_dir) if
-                  os.path.isfile(os.path.join(args.data_dir, f)) and f.endswith('ids')]
 
-    if len(data_files) == 0:
-        logging.fatal(f"No files found in '{args.data_dir}'. Exiting.")
-        exit(1)
+
+if __name__ == '__main__':
+    parse_args()
+
+    init_logging()
 
     init_state()
 
-    sra_download_gen = Sra(data_files).next_item()
-
-    httpd = http.server.HTTPServer(('localhost', args.port), SimpleHTTPRequestHandler)
-    print(f'Starting server on port {args.port}')
+    httpd = http.server.HTTPServer(('', args.port), SimpleHTTPRequestHandler)
+    logging.info(f'Starting server on port {args.port}')
     httpd.serve_forever()

@@ -26,9 +26,11 @@ function execute {
 
 # check the command-line arguments
 if [ "$#" -ne 3 ]; then
-	    echo_err "Usage: clean.sh <sra_id> <input_file> <output_dir>"
+	    echo_err "Usage: clean.sh <sra_id> <input_file> <output_file>"
 	    exit 1
 fi
+
+set -e # exit on error
 
 sra_number=$1
 input_file=$2
