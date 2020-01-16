@@ -167,6 +167,19 @@ def get_var(post_vars, var):
     return var_list[0].decode('utf-8')
 
 
+def should_download():
+    """ Returns true if it makes sense to download more data for processing, e.g. if we don't already have a
+    large number of downloads waiting to be processed"""
+
+    return len(to_create_sras) < 10 and len(to_create_sras) < 3 * args.worker_count
+
+
+def should_create():
+    """ Returns true if it makes sense to create rather than clean """
+
+    return len(to_create_sras) <= len(to_clean_sras) or len(to_clean_sras) < 4 * args.worker_count
+
+
 class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     """ Processes requests for new jobs or for acknowledging finished jobs """
 
@@ -185,7 +198,7 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 or pending_cleans or pending_transfers):
             self.send_reply(204, 'All done, feel free to exit and pat yourself on the back')
         response = {}
-        if download_jobs[0] == '0':
+        if download_jobs[0] == '0' and should_download():
             try:
                 sra_id_line = next(sra_download_gen)
                 response['download'] = {'id': sra_id_line[0]}
@@ -196,8 +209,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 download_done = True  # nothing else to download
         create_jobs_int = int(create_jobs[0])
         clean_jobs_int = int(clean_jobs[0])
-        if create_jobs_int == 0:
-            if to_create_sras and clean_jobs_int == 0:
+        if create_jobs_int == 0:  # if we have a create job, we're done - the machine is full
+            if to_create_sras and clean_jobs_int == 0 and should_create():
                 sra_id, directory = to_create_sras.popitem()
                 response['create'] = {'id': sra_id, 'location': directory}
                 pending_creates.add(sra_id)
@@ -407,6 +420,7 @@ def parse_args():
         help='Location of the directory containing the input data')
     parser.add_argument('--add_gcloud_bucket', default=True,
                         help='Whether to add the NCBI gcloud bucket id for each sra')
+    parser.add_argument('--worker_count', default=1, help='Number of workers processing data')
 
     global args
     args = parser.parse_args()

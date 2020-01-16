@@ -161,6 +161,14 @@ def send_create_request(compute, project, zone, name, startup_script_name, serve
                 'initializeParams': {
                     'sourceSnapshot': source_disk_image,
                 }
+            },
+            {
+                'type': 'SCRATCH',
+                'initializeParams': {
+                    'diskType': f'zones/{zone}/diskTypes/local-ssd'
+                },
+                'autoDelete': True,
+                'interface': 'NVME'
             }
         ],
 
