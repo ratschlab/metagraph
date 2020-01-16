@@ -35,4 +35,4 @@ cmake ..
 make -j metagraph
 
 cd "$metagraph_path/scripts/cloud"
-python3 ./client.py --server_host="${server_host}" --client_id="${instance_id}"
+python3 ./client.py --server_host="${server_host}" --client_id="${instance_id}" --output_dir="/mnt/disks/ssd/"

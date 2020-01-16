@@ -281,6 +281,10 @@ def check_env():
     """ Make sure all the necessary software is in place to successfully run the client and create working
     directories """
 
+    make_dir_if_needed(download_dir_base())
+    make_dir_if_needed(create_dir_base())
+    make_dir_if_needed(clean_dir())
+
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
     file_handler = logging.FileHandler("{0}/{1}.log".format(args.output_dir, 'client'))
     file_handler.setLevel(logging.DEBUG)
@@ -304,10 +308,6 @@ if __name__ == '__main__':
     parser.add_argument('--server_host', help='HTTP server name or ip')
     parser.add_argument('--server_port', default=8000, help='HTTP Port on which the server runs')
     parser.add_argument(
-        '--data_dir',
-        default=os.path.expanduser('~/Downloads/sra_test/'),
-        help='Location of the directory containing the input data')
-    parser.add_argument(
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
@@ -317,8 +317,8 @@ if __name__ == '__main__':
                         help='Unique id for each client, used to identify clients for logging purposes')
     args = parser.parse_args()
 
-    if not os.path.isabs(args.data_dir):
-        logging.error(f'data_dir must be an absolute path, not {args.data_dir}')
+    if not os.path.isabs(args.output_dir):
+        logging.error(f'output_dir must be an absolute path, not {args.output_dir}')
         exit(1)
     if not args.server_host:
         logging.error('missing --server_host. Can\'t connect to server without it!')
