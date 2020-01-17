@@ -218,7 +218,7 @@ def check_status():
                 logging.info(f'Cleaning up {download_path}')
                 parsed_download_path = urllib.parse.urlparse(download_path)
                 subprocess.run(['ssh', parsed_download_path.scheme, f'rm -rf {parsed_download_path.path}'])
-                del clean_source[sra_id]
+                del create_source[sra_id]
 
             if return_code == 0:
                 logging.info(f'Building graph for SRA id {sra_id} completed successfully.')
