@@ -248,7 +248,7 @@ if __name__ == '__main__':
                         help='Optional name of script to run at creation time')
     parser.add_argument('-u', '--user', default='ddanciu',
                         help='User to run comands under (for action==run)')
-    parser.add_argument('--server_host', default='34.65.126.54',
+    parser.add_argument('--server_host', default='34.65.229.224',
                         help='The IP/hostname of the REST server that distributes jobs')
 
     args = parser.parse_args()

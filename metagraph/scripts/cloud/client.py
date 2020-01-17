@@ -73,7 +73,7 @@ def clean_dir():
 
 
 def clean_file(sra_id):
-    return os.path.join(clean_dir(), f'{sra_id}.fasta.gz')
+    return os.path.join(clean_dir(), f'{sra_id}.*')
 
 
 def start_download(download_resp):
@@ -253,6 +253,7 @@ def check_status():
 
                 if not ack('clean', sra_id, location):  # all done, yay!
                     return False
+
 
                 start_transfer(sra_id, clean_file(sra_id))
             else:
