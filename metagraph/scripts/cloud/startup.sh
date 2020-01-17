@@ -14,7 +14,7 @@ echo UUID=`sudo blkid -s UUID -o value /dev/disk/by-id/google-local-nvme-ssd-0` 
 function start_client() {
   echo "Executing script as: $(whoami)"
   metagraph_path="$HOME/projects2014-metagenome/metagraph"
-  PATH="$PATH:~/.aspera/connect/bin/:${metagraph_path}/build:/home/linuxbrew/.linuxbrew/bin/"
+  PATH="$PATH:~/.aspera/connect/bin/:${metagraph_path}/build:/home/linuxbrew/.linuxbrew/bin/:/snap/bin"
   # get the id of the instance from the metadata server and place it into a file
   response=$(curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/instance_id -H "Metadata-Flavor: Google" --write-out  %{http_code} --silent --output /dev/null)
   if ((response == 200)); then
