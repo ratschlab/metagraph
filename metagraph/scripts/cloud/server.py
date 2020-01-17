@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import cgi
 import errno
@@ -8,7 +10,8 @@ import logging
 import os
 import urllib
 
-# TODO: - maybe handle retries for pending jobs
+# TODO:
+#  - maybe handle retries for pending jobs
 
 args = None  # the parsed command line arguments
 
@@ -63,9 +66,8 @@ status_str = f"""
 
 def convert_bucket():
     """ Converts the original gs://... bucket urls in bucket1..bucket9 to sra_id bucket_no pairs for faster parsing """
-    logging.info('Converting bucket files to a faster to parse format...')
-    fileout = os.path.join(args.data_dir, 'buckets')
 
+    logging.info('Converting bucket files to a faster to parse format...')
     for i in range(1, 9):
         fileout = os.path.join(args.data_dir, f'bucket_proc{i}')
         with open(fileout, 'w') as fpout:
@@ -97,6 +99,8 @@ class Sra:
             with open(file) as fp:
                 for line in fp:
                     line = line.rstrip().split()
+                    if len(line) == 0:
+                        continue
                     if line[0] in downloaded_sras:  # already processed
                         print(f'{line[0]} already downloaded - assuming it\'s ready for processing')
                         continue
@@ -315,7 +319,7 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         post_vars = self.get_post_vars()
-        print(f'POST {parsed_url} {post_vars}')
+        logging.debug(f'POST {parsed_url} {post_vars}')
         if not post_vars:
             self.send_reply(400, f'No POST parameters specified.')
             return

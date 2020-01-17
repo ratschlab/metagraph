@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import os
 import subprocess
 import time
 
@@ -127,7 +126,7 @@ def send_create_request(compute, project, zone, name, startup_script_name, serve
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
     # image_response = compute.images().getFromFamily(project='metagraph', family='metagraph2').execute()
-    image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph5').execute()
+    image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph6').execute()
     source_disk_image = image_response['selfLink']
 
     # Configure the machine: 1vCPU, 3.75GB of RAM

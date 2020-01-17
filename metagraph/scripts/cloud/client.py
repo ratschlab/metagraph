@@ -1,9 +1,10 @@
+#!/usr/bin/env python3
+
 import argparse
 import http
 import json
 import logging
 import os
-import pathlib
 import socket
 import subprocess
 import time
@@ -15,6 +16,10 @@ download_processes = {}
 create_processes = {}
 clean_processes = {}
 transfer_processes = {}
+
+# the location (host:/path) where clean and create get their files from; used to clean up files that are processed
+create_source = {}
+clean_source = {}
 
 MAX_DOWNLOAD_PROCESSES = 1
 MAX_CREATE_PROCESSES = 1
@@ -38,7 +43,7 @@ def get_work():
             logging.error(f'Failed to open URL {url} Reason: {e.reason}')
             time.sleep(5)  # wait a bit and try again
         except http.client.RemoteDisconnected as e:
-            logging.error(f'Failed to open URL {url} Reason: {e.reason}')
+            logging.error(f'Failed to open URL {url} Reason: remote disconnected.')
             time.sleep(5)  # wait a bit and try again
     return {}
 
@@ -90,6 +95,7 @@ def internal_ip():
 def start_create(sra_id, location):
     input_dir_base = download_dir_base()
     if not location.startswith(internal_ip()):
+        create_source[sra_id] = location
         return_code = subprocess.call(['scp', '-r', location, input_dir_base])
         if return_code != 0:
             logging.warning(f'Copying from {location} to {input_dir_base} failed')
@@ -114,6 +120,7 @@ def make_dir_if_needed(path):
 def start_clean(sra_id, location):
     input_dir = create_dir_base()
     if not location.startswith(internal_ip()):
+        clean_source[sra_id] = location
         return_code = subprocess.call(['scp', '-r', location, input_dir])
         if return_code != 0:
             logging.warning(f'Copying from {location} to {input_dir} failed')
@@ -129,7 +136,8 @@ def start_clean(sra_id, location):
 
 
 def start_transfer(sra_id, cleaned_graph_location):
-    transfer_processes[sra_id] = subprocess.Popen(['scp', '-r', cleaned_graph_location, args.destination])
+    transfer_processes[sra_id] = subprocess.Popen(
+        f'scp -r {cleaned_graph_location} {args.destination}; rm -rf {cleaned_graph_location}', shell=True)
 
 
 def is_full():
@@ -201,8 +209,17 @@ def check_status():
     completed_creates = set()
     for sra_id, create_process in create_processes.items():
         return_code = create_process.poll()
+
         if return_code is not None:
             completed_creates.add(sra_id)
+            # clean up the download path; if adding retries, do this only on success
+            if sra_id in create_source:
+                download_path = create_source[sra_id]
+                logging.info(f'Cleaning up {download_path}')
+                parsed_download_path = urllib.parse.urlparse(download_path)
+                subprocess.run(['ssh', parsed_download_path.scheme, f'rm -rf {parsed_download_path.path}'])
+                del clean_source[sra_id]
+
             if return_code == 0:
                 logging.info(f'Building graph for SRA id {sra_id} completed successfully.')
                 location = f'{internal_ip()}:{create_dir(sra_id)}'
@@ -221,6 +238,15 @@ def check_status():
         return_code = clean_process.poll()
         if return_code is not None:
             completed_cleans.add(sra_id)
+
+            if sra_id in clean_source:
+                # clean up the original graph; if adding retries, do this only on success
+                clean_path = clean_source[sra_id]
+                logging.info(f'Cleaning up {clean_path}')
+                parsed_download_path = urllib.parse.urlparse(clean_path)
+                subprocess.run(['ssh', parsed_download_path.scheme, f'rm -rf {parsed_download_path.path}'])
+                del clean_source[sra_id]
+
             if return_code == 0:
                 logging.info(f'Cleaning graph for SRA id {sra_id} completed successfully.')
                 location = f'{internal_ip()}:{clean_file(sra_id)}'
@@ -304,7 +330,7 @@ if __name__ == '__main__':
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--source', help='Where to download the data from: ena or ncbi', choices=('ena', 'ncbi'),
-                        default='ena')
+                        default='ncbi')
     parser.add_argument('--server_host', help='HTTP server name or ip')
     parser.add_argument('--server_port', default=8000, help='HTTP Port on which the server runs')
     parser.add_argument(
