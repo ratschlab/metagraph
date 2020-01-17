@@ -13,7 +13,8 @@ echo UUID=`sudo blkid -s UUID -o value /dev/disk/by-id/google-local-nvme-ssd-0` 
 # starts the cloud metagraph client
 function start_client() {
   echo "Executing script as: $(whoami)"
-
+  metagraph_path="$HOME/projects2014-metagenome/metagraph"
+  PATH="$PATH:~/.aspera/connect/bin/:${metagraph_path}/build:/home/linuxbrew/.linuxbrew/bin/"
   # get the id of the instance from the metadata server and place it into a file
   response=$(curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/instance_id -H "Metadata-Flavor: Google" --write-out  %{http_code} --silent --output /dev/null)
   if ((response == 200)); then
@@ -30,7 +31,6 @@ function start_client() {
     server_host='127.0.0.1'
   fi
 
-  metagraph_path="$HOME/projects2014-metagenome/metagraph"
   cd "$metagraph_path"
   git checkout dd/cloud  # TODO: remove this at some point
   git pull origin dd/cloud
@@ -45,4 +45,4 @@ function start_client() {
 }
 
 export -f start_client
-sudo -u ddanciu "bash -c start_client"
+su ddanciu -c "bash -c start_client"
