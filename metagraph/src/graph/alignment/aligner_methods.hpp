@@ -163,8 +163,8 @@ class DefaultColumnExtender : public Extender<NodeType> {
     const DBGAlignerConfig &config_;
 
     struct ColumnPriorityFunction {
-        bool operator()(typename DPTable::value_type* a,
-                        typename DPTable::value_type* b) const {
+        bool operator()(const typename DPTable::value_type* a,
+                        const typename DPTable::value_type* b) const {
             return compare_(a->second, b->second);
         }
 
