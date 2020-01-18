@@ -450,10 +450,10 @@ DPTable<NodeType>::DPTable(const SequenceGraph &graph,
     std::vector<NodeType> in_nodes;
     graph.adjacent_incoming_nodes(start_node, [&](auto i) { in_nodes.emplace_back(i); });
 
-    auto& table_init = dp_table_.emplace(
+    auto& table_init = const_cast<Column&>(dp_table_.emplace(
         start_node,
         Column(size, min_score, start_char, std::move(in_nodes))
-    ).first->second;
+    ).first->second);
 
     table_init.scores.front() = initial_score;
     table_init.ops.front() = Cigar::Operator::MATCH;
