@@ -1,7 +1,6 @@
 #include "aligner_methods.hpp"
 
 #ifdef __AVX2__
-#include <emmintrin.h>
 #include <immintrin.h>
 #endif
 
@@ -168,7 +167,7 @@ inline void compute_match_delete_updates_avx2(size_t &i,
     const __m256i r_rotate = _mm256_setr_epi32(1, 2, 3, 4, 5, 6, 7, 0);
 
     for (; i + 8 <= length; i += 8) {
-        __m256i incoming_packed = _mm256_loadu_si256((__m256i*)(incoming_scores - 1));
+        __m256i incoming_packed = _mm256_load_si256((__m256i*)(incoming_scores - 1));
 
         // compute match and delete scores
         __m256i match_scores_packed = _mm256_add_epi32(
