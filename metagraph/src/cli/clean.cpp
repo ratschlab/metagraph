@@ -11,7 +11,7 @@
 #include "graph/graph_cleaning.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
-#include "sequence_reader.hpp"
+#include "parse_sequences.hpp"
 
 using mg::common::logger;
 

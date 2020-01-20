@@ -8,6 +8,7 @@
 #include <ips4o.hpp>
 
 #include "common/logger.hpp"
+#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/utils/string_utils.hpp"
