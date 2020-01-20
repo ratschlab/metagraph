@@ -37,3 +37,4 @@ input_file=$2
 output_file=$3
 # --prune-unitigs 0 --fallback 3
 execute metagraph clean -v -p 1  --prune-tips 20 --to-fasta -o "${output_file}" "${input_file}"
+rm -rf $(dirname "${input_file}")

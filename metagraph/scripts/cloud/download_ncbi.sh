@@ -40,10 +40,10 @@ if ! [ -f "${sra_dir}" ]; then
 else
   echo "${sra_number} already downloaded"
 fi
-tmp_dir="/tmp/sra/${sra_dir}"
+tmp_dir="${download_dir}/tmp/${sra_number}"
 mkdir -p "${tmp_dir}"
 for sra_file in $(ls -p "${sra_dir}"); do
-  execute fasterq-dump "${sra_dir}/${sra_file}" -f -e 4  -O "${download_dir}/${sra_number} -t ${tmp_dir}"
+  execute fasterq-dump "${sra_dir}/${sra_file}" -f -e 4  -O "${download_dir}/${sra_number}" -t "${tmp_dir}"
+  rm -rf "${tmp_dir}"
 done
-# rm -rf ${sra_dir} # TODO: enable this
-# rm -rf ${tmp_dir}
+rm -rf ${sra_dir} # TODO: enable this
