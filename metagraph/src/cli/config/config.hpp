@@ -113,7 +113,6 @@ class Config {
     std::vector<std::string> infbase_annotators;
     std::vector<std::string> label_mask_in;
     std::vector<std::string> label_mask_out;
-    std::vector<std::string> label_filter;
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
@@ -126,15 +125,12 @@ class Config {
     std::string annotation_label = "";
     std::string header = "";
     std::string accession2taxid;
-    std::string taxonomy_nodes;
-    std::string taxonomy_map;
 
     enum IdentityType {
         NO_IDENTITY = -1,
         BUILD = 1,
         CLEAN,
         EXTEND,
-        EXPERIMENT,
         MERGE,
         CONCATENATE,
         COMPARE,
@@ -149,8 +145,6 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
-        CALL_VARIANTS,
-        PARSE_TAXONOMY
     };
     IdentityType identity = NO_IDENTITY;
 

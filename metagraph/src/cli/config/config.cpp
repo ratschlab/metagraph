@@ -44,8 +44,6 @@ Config::Config(int argc, char *argv[]) {
         identity = COMPARE;
     } else if (!strcmp(argv[1], "align")) {
         identity = ALIGN;
-    } else if (!strcmp(argv[1], "experiment")) {
-        identity = EXPERIMENT;
     } else if (!strcmp(argv[1], "stats")) {
         identity = STATS;
     } else if (!strcmp(argv[1], "annotate")) {
@@ -66,10 +64,6 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
-    } else if (!strcmp(argv[1], "call_variants")) {
-        identity = CALL_VARIANTS;
-    } else if (!strcmp(argv[1], "parse_taxonomy")) {
-        identity = PARSE_TAXONOMY;
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -316,20 +310,8 @@ Config::Config(int argc, char *argv[]) {
             label_mask_out_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--label-other-fraction")) {
             label_other_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-filter")) {
-            label_filter.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--filter-by-kmer")) {
             filter_by_kmer = true;
-        } else if (!strcmp(argv[i], "--call-bubbles")) {
-            call_bubbles = true;
-        } else if (!strcmp(argv[i], "--call-breakpoints")) {
-            call_breakpoints = true;
-        } else if (!strcmp(argv[i], "--accession")) {
-            accession2taxid = std::string(get_value(i++));
-        } else if (!strcmp(argv[i], "--taxonomy")) {
-            taxonomy_nodes = std::string(get_value(i++));
-        } else if (!strcmp(argv[i], "--taxonomy-map")) {
-            taxonomy_map = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--container")) {
             container = string_to_container(get_value(i++));
         } else if (argv[i][0] == '-') {
@@ -360,8 +342,6 @@ Config::Config(int argc, char *argv[]) {
     if (!fnames.size() && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
-                      && !(identity == CALL_VARIANTS)
-                      && !(identity == PARSE_TAXONOMY)
                       && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
@@ -419,8 +399,6 @@ Config::Config(int argc, char *argv[]) {
             && identity != STATS
             && identity != SERVER_QUERY
             && !(identity == BUILD && complete)
-            && !(identity == CALL_VARIANTS)
-            && !(identity == PARSE_TAXONOMY)
             && !fnames.size())
         print_usage_and_exit = true;
 
@@ -498,10 +476,6 @@ Config::Config(int argc, char *argv[]) {
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
                     && outfbase.empty())
-        print_usage_and_exit = true;
-
-    if (identity == PARSE_TAXONOMY &&
-            ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
         print_usage_and_exit = true;
 
     if (identity == MERGE && fnames.size() < 2)
@@ -711,16 +685,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
-            fprintf(stderr, "\tcall_variants\tgenerate a masked annotated graph and call variants\n");
-            fprintf(stderr, "\t\t\trelative to unmasked graph\n\n");
-
-            fprintf(stderr, "\tparse_taxonomy\tgenerate NCBI Accession ID to Taxonomy ID mapper\n\n");
-
             return;
         }
-        case EXPERIMENT: {
-            fprintf(stderr, "Usage: %s experiment ???\n\n", prog_name.c_str());
-        } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA, FASTQ, VCF, or KMC format.\n"
@@ -1053,32 +1019,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");
-        } break;
-        case CALL_VARIANTS: {
-            fprintf(stderr, "Usage: %s call_variants -i <GRAPH> -a <annotation> [options]\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for call_variants:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph []\n");
-            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph []\n");
-            fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
-            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
-            fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
-            fprintf(stderr, "\t   --filter-by-kmer \t\t\tmask out graph k-mers individually [off]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles [off]\n");
-            fprintf(stderr, "\t   --call-breakpoints \t\tcall labels from breakpoints [off]\n");
-            fprintf(stderr, "\t   --label-filter [STR] \tdiscard variants with this label []\n");
-            fprintf(stderr, "\t   --taxonomy-map [STR] \tfilename of taxonomy map file []\n");
-            fprintf(stderr, "\t   --cache-size [INT] \t\tnumber of uncompressed rows to store in the cache [0]\n");
-        } break;
-        case PARSE_TAXONOMY: {
-            fprintf(stderr, "Usage: %s parse_taxonomy -o <OUTBASE> [options]\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for parse_taxonomy:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --accession [STR] \tfilename of the accession2taxid.gz file []\n");
-            fprintf(stderr, "\t   --taxonomy [STR] \tfilename of the nodes.dmp file []\n");
         } break;
     }
 
