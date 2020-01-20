@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import os
 import subprocess
 import time
 
@@ -20,6 +19,9 @@ def count_pending_operations(compute, project, zone, operation_ids):
 
 
 def wait_for_all_operations(compute, project, zone, ids):
+    if not ids:
+        print('There are no operations to wait for to finish. This is probably an error.')
+        return
     print('Waiting for *all* operations to finish...', end='', flush=True)
     sleep_time_sec = 1
     while True:
@@ -119,24 +121,24 @@ def stop_instances(compute, project, zone, name, count):
     wait_for_all_operations(compute, project, zone, ids)
 
 
-def send_create_request(compute, project, zone, name, startup_script_name, count):
+def send_create_request(compute, project, zone, name, startup_script_name, server_host):
     """ Send a request to creates a new instance with the given parameters """
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
-    image_response = compute.images().getFromFamily(
-        project='metagraph', family='metagraph2').execute()
+    # image_response = compute.images().getFromFamily(project='metagraph', family='metagraph2').execute()
+    image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph6').execute()
     source_disk_image = image_response['selfLink']
 
     # Configure the machine: 1vCPU, 3.75GB of RAM
-    machine_type = f"zones/{zone}/machineTypes/n1-standard-2"
+    machine_type = f"zones/{zone}/machineTypes/n1-standard-4"
     metadata = [
         {
             'key': 'instance_id',
             'value': name.split('-')[-1]
         },
         {
-            'key': 'num_instances',
-            'value': count
+            'key': 'server_host',
+            'value': server_host
         }
     ]
     if startup_script_name != '':
@@ -156,8 +158,16 @@ def send_create_request(compute, project, zone, name, startup_script_name, count
                 'boot': True,
                 'autoDelete': True,  # disk will be deleted together with instance
                 'initializeParams': {
-                    'sourceImage': source_disk_image,
+                    'sourceSnapshot': source_disk_image,
                 }
+            },
+            {
+                'type': 'SCRATCH',
+                'initializeParams': {
+                    'diskType': f'zones/{zone}/diskTypes/local-ssd'
+                },
+                'autoDelete': True,
+                'interface': 'NVME'
             }
         ],
 
@@ -166,7 +176,7 @@ def send_create_request(compute, project, zone, name, startup_script_name, count
         'networkInterfaces': [{
             'network': 'global/networks/default',
             'accessConfigs': [
-            #    {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
+                #    {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
             ]
         }],
 
@@ -199,11 +209,10 @@ def send_create_request(compute, project, zone, name, startup_script_name, count
     return None
 
 
-
-def create_instances(compute, project, zone, name, count, startup_script):
+def create_instances(compute, project, zone, name, count, startup_script, server_host):
     ids = []
     for i in range(count):
-        operation = send_create_request(compute, project, zone, name + '-' + str(i), startup_script, count)
+        operation = send_create_request(compute, project, zone, name + '-' + str(i), startup_script, server_host)
         if operation:
             ids.append(operation['id'])
 
@@ -217,7 +226,7 @@ def run_command(compute, project, zone, user, name, count, startup_script_name):
         command = ['gcloud', 'compute', 'ssh', user + '@' + instance, '--zone', zone, '--command', startup_script]
         print(f'Running command\n{command}')
         out_file = open('/tmp/log-' + instance, 'w')
-        time.sleep(1) # needed because gcloud crashes miserably if run in quick succession
+        time.sleep(1)  # needed because gcloud crashes miserably if run in quick succession
         subprocess.Popen(command, stdout=out_file, stderr=subprocess.STDOUT)
 
 
@@ -229,7 +238,7 @@ if __name__ == '__main__':
     parser.add_argument('--project_id', default='metagraph', help='Google Cloud project ID.')
     parser.add_argument(
         '--zone',
-        default='europe-west3-a',
+        default='us-east1-b',  # Belgium; this seems to be the cheapest in EU; 107USD/4vCPU instance/month
         help='Compute Engine zone to deploy to.')
     parser.add_argument(
         '--name', default='', help='Name (or prefix) of instances to perform the action on')
@@ -239,12 +248,14 @@ if __name__ == '__main__':
                         help='Optional name of script to run at creation time')
     parser.add_argument('-u', '--user', default='ddanciu',
                         help='User to run comands under (for action==run)')
+    parser.add_argument('--server_host', default='34.65.229.224',
+                        help='The IP/hostname of the REST server that distributes jobs')
 
     args = parser.parse_args()
 
     compute = googleapiclient.discovery.build('compute', 'v1')
     if args.action == 'create' or args.action == 'c':
-        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script)
+        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script, args.server_host)
     elif args.action == 'delete' or args.action == 'd':
         delete_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
     elif args.action == 'list' or args.action == 'l':

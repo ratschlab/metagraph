@@ -50,4 +50,5 @@ fi
 mkdir -p "$output_dir"
 # -k 31; using 10 until building on disk works properly
 execute metagraph build -v -p 4 -k 10 --canonical --count-kmers -o "${output_dir}/${sra_number}"  $input_filenames
+execute rm -rf "${input_dir}"
 echo "Create script finished."
