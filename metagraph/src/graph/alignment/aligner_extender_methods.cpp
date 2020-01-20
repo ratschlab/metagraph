@@ -1,7 +1,6 @@
 #include "aligner_methods.hpp"
 
 #ifdef __AVX2__
-#include <emmintrin.h>
 #include <immintrin.h>
 #endif
 
@@ -23,14 +22,14 @@ using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 template <typename NodeType,
           typename Column = typename DPTable<NodeType>::Column,
           typename score_t = typename DPTable<NodeType>::score_t>
-inline std::vector<typename DPTable<NodeType>::value_type*>
+inline std::vector<const typename DPTable<NodeType>::value_type*>
 get_outgoing_columns(const DeBruijnGraph &graph,
                      DPTable<NodeType> &dp_table,
                      NodeType cur_node,
                      size_t size,
                      size_t best_pos,
                      score_t min_cell_score) {
-    std::vector<typename DPTable<NodeType>::value_type*> out_columns;
+    std::vector<const typename DPTable<NodeType>::value_type*> out_columns;
 
     graph.call_outgoing_kmers(
         cur_node,
@@ -168,7 +167,7 @@ inline void compute_match_delete_updates_avx2(size_t &i,
     const __m256i r_rotate = _mm256_setr_epi32(1, 2, 3, 4, 5, 6, 7, 0);
 
     for (; i + 8 <= length; i += 8) {
-        __m256i incoming_packed = _mm256_loadu_si256((__m256i*)(incoming_scores - 1));
+        __m256i incoming_packed = _mm256_load_si256((__m256i*)(incoming_scores - 1));
 
         // compute match and delete scores
         __m256i match_scores_packed = _mm256_add_epi32(
@@ -415,8 +414,8 @@ DefaultColumnExtender<NodeType, Compare>
         return {};
 
     // keep track of which columns to use next
-    BoundedPriorityQueue<typename DPTable::value_type*,
-                         std::vector<typename DPTable::value_type*>,
+    BoundedPriorityQueue<const typename DPTable::value_type*,
+                         std::vector<const typename DPTable::value_type*>,
                          ColumnPriorityFunction> columns_to_update(config_.queue_size);
 
     DPTable dp_table(graph_,
@@ -459,7 +458,7 @@ DefaultColumnExtender<NodeType, Compare>
         // update columns
         for (auto *iter : out_columns) {
             auto next_node = iter->first;
-            auto &next_column = iter->second;
+            auto &next_column = const_cast<Column&>(iter->second);
 
             auto [overall_begin, overall_end] = get_column_boundaries(
                 iter,
