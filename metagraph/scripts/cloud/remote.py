@@ -238,7 +238,7 @@ if __name__ == '__main__':
     parser.add_argument('--project_id', default='metagraph', help='Google Cloud project ID.')
     parser.add_argument(
         '--zone',
-        default='europe-west1-d',  # Belgium; this seems to be the cheapest in EU; 107USD/4vCPU instance/month
+        default='us-east1-b',  # Belgium; this seems to be the cheapest in EU; 107USD/4vCPU instance/month
         help='Compute Engine zone to deploy to.')
     parser.add_argument(
         '--name', default='', help='Name (or prefix) of instances to perform the action on')
