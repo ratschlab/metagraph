@@ -18,10 +18,10 @@ TEST(BloomFilter, restrict_to) {
         }
     }
 
-    ASSERT_EQ(0, BloomFilter::restrict_to(0, 0));
-    ASSERT_EQ(0, BloomFilter::restrict_to(0, 0xFFFFFFFFFFFFFFFF));
-    ASSERT_EQ(0, BloomFilter::restrict_to(0xFFFFFFFFFFFFFFFF, 0));
-    ASSERT_EQ(0xFFFFFFFFFFFFFFFE,
+    ASSERT_EQ(0UL, BloomFilter::restrict_to(0, 0));
+    ASSERT_EQ(0UL, BloomFilter::restrict_to(0, 0xFFFFFFFFFFFFFFFF));
+    ASSERT_EQ(0UL, BloomFilter::restrict_to(0xFFFFFFFFFFFFFFFF, 0));
+    ASSERT_EQ(0xFFFFFFFFFFFFFFFEUL,
               BloomFilter::restrict_to(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF));
 
     // test multiples of powers of 10
