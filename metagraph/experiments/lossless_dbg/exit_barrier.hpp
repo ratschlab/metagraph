@@ -27,7 +27,7 @@ public:
 #endif
         {
         if (get_num_threads() > max_threads) {
-            throw "Implementation doesn't work with more than "s + to_string(max_threads) + " threads"s;
+            throw std::runtime_error("Implementation doesn't work with more than "s + to_string(max_threads) + " threads"s);
         }
         for(uint64_t i=0;i<exit_barriers.elements.size();i++) {
             //using BarrierT = typename decltype(exit_barriers)::element_type;
@@ -128,8 +128,8 @@ public:
         return my_relative_position + offset_change;
     }
 
-    void print_content(uint64_t node) {
-        cout << exit_barriers[node] << endl;
+    void print_content(uint64_t node,[[maybe_unused]] int tid=-1) const {  // print_content and exit have to have the same signature
+        mg::common::logger->debug("{}",exit_barriers[node]);
     }
 
 };
@@ -139,7 +139,7 @@ struct waiting_thread_info_t {
     int64_t relative_position;
     uint64_t node;
     char traversed_edge;
-    friend ostream& operator<<(ostream& os, const waiting_thread_info_t& dt);
+    friend ostream& operator<<(ostream& os, const waiting_thread_info_t& wt);
 };
 ostream& operator<<(ostream& os, const waiting_thread_info_t& wt)
 {
@@ -168,12 +168,13 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
         auto waiting_queue_lock = waiting_queue_locks.ptr_to(node);
         omp_set_lock(waiting_queue_lock);
         auto& waiting_queue = waiting_threads[node];
-        waiting_thread_info_t myself;
+        waiting_thread_info_t myself{-1,-1,static_cast<uint64_t>(-1),-1};
         for(auto&other : waiting_queue) {
             if (other.thread_id == tid) {
                 myself = other;
             }
         }
+        assert(myself.thread_id != -1);
         auto result = update_myself_after_wakeup(tid,myself.node,myself.traversed_edge,waiting_queue,myself.relative_position);
         omp_unset_lock(waiting_queue_lock);
         return result;
@@ -203,12 +204,12 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
         for(auto&other : waiting_queue) {
             if (was_me) {
                 // future
-                if (other.node == previous_node and
+                if ((int64_t)other.node == previous_node and
                     other.traversed_edge == traversed_edge and
                     other.thread_id < 0 and // job has already finished
                     other.relative_position <= relative_position) {
 #ifdef DEBUG_ORDER_CORRECTION
-                    cerr << waiting_queue << endl;
+                    mg::common::logger->debug("{}", waiting_queue);
                         PRINT_VAR(tid, node, other.relative_position);
 #endif
                     relative_position++;
@@ -225,7 +226,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
                 other.thread_id = -tid;
             }  else {
                 // past
-                if (other.node == previous_node and
+                if ((int64_t)other.node == previous_node and
                     other.traversed_edge == traversed_edge and
                     other.thread_id > 0 and// job is waiting
                     other.relative_position < relative_position) {
@@ -238,7 +239,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
         assert(was_me);
         relative_position += past_offset;
         assert(relative_position >= 0 || [&](){
-            cerr << waiting_queue << endl;
+            mg::common::logger->debug("{}", waiting_queue);
             PRINT_VAR(tid,traversed_edge,debug_my_id,past_offset,relative_position);
             return false;
         }());
@@ -251,8 +252,8 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
         return relative_position;
     }
 
-    void print_content(uint64_t node) {
-        cout << waiting_threads[node] << endl;
+    void print_content(uint64_t node, [[maybe_unused]] int tid=-1) const  { // print_content and exit have to have the same signature
+        mg::common::logger->debug("{}",waiting_threads[node]);
     }
 
     ChunkedDenseHashMap<deque<waiting_thread_info_t>,BitVector, RankSupport,false> waiting_threads;

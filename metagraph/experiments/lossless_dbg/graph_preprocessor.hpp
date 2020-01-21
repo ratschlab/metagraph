@@ -18,8 +18,7 @@ public:
     const int64_t delay_gap = 0;
     GraphPreprocessor(const Graph &graph) : graph(graph) {}
     transformations_t find_weak_splits() {
-        Timer timer;
-        cerr << "Started finding weak splits" << endl;
+        VerboseTimer weak_splits_timer("finding weak splits");
         // find nodes that will
         vector<optional<pair<char,char>>> result_intermediate(graph.num_nodes()+1);
         #pragma omp parallel for
@@ -39,7 +38,7 @@ public:
             }
             node++;
         }
-        cerr << "Finished finding weak splits in " << timer.elapsed() << " sec." << endl;
+        weak_splits_timer.finished();
 
         return result;
     }

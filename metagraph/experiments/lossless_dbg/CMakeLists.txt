@@ -63,12 +63,6 @@ include_directories(${INSTALL_DIR}/src/sparsepp/sparsepp)
 include_directories(playground/dynamic/include)
 endif()
 
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -lc++fs")
-#enable_testing()
-#find_package(GTest REQUIRED)
-#include_directories(${GTEST_INCLUDE_DIR})
-#
-#add_executable(compression_naive_code main.cpp)
 if(NOT DEFINED PROJECT_BINARY_DIR)
     set(ROOT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 else()

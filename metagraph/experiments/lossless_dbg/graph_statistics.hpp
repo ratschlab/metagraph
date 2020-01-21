@@ -17,9 +17,8 @@ using namespace nlohmann;
 using namespace std::string_literals;
 
 json get_statistics(DBGSuccinct& graph,int64_t verbosity=~0) {
-    Timer timer;
-    cerr << "Starting computation of graph statistics" << endl;
-    PRINT_VAR(verbosity,verbosity & STATS_INCOMING_HISTOGRAM,verbosity & STATS_OUTGOING_HISTOGRAM);
+    VerboseTimer graph_statistics_timer ("computation of graph statistics");
+    PRINT_VAR(verbosity,verbosity & STATS_INCOMING_HISTOGRAM,verbosity & STATS_OUTGOING_HISTOGRAM)(std::string());
     int64_t joins = 0;
     int64_t splits = 0;
     int64_t incoming_histogram[6] = {0,0,0,0,0,0};
@@ -47,7 +46,7 @@ json get_statistics(DBGSuccinct& graph,int64_t verbosity=~0) {
                 {"outgoing_histogram", outgoing_histogram},
                 {"num_of_nodes", graph.num_nodes()}
     };
-    cerr << "Computation of statistics finished in " << timer.elapsed() << " sec." << endl;
+    graph_statistics_timer.finished();
     return result;
 }
 

@@ -34,14 +34,14 @@ CREATE_MEMBER_CHECK(transformations);
 
 
 template<typename RoutingTableT=DefaultDynamicRoutingTable,typename IncomingTableT=DefaultDynamicIncomingTable, typename ExitBarrierT=ExitBarrier<>>
-class PathDatabaseDynamicCore {
+class DynamicPathDatabaseCore {
 public:
     using GraphT = DBGSuccinct;
     using path_id = pair<node_index,int64_t>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph, int64_t chunks=DefaultChunks) :
+    explicit DynamicPathDatabaseCore(std::shared_ptr<const GraphT> graph, int64_t chunks=DefaultChunks) :
             graph_(graph),
             graph(*graph_),
             incoming_table(graph_),
@@ -52,8 +52,8 @@ public:
             }
 
 
-    explicit PathDatabaseDynamicCore(const vector<string> &reads,
-                 size_t kmer_length = 21 /* default kmer */) :
+    explicit DynamicPathDatabaseCore(const vector<string> &reads,
+                                     size_t kmer_length = 21 /* default kmer */) :
             graph_(shared_ptr<const GraphT>(buildGraph(this,reads,kmer_length))),
             graph(*graph_),
             incoming_table(graph_),
@@ -61,7 +61,7 @@ public:
             chunks(DefaultChunks)
             {}
 
-    virtual ~PathDatabaseDynamicCore() {}
+    virtual ~DynamicPathDatabaseCore() {}
 
 
 
@@ -123,9 +123,8 @@ public:
         statistics["preprocessing_time"] = preprocessing_timer.finished();
         statistics["preprocessing_ram"] = get_used_memory();
 
-        cerr << "Cumulative sizes in bytes" << endl;
-        PRINT_VAR(is_join.size()/8);
-        PRINT_VAR(is_split.size()/8);
+        PRINT_VAR("Cumulative size in bytes",is_join.size()/8)
+        PRINT_VAR("Cumulative size in bytes",is_split.size()/8)
         VerboseTimer routing_timer("routing step");
 #ifndef DISABLE_PARALELIZATION
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
@@ -204,10 +203,10 @@ public:
                     }
                     assert(relative_position>=0);
                     assert((relative_position <= incoming_table.branch_size(node,join_symbol) || [&,node=node,join_symbol=join_symbol]{
-                        using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
+                        using TT = DecodeEnabler<DynamicPathDatabaseCore<>>;
                         auto self = reinterpret_cast<TT*>(this);
                         (void)self; // so it is always used (because of conditional compilation)
-                        cerr << "current" << endl;
+                        mg::common::logger->info("current");
                         PRINT_VAR(relative_position,incoming_table.branch_size(node,join_symbol));
                         PRINT_VAR(graph.get_node_sequence(node));
                         PRINT_VAR(node,tid,relative_position,previous_node,traversed_edge);
@@ -217,7 +216,7 @@ public:
                                                 PRINT_VAR("current incoming table");
                                                 incoming_table.print_content(node);
                                                 PRINT_VAR(join_symbol);
-                                                cerr << "previous" << endl;
+                                                mg::common::logger->info("previous");
                                                 PRINT_VAR("exit barrier");
                                                 exit_barrier.print_content(previous_node);
                         #ifdef DEBUG_ADDITIONAL_INFORMATION
@@ -445,15 +444,13 @@ public:
     RoutingTableT routing_table;
     int64_t chunks;
 
-    static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int64_t kmer_length) {
-        Timer timer;
-        cerr << "Started building the graph" << endl;
+    static DBGSuccinct* buildGraph(DynamicPathDatabaseCore* self, vector<string> reads, int64_t kmer_length) {
+        VerboseTimer building_graph_timer("building the graph");
         auto graph = new DBGSuccinct(dbg_succ_graph_constructor(reads, kmer_length));
 #if defined(MASK_DUMMY_KMERS)
         graph->mask_dummy_kmers(1, false);
 #endif
-        auto elapsed = timer.elapsed();
-        cerr << "Building finished in " << elapsed << " sec." << endl;
+        auto elapsed = building_graph_timer.finished();
         self->statistics["graph_build_time"] = elapsed;
         return graph;
     }
@@ -461,8 +458,8 @@ public:
 };
 
 template<typename RoutingTableT=DefaultDynamicRoutingTable,typename IncomingTableT=DefaultDynamicIncomingTable>
-class PathDatabaseDynamic : public DecodeEnabler<PathDatabaseDynamicCore<RoutingTableT,IncomingTableT>> {
-    using DecodeEnabler<PathDatabaseDynamicCore<RoutingTableT,IncomingTableT>>::DecodeEnabler;
+class PathDatabaseDynamic : public DecodeEnabler<DynamicPathDatabaseCore<RoutingTableT,IncomingTableT>> {
+    using DecodeEnabler<DynamicPathDatabaseCore<RoutingTableT,IncomingTableT>>::DecodeEnabler;
 };
 
 

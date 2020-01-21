@@ -29,15 +29,13 @@ class PathDatabase {
   public:
     // convenience constructor
     explicit PathDatabase(const vector<string> &reads, size_t kmer_length = 21) {
-        Timer timer;
-        cerr << "Started building the graph" << endl;
+        VerboseTimer building_graph_timer("building the graph");
         auto graph = std::make_unique<GraphT>(dbg_succ_graph_constructor(reads, kmer_length));
 #ifdef MASK_DUMMY_KMERS
         graph->mask_dummy_kmers(1, false);
 #endif
         graph_.reset(graph.release());
-        auto elapsed = timer.elapsed();
-        cerr << "Building finished in " << elapsed << " sec." << endl;
+        auto elapsed = building_graph_timer.finished();
         statistics["graph_build_time"] = elapsed;
     }
 

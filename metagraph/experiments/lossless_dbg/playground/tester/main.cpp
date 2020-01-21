@@ -50,7 +50,6 @@ int main(int argc, char *argv[]) {
     }
     else {
         cout << "Files differ!!!" << endl;
-        cerr << "Files differ!!!" << endl;
         return -1;
     }
 }

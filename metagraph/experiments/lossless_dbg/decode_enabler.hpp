@@ -50,7 +50,7 @@ public:
                 relative_position = this->routing_table.new_relative_position(node,relative_position);
 #ifdef DEBUG_ADDITIONAL_INFORMATION
                 if (base != encoded_base) {
-                    cout << encoded_base << base << endl;
+                    mg::common::logger->debug("{} {}",encoded_base,base);
                     this->routing_table.print_content(node);
                     this->incoming_table.print_content(node);
                 }

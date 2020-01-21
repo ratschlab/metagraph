@@ -19,6 +19,7 @@
 #include "kmer_extractor.hpp"
 #include "sequence_io.hpp"
 #include "unix_tools.hpp"
+#include "logger.hpp"
 
 using namespace std;
 using ll = long long;
@@ -54,16 +55,29 @@ abort();\
 #endif
 
 struct d_t {
-    template<typename T>
-    d_t operator,(const T &first) {
-        std::cerr << ' ' <<  x;
-        return *this;
+    d_t() {}
+    d_t(d_t&&) = default;
+    //d_t(d_t &&d) : content(std::move(d.content)){}
+
+    ~d_t() {
+        if (!content.str().empty())
+        mg::common::logger->debug(content.str());
+        else {
+            std::runtime_error("Something wrong");
+        }
     }
+
+    template<typename T>
+    d_t&& operator,(const T &first) {
+        content << ' ' <<  x;
+        return std::move(*this);
+    }
+    stringstream content;
 };
 
 
 
-#define PRINT_VAR(args ...) { d_t(), "|", __LINE__, "|", #args, ":", args, "\n"; }
+#define PRINT_VAR(args ...) { d_t(), "|", __LINE__, "|", #args, ":", args; }
 
 template<typename POD>
 inline std::istream &deserialize(std::istream &is, vector<POD> &v) {
@@ -107,7 +121,7 @@ inline string decode_from_input(const vector<string>& input,const pair<string,in
 inline void save_string(const string &to_save, const string &filename) {
     ofstream myfile;
     myfile.open(filename);
-    if (not myfile) { throw "can't open "s + filename + "for writing"; }
+    if (not myfile) { throw std::runtime_error("can't open "s + filename + "for writing"); }
     myfile << to_save;
     myfile.close();
 }
@@ -115,7 +129,7 @@ inline void save_string(const string &to_save, const string &filename) {
 inline void transform_to_fasta(const string &filename, const vector <string> &reads) {
     ofstream myfile;
     myfile.open(filename);
-    if (not myfile) { throw "can't open "s + filename + "for reading"; }
+    if (not myfile) { throw std::runtime_error("can't open "s + filename + "for reading"); }
     for(auto& read : reads) {
         myfile << ">" << endl;
         myfile << read << endl;
@@ -199,7 +213,7 @@ inline vector <string> read_reads_from_fasta(const string &filename) {
 template <typename... Args>
 inline void doPrint(std::ostream& out, Args&&... args)
 {
-    ((out << ',' << std::forward<Args>(args)), ...);
+    mg::common::logger->debug("{}",make_tuple(args...));
 }
 
 /*
@@ -296,7 +310,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function offset";
+            throw std::runtime_error("Can't call function offset");
         }
     }
 
@@ -314,7 +328,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function size";
+            throw std::runtime_error("Can't call function size");
         }
     }
 
@@ -332,7 +346,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function select";
+            throw std::runtime_error("Can't call function select");
         }
     }
 
@@ -350,7 +364,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function select_unchecked";
+            throw std::runtime_error("Can't call function select_unchecked");
         }
     }
 
@@ -368,7 +382,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function rank";
+            throw std::runtime_error("Can't call function rank");
         }
     }
 
@@ -386,7 +400,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function get";
+            throw std::runtime_error("Can't call function get");
         }
     }
 
@@ -404,7 +418,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function traversed_base";
+            throw std::runtime_error("Can't call function traversed_base");
         }
     }
 
@@ -422,7 +436,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function branch_offset";
+            throw std::runtime_error("Can't call function branch_offset");
         }
     }
 
@@ -440,7 +454,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function branch_size";
+            throw std::runtime_error("Can't call function branch_size");
         }
     }
 
@@ -458,7 +472,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function branch_offset_and_increment";
+            throw std::runtime_error("Can't call function branch_offset_and_increment");
         }
     }
 
@@ -474,7 +488,7 @@ public:
             return result;
         }
         else {
-            throw "Can't call function insert";
+            throw std::runtime_error("Can't call function insert");
         }
     }
 
@@ -491,7 +505,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function new_relative_position";
+            throw std::runtime_error("Can't call function new_relative_position");
         }
     }
 
@@ -512,7 +526,7 @@ public:
             return target;
         }
         else {
-            throw "Can't call function exit";
+            throw std::runtime_error("Can't call function exit");
         }
     }
 
@@ -528,7 +542,7 @@ public:
             t.enter(args...);
         }
         else {
-            throw "Can't call function enter";
+            throw std::runtime_error("Can't call function enter");
         }
     }
 
@@ -541,7 +555,7 @@ public:
             t.print_content(args...);
         }
         else {
-            throw "Can't call function print_content";
+            throw std::runtime_error("Can't call function print_content");
         }
     }
 
@@ -552,11 +566,11 @@ public:
 class VerboseTimer {
 public:
     VerboseTimer(string procedure_name) : procedure_name(procedure_name) {
-        cerr << "Started " << procedure_name << endl;
+        mg::common::logger->info( "Started {}",procedure_name);
     }
     double finished() {
         double elapsed = timer.elapsed();
-        cerr << "Finished " << procedure_name << " in " << elapsed << " sec." << endl;
+        mg::common::logger->info("Finished {} in {}  sec.",procedure_name, elapsed);
         return elapsed;
     }
     string procedure_name;

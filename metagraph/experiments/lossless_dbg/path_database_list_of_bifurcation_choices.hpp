@@ -17,12 +17,6 @@
 #include "path_database.hpp"
 #include "utilities.hpp"
 
-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
-#pragma GCC diagnostic ignored "-Wreturn-type"
-
-
-
-
 using namespace std;
 using namespace std::string_literals;
 using node_index = SequenceGraph::node_index;
@@ -31,11 +25,6 @@ const int64_t DEFAULT_K_KMER = 21;
 // Stores reads in a compressed format
 class PathDatabaseListBC : public PathDatabase<int64_t> {
   public:
-    // const value
-    // PathDatabaseListBC(const vector<string> &raw_reads)
-    // non-const pointer to modify
-    // PathDatabaseListBC(vector<string> *raw_reads)
-    //
     // Graph |graph| must contain all k-mers from the sequences passed
     PathDatabaseListBC(DBGSuccinct *graph,
                     const vector<string> &raw_reads,
@@ -68,7 +57,6 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
                        {"total_size",compressed_size_without_reference()},
                        {"bifurcation_size", compressed_size_without_reference()-2*num_paths()*graph_->get_k()},
                        {"number_of_reads",compressed_reads_.size()}};
-        cerr << result.dump(4) << endl;
         return result;
     }
 
@@ -101,15 +89,16 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
     }
 
     // returns ids of all paths that go through sequence |str|
-    std::vector<path_id> get_paths_going_through(const std::string &) const override {}
-    std::vector<path_id> get_paths_going_through(node_index) const override {}
+    std::vector<path_id> get_paths_going_through(const std::string &) const override {
+        throw std::runtime_error("Not implemented"); }
+    std::vector<path_id> get_paths_going_through(node_index) const override { throw std::runtime_error("Not implemented"); }
 
     // make one traversal step through the selected path
-    node_index get_next_node(node_index, path_id) const override {}
+    node_index get_next_node(node_index, path_id) const override { throw std::runtime_error("Not implemented"); }
 
     // transition to the next node consistent with the history
     // return npos if there is no transition consistent with the history
-    node_index get_next_consistent_node(const std::string &) const override {}
+    node_index get_next_consistent_node(const std::string &) const override { throw std::runtime_error("Not implemented"); }
 
     std::string decode(path_id path) const override {
         return decode_read(compressed_reads_[path]);

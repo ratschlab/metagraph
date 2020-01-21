@@ -17,7 +17,7 @@
 
 #include "path_database.hpp"
 #include "graph_patch.hpp"
-#include "path_database_dynamic.hpp"
+#include "dynamic_path_database.hpp"
 //#include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"

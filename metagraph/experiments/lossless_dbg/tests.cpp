@@ -22,7 +22,7 @@
 #include "utilities.hpp"
 #include "path_database_list_of_bifurcation_choices.hpp"
 #include "samplers.hpp"
-#include "path_database_dynamic.hpp"
+#include "dynamic_path_database.hpp"
 #include "path_database_wavelet.hpp"
 #include "incoming_table.hpp"
 #include "reference_dynamic_routing_table.hpp"
@@ -139,10 +139,10 @@ void check_decompression_all(T& db,vector<string>& reads) {
 template <typename T>
 void check_decompression_inverse(T& db,vector<string>& reads) {
     db.encode(reads);
-    PRINT_VAR(db.graph.num_nodes());
-    PRINT_VAR(db.graph.get_k());
+    PRINT_VAR(db.graph.num_nodes())(std::string());
+    PRINT_VAR(db.graph.get_k())(std::string());
     for (uint64_t i=1;i<=db.graph.num_nodes();i++) {
-        PRINT_VAR(db.graph.get_node_sequence(i));
+        PRINT_VAR(db.graph.get_node_sequence(i))(std::string());
     }
     auto decompressed_reads = db.decode_all_reads_inverse();
     ASSERT_EQ(multiset<string>(all(reads)),multiset<string>(all(decompressed_reads)));
@@ -197,7 +197,7 @@ void serialization_deserialization_test(vector<string>& reads, int kmer_length=2
     vector<string> decompressed_reads;
     decompressed_reads.reserve(handles.size());
     auto output_folder = fs::temp_directory_path() / "serdes/" ;
-    cout << "Files saved to: " << output_folder << endl;
+    mg::common::logger->info("Files saved to: {}", output_folder);
     fs::create_directories(output_folder);
     db.serialize(output_folder);
     auto newdb = T::deserialize(output_folder);
@@ -214,7 +214,7 @@ void short_serdes_test() {
 }
 
 TEST(PathDatabase,DummyTest) {
-    PRINT_VAR(sizeof(variant<vector<char>,wavelet_tree_dyn>));
+    PRINT_VAR(sizeof(variant<vector<char>,wavelet_tree_dyn>))(std::string());
 }
 TEST(PathDatabase,RightDecode) {
     //PathDatabaseWavelet<> pd({"ACTAGGA","ACTCGGA"},3);

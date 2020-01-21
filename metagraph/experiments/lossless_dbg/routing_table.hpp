@@ -67,8 +67,8 @@ public:
         auto routing_table_block = offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,encode(symbol));
         if (occurrence > rank(node,size(node)+1,symbol)) {
-            PRINT_VAR(graph->get_node_sequence(node));
-            PRINT_VAR(node,occurrence,symbol);
+            PRINT_VAR(graph->get_node_sequence(node))(std::string());
+            PRINT_VAR(node,occurrence,symbol)(std::string());
             print_content(node);
         }
         assert(occurrence <= rank(node,size(node)+1,symbol));
@@ -97,7 +97,7 @@ public:
         for (int64_t i=0;i<table_size;i++) {
             out << get(node, i);
         }
-        cerr << out.str();
+        mg::common::logger->debug(out.str());
         return out.str();
     }
 
@@ -107,7 +107,7 @@ public:
             out << decode(routing_table[i]);
         }
         out << endl;
-        cerr << out.str();
+        mg::common::logger->debug(out.str());
         return out.str();
     }
 

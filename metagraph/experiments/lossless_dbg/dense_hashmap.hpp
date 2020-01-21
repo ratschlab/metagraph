@@ -112,6 +112,10 @@ public:
         return chunk(n);
     }
 
+    const T& operator[](int64_t n) const {
+        return this->elements[underlying_position(n)];
+    }
+
     T& operator[](int64_t n) {
         return this->elements[underlying_position(n)];
     }

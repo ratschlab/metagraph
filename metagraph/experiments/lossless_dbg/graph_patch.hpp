@@ -22,7 +22,7 @@ char get_outgoing_base(const Graph& g,node_index node) {
     char base;
     assert(g.outdegree(node) == 1);
     g.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) {
-        PRINT_VAR(node,edge_label);
+        PRINT_VAR(node,edge_label)(std::string());
         base = edge_label;});
     return base;
 }

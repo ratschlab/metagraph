@@ -117,7 +117,7 @@ public:
             out << get(node, i);
         }
         out << endl;
-        cerr << out.str();
+        mg::common::logger->debug(out.str());
         return out.str();
     }
 
@@ -127,7 +127,7 @@ public:
             out << routing_table[i];
         }
         out << endl;
-        cerr << out.str();
+        mg::common::logger->debug(out.str());
         return out.str();
     }
 

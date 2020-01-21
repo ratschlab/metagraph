@@ -103,7 +103,7 @@ public:
         for(char c : "$ACGTN") {
             out << c << ":" << branch_size(node,c) << endl;
         }
-        cerr << out.str();
+        mg::common::logger->debug(out.str());
         return out.str();
     }
 

@@ -58,7 +58,6 @@ int main_tester(int argc, char *argv[]) {
     }
     else {
         cout << "Files differ!!!" << endl;
-        cerr << "Files differ!!!" << endl;
         cout << "l: " << left_reads.size() << endl;
         cout << "r: " << right_reads.size() << endl;
         std::multiset<string> only_in_left;

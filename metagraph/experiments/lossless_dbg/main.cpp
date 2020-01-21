@@ -18,6 +18,7 @@ using TCLAP::ValuesConstraint;
 #include "playground/statistics/statistics.hpp"
 #include "playground/tester/tester.hpp"
 #include "playground/tidbits/dump_routing_table.hpp"
+#include "logger.hpp"
 
 int main(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Toolbox for experiments", ' ', "");

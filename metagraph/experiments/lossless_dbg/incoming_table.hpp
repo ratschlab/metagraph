@@ -94,9 +94,9 @@ public:
 //            out << c << ":" << branch_size(node, c) << endl;
 //        }
         for (int i=0;i<table_size;i++) {
-            cout << i << ":" << branch_size_rank(node,i) << endl;
+            out << i << ":" << branch_size_rank(node,i) << endl;
         }
-        cerr << out.str();
+        mg::common::logger->debug(out.str());
         return out.str();
     }
 
