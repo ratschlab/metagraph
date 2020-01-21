@@ -74,6 +74,7 @@ class ChunkedWaitQueue {
           fence_size_(fence_size),
           on_item_pushed_(on_item_pushed),
           queue_(buffer_size),
+          buf_(1000),
           end_iterator_(Iterator(this, buffer_size)),
           is_shutdown_(false) {
         assert(fence_size < buffer_size);
@@ -141,6 +142,7 @@ class ChunkedWaitQueue {
         if (is_shutdown_) {
             return;
         }
+        flush();
         is_shutdown_ = true;
         not_empty_.notify_all();
     }
@@ -152,15 +154,12 @@ class ChunkedWaitQueue {
      * std::move it into the queue if the copy construction is expensive.
      */
     void push(value_type x) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        not_full_.wait(lock, [this] { return !full(); });
-        bool was_all_read = iterator_.no_more_elements();
-        last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
-        queue_[last_] = std::move(x);
-        on_item_pushed_(x);
-        if (was_all_read) { // queue was empty or all items were read
-            not_empty_.notify_all();
+        if (buf_.size() < buf_.capacity()) {
+            on_item_pushed_(x);
+            buf_.push_back(std::move(x));
+            return;
         }
+        flush();
     }
 
     /**
@@ -186,6 +185,8 @@ class ChunkedWaitQueue {
     std::function<void(const T &)> on_item_pushed_;
 
     std::vector<T, Alloc> queue_;
+
+    std::vector<T> buf_;
 
     /**
      * mutex_ used for synchronizing access to the queue. Both #mutex_ and #not_empty_
@@ -225,6 +226,22 @@ class ChunkedWaitQueue {
             not_full_.notify_one();
         }
     }
+
+    /** Write the contents of buf to the queue */
+    void flush() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        not_full_.wait(lock, [this] { return !full(); });
+        bool was_all_read = iterator_.no_more_elements();
+        for (const auto &v : buf_) {
+            last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
+            queue_[last_] = std::move(v);
+        }
+        if (was_all_read) { // queue was empty or all items were read
+            not_empty_.notify_all();
+        }
+        buf_.resize(0);
+    }
+
 
     /**
      * Returns the iterator of the queue. Note that a queue only has one iterator, so
