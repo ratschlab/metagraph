@@ -4,6 +4,6 @@
 
 namespace mg {
 namespace common {
-std::shared_ptr<spdlog::logger> logger = spdlog::stdout_color_mt("mg");
+std::shared_ptr<spdlog::logger> logger = spdlog::default_logger();
 } // namespace common
 } // namespace mg
