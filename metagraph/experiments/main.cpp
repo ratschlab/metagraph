@@ -17,6 +17,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/wavelet_tree.hpp"
+#include "common/vectors/bit_vector.hpp"
 #include "common/utils/template_utils.hpp"
 #include "graph/alignment/aligner_helper.hpp"
 #include "kmer/alphabets.hpp"
@@ -76,18 +77,20 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     if (static_cast<int>(another.rank1(another.size() / 2)) < -1
             || static_cast<int>(another.rank0(another.size() / 2)) < -1)
         throw std::runtime_error("Never happends, just initializing the rank support");
-    if (another.num_set_bits() && static_cast<int>(another.select1(1)) < -1)
-        throw std::runtime_error("Never happends, just initializing the select support");
+
+   if (another.num_set_bits()
+            && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
+            && static_cast<int>(another.select1(1)) < -1)
+       throw std::runtime_error("Never happends, just initializing the select support");
 
     auto RAM = get_curr_RSS() - mem_before;
 
     std::filesystem::remove(path);
 
-    uint64_t predicted_size;
-    if constexpr(!std::is_base_of<bit_vector_dyn, BitVector>::value) {
+    uint64_t predicted_size = 0.0 / 0.0;
+    if constexpr(!std::is_base_of_v<bit_vector_dyn, BitVector>
+                    && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
         predicted_size = predict_size<BitVector>(another.size(), another.num_set_bits());
-    } else {
-        predicted_size = 0;
     }
 
     std::cout << prefix
@@ -298,6 +301,7 @@ int main(int argc, char *argv[]) {
                 "smart",
                 "stat",
                 "sd",
+                "hyb",
                 "rrr63",
                 "rrr127",
                 "rrr255",
@@ -331,6 +335,10 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_sd>(length_arg.getValue(),
                                                   density_arg.getValue(),
                                                   "sd");
+            } else if (vector_type == "hyb") {
+                test_vector_points<bit_vector_hyb<>>(length_arg.getValue(),
+                                                     density_arg.getValue(),
+                                                     "hyb");
             } else if (vector_type == "rrr63") {
                 test_vector_points<bit_vector_rrr<>>(length_arg.getValue(),
                                                      density_arg.getValue(),

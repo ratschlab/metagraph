@@ -8,6 +8,7 @@
 #include <sdsl/int_vector.hpp>
 #include <sdsl/rrr_vector.hpp>
 #include <sdsl/sd_vector.hpp>
+#include <sdsl/hyb_vector.hpp>
 #include <dynamic.hpp>
 
 #include "bitmap.hpp"
@@ -221,6 +222,62 @@ class bit_vector_sd : public bit_vector {
     sdsl::sd_vector<>::rank_1_type rk1_;
     sdsl::sd_vector<>::select_1_type slct1_;
     sdsl::sd_vector<>::select_0_type slct0_;
+};
+
+
+template <uint32_t block_rate = 16>
+class bit_vector_hyb : public bit_vector {
+  public:
+    explicit bit_vector_hyb(uint64_t size = 0, bool value = false);
+    explicit bit_vector_hyb(const sdsl::bit_vector &vector);
+    explicit bit_vector_hyb(const sdsl::bit_vector &vector, uint64_t num_set_bits);
+    explicit bit_vector_hyb(const bit_vector_hyb &other);
+
+    bit_vector_hyb(bit_vector_hyb&& other) noexcept;
+    bit_vector_hyb(std::initializer_list<bool> init);
+    bit_vector_hyb(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
+                  uint64_t size,
+                  uint64_t num_set_bits);
+
+    bit_vector_hyb& operator=(const bit_vector_hyb &other);
+    bit_vector_hyb& operator=(bit_vector_hyb&& other) noexcept;
+
+    std::unique_ptr<bit_vector> copy() const override;
+
+    uint64_t rank1(uint64_t id) const override;
+    uint64_t select0(uint64_t id) const;
+    uint64_t select1(uint64_t id) const override;
+
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
+
+    void set(uint64_t id, bool val) override;
+    bool operator[](uint64_t id) const override;
+    uint64_t get_int(uint64_t id, uint32_t width) const override;
+
+    void insert_bit(uint64_t id, bool val) override;
+    void delete_bit(uint64_t id) override;
+
+    bool load(std::istream &in) override;
+    void serialize(std::ostream &out) const override;
+
+    uint64_t size() const override { return vector_.size(); }
+
+    sdsl::bit_vector to_vector() const override;
+
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override;
+
+    bool is_inverted() const { return inverted_; }
+
+    const sdsl::hyb_vector<block_rate>& data() const { return vector_; }
+
+  private:
+    bool inverted_;
+    sdsl::hyb_vector<block_rate> vector_;
+    typename sdsl::hyb_vector<block_rate>::rank_1_type rk1_;
+    typename sdsl::hyb_vector<block_rate>::select_1_type slct1_;
+    typename sdsl::hyb_vector<block_rate>::select_0_type slct0_;
 };
 
 

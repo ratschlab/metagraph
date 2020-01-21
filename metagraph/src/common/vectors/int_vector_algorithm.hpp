@@ -9,8 +9,8 @@
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
 
-template <class Callback>
-void call_ones(const sdsl::bit_vector &vector,
+template <class Bitmap, class Callback>
+void call_ones(const Bitmap &vector,
                uint64_t begin, uint64_t end,
                Callback callback) {
     assert(begin <= end);
@@ -43,13 +43,13 @@ void call_ones(const sdsl::bit_vector &vector,
     }
 }
 
-template <class Callback>
-void call_ones(const sdsl::bit_vector &vector, Callback callback) {
+template <class Bitmap, class Callback>
+void call_ones(const Bitmap &vector, Callback callback) {
     call_ones(vector, 0, vector.size(), callback);
 }
 
-template <class Callback>
-void call_zeros(const sdsl::bit_vector &vector,
+template <class Bitmap, class Callback>
+void call_zeros(const Bitmap &vector,
                 uint64_t begin, uint64_t end,
                 Callback callback) {
     assert(begin <= end);
@@ -82,8 +82,8 @@ void call_zeros(const sdsl::bit_vector &vector,
     }
 }
 
-template <class Callback>
-void call_zeros(const sdsl::bit_vector &vector, Callback callback) {
+template <class Bitmap, class Callback>
+void call_zeros(const Bitmap &vector, Callback callback) {
     call_zeros(vector, 0, vector.size(), callback);
 }
 
