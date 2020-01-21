@@ -74,10 +74,11 @@ class ChunkedWaitQueue {
           fence_size_(fence_size),
           on_item_pushed_(on_item_pushed),
           queue_(buffer_size),
-          buf_(1000),
           end_iterator_(Iterator(this, buffer_size)),
           is_shutdown_(false) {
         assert(fence_size < buffer_size);
+        assert(1000 < buffer_size); // TODO: maybe make 1000 a param
+        buf_.reserve(1000);
     }
 
     /**
@@ -115,8 +116,18 @@ class ChunkedWaitQueue {
      * the older elements via #pop_chunk().
      */
     bool full() const {
-        return last_ != buffer_size_ && first_ == (last_ + 1) % buffer_size_;
+        size_type beyond_last = (last_ + 1) % buffer_size_;
+        return last_ != buffer_size_ && first_ == beyond_last;
     }
+
+    bool can_flush() const {
+        if (empty()) {
+            return true;
+        }
+        size_type last_after_flush = (last_ + buf_.capacity()) % buffer_size_;
+        return last_after_flush < first_ || last_after_flush - first_ >= buf_.capacity();
+    }
+
 
     /**
      * Returns the capacity of the queue's internal buffer.
@@ -142,6 +153,7 @@ class ChunkedWaitQueue {
         if (is_shutdown_) {
             return;
         }
+        not_full_.wait(lock, [this] { return can_flush(); });
         flush();
         is_shutdown_ = true;
         not_empty_.notify_all();
@@ -154,12 +166,13 @@ class ChunkedWaitQueue {
      * std::move it into the queue if the copy construction is expensive.
      */
     void push(value_type x) {
-        if (buf_.size() < buf_.capacity()) {
-            on_item_pushed_(x);
-            buf_.push_back(std::move(x));
-            return;
+        on_item_pushed_(x);
+        buf_.push_back(std::move(x));
+        if (buf_.size() == buf_.capacity()) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            not_full_.wait(lock, [this] { return can_flush(); });
+            flush();
         }
-        flush();
     }
 
     /**
@@ -218,19 +231,18 @@ class ChunkedWaitQueue {
         if (size() < chunk_size_) { // nothing to pop
             return;
         }
-        const bool was_full = full();
+        const bool could_flush = can_flush();
 
         first_ = (first_ + chunk_size_) % queue_.size();
 
-        if (was_full) { // notify waiting writer that it can start writing again
+        if (!could_flush && can_flush()) {
+            // notify waiting writer that it can start writing  again
             not_full_.notify_one();
         }
     }
 
-    /** Write the contents of buf to the queue */
+    /** Write the contents of buf to the queue - the caller must hold the mutex. */
     void flush() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        not_full_.wait(lock, [this] { return !full(); });
         bool was_all_read = iterator_.no_more_elements();
         for (const auto &v : buf_) {
             last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
