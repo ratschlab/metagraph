@@ -85,9 +85,83 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     auto RAM = get_curr_RSS() - mem_before;
 
+    Timer timer;
+    int result = 0;
+    const size_t num_iterations = 10'000'000;
+
+    // Random access time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size(); i < num_iterations; ++i) {
+        result += another[(i * 87'178'291'199) % size];
+    }
+    double random_access = timer.elapsed() / num_iterations;
+
+    // Random get_int time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size() / 64; i < num_iterations; ++i) {
+        result += another.get_int(((i * 87'178'291'199) % size) * 64, 64);
+    }
+    double random_access_word = timer.elapsed() / num_iterations;
+
+    // Random rank time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size(); i < num_iterations; ++i) {
+        result += another.rank1((i * 87'178'291'199) % size);
+    }
+    double random_rank = timer.elapsed() / num_iterations;
+
+    // Random select time
+    timer.reset();
+    double random_select = 0.0 / 0.0;
+    if (another.num_set_bits() && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+        for (uint64_t i = 0, rank = another.num_set_bits(); i < num_iterations; ++i) {
+            result += another.select1(1 + (i * 87'178'291'199) % rank);
+        }
+        random_select = timer.elapsed() / num_iterations;
+    }
+
+    // Sequential access time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size(); i < num_iterations; ++i) {
+        if (j == size)
+            j = 0;
+        result += another[j++];
+    }
+    double sequential_access = timer.elapsed() / num_iterations;
+
+    // Random get_int time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size() / 64; i < num_iterations; ++i) {
+        if (j == size)
+            j = 0;
+        result += another.get_int(64 * j++, 64);
+    }
+    double sequential_access_word = timer.elapsed() / num_iterations;
+
+    // Sequential rank time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size(); i < num_iterations; ++i) {
+        if (j == size)
+            j = 0;
+        result += another.rank1(j++);
+    }
+    double sequential_rank = timer.elapsed() / num_iterations;
+
+    // Sequential select time
+    double sequential_select = 0.0 / 0.0;
+    if (another.num_set_bits() && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+        timer.reset();
+        for (uint64_t i = 0, j = 1, rank = another.num_set_bits(); i < num_iterations; ++i) {
+            if (j == rank)
+                j = 1;
+            result += another.select1(j++);
+        }
+        sequential_select = timer.elapsed() / num_iterations;
+    }
+
     std::filesystem::remove(path);
 
-    uint64_t predicted_size = 0.0 / 0.0;
+    double predicted_size = 0.0 / 0.0;
     if constexpr(!std::is_base_of_v<bit_vector_dyn, BitVector>
                     && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
         predicted_size = predict_size<BitVector>(another.size(), another.num_set_bits());
@@ -100,6 +174,14 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
               << "\t" << 1. * serialized_size * 8 / n
               << "\t" << RAM
               << "\t" << 1. * predicted_size / another.size()
+              << "\t" << random_access
+              << "\t" << random_access_word
+              << "\t" << random_rank
+              << "\t" << random_select
+              << "\t" << sequential_access
+              << "\t" << sequential_access_word
+              << "\t" << sequential_rank
+              << "\t" << sequential_select
               << std::endl;
 }
 
