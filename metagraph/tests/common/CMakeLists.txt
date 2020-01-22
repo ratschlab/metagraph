@@ -37,5 +37,6 @@ target_link_libraries(tests
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
     ${SDSL_LIBRARY}
+    ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
 

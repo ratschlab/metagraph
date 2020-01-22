@@ -16,26 +16,21 @@ using common::ChunkedWaitQueue;
 TEST(WaitQueue, Empty) {
     ChunkedWaitQueue<int32_t> under_test(20, 1);
     EXPECT_TRUE(under_test.empty());
-    EXPECT_FALSE(under_test.full());
 }
 
 TEST(WaitQueue, PushPop) {
     ChunkedWaitQueue<int32_t> under_test(3, 1);
     under_test.push(1);
-    EXPECT_FALSE(under_test.full());
     under_test.push(2);
-    EXPECT_FALSE(under_test.full());
     under_test.push(3);
-    EXPECT_TRUE(under_test.full());
+
     ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.begin();
     EXPECT_EQ(1, *iterator);
     EXPECT_EQ(2, *(++iterator));
     // the chunk wasn't yet cleaned up, so the queue should be full
-    EXPECT_TRUE(under_test.full());
 
     EXPECT_EQ(3, *(++iterator));
     // at this point the first chunk was cleaned up, so the queue is not full any longer
-    EXPECT_FALSE(under_test.full());
 
     under_test.push(4);
     EXPECT_EQ(4, *(++iterator));
