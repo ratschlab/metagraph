@@ -7,10 +7,10 @@
 #include <iostream>
 #include <sdsl/wt_rlmn.hpp>
 #include "utilities.hpp"
-int main_dumprt([[maybe_unused]]int argc,[[maybe_unused]] char *argv[]) {
+int main_dumprt([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     sdsl::wt_rlmn<> wt;
     wt.load(cin);
-    for(uint64_t i=0;i<wt.size();i++) {
+    for (uint64_t i = 0; i < wt.size(); i++) {
         cout << decode(wt[i]);
     }
     return 0;

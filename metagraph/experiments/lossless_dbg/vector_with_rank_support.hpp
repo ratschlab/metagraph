@@ -12,10 +12,10 @@ using namespace std;
 
 template <typename T>
 class VectorWithRankSupport : public vector<T> {
-public:
+  public:
     using vector<T>::vector;
     // rank [0..position]
-    int64_t rank(T symbol,int64_t position) const {
+    int64_t rank(T symbol, int64_t position) const {
         int64_t result = 0;
         for (size_t i = 0; i <= position; ++i) {
             result += vector<T>::operator[](i) == symbol;
@@ -23,15 +23,14 @@ public:
         return result;
     }
 
-    int64_t select(T symbol,int64_t rank) const {
+    int64_t select(T symbol, int64_t rank) const {
         int64_t crank = 1;
         int64_t i = 0;
-        for(auto& c : *this) {
+        for (auto &c : *this) {
             if (c == symbol) {
                 if (crank == rank) {
                     return i;
-                }
-                else {
+                } else {
                     crank++;
                 }
             }
@@ -40,11 +39,9 @@ public:
         return INT_MAX;
     }
 
-    char get(int64_t position) const {
-        return this->at(position);
-    }
+    char get(int64_t position) const { return this->at(position); }
 
-    void insert(int64_t position,T symbol) {
+    void insert(int64_t position, T symbol) {
         assert(position <= this->size());
         vector<T>::insert(this->begin() + position, symbol);
     }

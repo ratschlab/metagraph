@@ -8,9 +8,7 @@ using namespace std;
 using namespace std::string_literals;
 
 
-
 int main(int argc, char *argv[]) {
-    main_dumprt(argc,argv);
+    main_dumprt(argc, argv);
     return 0;
 }
-

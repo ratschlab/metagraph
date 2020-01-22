@@ -20,37 +20,28 @@ using TCLAP::ValuesConstraint;
 #include "utilities.hpp"
 
 
-
 using namespace std;
 using namespace nlohmann;
 using namespace std::string_literals;
 
 int main_statistics(int argc, char *argv[]) {
-    TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
-    TCLAP::ValueArg<std::string> graphArg("g",
-                                          "graph",
+    TCLAP::CmdLine cmd("Compress reads", ' ', "0.1");
+    TCLAP::ValueArg<std::string> graphArg("g", "graph",
                                           "Graph to use as a reference in compression",
-                                          true,
-                                          "",
-                                          "string",cmd);
-    TCLAP::ValueArg<std::string> statisticsArg("s",
-                                               "statistics",
-                                               "Filename of json file that will output statistics about compressed file.",
-                                               true,
-                                               "statistics.json",
-                                               "string",cmd);
-    TCLAP::ValueArg<int> verbosityArg("v",
-                                               "verbosity",
-                                               "Level of detail of the statistics",
-                                               false,
-                                               0u,
-                                               "int64_t",cmd);
+                                          true, "", "string", cmd);
+    TCLAP::ValueArg<std::string> statisticsArg(
+            "s", "statistics",
+            "Filename of json file that will output statistics about compressed file.",
+            true, "statistics.json", "string", cmd);
+    TCLAP::ValueArg<int> verbosityArg("v", "verbosity",
+                                      "Level of detail of the statistics", false, 0u,
+                                      "int64_t", cmd);
     cmd.parse(argc, argv);
     auto graph = DBGSuccinct(21);
     graph.load(graphArg.getValue());
-    auto statistics = get_statistics(graph,verbosityArg.getValue());
+    auto statistics = get_statistics(graph, verbosityArg.getValue());
     cout << statistics << endl;
-    save_string(statistics.dump(4),statisticsArg.getValue());
+    save_string(statistics.dump(4), statisticsArg.getValue());
     return 0;
 }
 

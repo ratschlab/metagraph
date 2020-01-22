@@ -21,14 +21,14 @@
 
 using default_bit_vector = bit_vector_small;
 
-template <typename GraphT=DBGSuccinct,typename _edge_identifier_t=char>
+template <typename GraphT = DBGSuccinct, typename _edge_identifier_t = char>
 class SolidDynamicIncomingTable {
-public:
+  public:
     using edge_identifier_t = _edge_identifier_t;
     explicit SolidDynamicIncomingTable(ll size) : total_size(size) {}
 
     int64_t branch_offset(node_index node, edge_identifier_t incoming) const {
-        assert((int64_t )node < total_size);
+        assert((int64_t)node < total_size);
         int64_t result = 0;
         for (char base : "$ACGTN") {
             if (base < incoming) {
@@ -44,7 +44,7 @@ public:
     }
 
     int64_t branch_size(node_index node, edge_identifier_t incoming) const {
-        assert((int64_t )node < total_size);
+        assert((int64_t)node < total_size);
         int64_t result = 0;
         int64_t encoded = encode(incoming);
         auto it = incoming_table.find(node);
@@ -53,65 +53,58 @@ public:
         else {
             result = it->second.at(encoded);
         }
-        assert(result>=0);
+        assert(result >= 0);
         return result;
     }
 
     ll size(node_index node) const {
         assert(node < total_size);
         ll result = 0;
-        for(char base : "$ACGTN") {
-            result += branch_size(node,base);
+        for (char base : "$ACGTN") {
+            result += branch_size(node, base);
         }
         return result;
     }
 
-    int64_t branch_offset_and_increment(node_index node,
-                                    edge_identifier_t incoming) {
-        assert((int64_t )node < total_size);
-        assert(incoming == '$' or
-               incoming == 'A' or
-               incoming == 'C' or
-               incoming == 'G' or
-               incoming == 'T' or
-               incoming == 'N'
-        );
+    int64_t branch_offset_and_increment(node_index node, edge_identifier_t incoming) {
+        assert((int64_t)node < total_size);
+        assert(incoming == '$' or incoming == 'A' or incoming == 'C' or incoming == 'G'
+               or incoming == 'T' or incoming == 'N');
         int result = 0;
 
         auto it = incoming_table.find(node);
         int64_t encoded = encode(incoming);
 
         if (it != incoming_table.end()) {
-            const auto& array = it->second;
+            const auto &array = it->second;
 
-            for(auto i=0;i<6;i++) {
-                if (i >= encoded) break;
+            for (auto i = 0; i < 6; i++) {
+                if (i >= encoded)
+                    break;
                 result += array[i];
             }
             it.value()[encoded]++;
         } else {
             incoming_table[node][encoded]++;
         }
-        assert(result>= 0);
+        assert(result >= 0);
         return result;
     }
 
 
     string print_content(node_index node) const {
-        assert((int64_t )node < total_size);
+        assert((int64_t)node < total_size);
         stringstream out;
-        for(char c : "$ACGTN") {
-            out << c << ":" << branch_size(node,c) << endl;
+        for (char c : "$ACGTN") {
+            out << c << ":" << branch_size(node, c) << endl;
         }
         mg::common::logger->debug(out.str());
         return out.str();
     }
 
-    bool has_new_reads(node_index node) const {
-        return branch_size(node, '$');
-    }
+    bool has_new_reads(node_index node) const { return branch_size(node, '$'); }
     int64_t total_size;
-    tsl::hopscotch_map<node_index, array<int32_t,6>> incoming_table;
+    tsl::hopscotch_map<node_index, array<int32_t, 6>> incoming_table;
 };
 
 #endif // __SOLID_DYNAMIC_INCOMING_TABLE_HPP__

@@ -27,21 +27,14 @@ using namespace std::string_literals;
 using node_index = SequenceGraph::node_index;
 
 
-
 int main_tester(int argc, char *argv[]) {
-    TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
-    TCLAP::ValueArg<std::string> leftArg("l",
-                                         "left_hand_side",
-                                         "FASTA/Q file that should be compressed",
-                                         true,
-                                         "",
-                                         "string");
-    TCLAP::ValueArg<std::string> rightArg("r",
-                                          "right_hand_side",
-                                          "FASTA/Q file that should be compressed",
-                                          true,
-                                          "",
-                                          "string");
+    TCLAP::CmdLine cmd("Compress reads", ' ', "0.1");
+    TCLAP::ValueArg<std::string> leftArg("l", "left_hand_side",
+                                         "FASTA/Q file that should be compressed", true,
+                                         "", "string");
+    TCLAP::ValueArg<std::string> rightArg("r", "right_hand_side",
+                                          "FASTA/Q file that should be compressed", true,
+                                          "", "string");
     cmd.add(leftArg);
     cmd.add(rightArg);
     cmd.parse(argc, argv);
@@ -55,25 +48,22 @@ int main_tester(int argc, char *argv[]) {
     if (left_reads == right_reads) {
         cout << "Reads are identical up to ordering." << endl;
         return 0;
-    }
-    else {
+    } else {
         cout << "Files differ!!!" << endl;
         cout << "l: " << left_reads.size() << endl;
         cout << "r: " << right_reads.size() << endl;
         std::multiset<string> only_in_left;
-        std::set_difference(all(left_reads),
-                            all(right_reads),
+        std::set_difference(all(left_reads), all(right_reads),
                             std::inserter(only_in_left, only_in_left.begin()));
         std::multiset<string> only_in_right;
-        std::set_difference(all(right_reads),
-                            all(left_reads),
+        std::set_difference(all(right_reads), all(left_reads),
                             std::inserter(only_in_right, only_in_right.begin()));
         cout << "----- Only in left -----" << endl;
-        for(auto &e : only_in_left) {
+        for (auto &e : only_in_left) {
             cout << e << endl;
         }
         cout << "----- Only in right -----" << endl;
-        for(auto &e : only_in_right) {
+        for (auto &e : only_in_right) {
             cout << e << endl;
         }
         return -1;

@@ -28,15 +28,19 @@
 
 using node_index = SequenceGraph::node_index;
 
-template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
+template <typename EntryT = SolidDynamicRoutingTable<>,
+          typename BitVector = sdsl::bit_vector,
+          typename RankSupport = typename BitVector::rank_1_type>
 class DynamicRoutingTableCore {
-public:
+  public:
     using BaseT = typename EntryT::BaseT;
     DynamicRoutingTableCore() = default;
     DynamicRoutingTableCore(shared_ptr<const DBGSuccinct> graph) : graph(graph) {}
-    DynamicRoutingTableCore(shared_ptr<const DBGSuccinct> graph, BitVector* is_element,RankSupport* rank_element, ll chunks = DefaultChunks)
-            : graph(graph), chunks(is_element,rank_element,chunks) {
-    }
+    DynamicRoutingTableCore(shared_ptr<const DBGSuccinct> graph,
+                            BitVector *is_element,
+                            RankSupport *rank_element,
+                            ll chunks = DefaultChunks)
+        : graph(graph), chunks(is_element, rank_element, chunks) {}
 
     ll select(int64_t location, ll occurrence, char symbol) const {
         auto &chunk = chunks.at(location);
@@ -45,7 +49,8 @@ public:
 
     ll rank(int64_t location, ll position, char symbol, ll hint_block_offset) const {
         auto &chunk = chunks.at(location);
-        return chunk.rank(chunks.position_in_chunk(location), position, symbol, hint_block_offset);
+        return chunk.rank(chunks.position_in_chunk(location), position, symbol,
+                          hint_block_offset);
     }
 
     ll rank(int64_t location, ll position, char symbol) const {
@@ -76,7 +81,7 @@ public:
 
     string print_content() const {
         stringstream out;
-        for(int64_t chunk_id = 0; chunk_id < chunks.size(); chunk_id++) {
+        for (int64_t chunk_id = 0; chunk_id < chunks.size(); chunk_id++) {
             auto &chunk = chunks.at(chunk_id);
             out << chunk.print_content();
         }
@@ -95,7 +100,8 @@ public:
 
     ll new_relative_position(int64_t location, ll position, ll hint_block_offset) const {
         auto &chunk = chunks.at(location);
-        return chunk.new_relative_position(chunks.position_in_chunk(location), position, hint_block_offset);
+        return chunk.new_relative_position(chunks.position_in_chunk(location), position,
+                                           hint_block_offset);
     }
 
     ll insert(int64_t location, ll position, char symbol) {
@@ -105,12 +111,14 @@ public:
 
 
     shared_ptr<const DBGSuccinct> graph;
-    ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
+    ChunkedDenseHashMap<EntryT, BitVector, RankSupport> chunks;
 };
 
 
-
-template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
-using DynamicRoutingTable = TransformationsEnabler<DynamicRoutingTableCore<EntryT,BitVector,RankSupport>>;
+template <typename EntryT = SolidDynamicRoutingTable<>,
+          typename BitVector = sdsl::bit_vector,
+          typename RankSupport = typename BitVector::rank_1_type>
+using DynamicRoutingTable
+        = TransformationsEnabler<DynamicRoutingTableCore<EntryT, BitVector, RankSupport>>;
 
 #endif // __DYNAMIC_ROUTING_TABLE_HPP__

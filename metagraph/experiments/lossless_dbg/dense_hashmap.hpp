@@ -9,97 +9,86 @@
 #include <sdsl/bit_vectors.hpp>
 
 
-
-
-template <typename T,typename bit_vector_=sdsl::bit_vector, typename rank_support_=sdsl::rank_support_v<1>>
+template <typename T, typename bit_vector_ = sdsl::bit_vector, typename rank_support_ = sdsl::rank_support_v<1>>
 class DenseHashMap {
-public:
+  public:
     using bit_vector = bit_vector_;
     using rank_support = rank_support_;
     using element_type = T;
     DenseHashMap() = default;
 
-    DenseHashMap(bit_vector *isElement,rank_support *rank,T default_element = T()) {
+    DenseHashMap(bit_vector *isElement, rank_support *rank, T default_element = T()) {
         int64_t total_num_elements = rank->rank(rank->size());
         this->is_element = isElement;
         this->rank = rank;
-        elements = decltype(elements)(total_num_elements,default_element);
+        elements = decltype(elements)(total_num_elements, default_element);
     }
 
     int64_t underlying_position(int64_t n) const {
         assert(n >= 0);
-        assert(n < (int64_t ) is_element->size());
+        assert(n < (int64_t)is_element->size());
         assert((*is_element)[n]);
         return rank->rank(n);
     }
 
-    T& operator[](int64_t n) {
-        return elements[underlying_position(n)];
-    }
+    T &operator[](int64_t n) { return elements[underlying_position(n)]; }
 
-    const T& operator[](int64_t n) const {
-        return elements[underlying_position(n)];
-    }
+    const T &operator[](int64_t n) const { return elements[underlying_position(n)]; }
 
-    const T& at(int64_t n) const {
-        return elements.at(underlying_position(n));
-    }
+    const T &at(int64_t n) const { return elements.at(underlying_position(n)); }
 
     bool count(int64_t n) const {
-        assert(n < (int64_t ) is_element->size());
+        assert(n < (int64_t)is_element->size());
         return (*is_element)[n];
     }
 
-    T* ptr_to(int64_t n) {
-        return &elements[underlying_position(n)];
-    }
+    T *ptr_to(int64_t n) { return &elements[underlying_position(n)]; }
 
-    int64_t size() const {
-        return elements.size();
-    }
+    int64_t size() const { return elements.size(); }
 
 
-    bit_vector * is_element;
-    rank_support * rank;
+    bit_vector *is_element;
+    rank_support *rank;
     std::vector<T> elements;
 };
 
 const int DefaultChunks = 100;
-template <typename T,typename bit_vector=sdsl::bit_vector, typename rank_support=sdsl::rank_support_v<1>,bool supply_size=true>
-class ChunkedDenseHashMap : public DenseHashMap<T,bit_vector,rank_support> {
-public:
+template <typename T,
+          typename bit_vector = sdsl::bit_vector,
+          typename rank_support = sdsl::rank_support_v<1>,
+          bool supply_size = true>
+class ChunkedDenseHashMap : public DenseHashMap<T, bit_vector, rank_support> {
+  public:
     using element_type = T;
     ChunkedDenseHashMap() = default;
 
-    ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,int64_t chunks=DefaultChunks) {
-        assert(chunks>0);
+    ChunkedDenseHashMap(bit_vector *isElement,
+                        rank_support *rank,
+                        int64_t chunks = DefaultChunks) {
+        assert(chunks > 0);
         int64_t total_num_elements = rank->rank(rank->size());
-        chunks = min(chunks,total_num_elements);
+        chunks = min(chunks, total_num_elements);
         this->is_element = isElement;
         this->rank = rank;
-        chunk_size = get_chunk_size(total_num_elements,chunks);
+        chunk_size = get_chunk_size(total_num_elements, chunks);
 
 
         if constexpr (supply_size) {
-            this->elements = decltype(this->elements)(chunks, T(chunk_size));//note: the last chunk will be padded
-        }
-        else {
+            this->elements = decltype(this->elements)(
+                    chunks, T(chunk_size)); // note: the last chunk will be padded
+        } else {
             this->elements = decltype(this->elements)(chunks);
         }
     }
 
-    static int64_t get_chunk_size(int64_t num_elements,int64_t chunks) {
-        return (num_elements+chunks-1)/chunks;
+    static int64_t get_chunk_size(int64_t num_elements, int64_t chunks) {
+        return (num_elements + chunks - 1) / chunks;
     }
 
 
-    int64_t unchunked_position(int64_t n) const {
-        return this->rank->rank(n);
-    }
+    int64_t unchunked_position(int64_t n) const { return this->rank->rank(n); }
 
-    int64_t chunk(int64_t n) const {
-        return unchunked_position(n)/chunk_size;
-    }
+    int64_t chunk(int64_t n) const { return unchunked_position(n) / chunk_size; }
 
     int64_t position_in_chunk(int64_t n) const {
         return unchunked_position(n) % chunk_size;
@@ -107,31 +96,25 @@ public:
 
     int64_t underlying_position(int64_t n) const {
         assert(n >= 0);
-        assert(n < (ll) this->is_element->size());
+        assert(n < (ll)this->is_element->size());
         assert((*this->is_element)[n]);
         return chunk(n);
     }
 
-    const T& operator[](int64_t n) const {
+    const T &operator[](int64_t n) const {
         return this->elements[underlying_position(n)];
     }
 
-    T& operator[](int64_t n) {
-        return this->elements[underlying_position(n)];
-    }
+    T &operator[](int64_t n) { return this->elements[underlying_position(n)]; }
 
-    const T& at(int64_t n) const {
-        return this->elements.at(underlying_position(n));
-    }
+    const T &at(int64_t n) const { return this->elements.at(underlying_position(n)); }
 
     bool count(int64_t n) const {
         assert(n < this->is_element->size());
         return (*this->is_element)[n];
     }
 
-    T* ptr_to(int64_t n) {
-        return &(this->elements[underlying_position(n)]);
-    }
+    T *ptr_to(int64_t n) { return &(this->elements[underlying_position(n)]); }
 
     int64_t chunk_size = 0;
 };

@@ -20,21 +20,14 @@ using namespace std::string_literals;
 using node_index = SequenceGraph::node_index;
 
 
-
 int main(int argc, char *argv[]) {
-    TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
-    TCLAP::ValueArg<std::string> leftArg("l",
-                                          "left_hand_side",
-                                          "FASTA/Q file that should be compressed",
-                                          true,
-                                          "",
-                                          "string");
-    TCLAP::ValueArg<std::string> rightArg("r",
-                                          "right_hand_side",
-                                          "FASTA/Q file that should be compressed",
-                                          true,
-                                          "",
-                                          "string");
+    TCLAP::CmdLine cmd("Compress reads", ' ', "0.1");
+    TCLAP::ValueArg<std::string> leftArg("l", "left_hand_side",
+                                         "FASTA/Q file that should be compressed", true,
+                                         "", "string");
+    TCLAP::ValueArg<std::string> rightArg("r", "right_hand_side",
+                                          "FASTA/Q file that should be compressed", true,
+                                          "", "string");
     cmd.add(leftArg);
     cmd.add(rightArg);
     cmd.parse(argc, argv);
@@ -47,8 +40,7 @@ int main(int argc, char *argv[]) {
     if (left_reads == right_reads) {
         cout << "Reads are identical up to ordering." << endl;
         return 0;
-    }
-    else {
+    } else {
         cout << "Files differ!!!" << endl;
         return -1;
     }

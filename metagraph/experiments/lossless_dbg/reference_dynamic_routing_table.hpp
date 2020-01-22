@@ -10,42 +10,47 @@
 #include <filesystem>
 
 // Verified implementation of routing table (to test against)
-template<typename DummyT=int>
+template <typename DummyT = int>
 class ReferenceDynamicRoutingTable {
-public:
+  public:
     ReferenceDynamicRoutingTable() = default;
-    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> ) {}
+    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct>) {}
 
-    template<typename BitVector,typename RankSupport>
-    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> /* graph */, BitVector* is_element,RankSupport* rank_element, ll /* chunks = DefaultChunks */) : routing_table(is_element,rank_element) {
+    template <typename BitVector, typename RankSupport>
+    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> /* graph */,
+                                 BitVector *is_element,
+                                 RankSupport *rank_element,
+                                 ll /* chunks = DefaultChunks */)
+        : routing_table(is_element, rank_element) {}
 
-    }
-
-//    int select(node_index node, int occurrence, char symbol) const {
-//    }
+    //    int select(node_index node, int occurrence, char symbol) const {
+    //    }
 
 
-protected:
+  protected:
     // rank [0..position)
-    int rank(node_index node, int position, char symbol, [[maybe_unused]] ll hint_block_offset=-1) const {
+    int rank(node_index node,
+             int position,
+             char symbol,
+             [[maybe_unused]] ll hint_block_offset = -1) const {
         int result = 0;
         const auto &node_entry = routing_table.at(node);
-        assert(position <= (int64_t ) node_entry.size());
-        for (int64_t  i = 0; i < position; ++i) {
+        assert(position <= (int64_t)node_entry.size());
+        for (int64_t i = 0; i < position; ++i) {
             result += node_entry[i] == symbol;
         }
         return result;
     }
-public:
-    int select(node_index node,int rank,char symbol) const {
+
+  public:
+    int select(node_index node, int rank, char symbol) const {
         int crank = 1;
         int i = 0;
-        for(auto& c : routing_table.at(node)) {
+        for (auto &c : routing_table.at(node)) {
             if (c == symbol) {
                 if (crank == rank) {
                     return i;
-                }
-                else {
+                } else {
                     crank++;
                 }
             }
@@ -53,14 +58,14 @@ public:
         }
         return INT_MAX;
     }
-    char get(node_index node, int position, [[maybe_unused]] ll hint_block_offset=-1) const {
+    char get(node_index node, int position, [[maybe_unused]] ll hint_block_offset = -1) const {
         return routing_table.at(node).at(position);
     }
 
     string print_content(node_index node) const {
         stringstream out;
         auto table_size = size(node);
-        for (int i=0;i<table_size;i++) {
+        for (int i = 0; i < table_size; i++) {
             out << get(node, i);
         }
         out << endl;
@@ -70,7 +75,7 @@ public:
 
     string print_content() const {
         stringstream out;
-        for (int64_t i=0;i<routing_table.size();i++) {
+        for (int64_t i = 0; i < routing_table.size(); i++) {
             out << routing_table[i];
         }
         out << endl;
@@ -80,12 +85,14 @@ public:
 
     char traversed_base(node_index node, int position) const {
         assert(position >= 0 && "traversing o");
-        return get(node,position);
+        return get(node, position);
     }
 
-    int new_relative_position(node_index node, int position, [[maybe_unused]] ll hint_block_offset=-1) const {
-        auto base = get(node,position);
-        auto base_rank = rank(node,position,base);
+    int new_relative_position(node_index node,
+                              int position,
+                              [[maybe_unused]] ll hint_block_offset = -1) const {
+        auto base = get(node, position);
+        auto base_rank = rank(node, position, base);
         return base_rank;
     }
 

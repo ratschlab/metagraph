@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.13)
 #
 set(CMAKE_CXX_STANDARD 17)
 set(ENCODER_VERSION 8)
-if(NOT DEFINED CMAKE_BUILD_TYPE)
+if (NOT DEFINED CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
-endif()
+endif ()
 string(TOLOWER ${CMAKE_BUILD_TYPE} BTYPE)
 set(PATH_ENCODER_CURRENT path_encoder_toolbox_v${ENCODER_VERSION})
 set(PATH_ENCODER_CURRENT_TYPE ${PATH_ENCODER_CURRENT}_${BTYPE})
@@ -15,15 +15,15 @@ set(PATH_ENCODER_CURRENT_TYPE ${PATH_ENCODER_CURRENT}_${BTYPE})
 
 ## Add profiler into all versions
 find_library(PROFILER_LIB profiler)
-if(PROFILER_LIB)
+if (PROFILER_LIB)
     link_libraries(profiler)
-endif()
+endif ()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_PROFILE} -fno-inline-functions")
-else()
+else ()
     set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_PROFILE} -fno-inline")
-endif()
+endif ()
 
 set(CMAKE_CXX_FLAGS_VERBOSEDEBUG "${CMAKE_CXX_FLAGS} -DDEBUG_ADDITIONAL_INFORMATION")
 
@@ -45,51 +45,51 @@ set(CMAKE_CXX_FLAGS_VERBOSEDEBUG "${CMAKE_CXX_FLAGS} -DDEBUG_ADDITIONAL_INFORMAT
 include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
 
 # sparsepp
-if(DEFINED USE_DYNAMIC)
-        ExternalProject_Add(sparsepp
-        GIT_REPOSITORY "https://github.com/edawson/sparsepp.git"
-        GIT_TAG "1c5a285e87b2244383efe0398f9992acd61234e9"
-        BUILD_IN_SOURCE TRUE
-        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${INSTALL_DIR} # TODO ADD static build flag
-        UPDATE_COMMAND ""
-        INSTALL_COMMAND ""
-        BUILD_COMMAND ""
-        CONFIGURE_COMMAND "")
-ExternalProject_Get_property(sparsepp INSTALL_DIR)
-set(sparsepp_INCLUDE "${INSTALL_DIR}/src/sparsepp/sparsepp/")
-set(sparsepp_LIB "${INSTALL_DIR}/src/sparsepp/sparsepp/")
-include_directories(${INSTALL_DIR}/src/sparsepp/sparsepp)
+if (DEFINED USE_DYNAMIC)
+    ExternalProject_Add(sparsepp
+            GIT_REPOSITORY "https://github.com/edawson/sparsepp.git"
+            GIT_TAG "1c5a285e87b2244383efe0398f9992acd61234e9"
+            BUILD_IN_SOURCE TRUE
+            CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${INSTALL_DIR} # TODO ADD static build flag
+            UPDATE_COMMAND ""
+            INSTALL_COMMAND ""
+            BUILD_COMMAND ""
+            CONFIGURE_COMMAND "")
+    ExternalProject_Get_property(sparsepp INSTALL_DIR)
+    set(sparsepp_INCLUDE "${INSTALL_DIR}/src/sparsepp/sparsepp/")
+    set(sparsepp_LIB "${INSTALL_DIR}/src/sparsepp/sparsepp/")
+    include_directories(${INSTALL_DIR}/src/sparsepp/sparsepp)
 
-include_directories(playground/dynamic/include)
-endif()
+    include_directories(playground/dynamic/include)
+endif ()
 
-if(NOT DEFINED PROJECT_BINARY_DIR)
+if (NOT DEFINED PROJECT_BINARY_DIR)
     set(ROOT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
-else()
+else ()
     set(ROOT_BINARY_DIR ${PROJECT_BINARY_DIR})
-endif()
+endif ()
 message("Project binary dir: ${PROJECT_BINARY_DIR}")
 
 project(lossless_dbg)
-if(NOT DEFINED METALIBS)
+if (NOT DEFINED METALIBS)
     set(METALIBS metagraph-core sdsl maus2 z hts c++fs)
     string(APPEND CMAKE_CXX_FLAGS " -D_DNA_GRAPH")
-endif()
+endif ()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsave-optimization-record")
-endif()
+endif ()
 
 add_executable(tests tests.cpp)
 add_executable(${PATH_ENCODER_CURRENT_TYPE} main.cpp)
 
 target_link_libraries(tests metagraph-core ${METALIBS} gtest gtest_main)
 
-target_link_libraries(${PATH_ENCODER_CURRENT_TYPE} metagraph-core ${METALIBS} gtest gtest_main )
-if(DEFINED USE_DYNAMIC)
+target_link_libraries(${PATH_ENCODER_CURRENT_TYPE} metagraph-core ${METALIBS} gtest gtest_main)
+if (DEFINED USE_DYNAMIC)
     add_dependencies(tests sparsepp)
     add_dependencies(${PATH_ENCODER_CURRENT_TYPE} sparsepp)
-endif()
+endif ()
 
 SET(uid 0)
 macro(add_symlink filepath sympath)
@@ -99,7 +99,7 @@ macro(add_symlink filepath sympath)
             create_symlink
             ${filepath} ${sympath}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
+            )
 endmacro(add_symlink)
 
 add_symlink(${CMAKE_CURRENT_BINARY_DIR}/${PATH_ENCODER_CURRENT_TYPE} ${ROOT_BINARY_DIR}/path_encoder_toolbox)
@@ -108,11 +108,11 @@ add_symlink(${PATH_ENCODER_CURRENT_TYPE} ${PATH_ENCODER_CURRENT})
 
 
 install(TARGETS ${PATH_ENCODER_CURRENT_TYPE} DESTINATION bin)
-string( TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_LOWER )
-if(${CMAKE_BUILD_TYPE_LOWER} STREQUAL "release")
+string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_LOWER)
+if (${CMAKE_BUILD_TYPE_LOWER} STREQUAL "release")
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/path_encoder_toolbox DESTINATION bin)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PATH_ENCODER_CURRENT} DESTINATION bin)
-endif()
+endif ()
 
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})

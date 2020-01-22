@@ -27,16 +27,16 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
   public:
     // Graph |graph| must contain all k-mers from the sequences passed
     PathDatabaseListBC(DBGSuccinct *graph,
-                    const vector<string> &raw_reads,
-                    size_t kmer_length = DEFAULT_K_KMER)
-          : PathDatabase(std::shared_ptr<const DBGSuccinct> { graph }),
-            kmer_length_(kmer_length),
-            read_length(raw_reads[0].length()) {
-    }
+                       const vector<string> &raw_reads,
+                       size_t kmer_length = DEFAULT_K_KMER)
+        : PathDatabase(std::shared_ptr<const DBGSuccinct> { graph }),
+          kmer_length_(kmer_length),
+          read_length(raw_reads[0].length()) {}
 
-    PathDatabaseListBC(const vector<string> &raw_reads,
-                    size_t kmer_length = DEFAULT_K_KMER)
-          : PathDatabase(raw_reads,kmer_length), kmer_length_(kmer_length),read_length(raw_reads[0].length()) {}
+    PathDatabaseListBC(const vector<string> &raw_reads, size_t kmer_length = DEFAULT_K_KMER)
+        : PathDatabase(raw_reads, kmer_length),
+          kmer_length_(kmer_length),
+          read_length(raw_reads[0].length()) {}
 
     std::vector<string> get_all_reads() const {
         vector<string> reads;
@@ -53,17 +53,19 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
         for (const auto &read : compressed_reads_) {
             bifurcation_size_histogram[to_string(read.second.size())]++;
         }
-        json result = {{"bifurcation_histogram",bifurcation_size_histogram},
-                       {"total_size",compressed_size_without_reference()},
-                       {"bifurcation_size", compressed_size_without_reference()-2*num_paths()*graph_->get_k()},
-                       {"number_of_reads",compressed_reads_.size()}};
+        json result = { { "bifurcation_histogram", bifurcation_size_histogram },
+                        { "total_size", compressed_size_without_reference() },
+                        { "bifurcation_size",
+                          compressed_size_without_reference()
+                                  - 2 * num_paths() * graph_->get_k() },
+                        { "number_of_reads", compressed_reads_.size() } };
         return result;
     }
 
     int64_t compressed_size_without_reference() const {
         // returns size in bits
         int64_t size = 0;
-        for(auto &read : compressed_reads_) {
+        for (auto &read : compressed_reads_) {
             // *2 for two bit encoding
             size += read.first.size() * 2;
             size += read.second.size() * 2;
@@ -76,7 +78,7 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
     double bits_per_symbol(bool include_reference = false) const {
         assert(!include_reference);
         return static_cast<double>(compressed_size_without_reference())
-               / (compressed_reads_.size()*read_length);
+                / (compressed_reads_.size() * read_length);
     }
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
@@ -90,15 +92,22 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
 
     // returns ids of all paths that go through sequence |str|
     std::vector<path_id> get_paths_going_through(const std::string &) const override {
-        throw std::runtime_error("Not implemented"); }
-    std::vector<path_id> get_paths_going_through(node_index) const override { throw std::runtime_error("Not implemented"); }
+        throw std::runtime_error("Not implemented");
+    }
+    std::vector<path_id> get_paths_going_through(node_index) const override {
+        throw std::runtime_error("Not implemented");
+    }
 
     // make one traversal step through the selected path
-    node_index get_next_node(node_index, path_id) const override { throw std::runtime_error("Not implemented"); }
+    node_index get_next_node(node_index, path_id) const override {
+        throw std::runtime_error("Not implemented");
+    }
 
     // transition to the next node consistent with the history
     // return npos if there is no transition consistent with the history
-    node_index get_next_consistent_node(const std::string &) const override { throw std::runtime_error("Not implemented"); }
+    node_index get_next_consistent_node(const std::string &) const override {
+        throw std::runtime_error("Not implemented");
+    }
 
     std::string decode(path_id path) const override {
         return decode_read(compressed_reads_[path]);
@@ -128,37 +137,36 @@ class PathDatabaseListBC : public PathDatabase<int64_t> {
     }
 
     std::string decode_read(const compressed_read_t &compressed_read) const {
-        auto& [starting_kmer, edge_choices] = compressed_read;
+        auto &[starting_kmer, edge_choices] = compressed_read;
         auto current_bifurcation_choice = edge_choices.begin();
         auto node = graph_->kmer_to_node(starting_kmer);
         string read = starting_kmer;
         char next_char;
-        while ((int64_t )read.size() < read_length) {
+        while ((int64_t)read.size() < read_length) {
             int64_t outgoing_degree = 0;
-            graph_->call_outgoing_kmers(node,[&](node_index next_node, char character) {
+            graph_->call_outgoing_kmers(node, [&](node_index next_node, char character) {
                 outgoing_degree++;
-                if (outgoing_degree>1) {
+                if (outgoing_degree > 1) {
                     if (character == *current_bifurcation_choice) {
-                        //initial guess was wrong
+                        // initial guess was wrong
                         node = next_node;
                         next_char = character;
                     }
-                }
-                else {
-                    //initial guess
+                } else {
+                    // initial guess
                     node = next_node;
                     next_char = character;
                 }
             });
             if (outgoing_degree > 1) {
-                current_bifurcation_choice++;//prepare next choice
+                current_bifurcation_choice++; // prepare next choice
             }
             read += next_char;
         }
         return read;
     }
 
-    void serialize(const fs::path&) const override {};
+    void serialize(const fs::path &) const override {};
 
 
     std::vector<compressed_read_t> compressed_reads_;

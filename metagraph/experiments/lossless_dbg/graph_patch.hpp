@@ -17,22 +17,23 @@
 #include "dbg_succinct.hpp"
 using node_index = SequenceGraph::node_index;
 
-template <typename Graph=DBGSuccinct>
-char get_outgoing_base(const Graph& g,node_index node) {
+template <typename Graph = DBGSuccinct>
+char get_outgoing_base(const Graph &g, node_index node) {
     char base;
     assert(g.outdegree(node) == 1);
-    g.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) {
-        PRINT_VAR(node,edge_label)(std::string());
-        base = edge_label;});
+    g.call_outgoing_kmers(node, [&base](node_index node, char edge_label) {
+        PRINT_VAR(node, edge_label)(std::string());
+        base = edge_label;
+    });
     return base;
 }
 
-template <typename Graph=DBGSuccinct>
-bool is_join_node(const Graph& g, node_index node)  {
+template <typename Graph = DBGSuccinct>
+bool is_join_node(const Graph &g, node_index node) {
     return g.indegree(node) > 1;
 }
-template <typename Graph=DBGSuccinct>
-bool is_split_node(const Graph& g,node_index node)  {
+template <typename Graph = DBGSuccinct>
+bool is_split_node(const Graph &g, node_index node) {
     return g.outdegree(node) > 1;
 }
 
