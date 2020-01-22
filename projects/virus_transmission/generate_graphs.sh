@@ -31,6 +31,7 @@ for a in 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.35 0.40 0.45; do
     $METAGRAPH assemble -a k$K/$NAME.column.annodbg --unitigs $FLAGS k$K/$NAME.dbg \
         -o k$K/$NAME.diff.unitig.$a \
         --header "k$K/$NAME.diff.unitig.$a." \
+        --enumerate \
         --label-mask-in k$K/$NAME\_D_0w_urine_raw.contigs.fasta.gz \
         --label-mask-in k$K/$NAME\_R_4-6w_urine_raw.contigs.fasta.gz \
         --label-mask-in k$K/$NAME\_R_52w_urine_raw.contigs.fasta.gz \
