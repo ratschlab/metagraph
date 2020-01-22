@@ -60,6 +60,7 @@ struct d_t {
 
     ~d_t() {
         if (!content.str().empty())
+            //using mg::common::logger;
             mg::common::logger->debug(content.str());
         else {
             std::runtime_error("Something wrong");
@@ -74,9 +75,10 @@ struct d_t {
     stringstream content;
 };
 
+#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
 #define PRINT_VAR(args...) \
-    { d_t(), "|", __LINE__, "|", #args, ":", args; }
+    { d_t(), "|", __FILENAME__,__LINE__,__FUNCTION__, "|", #args, ":", args; }
 
 template <typename POD>
 inline std::istream &deserialize(std::istream &is, vector<POD> &v) {
@@ -217,7 +219,7 @@ inline vector<string> read_reads_from_fasta(const string &filename) {
 }
 
 template <typename... Args>
-inline void doPrint(std::ostream &out, Args &&... args) {
+inline void doPrint(Args &&... args) {
     mg::common::logger->debug("{}", make_tuple(args...));
 }
 
@@ -308,7 +310,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::offset(args...);
             auto value = t.offset(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -325,7 +327,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::size(args...);
             auto value = t.size(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -342,7 +344,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::select(args...);
             auto value = t.select(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -359,7 +361,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::select_unchecked(args...);
             auto value = t.select_unchecked(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -376,7 +378,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::rank(args...);
             auto value = t.rank(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -393,7 +395,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::get(args...);
             auto value = t.get(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -410,7 +412,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::traversed_base(args...);
             auto value = t.traversed_base(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -427,7 +429,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::branch_offset(args...);
             auto value = t.branch_offset(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -444,7 +446,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::branch_size(args...);
             auto value = t.branch_size(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -461,7 +463,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::branch_offset_and_increment(args...);
             auto value = t.branch_offset_and_increment(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -490,7 +492,7 @@ class IdentityComparator : public Reference {
             auto target = Reference::new_relative_position(args...);
             auto value = t.new_relative_position(args...);
             if (target != value) {
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;
@@ -509,7 +511,7 @@ class IdentityComparator : public Reference {
             if (target != value) {
                 Reference::print_content(args...);
                 t.print_content(args...);
-                doPrint(cout, target, value, args...);
+                doPrint(target, value, args...);
             }
             assert(target == value);
             return target;

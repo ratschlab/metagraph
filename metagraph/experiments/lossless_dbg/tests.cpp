@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <variant>
 #include <gtest/gtest.h>
+
 #define private public
 #define protected public
 
@@ -31,6 +32,21 @@
 using namespace std;
 namespace fs = std::filesystem;
 
+class Environment : public ::testing::Environment {
+  public:
+    ~Environment() override {}
+
+    // Override this to define how to set up the environment.
+    void SetUp() override {
+        mg::common::logger->set_level(spdlog::level::debug);
+    }
+
+    // Override this to define how to tear down the environment.
+    void TearDown() override {}
+};
+
+::testing::Environment* const env =
+        ::testing::AddGlobalTestEnvironment(new Environment);
 
 const string random_generator_state
         = "3424 3838682849 1000327468 417786463 3810545279 1529041649 1625434294 "

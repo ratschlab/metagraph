@@ -129,7 +129,6 @@ class SolidDynamicRoutingTable {
         for (int64_t i = 0; i < table_size; i++) {
             out << get(node, i);
         }
-        out << endl;
         mg::common::logger->debug(out.str());
         return out.str();
     }
@@ -139,7 +138,7 @@ class SolidDynamicRoutingTable {
         for (uint64_t i = 0; i < routing_table.size(); i++) {
             out << routing_table[i];
         }
-        out << endl;
+
         mg::common::logger->debug(out.str());
         return out.str();
     }

@@ -116,7 +116,7 @@ class RoutingTableCore {
         for (uint64_t i = 0; i < routing_table.size(); i++) {
             out << decode(routing_table[i]);
         }
-        out << endl;
+
         mg::common::logger->debug(out.str());
         return out.str();
     }

@@ -12,7 +12,7 @@
 using default_bit_vector = bit_vector_small;
 
 using MultiplicityT = sdsl::int_vector<>;
-template <typename BitVector_ = default_bit_vector, typename GraphT = DBGSuccinct>
+template <typename BitVector_ = default_bit_vector, typename GraphT = DBGSuccinct, bool full_incoming_table = false>
 class IncomingTable {
   public:
     using edge_identifier_t = node_index;
@@ -54,12 +54,12 @@ class IncomingTable {
     }
 
     bool has_size(node_index node, node_index prev_node) const {
-#ifndef FULL_INCOMING_TABLE
-        int64_t branch_offset = relative_offset(node, prev_node);
-        return branch_offset < size(node);
-#else
-        return true;
-#endif
+        if constexpr (full_incoming_table) {
+            return true;
+        } else {
+            int64_t branch_offset = relative_offset(node, prev_node);
+            return branch_offset < size(node);
+        }
     }
 
     int64_t size(node_index node) const {
@@ -73,13 +73,13 @@ class IncomingTable {
         assert(!(graph->indegree(node) < 2 and size(node))
                or size(node) > (int64_t)graph->indegree(node));
 #endif
-#ifndef FULL_INCOMING_TABLE
-        return size(node) == (int64_t)graph->indegree(node)
-                or ((int64_t)graph->indegree(node) < (int64_t)2 and size(node));
-#else
-        return (size(node) > graph->indegree(node))
-                or (graph->indegree(node) < 2 and size(node));
-#endif
+        if constexpr (full_incoming_table) {
+            return (size(node) > (int64_t)graph->indegree(node))
+                   or (graph->indegree(node) < 2 and size(node));
+        } else {
+            return size(node) == (int64_t)graph->indegree(node)
+                   or ((int64_t)graph->indegree(node) < (int64_t)2 and size(node));
+        }
     }
 
     int64_t relative_offset(node_index node, node_index prev_node) const {
@@ -100,7 +100,7 @@ class IncomingTable {
         //            out << c << ":" << branch_size(node, c) << endl;
         //        }
         for (int i = 0; i < table_size; i++) {
-            out << i << ":" << branch_size_rank(node, i) << endl;
+            out << i << ":" << branch_size_rank(node, i) << ",";
         }
         mg::common::logger->debug(out.str());
         return out.str();

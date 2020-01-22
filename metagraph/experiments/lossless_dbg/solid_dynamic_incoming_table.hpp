@@ -96,7 +96,7 @@ class SolidDynamicIncomingTable {
         assert((int64_t)node < total_size);
         stringstream out;
         for (char c : "$ACGTN") {
-            out << c << ":" << branch_size(node, c) << endl;
+            out << c << ":" << branch_size(node, c) << ",";
         }
         mg::common::logger->debug(out.str());
         return out.str();

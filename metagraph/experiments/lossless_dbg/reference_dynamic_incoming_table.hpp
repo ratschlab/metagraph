@@ -70,7 +70,7 @@ class ReferenceDynamicIncomingTable {
     string print_content(node_index node) const {
         stringstream out;
         for (char c : "$ACGTN") {
-            out << c << ":" << branch_size(node, c) << endl;
+            out << c << ":" << branch_size(node, c) << ",";
         }
         mg::common::logger->debug(out.str());
         return out.str();

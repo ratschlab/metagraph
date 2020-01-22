@@ -138,7 +138,6 @@ class DecodeEnabler : public Database {
     path_id get_global_path_id(node_index node, int64_t relative_position) const {
         node_index prev_node = 0;
         int64_t prev_offset = 0;
-        //#ifdef VERBOSE_DEBUG
         PRINT_VAR(this->graph_->get_node_sequence(node), node, relative_position);
 
         //#endif
