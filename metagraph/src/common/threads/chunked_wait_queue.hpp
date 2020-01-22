@@ -56,7 +56,7 @@ class ChunkedWaitQueue {
     typedef T value_type;
     typedef Iterator iterator;
 
-    static constexpr size_t WRITE_BUF_SIZE = 1000;
+    static constexpr size_t WRITE_BUF_SIZE = 10000;
 
     ChunkedWaitQueue(const ChunkedWaitQueue &other) = delete;
     ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete;
@@ -83,8 +83,7 @@ class ChunkedWaitQueue {
           end_iterator_(Iterator(this, buffer_size)),
           is_shutdown_(false) {
         assert(fence_size < buffer_size);
-        size_t write_batch_size = std::min(WRITE_BUF_SIZE, chunk_size_);
-        write_buf_.reserve(write_batch_size);
+        write_buf_.reserve(std::min(WRITE_BUF_SIZE, chunk_size_));
     }
 
     /**
@@ -129,7 +128,7 @@ class ChunkedWaitQueue {
         if (is_shutdown_) {
             return;
         }
-        not_full_.wait(lock, [this] { return can_flush(); });
+        can_flush_.wait(lock, [this] { return can_flush(); });
         flush();
         is_shutdown_ = true;
         not_empty_.notify_all();
@@ -146,7 +145,7 @@ class ChunkedWaitQueue {
         write_buf_.push_back(std::move(x));
         if (write_buf_.size() == write_buf_.capacity()) {
             std::unique_lock<std::mutex> lock(mutex_);
-            not_full_.wait(lock, [this] { return can_flush(); });
+            can_flush_.wait(lock, [this] { return can_flush(); });
             flush();
         }
     }
@@ -192,7 +191,7 @@ class ChunkedWaitQueue {
     /**
      * Signals that the queue is ready to accept new elements.
      */
-    std::condition_variable not_full_;
+    std::condition_variable can_flush_;
 
     size_type first_ = 0;
     size_type last_ = buffer_size_;
@@ -233,7 +232,7 @@ class ChunkedWaitQueue {
 
         if (!could_flush && can_flush()) {
             // notify waiting writer that it can start writing  again
-            not_full_.notify_one();
+            can_flush_.notify_one();
         }
     }
 

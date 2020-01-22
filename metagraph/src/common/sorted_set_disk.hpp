@@ -86,7 +86,7 @@ class SortedSetDisk {
         // acquire the mutex to restrict the number of writing threads
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         assert(batch_size <= data_.capacity()
-               || "Batch size exceeded the buffer's capacity.");
+               && "Batch size exceeded the buffer's capacity.");
         if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
             std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
             // TODO(ddanciu) - test if it's worth it to keep adding in memory if the
