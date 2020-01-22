@@ -1,7 +1,6 @@
 //
 // Created by Jan Studený on 2019-03-11.
 //
-#include <utility>
 #include "dump_routing_table.hpp"
 
 using namespace std;
