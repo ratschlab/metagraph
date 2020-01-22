@@ -367,6 +367,14 @@ TEST(ExitBarrier, Counting2) {
 
 vector<string> alternative_reads = { "GAGCTCGGGACTTGAATAT", "GAGCTCGAGACTTGAATAG" };
 
+
+TEST(PathDatabase, RoutingTableInternal) { // this should uncover most of the errors
+    short_identity_test<PathDatabaseDynamic<
+            IdentityComparator<DynamicRoutingTableCore<>, ReferenceDynamicRoutingTable<>>,
+            IdentityComparator<DynamicIncomingTable<>, ReferenceDynamicIncomingTable<>>>>();
+}
+
+
 TEST(PathDatabase, DynamicAlternativeRoute) {
     check_compression_decompression<PathDatabaseDynamic<>>(alternative_reads, 5);
 }
@@ -440,11 +448,7 @@ TEST(PathDatabase, GetStatistics) {
 }
 
 
-TEST(PathDatabase, RoutingTableInternal) {
-    short_identity_test<PathDatabaseDynamic<
-            IdentityComparator<DynamicRoutingTableCore<>, ReferenceDynamicRoutingTable<>>,
-            IdentityComparator<DynamicIncomingTable<>, ReferenceDynamicIncomingTable<>>>>();
-}
+
 
 template <typename T>
 void long_identity_test() {
