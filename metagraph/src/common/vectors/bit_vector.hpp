@@ -9,6 +9,7 @@
 #include <sdsl/rrr_vector.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/hyb_vector.hpp>
+#include <sdsl/bit_vector_il.hpp>
 #include <dynamic.hpp>
 
 #include "bitmap.hpp"
@@ -48,6 +49,8 @@ class bit_vector : public bitmap {
             - bit_vector_dyn
             - bit_vector_stat
             - bit_vector_sd
+            - bit_vector_hyb<>
+            - bit_vector_il<>
             - bit_vector_rrr<3>
             - bit_vector_rrr<8>
             - bit_vector_rrr<15>
@@ -268,16 +271,68 @@ class bit_vector_hyb : public bit_vector {
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const override;
 
-    bool is_inverted() const { return inverted_; }
-
     const sdsl::hyb_vector<block_rate>& data() const { return vector_; }
 
   private:
-    bool inverted_;
     sdsl::hyb_vector<block_rate> vector_;
     typename sdsl::hyb_vector<block_rate>::rank_1_type rk1_;
     typename sdsl::hyb_vector<block_rate>::select_1_type slct1_;
     typename sdsl::hyb_vector<block_rate>::select_0_type slct0_;
+};
+
+
+template <uint32_t block_size = 512>
+class bit_vector_il : public bit_vector {
+    static constexpr auto kBlockSize = block_size;
+
+  public:
+    explicit bit_vector_il(uint64_t size = 0, bool value = false);
+    explicit bit_vector_il(const sdsl::bit_vector &vector);
+    explicit bit_vector_il(const sdsl::bit_vector &vector, uint64_t num_set_bits);
+    explicit bit_vector_il(const bit_vector_il &other);
+
+    bit_vector_il(bit_vector_il&& other) noexcept;
+    bit_vector_il(std::initializer_list<bool> init);
+    bit_vector_il(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
+                  uint64_t size,
+                  uint64_t num_set_bits);
+
+    bit_vector_il& operator=(const bit_vector_il &other);
+    bit_vector_il& operator=(bit_vector_il&& other) noexcept;
+
+    std::unique_ptr<bit_vector> copy() const override;
+
+    uint64_t rank1(uint64_t id) const override;
+    uint64_t select0(uint64_t id) const;
+    uint64_t select1(uint64_t id) const override;
+
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
+
+    void set(uint64_t id, bool val) override;
+    bool operator[](uint64_t id) const override;
+    uint64_t get_int(uint64_t id, uint32_t width) const override;
+
+    void insert_bit(uint64_t id, bool val) override;
+    void delete_bit(uint64_t id) override;
+
+    bool load(std::istream &in) override;
+    void serialize(std::ostream &out) const override;
+
+    uint64_t size() const override { return vector_.size(); }
+
+    sdsl::bit_vector to_vector() const override;
+
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override;
+
+    const sdsl::bit_vector_il<kBlockSize>& data() const { return vector_; }
+
+  private:
+    sdsl::bit_vector_il<kBlockSize> vector_;
+    typename sdsl::bit_vector_il<kBlockSize>::rank_1_type rk1_;
+    typename sdsl::bit_vector_il<kBlockSize>::select_1_type slct1_;
+    typename sdsl::bit_vector_il<kBlockSize>::select_0_type slct0_;
 };
 
 
@@ -326,7 +381,7 @@ class bit_vector_rrr : public bit_vector {
     const sdsl::rrr_vector<kBlockSize>& data() const { return vector_; }
 
   private:
-    typename sdsl::rrr_vector<kBlockSize> vector_;
+    sdsl::rrr_vector<kBlockSize> vector_;
     typename sdsl::rrr_vector<kBlockSize>::rank_1_type rk1_;
     typename sdsl::rrr_vector<kBlockSize>::select_1_type slct1_;
     typename sdsl::rrr_vector<kBlockSize>::select_0_type slct0_;

@@ -67,6 +67,7 @@ template bit_vector_rrr<63> bit_vector::convert_to<bit_vector_rrr<63>>();
 template bit_vector_rrr<127> bit_vector::convert_to<bit_vector_rrr<127>>();
 template bit_vector_rrr<255> bit_vector::convert_to<bit_vector_rrr<255>>();
 template bit_vector_hyb<> bit_vector::convert_to<bit_vector_hyb<>>();
+template bit_vector_il<> bit_vector::convert_to<bit_vector_il<>>();
 template sdsl::bit_vector bit_vector::convert_to<sdsl::bit_vector>();
 template<> bit_vector_small bit_vector::convert_to() {
     return bit_vector_small(std::move(*this));
@@ -1216,6 +1217,193 @@ void bit_vector_hyb<block_rate>
 }
 
 template class bit_vector_hyb<16>;
+
+
+////////////////////////////////////////////////////////////////
+//  bit_vector_il, sdsl uncompressed with rank-select support //
+////////////////////////////////////////////////////////////////
+
+template <uint32_t block_size>
+bit_vector_il<block_size>
+::bit_vector_il(uint64_t size, bool value)
+      : vector_(sdsl::bit_vector(size, value)),
+        rk1_(&vector_),
+        slct1_(&vector_),
+        slct0_(&vector_) {}
+
+template <uint32_t block_size>
+bit_vector_il<block_size>
+::bit_vector_il(const sdsl::bit_vector &vector)
+      : vector_(vector),
+        rk1_(&vector_),
+        slct1_(&vector_),
+        slct0_(&vector_) {}
+
+template <uint32_t block_size>
+bit_vector_il<block_size>
+::bit_vector_il(const bit_vector_il<block_size> &other) {
+    *this = other;
+}
+
+template <uint32_t block_size>
+bit_vector_il<block_size>
+::bit_vector_il(bit_vector_il<block_size>&& other) noexcept {
+    *this = std::move(other);
+}
+
+template <uint32_t block_size>
+bit_vector_il<block_size>
+::bit_vector_il(std::initializer_list<bool> init)
+      : bit_vector_il(sdsl::bit_vector(init)) {}
+
+template <uint32_t block_size>
+bit_vector_il<block_size>&
+bit_vector_il<block_size>::operator=(const bit_vector_il<block_size> &other) {
+    vector_ = other.vector_;
+    rk1_ = other.rk1_;
+    rk1_.set_vector(&vector_);
+    slct1_ = other.slct1_;
+    slct1_.set_vector(&vector_);
+    slct0_ = other.slct0_;
+    slct0_.set_vector(&vector_);
+    return *this;
+}
+
+template <uint32_t block_size>
+bit_vector_il<block_size>&
+bit_vector_il<block_size>::operator=(bit_vector_il<block_size>&& other) noexcept {
+    vector_ = std::move(other.vector_);
+    rk1_ = std::move(other.rk1_);
+    rk1_.set_vector(&vector_);
+    slct1_ = std::move(other.slct1_);
+    slct1_.set_vector(&vector_);
+    slct0_ = std::move(other.slct0_);
+    slct0_.set_vector(&vector_);
+    return *this;
+}
+
+template <uint32_t block_size>
+std::unique_ptr<bit_vector> bit_vector_il<block_size>::copy() const {
+    return std::make_unique<bit_vector_il<block_size>>(*this);
+}
+
+template <uint32_t block_size>
+uint64_t bit_vector_il<block_size>::rank1(uint64_t id) const {
+    //the rank method in SDSL does not include id in the count
+    return rk1_(id >= this->size() ? this->size() : id + 1);
+}
+
+template <uint32_t block_size>
+uint64_t bit_vector_il<block_size>::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
+    assert(num_set_bits() == rank1(size() - 1));
+
+    return slct0_(id);
+}
+
+template <uint32_t block_size>
+uint64_t bit_vector_il<block_size>::select1(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= num_set_bits());
+    assert(num_set_bits() == rank1(size() - 1));
+
+    return slct1_(id);
+}
+
+template <uint32_t block_size>
+uint64_t bit_vector_il<block_size>::next1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_STAT);
+}
+
+template <uint32_t block_size>
+uint64_t bit_vector_il<block_size>::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_STAT);
+}
+
+template <uint32_t block_size>
+void bit_vector_il<block_size>::set(uint64_t, bool) {
+    throw std::runtime_error("Not supported");
+}
+
+template <uint32_t block_size>
+bool bit_vector_il<block_size>::operator[](uint64_t id) const {
+    assert(id < size());
+    return vector_[id];
+}
+
+template <uint32_t block_size>
+uint64_t bit_vector_il<block_size>
+::get_int(uint64_t id, uint32_t width) const {
+    return vector_.get_int(id, width);
+}
+
+template <uint32_t block_size>
+void bit_vector_il<block_size>::insert_bit(uint64_t, bool) {
+    throw std::runtime_error("Not supported");
+}
+
+template <uint32_t block_size>
+void bit_vector_il<block_size>::delete_bit(uint64_t) {
+    throw std::runtime_error("Not supported");
+}
+
+template <uint32_t block_size>
+bool bit_vector_il<block_size>::load(std::istream &in) {
+    if (!in.good())
+        return false;
+
+    try {
+        vector_.load(in);
+        if (!in.good())
+            return false;
+        rk1_ = decltype(rk1_)(&vector_);
+        slct1_ = decltype(slct1_)(&vector_);
+        slct0_ = decltype(slct0_)(&vector_);
+        return true;
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Not enough memory to load bit_vector_il." << std::endl;
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+template <uint32_t block_size>
+void bit_vector_il<block_size>::serialize(std::ostream &out) const {
+    vector_.serialize(out);
+
+    if (!out.good())
+        throw std::ofstream::failure("Error when dumping bit_vector_il");
+}
+
+template <uint32_t block_size>
+sdsl::bit_vector bit_vector_il<block_size>::to_vector() const {
+    // moderate density
+    sdsl::bit_vector vector(size());
+
+    uint64_t i;
+    for (i = 0; i + 64 <= vector.size(); i += 64) {
+        vector.set_int(i, vector_.get_int(i));
+    }
+    if (i < vector.size())
+        vector.set_int(i, vector_.get_int(i, vector.size() - i), vector.size() - i);
+
+    return vector;
+}
+
+template <uint32_t block_size>
+void bit_vector_il<block_size>
+::call_ones_in_range(uint64_t begin, uint64_t end,
+                     const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+    ::call_ones(vector_, begin, end, callback);
+}
+
+template class bit_vector_il<512>;
 
 
 ////////////////////////////////////////////

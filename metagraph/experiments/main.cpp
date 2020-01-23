@@ -163,7 +163,8 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     double predicted_size = 0.0 / 0.0;
     if constexpr(!std::is_base_of_v<bit_vector_dyn, BitVector>
-                    && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+                    && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
+                    && !std::is_base_of_v<bit_vector_il<>, BitVector>) {
         predicted_size = predict_size<BitVector>(another.size(), another.num_set_bits());
     }
 
@@ -384,6 +385,7 @@ int main(int argc, char *argv[]) {
                 "stat",
                 "sd",
                 "hyb",
+                "il",
                 "rrr63",
                 "rrr127",
                 "rrr255",
@@ -421,6 +423,10 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_hyb<>>(length_arg.getValue(),
                                                      density_arg.getValue(),
                                                      "hyb");
+            } else if (vector_type == "il") {
+                test_vector_points<bit_vector_il<>>(length_arg.getValue(),
+                                                    density_arg.getValue(),
+                                                    "il");
             } else if (vector_type == "rrr63") {
                 test_vector_points<bit_vector_rrr<>>(length_arg.getValue(),
                                                      density_arg.getValue(),
