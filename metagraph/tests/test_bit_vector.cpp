@@ -223,6 +223,17 @@ TYPED_TEST(BitVectorTest, queries) {
     test_bit_vector_queries<TypeParam>();
 }
 
+TYPED_TEST(BitVectorTest, select1) {
+    for (size_t size : { 1, 2, 3, 4, 5, 50, 51, 52 }) {
+        for (size_t i = 0; i < size; ++i) {
+            sdsl::bit_vector bv(size, 0);
+            bv[i] = 1;
+            TypeParam bit_vector(std::move(bv));
+            EXPECT_EQ(i, bit_vector.select1(1));
+        }
+    }
+}
+
 TYPED_TEST(BitVectorTestSelect0, select0) {
     // Mainly test select0.
     auto vector = std::make_unique<TypeParam>(10, 1);
@@ -248,6 +259,15 @@ TYPED_TEST(BitVectorTestSelect0, select0) {
     EXPECT_EQ(10u, vector->size());
     EXPECT_EQ(0u, vector->select0(1));
     EXPECT_EQ(1u, vector->select0(2));
+
+    for (size_t size : { 1, 2, 3, 4, 5, 50, 51, 52 }) {
+        for (size_t i = 0; i < size; ++i) {
+            sdsl::bit_vector bv(size, 1);
+            bv[i] = 0;
+            TypeParam bit_vector(std::move(bv));
+            EXPECT_EQ(i, bit_vector.select0(1));
+        }
+    }
 }
 
 void test_bit_vector_set(bit_vector *vector, sdsl::bit_vector *numbers) {
