@@ -16,11 +16,25 @@ typedef ::testing::Types<bit_vector_stat,
                          bit_vector_dyn,
                          bit_vector_sd,
                          bit_vector_rrr<>,
+                         bit_vector_il<>,
+                         bit_vector_hyb<>,
                          bit_vector_small,
                          bit_vector_smart>
         BitVectorTypes;
 
 TYPED_TEST_SUITE(BitVectorTest, BitVectorTypes);
+
+template <typename Bitmap>
+class BitVectorTestSelect0 : public ::testing::Test { };
+
+typedef ::testing::Types<bit_vector_dyn,
+                         bit_vector_sd,
+                         bit_vector_rrr<>,
+                         bit_vector_il<>,
+                         bit_vector_hyb<>>
+        BitVectorTypesSelect0;
+
+TYPED_TEST_SUITE(BitVectorTestSelect0, BitVectorTypesSelect0);
 
 
 void test_next_subvector(const bit_vector &vector, uint64_t idx) {
@@ -121,6 +135,7 @@ void reference_based_test(const bit_vector &vector,
     ASSERT_DEATH(vector[vector.size() + 1], "");
 
     for (size_t i = 1; i <= max_rank; ++i) {
+        EXPECT_TRUE(vector[vector.select1(i)]);
         EXPECT_EQ(i, vector.rank1(vector.select1(i)));
     }
 
@@ -172,6 +187,7 @@ void test_bit_vector_queries() {
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(1, (*vector)[i]);
         EXPECT_EQ(0u, vector->rank0(i));
+        EXPECT_TRUE((*vector)[vector->select1(i + 1)]);
         EXPECT_EQ(i, vector->select1(i + 1));
         EXPECT_EQ(i + 1, vector->rank1(i));
         EXPECT_EQ(i + 1, vector->rank1(vector->select1(i + 1)));
@@ -207,9 +223,9 @@ TYPED_TEST(BitVectorTest, queries) {
     test_bit_vector_queries<TypeParam>();
 }
 
-TEST(bit_vector_rrr, nonCommonQueries) {
+TYPED_TEST(BitVectorTestSelect0, select0) {
     // Mainly test select0.
-    auto vector = std::make_unique<bit_vector_rrr<>>(10, 1);
+    auto vector = std::make_unique<TypeParam>(10, 1);
     ASSERT_TRUE(vector);
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
@@ -217,7 +233,7 @@ TEST(bit_vector_rrr, nonCommonQueries) {
         ASSERT_DEATH(vector->select0(i), "");
     }
 
-    vector.reset(new bit_vector_rrr<>(10, 0));
+    vector.reset(new TypeParam(10, 0));
     ASSERT_TRUE(vector);
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
@@ -226,48 +242,12 @@ TEST(bit_vector_rrr, nonCommonQueries) {
         EXPECT_EQ(i + 1, vector->rank0(vector->select0(i + 1)));
         EXPECT_EQ(i, vector->select0(vector->rank0(i)));
     }
-}
 
-TEST(bit_vector_dyn, nonCommonQueries) {
-    // Mainly test select0.
-    auto vector = std::make_unique<bit_vector_dyn>(10, 1);
+    vector.reset(new TypeParam({ 0, 0, 1, 1, 1, 1, 1, 1, 1, 1 }));
     ASSERT_TRUE(vector);
     EXPECT_EQ(10u, vector->size());
-    for (size_t i = 0; i < vector->size(); ++i) {
-        EXPECT_EQ(1, (*vector)[i]);
-        ASSERT_DEATH(vector->select0(i), "");
-    }
-
-    vector.reset(new bit_vector_dyn(10, 0));
-    ASSERT_TRUE(vector);
-    EXPECT_EQ(10u, vector->size());
-    for (size_t i = 0; i < vector->size(); ++i) {
-        EXPECT_EQ(0, (*vector)[i]);
-        EXPECT_EQ(i, vector->select0(i + 1));
-        EXPECT_EQ(i + 1, vector->rank0(vector->select0(i + 1)));
-        EXPECT_EQ(i, vector->select0(vector->rank0(i)));
-    }
-}
-
-TEST(bit_vector_sd, nonCommonQueries) {
-    // Mainly test select0.
-    auto vector = std::make_unique<bit_vector_sd>(10, 1);
-    ASSERT_TRUE(vector);
-    EXPECT_EQ(10u, vector->size());
-    for (size_t i = 0; i < vector->size(); ++i) {
-        EXPECT_EQ(1, (*vector)[i]);
-        ASSERT_DEATH(vector->select0(i), "");
-    }
-
-    vector.reset(new bit_vector_sd(10, 0));
-    ASSERT_TRUE(vector);
-    EXPECT_EQ(10u, vector->size());
-    for (size_t i = 0; i < vector->size(); ++i) {
-        EXPECT_EQ(0, (*vector)[i]);
-        EXPECT_EQ(i, vector->select0(i + 1));
-        EXPECT_EQ(i + 1, vector->rank0(vector->select0(i + 1)));
-        EXPECT_EQ(i, vector->select0(vector->rank0(i)));
-    }
+    EXPECT_EQ(0u, vector->select0(1));
+    EXPECT_EQ(1u, vector->select0(2));
 }
 
 void test_bit_vector_set(bit_vector *vector, sdsl::bit_vector *numbers) {
@@ -780,6 +760,8 @@ TYPED_TEST(BitVectorTest, copy_to) {
     test_copy_convert_to< TypeParam, bit_vector_dyn >();
     test_copy_convert_to< TypeParam, bit_vector_sd >();
     test_copy_convert_to< TypeParam, bit_vector_rrr<> >();
+    test_copy_convert_to< TypeParam, bit_vector_il<> >();
+    test_copy_convert_to< TypeParam, bit_vector_hyb<> >();
     test_copy_convert_to< TypeParam, bit_vector_small >();
     test_copy_convert_to< TypeParam, bit_vector_smart >();
 }
@@ -1053,6 +1035,8 @@ TYPED_TEST(BitVectorTest, operator_eq) {
             EXPECT_EQ(bit_vector, bit_vector_dyn(size, value));
             EXPECT_EQ(bit_vector, bit_vector_sd(size, value));
             EXPECT_EQ(bit_vector, bit_vector_rrr<>(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_il<>(size, value));
+            EXPECT_EQ(bit_vector, bit_vector_hyb<>(size, value));
             EXPECT_EQ(bit_vector, bit_vector_small(size, value));
             EXPECT_EQ(bit_vector, bit_vector_smart(size, value));
         }
@@ -1073,6 +1057,8 @@ TYPED_TEST(BitVectorTest, operator_neq) {
         EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
         EXPECT_NE(bit_vector, bit_vector_sd(size, value));
         EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+        EXPECT_NE(bit_vector, bit_vector_il<>(size, value));
+        EXPECT_NE(bit_vector, bit_vector_hyb<>(size, value));
         EXPECT_NE(bit_vector, bit_vector_small(size, value));
         EXPECT_NE(bit_vector, bit_vector_smart(size, value));
     }
@@ -1090,6 +1076,8 @@ TYPED_TEST(BitVectorTest, operator_neq) {
         EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
         EXPECT_NE(bit_vector, bit_vector_sd(size, value));
         EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+        EXPECT_NE(bit_vector, bit_vector_il<>(size, value));
+        EXPECT_NE(bit_vector, bit_vector_hyb<>(size, value));
         EXPECT_NE(bit_vector, bit_vector_small(size, value));
         EXPECT_NE(bit_vector, bit_vector_smart(size, value));
     }
@@ -1106,6 +1094,8 @@ TYPED_TEST(BitVectorTest, operator_neq) {
             EXPECT_NE(bit_vector, bit_vector_dyn(size, value));
             EXPECT_NE(bit_vector, bit_vector_sd(size, value));
             EXPECT_NE(bit_vector, bit_vector_rrr<>(size, value));
+            EXPECT_NE(bit_vector, bit_vector_il<>(size, value));
+            EXPECT_NE(bit_vector, bit_vector_hyb<>(size, value));
             EXPECT_NE(bit_vector, bit_vector_small(size, value));
             EXPECT_NE(bit_vector, bit_vector_smart(size, value));
         }

@@ -59,6 +59,8 @@ Vector bit_vector::convert_to() {
 template bit_vector_dyn bit_vector::convert_to<bit_vector_dyn>();
 template bit_vector_stat bit_vector::convert_to<bit_vector_stat>();
 template bit_vector_sd bit_vector::convert_to<bit_vector_sd>();
+template bit_vector_il<> bit_vector::convert_to<bit_vector_il<>>();
+template bit_vector_hyb<> bit_vector::convert_to<bit_vector_hyb<>>();
 template bit_vector_rrr<3> bit_vector::convert_to<bit_vector_rrr<3>>();
 template bit_vector_rrr<8> bit_vector::convert_to<bit_vector_rrr<8>>();
 template bit_vector_rrr<15> bit_vector::convert_to<bit_vector_rrr<15>>();
@@ -66,8 +68,6 @@ template bit_vector_rrr<31> bit_vector::convert_to<bit_vector_rrr<31>>();
 template bit_vector_rrr<63> bit_vector::convert_to<bit_vector_rrr<63>>();
 template bit_vector_rrr<127> bit_vector::convert_to<bit_vector_rrr<127>>();
 template bit_vector_rrr<255> bit_vector::convert_to<bit_vector_rrr<255>>();
-template bit_vector_hyb<> bit_vector::convert_to<bit_vector_hyb<>>();
-template bit_vector_il<> bit_vector::convert_to<bit_vector_il<>>();
 template sdsl::bit_vector bit_vector::convert_to<sdsl::bit_vector>();
 template<> bit_vector_small bit_vector::convert_to() {
     return bit_vector_small(std::move(*this));
@@ -103,6 +103,8 @@ Vector bit_vector::copy_to() const {
 template bit_vector_dyn bit_vector::copy_to<bit_vector_dyn>() const;
 template bit_vector_stat bit_vector::copy_to<bit_vector_stat>() const;
 template bit_vector_sd bit_vector::copy_to<bit_vector_sd>() const;
+template bit_vector_il<> bit_vector::copy_to<bit_vector_il<>>() const;
+template bit_vector_hyb<> bit_vector::copy_to<bit_vector_hyb<>>() const;
 template bit_vector_rrr<3> bit_vector::copy_to<bit_vector_rrr<3>>() const;
 template bit_vector_rrr<8> bit_vector::copy_to<bit_vector_rrr<8>>() const;
 template bit_vector_rrr<15> bit_vector::copy_to<bit_vector_rrr<15>>() const;
@@ -1157,7 +1159,21 @@ uint64_t bit_vector_hyb<block_rate>::select0(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
 
-    return slct0_(id);
+    // return slct0_(id);
+
+    // select is not implemented in sdsl, do binary search
+    uint64_t begin = 0;
+    uint64_t end = size();
+
+    while (begin + 1 < end) {
+        uint64_t mid = (begin + end - 1) / 2;
+        if (id > rank0(mid)) {
+            begin = mid + 1;
+        } else {
+            end = mid + 1;
+        }
+    }
+    return begin;
 }
 
 template <uint32_t block_rate>
@@ -1165,7 +1181,21 @@ uint64_t bit_vector_hyb<block_rate>::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
 
-    return slct1_(id);
+    // return slct1_(id);
+
+    // select is not implemented in sdsl, do binary search
+    uint64_t begin = 0;
+    uint64_t end = size();
+
+    while (begin + 1 < end) {
+        uint64_t mid = (begin + end - 1) / 2;
+        if (id > rank1(mid)) {
+            begin = mid + 1;
+        } else {
+            end = mid + 1;
+        }
+    }
+    return begin;
 }
 
 template <uint32_t block_rate>
