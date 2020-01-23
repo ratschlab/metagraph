@@ -231,6 +231,7 @@ void recover_source_dummy_nodes(size_t k,
     using KMER = T;
 
     // name of the file containing dummy k-mers of given prefix length
+    //TODO(ddanciu): make sure these path names are unique and can be changed
     const auto get_file_name
             = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
 
