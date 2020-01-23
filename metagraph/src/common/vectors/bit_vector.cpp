@@ -11,22 +11,22 @@ const double STAT_BITS_PER_BIT_IF_SPARSE = 1.07;
 // TODO: why is this so large? Check the sdsl implementation
 const double STAT_BITS_PER_BIT_IF_DENSE = 1.51;
 
+// sequential access for bit_vector_dyn is 18 times faster than select
+const size_t SEQ_ACCESS_VS_SELECT_FACTOR_DYN = 18;
+
+// sequential word access for bit_vector_rrr per bit is 21 times faster than select
+const size_t SEQ_BITWICE_WORD_ACCESS_VS_SELECT_FACTOR_RRR = 21;
+
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
-const size_t MAX_ITER_BIT_VECTOR_DYN = 0;
+const size_t MAX_ITER_BIT_VECTOR_DYN = 50;
 const size_t MAX_ITER_BIT_VECTOR_SD = 10;
-const size_t MAX_ITER_BIT_VECTOR_RRR = 10;
-const size_t MAX_ITER_BIT_VECTOR_HYB = 10;
+const size_t MAX_ITER_BIT_VECTOR_RRR = 5;
+const size_t MAX_ITER_BIT_VECTOR_HYB = std::numeric_limits<size_t>::max();
 
 
 uint64_t bit_vector::rank0(uint64_t id) const {
     return std::min(id + 1, size()) - rank1(id);
-}
-
-sdsl::bit_vector bit_vector::to_vector() const {
-    sdsl::bit_vector result(size(), false);
-    call_ones([&result](auto i) { result[i] = true; });
-    return result;
 }
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
@@ -335,6 +335,37 @@ void bit_vector_dyn::call_ones_in_range(uint64_t begin, uint64_t end,
         while (one_pos < end) {
             callback(one_pos++);
         }
+    }
+}
+
+sdsl::bit_vector bit_vector_dyn::to_vector() const {
+    if (SEQ_ACCESS_VS_SELECT_FACTOR_DYN * num_set_bits() < size()) {
+        // very sparse
+        sdsl::bit_vector result(size(), false);
+
+        uint64_t num_ones = num_set_bits();
+        for (uint64_t r = 1; r <= num_ones; ++r) {
+            result[select1(r)] = true;
+        }
+        return result;
+
+    } else if (SEQ_ACCESS_VS_SELECT_FACTOR_DYN * (size() - num_set_bits()) < size()) {
+        // very dense
+        sdsl::bit_vector result(size(), true);
+
+        uint64_t num_zeros = size() - num_set_bits();
+        for (uint64_t r = 1; r <= num_zeros; ++r) {
+            result[select0(r)] = false;
+        }
+        return result;
+
+    } else {
+        // moderate density
+        sdsl::bit_vector result(size());
+        for (uint64_t i = 0; i < vector_.size(); ++i) {
+            result[i] = vector_.at(i);
+        }
+        return result;
     }
 }
 
@@ -974,7 +1005,7 @@ void bit_vector_rrr<log_block_size>::serialize(std::ostream &out) const {
 
 template <size_t log_block_size>
 sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
-    if (2 * num_set_bits() < size()) {
+    if (SEQ_BITWICE_WORD_ACCESS_VS_SELECT_FACTOR_RRR * num_set_bits() < size()) {
         // sparse
         sdsl::bit_vector vector(size(), 0);
         uint64_t max_rank = size() ? rank1(size() - 1) : 0;
@@ -982,13 +1013,27 @@ sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
             vector[slct1_(i)] = 1;
         }
         return vector;
-    } else {
+
+    } else if (SEQ_BITWICE_WORD_ACCESS_VS_SELECT_FACTOR_RRR * (size() - num_set_bits()) < size()) {
         // dense
         sdsl::bit_vector vector(size(), 1);
         uint64_t max_rank = size() ? rank0(size() - 1) : 0;
         for (uint64_t i = 1; i <= max_rank; ++i) {
             vector[slct0_(i)] = 0;
         }
+        return vector;
+
+    } else {
+        // moderate density
+        sdsl::bit_vector vector(size());
+
+        uint64_t i;
+        for (i = 0; i + 64 <= vector.size(); i += 64) {
+            vector.set_int(i, vector_.get_int(i));
+        }
+        if (i < vector.size())
+            vector.set_int(i, vector_.get_int(i, vector.size() - i), vector.size() - i);
+
         return vector;
     }
 }

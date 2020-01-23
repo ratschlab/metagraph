@@ -70,7 +70,7 @@ class bit_vector : public bitmap {
 
     virtual std::unique_ptr<bit_vector> copy() const = 0;
 
-    virtual sdsl::bit_vector to_vector() const;
+    virtual sdsl::bit_vector to_vector() const = 0;
 };
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
@@ -105,6 +105,8 @@ class bit_vector_dyn : public bit_vector {
 
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const override;
+
+    sdsl::bit_vector to_vector() const override;
 
   private:
     dyn::suc_bv vector_;
