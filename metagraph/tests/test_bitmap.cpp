@@ -617,6 +617,8 @@ TYPED_TEST(BitmapTest, operator_eq) {
             EXPECT_EQ(bitmap, bit_vector_dyn(size, value));
             EXPECT_EQ(bitmap, bit_vector_sd(size, value));
             EXPECT_EQ(bitmap, bit_vector_rrr<>(size, value));
+            EXPECT_EQ(bitmap, bit_vector_il<>(size, value));
+            EXPECT_EQ(bitmap, bit_vector_hyb<>(size, value));
             EXPECT_EQ(bitmap, bit_vector_small(size, value));
             EXPECT_EQ(bitmap, bit_vector_smart(size, value));
         }
@@ -637,6 +639,8 @@ TYPED_TEST(BitmapTest, operator_neq) {
         EXPECT_NE(bitmap, bit_vector_dyn(size, value));
         EXPECT_NE(bitmap, bit_vector_sd(size, value));
         EXPECT_NE(bitmap, bit_vector_rrr<>(size, value));
+        EXPECT_NE(bitmap, bit_vector_il<>(size, value));
+        EXPECT_NE(bitmap, bit_vector_hyb<>(size, value));
         EXPECT_NE(bitmap, bit_vector_small(size, value));
         EXPECT_NE(bitmap, bit_vector_smart(size, value));
     }
@@ -654,6 +658,8 @@ TYPED_TEST(BitmapTest, operator_neq) {
         EXPECT_NE(bitmap, bit_vector_dyn(size, value));
         EXPECT_NE(bitmap, bit_vector_sd(size, value));
         EXPECT_NE(bitmap, bit_vector_rrr<>(size, value));
+        EXPECT_NE(bitmap, bit_vector_il<>(size, value));
+        EXPECT_NE(bitmap, bit_vector_hyb<>(size, value));
         EXPECT_NE(bitmap, bit_vector_small(size, value));
         EXPECT_NE(bitmap, bit_vector_smart(size, value));
     }
@@ -670,6 +676,8 @@ TYPED_TEST(BitmapTest, operator_neq) {
             EXPECT_NE(bitmap, bit_vector_dyn(size, value));
             EXPECT_NE(bitmap, bit_vector_sd(size, value));
             EXPECT_NE(bitmap, bit_vector_rrr<>(size, value));
+            EXPECT_NE(bitmap, bit_vector_il<>(size, value));
+            EXPECT_NE(bitmap, bit_vector_hyb<>(size, value));
             EXPECT_NE(bitmap, bit_vector_small(size, value));
             EXPECT_NE(bitmap, bit_vector_smart(size, value));
         }
