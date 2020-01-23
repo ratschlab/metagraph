@@ -363,6 +363,9 @@ sdsl::bit_vector bit_vector_dyn::to_vector() const {
 
     } else {
         // moderate density
+
+        // TODO: implement get_int in dyn::suc_bv and use it here instead of
+        // querying one bit at a time
         sdsl::bit_vector result(size());
         for (uint64_t i = 0; i < vector_.size(); ++i) {
             result[i] = vector_.at(i);

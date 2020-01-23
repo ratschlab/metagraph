@@ -51,7 +51,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     if (static_cast<int>(other.rank1(1)) < -1
             || static_cast<int>(other.rank0(1)) < -1)
-        throw std::runtime_error("Never happends, just initializing the rank support");
+        throw std::runtime_error("Never happens, just initializing the rank support");
 
     std::filesystem::path path(std::string("test.")
                                 + prefix
@@ -76,12 +76,12 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     if (static_cast<int>(another.rank1(another.size() / 2)) < -1
             || static_cast<int>(another.rank0(another.size() / 2)) < -1)
-        throw std::runtime_error("Never happends, just initializing the rank support");
+        throw std::runtime_error("Never happens, just initializing the rank support");
 
    if (another.num_set_bits()
             && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
             && static_cast<int>(another.select1(1)) < -1)
-       throw std::runtime_error("Never happends, just initializing the select support");
+       throw std::runtime_error("Never happens, just initializing the select support");
 
     auto RAM = get_curr_RSS() - mem_before;
 
