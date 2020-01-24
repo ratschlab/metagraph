@@ -342,7 +342,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
                 }
             }
         }
-        std::memcpy(read_buf_.data(), &read_buf_[read_buf_.size() - fence_size],
+        std::memcpy((char *)read_buf_.data(),
+                    (char *)&read_buf_[read_buf_.size() - fence_size],
                     fence_size * sizeof(T));
         read_buf_.resize(read_buf_size_ + fence_size);
         read_buf_idx_ = fence_size;
@@ -418,7 +419,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         uint32_t el_count = std::min(read_buf_size_, parent_->last_ + 1);
         assert(el_count == read_buf_size_ || parent_->is_shutdown_);
         read_buf_.resize(el_count);
-        std::memcpy(read_buf_.data(), parent_->queue_.data(), el_count * sizeof(T));
+        std::memcpy((char *)read_buf_.data(), (char *)parent_->queue_.data(),
+                    el_count * sizeof(T));
         idx_ = el_count - 1;
     }
 };
