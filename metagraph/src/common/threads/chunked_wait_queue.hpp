@@ -387,11 +387,13 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     size_t read_buf_size_;
 
   private:
+    /** Returns the number of elements between the current element and the oldest */
     size_type dist_to_first() const {
         return idx_ >= parent_->first_ ? idx_ - parent_->first_
                                        : parent_->buffer_size_ + idx_ - parent_->first_;
     }
 
+    /** Returns true if the iterator can be incremented without blocking */
     bool can_increment() const {
         return !parent_->empty() && idx_ != parent_->last_ && idx_ != parent_->buffer_size_;
     }
@@ -409,8 +411,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     }
 
     /**
-     * Initializes the read buffer. Must be called before iterator is used for the
-     * first time, but after the parent has enough elements to initialize the buffer.
+     * Initializes the read iterator's buffer. Must be called before iterator is used for
+     * the first time, but after the parent has enough elements to initialize the buffer.
      */
     void init() {
         uint32_t el_count = std::min(read_buf_size_, parent_->last_ + 1);
