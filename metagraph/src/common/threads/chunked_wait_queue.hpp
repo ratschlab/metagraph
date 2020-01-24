@@ -80,10 +80,11 @@ class ChunkedWaitQueue {
           fence_size_(fence_size),
           on_item_pushed_(on_item_pushed),
           queue_(buffer_size),
-          end_iterator_(Iterator(this, buffer_size)),
+          end_iterator_(Iterator(this, std::min(WRITE_BUF_SIZE, chunk_size_), buffer_size)),
           is_shutdown_(false) {
         assert(fence_size < buffer_size);
         write_buf_.reserve(std::min(WRITE_BUF_SIZE, chunk_size_));
+        assert(write_buf_.capacity() >= fence_size_);
     }
 
     /**
@@ -156,7 +157,7 @@ class ChunkedWaitQueue {
      * iterating.
      */
     // TODO: construct iterator and return it instead of returning a reference
-    Iterator& begin() const { return const_cast<ChunkedWaitQueue*>(this)->iter(); }
+    Iterator &begin() const { return const_cast<ChunkedWaitQueue *>(this)->iter(); }
 
     /**
      * Special iterator indicating the end of the queue - the end is reached when the
@@ -196,7 +197,7 @@ class ChunkedWaitQueue {
     size_type first_ = 0;
     size_type last_ = buffer_size_;
 
-    Iterator iterator_ = Iterator(this);
+    Iterator iterator_ = Iterator(this, std::min(WRITE_BUF_SIZE, chunk_size_));
     Iterator end_iterator_;
 
     bool is_shutdown_;
@@ -238,7 +239,7 @@ class ChunkedWaitQueue {
 
     /** Write the contents of buf to the queue - the caller must hold the mutex. */
     void flush() {
-        bool was_all_read = iterator_.no_more_elements();
+        bool was_all_read = !iterator_.can_increment();
         for (auto &v : write_buf_) {
             last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
             queue_[last_] = std::move(v);
@@ -265,6 +266,7 @@ class ChunkedWaitQueue {
         if (empty() && is_shutdown_) {
             return end_iterator_;
         }
+        iterator_.init();
         return iterator_;
     }
 };
@@ -287,24 +289,21 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
      * Creates an iterator for the given queue.
      * @param parent the ChunkedWaitQueue this class iterates
      */
-    Iterator(ChunkedWaitQueue *parent) : parent_(parent) {}
+    Iterator(ChunkedWaitQueue *parent, size_t read_buf_size)
+        : parent_(parent), idx_(0), read_buf_size_(read_buf_size) {}
 
     /**
-     * Creates an iterator for the given queue.
+     * Creates an iterator for the given queue at a specific position.
      * @param parent the ChunkedWaitQueue this class iterates
      */
-    Iterator(ChunkedWaitQueue *parent, size_t idx) : parent_(parent), idx_(idx) {}
+    Iterator(ChunkedWaitQueue *parent, size_t read_buf_size, size_t idx)
+        : parent_(parent), idx_(idx), read_buf_size_(read_buf_size) {}
 
     /**
      * Returns the element currently pointed at by the iterator.
      * Undefined behavior if the iterator is pointing at the past-the-end element.
      */
-    T operator*() const {
-        assert(idx_ < parent_->buffer_size_
-                && "Attempting to dereference past-the-end iterator");
-
-        return parent_->queue_[idx_];
-    }
+    T operator*() const { return read_buf_[read_buf_idx_]; }
 
     /**
      * Moves the iterator to the next element in the queue.
@@ -316,27 +315,46 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
      * are no elements left and the queue was shut down.
      */
     Iterator &operator++() {
-        std::unique_lock<std::mutex> l(parent_->mutex_);
-        // make some room, if possible
-        if (index_dist() + 1 >= parent_->chunk_size_ + parent_->fence_size_) {
-            parent_->pop_chunk();
+        read_buf_idx_++;
+        if (read_buf_idx_ < read_buf_.size()) {
+            return *this;
         }
-        if (no_more_elements()) {
-            parent_->not_empty_.wait(l, [this]() {
-                return parent_->is_shutdown_ || !no_more_elements();
-            });
-            if (parent_->is_shutdown_ && no_more_elements()) { // reached the end
-                // notify waiting destructor that object is ready to be destroyed
-                parent_->empty_.notify_all();
-                idx_ = parent_->buffer_size_;
-                return *this;
-            }
-            // the queue may have filled up while we were sleeping; make some room
-            if (index_dist() + 1 >= parent_->chunk_size_ + parent_->fence_size_) {
+        size_t fence_size = parent_->fence_size_;
+        {
+            std::unique_lock<std::mutex> l(parent_->mutex_);
+            // make some room, if possible
+            if (index_dist() + 1 >= parent_->chunk_size_ + fence_size) {
                 parent_->pop_chunk();
             }
+            if (!can_read_from_parent()) {
+                parent_->not_empty_.wait(l, [this]() {
+                    return parent_->is_shutdown_ || can_read_from_parent();
+                });
+                if (parent_->is_shutdown_ && !can_increment()) { // reached the end
+                    // notify waiting destructor that object is ready to be destroyed
+                    parent_->empty_.notify_all();
+                    idx_ = parent_->buffer_size_;
+                    return *this;
+                }
+                // the queue may have filled up while we were sleeping; make some room
+                if (index_dist() + 1 >= parent_->chunk_size_ + fence_size) {
+                    parent_->pop_chunk();
+                }
+            }
         }
-        idx_ = (idx_ + 1) % parent_->queue_.size();
+        std::memcpy(read_buf_.data(), &read_buf_[read_buf_.size() - fence_size],
+                    fence_size * sizeof(T));
+        read_buf_.resize(read_buf_size_ + fence_size);
+        read_buf_idx_ = fence_size;
+        uint32_t i;
+        for (i = read_buf_idx_; i < read_buf_.size() && can_increment(); ++i) {
+            idx_ = (idx_ + 1) % parent_->queue_.size();
+            read_buf_[i] = parent_->queue_[idx_];
+        }
+        if (i < read_buf_.size()) { // only happens if queue was shut down
+            assert(parent_->is_shutdown_ && !can_increment());
+            read_buf_.resize(i);
+        }
         return *this;
     }
 
@@ -345,18 +363,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
      * Stops execution if attempting to move before the first element
      */
     Iterator &operator--() {
-        std::unique_lock<std::mutex> l(parent_->mutex_);
-        if (idx_ == parent_->first_) { // underflow
-            logger->error("Attempting to move before the first element.");
-            std::exit(EXIT_FAILURE);
-        }
-        if (idx_ == parent_->buffer_size_) { // past the end iterator
-            idx_ = parent_->last_;
-        } else if (idx_ > 0) {
-            idx_--;
-        } else {
-            idx_ = parent_->buffer_size_ - 1;
-        }
+        assert(read_buf_idx_ > 0 && "Attempting to move before the first element.");
+        read_buf_idx_--;
         return *this;
     }
 
@@ -367,21 +375,45 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
 
     void reset() {
         idx_ = 0;
-        saved_indexes_.swap(std::stack<T>());
+        read_buf_.resize(0);
+        read_buf_idx_ = 0;
     }
 
   private:
     ChunkedWaitQueue *parent_;
     size_type idx_ = 0;
-    std::stack<size_type, std::vector<size_type>> saved_indexes_;
+    std::vector<T> read_buf_;
+    size_t read_buf_idx_ = 0;
+    size_t read_buf_size_;
 
   private:
-    size_type index_dist() {
+    size_type index_dist() const {
         return idx_ >= parent_->first_ ? idx_ - parent_->first_
                                        : parent_->buffer_size_ + idx_ - parent_->first_;
     }
 
-    bool no_more_elements() { return parent_->empty() || idx_ == parent_->last_; }
+    bool can_increment() const { return !(parent_->empty() || idx_ == parent_->last_); }
+
+    /** Returns true if there are enough unread elements to fill #read_buf_ */
+    bool can_read_from_parent() const {
+        uint32_t unread_element_count = idx_ <= parent_->last_
+                ? parent_->last_ - idx_
+                : parent_->buffer_size_ + parent_->last_ - idx_;
+
+        return unread_element_count >= read_buf_size_;
+    }
+
+    /**
+     * Initializes the read buffer. Must be called before iterator is used for the
+     * first time, but after the parent has enough elements to initialize the buffer.
+     */
+    void init() {
+        uint32_t el_count = std::min(read_buf_size_, parent_->last_ + 1);
+        assert(el_count == read_buf_size_ || parent_->is_shutdown_);
+        read_buf_.resize(el_count);
+        std::memcpy(read_buf_.data(), parent_->queue_.data(), el_count * sizeof(T));
+        idx_ = el_count - 1;
+    }
 };
 
 } // namespace common

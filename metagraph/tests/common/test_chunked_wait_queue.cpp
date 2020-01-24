@@ -48,17 +48,27 @@ TEST(WaitQueue, Shutdown) {
 }
 
 void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
-    ChunkedWaitQueue<int32_t> under_test(20, 2);
+    ChunkedWaitQueue<int32_t> under_test(50, 10);
     struct Receiver {
         ChunkedWaitQueue<int32_t> *const under_test;
         uint32_t delay_read_ms;
         std::vector<int32_t> pop_result;
 
         void run() {
-            for (auto &it = under_test->begin(); it != under_test->end(); ++it) {
+            uint32_t count = 0;
+            for (auto &it = under_test->begin(); it != under_test->end(); ++it, ++count) {
                 if (delay_read_ms > 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay_read_ms));
                 }
+                int32_t v = *it;
+                uint32_t steps = std::min(10U, count);
+                for (uint32_t i = 0; i < steps; ++i) {
+                    --it;
+                }
+                for (uint32_t i = 0; i < steps; ++i) {
+                    ++it;
+                }
+                EXPECT_EQ(v, *it);
                 pop_result.push_back(*it);
             }
         }
@@ -71,7 +81,7 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
 
     // start feeding the receiver with some data
     std::thread senderThread([&under_test, delay_write_ms] {
-        for (uint32_t i = 0; i < 100; ++i) {
+        for (uint32_t i = 0; i < 200; ++i) {
             if (delay_write_ms > 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(delay_write_ms));
             }

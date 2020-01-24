@@ -34,7 +34,7 @@ void expect_equals(common::SortedSetDisk<TypeParam> &underTest,
 
 template <typename T>
 common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8,
-                                                size_t num_elements_cached = 4) {
+                                                size_t num_elements_cached = 2) {
     constexpr size_t thread_count = 1;
     auto nocleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
     auto on_item_pushed = [](const T &) {};
@@ -167,7 +167,8 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
          iterator != merge_queue.end(); ++iterator) {
         EXPECT_EQ((TypeParam)size, *iterator);
         for (uint32_t idx = 0; idx < 10 && size - idx > 0; ++idx) {
-            EXPECT_EQ((TypeParam)(size - idx), *iterator);
+            EXPECT_EQ((TypeParam)(size - idx), *iterator)
+                    << "Size: " << size << " Index: " << idx;
             --iterator;
         }
         TypeParam value = *iterator;
