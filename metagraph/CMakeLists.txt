@@ -297,12 +297,11 @@ if(FOLLY_LIBRARIES)
   find_package(OpenSSL REQUIRED COMPONENTS Crypto)
   set(METALIBS ${METALIBS}
     ${FOLLY_LIBRARIES}
-    -ldouble-conversion
     -ldl
     -lboost_regex
     -lboost_filesystem
     -lboost_program_options
-    OpenSSL::Crypto
+    -lcrypto
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
@@ -365,20 +364,22 @@ set(METALIBS ${METALIBS}
   brwt
   jsoncpp_lib
   progress_bar
-  ${OpenMP_CXX_LIBRARIES}
   fmt::fmt
   mersenne_twister
   spdlog::spdlog
 )
+if(APPLE)
+  set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
+endif()
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)
 endif()
 
 if(BUILD_STATIC)
-  set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL REQUIRED)
-  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl ${OPENSSL_LIBRARIES})
+  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl -lssl -lcrypto)
 endif()
 
 # check for std::filesystem::temp_directory_path
