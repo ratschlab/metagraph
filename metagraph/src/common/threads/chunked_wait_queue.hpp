@@ -105,7 +105,7 @@ class ChunkedWaitQueue {
         first_ = 0;
         last_ = buffer_size_;
         is_shutdown_ = false;
-        iterator_.idx_ = 0;
+        iterator_.reset();
         on_item_pushed_ = on_item_pushed;
     }
 
@@ -323,7 +323,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         {
             std::unique_lock<std::mutex> l(parent_->mutex_);
             // make some room, if possible
-            if (index_dist() + 1 >= parent_->chunk_size_ + fence_size) {
+            if (dist_to_first() + 1 >= parent_->chunk_size_ + fence_size) {
                 parent_->pop_chunk();
             }
             if (!can_read_from_parent()) {
@@ -331,13 +331,13 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
                     return parent_->is_shutdown_ || can_read_from_parent();
                 });
                 if (parent_->is_shutdown_ && !can_increment()) { // reached the end
+                    idx_ = parent_->buffer_size_;
                     // notify waiting destructor that object is ready to be destroyed
                     parent_->empty_.notify_all();
-                    idx_ = parent_->buffer_size_;
                     return *this;
                 }
                 // the queue may have filled up while we were sleeping; make some room
-                if (index_dist() + 1 >= parent_->chunk_size_ + fence_size) {
+                if (dist_to_first() + 1 >= parent_->chunk_size_ + fence_size) {
                     parent_->pop_chunk();
                 }
             }
@@ -368,10 +368,10 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         return *this;
     }
 
-    bool operator==(const Iterator &other) {
+    bool operator==(const Iterator &other) const {
         return parent_ == other.parent_ && idx_ == other.idx_;
     }
-    bool operator!=(const Iterator &other) { return !(*this == other); }
+    bool operator!=(const Iterator &other) const { return !(*this == other); }
 
     void reset() {
         idx_ = 0;
@@ -387,15 +387,20 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     size_t read_buf_size_;
 
   private:
-    size_type index_dist() const {
+    size_type dist_to_first() const {
         return idx_ >= parent_->first_ ? idx_ - parent_->first_
                                        : parent_->buffer_size_ + idx_ - parent_->first_;
     }
 
-    bool can_increment() const { return !(parent_->empty() || idx_ == parent_->last_); }
+    bool can_increment() const {
+        return !parent_->empty() && idx_ != parent_->last_ && idx_ != parent_->buffer_size_;
+    }
 
     /** Returns true if there are enough unread elements to fill #read_buf_ */
     bool can_read_from_parent() const {
+        if (idx_ == parent_->buffer_size_) {
+            return false; // this is the end iterator
+        }
         uint32_t unread_element_count = idx_ <= parent_->last_
                 ? parent_->last_ - idx_
                 : parent_->buffer_size_ + parent_->last_ - idx_;
