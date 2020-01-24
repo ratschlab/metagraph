@@ -17,9 +17,9 @@ namespace mg {
 namespace common {
 
 /**
- *  A ChunkedWaitQueue is a data structure that allows safe zero-copy data transfer from
- * one thread to another. There are a few fundamental differences between a normal
- * WaitQueue and this implementation:
+ *  A ChunkedWaitQueue is a data structure that allows safe data transfer from a single
+ *  writer thread to a single reader thread. There are a few fundamental differences
+ *  between a normal WaitQueue and this implementation:
  *  1. Users have no direct control over how elements are popped from the queue.
  *  Elements are popped from the queue in chunks whenever the single iterator of the queue
  * is far enough from the oldest element.
@@ -27,13 +27,16 @@ namespace common {
  * iterating the elements of the queue forward. The iterator will remove elements from the
  * queue as they become old. Limited iteration backwards is permitted with a maximum of
  * #fence_size elements from the most recently read element.
- *  4. Since the queue exposes a single iterator, it expects a single reader thread.
- * Multiple writers may push information into the queue.
+ *  3. To reduce the amount of locking, the queue expects one reader and one writer
+ *  thread.  Elements are "committed" (made visible to the reader thread) by the #push()
+ *  method in batches. The writer thread will only lock once every
+ * #write_buf_.capacity() pushes to the queue, so the larger this value the less
+ * locking, but also the later the reader thread will see the committed values.
  *
  * The ChunkedWaitQueue uses a pre-allocated circular array to store the elements in
- * order to avoid resize and heap allocations at runtime.
+ * order to avoid heap allocations at runtime.
  *
- * Writers can push_front a value to the queue, the reader can access elements in order
+ * Writers can #push a value to the queue, the reader can access elements in order
  * via a single iterator exposed by the class. The reader/iterator will block if there
  * are no available elements, the writers will block if the queue is full i.e. if it
  * contains buffer_size number of elements.
@@ -53,6 +56,8 @@ class ChunkedWaitQueue {
     typedef T value_type;
     typedef Iterator iterator;
 
+    static constexpr size_t WRITE_BUF_SIZE = 10000;
+
     ChunkedWaitQueue(const ChunkedWaitQueue &other) = delete;
     ChunkedWaitQueue &operator=(const ChunkedWaitQueue &) = delete;
 
@@ -64,6 +69,7 @@ class ChunkedWaitQueue {
      * will always keep at least fence_size elements behind the furthest iterator for this
      * purpose. Must be smaller than #buffer_size, and in practice it's orders of
      * magnitude smaller.
+     * @param on_item_pushed callback to invoke when an item is pushed into the queue
      */
     explicit ChunkedWaitQueue(
             size_type buffer_size,
@@ -77,6 +83,7 @@ class ChunkedWaitQueue {
           end_iterator_(Iterator(this, buffer_size)),
           is_shutdown_(false) {
         assert(fence_size < buffer_size);
+        write_buf_.reserve(std::min(WRITE_BUF_SIZE, chunk_size_));
     }
 
     /**
@@ -109,29 +116,9 @@ class ChunkedWaitQueue {
     bool empty() const { return last_ == buffer_size_; }
 
     /**
-     * Returns true if the buffer of the queue is full. #push_front operations will block
-     * until #iterator() advances far enough in the queue to allow garbage collecting
-     * the older elements via #pop_chunk().
-     */
-    bool full() const {
-        return last_ != buffer_size_ && first_ == (last_ + 1) % buffer_size_;
-    }
-
-    /**
      * Returns the capacity of the queue's internal buffer.
      */
     size_type buffer_size() const { return queue_.size(); }
-
-    /**
-     * Returns the number of elements in the buffer. Sort of irrelevant, as the number of
-     * elements is not under user control.
-     */
-    size_type size() {
-        if (last_ == buffer_size_) {
-            return 0;
-        }
-        return first_ <= last_ ? last_ - first_ + 1 : queue_.size() + last_ - first_ + 1;
-    }
 
     /**
      * Close the queue and notify any blocked readers.
@@ -141,6 +128,8 @@ class ChunkedWaitQueue {
         if (is_shutdown_) {
             return;
         }
+        can_flush_.wait(lock, [this] { return can_flush(); });
+        flush();
         is_shutdown_ = true;
         not_empty_.notify_all();
     }
@@ -152,14 +141,12 @@ class ChunkedWaitQueue {
      * std::move it into the queue if the copy construction is expensive.
      */
     void push(value_type x) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        not_full_.wait(lock, [this] { return !full(); });
-        bool was_all_read = iterator_.no_more_elements();
-        last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
-        queue_[last_] = std::move(x);
         on_item_pushed_(x);
-        if (was_all_read) { // queue was empty or all items were read
-            not_empty_.notify_all();
+        write_buf_.push_back(std::move(x));
+        if (write_buf_.size() == write_buf_.capacity()) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            can_flush_.wait(lock, [this] { return can_flush(); });
+            flush();
         }
     }
 
@@ -187,6 +174,8 @@ class ChunkedWaitQueue {
 
     std::vector<T, Alloc> queue_;
 
+    std::vector<T> write_buf_;
+
     /**
      * mutex_ used for synchronizing access to the queue. Both #mutex_ and #not_empty_
      * need to be mutable in order to simulate const iterators (see #iterator_)
@@ -202,7 +191,7 @@ class ChunkedWaitQueue {
     /**
      * Signals that the queue is ready to accept new elements.
      */
-    std::condition_variable not_full_;
+    std::condition_variable can_flush_;
 
     size_type first_ = 0;
     size_type last_ = buffer_size_;
@@ -213,18 +202,53 @@ class ChunkedWaitQueue {
     bool is_shutdown_;
 
   private:
+    /** Returns the number of elements in the buffer. */
+    size_type size() {
+        if (last_ == buffer_size_) {
+            return 0;
+        }
+        return first_ <= last_ ? last_ - first_ + 1 : queue_.size() + last_ - first_ + 1;
+    }
+
+    /**
+     * Returns true if there is enough space in #queue_ to flush #write_buf_ into it.
+     * If #can_flush() is false, #push() operations will block until #iterator() advances
+     * far enough in the queue to allow garbage collecting the older elements via
+     * #pop_chunk().
+     */
+    bool can_flush() const {
+        return empty() || (last_ < first_ && first_ - last_ > write_buf_.capacity())
+                || (last_ >= first_
+                    && buffer_size_ - last_ + first_ > write_buf_.capacity());
+    }
+
     void pop_chunk() {
         if (size() < chunk_size_) { // nothing to pop
             return;
         }
-        const bool was_full = full();
+        const bool could_flush = can_flush();
 
         first_ = (first_ + chunk_size_) % queue_.size();
 
-        if (was_full) { // notify waiting writer that it can start writing again
-            not_full_.notify_one();
+        if (!could_flush && can_flush()) {
+            // notify waiting writer that it can start writing  again
+            can_flush_.notify_one();
         }
     }
+
+    /** Write the contents of buf to the queue - the caller must hold the mutex. */
+    void flush() {
+        bool was_all_read = iterator_.no_more_elements();
+        for (auto &v : write_buf_) {
+            last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
+            queue_[last_] = std::move(v);
+        }
+        if (was_all_read) { // queue was empty or all items were read
+            not_empty_.notify_all();
+        }
+        write_buf_.resize(0);
+    }
+
 
     /**
      * Returns the iterator of the queue. Note that a queue only has one iterator, so

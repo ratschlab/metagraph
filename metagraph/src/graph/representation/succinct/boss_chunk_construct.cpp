@@ -180,9 +180,9 @@ void write_or_die(std::ofstream *f, const T &v) {
 
 
 /**
- * Writes the kmer at the front of #buffer to a file if it's not a redundant dummy
- * kmer. If the k-mer at the front is a (not-redundant) dummy k-mer it also writes its
- * corresponding dummy k-mer of prefix length 2 into #sorted_dummy_kmers.
+ * Writes the front of #buffer to a file if it's not a redundant dummy kmer. If the k-mer
+ * at the front is a (not-redundant) dummy k-mer it also writes its corresponding dummy
+ * k-mer of prefix length 2 into #sorted_dummy_kmers.
  */
 template <typename T>
 uint8_t write_kmer(size_t k,
@@ -231,6 +231,7 @@ void recover_source_dummy_nodes(size_t k,
     using KMER = T;
 
     // name of the file containing dummy k-mers of given prefix length
+    //TODO(ddanciu): make sure these path names are unique and can be changed
     const auto get_file_name
             = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
 
@@ -247,6 +248,7 @@ void recover_source_dummy_nodes(size_t k,
 
     const std::string file_name = "/tmp/original_and_dummy_l1";
     files_to_merge.push_back(create_stream(file_name));
+    files_to_merge.reserve(k + 1); // avoid re-allocations as we keep refs to elements
     std::ofstream *dummy_l1 = &files_to_merge.back().second;
 
     using TAlphabet = typename T::CharType;
@@ -289,12 +291,13 @@ void recover_source_dummy_nodes(size_t k,
     // push out the leftover dummy kmers
     sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
 
+    logger->trace("Total number of k-mers: {}", num_parent_kmers);
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   num_dummy_parent_kmers);
-    logger->trace("Total number of k-mers: {}", num_parent_kmers);
 
     // generate dummy k-mers of prefix length 3..k
-    common::SortedSetDisk<T> sorted_dummy_kmers2;
+    common::SortedSetDisk<T> sorted_dummy_kmers2(no_cleanup, num_threads,
+                                                 kmers->buffer_size(), "/tmp/chunk2_");
     common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
     common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
     for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
@@ -319,14 +322,17 @@ void recover_source_dummy_nodes(size_t k,
 
         std::swap(source, dest);
     }
-    for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
-        // we iterate to merge the data and write it to disk
+    uint32_t num_kmers = 0;
+    // iterate to merge the data and write it to disk
+    for (auto &it = source->data().begin(); it != source->data().end(); ++it, ++num_kmers) {
     }
+    logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}", k, num_kmers);
 
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix
-    // length x in /tmp/dummy{x}, and we'll merge them all into a single stream
+    // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     std::vector<std::string> file_names;
     std::for_each(files_to_merge.begin(), files_to_merge.end(), [&file_names](auto &el) {
+        el.second.flush();
         file_names.push_back(el.first);
     });
 
