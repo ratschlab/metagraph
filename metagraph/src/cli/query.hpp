@@ -13,6 +13,7 @@ class Config;
 void execute_query(const std::string &seq_name,
                    const std::string &sequence,
                    bool count_labels,
+                   bool print_signature,
                    bool suppress_unlabeled,
                    size_t num_top_labels,
                    double discovery_fraction,

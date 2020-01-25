@@ -27,6 +27,7 @@ using mg::common::logger;
 void execute_query(const std::string &seq_name,
                    const std::string &sequence,
                    bool count_labels,
+                   bool print_signature,
                    bool suppress_unlabeled,
                    size_t num_top_labels,
                    double discovery_fraction,
@@ -36,7 +37,29 @@ void execute_query(const std::string &seq_name,
     std::string output;
     output.reserve(1'000);
 
-    if (count_labels) {
+    if (print_signature) {
+        auto signature = anno_graph.get_top_label_signatures(sequence,
+                                                             num_top_labels,
+                                                             discovery_fraction);
+
+        if (!signature.size() && suppress_unlabeled)
+            return;
+
+        output += seq_name;
+
+        for (const auto &[label, kmer_presence_mask] : signature) {
+            output += fmt::format(
+                "\t<{}>:{}:{}:{}",
+                label,
+                sdsl::util::cnt_one_bits(kmer_presence_mask),
+                sdsl::util::to_string(kmer_presence_mask),
+                anno_graph.score_kmer_presence_mask(kmer_presence_mask)
+            );
+        }
+
+        output += '\n';
+
+    } else if (count_labels) {
         auto top_labels = anno_graph.get_top_labels(sequence,
                                                     num_top_labels,
                                                     discovery_fraction);

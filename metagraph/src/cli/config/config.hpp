@@ -32,6 +32,7 @@ class Config {
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
     bool count_kmers = false;
+    bool print_signature = false;
     bool query_presence = false;
     bool filter_present = false;
     bool dump_text_anno = false;

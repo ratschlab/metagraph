@@ -172,6 +172,8 @@ Config::Config(int argc, char *argv[]) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
+        } else if (!strcmp(argv[i], "--print-signature")) {
+            print_signature = true;
         } else if (!strcmp(argv[i], "--map")) {
             map_sequences = true;
         } else if (!strcmp(argv[i], "--align-seed-unimems")) {
@@ -956,6 +958,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
+            fprintf(stderr, "\t   --print-signature \tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [1.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
