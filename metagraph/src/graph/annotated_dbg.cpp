@@ -273,19 +273,21 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
         [&](const auto &code_count) { return code_count.second >= min_count; }
     ));
 
-    std::sort(code_counts.begin(), code_counts.end(),
-              [](const auto &first, const auto &second) {
-                  return first.second > second.second;
-              });
-
     // leave only first |num_top_labels| top labels
-    if (code_counts.size() > num_top_labels)
+    if (num_top_labels <= code_counts.size()) {
+        std::sort(code_counts.begin(), code_counts.end(),
+                  [](const auto &first, const auto &second) {
+                      return first.second > second.second
+                          || (first.second == second.second && first.first < second.first);
+                  });
+
         code_counts.erase(code_counts.begin() + num_top_labels, code_counts.end());
+    }
 
     const auto &label_encoder = annotator_->get_label_encoder();
 
+    // TODO: remove this step?
     std::vector<StringCountPair> label_counts(code_counts.size());
-
     for (size_t i = 0; i < code_counts.size(); ++i) {
         label_counts[i].first = label_encoder.decode(code_counts[i].first);
         label_counts[i].second = code_counts[i].second;
