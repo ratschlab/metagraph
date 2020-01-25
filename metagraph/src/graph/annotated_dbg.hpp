@@ -81,7 +81,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::vector<std::string> get_labels(const std::vector<std::string> &sequences,
                                         const std::vector<double> &weights,
                                         double presence_ratio) const;
-    std::vector<std::string> get_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
+    std::vector<std::string> get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                                         size_t min_count) const;
 
     // return top |num_top_labels| labels with their counts
@@ -98,7 +98,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    double presence_ratio = 0.0) const;
 
     std::vector<std::pair<std::string, size_t>>
-    get_top_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
+    get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                    size_t num_top_labels,
                    size_t min_count = 0) const;
 

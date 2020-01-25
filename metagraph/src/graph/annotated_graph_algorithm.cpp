@@ -9,6 +9,14 @@
 #include "graph/alignment/aligner_helper.hpp"
 #include "graph/representation/masked_graph.hpp"
 
+template <typename Key, typename T>
+using VectorOrderedMap = tsl::ordered_map<Key, T,
+                                          std::hash<Key>, std::equal_to<Key>,
+                                          std::allocator<std::pair<Key, T>>,
+                                          std::vector<std::pair<Key, T>>,
+                                          uint64_t>;
+
+
 namespace annotated_graph_algorithm {
 
 typedef AnnotatedDBG::node_index node_index;
@@ -62,7 +70,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     return annotated_graph_algorithm::mask_nodes_by_unitig(
         dbg,
         [&](const auto &, const auto &path) {
-            tsl::hopscotch_map<row_index, size_t> index_counts;
+            VectorOrderedMap<row_index, size_t> index_counts;
             for (const auto i : path) {
                 index_counts[anno_graph.graph_to_anno_index(i)]++;
             }
@@ -72,7 +80,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
             size_t out_count = 0;
             const size_t out_count_cutoff = label_out_factor * path.size();
 
-            for (const auto &pair : annotation.count_labels(index_counts)) {
+            for (const auto &pair : annotation.count_labels(index_counts.values_container())) {
                 if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
                     in_count += pair.second;
 

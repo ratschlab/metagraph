@@ -261,7 +261,7 @@ void ColumnCompressed<Label>
 template <typename Label>
 std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 ColumnCompressed<Label>
-::count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
+::count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
                size_t min_count,
                size_t count_cap) const {
 

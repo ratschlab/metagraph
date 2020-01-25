@@ -1,8 +1,17 @@
 #include "annotated_dbg.hpp"
 
+#include <tsl/ordered_map.h>
+
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
+
+template <typename Key, typename T>
+using VectorOrderedMap = tsl::ordered_map<Key, T,
+                                          std::hash<Key>, std::equal_to<Key>,
+                                          std::allocator<std::pair<Key, T>>,
+                                          std::vector<std::pair<Key, T>>,
+                                          uint64_t>;
 
 
 AnnotatedSequenceGraph
@@ -25,10 +34,10 @@ void AnnotatedSequenceGraph
                     const std::vector<std::string> &labels) {
     assert(check_compatibility());
 
-    std::vector<uint64_t> indices;
+    std::vector<row_index> indices;
     indices.reserve(sequence.size());
 
-    graph_->map_to_nodes(sequence, [&](uint64_t i) {
+    graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0)
             indices.push_back(graph_to_anno_index(i));
     });
@@ -58,13 +67,13 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    VectorOrderedMap<row_index, size_t> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
-    graph_->map_to_nodes(sequence, [&](uint64_t i) {
+    graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
@@ -80,7 +89,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     if (num_present_kmers < min_count)
         return {};
 
-    return get_labels(index_counts, min_count);
+    return get_labels(index_counts.values_container(), min_count);
 }
 
 std::vector<std::string> AnnotatedDBG
@@ -92,12 +101,12 @@ std::vector<std::string> AnnotatedDBG
     assert(check_compatibility());
     assert(sequences.size() == weights.size());
 
-    tsl::hopscotch_map<uint64_t, double> index_weights;
+    tsl::hopscotch_map<row_index, double> index_weights;
     double weighted_num_missing_kmers = 0;
     double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
 
     for (size_t j = 0; j < sequences.size(); ++j) {
-        graph_->map_to_nodes(sequences[j], [&](uint64_t i) {
+        graph_->map_to_nodes(sequences[j], [&](node_index i) {
             if (i > 0) {
                 index_weights[graph_to_anno_index(i)] += weights[j];
             } else {
@@ -106,7 +115,7 @@ std::vector<std::string> AnnotatedDBG
         });
     }
 
-    tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    VectorOrderedMap<row_index, size_t> index_counts;
 
     size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
     size_t num_present_kmers = 0;
@@ -124,11 +133,11 @@ std::vector<std::string> AnnotatedDBG
     if (num_present_kmers < min_count)
         return {};
 
-    return get_labels(index_counts, min_count);
+    return get_labels(index_counts.values_container(), min_count);
 }
 
 std::vector<std::string>
-AnnotatedDBG::get_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
+AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                          size_t min_count) const {
     assert(check_compatibility());
 
@@ -182,13 +191,13 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
         return label_counts;
     }
 
-    tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    VectorOrderedMap<row_index, size_t> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
-    graph_->map_to_nodes(sequence, [&](uint64_t i) {
+    graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
@@ -203,7 +212,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     if (num_present_kmers < min_count)
         return {};
 
-    return get_top_labels(index_counts, num_top_labels, min_count);
+    return get_top_labels(index_counts.values_container(), num_top_labels, min_count);
 }
 
 std::vector<StringCountPair>
@@ -216,12 +225,12 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
     assert(check_compatibility());
     assert(sequences.size() == weights.size());
 
-    tsl::hopscotch_map<uint64_t, double> index_weights;
+    tsl::hopscotch_map<row_index, double> index_weights;
     double weighted_num_missing_kmers = 0;
     double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
 
     for (size_t j = 0; j < sequences.size(); ++j) {
-        graph_->map_to_nodes(sequences[j], [&](uint64_t i) {
+        graph_->map_to_nodes(sequences[j], [&](node_index i) {
             if (i > 0) {
                 index_weights[graph_to_anno_index(i)] += weights[j];
             } else {
@@ -230,7 +239,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
         });
     }
 
-    tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    VectorOrderedMap<row_index, size_t> index_counts;
 
     size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
     size_t num_present_kmers = 0;
@@ -248,11 +257,11 @@ AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
     if (num_present_kmers < min_count)
         return {};
 
-    return get_top_labels(index_counts, num_top_labels, min_count);
+    return get_top_labels(index_counts.values_container(), num_top_labels, min_count);
 }
 
 std::vector<StringCountPair>
-AnnotatedDBG::get_top_labels(const tsl::hopscotch_map<node_index, size_t> &index_counts,
+AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                              size_t num_top_labels,
                              size_t min_count) const {
     assert(check_compatibility());
@@ -271,8 +280,7 @@ AnnotatedDBG::get_top_labels(const tsl::hopscotch_map<node_index, size_t> &index
 
     // leave only first |num_top_labels| top labels
     if (code_counts.size() > num_top_labels)
-        code_counts.erase(code_counts.begin() + num_top_labels,
-                           code_counts.end());
+        code_counts.erase(code_counts.begin() + num_top_labels, code_counts.end());
 
     const auto &label_encoder = annotator_->get_label_encoder();
 
