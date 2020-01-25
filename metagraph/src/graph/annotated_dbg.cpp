@@ -166,6 +166,22 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
+    if (presence_ratio == 1.) {
+        auto labels = get_labels(sequence, presence_ratio);
+        if (labels.size() > num_top_labels)
+            labels.erase(labels.begin() + num_top_labels, labels.end());
+
+        std::vector<StringCountPair> label_counts;
+        label_counts.reserve(labels.size());
+
+        for (auto&& label : labels) {
+            label_counts.emplace_back(std::move(label),
+                                      sequence.size() - dbg_.get_k() + 1);
+        }
+
+        return label_counts;
+    }
+
     tsl::hopscotch_map<uint64_t, size_t> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
