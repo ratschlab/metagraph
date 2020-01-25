@@ -4,13 +4,67 @@
 #include <immintrin.h>
 #endif
 
+#ifdef __SSE2__
+#include <emmintrin.h>
+#endif
+
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
     sdsl::bit_vector result(vector.size(), 0);
+
     for (size_t i = 0; i < vector.size(); ++i) {
         if (vector[i])
             result[i] = 1;
     }
+
+    return result;
+}
+
+sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
+    sdsl::bit_vector result(vector.size(), 0);
+
+    size_t i = 0;
+#ifdef __AVX2__
+    for (; i + 32 <= vector.size(); i += 32) {
+        result.set_int(
+            i,
+            ~_mm256_movemask_epi8(_mm256_cmpeq_epi8(
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&vector[i])),
+                _mm256_setzero_si256()
+            )),
+            32
+        );
+    }
+#endif
+
+#ifdef __SSE2__
+    for (; i + 16 <= vector.size(); i += 16) {
+        result.set_int(
+            i,
+            ~_mm_movemask_epi8(_mm_cmpeq_epi8(
+                _mm_loadu_si128(reinterpret_cast<const __m128i*>(&vector[i])),
+                _mm_setzero_si128()
+            )),
+            16
+        );
+    }
+#endif
+
+    // at most 16 bits left
+    uint16_t last_word = 0;
+    size_t last_i = i;
+    size_t j = 0;
+    for (; i < vector.size(); ++i, ++j) {
+        if (vector[i])
+            last_word |= uint16_t(1) << j;
+    }
+
+    result.set_int(last_i, last_word, i - last_i);
+
+    assert(static_cast<size_t>(std::count_if(vector.begin(), vector.end(),
+                                             [](uint8_t a) { return a; }))
+        == sdsl::util::cnt_one_bits(result));
+
     return result;
 }
 

@@ -8,6 +8,7 @@
 
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
+sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector);
 
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector,

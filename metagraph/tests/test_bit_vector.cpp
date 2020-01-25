@@ -1295,3 +1295,59 @@ TYPED_TEST(BitVectorTest, operator_neq) {
         }
     }
 }
+
+TEST(bit_vector, to_sdsl_empty) {
+    EXPECT_EQ(0u, to_sdsl(std::vector<bool>()).size());
+    EXPECT_EQ(0u, to_sdsl(std::vector<uint8_t>()).size());
+}
+
+TEST(bit_vector, to_sdsl_zeros) {
+    for (size_t i = 0; i < 1025; ++i) {
+        auto vector_bool = to_sdsl(std::vector<bool>(i, false));
+        EXPECT_EQ(i, vector_bool.size());
+        EXPECT_EQ(0u, sdsl::util::cnt_one_bits(vector_bool));
+
+        auto vector_uint8_t = to_sdsl(std::vector<uint8_t>(i, false));
+        EXPECT_EQ(i, vector_uint8_t.size());
+        EXPECT_EQ(0u, sdsl::util::cnt_one_bits(vector_uint8_t));
+    }
+}
+
+TEST(bit_vector, to_sdsl_ones) {
+    for (size_t i = 0; i < 1025; ++i) {
+        auto vector_bool = to_sdsl(std::vector<bool>(i, true));
+        EXPECT_EQ(i, vector_bool.size());
+        EXPECT_EQ(i, sdsl::util::cnt_one_bits(vector_bool));
+
+        auto vector_uint8_t = to_sdsl(std::vector<uint8_t>(i, true));
+        EXPECT_EQ(i, vector_uint8_t.size());
+        EXPECT_EQ(i, sdsl::util::cnt_one_bits(vector_uint8_t));
+    }
+}
+
+TEST(bit_vector, to_sdsl) {
+    std::vector<bool> bits_bool;
+    std::vector<uint8_t> bits_uint8_t_a;
+    std::vector<uint8_t> bits_uint8_t_b;
+    std::vector<uint64_t> ranks = { 0 };
+
+    for (size_t i = 0; i < 10'000'000; ++i) {
+        bits_bool.push_back((i + (i * i) % 31) % 2);
+        bits_uint8_t_a.push_back(static_cast<bool>((i + (i * i) % 31) % 2));
+        bits_uint8_t_b.push_back(((i + (i * i) % 31) % 2) ? 0xFF : 0);
+        if (bits_uint8_t_a.back()) {
+            ranks.back()++;
+        }
+        ranks.push_back(ranks.back());
+    }
+
+    bit_vector_stat a(to_sdsl(bits_bool));
+    bit_vector_stat b(to_sdsl(bits_uint8_t_a));
+    bit_vector_stat c(to_sdsl(bits_uint8_t_b));
+
+    for (size_t i = 0; i < bits_bool.size(); ++i) {
+        EXPECT_EQ(ranks[i], a.rank1(i));
+        EXPECT_EQ(ranks[i], b.rank1(i));
+        EXPECT_EQ(ranks[i], c.rank1(i));
+    }
+}
