@@ -2,6 +2,8 @@
 #define __QUERY_GRAPH_HPP__
 
 #include <cstdlib>
+#include <functional>
+#include <memory>
 #include <string>
 
 class AnnotatedDBG;
@@ -18,6 +20,15 @@ void execute_query(const std::string &seq_name,
                    const AnnotatedDBG &anno_graph,
                    std::ostream &output_stream,
                    IDBGAligner *aligner = nullptr);
+
+
+using StringGenerator = std::function<void(std::function<void(const std::string&)>)>;
+
+std::unique_ptr<AnnotatedDBG>
+construct_query_graph(const AnnotatedDBG &anno_graph,
+                      StringGenerator call_sequences,
+                      double discovery_fraction,
+                      size_t num_threads);
 
 int query_graph(Config *config);
 
