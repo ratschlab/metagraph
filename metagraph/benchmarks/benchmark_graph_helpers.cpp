@@ -4,12 +4,16 @@
 #include <string>
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "cli/query.hpp"
 #include "common/utils/string_utils.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "seq_io/sequence_io.hpp"
 
+
+template <class Annotation>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
     std::vector<std::string> sequences;
     std::vector<std::string> labels;
@@ -34,7 +38,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
         graph,
-        std::make_unique<annotate::ColumnCompressed<>>(max_index)
+        std::make_unique<Annotation>(max_index)
     );
 
     for (size_t i = 0; i < sequences.size(); ++i) {
@@ -42,4 +46,22 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
     }
 
     return anno_graph;
+}
+
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<annotate::ColumnCompressed<>>(const std::string &filename);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<annotate::RowCompressed<>>(const std::string &filename);
+
+
+std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
+                                                const std::string &query_filename) {
+    std::ignore = query_filename;
+
+    return construct_query_graph(
+        anno_graph,
+        [&](std::function<void(const std::string&)> call_sequences) {
+            std::ignore = call_sequences;
+        },
+        0.0,
+        1
+    );
 }
