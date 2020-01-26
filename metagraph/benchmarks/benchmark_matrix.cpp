@@ -117,11 +117,13 @@ static void BM_BRWTCompressTranscripts(benchmark::State& state) {
         utils::set_verbose(true);
         annotator = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
             const_cast<annotate::ColumnCompressed<>&&>(*column),
-            1,
-            1
+            state.range(0),
+            state.range(0)
         );
     }
 }
 
 BENCHMARK(BM_BRWTCompressTranscripts)->Unit(benchmark::kMillisecond)
-                                     ->Iterations(1);
+                                     ->Iterations(1)
+                                     ->Arg(1)
+                                     ->Arg(4);
