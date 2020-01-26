@@ -239,10 +239,7 @@ int clean_graph(Config *config) {
                 [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; });
 
             dump_contigs_to_fasta(filebase, [&](auto dump_sequence) {
-                graph_slice.call_unitigs([&](const std::string &contig,
-                                             const auto &path) {
-                    dump_sequence(contig, path);
-                });
+                graph_slice.call_sequences(dump_sequence, graph_slice.is_canonical_mode());
             });
         }
     }
