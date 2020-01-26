@@ -5,10 +5,16 @@
 #include "method_constructors.hpp"
 
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
+#include "annotation/annotation_converters.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
+#include "seq_io/sequence_io.hpp"
+#include "common/algorithms.hpp"
 
 
-std::vector<double> get_densities(uint64_t num_cols,
-                                  const std::vector<double> &vector) {
+std::vector<double> get_densities(uint64_t num_cols, const std::vector<double> &vector) {
     auto densities = vector;
     if (densities.size() == 1) {
         densities.assign(num_cols, densities[0]);
@@ -57,3 +63,59 @@ static void BM_BRWTCompressSparse(benchmark::State& state) {
 BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 10)->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 100)->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 1000)->Unit(benchmark::kMillisecond);
+
+
+std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
+    std::vector<std::string> sequences;
+    std::vector<std::string> labels;
+    read_fasta_file_critical(filename,
+                             [&](kseq_t *stream) {
+                                 sequences.push_back(stream->seq.s);
+                                 labels.push_back(stream->name.s);
+                             },
+                             true);
+
+    size_t k = 12;
+
+    BOSSConstructor constructor(k - 1);
+    constructor.add_sequences(sequences);
+    std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor)) };
+    dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
+
+    uint64_t max_index = graph->max_index();
+
+    auto anno_graph = std::make_unique<AnnotatedDBG>(
+        graph,
+        std::make_unique<annotate::ColumnCompressed<>>(max_index)
+    );
+
+    for (size_t i = 0; i < sequences.size(); ++i) {
+        anno_graph->annotate_sequence(std::string(sequences[i]), { labels[i] });
+    }
+
+    return anno_graph;
+}
+
+static void BM_BRWTCompressTranscripts(benchmark::State& state) {
+    auto anno_graph = build_anno_graph("../tests/data/transcripts_1000.fa");
+
+    std::unique_ptr<annotate::MultiBRWTAnnotator> annotator;
+    for (auto _ : state) {
+        const auto *column = dynamic_cast<const annotate::ColumnCompressed<>*>(
+            &anno_graph->get_annotation()
+        );
+
+        if (!column)
+            throw std::runtime_error("This shouldn't happen");
+
+        utils::set_verbose(true);
+        annotator = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
+            const_cast<annotate::ColumnCompressed<>&&>(*column),
+            1,
+            1
+        );
+    }
+}
+
+BENCHMARK(BM_BRWTCompressTranscripts)->Unit(benchmark::kMillisecond)
+                                     ->Iterations(1);
