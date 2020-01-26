@@ -119,8 +119,9 @@ class MergingHeap {
 };
 
 /**
- * Given a list of n source files, containing ordered elements of type T and a count,
- * merge the n sources (and the corresponding counts) into a single (ordered) list.
+ * Given a list of n source files, containing ordered pairs of  <T, count>,
+ * merge the n sources (and the corresponding counts) into a single list, ordered by T.
+ * If two pairs have the same first element, the counts are added together.
  * @param sources the files containing sorted lists of pairs <T, C>
  * @param on_new_item callback to invoke when a new element was merged
  *
@@ -128,10 +129,11 @@ class MergingHeap {
  *
  * Note: this method blocks until all the data was successfully merged.
  */
+// template <template<class, class> class V, class T, class C>
 template <typename T, typename C>
 uint64_t merge_files(const std::vector<std::string> sources,
                      std::function<void(const std::pair<T, C> &)> on_new_item) {
-    // First element is the object, second the count, third the source file index
+    // Convenience type for storing a pair and it's source file index
     using CountedEl = std::tuple<T, C, uint32_t>;
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
@@ -141,8 +143,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
     MergingHeap<T, C> merge_heap;
     std::pair<T, C> data_item;
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        // TODO: use a bigger buffer in stream to reduce the number
-        // of random reads or insert into the heap a batch of elements at a time
+        // TODO: try setting a larger buffer size in ifstream to reduce disk I/O
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
         if (!chunk_files[i].good()) {
             logger->error("Error: Unable to open chunk file '{}'", sources[i]);

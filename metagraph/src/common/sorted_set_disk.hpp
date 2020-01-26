@@ -9,10 +9,8 @@
 
 #include <ips4o.hpp>
 
+#include "common/sorted_set_disk_base.hh"
 #include "common/threads/chunked_wait_queue.hpp"
-#include "common/file_merger.hpp"
-#include "common/logger.hpp"
-#include "common/threads/threading.hpp"
 #include "common/vector.hpp"
 
 namespace mg {
@@ -55,22 +53,13 @@ class SortedSetDisk {
             const std::string &chunk_file_prefix = "/tmp/chunk_",
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100)
-        : num_threads_(num_threads),
-          chunk_file_prefix_(chunk_file_prefix),
-          merge_queue_(reserved_num_elements ,
-                       num_last_elements_cached,
-                       on_item_pushed),
-          cleanup_(cleanup) {
-        if (reserved_num_elements == 0) {
-            logger->error("SortedSetDisk buffer cannot have size 0");
-            std::exit(EXIT_FAILURE);
-        }
-        try_reserve(reserved_num_elements);
-    }
+        : SortedDiskBase<T>(cleanup,
+                            num_threads,
+                            reserved_num_elements,
+                            chunk_file_prefix,
+                            on_item_pushed,
+                            num_last_elements_cached) {}
 
-    ~SortedSetDisk() {
-        merge_queue_.shutdown(); // make sure the data was processed
-    }
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is
@@ -79,81 +68,23 @@ class SortedSetDisk {
      */
     template <class Iterator>
     void insert(Iterator begin, Iterator end) {
-        assert(begin <= end);
+        std::optional<size_t> offset = this->prepare_insert(begin, end);
 
-        uint64_t batch_size = end - begin;
-
-        // acquire the mutex to restrict the number of writing threads
-        std::unique_lock<std::mutex> exclusive_lock(mutex_);
-        assert(batch_size <= data_.capacity()
-               && "Batch size exceeded the buffer's capacity.");
-        if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
-            std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-            shrink_data();
-
-            dump_to_file_async();
-        }
-
-        size_t offset = data_.size();
-        // resize to the future size after insertion (no reallocation will happen)
-        data_.resize(data_.size() + batch_size);
-        std::shared_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-        exclusive_lock.unlock();
         // different threads will insert to different chunks of memory, so it's okay
         // (and desirable) to allow concurrent inserts
-        std::copy(begin, end, data_.begin() + offset);
-    }
-
-    /**
-     * Returns the globally sorted and de-duped data. Typically called once all
-     * the data was inserted via insert().
-     */
-    ChunkedWaitQueue<T> &data() {
-        std::unique_lock<std::mutex> exclusive_lock(mutex_);
-        std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-
-        if (!is_merging_) {
-            is_merging_ = true;
-            // write any residual data left
-            if (!data_.empty()) {
-                sort_and_remove_duplicates(&data_, num_threads_);
-                dump_to_file_async();
-            }
-            async_worker_.join(); // make sure all pending data was written
-            // TODO(ddanciu): instead of writing to file, pass buffer to merge_func to
-            //  avoid writing/reading to disk for small graphs
-            start_merging();
+        std::shared_lock<std::shared_timed_mutex> multi_insert_lock(this->multi_insert_mutex_);
+        if (offset) {
+            std::copy(begin, end, data_.begin() + offset);
         }
-        return merge_queue_;
     }
 
-    void start_merging() {
-        async_worker_.enqueue([this]() {
-            std::vector<std::string> file_names(chunk_count_);
-            for (size_t i = 0; i < chunk_count_; ++i) {
-                file_names[i] = chunk_file_prefix_ + std::to_string(i);
-            }
-            merge_files<T>(file_names, [this](const T &v) { merge_queue_.push(v); });
-            merge_queue_.shutdown();
-        });
-    }
 
-    void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {}) {
-        std::unique_lock<std::mutex> exclusive_lock(mutex_);
-        std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-        is_merging_ = false;
-        chunk_count_ = 0;
-        data_.resize(0); // this makes sure the buffer is not reallocated
-        data_dump_.resize(0);
-        merge_queue_.reset(on_item_pushed);
-    }
-
-    template <class Array>
-    void sort_and_remove_duplicates(Array *vector, size_t num_threads) const {
+  private:
+    virtual void sort_and_merge_duplicates(storage_type *vector, size_t num_threads) const {
         assert(vector);
 
-        ips4o::parallel::sort(vector->begin(), vector->end(),
-                              std::less<typename Array::value_type>(), num_threads);
+        ips4o::parallel::sort(vector->begin(), vector->end(), std::less<value_type>(),
+                              num_threads);
         // remove duplicates
         auto unique_end = std::unique(vector->begin(), vector->end());
         vector->erase(unique_end, vector->end());
