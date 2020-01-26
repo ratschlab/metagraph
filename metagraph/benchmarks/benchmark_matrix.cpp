@@ -2,16 +2,15 @@
 
 #include <vector>
 
+
 #include "method_constructors.hpp"
 
-#include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "seq_io/sequence_io.hpp"
-#include "common/algorithms.hpp"
 #include "common/utils/string_utils.hpp"
 
 
@@ -114,7 +113,6 @@ static void BM_BRWTCompressTranscripts(benchmark::State& state) {
         if (!column)
             throw std::runtime_error("This shouldn't happen");
 
-        utils::set_verbose(true);
         annotator = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
             const_cast<annotate::ColumnCompressed<>&&>(*column),
             state.range(0),
