@@ -28,7 +28,7 @@ namespace common {
  *
  * @tparam T the type of the elements that are being stored and sorted,
  * typically #KMerBOSS instances
- * */
+ */
 template <typename T>
 class SortedSetDisk {
   public:
@@ -38,8 +38,8 @@ class SortedSetDisk {
     typedef ChunkedWaitQueue<T> result_type;
 
     /**
-     * Constructs a SortedSetDisk instance and initializes its buffer to the value
-     * specified in CONTAINER_SIZE_BYTES.
+     * Constructs a SortedSetDisk instance and initializes its buffers to the value
+     * specified in #reserved_num_elements.
      * @param cleanup function to run each time a chunk is written to disk; typically
      * performs cleanup operations, such as removing redundant dummy source k-mers
      * @param num_threads the number of threads to use by the sorting algorithm
@@ -89,8 +89,6 @@ class SortedSetDisk {
                && "Batch size exceeded the buffer's capacity.");
         if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
             std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-            // TODO(ddanciu) - test if it's worth it to keep adding in memory if the
-            // shrinking was significant
             shrink_data();
 
             dump_to_file_async();
@@ -202,7 +200,7 @@ class SortedSetDisk {
     /**
      * Write the current chunk to disk, asynchronously.
      * While the current chunk is being written to disk, the class may accept new
-     * insertions which will be written into the other #data_ buffer.
+     * insertions.
      */
     void dump_to_file_async() {
         async_worker_.join(); // wait for other thread to finish writing
