@@ -12,6 +12,7 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "common/algorithms.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 std::vector<double> get_densities(uint64_t num_cols, const std::vector<double> &vector) {
@@ -70,8 +71,11 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
     std::vector<std::string> labels;
     read_fasta_file_critical(filename,
                              [&](kseq_t *stream) {
-                                 sequences.push_back(stream->seq.s);
-                                 labels.push_back(stream->name.s);
+                                 std::string name(stream->name.s);
+                                 for (const auto &label : utils::split_string(name, "|")) {
+                                     sequences.push_back(stream->seq.s);
+                                     labels.push_back(label);
+                                 }
                              },
                              true);
 
@@ -98,6 +102,8 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
 
 static void BM_BRWTCompressTranscripts(benchmark::State& state) {
     auto anno_graph = build_anno_graph("../tests/data/transcripts_1000.fa");
+    const auto &annotation = anno_graph->get_annotation();
+    std::cout << annotation.num_objects() << " " << annotation.num_labels() << std::endl;
 
     std::unique_ptr<annotate::MultiBRWTAnnotator> annotator;
     for (auto _ : state) {
