@@ -3,6 +3,10 @@
 #include "benchmark_graph_helpers.hpp"
 #include "method_constructors.hpp"
 
+#include "annotation/annotation_converters.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "graph/annotated_dbg.hpp"
+
 
 std::vector<double> get_densities(uint64_t num_cols, const std::vector<double> &vector) {
     auto densities = vector;
