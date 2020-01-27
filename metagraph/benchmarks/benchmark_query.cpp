@@ -24,17 +24,15 @@ static void BM_GetTopLabels(benchmark::State& state) {
     auto anno_graph = build_anno_graph<annotate::RowCompressed<>>(graph_file);
 
     for (auto _ : state) {
+        std::unique_ptr<AnnotatedDBG> query_graph;
+        if constexpr(fast)
+            query_graph = build_query_graph(*anno_graph, queries[state.range(0)]);
+
+        const auto &graph = fast ? *query_graph : *anno_graph;
+
         read_fasta_file_critical(
             queries[state.range(0)],
-            [&](kseq_t *stream) {
-                std::string query(stream->seq.s);
-                std::unique_ptr<AnnotatedDBG> query_graph;
-                if constexpr(fast)
-                    query_graph = build_query_graph(*anno_graph, query);
-
-                const auto &graph = fast ? *query_graph : *anno_graph;
-                graph.get_top_labels(query, -1);
-            }
+            [&](kseq_t *stream) { graph.get_top_labels(stream->seq.s, -1); }
         );
     }
 }

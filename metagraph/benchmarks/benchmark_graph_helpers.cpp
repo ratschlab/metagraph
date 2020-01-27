@@ -19,8 +19,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
     std::vector<std::string> labels;
     read_fasta_file_critical(filename,
                              [&](kseq_t *stream) {
-                                 std::string name(stream->name.s);
-                                 for (const auto &label : utils::split_string(name, "|")) {
+                                 for (const auto &label : utils::split_string(stream->name.s, "|")) {
                                      sequences.push_back(stream->seq.s);
                                      labels.push_back(label);
                                  }
@@ -54,12 +53,13 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<annotate::RowCompressed<
 
 std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
                                                 const std::string &query_filename) {
-    std::ignore = query_filename;
-
     return construct_query_graph(
         anno_graph,
         [&](std::function<void(const std::string&)> call_sequences) {
-            std::ignore = call_sequences;
+            read_fasta_file_critical(
+                query_filename,
+                [&](kseq_t *stream) { call_sequences(stream->seq.s); }
+            );
         },
         0.0,
         1
