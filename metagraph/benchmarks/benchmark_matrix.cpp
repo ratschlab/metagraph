@@ -20,7 +20,7 @@ std::vector<double> get_densities(uint64_t num_cols, std::vector<double> densiti
 
 template <size_t density_numerator,
           size_t density_denominator,
-          size_t rows_arg = 1000000,
+          size_t rows_arg = 100000,
           size_t cols_arg = 1000,
           size_t unique_arg = 100,
           size_t arity_arg = 2,
@@ -72,13 +72,13 @@ BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 1000)
 
 
 static void BM_BRWTCompressTranscripts(benchmark::State& state) {
-    auto anno_graph = build_anno_graph("../tests/data/transcripts_1000.fa");
+    auto anno_graph = build_anno_graph("../tests/data/transcripts_100.fa");
 
     std::unique_ptr<annotate::MultiBRWTAnnotator> annotator;
 
     size_t i = 0;
     for (auto _ : state) {
-        if (i)
+        if (i++)
             throw std::runtime_error("This benchmark will fail on the second iteration");
 
         const auto *column = dynamic_cast<const annotate::ColumnCompressed<>*>(
@@ -93,8 +93,6 @@ static void BM_BRWTCompressTranscripts(benchmark::State& state) {
             state.range(0),
             state.range(0)
         );
-
-        ++i;
     }
 }
 

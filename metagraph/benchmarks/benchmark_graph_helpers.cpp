@@ -55,10 +55,10 @@ std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
                                                 const std::string &query_filename) {
     return construct_query_graph(
         anno_graph,
-        [&](std::function<void(const std::string&)> call_sequences) {
+        [&](std::function<void(const std::string&)> call_sequence) {
             read_fasta_file_critical(
                 query_filename,
-                [&](kseq_t *stream) { call_sequences(stream->seq.s); }
+                [&](kseq_t *stream) { call_sequence(stream->seq.s); }
             );
         },
         0.0,
