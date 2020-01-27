@@ -522,18 +522,13 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM
 file(GLOB benchmark_files
   "benchmarks/*.cpp"
   "experiments/*.cpp"
-  "src/cli/query.cpp"
-  "src/cli/align.cpp"
-  "src/cli/load/load_annotated_graph.cpp"
-  "src/cli/load/load_graph.cpp"
-  "src/cli/load/load_annotation.cpp"
 )
 list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER benchmark_files EXCLUDE REGEX "experiments/main.cpp")
 
 add_executable(benchmarks ${benchmark_files})
 target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(benchmarks benchmark_main benchmark metagraph-core)
+target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
 
 target_compile_options(benchmarks PRIVATE -Wno-undefined-var-template)
 
