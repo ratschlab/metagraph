@@ -55,7 +55,6 @@ static void BM_BRWTCompressSparse(benchmark::State& state) {
             greedy_arg,
             relax_arg
         );
-
     }
 }
 
