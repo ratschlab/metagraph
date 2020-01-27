@@ -21,6 +21,10 @@ std::string form_client_reply(const std::string &received_message,
                               const AnnotatedDBG &anno_graph,
                               const Config &config,
                               IDBGAligner *aligner = nullptr) {
+    // TODO: incorporate aligner
+    // TODO: fast query
+    std::ignore = aligner;
+
     try {
         Json::Value json;
 
@@ -61,8 +65,7 @@ std::string form_client_reply(const std::string &received_message,
                           discovery_fraction,
                           config.anno_labels_delimiter,
                           anno_graph,
-                          oss,
-                          aligner);
+                          oss);
         };
 
         if (!seq.isNull()) {
@@ -114,7 +117,6 @@ int run_server(Config *config) {
     logger->info("Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
 
     std::unique_ptr<IDBGAligner> aligner;
-    // TODO: make aligner work with batch querying
     if (config->align_sequences && !config->fast)
         aligner.reset(build_aligner(*graph, *config).release());
 

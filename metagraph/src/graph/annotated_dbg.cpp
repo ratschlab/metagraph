@@ -92,50 +92,6 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     return get_labels(index_counts.values_container(), min_count);
 }
 
-std::vector<std::string> AnnotatedDBG
-::get_labels(const std::vector<std::string> &sequences,
-             const std::vector<double> &weights,
-             double presence_ratio) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
-    assert(check_compatibility());
-    assert(sequences.size() == weights.size());
-
-    tsl::hopscotch_map<row_index, double> index_weights;
-    double weighted_num_missing_kmers = 0;
-    double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
-
-    for (size_t j = 0; j < sequences.size(); ++j) {
-        graph_->map_to_nodes(sequences[j], [&](node_index i) {
-            if (i > 0) {
-                index_weights[graph_to_anno_index(i)] += weights[j];
-            } else {
-                weighted_num_missing_kmers += weights[j];
-            }
-        });
-    }
-
-    VectorOrderedMap<row_index, size_t> index_counts;
-
-    size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
-    size_t num_present_kmers = 0;
-
-    for (const auto &pair : index_weights) {
-        double count = std::floor(pair.second / scale);
-        index_counts[pair.first] = count;
-        num_present_kmers += count;
-    }
-
-    size_t min_count = std::max(1.0, std::ceil(presence_ratio
-                                                 * (num_present_kmers
-                                                     + num_missing_kmers)));
-
-    if (num_present_kmers < min_count)
-        return {};
-
-    return get_labels(index_counts.values_container(), min_count);
-}
-
 std::vector<std::string>
 AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                          size_t min_count) const {
@@ -209,51 +165,6 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     uint64_t min_count = std::max(1.0, std::ceil(presence_ratio
                                                     * (num_present_kmers
                                                         + num_missing_kmers)));
-    if (num_present_kmers < min_count)
-        return {};
-
-    return get_top_labels(index_counts.values_container(), num_top_labels, min_count);
-}
-
-std::vector<StringCountPair>
-AnnotatedDBG::get_top_labels(const std::vector<std::string> &sequences,
-                             const std::vector<double> &weights,
-                             size_t num_top_labels,
-                             double presence_ratio) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
-    assert(check_compatibility());
-    assert(sequences.size() == weights.size());
-
-    tsl::hopscotch_map<row_index, double> index_weights;
-    double weighted_num_missing_kmers = 0;
-    double scale = std::accumulate(weights.begin(), weights.end(), 0.0);
-
-    for (size_t j = 0; j < sequences.size(); ++j) {
-        graph_->map_to_nodes(sequences[j], [&](node_index i) {
-            if (i > 0) {
-                index_weights[graph_to_anno_index(i)] += weights[j];
-            } else {
-                weighted_num_missing_kmers += weights[j];
-            }
-        });
-    }
-
-    VectorOrderedMap<row_index, size_t> index_counts;
-
-    size_t num_missing_kmers = std::floor(weighted_num_missing_kmers / scale);
-    size_t num_present_kmers = 0;
-
-    for (const auto &pair : index_weights) {
-        double count = std::floor(pair.second / scale);
-        index_counts[pair.first] = count;
-        num_present_kmers += count;
-    }
-
-    size_t min_count = std::max(1.0, std::ceil(presence_ratio
-                                                 * (num_present_kmers
-                                                     + num_missing_kmers)));
-
     if (num_present_kmers < min_count)
         return {};
 

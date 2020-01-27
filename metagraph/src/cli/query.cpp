@@ -32,38 +32,14 @@ void execute_query(const std::string &seq_name,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
                    const AnnotatedDBG &anno_graph,
-                   std::ostream &output_stream,
-                   IDBGAligner *aligner) {
-    std::vector<std::string> sequences;
-    std::vector<double> weights;
-
-    if (aligner) {
-        auto alignments = aligner->align(sequence);
-        sequences.reserve(alignments.size());
-
-        std::transform(alignments.begin(), alignments.end(),
-                       std::back_inserter(sequences),
-                       [](const auto &alignment) { return alignment.get_sequence(); });
-
-        weights = alignments.get_alignment_weights(aligner->get_config());
-
-        if (sequences.empty())
-            aligner = nullptr;
-    }
-
-    assert(sequences.size() == weights.size());
-    assert(!aligner || sequences.size());
-
+                   std::ostream &output_stream) {
     std::string output;
     output.reserve(1'000);
 
     if (count_labels) {
-        auto top_labels = aligner
-            ? anno_graph.get_top_labels(sequences,
-                                        weights,
-                                        num_top_labels,
-                                        discovery_fraction)
-            : anno_graph.get_top_labels(sequence, num_top_labels, discovery_fraction);
+        auto top_labels = anno_graph.get_top_labels(sequence,
+                                                    num_top_labels,
+                                                    discovery_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return;
@@ -80,17 +56,14 @@ void execute_query(const std::string &seq_name,
         output += '\n';
 
     } else {
-        auto labels_discovered = aligner
-            ? anno_graph.get_labels(sequences, weights, discovery_fraction)
-            : anno_graph.get_labels(sequence, discovery_fraction);
+        auto labels_discovered = anno_graph.get_labels(sequence, discovery_fraction);
 
         if (!labels_discovered.size() && suppress_unlabeled)
             return;
 
         output += seq_name;
         output += '\t';
-        output += utils::join_strings(labels_discovered,
-                                      anno_labels_delimiter);
+        output += utils::join_strings(labels_discovered, anno_labels_delimiter);
         output += '\n';
     }
 
@@ -312,7 +285,6 @@ int query_graph(Config *config) {
     Timer timer;
 
     std::unique_ptr<IDBGAligner> aligner;
-    // TODO: make aligner work with batch querying
     if (config->align_sequences && !config->fast)
         aligner.reset(build_aligner(*graph, *config).release());
 
@@ -329,13 +301,35 @@ int query_graph(Config *config) {
         // Graph constructed from a batch of queried sequences
         // Used only in fast mode
         std::unique_ptr<AnnotatedDBG> query_graph;
+        std::vector<std::pair<std::string, std::string>> named_queries;
+
+        if (aligner) {
+            read_fasta_file_critical(
+                file,
+                [&](kseq_t *seq) {
+                    std::string query(seq->seq.s);
+                    auto alignments = aligner->align(query);
+                    named_queries.emplace_back(
+                        alignments.size() ? std::move(alignments.front().get_sequence())
+                                          : std::move(query),
+                        seq->name.s
+                    );
+                }
+            );
+        } else {
+            read_fasta_file_critical(
+                file,
+                [&](kseq_t *seq) { named_queries.emplace_back(seq->seq.s, seq->name.s); },
+                config->forward_and_reverse
+            );
+        }
+
         if (config->fast) {
             query_graph = construct_query_graph(*anno_graph,
                 [&](auto call_sequence) {
-                    read_fasta_file_critical(file,
-                        [&](kseq_t *seq) { call_sequence(seq->seq.s); },
-                        config->forward_and_reverse
-                    );
+                    for (const auto &[query, name] : named_queries) {
+                        call_sequence(query);
+                    }
                 },
                 config->count_labels ? 0 : config->discovery_fraction,
                 get_num_threads()
@@ -347,24 +341,20 @@ int query_graph(Config *config) {
                           file, curr_timer.elapsed());
         }
 
-        read_fasta_file_critical(file,
-            [&](kseq_t *read_stream) {
-                thread_pool.enqueue(execute_query,
-                    fmt::format_int(seq_count++).str() + "\t"
-                        + read_stream->name.s,
-                    std::string(read_stream->seq.s),
-                    config->count_labels,
-                    config->suppress_unlabeled,
-                    config->num_top_labels,
-                    config->discovery_fraction,
-                    config->anno_labels_delimiter,
-                    std::ref(*graph_to_query),
-                    std::ref(std::cout),
-                    aligner.get()
-                );
-            },
-            config->forward_and_reverse
-        );
+        for (const auto &[query, name] : named_queries) {
+            thread_pool.enqueue(execute_query,
+                fmt::format_int(seq_count++).str() + "\t" + name,
+                std::string(query),
+                config->count_labels,
+                config->print_signature,
+                config->suppress_unlabeled,
+                config->num_top_labels,
+                config->discovery_fraction,
+                config->anno_labels_delimiter,
+                std::ref(*graph_to_query),
+                std::ref(std::cout)
+            );
+        }
 
         // wait while all threads finish processing the current file
         thread_pool.join();

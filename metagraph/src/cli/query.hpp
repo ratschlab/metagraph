@@ -18,8 +18,7 @@ void execute_query(const std::string &seq_name,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
                    const AnnotatedDBG &anno_graph,
-                   std::ostream &output_stream,
-                   IDBGAligner *aligner = nullptr);
+                   std::ostream &output_stream);
 
 
 using StringGenerator = std::function<void(std::function<void(const std::string&)>)>;
