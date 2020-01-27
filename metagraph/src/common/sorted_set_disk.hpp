@@ -142,6 +142,16 @@ class SortedSetDiskBase {
         });
     }
 
+    void shrink_data() {
+        logger->trace("Allocated capacity exceeded, erasing duplicate values...");
+
+        size_t old_size = data_.size();
+        sort_and_remove_duplicates(&data_, num_threads_);
+        sorted_end_ = data_.size();
+
+        logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
+                      data_.size(), (data_.size() * sizeof(value_type) >> 20));
+    }
 
     /**
      * Dumps the given data to a file, synchronously.
@@ -165,18 +175,6 @@ class SortedSetDiskBase {
         binary_file.close();
         data->resize(0);
     }
-
-    void shrink_data() {
-        logger->trace("Allocated capacity exceeded, erasing duplicate values...");
-
-        size_t old_size = data_.size();
-        sort_and_remove_duplicates(&data_, num_threads_);
-        sorted_end_ = data_.size();
-
-        logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
-                      data_.size(), (data_.size() * sizeof(value_type) >> 20));
-    }
-
 
     /**
      * Write the current chunk to disk, asynchronously.
