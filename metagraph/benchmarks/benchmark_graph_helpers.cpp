@@ -20,7 +20,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
     read_fasta_file_critical(filename,
                              [&](kseq_t *stream) {
                                  for (const auto &label : utils::split_string(stream->name.s, "|")) {
-                                     sequences.push_back(stream->seq.s);
+                                     sequences.emplace_back(stream->seq.s);
                                      labels.push_back(label);
                                  }
                              },
