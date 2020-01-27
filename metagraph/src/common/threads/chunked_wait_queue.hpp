@@ -226,7 +226,7 @@ class ChunkedWaitQueue {
     void pop_chunk() {
         const bool could_flush = can_flush();
 
-        first_ = (first_ + chunk_size_) % queue_.size();
+        first_ = (first_ + chunk_size_) % buffer_size_;
 
         if (!could_flush && can_flush()) {
             // notify waiting writer that it can start writing  again
@@ -238,7 +238,7 @@ class ChunkedWaitQueue {
     void flush() {
         bool was_all_read = !iterator_.can_increment();
         for (auto &v : write_buf_) {
-            last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % queue_.size();
+            last_ = (last_ == buffer_size_) ? 0 : (last_ + 1) % buffer_size_;
             queue_[last_] = std::move(v);
         }
         if (was_all_read) { // queue was empty or all items were read
@@ -343,8 +343,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         read_buf_.resize(read_buf_size_ + fence_size);
         read_buf_idx_ = fence_size;
         size_t i;
-        for (i = read_buf_idx_; i < read_buf_.size() && can_increment(); ++i) {
-            idx_ = (idx_ + 1) % parent_->queue_.size();
+        for (i = read_buf_idx_; i < read_buf_.size() && idx_ != parent_->last_ ; ++i) {
+            idx_ = (idx_ + 1) % parent_->buffer_size_;
             read_buf_[i] = parent_->queue_[idx_];
         }
         if (i < read_buf_.size()) { // only happens if queue was shut down
@@ -385,6 +385,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
   private:
     /** Returns the number of elements between the current element and the oldest */
     size_type dist_to_first() const {
+        // idx_ points to the current element, hence the '+1' in the result
         return idx_ >= parent_->first_ ? idx_ - parent_->first_ + 1
                                        : parent_->buffer_size_ + idx_ - parent_->first_ + 1;
     }
