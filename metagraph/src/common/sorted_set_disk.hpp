@@ -129,7 +129,7 @@ class SortedSetDiskBase {
     virtual void sort_and_remove_duplicates(storage_type *vector,
                                             size_t num_threads) const = 0;
 
-    void start_merging() { // TODO: move to protected
+    void start_merging() {
         async_worker_.enqueue([this]() {
             std::vector<std::string> file_names(chunk_count_);
             for (size_t i = 0; i < chunk_count_; ++i) {
