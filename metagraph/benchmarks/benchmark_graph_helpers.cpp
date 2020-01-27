@@ -13,8 +13,10 @@
 #include "seq_io/sequence_io.hpp"
 
 
+namespace mg {
+
 template <class Annotation>
-std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
+std::unique_ptr<AnnotatedDBG> bm::build_anno_graph(const std::string &filename) {
     std::vector<std::string> sequences;
     std::vector<std::string> labels;
     read_fasta_file_critical(filename,
@@ -47,12 +49,12 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
     return anno_graph;
 }
 
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<annotate::ColumnCompressed<>>(const std::string &filename);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<annotate::RowCompressed<>>(const std::string &filename);
+template std::unique_ptr<AnnotatedDBG> bm::build_anno_graph<annotate::ColumnCompressed<>>(const std::string &filename);
+template std::unique_ptr<AnnotatedDBG> bm::build_anno_graph<annotate::RowCompressed<>>(const std::string &filename);
 
 
-std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
-                                                const std::string &query_filename) {
+std::unique_ptr<AnnotatedDBG> bm::build_query_graph(const AnnotatedDBG &anno_graph,
+                                                    const std::string &query_filename) {
     return construct_query_graph(
         anno_graph,
         [&](std::function<void(const std::string&)> call_sequence) {
@@ -65,3 +67,5 @@ std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
         1
     );
 }
+
+} //namespace mg

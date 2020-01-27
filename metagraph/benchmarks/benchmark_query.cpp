@@ -10,7 +10,8 @@
 #include "seq_io/sequence_io.hpp"
 
 
-namespace BENCHMARK_QUERY {
+namespace mg {
+namespace bm {
 
 std::vector<std::string> queries {
     "../tests/data/transcripts_100.fa"
@@ -45,4 +46,5 @@ BENCHMARK_TEMPLATE(BM_GetTopLabels, QueryMode::FAST)
     ->DenseRange(0, queries.size() - 1, 1);
 
 
-} // BENCHMARK_QUERY
+} // namespace bm
+} // namespace mg
