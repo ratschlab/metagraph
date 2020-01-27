@@ -9,7 +9,7 @@ class AnnotatedDBG;
 namespace annotate {
 template <typename Label>
 class ColumnCompressed;
-};
+}
 
 
 template <class Annotation = annotate::ColumnCompressed<std::string>>

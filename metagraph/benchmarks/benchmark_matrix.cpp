@@ -8,8 +8,7 @@
 #include "graph/annotated_dbg.hpp"
 
 
-std::vector<double> get_densities(uint64_t num_cols, const std::vector<double> &vector) {
-    auto densities = vector;
+std::vector<double> get_densities(uint64_t num_cols, std::vector<double> densities) {
     if (densities.size() == 1) {
         densities.assign(num_cols, densities[0]);
     } else if (densities.size() != num_cols) {
