@@ -1,4 +1,5 @@
-#pragma once
+#ifndef __SORTED_SET_DISK_BASE_HPP__
+#define __SORTED_SET_DISK_BASE_HPP__
 
 #include <cassert>
 #include <functional>
@@ -43,8 +44,7 @@ class SortedSetDiskBase {
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
             const std::string &chunk_file_prefix = "/tmp/chunk_",
-            std::function<void(const value_type &)> on_item_pushed
-            = [](const value_type &) {},
+            std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100)
         : num_threads_(num_threads),
           chunk_file_prefix_(chunk_file_prefix),
@@ -82,6 +82,7 @@ class SortedSetDiskBase {
         if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
             std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
             shrink_data();
+
             dump_to_file_async();
         }
 
@@ -98,7 +99,7 @@ class SortedSetDiskBase {
      * Returns the globally sorted and counted data. Typically called once all the data
      * was inserted via insert().
      */
-    ChunkedWaitQueue<value_type> &data() {
+    ChunkedWaitQueue<T> &data() {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
 
@@ -227,15 +228,11 @@ class SortedSetDiskBase {
     storage_type data_dump_;
 
     size_t num_threads_;
-
     std::string chunk_file_prefix_;
     /**
      * True if the data merging thread was started, and data started flowing into the #merge_queue_.
      */
     bool is_merging_ = false;
-
-    // indicate the end of the preprocessed distinct and sorted values
-    uint64_t sorted_end_ = 0;
 
     /**
      * Ensures mutually exclusive access (and thus thread-safety) to #data.
@@ -255,8 +252,10 @@ class SortedSetDiskBase {
 
     ChunkedWaitQueue<T> merge_queue_;
 
-    std::function<void(Vector<T> *)> cleanup_;
+    std::function<void(storage_type *)> cleanup_;
 };
 
 } // namespace common
 } // namespace mg
+
+#endif // __SORTED_SET_DISK_BASE_HPP__
