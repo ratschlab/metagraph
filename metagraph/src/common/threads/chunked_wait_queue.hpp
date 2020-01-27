@@ -84,7 +84,6 @@ class ChunkedWaitQueue {
           is_shutdown_(false) {
         assert(fence_size < buffer_size);
         write_buf_.reserve(std::min(WRITE_BUF_SIZE, chunk_size_));
-        assert(write_buf_.capacity() >= fence_size_);
     }
 
     /**
@@ -112,7 +111,8 @@ class ChunkedWaitQueue {
     /**
      * Returns true if the queue is empty. This can happen only before an element is
      * added. Once an element is added, the queue will never be empty again (because
-     * the queue will always keep at least #fence_size_ elements for backwards iteration).
+     * the queue will always keep at least #fence_size_+1 elements for backwards
+     * iteration).
      */
     bool empty() const { return last_ == buffer_size_; }
 
@@ -208,7 +208,7 @@ class ChunkedWaitQueue {
         if (last_ == buffer_size_) {
             return 0;
         }
-        return first_ <= last_ ? last_ - first_ + 1 : queue_.size() + last_ - first_ + 1;
+        return first_ <= last_ ? last_ - first_ + 1 : buffer_size_ + last_ - first_ + 1;
     }
 
     /**
@@ -224,9 +224,6 @@ class ChunkedWaitQueue {
     }
 
     void pop_chunk() {
-        if (size() < chunk_size_) { // nothing to pop
-            return;
-        }
         const bool could_flush = can_flush();
 
         first_ = (first_ + chunk_size_) % queue_.size();
@@ -290,14 +287,16 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
      * @param parent the ChunkedWaitQueue this class iterates
      */
     Iterator(ChunkedWaitQueue *parent, size_t read_buf_size)
-        : parent_(parent), idx_(0), read_buf_size_(read_buf_size) {}
+        : Iterator(parent, read_buf_size, 0) {}
 
     /**
      * Creates an iterator for the given queue at a specific position.
      * @param parent the ChunkedWaitQueue this class iterates
      */
     Iterator(ChunkedWaitQueue *parent, size_t read_buf_size, size_t idx)
-        : parent_(parent), idx_(idx), read_buf_size_(read_buf_size) {}
+        : parent_(parent), idx_(idx), read_buf_size_(read_buf_size) {
+        assert(read_buf_size >= parent->fence_size_);
+    }
 
     /**
      * Returns the element currently pointed at by the iterator.
@@ -320,34 +319,30 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
             return *this;
         }
         size_t fence_size = parent_->fence_size_;
-        {
-            std::unique_lock<std::mutex> l(parent_->mutex_);
-            // make some room, if possible
-            if (dist_to_first() + 1 >= parent_->chunk_size_ + fence_size) {
+        std::unique_lock<std::mutex> l(parent_->mutex_);
+        // make some room, if possible
+        if (dist_to_first() > parent_->chunk_size_ + fence_size) {
+            parent_->pop_chunk();
+        }
+        if (!can_read_from_queue()) {
+            parent_->not_empty_.wait(l, [this]() {
+                return parent_->is_shutdown_ || can_read_from_queue();
+            });
+            if (parent_->is_shutdown_ && !can_increment()) { // reached the end
+                idx_ = parent_->buffer_size_;
+                // notify waiting destructor that object is ready to be destroyed
+                parent_->empty_.notify_all();
+                return *this;
+            }
+            // the queue may have filled up while we were sleeping; make some room
+            if (dist_to_first() > parent_->chunk_size_ + fence_size) {
                 parent_->pop_chunk();
             }
-            if (!can_read_from_parent()) {
-                parent_->not_empty_.wait(l, [this]() {
-                    return parent_->is_shutdown_ || can_read_from_parent();
-                });
-                if (parent_->is_shutdown_ && !can_increment()) { // reached the end
-                    idx_ = parent_->buffer_size_;
-                    // notify waiting destructor that object is ready to be destroyed
-                    parent_->empty_.notify_all();
-                    return *this;
-                }
-                // the queue may have filled up while we were sleeping; make some room
-                if (dist_to_first() + 1 >= parent_->chunk_size_ + fence_size) {
-                    parent_->pop_chunk();
-                }
-            }
         }
-        std::memcpy((char *)read_buf_.data(),
-                    (char *)&read_buf_[read_buf_.size() - fence_size],
-                    fence_size * sizeof(T));
+        std::move(read_buf_.end() - fence_size, read_buf_.end(), read_buf_.begin());
         read_buf_.resize(read_buf_size_ + fence_size);
         read_buf_idx_ = fence_size;
-        uint32_t i;
+        size_t i;
         for (i = read_buf_idx_; i < read_buf_.size() && can_increment(); ++i) {
             idx_ = (idx_ + 1) % parent_->queue_.size();
             read_buf_[i] = parent_->queue_[idx_];
@@ -390,8 +385,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
   private:
     /** Returns the number of elements between the current element and the oldest */
     size_type dist_to_first() const {
-        return idx_ >= parent_->first_ ? idx_ - parent_->first_
-                                       : parent_->buffer_size_ + idx_ - parent_->first_;
+        return idx_ >= parent_->first_ ? idx_ - parent_->first_ + 1
+                                       : parent_->buffer_size_ + idx_ - parent_->first_ + 1;
     }
 
     /** Returns true if the iterator can be incremented without blocking */
@@ -400,7 +395,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     }
 
     /** Returns true if there are enough unread elements to fill #read_buf_ */
-    bool can_read_from_parent() const {
+    bool can_read_from_queue() const {
         if (idx_ == parent_->buffer_size_) {
             return false; // this is the end iterator
         }
@@ -419,8 +414,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         uint32_t el_count = std::min(read_buf_size_, parent_->last_ + 1);
         assert(el_count == read_buf_size_ || parent_->is_shutdown_);
         read_buf_.resize(el_count);
-        std::memcpy((char *)read_buf_.data(), (char *)parent_->queue_.data(),
-                    el_count * sizeof(T));
+        std::copy_n(parent_->queue_.begin(), el_count, read_buf_.begin());
         idx_ = el_count - 1;
     }
 };

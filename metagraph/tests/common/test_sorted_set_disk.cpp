@@ -44,32 +44,48 @@ common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8,
 }
 
 TYPED_TEST(SortedSetDiskTest, Empty) {
-    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
-    expect_equals(underTest, {});
+    constexpr size_t container_size = 8;
+    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+        common::SortedSetDisk<TypeParam> underTest
+                = create_sorted_set_disk<TypeParam>(container_size, cached);
+        expect_equals(underTest, {});
+    }
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
-    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
-    std::array<TypeParam, 1> elements = { 42 };
-    underTest.insert(elements.begin(), elements.end());
-    expect_equals(underTest, { 42 });
+    constexpr size_t container_size = 8;
+    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+        common::SortedSetDisk<TypeParam> underTest
+                = create_sorted_set_disk<TypeParam>(container_size, cached);
+        std::array<TypeParam, 1> elements = { 42 };
+        underTest.insert(elements.begin(), elements.end());
+        expect_equals(underTest, { 42 });
+    }
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
-    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
-    std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
-    underTest.insert(elements.begin(), elements.end());
-    expect_equals(underTest, { 42, 43, 44, 45 });
+    constexpr size_t container_size = 8;
+    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+        common::SortedSetDisk<TypeParam> underTest
+                = create_sorted_set_disk<TypeParam>(container_size, cached);
+        std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
+        underTest.insert(elements.begin(), elements.end());
+        expect_equals(underTest, { 42, 43, 44, 45 });
+    }
 }
 
 /**
  * Test that elements are correctly merged from multiple buffers
  */
 TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
-    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
-    std::vector<TypeParam> elements = { 42, 43, 44, 45 };
-    underTest.insert(elements.begin(), elements.end());
-    expect_equals(underTest, elements);
+    constexpr size_t container_size = 8;
+    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+        common::SortedSetDisk<TypeParam> underTest
+                = create_sorted_set_disk<TypeParam>(container_size, cached);
+        std::vector<TypeParam> elements = { 42, 43, 44, 45 };
+        underTest.insert(elements.begin(), elements.end());
+        expect_equals(underTest, elements);
+    }
 }
 
 /**
@@ -77,15 +93,20 @@ TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
  * multiple inserts.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
-    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
-    std::vector<TypeParam> expected_result;
-    for (uint32_t i = 0; i < 100; ++i) {
-        std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
-                                              TypeParam(4 * i + 2), TypeParam(4 * i + 3) };
-        underTest.insert(elements.begin(), elements.end());
-        expected_result.insert(expected_result.end(), elements.begin(), elements.end());
+    constexpr size_t container_size = 8;
+    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+        common::SortedSetDisk<TypeParam> underTest
+                = create_sorted_set_disk<TypeParam>(container_size, cached);
+        std::vector<TypeParam> expected_result;
+        for (uint32_t i = 0; i < 100; ++i) {
+            std::array<TypeParam, 4> elements
+                    = { TypeParam(4 * i), TypeParam(4 * i + 1), TypeParam(4 * i + 2),
+                        TypeParam(4 * i + 3) };
+            underTest.insert(elements.begin(), elements.end());
+            expected_result.insert(expected_result.end(), elements.begin(), elements.end());
+        }
+        expect_equals(underTest, expected_result);
     }
-    expect_equals(underTest, expected_result);
 }
 
 /**
