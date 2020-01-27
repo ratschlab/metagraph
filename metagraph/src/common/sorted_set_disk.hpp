@@ -147,10 +147,9 @@ class SortedSetDiskBase {
 
         size_t old_size = data_.size();
         sort_and_remove_duplicates(&data_, num_threads_);
-        sorted_end_ = data_.size();
 
         logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
-                      data_.size(), (data_.size() * sizeof(value_type) >> 20));
+                      data_.size(), (data_.size() * sizeof(T) >> 20));
     }
 
     /**
@@ -199,9 +198,9 @@ class SortedSetDiskBase {
                 data_.reserve(size);
                 data_dump_.reserve(size);
                 if (size != original_size) {
-                    logger->warn(
-                            "SortedMultisetDisk: Requested {}MiB, but only found {}MiB",
-                            (original_size * sizeof(T)) >> 20, (size * sizeof(T)) >> 20);
+                    logger->warn("SortedSetDisk: Requested {}MiB, but only found {}MiB",
+                                 (original_size * sizeof(T)) >> 20,
+                                 (size * sizeof(T)) >> 20);
                 }
                 return;
             } catch (const std::bad_alloc &exception) {
@@ -220,12 +219,12 @@ class SortedSetDiskBase {
     /**
      * Hold the data filled in via #insert.
      */
-    Vector<T> data_;
+    storage_type data_;
     /**
      * Buffer containing the data that is currently being dumped to disk (while #data_
      * is being filled with new information.
      */
-    Vector<T> data_dump_;
+    storage_type data_dump_;
 
     size_t num_threads_;
 
