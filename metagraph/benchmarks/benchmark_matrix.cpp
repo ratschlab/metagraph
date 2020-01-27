@@ -31,7 +31,8 @@ static void BM_BRWTCompressSparse(benchmark::State& state) {
     generator.set_seed(42);
 
     auto density_arg = std::vector<double>(
-        unique_arg, double(density_numerator) / double(density_denominator)
+        unique_arg,
+        static_cast<double>(density_numerator) / density_denominator
     );
     std::vector<std::unique_ptr<bit_vector>> generated_columns;
     generated_columns = generator.generate_random_columns(
@@ -43,30 +44,45 @@ static void BM_BRWTCompressSparse(benchmark::State& state) {
 
     std::unique_ptr<BinaryMatrix> matrix;
 
+    size_t i = 0;
     for (auto _ : state) {
+        if (i)
+            throw std::runtime_error("This benchmark will fail on the second iteration");
+
         matrix = generate_brwt_from_rows(
             std::move(generated_columns),
             arity_arg,
             greedy_arg,
             relax_arg
         );
+
+        ++i;
     }
 }
 
-BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 10)->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 100)->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 1000)->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 10)
+    ->Unit(benchmark::kMillisecond)
+    ->Iterations(1);
+BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 100)
+    ->Unit(benchmark::kMillisecond)
+    ->Iterations(1);
+BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 1000)
+    ->Unit(benchmark::kMillisecond)
+    ->Iterations(1);
 
 
 
 
 static void BM_BRWTCompressTranscripts(benchmark::State& state) {
     auto anno_graph = build_anno_graph("../tests/data/transcripts_1000.fa");
-    const auto &annotation = anno_graph->get_annotation();
-    std::cout << annotation.num_objects() << " " << annotation.num_labels() << std::endl;
 
     std::unique_ptr<annotate::MultiBRWTAnnotator> annotator;
+
+    size_t i = 0;
     for (auto _ : state) {
+        if (i)
+            throw std::runtime_error("This benchmark will fail on the second iteration");
+
         const auto *column = dynamic_cast<const annotate::ColumnCompressed<>*>(
             &anno_graph->get_annotation()
         );
@@ -79,6 +95,8 @@ static void BM_BRWTCompressTranscripts(benchmark::State& state) {
             state.range(0),
             state.range(0)
         );
+
+        ++i;
     }
 }
 
