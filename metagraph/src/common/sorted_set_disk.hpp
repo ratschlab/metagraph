@@ -122,22 +122,9 @@ class SortedSetDisk {
                 dump_to_file_async();
             }
             async_worker_.join(); // make sure all pending data was written
-            // TODO(ddanciu): instead of writing to file, pass buffer to merge_func to
-            //  avoid writing/reading to disk for small graphs
             start_merging();
         }
         return merge_queue_;
-    }
-
-    void start_merging() {
-        async_worker_.enqueue([this]() {
-            std::vector<std::string> file_names(chunk_count_);
-            for (size_t i = 0; i < chunk_count_; ++i) {
-                file_names[i] = chunk_file_prefix_ + std::to_string(i);
-            }
-            merge_files<T>(file_names, [this](const T &v) { merge_queue_.push(v); });
-            merge_queue_.shutdown();
-        });
     }
 
     void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {}) {
@@ -166,6 +153,17 @@ class SortedSetDisk {
     size_t buffer_size() const { return data_.capacity(); }
 
   private:
+    void start_merging() {
+        async_worker_.enqueue([this]() {
+          std::vector<std::string> file_names(chunk_count_);
+          for (size_t i = 0; i < chunk_count_; ++i) {
+              file_names[i] = chunk_file_prefix_ + std::to_string(i);
+          }
+          merge_files<T>(file_names, [this](const T &v) { merge_queue_.push(v); });
+          merge_queue_.shutdown();
+        });
+    }
+
     void shrink_data() {
         logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
