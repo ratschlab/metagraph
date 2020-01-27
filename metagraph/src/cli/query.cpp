@@ -97,10 +97,9 @@ void execute_query(const std::string &seq_name,
     output_stream << output;
 }
 
-template <class Callback>
 std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
-                      Callback call_sequences,
+                      StringGenerator call_sequences,
                       double discovery_fraction,
                       size_t num_threads) {
     const auto *full_dbg = &anno_graph.get_graph();
