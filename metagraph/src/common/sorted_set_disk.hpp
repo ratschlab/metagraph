@@ -61,6 +61,37 @@ class SortedSetDiskBase {
         merge_queue_.shutdown(); // make sure the data was processed
     }
 
+    //TODO: move to private once CL is reviewed
+    /**
+     * Prepare inserting the data between #begin and #end into the buffer. If the
+     * buffer is full, the data is processed using #shink_data(), then written to disk,
+     * after which the buffer is cleared.
+     */
+    template <class Iterator>
+    std::optional<size_t> prepare_insert(Iterator begin, Iterator end) {
+        assert(begin <= end);
+
+        uint64_t batch_size = end - begin;
+
+        if (!batch_size)
+            return {};
+
+        assert(batch_size <= data_.capacity()
+                       && "Batch size exceeded the buffer's capacity.");
+
+        if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
+            std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
+            shrink_data();
+            dump_to_file_async();
+        }
+
+        size_t offset = data_.size();
+        // resize to the future size after insertion (no reallocation will happen)
+        data_.resize(data_.size() + batch_size);
+
+        return offset;
+    }
+
     size_t buffer_size() const { return data_.capacity(); }
 
     /**
@@ -97,36 +128,6 @@ class SortedSetDiskBase {
   protected:
     virtual void sort_and_remove_duplicates(storage_type *vector,
                                             size_t num_threads) const = 0;
-
-    /**
-     * Prepare inserting the data between #begin and #end into the buffer. If the
-     * buffer is full, the data is processed using #shink_data(), then written to disk,
-     * after which the buffer is cleared.
-     */
-    template <class Iterator>
-    std::optional<size_t> prepare_insert(Iterator begin, Iterator end) {
-        assert(begin <= end);
-
-        uint64_t batch_size = end - begin;
-
-        if (!batch_size)
-            return {};
-
-        assert(batch_size <= data_.capacity()
-               && "Batch size exceeded the buffer's capacity.");
-
-        if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
-            std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-            shrink_data();
-            dump_to_file_async();
-        }
-
-        size_t offset = data_.size();
-        // resize to the future size after insertion (no reallocation will happen)
-        data_.resize(data_.size() + batch_size);
-
-        return offset;
-    }
 
     void start_merging() { // TODO: move to protected
         async_worker_.enqueue([this]() {
