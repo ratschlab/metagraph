@@ -46,7 +46,7 @@ static void BM_BRWTCompressSparse(benchmark::State& state) {
 
     size_t i = 0;
     for (auto _ : state) {
-        if (i)
+        if (i++)
             throw std::runtime_error("This benchmark will fail on the second iteration");
 
         matrix = generate_brwt_from_rows(
