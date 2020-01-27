@@ -20,7 +20,7 @@ std::vector<double> get_densities(uint64_t num_cols, std::vector<double> densiti
 
 template <size_t density_numerator,
           size_t density_denominator,
-          size_t rows_arg = 100000,
+          size_t rows_arg = 300000,
           size_t cols_arg = 1000,
           size_t unique_arg = 100,
           size_t arity_arg = 2,
