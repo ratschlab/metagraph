@@ -1,139 +1,99 @@
 #pragma once
 
-#include <mutex>
-#include <shared_mutex>
-#include <iostream>
-#include <vector>
 #include <cassert>
+#include <functional>
+#include <optional>
+#include <shared_mutex>
+#include <string>
 
 #include <ips4o.hpp>
 
-#include "common/logger.hpp"
+#include "common/sorted_set_disk.hpp"
+#include "common/threads/chunked_wait_queue.hpp"
+
 
 namespace mg {
 namespace common {
 
-// Thread safe data storage for counting
-template <typename T,
-        typename C = uint8_t,
-        class Container = std::vector<std::pair<T, C>>>
-class SortedMultiset {
+/**
+ * Specialization of SortedSetDiskBase that is able to both sort and count elements.
+ *
+ * @tparam T the type of the elements that are being stored, sorted and counted,
+ * typically #KMerBOSS instances
+ * @param C the type used to count the number of appearances of each element of type T
+ */
+template <typename T, typename C = uint8_t>
+class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
   public:
-    static_assert(std::is_same_v<std::pair<T, C>, typename Container::value_type>);
-
-    typedef T key_type;
-    typedef C count_type;
     typedef std::pair<T, C> value_type;
-    typedef Container storage_type;
-    typedef Container result_type;
+    typedef Vector<value_type> storage_type;
+    typedef ChunkedWaitQueue<value_type> result_type;
+    typedef typename storage_type::iterator Iterator;
 
-    SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-                   size_t num_threads = 1, size_t max_num_elements = 0)
-            : num_threads_(num_threads), cleanup_(cleanup) {
-        reserve(max_num_elements);
-    }
-
-    ~SortedMultiset() {}
+    /**
+     * Constructs a SortedMultisetDisk instance and initializes its buffers sizes to the
+     * value specified in #reserved_num_elements.
+     * @param cleanup function to run each time a chunk is written to disk; typically
+     * performs cleanup operations, such as removing redundant dummy source k-mers
+     * @param num_threads the number of threads to use by the sorting algorithm
+     * @param chunk_file_prefix the prefix of the temporary files where chunks are
+     * written before being merged
+     * @param container_size the size of the in-memory container that is written
+     * to disk when full
+     */
+    SortedMultisetDisk(
+            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
+            size_t num_threads = 1,
+            size_t reserved_num_elements = 1e6,
+            const std::string &chunk_file_prefix = "/tmp/chunk_",
+            std::function<void(const value_type &)> on_item_pushed
+            = [](const value_type &) {},
+            size_t num_last_elements_cached = 100)
+        : SortedSetDiskBase<std::pair<T, C>>(cleanup,
+                                          num_threads,
+                                          reserved_num_elements,
+                                          chunk_file_prefix,
+                                          on_item_pushed,
+                                          num_last_elements_cached) {}
 
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 
+    /**
+     * Insert the data between #begin and #end into the buffer.
+     */
     template <class Iterator>
     void insert(Iterator begin, Iterator end) {
-        assert(begin <= end);
-
-        uint64_t batch_size = end - begin;
-
-        if (!batch_size)
-            return;
-
         // acquire the mutex to restrict the number of writing threads
-        std::unique_lock<std::mutex> resize_lock(mutex_resize_);
+        std::unique_lock<std::mutex> exclusive_lock(this->mutex_);
 
-        if (data_.size() + batch_size > data_.capacity()) {
-            std::unique_lock<std::shared_timed_mutex> reallocate_lock(mutex_copy_);
+        std::optional<size_t> offset = this->prepare_insert(begin, end);
 
-            shrink_data();
-
-            try {
-                try_reserve(data_.size() + data_.size() / 2,
-                            data_.size() + batch_size);
-            } catch (const std::bad_alloc &exception) {
-                std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
-                exit(1);
+        std::shared_lock<std::shared_timed_mutex> multi_insert_lock(this->multi_insert_mutex_);
+        // different threads will insert to different chunks of memory, so it's okay
+        // (and desirable) to allow concurrent inserts
+        exclusive_lock.unlock();
+        if (offset) {
+            if constexpr (std::is_same<T, std::remove_cv_t<std::remove_reference_t<decltype(*begin)>>>::value) {
+                std::transform(begin, end, this->data_.begin() + offset.value(),
+                               [](const T &value) { return std::make_pair(value, C(1)); });
+            } else {
+                std::copy(begin, end, this->data_.begin() + offset.value());
             }
         }
-
-        size_t offset = data_.size();
-        data_.resize(data_.size() + batch_size);
-
-        std::shared_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
-
-        resize_lock.unlock();
-
-        if constexpr(std::is_same<T, std::remove_cv_t<
-                std::remove_reference_t<
-                        decltype(*begin)>>>::value) {
-            std::transform(begin, end, data_.begin() + offset,
-                           [](const T &value) { return std::make_pair(value, C(1)); });
-        } else {
-            std::copy(begin, end, data_.begin() + offset);
-        }
     }
 
-    void reserve(size_t size) {
-        std::unique_lock<std::mutex> resize_lock(mutex_resize_);
-        std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
+  protected:
+    virtual void sort_and_remove_duplicates(storage_type *vector, size_t num_threads) const {
+        assert(vector);
+        ips4o::parallel::sort(
+                vector->begin(), vector->end(),
+                [](const value_type &first, const value_type &second) {
+                    return first.first < second.first;
+                },
+                this->num_threads_);
 
-        try_reserve(size);
-    }
-
-    size_t buffer_size() const { return data_.capacity(); }
-
-    result_type& data() {
-        std::unique_lock<std::mutex> resize_lock(mutex_resize_);
-        std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
-
-        if (sorted_end_ != data_.size()) {
-            sort_and_merge_duplicates();
-            sorted_end_ = data_.size();
-        }
-
-        return data_;
-    }
-
-    void clear() {
-        std::unique_lock<std::mutex> resize_lock(mutex_resize_);
-        std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
-
-        data_ = decltype(data_)();
-        sorted_end_ = 0;
-    }
-
-  private:
-    void shrink_data() {
-        logger->trace("Allocated capacity exceeded, erasing duplicate values...");
-
-        size_t old_size = data_.size();
-        sort_and_merge_duplicates();
-        sorted_end_ = data_.size();
-
-        logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
-                      data_.size(), (data_.size() * sizeof(value_type) >> 20));
-    }
-
-    void sort_and_merge_duplicates() {
-        if (!data_.size())
-            return;
-
-        ips4o::parallel::sort(data_.begin(), data_.end(),
-                              [](const value_type &first, const value_type &second) {
-                                return first.first < second.first;
-                              },
-                              num_threads_
-        );
-
-        auto first = data_.begin();
-        auto last = data_.end();
+        auto first = vector->begin();
+        auto last = vector->end();
 
         auto dest = first;
 
@@ -149,35 +109,10 @@ class SortedMultiset {
             }
         }
 
-        data_.erase(++dest, data_.end());
+        vector->erase(++dest, this->data_.end());
 
-        cleanup_(&data_);
+        this->cleanup_(vector);
     }
-
-    void try_reserve(size_t size, size_t min_size = 0) {
-        size = std::max(size, min_size);
-
-        while (size > min_size) {
-            try {
-                data_.reserve(size);
-                return;
-            } catch (const std::bad_alloc &exception) {
-                size = min_size + (size - min_size) * 2 / 3;
-            }
-        }
-        data_.reserve(min_size);
-    }
-
-    storage_type data_;
-    size_t num_threads_;
-
-    std::function<void(storage_type*)> cleanup_;
-
-    // indicate the end of the preprocessed distinct and sorted values
-    uint64_t sorted_end_ = 0;
-
-    mutable std::mutex mutex_resize_;
-    mutable std::shared_timed_mutex mutex_copy_;
 };
 
 } // namespace common
