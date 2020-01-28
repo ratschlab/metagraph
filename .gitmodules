@@ -58,3 +58,6 @@
 [submodule "metagraph/external-libraries/googletest"]
 	path = metagraph/external-libraries/googletest
 	url = https://github.com/google/googletest.git
+[submodule "metagraph/external-libraries/benchmark"]
+	path = metagraph/external-libraries/benchmark
+	url = https://github.com/google/benchmark

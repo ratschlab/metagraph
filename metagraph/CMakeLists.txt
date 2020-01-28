@@ -514,6 +514,23 @@ target_link_libraries(unit_tests gtest_main gtest metagraph-core)
 
 target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
+#-------------------
+# Benchmarks
+#-------------------
+add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL)
+
+file(GLOB benchmark_files
+  "benchmarks/*.cpp"
+  "experiments/*.cpp"
+)
+list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
+list(FILTER benchmark_files EXCLUDE REGEX "experiments/main.cpp")
+
+add_executable(benchmarks ${benchmark_files})
+target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
+
+target_compile_options(benchmarks PRIVATE -Wno-undefined-var-template)
 
 #-------------------
 # Tests
