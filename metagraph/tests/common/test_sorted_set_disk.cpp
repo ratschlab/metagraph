@@ -73,6 +73,16 @@ TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
 }
 
 /**
+ * Test that we correctly deal with inserting a range larger than the buffer's size.
+ */
+TYPED_TEST(SortedSetDiskTest, OneInsertLargerThanBuffer) {
+    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>(3, 1);
+    std::vector<TypeParam> elements = { 42, 43, 44, 45 };
+    underTest.insert(elements.begin(), elements.end());
+    expect_equals(underTest, elements);
+}
+
+/**
  * Test that distinct elements are correctly merged from multiple buffers across
  * multiple inserts.
  */

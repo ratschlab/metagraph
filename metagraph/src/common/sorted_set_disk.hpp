@@ -67,12 +67,9 @@ class SortedSetDiskBase {
      */
     template <class Iterator>
     size_t prepare_insert(Iterator begin, Iterator end) {
-        assert(begin <= end);
-
         uint64_t batch_size = end - begin;
 
-        assert(batch_size <= data_.capacity()
-                       && "Batch size exceeded the buffer's capacity.");
+        assert(begin <= end && batch_size <= data_.capacity());
 
         if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
             std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
@@ -205,6 +202,13 @@ class SortedSetDiskBase {
         }
         data_.reserve(min_size);
         data_dump_.reserve(min_size);
+    }
+
+    /** Advances #it by step or points to #end, whichever comes first. */
+    template <typename Iterator>
+    Iterator safe_advance(const Iterator &it, const Iterator &end, size_t step) {
+        assert(it <= end);
+        return end - it < this->buffer_size() ? end : it + step;
     }
 
     /**

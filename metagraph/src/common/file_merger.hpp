@@ -86,6 +86,9 @@ uint64_t merge_files(const std::vector<std::string> sources,
  * @tparam T the actual heap element type; this is the type tested for equality
  * @tparam C the count type for elements in the heap (typically some unsigned integer)
  */
+ //TODO(ddanciu) - instead of using MergingHeap, we can use a simple
+ // std::priority_queue which stores duplicate elements and merge elements when popping
+ // Profile which one is faster.
 template <typename T, typename C>
 class MergingHeap {
     /** The heap stores triplets of the form <Element, Count, SourceIndex> */

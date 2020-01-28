@@ -63,6 +63,14 @@ TYPED_TEST(SortedMultisetDiskTest, InsertOneRange) {
     expect_equals(underTest, { { 42, 2 }, { 43, 2 }, { 44, 1 }, { 45, 2 } });
 }
 
+TYPED_TEST(SortedMultisetDiskTest, InsertOneRangeLargerThanBuffer) {
+    common::SortedMultisetDisk<TypeParam> underTest
+            = create_sorted_set_disk<TypeParam>(3, 1);
+    std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
+    underTest.insert(elements.begin(), elements.end());
+    expect_equals(underTest, { { 42, 2 }, { 43, 2 }, { 44, 1 }, { 45, 2 } });
+}
+
 /**
  * Test that elements are correctly merged from multiple buffers
  */

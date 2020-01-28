@@ -67,18 +67,22 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
      */
     template <class Iterator>
     void insert(Iterator begin, Iterator end) {
-        if (begin == end) {
-            return;
-        }
-        // acquire the mutex to restrict the number of writing threads
-        std::unique_lock<std::mutex> exclusive_lock(this->mutex_);
-        size_t offset = this->prepare_insert(begin, end);
+        Iterator original_end = end;
+        end = this->safe_advance(begin, original_end, this->buffer_size());
+        while (begin != end) {
+            // acquire the mutex to restrict the number of writing threads
+            std::unique_lock<std::mutex> exclusive_lock(this->mutex_);
+            size_t offset = this->prepare_insert(begin, end);
 
-        std::shared_lock<std::shared_timed_mutex> multi_insert_lock(this->multi_insert_mutex_);
-        // different threads will insert to different chunks of memory, so it's okay
-        // (and desirable) to allow concurrent inserts
-        exclusive_lock.unlock();
-        std::copy(begin, end, this->data_.begin() + offset);
+            std::shared_lock<std::shared_timed_mutex> multi_insert_lock(
+                    this->multi_insert_mutex_);
+            // different threads will insert to different chunks of memory, so it's okay
+            // (and desirable) to allow concurrent inserts
+            exclusive_lock.unlock();
+            std::copy(begin, end, this->data_.begin() + offset);
+            begin = end;
+            end = this->safe_advance(begin, original_end, this->buffer_size());
+        }
     }
 
     virtual void sort_and_remove_duplicates(storage_type *vector, size_t num_threads)
