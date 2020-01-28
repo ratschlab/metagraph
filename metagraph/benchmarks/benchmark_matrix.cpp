@@ -1,5 +1,8 @@
 #include "benchmark/benchmark.h"
 
+#include <string>
+#include <vector>
+
 #include "benchmark_graph_helpers.hpp"
 #include "method_constructors.hpp"
 
@@ -72,10 +75,14 @@ BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 1000)
     ->Iterations(1);
 
 
+std::vector<std::string> files {
+    "../tests/data/transcripts_100.fa",
+    "../tests/data/transcripts_500.fa"
+};
 
-
+template <size_t file_index>
 static void BM_BRWTCompressTranscripts(benchmark::State& state) {
-    auto anno_graph = build_anno_graph("../tests/data/transcripts_100.fa");
+    auto anno_graph = build_anno_graph(files[file_index]);
 
     std::unique_ptr<annotate::MultiBRWTAnnotator> annotator;
 
@@ -99,10 +106,16 @@ static void BM_BRWTCompressTranscripts(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_BRWTCompressTranscripts)->Unit(benchmark::kMillisecond)
-                                     ->Iterations(1)
-                                     ->Arg(1)
-                                     ->Arg(4);
+BENCHMARK_TEMPLATE(BM_BRWTCompressTranscripts, 0)
+    ->Unit(benchmark::kMillisecond)
+    ->Iterations(1)
+    ->Arg(1)
+    ->Arg(4);
+
+BENCHMARK_TEMPLATE(BM_BRWTCompressTranscripts, 1)
+    ->Unit(benchmark::kMillisecond)
+    ->Iterations(1)
+    ->Arg(4);
 
 } // namespace bm
 } // namespace mg
