@@ -88,7 +88,8 @@ uint64_t merge_files(const std::vector<std::string> sources,
  */
  //TODO(ddanciu) - instead of using MergingHeap, we can use a simple
  // std::priority_queue which stores duplicate elements and merge elements when popping
- // Profile which one is faster.
+ // Profile which one is faster. Also profile if using an  std::vector as in MergeQueue
+ // is faster than using an std::queue.
 template <typename T, typename C>
 class MergingHeap {
     /** The heap stores triplets of the form <Element, Count, SourceIndex> */
