@@ -101,7 +101,7 @@ class MergingHeap {
             std::get<1>(*it) += count;
             return true;
         }
-        els.insert(it, { el, count, idx });
+        els.emplace(it, el, count, idx);
         return false;
     }
 
@@ -119,17 +119,16 @@ class MergingHeap {
 };
 
 /**
- * Given a list of n source files, containing ordered pairs of  <T, count>,
- * merge the n sources (and the corresponding counts) into a single list, ordered by T.
+ * Given a list of n source files, containing ordered pairs of  <element, count>,
+ * merge the n sources (and the corresponding counts) into a single list, ordered by el.
  * If two pairs have the same first element, the counts are added together.
- * @param sources the files containing sorted lists of pairs <T, C>
+ * @param sources the files containing sorted lists of pairs of type <T, C>
  * @param on_new_item callback to invoke when a new element was merged
  *
  * @return the total number of elements read from all files
  *
  * Note: this method blocks until all the data was successfully merged.
  */
-// template <template<class, class> class V, class T, class C>
 template <typename T, typename C>
 uint64_t merge_files(const std::vector<std::string> sources,
                      std::function<void(const std::pair<T, C> &)> on_new_item) {

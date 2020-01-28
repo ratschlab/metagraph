@@ -1,11 +1,13 @@
-#ifndef __SORTED_SET_DISK_HPP__
-#define __SORTED_SET_DISK_HPP__
+#ifndef __SORTED_SET_DISK_BASE_HPP__
+#define __SORTED_SET_DISK_BASE_HPP__
 
 #include <cassert>
-#include <fstream> //TODO(ddanciu) - try boost mmapped instead
+#include <functional>
 #include <mutex>
-#include <queue>
+#include <iostream>
+#include <optional>
 #include <shared_mutex>
+#include <vector>
 
 #include <ips4o.hpp>
 
@@ -17,84 +19,127 @@ namespace mg {
 namespace common {
 
 /**
- * Thread safe data storage that is able to sort and extract distinct elements
- * from the underlying Container using external storage to avoid memory overlow.
+ * Abstract thread safe data storage that is able to sort  elements from the
+ * underlying Container using external storage to limit the amount of required memory.
  * Data is pushed into the data structure in chunks using the #insert() method.
- * Once the internal buffer is full, the data is sorted and written to disk,
- * each disk write into a different file. The #data() method returns the
- * globally sorted data.
+ * Once the internal buffer is full, the data is processed using
+ * #sort_and_remove_duplicates and written to disk, each disk write into a different file.
+ * The #data() method returns the globally sorted data.
  *
  * @tparam T the type of the elements that are being stored and sorted,
- * typically #KMerBOSS instances
+ * typically #KMerBOSS instances, or <#KmerBOSS, count> pairs.
  */
 template <typename T>
-class SortedSetDisk {
-  public:
-    typedef T key_type;
+class SortedSetDiskBase {
     typedef T value_type;
-    typedef Vector<T> storage_type;
-    typedef ChunkedWaitQueue<T> result_type;
+    typedef Vector<value_type> storage_type;
+    typedef ChunkedWaitQueue<value_type> result_type;
+    typedef typename storage_type::iterator Iterator;
 
-    /**
-     * Constructs a SortedSetDisk instance and initializes its buffers to the value
-     * specified in #reserved_num_elements.
-     * @param cleanup function to run each time a chunk is written to disk; typically
-     * performs cleanup operations, such as removing redundant dummy source k-mers
-     * @param num_threads the number of threads to use by the sorting algorithm
-     * @param chunk_file_prefix the prefix of the temporary files where chunks are
-     * written before being merged
-     * @param container_size the size of the in-memory container that is written
-     * to disk when full
-     */
-    SortedSetDisk(
+  public:
+    SortedSetDiskBase(
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
             const std::string &chunk_file_prefix = "/tmp/chunk_",
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100)
-        : SortedDiskBase<T>(cleanup,
-                            num_threads,
-                            reserved_num_elements,
-                            chunk_file_prefix,
-                            on_item_pushed,
-                            num_last_elements_cached) {}
-
-
-    /**
-     * Insert the data between #begin and #end into the buffer. If the buffer is
-     * full, the data is sorted, de-duped and written to disk, after which the
-     * buffer is cleared.
-     */
-    template <class Iterator>
-    void insert(Iterator begin, Iterator end) {
-        std::optional<size_t> offset = this->prepare_insert(begin, end);
-
-        // different threads will insert to different chunks of memory, so it's okay
-        // (and desirable) to allow concurrent inserts
-        std::shared_lock<std::shared_timed_mutex> multi_insert_lock(this->multi_insert_mutex_);
-        if (offset) {
-            std::copy(begin, end, data_.begin() + offset);
+        : num_threads_(num_threads),
+          chunk_file_prefix_(chunk_file_prefix),
+          merge_queue_(reserved_num_elements, num_last_elements_cached, on_item_pushed),
+          cleanup_(cleanup) {
+        if (reserved_num_elements == 0) {
+            logger->error("SortedSetDisk buffer cannot have size 0");
+            std::exit(EXIT_FAILURE);
         }
+        try_reserve(reserved_num_elements);
     }
 
+    virtual ~SortedSetDiskBase() {
+        merge_queue_.shutdown(); // make sure the data was processed
+    }
 
-  private:
-    virtual void sort_and_merge_duplicates(storage_type *vector, size_t num_threads) const {
-        assert(vector);
+    //TODO: move to private once CL is reviewed
+    /**
+     * Prepare inserting the data between #begin and #end into the buffer. If the
+     * buffer is full, the data is processed using #shink_data(), then written to disk,
+     * after which the buffer is cleared.
+     */
+    template <class Iterator>
+    std::optional<size_t> prepare_insert(Iterator begin, Iterator end) {
+        assert(begin <= end);
 
-        ips4o::parallel::sort(vector->begin(), vector->end(), std::less<value_type>(),
-                              num_threads);
-        // remove duplicates
-        auto unique_end = std::unique(vector->begin(), vector->end());
-        vector->erase(unique_end, vector->end());
+        uint64_t batch_size = end - begin;
 
-        cleanup_(vector); // typically removes source dummy k-mers
+        if (!batch_size)
+            return {};
+
+        assert(batch_size <= data_.capacity()
+                       && "Batch size exceeded the buffer's capacity.");
+
+        if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
+            std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
+            shrink_data();
+
+            dump_to_file_async();
+        }
+
+        size_t offset = data_.size();
+        // resize to the future size after insertion (no reallocation will happen)
+        data_.resize(data_.size() + batch_size);
+
+        return offset;
     }
 
     size_t buffer_size() const { return data_.capacity(); }
 
-  private:
+    /**
+     * Returns the globally sorted and counted data. Typically called once all the data
+     * was inserted via insert().
+     */
+    ChunkedWaitQueue<T> &data() {
+        std::unique_lock<std::mutex> exclusive_lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
+
+        if (!is_merging_) {
+            is_merging_ = true;
+            // write any residual data left
+            if (!data_.empty()) {
+                sort_and_remove_duplicates(&data_, num_threads_);
+                dump_to_file_async();
+            }
+            async_worker_.join(); // make sure all pending data was written
+            start_merging();
+        }
+    }
+
+    void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {}) {
+        std::unique_lock<std::mutex> exclusive_lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
+        is_merging_ = false;
+        chunk_count_ = 0;
+        data_.resize(0); // this makes sure the buffer is not reallocated
+        data_dump_.resize(0);
+        merge_queue_.reset(on_item_pushed);
+    }
+
+  protected:
+    virtual void sort_and_remove_duplicates(storage_type *vector,
+                                            size_t num_threads) const = 0;
+
+    void start_merging() {
+        async_worker_.enqueue([this]() {
+            std::vector<std::string> file_names(chunk_count_);
+            for (size_t i = 0; i < chunk_count_; ++i) {
+                file_names[i] = chunk_file_prefix_ + std::to_string(i);
+            }
+            std::function<void(const value_type &)> on_new_item
+                    = [this](const value_type &v) { merge_queue_.push(v); };
+            merge_files(file_names, on_new_item);
+            merge_queue_.shutdown();
+        });
+    }
+
     void shrink_data() {
         logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
@@ -210,4 +255,4 @@ class SortedSetDisk {
 } // namespace common
 } // namespace mg
 
-#endif // __SORTED_SET_DISK_HPP__
+#endif // __SORTED_SET_DISK_BASE_HPP__

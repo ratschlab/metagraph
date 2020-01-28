@@ -1,13 +1,16 @@
 #pragma once
 
-#include <mutex>
-#include <shared_mutex>
-#include <iostream>
-#include <vector>
 #include <cassert>
+#include <functional>
+#include <optional>
+#include <shared_mutex>
+#include <string>
 
 #include <ips4o.hpp>
 #include "common/sorted_set_disk_base.hh"
+#include "common/threads/chunked_wait_queue.hpp"
+
+#include "common/sorted_set_disk.hpp"
 #include "common/threads/chunked_wait_queue.hpp"
 
 
@@ -15,19 +18,14 @@ namespace mg {
 namespace common {
 
 /**
- * Thread safe data storage that is able to sort and count elements from the underlying
- * Container using external storage to limit the amount of required memory.
- * Data is pushed into the data structure in chunks using the #insert() method.
- * Once the internal buffer is full, the data is sorted, merged, and written to disk,
- * each disk write into a different file. The #data() method returns the
- * globally sorted data.
+ * Specialization of SortedSetDiskBase that is able to both sort and count elements.
  *
  * @tparam T the type of the elements that are being stored, sorted and counted,
  * typically #KMerBOSS instances
- * @param C the type used to count the number of appearences of each element of type T
+ * @param C the type used to count the number of appearances of each element of type T
  */
 template <typename T, typename C = uint8_t>
-class SortedMultisetDisk : public SortedDiskBase<std::pair<T, C>> {
+class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
   public:
     typedef std::pair<T, C> value_type;
     typedef Vector<value_type> storage_type;
@@ -53,7 +51,7 @@ class SortedMultisetDisk : public SortedDiskBase<std::pair<T, C>> {
             std::function<void(const value_type &)> on_item_pushed
             = [](const value_type &) {},
             size_t num_last_elements_cached = 100)
-        : SortedDiskBase<std::pair<T, C>>(cleanup,
+        : SortedSetDiskBase<std::pair<T, C>>(cleanup,
                                           num_threads,
                                           reserved_num_elements,
                                           chunk_file_prefix,
@@ -63,17 +61,19 @@ class SortedMultisetDisk : public SortedDiskBase<std::pair<T, C>> {
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 
     /**
-     * Insert the data between #begin and #end into the buffer. If the buffer is
-     * full, the data is sorted, counted and written to disk, after which the
-     * buffer is cleared.
+     * Insert the data between #begin and #end into the buffer.
      */
     template <class Iterator>
     void insert(Iterator begin, Iterator end) {
+        // acquire the mutex to restrict the number of writing threads
+        std::unique_lock<std::mutex> exclusive_lock(this->mutex_);
+
         std::optional<size_t> offset = this->prepare_insert(begin, end);
 
+        std::shared_lock<std::shared_timed_mutex> multi_insert_lock(this->multi_insert_mutex_);
         // different threads will insert to different chunks of memory, so it's okay
         // (and desirable) to allow concurrent inserts
-        std::shared_lock<std::shared_timed_mutex> multi_insert_lock(this->multi_insert_mutex_);
+        exclusive_lock.unlock();
         if (offset) {
             if constexpr (std::is_same<T, std::remove_cv_t<std::remove_reference_t<decltype(*begin)>>>::value) {
                 std::transform(begin, end, this->data_.begin() + offset.value(),
@@ -85,7 +85,7 @@ class SortedMultisetDisk : public SortedDiskBase<std::pair<T, C>> {
     }
 
   protected:
-    virtual void sort_and_merge_duplicates(storage_type *vector, size_t num_threads) const {
+    virtual void sort_and_remove_duplicates(storage_type *vector, size_t num_threads) const {
         assert(vector);
         ips4o::parallel::sort(
                 vector->begin(), vector->end(),
