@@ -13,11 +13,6 @@ namespace {
 using namespace mg;
 using common::ChunkedWaitQueue;
 
-TEST(WaitQueue, Empty) {
-    ChunkedWaitQueue<int32_t> under_test(20, 1);
-    EXPECT_TRUE(under_test.empty());
-}
-
 TEST(WaitQueue, PushPop) {
     constexpr size_t buffer_size = 4;
     constexpr size_t fence_size = 1;

@@ -109,14 +109,6 @@ class ChunkedWaitQueue {
     }
 
     /**
-     * Returns true if the queue is empty. This can happen only before an element is
-     * added. Once an element is added, the queue will never be empty again (because
-     * the queue will always keep at least #fence_size_+1 elements for backwards
-     * iteration).
-     */
-    bool empty() const { return last_ == buffer_size_; }
-
-    /**
      * Returns the capacity of the queue's internal buffer.
      */
     size_type buffer_size() const { return buffer_.size(); }
@@ -203,6 +195,14 @@ class ChunkedWaitQueue {
     bool is_shutdown_;
 
   private:
+    /**
+     * Returns true if the queue is empty. This can happen only before an element is
+     * added. Once an element is added, the queue will never be empty again (because
+     * the queue will always keep at least #fence_size_+1 elements for backwards
+     * iteration).
+     */
+    bool empty() const { return last_ == buffer_size_; }
+
     /** Returns the number of elements in the buffer. */
     size_type size() {
         if (last_ == buffer_size_) {
