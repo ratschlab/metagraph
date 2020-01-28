@@ -102,4 +102,70 @@ void read_fasta_from_string(const std::string &fasta_flat,
                             std::function<void(kseq_t*)> callback,
                             bool with_reverse = false);
 
+
+class FastaParser {
+  public:
+    class iterator;
+
+    explicit FastaParser(const std::string &filename);
+
+    iterator begin() const;
+    iterator end() const;
+
+  private:
+    std::string filename_;
+};
+
+
+class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
+                                                   kseq_t,
+                                                   size_t,
+                                                   kseq_t*,
+                                                   kseq_t&> {
+    friend FastaParser;
+
+  public:
+    iterator() {}
+
+    iterator(const iterator &other);
+    iterator(iterator&& other);
+
+    iterator& operator=(const iterator &other);
+    iterator& operator=(iterator&& other);
+
+    ~iterator();
+
+    kseq_t& operator*() { return *read_stream_; }
+    const kseq_t& operator*() const { return *read_stream_; }
+
+    kseq_t* operator->() { return read_stream_; }
+    const kseq_t* operator->() const { return read_stream_; }
+
+    iterator& operator++() {
+        if (kseq_read(read_stream_) < 0) {
+            kseq_destroy(read_stream_);
+            read_stream_ = NULL;
+        }
+        return *this;
+    }
+
+    bool operator==(const iterator &other) const {
+        return (read_stream_ && other.read_stream_
+                    && filename_ == other.filename_
+                    && read_stream_->f->seek_pos == other.read_stream_->f->seek_pos)
+            || (!read_stream_ && !other.read_stream_);
+    }
+
+    bool operator!=(const iterator &other) const {
+        return !(*this == other);
+    }
+
+  private:
+    explicit iterator(const std::string &filename);
+
+    std::string filename_;
+    gzFile input_p_ = Z_NULL;
+    kseq_t *read_stream_ = NULL;
+};
+
 #endif // __SEQUENCE_IO__

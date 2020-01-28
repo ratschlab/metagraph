@@ -155,6 +155,118 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
         && gzputc(gz_out, '\n') == '\n';
 }
 
+
+FastaParser::FastaParser(const std::string &filename) : filename_(filename) {
+    // check if we can read from file
+    gzFile input_p = gzopen(filename_.c_str(), "r");
+    if (input_p == Z_NULL) {
+        std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
+        exit(1);
+    }
+    gzclose(input_p);
+}
+
+FastaParser::iterator FastaParser::begin() const { return iterator(filename_); }
+FastaParser::iterator FastaParser::end() const { return iterator(); }
+
+
+FastaParser::iterator::iterator(const iterator &other) { *this = other; }
+
+FastaParser::iterator::iterator(iterator&& other) { *this = std::move(other); }
+
+FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
+    filename_ = other.filename_;
+
+    if (read_stream_) {
+        kseq_destroy(read_stream_);
+        read_stream_ = NULL;
+    }
+
+    if (input_p_ != Z_NULL) {
+        gzclose(input_p_);
+        input_p_ = Z_NULL;
+    }
+
+    if (!other.read_stream_)
+        return *this;
+
+    input_p_ = gzopen(filename_.c_str(), "r");
+    if (input_p_ == Z_NULL) {
+        std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
+        exit(1);
+    }
+
+    read_stream_ = kseq_init(input_p_);
+    if (read_stream_ == NULL) {
+        std::cerr << "ERROR: failed to initialize kseq file descriptor" << std::endl;
+        exit(1);
+    }
+
+    gzseek(input_p_, gztell(other.input_p_), SEEK_SET);
+
+#define copy_kstring(kstr, other_kstr) \
+            kstr.m = other_kstr.m; \
+            kstr.l = other_kstr.l; \
+            kstr.s = (char*)realloc(kstr.s, kstr.m); \
+            memcpy(kstr.s, other_kstr.s, other_kstr.m); \
+
+    // copy last cached record
+    copy_kstring(read_stream_->name, other.read_stream_->name);
+    copy_kstring(read_stream_->comment, other.read_stream_->comment);
+    copy_kstring(read_stream_->seq, other.read_stream_->seq);
+    copy_kstring(read_stream_->qual, other.read_stream_->qual);
+
+    read_stream_->last_char = other.read_stream_->last_char;
+
+    // copy stream state
+    kstream_t *f = read_stream_->f;
+    kstream_t *other_f = other.read_stream_->f;
+
+    f->begin = other_f->begin;
+    f->end = other_f->end;
+    f->is_eof = other_f->is_eof;
+    f->bufsize = other_f->bufsize;
+    f->seek_pos = other_f->seek_pos;
+    f->buf = (unsigned char*)realloc(f->buf, f->bufsize);
+    memcpy(f->buf, other_f->buf, other_f->bufsize);
+
+    return *this;
+}
+
+FastaParser::iterator& FastaParser::iterator::operator=(iterator&& other) {
+    std::swap(filename_, other.filename_);
+    std::swap(input_p_, other.input_p_);
+    std::swap(read_stream_, other.read_stream_);
+    // the destructor in |other| will be responsible for freeing the memory now
+    return *this;
+}
+
+FastaParser::iterator::iterator(const std::string &filename)
+      : filename_(filename) {
+    input_p_ = gzopen(filename_.c_str(), "r");
+    if (input_p_ == Z_NULL) {
+        std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
+        exit(1);
+    }
+
+    read_stream_ = kseq_init(input_p_);
+    if (read_stream_ == NULL) {
+        std::cerr << "ERROR: failed to initialize kseq file descriptor" << std::endl;
+        exit(1);
+    }
+
+    ++(*this);
+}
+
+FastaParser::iterator::~iterator() {
+    if (read_stream_)
+        kseq_destroy(read_stream_);
+
+    if (input_p_ != Z_NULL)
+        gzclose(input_p_);
+}
+
+
 template <class Callback>
 void read_fasta_file_critical(gzFile input_p,
                               Callback callback,

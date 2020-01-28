@@ -18,7 +18,7 @@
 #include "load/load_annotated_graph.hpp"
 #include "align.hpp"
 
-static const size_t kRowBatchSize = 100'000;
+const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 
 using mg::common::logger;
@@ -326,45 +326,68 @@ int query_graph(Config *config) {
 
         const auto *graph_to_query = anno_graph.get();
 
+        auto query_seq = [&](kseq_t *read_stream) {
+            thread_pool.enqueue(execute_query,
+                fmt::format_int(seq_count++).str() + "\t"
+                    + read_stream->name.s,
+                std::string(read_stream->seq.s),
+                config->count_labels,
+                config->suppress_unlabeled,
+                config->num_top_labels,
+                config->discovery_fraction,
+                config->anno_labels_delimiter,
+                std::ref(*graph_to_query),
+                std::ref(std::cout),
+                aligner.get()
+            );
+        };
+
         // Graph constructed from a batch of queried sequences
         // Used only in fast mode
-        std::unique_ptr<AnnotatedDBG> query_graph;
         if (config->fast) {
-            query_graph = construct_query_graph(*anno_graph,
-                [&](auto call_sequence) {
-                    read_fasta_file_critical(file,
-                        [&](kseq_t *seq) { call_sequence(seq->seq.s); },
-                        config->forward_and_reverse
-                    );
-                },
-                config->count_labels ? 0 : config->discovery_fraction,
-                get_num_threads()
-            );
+            FastaParser fasta_parser(file);
+            auto begin = fasta_parser.begin();
+            auto end = fasta_parser.end();
 
-            graph_to_query = query_graph.get();
+            const uint64_t batch_size = config->query_batch_size_in_bytes;
+            FastaParser::iterator it;
 
-            logger->trace("Query graph constructed for '{}' in {} sec",
-                          file, curr_timer.elapsed());
-        }
-
-        read_fasta_file_critical(file,
-            [&](kseq_t *read_stream) {
-                thread_pool.enqueue(execute_query,
-                    fmt::format_int(seq_count++).str() + "\t"
-                        + read_stream->name.s,
-                    std::string(read_stream->seq.s),
-                    config->count_labels,
-                    config->suppress_unlabeled,
-                    config->num_top_labels,
-                    config->discovery_fraction,
-                    config->anno_labels_delimiter,
-                    std::ref(*graph_to_query),
-                    std::ref(std::cout),
-                    aligner.get()
+            while (begin != end) {
+                uint64_t num_bytes_read = 0;
+                auto query_graph = construct_query_graph(*anno_graph,
+                    [&](auto call_sequence) {
+                        num_bytes_read = 0;
+                        for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
+                            call_sequence(it->seq.s);
+                            num_bytes_read += it->seq.l;
+                            if (config->forward_and_reverse) {
+                                reverse_complement(it->seq);
+                                call_sequence(it->seq.s);
+                                num_bytes_read += it->seq.l;
+                            }
+                        }
+                    },
+                    config->count_labels ? 0 : config->discovery_fraction,
+                    get_num_threads()
                 );
-            },
-            config->forward_and_reverse
-        );
+
+                graph_to_query = query_graph.get();
+
+                for ( ; begin != it; ++begin) {
+                    query_seq(&*begin);
+                    if (config->forward_and_reverse) {
+                        reverse_complement(begin->seq);
+                        query_seq(&*begin);
+                    }
+                }
+
+                logger->trace("Query graph constructed for first {} bytes from '{}' in {} sec",
+                              num_bytes_read, file, curr_timer.elapsed());
+            }
+
+        } else {
+            read_fasta_file_critical(file, query_seq, config->forward_and_reverse);
+        }
 
         // wait while all threads finish processing the current file
         thread_pool.join();

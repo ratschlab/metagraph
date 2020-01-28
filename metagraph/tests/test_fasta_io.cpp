@@ -1,0 +1,333 @@
+#include "gtest/gtest.h"
+
+#include <string>
+#include <filesystem>
+
+#include "seq_io/sequence_io.hpp"
+
+const std::string test_data_dir = "../tests/data";
+const std::string test_fasta = test_data_dir + "/transcripts_1000.fa";
+const std::string dump_filename = test_data_dir + "/dump.fasta.gz";
+
+
+TEST(FastaFile, iterator_read) {
+    size_t num_records = 0;
+    size_t total_size = 0;
+    for (const auto &record : FastaParser(test_fasta)) {
+        num_records++;
+        total_size += record.seq.l;
+    }
+    EXPECT_EQ(1000u, num_records);
+    EXPECT_EQ(1490627u, total_size);
+}
+
+TEST(FastaFile, full_iterator_read_empty) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+    }
+
+    size_t num_records = 0;
+    size_t total_size = 0;
+    for (const auto &record : FastaParser(dump_filename)) {
+        num_records++;
+        total_size += record.seq.l;
+    }
+    EXPECT_EQ(0u, num_records);
+    EXPECT_EQ(0u, total_size);
+
+    std::filesystem::remove(dump_filename);
+}
+
+TEST(FastaFile, full_iterator_read_1K) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+        for (size_t i = 0; i < 1'000; ++i) {
+            writer.write(std::string(i % 1'000, 'A'));
+        }
+    }
+
+    size_t num_records = 0;
+    size_t total_size = 0;
+    for (const auto &record : FastaParser(dump_filename)) {
+        num_records++;
+        total_size += record.seq.l;
+    }
+    EXPECT_EQ(1'000u, num_records);
+    EXPECT_EQ(499'500u, total_size);
+
+    std::filesystem::remove(dump_filename);
+}
+
+TEST(FastaFile, full_iterator_read_100K) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+        for (size_t i = 0; i < 100'000; ++i) {
+            writer.write(std::string(i % 1'000, 'A'));
+        }
+    }
+
+    size_t num_records = 0;
+    size_t total_size = 0;
+    for (const auto &record : FastaParser(dump_filename)) {
+        num_records++;
+        total_size += record.seq.l;
+    }
+    EXPECT_EQ(100'000u, num_records);
+    EXPECT_EQ(49'950'000u, total_size);
+
+    std::filesystem::remove(dump_filename);
+}
+
+TEST(FastaFile, twice_iterator_read_empty) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+    }
+
+    FastaParser parser(dump_filename);
+    auto begin = parser.begin();
+
+    size_t num_records = 0;
+    size_t total_size = 0;
+    for (auto it = begin; it != parser.end(); ++it) {
+        num_records++;
+        total_size += it->seq.l;
+    }
+    EXPECT_EQ(0u, num_records);
+    EXPECT_EQ(0u, total_size);
+
+    num_records = 0;
+    total_size = 0;
+    for (auto it = begin; it != parser.end(); ++it) {
+        num_records++;
+        total_size += it->seq.l;
+    }
+    EXPECT_EQ(0u, num_records);
+    EXPECT_EQ(0u, total_size);
+
+    std::filesystem::remove(dump_filename);
+}
+
+TEST(FastaFile, twice_full_iterator_read_1K) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+        for (size_t i = 0; i < 1'000; ++i) {
+            writer.write(std::string(i % 1'000, 'A'));
+        }
+    }
+
+    FastaParser parser(dump_filename);
+    auto begin = parser.begin();
+
+    size_t num_records = 0;
+    size_t total_size = 0;
+    for (auto it = begin; it != parser.end(); ++it) {
+        num_records++;
+        total_size += it->seq.l;
+    }
+    EXPECT_EQ(1'000u, num_records);
+    EXPECT_EQ(499'500u, total_size);
+
+    num_records = 0;
+    total_size = 0;
+    for (auto it = begin; it != parser.end(); ++it) {
+        num_records++;
+        total_size += it->seq.l;
+    }
+    EXPECT_EQ(1'000u, num_records);
+    EXPECT_EQ(499'500u, total_size);
+
+    std::filesystem::remove(dump_filename);
+}
+
+
+TEST(FastaFile, twice_iterator_read_empty_with_move) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+    }
+
+    FastaParser parser(dump_filename);
+    auto begin = parser.begin();
+
+    size_t num_records = 0;
+    size_t total_size = 0;
+    for (auto it = begin; it != parser.end(); ++it ) {
+        num_records++;
+        total_size += it->seq.l;
+    }
+    EXPECT_EQ(0u, num_records);
+    EXPECT_EQ(0u, total_size);
+
+    num_records = 0;
+    total_size = 0;
+    for (auto it = std::move(begin); it != parser.end(); ++it) {
+        num_records++;
+        total_size += it->seq.l;
+    }
+    EXPECT_EQ(0u, num_records);
+    EXPECT_EQ(0u, total_size);
+
+    std::filesystem::remove(dump_filename);
+}
+
+TEST(FastaFile, twice_full_iterator_read_1K_with_move) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+        for (size_t i = 0; i < 1'000; ++i) {
+            writer.write(std::string(i % 1'000, 'A'));
+        }
+    }
+
+    FastaParser parser(dump_filename);
+    auto begin = parser.begin();
+
+    size_t num_records = 0;
+    size_t total_size = 0;
+    for (auto it = begin; it != parser.end(); ++it ) {
+        num_records++;
+        total_size += it->seq.l;
+    }
+    EXPECT_EQ(1'000u, num_records);
+    EXPECT_EQ(499'500u, total_size);
+
+    num_records = 0;
+    total_size = 0;
+    for (auto it = std::move(begin); it != parser.end(); ++it) {
+        num_records++;
+        total_size += it->seq.l;
+    }
+    EXPECT_EQ(1'000u, num_records);
+    EXPECT_EQ(499'500u, total_size);
+
+    std::filesystem::remove(dump_filename);
+}
+
+TEST(FastaFile, iterator_compare) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+        for (size_t i = 0; i < 1'000; ++i) {
+            writer.write(std::string(i % 1'000, 'A'));
+        }
+    }
+
+    FastaParser parser(dump_filename);
+
+    for (auto it = parser.begin(); it != parser.end(); ++it) {
+        auto copy = it;
+        EXPECT_TRUE(copy == it);
+        EXPECT_FALSE(copy != it);
+        EXPECT_TRUE(++copy != it);
+        EXPECT_FALSE(copy == it);
+        EXPECT_TRUE(copy == ++it);
+        EXPECT_FALSE(copy != it);
+    }
+
+    std::filesystem::remove(dump_filename);
+}
+
+TEST(FastaFile, iterator_read_1M_multiple_copies) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+        writer.write(std::string(1'000'000, 'A'));
+        writer.write(std::string(2'000'000, 'C'));
+        writer.write(std::string(3'000'000, 'G'));
+        writer.write(std::string(4'000'000, 'T'));
+    }
+
+    FastaParser parser(dump_filename);
+
+    size_t num_records = 0;
+    size_t total_size = 0;
+
+    auto begin = parser.begin();
+    auto first_copy = begin;
+    auto second_copy = begin;
+
+    for ( ; first_copy != parser.end(); ++first_copy) {
+        num_records++;
+        total_size += first_copy->seq.l;
+    }
+
+    EXPECT_EQ(4u, num_records);
+    EXPECT_EQ(10'000'000u, total_size);
+
+    for ( ; second_copy != parser.end(); ++second_copy) {
+        num_records++;
+        total_size += second_copy->seq.l;
+    }
+
+    EXPECT_EQ(8u, num_records);
+    EXPECT_EQ(20'000'000u, total_size);
+
+    ++begin;
+    first_copy = begin;
+    second_copy = begin;
+
+    num_records = 0;
+    total_size = 0;
+
+    for ( ; first_copy != parser.end(); ++first_copy) {
+        num_records++;
+        total_size += first_copy->seq.l;
+    }
+
+    EXPECT_EQ(3u, num_records);
+    EXPECT_EQ(9'000'000u, total_size);
+
+    for ( ; second_copy != parser.end(); ++second_copy) {
+        num_records++;
+        total_size += second_copy->seq.l;
+    }
+
+    EXPECT_EQ(6u, num_records);
+    EXPECT_EQ(18'000'000u, total_size);
+
+    ++begin;
+    first_copy = begin;
+    second_copy = begin;
+
+    num_records = 0;
+    total_size = 0;
+
+    for ( ; first_copy != parser.end(); ++first_copy) {
+        num_records++;
+        total_size += first_copy->seq.l;
+    }
+
+    EXPECT_EQ(2u, num_records);
+    EXPECT_EQ(7'000'000u, total_size);
+
+    for ( ; second_copy != parser.end(); ++second_copy) {
+        num_records++;
+        total_size += second_copy->seq.l;
+    }
+
+    EXPECT_EQ(4u, num_records);
+    EXPECT_EQ(14'000'000u, total_size);
+
+    ++begin;
+    first_copy = begin;
+    second_copy = begin;
+
+    num_records = 0;
+    total_size = 0;
+
+    for ( ; first_copy != parser.end(); ++first_copy) {
+        num_records++;
+        total_size += first_copy->seq.l;
+    }
+
+    EXPECT_EQ(1u, num_records);
+    EXPECT_EQ(4'000'000u, total_size);
+
+    for ( ; second_copy != parser.end(); ++second_copy) {
+        num_records++;
+        total_size += second_copy->seq.l;
+    }
+
+    EXPECT_EQ(2u, num_records);
+    EXPECT_EQ(8'000'000u, total_size);
+
+    EXPECT_EQ(4'000'000u, begin->seq.l);
+
+    std::filesystem::remove(dump_filename);
+}
