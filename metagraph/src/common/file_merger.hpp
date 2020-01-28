@@ -89,14 +89,14 @@ uint64_t merge_files(const std::vector<std::string> sources,
 template <typename T, typename C>
 class MergingHeap {
     /** The heap stores triplets of the form <Element, Count, SourceIndex> */
-    using ElType = std::tuple<T, C, uint32_t>;
+    using value_type =  std::tuple<T, C, uint32_t> ;
 
   public:
     bool emplace(T el, C count, uint32_t idx) {
-        auto it = els.begin();
-        while (it != els.end() && el < std::get<0>(*it)) {
-            it++;
-        }
+        auto it = std::lower_bound(els.begin(), els.end(), value_type(el, count, idx),
+                                   [](const value_type &a, const value_type &b) {
+                                       return std::get<0>(a) > std::get<0>(b);
+                                   });
         if (it != els.end() && el == std::get<0>(*it)) {
             std::get<1>(*it) += count;
             return true;
@@ -105,8 +105,8 @@ class MergingHeap {
         return false;
     }
 
-    ElType pop() {
-        ElType result = els.back();
+    value_type pop() {
+        value_type result = els.back();
         els.pop_back();
         return result;
     }
@@ -115,7 +115,7 @@ class MergingHeap {
 
   private:
     // elements stored in increasing order of the first tuple member
-    std::vector<ElType> els;
+    std::vector<value_type> els;
 };
 
 /**
@@ -145,7 +145,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
         // TODO: try setting a larger buffer size in ifstream to reduce disk I/O
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
         if (!chunk_files[i].good()) {
-            logger->error("Error: Unable to open chunk file '{}'", sources[i]);
+            logger->error("Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
         bool found = true;

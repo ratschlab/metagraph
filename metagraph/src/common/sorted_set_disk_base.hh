@@ -50,13 +50,10 @@ class SortedDiskBase {
      * buffer is cleared.
      */
     template <class Iterator>
-    std::optional<size_t> prepare_insert(Iterator begin, Iterator end) {
+    size_t prepare_insert(Iterator begin, Iterator end) {
         assert(begin <= end);
 
         uint64_t batch_size = end - begin;
-
-        if (!batch_size)
-            return {};
 
         // acquire the mutex to restrict the number of writing threads
         std::unique_lock<std::mutex> exclusive_lock(mutex_);

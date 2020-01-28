@@ -21,8 +21,8 @@ namespace common {
  * Specialization of SortedSetDiskBase that is able to both sort and count elements.
  *
  * @tparam T the type of the elements that are being stored, sorted and counted,
- * typically #KMerBOSS instances
- * @param C the type used to count the number of appearances of each element of type T
+ * typically k-mers
+ * @param C the type used to count the multiplicity of each value in the multi-set
  */
 template <typename T, typename C = uint8_t>
 class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
@@ -65,22 +65,24 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
      */
     template <class Iterator>
     void insert(Iterator begin, Iterator end) {
+        if (begin == end) {
+            return;
+        }
         // acquire the mutex to restrict the number of writing threads
         std::unique_lock<std::mutex> exclusive_lock(this->mutex_);
 
-        std::optional<size_t> offset = this->prepare_insert(begin, end);
+        size_t offset = this->prepare_insert(begin, end);
 
         std::shared_lock<std::shared_timed_mutex> multi_insert_lock(this->multi_insert_mutex_);
         // different threads will insert to different chunks of memory, so it's okay
         // (and desirable) to allow concurrent inserts
         exclusive_lock.unlock();
-        if (offset) {
-            if constexpr (std::is_same<T, std::remove_cv_t<std::remove_reference_t<decltype(*begin)>>>::value) {
-                std::transform(begin, end, this->data_.begin() + offset.value(),
-                               [](const T &value) { return std::make_pair(value, C(1)); });
-            } else {
-                std::copy(begin, end, this->data_.begin() + offset.value());
-            }
+        if constexpr (std::is_same<T, std::decay_t<decltype(*begin)>>::value) {
+            std::transform(begin, end, this->data_.begin() + offset, [](const T &value) {
+                return std::make_pair(value, static_cast<C>(1));
+            });
+        } else {
+            std::copy(begin, end, this->data_.begin() + offset);
         }
     }
 
@@ -107,7 +109,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
                     dest->second = max_count();
                 }
             } else {
-                *++dest = std::move(*first);;
+                *++dest = std::move(*first);
             }
         }
 

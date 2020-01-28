@@ -66,13 +66,10 @@ class SortedSetDiskBase {
      * after which the buffer is cleared.
      */
     template <class Iterator>
-    std::optional<size_t> prepare_insert(Iterator begin, Iterator end) {
+    size_t prepare_insert(Iterator begin, Iterator end) {
         assert(begin <= end);
 
         uint64_t batch_size = end - begin;
-
-        if (!batch_size)
-            return {};
 
         assert(batch_size <= data_.capacity()
                        && "Batch size exceeded the buffer's capacity.");
@@ -111,6 +108,7 @@ class SortedSetDiskBase {
             async_worker_.join(); // make sure all pending data was written
             start_merging();
         }
+        return merge_queue_;
     }
 
     void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {}) {
