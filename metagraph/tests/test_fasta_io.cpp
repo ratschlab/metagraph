@@ -78,6 +78,33 @@ TEST(FastaFile, full_iterator_read_100K) {
     std::filesystem::remove(dump_filename);
 }
 
+// test that seek works fast so we can copy an iterator very quickly
+TEST(FastaFile, full_iterator_read_100K_fast_copy) {
+    {
+        FastaWriter writer(dump_filename, "seq", true);
+        for (size_t i = 0; i < 100'000; ++i) {
+            writer.write(std::string(i % 1'000, 'A'));
+        }
+    }
+
+    FastaParser fasta_parser(dump_filename);
+    FastaParser::iterator copy;
+
+    size_t total_size = 0;
+
+    // on each iteration, copy the current iterator 50 times
+    for (auto it = fasta_parser.begin(); it != fasta_parser.end(); ++it) {
+        for (size_t i = 0; i < 50; ++i) {
+            copy = it;
+            total_size += copy->seq.l;
+        }
+    }
+
+    EXPECT_EQ(49'950'000u * 50, total_size);
+
+    std::filesystem::remove(dump_filename);
+}
+
 TEST(FastaFile, twice_iterator_read_empty) {
     {
         FastaWriter writer(dump_filename, "seq", true);

@@ -164,7 +164,6 @@ class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
     explicit iterator(const std::string &filename);
 
     std::string filename_;
-    gzFile input_p_ = Z_NULL;
     kseq_t *read_stream_ = NULL;
 };
 
