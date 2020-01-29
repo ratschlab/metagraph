@@ -10,7 +10,6 @@
 #include <cassert>
 
 #include <json/json.h>
-#include <sdsl/int_vector.hpp>
 #include <tsl/ordered_map.h>
 
 #include "common/seq_tools/reverse_complement.hpp"
