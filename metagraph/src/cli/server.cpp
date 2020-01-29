@@ -50,7 +50,7 @@ std::string form_client_reply(const std::string &received_message,
         auto discovery_fraction = json.get("discovery_fraction",
                                            config.discovery_fraction).asDouble();
         auto count_labels = json.get("count_labels", config.count_labels).asBool();
-        auto print_signature = json.get("print_signature", config.count_labels).asBool();
+        auto print_signature = json.get("print_signature", config.print_signature).asBool();
         auto num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
 
         std::ostringstream oss;
