@@ -291,13 +291,21 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
 
     auto it = label_codes.begin();
     for (const auto &[row, indices] : index_locations) {
+        // Each row in the annotation matrix is associated with a set of
+        // indices in the input sequence's k-mer sequence.
+        // Each row is also associated with a vector in label_codes indicating
+        // the codes for that row's associated labels.
         for (const auto &code : *it) {
+            // generate a k-mer sequence presence mask for the input sequence
+            // to indicate which k-mers are associated with this label code
             auto &vector_count = label_codes_to_presence[code];
 
             if (vector_count.first.empty())
                 vector_count.first.resize(size, 0);
 
             for (size_t i : indices) {
+                // set index i in the k-mer presence vector to true (i.e., all ones)
+                // and increment the popcount if it wasn't previously set
                 vector_count.second += !vector_count.first[i];
                 vector_count.first[i] = 0xFF;
             }
