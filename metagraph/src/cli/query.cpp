@@ -307,7 +307,7 @@ int query_graph(Config *config) {
     auto graph = load_critical_dbg(config->infbase);
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 
-    ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
+    ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 
     Timer timer;
 
@@ -326,7 +326,7 @@ int query_graph(Config *config) {
 
         const auto *graph_to_query = anno_graph.get();
 
-        auto query_seq = [&](kseq_t *read_stream) {
+        auto query_seq_async = [&](kseq_t *read_stream) {
             thread_pool.enqueue(execute_query,
                 fmt::format_int(seq_count++).str() + "\t"
                     + read_stream->name.s,
@@ -374,10 +374,10 @@ int query_graph(Config *config) {
                 graph_to_query = query_graph.get();
 
                 for ( ; begin != it; ++begin) {
-                    query_seq(&*begin);
+                    query_seq_async(&*begin);
                     if (config->forward_and_reverse) {
                         reverse_complement(begin->seq);
-                        query_seq(&*begin);
+                        query_seq_async(&*begin);
                     }
                 }
 
@@ -386,7 +386,7 @@ int query_graph(Config *config) {
             }
 
         } else {
-            read_fasta_file_critical(file, query_seq, config->forward_and_reverse);
+            read_fasta_file_critical(file, query_seq_async, config->forward_and_reverse);
         }
 
         // wait while all threads finish processing the current file
