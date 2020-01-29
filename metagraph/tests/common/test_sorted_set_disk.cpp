@@ -45,7 +45,7 @@ common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8,
 
 TYPED_TEST(SortedSetDiskTest, Empty) {
     constexpr size_t container_size = 8;
-    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+    for (uint32_t cached = 1; cached < container_size / 3; ++cached) {
         common::SortedSetDisk<TypeParam> underTest
                 = create_sorted_set_disk<TypeParam>(container_size, cached);
         expect_equals(underTest, {});
@@ -54,7 +54,7 @@ TYPED_TEST(SortedSetDiskTest, Empty) {
 
 TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
     constexpr size_t container_size = 8;
-    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+    for (uint32_t cached = 1; cached < container_size / 3; ++cached) {
         common::SortedSetDisk<TypeParam> underTest
                 = create_sorted_set_disk<TypeParam>(container_size, cached);
         std::array<TypeParam, 1> elements = { 42 };
@@ -65,7 +65,7 @@ TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
 
 TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
     constexpr size_t container_size = 8;
-    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+    for (uint32_t cached = 1; cached < container_size / 3; ++cached) {
         common::SortedSetDisk<TypeParam> underTest
                 = create_sorted_set_disk<TypeParam>(container_size, cached);
         std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
@@ -79,7 +79,7 @@ TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
  */
 TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
     constexpr size_t container_size = 8;
-    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+    for (uint32_t cached = 1; cached < container_size / 3; ++cached) {
         common::SortedSetDisk<TypeParam> underTest
                 = create_sorted_set_disk<TypeParam>(container_size, cached);
         std::vector<TypeParam> elements = { 42, 43, 44, 45 };
@@ -94,7 +94,7 @@ TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
     constexpr size_t container_size = 8;
-    for (uint32_t cached = 0; cached < container_size / 3; ++cached) {
+    for (uint32_t cached = 1; cached < container_size / 3; ++cached) {
         common::SortedSetDisk<TypeParam> underTest
                 = create_sorted_set_disk<TypeParam>(container_size, cached);
         std::vector<TypeParam> expected_result;

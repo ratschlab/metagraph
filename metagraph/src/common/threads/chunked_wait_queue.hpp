@@ -82,6 +82,7 @@ class ChunkedWaitQueue {
           buffer_(buffer_size),
           end_iterator_(Iterator(this, std::min(WRITE_BUF_SIZE, chunk_size_), buffer_size)),
           is_shutdown_(false) {
+        assert(fence_size > 0);
         assert(fence_size < buffer_size);
         write_buf_.reserve(std::min(WRITE_BUF_SIZE, chunk_size_));
     }
@@ -197,9 +198,9 @@ class ChunkedWaitQueue {
   private:
     /**
      * Returns true if the queue is empty. This can happen only before an element is
-     * added. Once an element is added, the queue will never be empty again (because
-     * the queue will always keep at least #fence_size_+1 elements for backwards
-     * iteration).
+     * added. Once an element is added, the queue will never be empty again, because
+     * the queue will always keep at least #fence_size_ elements for backwards
+     * iteration.
      */
     bool empty() const { return last_ == buffer_size_; }
 
@@ -322,7 +323,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         read_buf_idx_ = fence_size; // moved here to reduce size of critical section
         std::unique_lock<std::mutex> l(queue_->mutex_);
         // make some room, if possible
-        if (dist_to_first() > queue_->chunk_size_ + fence_size) {
+        if (elements_read() > queue_->chunk_size_ + fence_size) {
             queue_->pop_chunk();
         }
         if (!can_read_from_queue()) {
@@ -336,7 +337,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
                 return *this;
             }
             // the queue may have filled up while we were sleeping; make some room
-            if (dist_to_first() > queue_->chunk_size_ + fence_size) {
+            if (elements_read() > queue_->chunk_size_ + fence_size) {
                 queue_->pop_chunk();
             }
         }
@@ -384,10 +385,10 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
 
   private:
     /** Returns the number of elements between the current element and the oldest */
-    size_type dist_to_first() const {
+    size_type elements_read() const {
         // idx_ points to the current element, hence the '+1' in the result
         return idx_ >= queue_->first_ ? idx_ - queue_->first_ + 1
-                                       : queue_->buffer_size_ + idx_ - queue_->first_ + 1;
+                                      : queue_->buffer_size_ + idx_ - queue_->first_ + 1;
     }
 
     /** Returns true if the iterator can be incremented without blocking */

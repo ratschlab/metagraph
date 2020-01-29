@@ -40,21 +40,20 @@ TEST(WaitQueue, PushPop) {
 }
 
 TEST(WaitQueue, Shutdown) {
-    for (uint32_t fence_size = 0; fence_size < 2; ++fence_size) {
-        ChunkedWaitQueue<std::string> under_test(20, fence_size);
+        ChunkedWaitQueue<std::string> under_test(20, 3);
         under_test.shutdown();
         std::string v;
         EXPECT_TRUE(under_test.begin() == under_test.end());
-    }
 }
 
 void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
-    for (uint32_t fence_size = 0; fence_size <= 10; fence_size += 5) {
-        ChunkedWaitQueue<int32_t> under_test(50, 10);
+    for (uint32_t fence_size = 1; fence_size <= 11; fence_size += 5) {
+        ChunkedWaitQueue<int32_t> under_test(50, fence_size);
         struct Receiver {
             ChunkedWaitQueue<int32_t> *const under_test;
             uint32_t delay_read_ms;
             std::vector<int32_t> pop_result;
+            uint32_t fence_size;
 
             void run() {
                 uint32_t count = 0;
@@ -63,7 +62,7 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(delay_read_ms));
                     }
                     int32_t v = *it;
-                    uint32_t steps = std::min(10U, count);
+                    uint32_t steps = std::min(std::min(10U, count), fence_size);
                     for (uint32_t i = 0; i < steps; ++i) {
                         --it;
                     }
@@ -76,7 +75,7 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
             }
         };
 
-        Receiver receiver { &under_test, delay_read_ms, {} };
+        Receiver receiver { &under_test, delay_read_ms, {}, fence_size };
 
         // start 1 receiver thread eager to consume data
         std::thread receiverThread(std::bind(&Receiver::run, std::ref(receiver)));
