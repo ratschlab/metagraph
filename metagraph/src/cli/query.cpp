@@ -38,16 +38,18 @@ void execute_query(const std::string &seq_name,
     output.reserve(1'000);
 
     if (print_signature) {
-        auto signature = anno_graph.get_top_label_signatures(sequence,
-                                                             num_top_labels,
-                                                             discovery_fraction);
+        auto kmer_presence_masks = anno_graph.get_top_label_signatures(
+            sequence,
+            num_top_labels,
+            discovery_fraction
+        );
 
-        if (!signature.size() && suppress_unlabeled)
+        if (!kmer_presence_masks.size() && suppress_unlabeled)
             return;
 
         output += seq_name;
 
-        for (const auto &[label, kmer_presence_mask] : signature) {
+        for (const auto &[label, kmer_presence_mask] : kmer_presence_masks) {
             output += fmt::format(
                 "\t<{}>:{}:{}:{}",
                 label,
