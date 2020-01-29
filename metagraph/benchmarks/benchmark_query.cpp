@@ -14,7 +14,8 @@ namespace mg {
 namespace bm {
 
 std::vector<std::string> queries {
-    "../tests/data/transcripts_100.fa"
+    "../tests/data/transcripts_100.fa",
+    "../tests/data/transcripts_1000.fa",
 };
 
 enum QueryMode : bool { NORMAL, FAST };
