@@ -482,7 +482,7 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
         if (!(i & 0x3F) && i + 64 <= presence.size()) {
             // if at a word boundary and the next word is either all zeros or
             // all ones
-            const auto word = presence.get_int(i);
+            const uint64_t word = presence.get_int(i);
             if (!word || !(~word)) {
                 if ((!word && last_block) || (!(~word) && !last_block)) {
                     table[last_block].emplace_back(last_size + correction);
