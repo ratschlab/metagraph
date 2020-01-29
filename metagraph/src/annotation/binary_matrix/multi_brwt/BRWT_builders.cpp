@@ -18,7 +18,9 @@ BRWTBuilder::initialize(NodeBRWT&& node, bit_vector&& nonzero_rows) {
 
     brwt.assignments_ = RangePartition(node.column_arrangement,
                                        node.group_sizes);
-    brwt.nonzero_rows_ = nonzero_rows.convert_to<bit_vector_small>();
+    brwt.nonzero_rows_ = std::make_unique<bit_vector_small>(
+        nonzero_rows.convert_to<bit_vector_small>()
+    );
 
     brwt.child_nodes_ = std::move(node.child_nodes);
 
@@ -303,7 +305,7 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& brwts,
 
         node.child_nodes = std::move(brwt.child_nodes_);
 
-        columns.emplace_back(new bit_vector_small(std::move(brwt.nonzero_rows_)));
+        columns.push_back(std::move(brwt.nonzero_rows_));
     }
 
     return merge(std::move(columns),
@@ -359,7 +361,7 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix,
         }
 
         parent = BRWTBuilder::initialize(std::move(updated_parent),
-                                         std::move(parent.nonzero_rows_));
+                                         std::move(*parent.nonzero_rows_));
 
         ++progress_bar;
     }
@@ -417,7 +419,8 @@ void BRWTOptimizer::reassign(std::unique_ptr<BRWT>&& node,
 
     // TODO: assignemnts?
 
-    const auto node_index = node->nonzero_rows_.convert_to<bit_vector_stat>();
+    const auto node_index = node->nonzero_rows_->convert_to<sdsl::bit_vector>();
+    node->nonzero_rows_.reset();
 
     auto offset = parent->group_sizes.size();
 
@@ -437,14 +440,15 @@ void BRWTOptimizer::reassign(std::unique_ptr<BRWT>&& node,
         sdsl::bit_vector subindex(node_index.size(), false);
 
         uint64_t child_i = 0;
-        node_index.call_ones([&](auto i) {
-            if (grand_child->nonzero_rows_[child_i])
+        call_ones(node_index, [&](auto i) {
+            if ((*grand_child->nonzero_rows_)[child_i])
                 subindex[i] = true;
 
             child_i++;
         });
 
-        grand_child->nonzero_rows_ = bit_vector_small(subindex);
+        grand_child->nonzero_rows_
+            = std::make_unique<bit_vector_small>(std::move(subindex));
 
         parent->group_sizes[offset + i] = grand_child->num_columns();
         parent->child_nodes[offset + i] = std::move(grand_child);
@@ -461,23 +465,23 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
         assert(brwt_child);
 
         assert(brwt_child->num_rows() <= node.num_rows());
-        assert(brwt_child->nonzero_rows_.size() <= node.num_rows());
+        assert(brwt_child->nonzero_rows_->size() <= node.num_rows());
 
         // updated vector
-        delta += predict_size<decltype(brwt_child->nonzero_rows_)>(
+        delta += predict_size<bit_vector_small>(
                         node.num_rows(),
-                        brwt_child->nonzero_rows_.num_set_bits());
+                        brwt_child->nonzero_rows_->num_set_bits());
 
         // old index vector
-        delta -= predict_size<decltype(brwt_child->nonzero_rows_)>(
-                        brwt_child->nonzero_rows_.size(),
-                        brwt_child->nonzero_rows_.num_set_bits());
+        delta -= predict_size<bit_vector_small>(
+                        brwt_child->nonzero_rows_->size(),
+                        brwt_child->nonzero_rows_->num_set_bits());
     }
 
     // removed index vector
-    delta -= predict_size<decltype(node.nonzero_rows_)>(
-                    node.nonzero_rows_.size(),
-                    node.nonzero_rows_.num_set_bits());
+    delta -= predict_size<bit_vector_small>(
+                    node.nonzero_rows_->size(),
+                    node.nonzero_rows_->num_set_bits());
 
     return delta;
 }

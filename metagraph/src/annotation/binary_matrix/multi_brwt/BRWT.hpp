@@ -10,11 +10,7 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
-// Compress sparse binary matrix (binary relations)
-// using the BRWT structure described in:
-// Barbay, Jérémy, Francisco Claude, and Gonzalo Navarro.
-// "Compact binary relation representations with rich functionality."
-// Information and Computation 232 (2013): 19-37.
+// The Multi-BRWT compressed binary matrix representation
 class BRWT : public BinaryMatrix {
     friend class BRWTBuilder;
     friend class BRWTBottomUpBuilder;
@@ -23,16 +19,16 @@ class BRWT : public BinaryMatrix {
     typedef uint32_t Child;
 
   public:
-    BRWT() = default;
+    BRWT() : nonzero_rows_(new bit_vector_small()) {}
 
-    BRWT(const BRWT &other) = default;
-    BRWT& operator=(const BRWT &other) = default;
+    BRWT(const BRWT &other) = delete;
+    BRWT& operator=(const BRWT &other) = delete;
 
     BRWT(BRWT&& other) = default;
     BRWT& operator=(BRWT&& other) = default;
 
     uint64_t num_columns() const { return assignments_.size(); }
-    uint64_t num_rows() const { return nonzero_rows_.size(); }
+    uint64_t num_rows() const { return nonzero_rows_->size(); }
 
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
@@ -60,7 +56,7 @@ class BRWT : public BinaryMatrix {
 
     // assigns columns to the child nodes
     RangePartition assignments_;
-    bit_vector_small nonzero_rows_;
+    std::unique_ptr<bit_vector> nonzero_rows_;
     std::vector<std::unique_ptr<BinaryMatrix>> child_nodes_;
 };
 

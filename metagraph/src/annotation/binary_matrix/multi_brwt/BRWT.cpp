@@ -12,7 +12,7 @@ bool BRWT::get(Row row, Column column) const {
     assert(column < num_columns());
 
     // terminate if the index bit is unset
-    if (!nonzero_rows_[row])
+    if (!(*nonzero_rows_)[row])
         return false;
 
     // return true if this is a leaf
@@ -20,7 +20,7 @@ bool BRWT::get(Row row, Column column) const {
         return true;
 
     auto child_node = assignments_.group(column);
-    return child_nodes_[child_node]->get(nonzero_rows_.rank1(row) - 1,
+    return child_nodes_[child_node]->get(nonzero_rows_->rank1(row) - 1,
                                          assignments_.rank(column));
 }
 
@@ -28,7 +28,7 @@ BRWT::SetBitPositions BRWT::get_row(Row row) const {
     assert(row < num_rows());
 
     // check if the row is empty
-    if (!nonzero_rows_[row])
+    if (!(*nonzero_rows_)[row])
         return {};
 
     // check whether it is a leaf
@@ -41,7 +41,7 @@ BRWT::SetBitPositions BRWT::get_row(Row row) const {
 
     // check all child nodes
     SetBitPositions row_set_bits;
-    uint64_t index_in_child = nonzero_rows_.rank1(row) - 1;
+    uint64_t index_in_child = nonzero_rows_->rank1(row) - 1;
 
     for (size_t i = 0; i < child_nodes_.size(); ++i) {
         const auto &child = *child_nodes_[i];
@@ -64,7 +64,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
         for (size_t i = 0; i < row_ids.size(); ++i) {
             assert(row_ids[i] < num_rows());
 
-            if (nonzero_rows_[row_ids[i]])
+            if ((*nonzero_rows_)[row_ids[i]])
                 rows[i] = utils::arange<Column, SetBitPositions>(0, assignments_.size());
         }
 
@@ -87,9 +87,9 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
         if (i + 2 < row_ids.size()
                 && row_ids[i + 2] < global_offset + 64
                 && row_ids[i + 2] >= global_offset
-                && global_offset + 64 <= nonzero_rows_.size()) {
+                && global_offset + 64 <= nonzero_rows_->size()) {
             // get the word
-            uint64_t word = nonzero_rows_.get_int(global_offset, 64);
+            uint64_t word = nonzero_rows_->get_int(global_offset, 64);
             uint64_t rank = -1ULL;
 
             do {
@@ -98,7 +98,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
                 if (word & (1ULL << offset)) {
                     if (rank == -1ULL)
                         rank = global_offset > 0
-                                ? nonzero_rows_.rank1(global_offset - 1)
+                                ? nonzero_rows_->rank1(global_offset - 1)
                                 : 0;
 
                     // map index from parent's to children's coordinate system
@@ -112,9 +112,9 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
 
         } else {
             // check index
-            if (nonzero_rows_[global_offset]) {
+            if ((*nonzero_rows_)[global_offset]) {
                 // map index from parent's to children's coordinate system
-                child_row_ids.push_back(nonzero_rows_.rank1(global_offset) - 1);
+                child_row_ids.push_back(nonzero_rows_->rank1(global_offset) - 1);
                 from_child_to_parent.push_back(i);
             }
         }
@@ -141,7 +141,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {
     assert(column < num_columns());
 
-    auto num_nonzero_rows = nonzero_rows_.num_set_bits();
+    auto num_nonzero_rows = nonzero_rows_->num_set_bits();
 
     // check if the column is empty
     if (!num_nonzero_rows)
@@ -152,7 +152,7 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
         // return the index column
         std::vector<BRWT::Row> result;
         result.reserve(num_nonzero_rows);
-        nonzero_rows_.call_ones([&](auto i) { result.push_back(i); });
+        nonzero_rows_->call_ones([&](auto i) { result.push_back(i); });
         return result;
     }
 
@@ -160,12 +160,12 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
     auto rows = child_nodes_[child_node]->get_column(assignments_.rank(column));
 
     // check if we need to update the row indexes
-    if (num_nonzero_rows == nonzero_rows_.size())
+    if (num_nonzero_rows == nonzero_rows_->size())
         return rows;
 
     // shift indexes
     for (size_t i = 0; i < rows.size(); ++i) {
-        rows[i] = nonzero_rows_.select1(rows[i] + 1);
+        rows[i] = nonzero_rows_->select1(rows[i] + 1);
     }
     return rows;
 }
@@ -178,7 +178,7 @@ bool BRWT::load(std::istream &in) {
         if (!assignments_.load(in))
             return false;
 
-        if (!nonzero_rows_.load(in))
+        if (!nonzero_rows_->load(in))
             return false;
 
         size_t num_child_nodes = load_number(in);
@@ -205,7 +205,7 @@ void BRWT::serialize(std::ostream &out) const {
     assert(!child_nodes_.size()
                 || child_nodes_.size() == assignments_.num_groups());
 
-    nonzero_rows_.serialize(out);
+    nonzero_rows_->serialize(out);
 
     serialize_number(out, child_nodes_.size());
     for (const auto &child : child_nodes_) {
@@ -215,7 +215,7 @@ void BRWT::serialize(std::ostream &out) const {
 
 uint64_t BRWT::num_relations() const {
     if (!child_nodes_.size())
-        return nonzero_rows_.num_set_bits();
+        return nonzero_rows_->num_set_bits();
 
     uint64_t num_set_bits = 0;
     for (const auto &submatrix_ptr : child_nodes_) {
@@ -259,8 +259,8 @@ double BRWT::shrinking_rate() const {
     BFT([&](const BRWT &node) {
         if (node.child_nodes_.size()) {
             num_nodes++;
-            rate_sum += static_cast<double>(node.nonzero_rows_.num_set_bits())
-                            / node.nonzero_rows_.size();
+            rate_sum += static_cast<double>(node.nonzero_rows_->num_set_bits())
+                            / node.nonzero_rows_->size();
         }
     });
 
@@ -271,7 +271,7 @@ uint64_t BRWT::total_column_size() const {
     uint64_t total_size = 0;
 
     BFT([&](const BRWT &node) {
-        total_size += node.nonzero_rows_.size();
+        total_size += node.nonzero_rows_->size();
     });
 
     return total_size;
@@ -281,7 +281,7 @@ uint64_t BRWT::total_num_set_bits() const {
     uint64_t total_num_set_bits = 0;
 
     BFT([&](const BRWT &node) {
-        total_num_set_bits += node.nonzero_rows_.num_set_bits();
+        total_num_set_bits += node.nonzero_rows_->num_set_bits();
     });
 
     return total_num_set_bits;
@@ -290,8 +290,8 @@ uint64_t BRWT::total_num_set_bits() const {
 void BRWT::print_tree_structure(std::ostream &os) const {
     BFT([&os](const BRWT &node) {
         // print node and its stats
-        os << &node << "," << node.nonzero_rows_.size()
-                    << "," << node.nonzero_rows_.num_set_bits();
+        os << &node << "," << node.nonzero_rows_->size()
+                    << "," << node.nonzero_rows_->num_set_bits();
         // print all its children
         for (const auto &child : node.child_nodes_) {
             os << "," << child.get();
