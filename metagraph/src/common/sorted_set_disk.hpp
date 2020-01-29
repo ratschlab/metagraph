@@ -208,7 +208,7 @@ class SortedSetDiskBase {
     template <typename Iterator>
     Iterator safe_advance(const Iterator &it, const Iterator &end, size_t step) {
         assert(it <= end);
-        return end - it < this->buffer_size() ? end : it + step;
+        return static_cast<size_t>(end - it) < this->buffer_size() ? end : it + step;
     }
 
     /**

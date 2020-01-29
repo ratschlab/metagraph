@@ -27,6 +27,8 @@ namespace common {
 template <typename T, typename C = uint8_t>
 class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
   public:
+    typedef T key_type;
+    typedef C count_type;
     typedef std::pair<T, C> value_type;
     typedef Vector<value_type> storage_type;
     typedef ChunkedWaitQueue<value_type> result_type;
@@ -98,7 +100,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
                 [](const value_type &first, const value_type &second) {
                     return first.first < second.first;
                 },
-                this->num_threads_);
+                num_threads);
 
         auto first = vector->begin();
         auto last = vector->end();
