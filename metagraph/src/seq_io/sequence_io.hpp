@@ -133,7 +133,7 @@ class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
     iterator& operator=(const iterator &other);
     iterator& operator=(iterator&& other);
 
-    ~iterator();
+    ~iterator() { deinit_stream(); }
 
     kseq_t& operator*() { return *read_stream_; }
     const kseq_t& operator*() const { return *read_stream_; }
@@ -162,6 +162,7 @@ class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
 
   private:
     explicit iterator(const std::string &filename);
+    void deinit_stream();
 
     std::string filename_;
     kseq_t *read_stream_ = NULL;

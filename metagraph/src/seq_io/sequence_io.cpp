@@ -177,7 +177,7 @@ FastaParser::iterator::iterator(iterator&& other) { *this = std::move(other); }
 FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
     if (!other.read_stream_) {
         // free memory, reset members and return
-        this->~iterator();
+        deinit_stream();
         filename_.clear();
         read_stream_ = NULL;
         return *this;
@@ -210,6 +210,10 @@ FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
             if (kstr.m != other_kstr.m) { \
                 kstr.m = other_kstr.m; \
                 kstr.s = (char*)realloc(kstr.s, kstr.m); \
+                if (!kstr.s) { \
+                    std::cerr << "ERROR: realloc failed" << std::endl; \
+                    exit(1); \
+                } \
             } \
             memcpy(kstr.s, other_kstr.s, other_kstr.m); \
 
@@ -232,6 +236,10 @@ FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
     if (f->bufsize != other_f->bufsize) {
         f->bufsize = other_f->bufsize;
         f->buf = (unsigned char*)realloc(f->buf, f->bufsize);
+        if (!f->buf) {
+            std::cerr << "ERROR: realloc failed" << std::endl;
+            exit(1);
+        }
     }
     memcpy(f->buf, other_f->buf, other_f->bufsize);
 
@@ -262,7 +270,7 @@ FastaParser::iterator::iterator(const std::string &filename)
     ++(*this);
 }
 
-FastaParser::iterator::~iterator() {
+void FastaParser::iterator::deinit_stream() {
     if (read_stream_) {
         gzFile input_p = read_stream_->f->f;
         kseq_destroy(read_stream_);

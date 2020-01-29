@@ -374,6 +374,8 @@ int query_graph(Config *config) {
                 graph_to_query = query_graph.get();
 
                 for ( ; begin != it; ++begin) {
+                    assert(begin != end);
+
                     query_seq_async(&*begin);
                     if (config->forward_and_reverse) {
                         reverse_complement(begin->seq);
