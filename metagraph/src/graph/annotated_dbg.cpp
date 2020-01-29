@@ -260,7 +260,7 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
-            index_locations[graph_to_anno_index(i)].emplace_back(
+            index_locations[graph_to_anno_index(i)].push_back(
                 num_present_kmers + num_missing_kmers
             );
 
@@ -292,29 +292,21 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     auto it = label_codes.begin();
     for (const auto &[row, indices] : index_locations) {
         for (const auto &code : *it) {
-            auto find = label_codes_to_presence.find(code);
-            if (find == label_codes_to_presence.end()) {
-                find = label_codes_to_presence.emplace(
-                    code,
-                    VectorCount { std::vector<uint8_t>(size, 0), 0 }
-                ).first;
-            }
+            auto &vector_count = label_codes_to_presence[code];
 
-            assert(find != label_codes_to_presence.end());
+            if (vector_count.first.empty())
+                vector_count.first.resize(size, 0);
 
-            auto &vector = find.value().first;
             for (size_t i : indices) {
-                find.value().second += !vector[i];
-                vector[i] = 0xFF;
+                vector_count.second += !vector_count.first[i];
+                vector_count.first[i] = 0xFF;
             }
         }
 
         ++it;
     }
 
-    auto vector = const_cast<Storage&&>(
-        std::move(label_codes_to_presence).values_container()
-    );
+    auto vector = const_cast<Storage&&>(label_codes_to_presence.values_container());
 
     bool is_sorted = num_top_labels <= vector.size();
     if (is_sorted) {
@@ -462,6 +454,8 @@ sdsl::bit_vector smooth_bit_vector(const sdsl::bit_vector &vector) {
 std::array<AlignedVector<size_t>, 2>
 tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
     std::array<AlignedVector<size_t>, 2> table;
+    table[0].reserve(presence.size());
+    table[1].reserve(presence.size());
 
     if (!presence.size())
         return table;
@@ -472,7 +466,7 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
 
     if (presence.size() >= 64) {
         const auto word = *presence.data();
-        if (!word || !(~word)) {
+        if (!word || word == 0xFFFFFFFFFFFFFFFF) {
             last_size = 64;
             i = 64;
         }
@@ -483,9 +477,9 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
             // if at a word boundary and the next word is either all zeros or
             // all ones
             const uint64_t word = presence.get_int(i);
-            if (!word || !(~word)) {
-                if ((!word && last_block) || (!(~word) && !last_block)) {
-                    table[last_block].emplace_back(last_size + correction);
+            if (!word || word == 0xFFFFFFFFFFFFFFFF) {
+                if ((!word && last_block) || (word == 0xFFFFFFFFFFFFFFFF && !last_block)) {
+                    table[last_block].push_back(last_size + correction);
                     last_block = !last_block;
                     last_size = 0;
                 }
@@ -499,13 +493,13 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
         if (last_block == presence[i]) {
             ++last_size;
         } else {
-            table[last_block].emplace_back(last_size + correction);
+            table[last_block].push_back(last_size + correction);
             last_block = !last_block;
             last_size = 1;
         }
     }
 
-    table[last_block].emplace_back(last_size);
+    table[last_block].push_back(last_size);
 
     assert(std::accumulate(table[0].begin(), table[0].end(), size_t(0))
          + std::accumulate(table[1].begin(), table[1].end(), size_t(0))
@@ -575,6 +569,7 @@ __m256d get_penalty_bigsi_avx2(__m256d counts,
     return penalties;
 }
 
+// TODO: create a simd_utils.hpp and move this there so it can be in unit tests
 // based off of:
 // https://stackoverflow.com/questions/41144668/how-to-efficiently-perform-double-int64-conversions-with-sse-avx
 __m256d uint64_to_double(__m256i x) {

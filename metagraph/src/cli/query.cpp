@@ -310,7 +310,7 @@ int query_graph(Config *config) {
     Timer timer;
 
     std::unique_ptr<IDBGAligner> aligner;
-    if (config->align_sequences && !config->fast)
+    if (config->align_sequences)
         aligner.reset(build_aligner(*graph, *config).release());
 
     // iterate over input files
