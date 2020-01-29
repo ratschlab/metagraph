@@ -18,7 +18,7 @@
 #include "load/load_annotated_graph.hpp"
 #include "align.hpp"
 
-static const size_t kRowBatchSize = 100'000;
+const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 
 using mg::common::logger;
@@ -305,13 +305,23 @@ int query_graph(Config *config) {
     auto graph = load_critical_dbg(config->infbase);
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 
-    ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
+    ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 
     Timer timer;
 
     std::unique_ptr<IDBGAligner> aligner;
-    if (config->align_sequences)
-        aligner.reset(build_aligner(*graph, *config).release());
+    if (config->align_sequences) {
+        Config dummy = *config;
+
+        // forward and reverse-complement alignments already handled below
+        dummy.forward_and_reverse = false;
+
+        // only find the top match
+        dummy.alignment_num_alternative_paths = 1;
+        aligner = build_aligner(*graph, dummy);
+    }
+
+    std::vector<std::pair<std::string, std::string>> named_alignments;
 
     // iterate over input files
     for (const auto &file : files) {
@@ -323,53 +333,10 @@ int query_graph(Config *config) {
 
         const auto *graph_to_query = anno_graph.get();
 
-        // Graph constructed from a batch of queried sequences
-        // Used only in fast mode
-        std::unique_ptr<AnnotatedDBG> query_graph;
-        std::vector<std::pair<std::string, std::string>> named_queries;
-
-        if (aligner) {
-            read_fasta_file_critical(
-                file,
-                [&](kseq_t *seq) {
-                    std::string query(seq->seq.s);
-                    auto alignments = aligner->align(query);
-                    named_queries.emplace_back(
-                        alignments.size() ? std::move(alignments.front().get_sequence())
-                                          : std::move(query),
-                        seq->name.s
-                    );
-                }
-            );
-        } else {
-            read_fasta_file_critical(
-                file,
-                [&](kseq_t *seq) { named_queries.emplace_back(seq->seq.s, seq->name.s); },
-                config->forward_and_reverse
-            );
-        }
-
-        if (config->fast) {
-            query_graph = construct_query_graph(*anno_graph,
-                [&](auto call_sequence) {
-                    for (const auto &[query, name] : named_queries) {
-                        call_sequence(query);
-                    }
-                },
-                config->count_labels ? 0 : config->discovery_fraction,
-                get_num_threads()
-            );
-
-            graph_to_query = query_graph.get();
-
-            logger->trace("Query graph constructed for '{}' in {} sec",
-                          file, curr_timer.elapsed());
-        }
-
-        for (const auto &[query, name] : named_queries) {
+        auto query_seq_async = [&](std::string&& name, std::string&& seq) {
             thread_pool.enqueue(execute_query,
                 fmt::format_int(seq_count++).str() + "\t" + name,
-                std::string(query),
+                std::move(seq),
                 config->count_labels,
                 config->print_signature,
                 config->suppress_unlabeled,
@@ -379,6 +346,120 @@ int query_graph(Config *config) {
                 std::ref(*graph_to_query),
                 std::ref(std::cout)
             );
+        };
+
+        auto query_seq_kseq_async = [&](kseq_t *read_stream) {
+            query_seq_async(read_stream->name.s, read_stream->seq.s);
+        };
+
+        auto get_alignment_match = [&](const kstring_t &seq) -> std::string {
+            auto alignments = aligner->align(seq.s);
+            if (alignments.size())
+                return const_cast<std::string&&>(alignments.front().get_sequence());
+
+            return seq.s;
+        };
+
+        // Graph constructed from a batch of queried sequences
+        // Used only in fast mode
+        if (config->fast) {
+            FastaParser fasta_parser(file);
+            auto begin = fasta_parser.begin();
+            auto end = fasta_parser.end();
+
+            const uint64_t batch_size = config->query_batch_size_in_bytes;
+            FastaParser::iterator it;
+
+            while (begin != end) {
+                uint64_t num_bytes_read = 0;
+                auto query_graph = construct_query_graph(*anno_graph,
+                    [&](auto call_sequence) {
+                        num_bytes_read = 0;
+                        named_alignments.clear();
+                        for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
+                            if (!aligner) {
+                                call_sequence(it->seq.s);
+                                num_bytes_read += it->seq.l;
+                                if (config->forward_and_reverse) {
+                                    reverse_complement(it->seq);
+                                    call_sequence(it->seq.s);
+                                    num_bytes_read += it->seq.l;
+                                }
+
+                                continue;
+                            }
+
+                            // Align the sequence, then add the best match
+                            // in the graph to the query graph.
+                            // Store the alignment for later
+                            named_alignments.emplace_back(
+                                it->name.s,
+                                get_alignment_match(it->seq)
+                            );
+                            call_sequence(named_alignments.back().second);
+                            num_bytes_read += named_alignments.back().second.length();
+
+                            if (config->forward_and_reverse) {
+                                reverse_complement(it->seq);
+                                named_alignments.emplace_back(
+                                    it->name.s,
+                                    get_alignment_match(it->seq)
+                                );
+                                call_sequence(named_alignments.back().second);
+                                num_bytes_read += named_alignments.back().second.length();
+                            }
+                        }
+                    },
+                    config->count_labels ? 0 : config->discovery_fraction,
+                    get_num_threads()
+                );
+
+                graph_to_query = query_graph.get();
+
+                for (auto jt = named_alignments.begin(); begin != it; ++begin, ++jt) {
+                    assert(begin != end);
+
+                    if (!aligner) {
+                        query_seq_async(begin->name.s, begin->seq.s);
+                        if (config->forward_and_reverse) {
+                            reverse_complement(begin->seq);
+                            query_seq_async(begin->name.s, begin->seq.s);
+                        }
+                    } else {
+                        // query the previously computed alignments against
+                        // the annotator
+                        query_seq_async(std::move(jt->first),
+                                        std::move(jt->second));
+                        if (config->forward_and_reverse) {
+                            // forward and reverse complement alignments are
+                            // stored interleaved
+                            ++jt;
+                            query_seq_async(std::move(jt->first),
+                                            std::move(jt->second));
+                        }
+                    }
+                }
+
+                logger->trace("Query graph constructed for first {} bytes from '{}' in {} sec",
+                              num_bytes_read, file, curr_timer.elapsed());
+            }
+
+        } else {
+            if (!aligner) {
+                read_fasta_file_critical(file,
+                                         query_seq_kseq_async,
+                                         config->forward_and_reverse);
+            } else {
+                // query the alignment matches against the annotator
+                read_fasta_file_critical(
+                    file,
+                    [&](kseq_t *read_stream) {
+                        query_seq_async(std::string(read_stream->name.s),
+                                        get_alignment_match(read_stream->seq));
+                    },
+                    config->forward_and_reverse
+                );
+            }
         }
 
         // wait while all threads finish processing the current file
