@@ -1,8 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <bitset>
-#include <cstdlib>
-
 #include "all/test_dbg_helpers.hpp"
 #include "test_aligner_helpers.hpp"
 #include "../test_helpers.hpp"
