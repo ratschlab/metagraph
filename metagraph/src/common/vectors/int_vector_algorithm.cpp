@@ -56,7 +56,7 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     size_t j = 0;
     for (; i < vector.size(); ++i, ++j) {
         if (vector[i])
-            last_word |= uint16_t(1) << j;
+            last_word |= static_cast<uint16_t>(1) << j;
     }
 
     result.set_int(last_i, last_word, i - last_i);
