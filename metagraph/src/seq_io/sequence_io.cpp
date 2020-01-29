@@ -205,7 +205,7 @@ FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
 
     gzseek(read_stream_->f->f, gztell(other.read_stream_->f->f), SEEK_SET);
 
-#define copy_kstring(kstr, other_kstr) \
+#define KSTRING_COPY(kstr, other_kstr) \
             kstr.l = other_kstr.l; \
             if (kstr.m != other_kstr.m) { \
                 kstr.m = other_kstr.m; \
@@ -214,10 +214,10 @@ FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
             memcpy(kstr.s, other_kstr.s, other_kstr.m); \
 
     // copy last cached record
-    copy_kstring(read_stream_->name, other.read_stream_->name);
-    copy_kstring(read_stream_->comment, other.read_stream_->comment);
-    copy_kstring(read_stream_->seq, other.read_stream_->seq);
-    copy_kstring(read_stream_->qual, other.read_stream_->qual);
+    KSTRING_COPY(read_stream_->name, other.read_stream_->name);
+    KSTRING_COPY(read_stream_->comment, other.read_stream_->comment);
+    KSTRING_COPY(read_stream_->seq, other.read_stream_->seq);
+    KSTRING_COPY(read_stream_->qual, other.read_stream_->qual);
 
     read_stream_->last_char = other.read_stream_->last_char;
 
