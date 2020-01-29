@@ -102,6 +102,29 @@ class TestQuery(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
             self.assertEqual(len(res.stdout), 136959)
 
+            # query graph (multi-threaded)
+            query_command = '{exe} query -i {graph} -a {annotation} -p {num_theads} {input}'.format(
+                exe=METAGRAPH,
+                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
+                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
+                input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                num_theads=NUM_THREADS
+            )
+            res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(len(res.stdout), 137140)
+
+            query_command = '{exe} query --count-labels -i {graph} -a {annotation} -p {num_theads} {input}'.format(
+                exe=METAGRAPH,
+                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
+                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
+                input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                num_theads=NUM_THREADS
+            )
+            res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(len(res.stdout), 136959)
+
     @parameterized.expand(['succinct'])
     def test_query_graphs_bloom(self, graph_repr):
 
@@ -183,6 +206,29 @@ class TestQuery(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
             self.assertEqual(len(res.stdout), 136959)
 
+            # query graph (multi-threaded)
+            query_command = '{exe} query -i {graph} -a {annotation} -p {num_theads} {input}'.format(
+                exe=METAGRAPH,
+                graph=self.tempdir.name + '/graph.bloom' + graph_file_extension[graph_repr],
+                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
+                input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                num_theads=NUM_THREADS
+            )
+            res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(len(res.stdout), 137140)
+
+            query_command = '{exe} query --count-labels -i {graph} -a {annotation} -p {num_theads} {input}'.format(
+                exe=METAGRAPH,
+                graph=self.tempdir.name + '/graph.bloom' + graph_file_extension[graph_repr],
+                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
+                input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                num_theads=NUM_THREADS
+            )
+            res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(len(res.stdout), 136959)
+
     @parameterized.expand(GRAPH_TYPES)
     def test_query_all_graphs_batch(self, graph_repr):
 
@@ -250,6 +296,29 @@ class TestQuery(unittest.TestCase):
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
                 input=TEST_DATA_DIR + '/transcripts_1000.fa'
+            )
+            res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(len(res.stdout), 136959)
+
+            # query graph (multi-threaded)
+            query_command = '{exe} query --fast -i {graph} -a {annotation} -p {num_threads} {input}'.format(
+                exe=METAGRAPH,
+                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
+                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
+                input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                num_threads=NUM_THREADS
+            )
+            res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(len(res.stdout), 137140)
+
+            query_command = '{exe} query --fast --count-labels -i {graph} -a {annotation} -p {num_threads} {input}'.format(
+                exe=METAGRAPH,
+                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
+                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
+                input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                num_threads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)

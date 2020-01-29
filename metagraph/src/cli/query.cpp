@@ -371,6 +371,8 @@ int query_graph(Config *config) {
             FastaParser::iterator it;
 
             while (begin != end) {
+                Timer batch_timer;
+
                 uint64_t num_bytes_read = 0;
                 auto query_graph = construct_query_graph(*anno_graph,
                     [&](auto call_sequence) {
@@ -416,6 +418,11 @@ int query_graph(Config *config) {
 
                 graph_to_query = query_graph.get();
 
+                logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",
+                              num_bytes_read, file, batch_timer.elapsed());
+
+                batch_timer.reset();
+
                 for (auto jt = named_alignments.begin(); begin != it; ++begin, ++jt) {
                     assert(begin != end);
 
@@ -443,8 +450,10 @@ int query_graph(Config *config) {
                     }
                 }
 
-                logger->trace("Query graph constructed for first {} bytes from '{}' in {} sec",
-                              num_bytes_read, file, curr_timer.elapsed());
+                thread_pool.join();
+
+                logger->trace("Batch of {} bytes from '{}' queried in {} sec",
+                              num_bytes_read, file, batch_timer.elapsed());
             }
 
         } else {
@@ -463,10 +472,10 @@ int query_graph(Config *config) {
                     config->forward_and_reverse
                 );
             }
-        }
 
-        // wait while all threads finish processing the current file
-        thread_pool.join();
+            // wait while all threads finish processing the current file
+            thread_pool.join();
+        }
 
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
                       curr_timer.elapsed(), timer.elapsed());
