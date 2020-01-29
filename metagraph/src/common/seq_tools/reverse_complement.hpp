@@ -64,7 +64,7 @@ void reverse_complement(const Iterator &begin, const Iterator &end) {
 };
 
 inline void reverse_complement(const kstring_t &seq) {
-    reverse_complement(&seq.s[0], &seq.s[0] + seq.l);
+    reverse_complement(seq.s, seq.s + seq.l);
 }
 
 #endif // __REVERSE_COMPLEMENT_HPP__

@@ -136,6 +136,8 @@ Config::Config(int argc, char *argv[]) {
             num_columns_cached = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
+        } else if (!strcmp(argv[i], "--batch-size")) {
+            query_batch_size_in_bytes = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
@@ -965,6 +967,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
+            fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");

@@ -76,6 +76,8 @@ class Config {
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
 
+    unsigned long long int query_batch_size_in_bytes = 100'000'000;
+
     uint8_t count_width = 8;
 
     // Alignment options
