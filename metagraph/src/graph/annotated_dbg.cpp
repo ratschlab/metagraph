@@ -599,7 +599,7 @@ double add_penalty_bigsi(double cur,
                          double mismatch_score,
                          double SNP_t) {
     double min_N_snps = count / SNP_t;
-    double max_N_snps = std::max(count - SNP_t + double(1), min_N_snps);
+    double max_N_snps = std::max(count - SNP_t + 1, min_N_snps);
     double mean_N_snps = min_N_snps + double(0.05) * max_N_snps;
 
     assert(count >= mean_N_snps);
