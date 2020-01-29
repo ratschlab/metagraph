@@ -202,10 +202,10 @@ convert<RainbowfishAnnotator, std::string>(ColumnCompressed<std::string>&& annot
                                                   annotator.get_label_encoder());
 }
 
-template <class StaticAnnotation, typename Label, class Partitioning>
+template <class StaticAnnotation, typename Label>
 typename std::unique_ptr<StaticAnnotation>
 convert_to_BRWT(ColumnCompressed<Label>&& annotator,
-                Partitioning partitioning,
+                BRWTBottomUpBuilder::Partitioner partitioning,
                 size_t num_parallel_nodes,
                 size_t num_threads) {
     // we are going to take the columns from the annotator and thus
@@ -233,7 +233,7 @@ convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
                                                         size_t num_threads) {
     return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
-        get_parallel_binary_grouping_greedy(num_threads),
+        [num_threads](const auto &columns) { return greedy_matching(columns, num_threads); },
         num_parallel_nodes,
         num_threads
     );
