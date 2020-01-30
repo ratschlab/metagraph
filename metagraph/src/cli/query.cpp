@@ -467,15 +467,13 @@ int query_graph(Config *config) {
 
                         // query the previously computed alignments against
                         // the annotator
-                        query_seq_async(std::move(jt->first),
-                                        std::move(jt->second));
+                        query_seq_async(std::move(jt->first), std::move(jt->second));
                         if (config->forward_and_reverse) {
                             // forward and reverse complement alignments are
                             // stored interleaved
                             ++jt;
                             assert(jt != named_alignments.end());
-                            query_seq_async(std::move(jt->first),
-                                            std::move(jt->second));
+                            query_seq_async(std::move(jt->first), std::move(jt->second));
                         }
                     }
                 }
