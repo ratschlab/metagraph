@@ -3,7 +3,6 @@
 
 #include <functional>
 #include <iostream>
-#include <vector>
 #include <cmath>
 
 #include <sdsl/int_vector.hpp>
@@ -117,12 +116,6 @@ class BloomFilter {
             ? std::ceil(M_LN2 * filter_size / expected_num_elements)
             : static_cast<uint32_t>(-1);
     }
-
-    /**
-     * A fast map of h uniformly to the region [0, size)
-     * Returns floor((h * size) / 2^64)
-     */
-    static uint64_t restrict_to(uint64_t h, size_t size);
 
   private:
     sdsl::bit_vector filter_;

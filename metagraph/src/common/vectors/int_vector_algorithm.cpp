@@ -1,5 +1,7 @@
 #include "int_vector_algorithm.hpp"
 
+#include "common/utils/simd_utils.hpp"
+
 #ifdef __AVX2__
 #include <immintrin.h>
 #endif
@@ -68,126 +70,6 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     return result;
 }
 
-#ifdef __AVX2__
-
-// from: https://github.com/WojciechMula/libalgebra/blob/master/libalgebra.h
-
-// carry-save added
-void CSA256(__m256i *hi, __m256i *lo, __m256i a, __m256i b, __m256i c) {
-    __m256i u = _mm256_xor_si256(a, b);
-    *hi = _mm256_or_si256(_mm256_and_si256(a, b), _mm256_and_si256(u, c));
-    *lo = _mm256_xor_si256(u, c);
-}
-
-__m256i popcnt256(__m256i v) {
-    __m256i lookup1 = _mm256_setr_epi8(
-        4, 5, 5, 6, 5, 6, 6, 7,
-        5, 6, 6, 7, 6, 7, 7, 8,
-        4, 5, 5, 6, 5, 6, 6, 7,
-        5, 6, 6, 7, 6, 7, 7, 8
-    );
-
-    __m256i lookup2 = _mm256_setr_epi8(
-        4, 3, 3, 2, 3, 2, 2, 1,
-        3, 2, 2, 1, 2, 1, 1, 0,
-        4, 3, 3, 2, 3, 2, 2, 1,
-        3, 2, 2, 1, 2, 1, 1, 0
-    );
-
-    __m256i low_mask = _mm256_set1_epi8(0x0f);
-    __m256i lo = _mm256_and_si256(v, low_mask);
-    __m256i hi = _mm256_and_si256(_mm256_srli_epi16(v, 4), low_mask);
-    __m256i popcnt1 = _mm256_shuffle_epi8(lookup1, lo);
-    __m256i popcnt2 = _mm256_shuffle_epi8(lookup2, hi);
-
-    return _mm256_sad_epu8(popcnt1, popcnt2);
-}
-
-
-__m256i popcnt_avx2_hs(const uint64_t *data, uint64_t size) {
-    __m256i total = _mm256_setzero_si256();
-    __m256i ones = _mm256_setzero_si256();
-    __m256i twos = _mm256_setzero_si256();
-    __m256i fours = _mm256_setzero_si256();
-    __m256i eights = _mm256_setzero_si256();
-    __m256i sixteens = _mm256_setzero_si256();
-    __m256i twosA, twosB, foursA, foursB, eightsA, eightsB;
-
-    #define LOAD(a) _mm256_loadu_si256((__m256i*)&data[i + (a * 4)])
-    for (uint64_t i = 0; i + 64 <= size; i += 64) {
-        CSA256(&twosA, &ones, ones, LOAD(0), LOAD(1));
-        CSA256(&twosB, &ones, ones, LOAD(2), LOAD(3));
-        CSA256(&foursA, &twos, twos, twosA, twosB);
-        CSA256(&twosA, &ones, ones, LOAD(4), LOAD(5));
-        CSA256(&twosB, &ones, ones, LOAD(6), LOAD(7));
-        CSA256(&foursB, &twos, twos, twosA, twosB);
-        CSA256(&eightsA, &fours, fours, foursA, foursB);
-        CSA256(&twosA, &ones, ones, LOAD(8), LOAD(9));
-        CSA256(&twosB, &ones, ones, LOAD(10), LOAD(11));
-        CSA256(&foursA, &twos, twos, twosA, twosB);
-        CSA256(&twosA, &ones, ones, LOAD(12), LOAD(13));
-        CSA256(&twosB, &ones, ones, LOAD(14), LOAD(15));
-        CSA256(&foursB, &twos, twos, twosA, twosB);
-        CSA256(&eightsB, &fours, fours, foursA, foursB);
-        CSA256(&sixteens, &eights, eights, eightsA, eightsB);
-        total = _mm256_add_epi64(total, popcnt256(sixteens));
-    }
-    #undef LOAD
-
-    total = _mm256_slli_epi64(total, 4);
-    total = _mm256_add_epi64(total, _mm256_slli_epi64(popcnt256(eights), 3));
-    total = _mm256_add_epi64(total, _mm256_slli_epi64(popcnt256(fours), 2));
-    total = _mm256_add_epi64(total, _mm256_slli_epi64(popcnt256(twos), 1));
-    total = _mm256_add_epi64(total, popcnt256(ones));
-
-    return total;
-}
-
-__m256i inner_prod_avx2_hs(const uint64_t *data1,
-                           const uint64_t *data2,
-                           uint64_t size) {
-    __m256i total = _mm256_setzero_si256();
-    __m256i ones = _mm256_setzero_si256();
-    __m256i twos = _mm256_setzero_si256();
-    __m256i fours = _mm256_setzero_si256();
-    __m256i eights = _mm256_setzero_si256();
-    __m256i sixteens = _mm256_setzero_si256();
-    __m256i twosA, twosB, foursA, foursB, eightsA, eightsB;
-
-    #define LOAD(a) _mm256_and_si256(_mm256_loadu_si256((__m256i*)&data1[i + (a * 4)]), \
-                                     _mm256_loadu_si256((__m256i*)&data2[i + (a * 4)]))
-    for (uint64_t i = 0; i + 64 <= size; i += 64) {
-        CSA256(&twosA, &ones, ones, LOAD(0), LOAD(1));
-        CSA256(&twosB, &ones, ones, LOAD(2), LOAD(3));
-        CSA256(&foursA, &twos, twos, twosA, twosB);
-        CSA256(&twosA, &ones, ones, LOAD(4), LOAD(5));
-        CSA256(&twosB, &ones, ones, LOAD(6), LOAD(7));
-        CSA256(&foursB, &twos, twos, twosA, twosB);
-        CSA256(&eightsA, &fours, fours, foursA, foursB);
-        CSA256(&twosA, &ones, ones, LOAD(8), LOAD(9));
-        CSA256(&twosB, &ones, ones, LOAD(10), LOAD(11));
-        CSA256(&foursA, &twos, twos, twosA, twosB);
-        CSA256(&twosA, &ones, ones, LOAD(12), LOAD(13));
-        CSA256(&twosB, &ones, ones, LOAD(14), LOAD(15));
-        CSA256(&foursB, &twos, twos, twosA, twosB);
-        CSA256(&eightsB, &fours, fours, foursA, foursB);
-        CSA256(&sixteens, &eights, eights, eightsA, eightsB);
-        total = _mm256_add_epi64(total, popcnt256(sixteens));
-    }
-    #undef LOAD
-
-    total = _mm256_slli_epi64(total, 4);
-    total = _mm256_add_epi64(total, _mm256_slli_epi64(popcnt256(eights), 3));
-    total = _mm256_add_epi64(total, _mm256_slli_epi64(popcnt256(fours), 2));
-    total = _mm256_add_epi64(total, _mm256_slli_epi64(popcnt256(twos), 1));
-    total = _mm256_add_epi64(total, popcnt256(ones));
-
-    return total;
-}
-
-
-#endif
-
 uint64_t count_ones(const sdsl::bit_vector &vector,
                     uint64_t begin, uint64_t end) {
     assert(begin <= end);
@@ -220,13 +102,7 @@ uint64_t count_ones(const sdsl::bit_vector &vector,
         );
     }
 
-    // [ a, b, c, d ] -> [ a+c, b+d, c+a, d+b ]
-    __m256i s1 = _mm256_add_epi64(counts, _mm256_permute4x64_epi64(counts, 0b01001110));
-
-    // [ a+c, b+d, c+a, d+b ] -> a+c+b+d
-    count += _mm256_extract_epi64(
-        _mm256_add_epi64(s1, _mm256_permute4x64_epi64(s1, 0b10001101)), 0
-    );
+    count += haddall_epi64(counts);
 #endif
 
     while (data < data_end) {
@@ -268,13 +144,7 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
         );
     }
 
-    // [ a, b, c, d ] -> [ a+c, b+d, c+a, d+b ]
-    __m256i s1 = _mm256_add_epi64(counts, _mm256_permute4x64_epi64(counts, 0b01001110));
-
-    // [ a+c, b+d, c+a, d+b ] -> a+c+b+d
-    count += _mm256_extract_epi64(
-        _mm256_add_epi64(s1, _mm256_permute4x64_epi64(s1, 0b10001101)), 0
-    );
+    count += haddall_epi64(counts);
 #endif
 
     while (first_data < first_end) {
