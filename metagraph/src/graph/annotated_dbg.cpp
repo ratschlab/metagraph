@@ -252,25 +252,31 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     }
 
     size_t num_present_kmers = 0;
+    size_t size = 0;
 
-    // map each index in the query k-mer sequence to a row in the annotation matrix
+    // maps each annotator row index to a vector of corresponding indices in the
+    // k-mer sequence of the query
+    VectorOrderedMap<row_index, std::vector<node_index>> index_map;
     std::vector<row_index> row_indices;
-    std::vector<node_index> node_indices;
-    row_indices.reserve(sequence.size() - dbg_.get_k() + 1);
-    node_indices.reserve(sequence.size() - dbg_.get_k() + 1);
+    index_map.reserve(sequence.size() - dbg_.get_k() + 1);
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
-        node_indices.push_back(i);
-
         if (i > 0) {
-            row_indices.push_back(graph_to_anno_index(i));
+            auto row_index = graph_to_anno_index(i);
+            auto &row = index_map[row_index];
+            if (row.empty())
+                row_indices.push_back(row_index);
+
+            row.push_back(size);
             ++num_present_kmers;
         }
+
+        ++size;
     });
 
-    assert(node_indices.size() == sequence.size() - dbg_.get_k() + 1);
+    assert(size == sequence.size() - dbg_.get_k() + 1);
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * node_indices.size()));
+    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * size));
     if (num_present_kmers < min_count)
         return {};
 
@@ -278,6 +284,7 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     using VectorCount = std::pair<std::vector<uint8_t>, size_t>;
     using Storage = std::vector<std::pair<uint64_t, VectorCount>>;
 
+    // map each label code to a pair containing a k-mer presence mask and its popcount
     VectorOrderedMap<uint64_t, VectorCount> label_codes_to_presence;
     static_assert(std::is_same<
         typename decltype(label_codes_to_presence)::values_container_type,
@@ -287,22 +294,19 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     auto label_codes = annotator_->get_label_codes(row_indices);
     assert(label_codes.size() == row_indices.size());
     auto it = label_codes.begin();
-    for (size_t i = 0; i < node_indices.size(); ++i) {
-        // skip this k-mer since it was not found in the graph
-        if (!node_indices[i])
-            continue;
-
-        assert(it != label_codes.end());
+    for (const auto &[row_index, query_indices] : index_map) {
         for (const auto &code : *it) {
             // for each label code associated with this k-mer, mark the
             // corresponding k-mer presence mask at index i
             auto &vector_count = label_codes_to_presence[code];
 
             if (vector_count.first.empty())
-                vector_count.first.resize(node_indices.size(), 0);
+                vector_count.first.resize(size, 0);
 
-            vector_count.second += !vector_count.first[i];
-            vector_count.first[i] = 0xFF;
+            for (auto i : query_indices) {
+                vector_count.second += !vector_count.first[i];
+                vector_count.first[i] = 0xFF;
+            }
         }
 
         ++it;
