@@ -86,4 +86,8 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>> StableGraphTypes;
 
+typedef ::testing::Types<DBGHashFast,
+                         DBGSuccinct,
+                         DBGSuccinctBloomFPR<1, 10>> FewGraphTypes;
+
 #endif // __TEST_DBG_HELPERS_HPP__

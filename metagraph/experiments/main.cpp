@@ -1086,8 +1086,7 @@ int main(int argc, char *argv[]) {
                     reverse_complement(ref.begin(), ref.end());
 
                 Cigar cigar_ob(cigar);
-                if (!cigar_ob.is_valid(&*ref.begin(), &*ref.end(),
-                                       &*alt.begin(), &*alt.end())) {
+                if (!cigar_ob.is_valid(ref, alt)) {
                     std::cerr << "ERROR: invalid CIGAR" << std::endl
                               << cigar << std::endl
                               << ref << std::endl
@@ -1096,9 +1095,7 @@ int main(int argc, char *argv[]) {
                     exit(1);
                 }
 
-                std::cout << config->score_cigar(&*ref.begin(), &*ref.end(),
-                                                 &*alt.begin(), &*alt.end(),
-                                                 cigar_ob) << std::endl;
+                std::cout << config->score_cigar(ref, alt, cigar_ob) << std::endl;
             }
         } else if (regime == "query_annotation_rows") {
             UnlabeledValueArg<std::string> annotation_arg("input_file", "Annotation", true, "", "string", cmd);

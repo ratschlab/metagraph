@@ -21,9 +21,8 @@ void check_json_dump_load(const DeBruijnGraph &graph,
         : query;
 
     ASSERT_EQ(std::string(path_query.c_str() + alignment.get_clipping(),
-                          alignment.query_size()),
-              std::string(alignment.get_query_begin(),
-                          alignment.get_query_end()));
+                          alignment.get_query().size()),
+              alignment.get_query());
 
     Alignment<NodeType> load_alignment;
     auto load_sequence = load_alignment.load_from_json(
@@ -44,8 +43,8 @@ void check_json_dump_load(const DeBruijnGraph &graph,
         << load_alignment.get_sequence() << "\n"
         << alignment.get_cigar().to_string() << " "
         << load_alignment.get_cigar().to_string() << "\n"
-        << std::string(alignment.get_query_begin(), alignment.get_query_end()) << " "
-        << std::string(load_alignment.get_query_begin(), load_alignment.get_query_end()) << "\n";
+        << alignment.get_query() << " "
+        << load_alignment.get_query() << "\n";
 }
 
 

@@ -1,0 +1,212 @@
+#include "aligner_helper.hpp"
+
+#include "kmer/alphabets.hpp"
+
+
+// check to make sure the current scoring system won't underflow
+bool DBGAlignerConfig::check_config_scores() const {
+    auto min_penalty_score = std::min(gap_opening_penalty, gap_extension_penalty);
+    for (const auto &row : score_matrix_) {
+        min_penalty_score = std::min(min_penalty_score, *std::min_element(row.begin(), row.end()));
+    }
+
+    assert(min_penalty_score < 0 && "min scores must be negative");
+
+    if (min_cell_score >= std::numeric_limits<score_t>::min() - min_penalty_score)
+        return true;
+
+    std::cerr << "min_cell_score is too small: " << min_cell_score << std::endl;
+    return false;
+}
+
+DBGAlignerConfig::DBGAlignerConfig(const ScoreMatrix &score_matrix,
+                                   int8_t gap_opening,
+                                   int8_t gap_extension)
+      : gap_opening_penalty(gap_opening),
+        gap_extension_penalty(gap_extension),
+        score_matrix_(score_matrix) {}
+
+DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
+                                   int8_t gap_opening,
+                                   int8_t gap_extension)
+      : gap_opening_penalty(gap_opening),
+        gap_extension_penalty(gap_extension),
+        score_matrix_(std::move(score_matrix)) {}
+
+DBGAlignerConfig::score_t DBGAlignerConfig
+::score_cigar(const std::string_view reference,
+              const std::string_view query,
+              const Cigar &cigar) const {
+    score_t score = 0;
+
+    assert(cigar.is_valid(reference, query));
+    auto ref_it = reference.begin();
+    auto alt_it = query.begin();
+
+    for (const auto &op : cigar) {
+        switch (op.first) {
+            case Cigar::Operator::CLIPPED:
+                break;
+            case Cigar::Operator::MATCH: {
+                score += match_score(std::string_view(ref_it, op.second));
+                ref_it += op.second;
+                alt_it += op.second;
+            } break;
+            case Cigar::Operator::MISMATCH: {
+                score += score_sequences(std::string_view(ref_it, op.second),
+                                         std::string_view(alt_it, op.second));
+                ref_it += op.second;
+                alt_it += op.second;
+            } break;
+            case Cigar::Operator::INSERTION: {
+                score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+                alt_it += op.second;
+            } break;
+            case Cigar::Operator::DELETION: {
+                score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+                ref_it += op.second;
+            } break;
+        }
+    }
+
+    return score;
+}
+
+void DBGAlignerConfig::set_scoring_matrix() {
+    if (alignment_edit_distance) {
+        // TODO: REPLACE THIS
+        #if _PROTEIN_GRAPH
+            const auto *alphabet = alphabets::kAlphabetProtein;
+            const auto *alphabet_encoding = alphabets::kCharToProtein;
+        #elif _DNA_GRAPH || _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+            const auto *alphabet = alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = alphabets::kCharToDNA;
+        #else
+            static_assert(false,
+                "Define an alphabet: either "
+                "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+            );
+        #endif
+
+        score_matrix_ = unit_scoring_matrix(1, alphabet, alphabet_encoding);
+
+    } else {
+        #if _PROTEIN_GRAPH
+            score_matrix_ = score_matrix_blosum62;
+        #elif _DNA_GRAPH || _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+            score_matrix_ = dna_scoring_matrix(alignment_match_score,
+                                               -alignment_mm_transition_score,
+                                               -alignment_mm_transversion_score);
+        #else
+            static_assert(false,
+                "Define an alphabet: either "
+                "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+            );
+        #endif
+    }
+}
+
+DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
+::dna_scoring_matrix(int8_t match_score,
+                     int8_t mm_transition_score,
+                     int8_t mm_transversion_score) {
+    ScoreMatrix score_matrix;
+    for (auto& row : score_matrix) {
+        row.fill(mm_transversion_score);
+    }
+
+    score_matrix['a']['g'] = score_matrix['A']['g'] = score_matrix['a']['G'] = score_matrix['A']['G'] = mm_transition_score;
+    score_matrix['g']['a'] = score_matrix['G']['a'] = score_matrix['g']['A'] = score_matrix['G']['A'] = mm_transition_score;
+    score_matrix['c']['t'] = score_matrix['C']['t'] = score_matrix['c']['T'] = score_matrix['C']['T'] = mm_transition_score;
+    score_matrix['t']['c'] = score_matrix['T']['c'] = score_matrix['t']['C'] = score_matrix['T']['C'] = mm_transition_score;
+    score_matrix['a']['a'] = score_matrix['A']['a'] = score_matrix['a']['A'] = score_matrix['A']['A'] = match_score;
+    score_matrix['c']['c'] = score_matrix['C']['c'] = score_matrix['c']['C'] = score_matrix['C']['C'] = match_score;
+    score_matrix['g']['g'] = score_matrix['G']['g'] = score_matrix['g']['G'] = score_matrix['G']['G'] = match_score;
+    score_matrix['t']['t'] = score_matrix['T']['t'] = score_matrix['t']['T'] = score_matrix['T']['T'] = match_score;
+
+    return score_matrix;
+}
+
+DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
+::unit_scoring_matrix(int8_t match_score,
+                      const std::string &alphabet,
+                      const uint8_t *encoding) {
+    ScoreMatrix score_matrix;
+    for (auto& row : score_matrix) {
+        row.fill(-match_score);
+    }
+
+    for (uint8_t c : alphabet) {
+        if (encoding[c] == encoding[0])
+            continue;
+
+        char upper = toupper(c);
+        char lower = tolower(c);
+
+        score_matrix[upper][upper]
+            = score_matrix[upper][lower]
+            = score_matrix[lower][upper]
+            = score_matrix[lower][lower] = match_score;
+    }
+
+    return score_matrix;
+}
+
+DBGAlignerConfig::ScoreMatrix blosum62_scoring_matrix() {
+    std::string alphabet = "ARNDCQEGHILKMFPSTWYVBZX";
+
+    std::vector<std::vector<int8_t>> scores = {
+        {  4, -1, -2, -2,  0, -1, -1,  0, -2, -1, -1, -1, -1, -2, -1,  1,  0, -3, -2,  0, -2, -1,  0 },
+        { -1,  5,  0, -2, -3,  1,  0, -2,  0, -3, -2,  2, -1, -3, -2, -1, -1, -3, -2, -3, -1,  0, -1 },
+        { -2,  0,  6,  1, -3,  0,  0,  0,  1, -3, -3,  0, -2, -3, -2,  1,  0, -4, -2, -3,  3,  0, -1 },
+        { -2, -2,  1,  6, -3,  0,  2, -1, -1, -3, -4, -1, -3, -3, -1,  0, -1, -4, -3, -3,  4,  1, -1 },
+        {  0, -3, -3, -3,  9, -3, -4, -3, -3, -1, -1, -3, -1, -2, -3, -1, -1, -2, -2, -1, -3, -3, -2 },
+        { -1,  1,  0,  0, -3,  5,  2, -2,  0, -3, -2,  1,  0, -3, -1,  0, -1, -2, -1, -2,  0,  3, -1 },
+        { -1,  0,  0,  2, -4,  2,  5, -2,  0, -3, -3,  1, -2, -3, -1,  0, -1, -3, -2, -2,  1,  4, -1 },
+        {  0, -2,  0, -1, -3, -2, -2,  6, -2, -4, -4, -2, -3, -3, -2,  0, -2, -2, -3, -3, -1, -2, -1 },
+        { -2,  0,  1, -1, -3,  0,  0, -2,  8, -3, -3, -1, -2, -1, -2, -1, -2, -2,  2, -3,  0,  0, -1 },
+        { -1, -3, -3, -3, -1, -3, -3, -4, -3,  4,  2, -3,  1,  0, -3, -2, -1, -3, -1,  3, -3, -3, -1 },
+        { -1, -2, -3, -4, -1, -2, -3, -4, -3,  2,  4, -2,  2,  0, -3, -2, -1, -2, -1,  1, -4, -3, -1 },
+        { -1,  2,  0, -1, -3,  1,  1, -2, -1, -3, -2,  5, -1, -3, -1,  0, -1, -3, -2, -2,  0,  1, -1 },
+        { -1, -1, -2, -3, -1,  0, -2, -3, -2,  1,  2, -1,  5,  0, -2, -1, -1, -1, -1,  1, -3, -1, -1 },
+        { -2, -3, -3, -3, -2, -3, -3, -3, -1,  0,  0, -3,  0,  6, -4, -2, -2,  1,  3, -1, -3, -3, -1 },
+        { -1, -2, -2, -1, -3, -1, -1, -2, -2, -3, -3, -1, -2, -4,  7, -1, -1, -4, -3, -2, -2, -1, -2 },
+        {  1, -1,  1,  0, -1,  0,  0,  0, -1, -2, -2,  0, -1, -2, -1,  4,  1, -3, -2, -2,  0,  0,  0 },
+        {  0, -1,  0, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -2, -1,  1,  5, -2, -2,  0, -1, -1,  0 },
+        { -3, -3, -4, -4, -2, -2, -3, -2, -2, -3, -2, -3, -1,  1, -4, -3, -2, 11,  2, -3, -4, -3, -2 },
+        { -2, -2, -2, -3, -2, -1, -2, -3,  2, -1, -1, -2, -1,  3, -3, -2, -2,  2,  7, -1, -3, -2, -1 },
+        {  0, -3, -3, -3, -1, -2, -2, -3, -3,  3,  1, -2,  1, -1, -2, -2,  0, -3, -1,  4, -3, -2, -1 },
+        { -2, -1,  3,  4, -3,  0,  1, -1,  0, -3, -4,  0, -3, -3, -2,  0, -1, -4, -3, -3,  4,  1, -1 },
+        { -1,  0,  0,  1, -3,  3,  4, -2,  0, -3, -3,  1, -1, -3, -1,  0, -1, -3, -2, -2,  1,  4, -1 },
+        {  0, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2,  0,  0, -2, -1, -1, -1, -1, -1 }
+    };
+
+    DBGAlignerConfig::ScoreMatrix score_matrix;
+
+    for (size_t i = 0; i < score_matrix.size(); ++i) {
+        score_matrix[i].fill(-4);
+
+        // meant to handle the letters J, O, U
+        score_matrix[i][i] = 1;
+    }
+
+    for (size_t i = 0; i < alphabet.size(); ++i) {
+        char a_upper = alphabet[i];
+        char a_lower = tolower(alphabet[i]);
+
+        for (size_t j = 0; j < alphabet.size(); ++j) {
+            char b_upper = alphabet[j];
+            char b_lower = tolower(alphabet[j]);
+
+            score_matrix[a_lower][b_lower]
+                = score_matrix[a_lower][b_upper]
+                = score_matrix[a_upper][b_lower]
+                = score_matrix[a_upper][b_upper] = scores[i][j];
+        }
+    }
+
+    return score_matrix;
+}
+
+const DBGAlignerConfig::ScoreMatrix DBGAlignerConfig::score_matrix_blosum62
+    = blosum62_scoring_matrix();

@@ -106,7 +106,8 @@ void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
     ASSERT_EQ(paths.size(), unimem_paths.size());
 
     for (size_t i = 0; i < paths.size(); ++i) {
-        EXPECT_EQ(paths[i], unimem_paths[i]);
+        EXPECT_EQ(paths[i], unimem_paths[i])
+            << paths[i] << "\n" << unimem_paths[i];
     }
 }
 
@@ -116,7 +117,7 @@ class DBGAlignerTest : public DeBruijnGraphTest<Graph> {
     void SetUp() { Cigar::initialize_opt_table(alphabet, alphabet_encoding); }
 };
 
-TYPED_TEST_SUITE(DBGAlignerTest, GraphTypes);
+TYPED_TEST_SUITE(DBGAlignerTest, FewGraphTypes);
 
 TYPED_TEST(DBGAlignerTest, bad_min_cell_score) {
     auto graph = build_graph_batch<TypeParam>(3, {});
@@ -151,15 +152,10 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(1ull, path.size());
     EXPECT_EQ("CAT", path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("3=", path.get_cigar().to_string());
     EXPECT_EQ(3u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
@@ -190,7 +186,7 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("14=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
@@ -223,15 +219,10 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("14=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
@@ -278,15 +269,10 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("9=", path.get_cigar().to_string());
     EXPECT_EQ(9u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
@@ -315,15 +301,10 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("17=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
@@ -351,15 +332,10 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("6=", path.get_cigar().to_string());
     EXPECT_EQ(6u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
@@ -387,16 +363,10 @@ TYPED_TEST(DBGAlignerTest, variation) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query.begin(), query.end(), reference.begin()),
-              path.get_score());
+    EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("5=1X6=", path.get_cigar().to_string());
     EXPECT_EQ(11u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -427,11 +397,6 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_TRUE(path.get_sequence().compare(reference_1) == 0 ||
@@ -467,16 +432,10 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query.begin(), query.end(), reference.begin()),
-              path.get_score());
+    EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("6=1X6=1X1=1X4=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -507,20 +466,12 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     auto paths = aligner.align(query);
 
     ASSERT_EQ(2u, paths.size());
-    std::vector<double> weights = {
-        std::exp(paths[0].get_score() - config.match_score(paths[0].get_sequence().begin(),
-                                                           paths[0].get_sequence().end())),
-        std::exp(paths[1].get_score() - config.match_score(paths[1].get_sequence().begin(),
-                                                           paths[1].get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
     EXPECT_NE(paths.front(), paths.back());
     auto path = paths.front();
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference_1, path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query.begin(), query.end(), reference_1.begin()),
-              path.get_score());
+    EXPECT_EQ(config.score_sequences(query, reference_1), path.get_score());
     EXPECT_EQ("4=1X6=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -553,18 +504,6 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
 
     auto paths = aligner.align(query);
 
-    std::vector<double> weights(paths.size());
-    std::transform(
-        paths.begin(), paths.end(),
-        weights.begin(),
-        [&](const auto &path) {
-            return std::exp(path.get_score()
-                - config.match_score(path.get_sequence().begin(),
-                                     path.get_sequence().end()));
-        }
-    );
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
-
     EXPECT_EQ(config.num_alternative_paths, paths.size());
     for (const auto &path : paths) {
         EXPECT_EQ("4=1X4=1X2=", path.get_cigar().to_string())
@@ -596,16 +535,10 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query.begin(), query.end(), reference.begin()),
-              path.get_score());
+    EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("4=1X9=1X6=", path.get_cigar().to_string());
     EXPECT_EQ(19u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -638,16 +571,10 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
 
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
-        std::vector<double> weights = {
-            std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                           path.get_sequence().end()))
-        };
-        EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
         EXPECT_EQ(query.size() - k + 1, path.size());
         EXPECT_EQ(reference, path.get_sequence());
-        EXPECT_EQ(config.score_sequences(query.begin(), query.end(), reference.begin()),
-                  path.get_score());
+        EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
         EXPECT_EQ("4=1X9=1X6=", path.get_cigar().to_string());
         EXPECT_EQ(19u, path.get_num_matches());
         EXPECT_FALSE(path.is_exact_match());
@@ -676,17 +603,10 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.match_score(reference.begin(), reference.end())
-                + config.gap_opening_penalty,
-              path.get_score());
+    EXPECT_EQ(config.match_score(reference) + config.gap_opening_penalty, path.get_score());
     EXPECT_EQ("5=1I5=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -714,17 +634,11 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end()) + config.gap_opening_penalty,
-              path.get_score());
+    EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty, path.get_score());
 
     // TODO: the first should ideally always be true
     EXPECT_TRUE("6=1D5=" == path.get_cigar().to_string()
@@ -757,18 +671,11 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.end())
-                + config.gap_opening_penalty
-                + score_t(3) * config.gap_extension_penalty,
-              path.get_score());
+    EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty
+        + score_t(3) * config.gap_extension_penalty, path.get_score());
     EXPECT_EQ("10=4D9=", path.get_cigar().to_string());
     EXPECT_EQ(19u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -796,15 +703,10 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(5ull, path.size());
     EXPECT_EQ(reference.substr(2), path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin() + 2, query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
     EXPECT_EQ("2S8=", path.get_cigar().to_string())
         << reference.substr(2) << " " << path.get_sequence();
     EXPECT_EQ(8u, path.get_num_matches());
@@ -833,15 +735,10 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(11u, path.size());
     EXPECT_EQ(reference.substr(3), path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin() + 2, query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
     EXPECT_EQ("2S14=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -870,15 +767,10 @@ TYPED_TEST(DBGAlignerTest, align_long_clipping) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(14u, path.size());
     EXPECT_EQ(reference.substr(7), path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin() + 7, query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query.substr(7)), path.get_score());
     EXPECT_EQ("7S17=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -906,15 +798,10 @@ TYPED_TEST(DBGAlignerTest, align_end_clipping) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(14u, path.size());
     EXPECT_EQ(reference.substr(0, 17), path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin(), query.begin() + 17), path.get_score());
+    EXPECT_EQ(config.match_score(query.substr(0, 17)), path.get_score());
     EXPECT_EQ("17=7S", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -944,15 +831,10 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(7u, path.size());
     EXPECT_EQ(reference.substr(5), path.get_sequence());
-    EXPECT_EQ(config.match_score(query.begin() + 2, query.end()), path.get_score());
+    EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
     EXPECT_EQ("2S13=", path.get_cigar().to_string());
     EXPECT_EQ(13u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -987,15 +869,10 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
-        std::vector<double> weights = {
-            std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                           path.get_sequence().end()))
-        };
-        EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
         EXPECT_EQ(7u, path.size());
         EXPECT_EQ(reference.substr(5), path.get_sequence());
-        EXPECT_EQ(config.match_score(query.begin() + 2, query.end()), path.get_score());
+        EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
         EXPECT_EQ("2S13=", path.get_cigar().to_string());
         EXPECT_EQ(13u, path.get_num_matches());
         EXPECT_FALSE(path.is_exact_match());
@@ -1020,16 +897,10 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
-        std::vector<double> weights = {
-            std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                           path.get_sequence().end()))
-        };
-        EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
         EXPECT_EQ(15u, path.size()); // includes dummy k-mers
         EXPECT_EQ(reference.substr(3), path.get_sequence());
-        EXPECT_EQ(config.score_sequences(query.begin(), query.end(), reference.begin() + 3),
-                  path.get_score());
+        EXPECT_EQ(config.score_sequences(query, reference.substr(3)), path.get_score());
         EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
         EXPECT_EQ(14u, path.get_num_matches());
         EXPECT_FALSE(path.is_exact_match());
@@ -1061,16 +932,10 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(15u, path.size()); // includes dummy k-mers
     EXPECT_EQ(reference.substr(3), path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query.begin(), query.end(), reference.begin() + 3),
-              path.get_score());
+    EXPECT_EQ(config.score_sequences(query, reference.substr(3)), path.get_score());
     EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -1096,17 +961,10 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(6u, path.size());
     EXPECT_EQ(reference.substr(6), path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query.begin() + 6, query.end(),
-                                     reference.begin() + 6),
-              path.get_score());
+    EXPECT_EQ(config.score_sequences(query.substr(6), reference.substr(6)), path.get_score());
     EXPECT_EQ("6S12=", path.get_cigar().to_string());
     EXPECT_EQ(12u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -1136,16 +994,10 @@ TEST(DBGAlignerTest, align_dummy) {
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-    std::vector<double> weights = {
-        std::exp(path.get_score() - config.match_score(path.get_sequence().begin(),
-                                                       path.get_sequence().end()))
-    };
-    EXPECT_EQ(weights, paths.get_alignment_weights(config));
 
     EXPECT_EQ(14u, path.size());
     EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query.begin(), query.end(), reference.begin()),
-              path.get_score());
+    EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("5=1X12=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());

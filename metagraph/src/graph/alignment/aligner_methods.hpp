@@ -10,13 +10,10 @@ class Seeder {
   public:
     virtual ~Seeder() {}
 
-    virtual std::vector<Alignment<NodeType>>
-    operator()(std::string_view seed,
-               size_t clipping = 0,
-               bool orientation = false) const = 0;
-
     virtual void initialize(std::string_view /* query string */,
                             bool /* orientation */) {}
+
+    virtual void call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const = 0;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
@@ -25,48 +22,52 @@ class ExactSeeder : public Seeder<NodeType> {
     ExactSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
 
-    std::vector<Alignment<NodeType>> operator()(std::string_view seed,
-                                                size_t clipping = 0,
-                                                bool orientation = false) const;
+    void initialize(std::string_view query, bool orientation);
+
+    void call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const;
 
     const DeBruijnGraph& get_graph() const { return graph_; }
     const DBGAlignerConfig& get_config() const { return config_; }
+    const std::string_view get_query() const { return query_; }
+    const std::vector<NodeType>& get_query_nodes() const { return query_nodes_; }
+    const std::vector<score_t>& get_partial_sums() const { return partial_sum; }
+    bool get_orientation() const { return orientation_; }
 
-  private:
+  protected:
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
+    std::string_view query_;
+    std::vector<NodeType> query_nodes_;
+    bool orientation_;
+    std::vector<score_t> partial_sum;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class SuffixSeeder : public Seeder<NodeType> {
   public:
-    SuffixSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : exact_seeder_(graph, config) {}
+    SuffixSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config);
 
-    std::vector<Alignment<NodeType>> operator()(std::string_view seed,
-                                                size_t clipping = 0,
-                                                bool orientation = false) const;
+    void initialize(std::string_view query, bool orientation) {
+        exact_seeder_.initialize(query, orientation);
+    }
+
+    void call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const;
 
     const DeBruijnGraph& get_graph() const { return exact_seeder_.get_graph(); }
     const DBGAlignerConfig& get_config() const { return exact_seeder_.get_config(); }
 
   private:
-    const ExactSeeder<NodeType> exact_seeder_;
+    ExactSeeder<NodeType> exact_seeder_;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class MEMSeeder : public Seeder<NodeType> {
   public:
-    std::vector<Alignment<NodeType>> operator()(std::string_view seed,
-                                                size_t clipping = 0,
-                                                bool orientation = false) const override;
+    virtual ~MEMSeeder() {}
 
-    virtual void initialize(std::string_view query, bool orientation) override final {
-        orientation_ = orientation;
-        query_nodes_.clear();
-        query_nodes_.reserve(query.size() - graph_.get_k() + 1);
-        graph_.map_to_nodes_sequentially(query, [&](auto i) { query_nodes_.push_back(i); });
-    }
+    virtual void initialize(std::string_view query, bool orientation) override final;
+
+    virtual void call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const override final;
 
     const DeBruijnGraph& get_graph() const { return graph_; }
     const DBGAlignerConfig& get_config() const { return config_; }
@@ -90,8 +91,10 @@ class MEMSeeder : public Seeder<NodeType> {
   private:
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
+    std::string_view query_;
     std::vector<NodeType> query_nodes_;
     bool orientation_;
+    std::vector<score_t> partial_sum;
     const std::unique_ptr<bitmap> is_mem_terminus_;
 };
 
@@ -119,14 +122,15 @@ class Extender {
 
     virtual ~Extender() {}
 
-    virtual std::vector<DBGAlignment>
+    virtual void
     operator()(const DBGAlignment &path,
-               const char *sequence_end_iterator,
-               const score_t *match_score_begin,
+               std::string_view query,
+               std::function<void(DBGAlignment&&)> callback,
                bool orientation,
-               score_t min_path_score = std::numeric_limits<score_t>::min()) const = 0;
+               score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
     virtual void initialize(const DBGAlignment &path) = 0;
+    virtual void initialize_query(const std::string_view query) = 0;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
     virtual const DBGAlignerConfig& get_config() const = 0;
@@ -140,20 +144,20 @@ class DefaultColumnExtender : public Extender<NodeType> {
     typedef typename Extender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename Extender<NodeType>::node_index node_index;
     typedef typename Extender<NodeType>::score_t score_t;
-    typedef typename ::DPTable<NodeType> DPTable;
-    typedef typename DPTable::Column Column;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
 
-    std::vector<DBGAlignment>
+    void
     operator()(const DBGAlignment &path,
-               const char *sequence_end_iterator,
-               const score_t *match_score_begin,
+               std::string_view query,
+               std::function<void(DBGAlignment&&)> callback,
                bool orientation,
-               score_t min_path_score = std::numeric_limits<score_t>::min()) const;
+               score_t min_path_score = std::numeric_limits<score_t>::min());
 
     void initialize(const DBGAlignment &) {}
+
+    void initialize_query(const std::string_view query);
 
     const DeBruijnGraph& get_graph() const { return graph_; }
     const DBGAlignerConfig& get_config() const { return config_; }
@@ -162,9 +166,15 @@ class DefaultColumnExtender : public Extender<NodeType> {
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
 
+    DPTable<NodeType> dp_table;
+
+    // compute perfect match scores for all suffixes
+    // used for branch and bound checks
+    std::vector<score_t> partial_sums_;
+
     struct ColumnPriorityFunction {
-        bool operator()(const typename DPTable::value_type* a,
-                        const typename DPTable::value_type* b) const {
+        bool operator()(const typename DPTable<NodeType>::value_type* a,
+                        const typename DPTable<NodeType>::value_type* b) const {
             return compare_(a->second, b->second);
         }
 

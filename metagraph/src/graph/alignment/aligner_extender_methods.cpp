@@ -385,48 +385,51 @@ inline size_t update_column_avx2(bool &updated,
  */
 
 template <typename NodeType, class Compare>
-std::vector<typename DefaultColumnExtender<NodeType, Compare>::DBGAlignment>
-DefaultColumnExtender<NodeType, Compare>
+void DefaultColumnExtender<NodeType, Compare>
 ::operator()(const DBGAlignment &path,
-             const char *sequence_end,
-             const score_t *match_score_begin,
+             std::string_view query,
+             std::function<void(DBGAlignment&&)> callback,
              bool orientation,
-             score_t min_path_score) const {
+             score_t min_path_score) {
+    size_t start_index = path.get_query_end() - 1 - query.data();
+    const score_t *match_score_begin = partial_sums_.data() + start_index;
+
     // this extender only works if at least one character has been matched
-    assert(path.get_query_end() > path.get_query_begin());
-    assert(sequence_end >= path.get_query_end());
+    assert(path.get_query_end() > path.get_query().data());
+    assert(query.data() + query.size() >= path.get_query_end());
 
     const auto *align_start = path.get_query_end();
-    size_t size = sequence_end - align_start + 1;
+    size_t size = query.data() + query.size() - align_start + 1;
 
-    assert(config_.match_score(align_start - 1, sequence_end) == *match_score_begin);
-    assert(config_.get_row(*(sequence_end - 1))[*(sequence_end - 1)]
-        == *(match_score_begin + size - 1));
+    assert(config_.match_score(std::string_view(align_start - 1, size))
+        == *match_score_begin);
+    assert(config_.get_row(query.back())[query.back()] == match_score_begin[size - 1]);
 
     // stop path early if it can't be better than the min_path_score
-    if (path.get_score() + *(match_score_begin + 1) < min_path_score)
-        return {};
+    if (path.get_score() + match_score_begin[1] < min_path_score)
+        return;
 
     // keep track of which columns to use next
-    BoundedPriorityQueue<const typename DPTable::value_type*,
-                         std::vector<const typename DPTable::value_type*>,
+    BoundedPriorityQueue<const typename DPTable<NodeType>::value_type*,
+                         std::vector<const typename DPTable<NodeType>::value_type*>,
                          ColumnPriorityFunction> columns_to_update(config_.queue_size);
 
-    DPTable dp_table(graph_,
-                     path.back(),
-                     *(align_start - 1),
-                     path.get_score(),
-                     config_.min_cell_score,
-                     size,
-                     config_.gap_opening_penalty,
-                     config_.gap_extension_penalty);
-
-    assert(dp_table.size() == 1);
+    dp_table.clear();
+    if (!dp_table.add_seed(graph_,
+                           path.back(),
+                           *(align_start - 1),
+                           path.get_score(),
+                           config_.min_cell_score,
+                           size,
+                           0,
+                           config_.gap_opening_penalty,
+                           config_.gap_extension_penalty))
+        return;
 
     // for storage of intermediate values
     std::vector<int8_t> char_scores;
     std::vector<Cigar::Operator> match_ops;
-    std::vector<const typename DPTable::value_type*> in_nodes;
+    std::vector<const typename DPTable<NodeType>::value_type*> in_nodes;
 
     AlignedVector<score_t> update_scores;
     AlignedVector<Cigar::Operator> update_ops;
@@ -452,7 +455,9 @@ DefaultColumnExtender<NodeType, Compare>
         // update columns
         for (auto *iter : out_columns) {
             auto next_node = iter->first;
-            auto &next_column = const_cast<Column&>(iter->second);
+            auto &next_column = const_cast<typename DPTable<NodeType>::Column&>(
+                iter->second
+            );
 
             auto [overall_begin, overall_end] = get_column_boundaries(
                 iter,
@@ -573,7 +578,7 @@ DefaultColumnExtender<NodeType, Compare>
     if (UNLIKELY(start_node->first == SequenceGraph::npos
             || (start_node->first == path.back() && !start_node->second.best_pos)
             || start_node->second.best_score() < min_path_score))
-        return {};
+        return;
 
     // check to make sure that start_node stores the best starting point
     assert(start_node->second.best_score()
@@ -584,40 +589,31 @@ DefaultColumnExtender<NodeType, Compare>
 
     assert(start_node->second.best_op() == Cigar::Operator::MATCH);
 
-    // avoid sorting column iterators if we're only interested in the top path
-    std::vector<DBGAlignment> next_paths;
-    if (config_.num_alternative_paths == 1) {
-        next_paths.emplace_back(dp_table,
-                                start_node,
-                                start_node->second.best_pos,
-                                start_node->second.best_score() - path.get_score(),
+    // get all alignments
+    dp_table.extract_alignments(graph_,
+                                config_,
+                                query,
+                                callback,
+                                path.get_score(),
                                 align_start,
                                 orientation,
-                                graph_.get_k() - 1);
+                                min_path_score,
+                                start_node);
+}
 
-        if (UNLIKELY(next_paths.back().empty() && !next_paths.back().get_query_begin())) {
-            next_paths.pop_back();
-        } else {
-            assert(next_paths.back().get_score() + path.get_score()
-                == start_node->second.best_score());
 
-            // TODO: remove this when the branch and bound is set to only consider
-            //       converged scores
-            next_paths.back().recompute_score(config_);
+template <typename NodeType, class Compare>
+void DefaultColumnExtender<NodeType, Compare>
+::initialize_query(const std::string_view query) {
+    dp_table.clear();
+    partial_sums_.resize(query.size());
+    std::transform(query.begin(), query.end(),
+                   partial_sums_.begin(),
+                   [&](char c) { return config_.get_row(c)[c]; });
 
-            assert(next_paths.back().is_valid(graph_, &config_));
-        }
-
-        return next_paths;
-    }
-
-    // get alternative alignments
-    return dp_table.extract_alignments(graph_,
-                                       config_,
-                                       path.get_score(),
-                                       align_start,
-                                       orientation,
-                                       min_path_score);
+    std::partial_sum(partial_sums_.rbegin(), partial_sums_.rend(), partial_sums_.rbegin());
+    assert(config_.match_score(query) == partial_sums_.front());
+    assert(config_.get_row(query.back())[query.back()] == partial_sums_.back());
 }
 
 
