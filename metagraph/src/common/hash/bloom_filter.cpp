@@ -1,5 +1,7 @@
 #include "bloom_filter.hpp"
 
+#include "common/utils/simd_utils.hpp"
+
 #ifdef __AVX2__
 #include <immintrin.h>
 #endif
@@ -26,90 +28,6 @@ BloomFilter::BloomFilter(size_t filter_size,
       : BloomFilter(filter_size,
                     std::min(max_num_hash_functions,
                              optim_h(filter_size, expected_num_elements))) {}
-
-
-/**
- * Helpers for fast map of h uniformly to the region [0, size)
- * (h * size) >> 64
- */
-
-inline uint64_t restrict_to_fallback(uint64_t h, size_t size) {
-    // adapted from:
-    // https://stackoverflow.com/questions/28868367/getting-the-high-part-of-64-bit-integer-multiplication
-
-    const uint64_t x0 = static_cast<uint32_t>(h);
-    const uint64_t x1 = h >> 32;
-    const uint64_t y0 = static_cast<uint32_t>(size);
-    const uint64_t y1 = size >> 32;
-
-    const uint64_t p01 = x0 * y1;
-
-    const uint64_t middle_hi = (x1 * y0
-        + ((x0 * y0) >> 32)
-        + static_cast<uint32_t>(p01)) >> 32;
-
-    assert(!size || x1 * y1 + middle_hi + (p01 >> 32) < size);
-    return x1 * y1 + middle_hi + (p01 >> 32);
-}
-
-#ifdef __SIZEOF_INT128__
-inline uint64_t restrict_to_int128_fallback(uint64_t h, size_t size) {
-    assert(!size || ((static_cast<__uint128_t>(h) * size) >> 64) < size);
-    assert(restrict_to_fallback(h, size) == ((static_cast<__uint128_t>(h) * size) >> 64));
-
-    return (static_cast<__uint128_t>(h) * size) >> 64;
-}
-#endif
-
-#ifdef __BMI2__
-inline uint64_t restrict_to_bmi2(uint64_t h, size_t size) {
-
-#ifndef NDEBUG
-    uint64_t h_fallback1 = restrict_to_fallback(h, size);
-#ifdef __SIZEOF_INT128__
-    uint64_t h_fallback2 = restrict_to_int128_fallback(h, size);
-#endif
-#endif
-
-    static_assert(sizeof(long long unsigned int) == sizeof(uint64_t));
-    _mulx_u64(h, size, reinterpret_cast<long long unsigned int*>(&h));
-
-    assert(!size || h < size);
-    assert(h_fallback1 == h);
-
-#ifdef __SIZEOF_INT128__
-    assert(h_fallback2 == h);
-#endif
-
-    return h;
-}
-#endif
-
-uint64_t BloomFilter::restrict_to(uint64_t h, size_t size) {
-#ifdef __BMI2__
-    return restrict_to_bmi2(h, size);
-#elif __SIZEOF_INT128__
-    return restrict_to_int128_fallback(h, size);
-#else
-    return restrict_to_fallback(h, size);
-#endif
-}
-
-
-#ifdef __AVX2__
-
-inline __m256i restrict_to_mask_epi64(const uint64_t *hashes, size_t size, __m256i mask) {
-    // TODO: is there a vectorized way of doing this?
-    return _mm256_and_si256(
-        _mm256_setr_epi64x(BloomFilter::restrict_to(hashes[0], size),
-                           BloomFilter::restrict_to(hashes[1], size),
-                           BloomFilter::restrict_to(hashes[2], size),
-                           BloomFilter::restrict_to(hashes[3], size)),
-        mask
-    );
-}
-
-#endif
 
 void BloomFilter::insert(uint64_t hash) {
     // use the 64-bit hash to select a 512-bit block
@@ -295,9 +213,6 @@ batch_check_avx2(const BloomFilter &bloom,
     const __m256i add = _mm256_setr_epi64x(0, 1, 2, 3);
     const __m256i numhash = _mm256_set1_epi64x(num_hash_functions_);
 
-    // used with _mm256_castsi256_si128 to cast packed 64-bit indices to 32-bit
-    const __m256i permute = _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7);
-
     __m256i block_indices;
     const uint64_t *block_index_array = reinterpret_cast<const uint64_t*>(&block_indices);
 
@@ -336,10 +251,7 @@ batch_check_avx2(const BloomFilter &bloom,
                             _mm256_mask_i32gather_epi64(
                                 all,
                                 offset,
-                                _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(
-                                    _mm256_srli_epi64(hash, 6),
-                                    permute
-                                )),
+                                cvtepi64_epi32(_mm256_srli_epi64(hash, 6)),
                                 _mm256_cmpgt_epi64(numhash, mult),
                                 8
                             ),

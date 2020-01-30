@@ -1,14 +1,14 @@
 #include "aligner_methods.hpp"
 
 #ifdef __AVX2__
-#include <emmintrin.h>
 #include <immintrin.h>
 #endif
 
 #include <Eigen/StdVector>
 
-#include "common/bounded_priority_queue.hpp"
 #include "common/algorithms.hpp"
+#include "common/bounded_priority_queue.hpp"
+#include "common/utils/simd_utils.hpp"
 
 
 template <typename T>
@@ -165,25 +165,18 @@ inline void compute_match_delete_updates_avx2(size_t &i,
     const __m256i del_packed = _mm256_set1_epi32(Cigar::Operator::DELETION);
     const __m256i gap_open_packed = _mm256_set1_epi32(gap_opening_penalty);
     const __m256i gap_extend_packed = _mm256_set1_epi32(gap_extension_penalty);
-    const __m256i r_rotate = _mm256_setr_epi32(1, 2, 3, 4, 5, 6, 7, 0);
 
     for (; i + 8 <= length; i += 8) {
         __m256i incoming_packed = _mm256_loadu_si256((__m256i*)(incoming_scores - 1));
 
         // compute match and delete scores
         __m256i match_scores_packed = _mm256_add_epi32(
-            _mm256_cvtepi8_epi32(_mm256_castsi256_si128(_mm256_insert_epi64(
-                _mm256_undefined_si256(),
-                *(uint64_t*)char_scores,
-                0
-            ))),
+            expandepi8_epi64(*(uint64_t*)char_scores),
             incoming_packed
         );
 
         __m256i delete_scores_packed = _mm256_add_epi32(
-            _mm256_insert_epi32(_mm256_permutevar8x32_epi32(incoming_packed, r_rotate),
-                                incoming_scores[7],
-                                7),
+            rshiftpushback_epi32(incoming_packed, incoming_scores[7]),
             _mm256_blendv_epi8(gap_open_packed,
                                gap_extend_packed,
                                _mm256_cmpeq_epi32(
