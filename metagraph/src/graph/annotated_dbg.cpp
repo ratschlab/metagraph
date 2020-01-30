@@ -252,68 +252,66 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
         return presence_vectors;
     }
 
-    VectorOrderedMap<row_index, std::vector<size_t>> index_locations;
-    index_locations.reserve(sequence.size() - dbg_.get_k() + 1);
-
     size_t num_present_kmers = 0;
-    size_t num_missing_kmers = 0;
+
+    // map each index in the query k-mer sequence to a row in the annotation matrix
+    std::vector<row_index> row_indices;
+    std::vector<node_index> node_indices;
+    row_indices.reserve(sequence.size() - dbg_.get_k() + 1);
+    node_indices.reserve(sequence.size() - dbg_.get_k() + 1);
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
-        if (i > 0) {
-            index_locations[graph_to_anno_index(i)].push_back(
-                num_present_kmers + num_missing_kmers
-            );
+        node_indices.push_back(i);
 
+        if (i > 0) {
+            row_indices.push_back(graph_to_anno_index(i));
             ++num_present_kmers;
-        } else {
-            ++num_missing_kmers;
         }
     });
 
-    size_t size = num_present_kmers + num_missing_kmers;
-    assert(size == sequence.size() - dbg_.get_k() + 1);
+    assert(node_indices.size() == sequence.size() - dbg_.get_k() + 1);
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * size));
+    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * node_indices.size()));
     if (num_present_kmers < min_count)
         return {};
 
-    std::vector<row_index> keys(index_locations.size());
-    std::transform(index_locations.begin(), index_locations.end(), keys.begin(),
-                   [](const auto &pair) { return pair.first; });
-
-    auto label_codes = annotator_->get_label_codes(keys);
-
+    // construct the k-mer presence masks for all label codes
     using VectorCount = std::pair<std::vector<uint8_t>, size_t>;
-    using LabelCodeVectorCountMap = VectorOrderedMap<uint64_t, VectorCount>;
-    using Storage = typename LabelCodeVectorCountMap::values_container_type;
+    using Storage = std::vector<std::pair<uint64_t, VectorCount>>;
 
-    LabelCodeVectorCountMap label_codes_to_presence;
+    VectorOrderedMap<uint64_t, VectorCount> label_codes_to_presence;
+    static_assert(std::is_same<
+        typename decltype(label_codes_to_presence)::values_container_type,
+        Storage
+    >::value);
 
+    auto label_codes = annotator_->get_label_codes(row_indices);
+    assert(label_codes.size() == row_indices.size());
     auto it = label_codes.begin();
-    for (const auto &[row, indices] : index_locations) {
-        // Each row in the annotation matrix is associated with a set of
-        // indices in the input sequence's k-mer sequence.
-        // Each row is also associated with a vector in label_codes indicating
-        // the codes for that row's associated labels.
+    for (size_t i = 0; i < node_indices.size(); ++i) {
+        // skip this k-mer since it was not found in the graph
+        if (!node_indices[i])
+            continue;
+
+        assert(it != label_codes.end());
         for (const auto &code : *it) {
-            // generate a k-mer sequence presence mask for the input sequence
-            // to indicate which k-mers are associated with this label code
+            // for each label code associated with this k-mer, mark the
+            // corresponding k-mer presence mask at index i
             auto &vector_count = label_codes_to_presence[code];
 
             if (vector_count.first.empty())
-                vector_count.first.resize(size, 0);
+                vector_count.first.resize(node_indices.size(), 0);
 
-            for (size_t i : indices) {
-                // set index i in the k-mer presence vector to true (i.e., all ones)
-                // and increment the popcount if it wasn't previously set
-                vector_count.second += !vector_count.first[i];
-                vector_count.first[i] = 0xFF;
-            }
+            vector_count.second += !vector_count.first[i];
+            vector_count.first[i] = 0xFF;
         }
 
         ++it;
     }
 
+    assert(it == label_codes.end());
+
+    // sort, decode, output
     auto vector = const_cast<Storage&&>(label_codes_to_presence.values_container());
 
     bool is_sorted = num_top_labels <= vector.size();
@@ -350,6 +348,7 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     }
 
 #ifndef NDEBUG
+    // sanity check, make sure that the same matches are output by get_top_labels
     auto top_labels = get_top_labels(sequence, num_top_labels, presence_ratio);
     assert(top_labels.size() == presence_vectors.size());
 
