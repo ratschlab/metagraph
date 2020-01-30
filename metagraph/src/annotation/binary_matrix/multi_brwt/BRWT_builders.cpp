@@ -417,11 +417,19 @@ void BRWTOptimizer::reassign(size_t node_rank, BRWT *parent, size_t num_threads)
         sdsl::bit_vector subindex(index_column.size(), false);
 
         uint64_t child_i = 0;
+        uint64_t w;
         call_ones(index_column, [&](auto i) {
-            // TODO: use get_int() for faster access
-            if ((*grand_child->nonzero_rows_)[child_i])
+            if (child_i % 64 == 0) {
+                w = grand_child->nonzero_rows_->get_int(child_i,
+                    std::min(static_cast<uint64_t>(64),
+                             grand_child->nonzero_rows_->size() - child_i)
+                );
+            }
+
+            if (w & 1)
                 subindex[i] = true;
 
+            w >>= 1;
             child_i++;
         });
 
