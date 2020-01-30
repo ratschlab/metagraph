@@ -186,6 +186,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     assert(!(*index_in_full_graph)[0]);
 
+    // TODO: find a way to do this without running call_sequences twice
     if (discovery_fraction > 0) {
         sdsl::bit_vector mask(graph->max_index() + 1, false);
 
@@ -306,6 +307,7 @@ int query_graph(Config *config) {
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
+    std::mutex call_sequence_mutex;
 
     Timer timer;
 
@@ -334,16 +336,22 @@ int query_graph(Config *config) {
 
         const auto *graph_to_query = anno_graph.get();
 
-        auto get_alignment = [&](const kstring_t &seq) {
+        auto get_alignment = [&](const kstring_t &seq, auto call_sequence) {
             return thread_pool.enqueue(
-                [&](std::string s) -> std::string {
+                [&](std::string s, auto call_sequence) -> std::string {
                     auto alignments = aligner->align(s);
                     if (alignments.size())
-                       return const_cast<std::string&&>(alignments.front().get_sequence());
+                       s = const_cast<std::string&&>(alignments.front().get_sequence());
+
+                    {
+                        std::lock_guard<std::mutex> lock(call_sequence_mutex);
+                        call_sequence(s);
+                    }
 
                     return s;
                 },
-                seq.s
+                seq.s,
+                call_sequence
             );
         };
 
@@ -415,7 +423,9 @@ int query_graph(Config *config) {
 
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
-                            future_alignments.push_back(get_alignment(it->seq));
+                            future_alignments.push_back(
+                                get_alignment(it->seq, call_sequence)
+                            );
 
                             // store sequence name and a placeholder for the
                             // alignment result
@@ -424,7 +434,9 @@ int query_graph(Config *config) {
 
                             if (config->forward_and_reverse) {
                                 reverse_complement(it->seq);
-                                future_alignments.push_back(get_alignment(it->seq));
+                                future_alignments.push_back(
+                                    get_alignment(it->seq, call_sequence)
+                                );
                                 named_alignments.emplace_back(it->name.s, std::string());
                                 num_bytes_read = it->seq.l;
                             }
@@ -435,8 +447,6 @@ int query_graph(Config *config) {
                         for (size_t i = 0; i < named_alignments.size(); ++i) {
                             named_alignments[i].second
                                 = std::move(future_alignments[i].get());
-
-                            call_sequence(named_alignments[i].second);
                         }
                     },
                     config->count_labels ? 0 : config->discovery_fraction,
@@ -488,11 +498,13 @@ int query_graph(Config *config) {
                                          config->forward_and_reverse);
             } else {
                 // query the alignment matches against the annotator
+                // TODO: better parallelization here
                 read_fasta_file_critical(
                     file,
                     [&](kseq_t *read_stream) {
                         query_seq_future_async(std::string(read_stream->name.s),
-                                               get_alignment(read_stream->seq));
+                                               get_alignment(read_stream->seq,
+                                                             [](const std::string&) {}));
                     },
                     config->forward_and_reverse
                 );
