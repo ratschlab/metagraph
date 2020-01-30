@@ -334,6 +334,19 @@ int query_graph(Config *config) {
 
         const auto *graph_to_query = anno_graph.get();
 
+        auto get_alignment = [&](const kstring_t &seq) {
+            return thread_pool.enqueue(
+                [&](std::string s) -> std::string {
+                    auto alignments = aligner->align(s);
+                    if (alignments.size())
+                       return const_cast<std::string&&>(alignments.front().get_sequence());
+
+                    return s;
+                },
+                seq.s
+            );
+        };
+
         auto query_seq_async = [&](std::string&& name, std::string&& seq) {
             thread_pool.enqueue(execute_query,
                 fmt::format_int(seq_count++).str() + "\t" + name,
@@ -369,19 +382,6 @@ int query_graph(Config *config) {
             query_seq_async(read_stream->name.s, read_stream->seq.s);
         };
 
-        auto get_alignment = [&](const kstring_t &seq, ThreadPool &thread_pool) {
-            return thread_pool.enqueue(
-                [&](std::string s) -> std::string {
-                    auto alignments = aligner->align(s);
-                    if (alignments.size())
-                       return const_cast<std::string&&>(alignments.front().get_sequence());
-
-                    return s;
-                },
-                seq.s
-            );
-        };
-
         // Graph constructed from a batch of queried sequences
         // Used only in fast mode
         if (config->fast) {
@@ -415,7 +415,7 @@ int query_graph(Config *config) {
 
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
-                            future_alignments.push_back(get_alignment(it->seq, thread_pool));
+                            future_alignments.push_back(get_alignment(it->seq));
 
                             // store sequence name and a placeholder for the
                             // alignment result
@@ -424,10 +424,7 @@ int query_graph(Config *config) {
 
                             if (config->forward_and_reverse) {
                                 reverse_complement(it->seq);
-                                future_alignments.push_back(
-                                    get_alignment(it->seq, thread_pool)
-                                );
-
+                                future_alignments.push_back(get_alignment(it->seq));
                                 named_alignments.emplace_back(it->name.s, std::string());
                                 num_bytes_read = it->seq.l;
                             }
@@ -494,10 +491,8 @@ int query_graph(Config *config) {
                 read_fasta_file_critical(
                     file,
                     [&](kseq_t *read_stream) {
-                        query_seq_future_async(
-                            std::string(read_stream->name.s),
-                            get_alignment(read_stream->seq, thread_pool)
-                        );
+                        query_seq_future_async(std::string(read_stream->name.s),
+                                               get_alignment(read_stream->seq));
                     },
                     config->forward_and_reverse
                 );
