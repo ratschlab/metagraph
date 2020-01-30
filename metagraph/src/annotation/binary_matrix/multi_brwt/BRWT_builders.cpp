@@ -315,9 +315,7 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& brwts,
                  num_threads);
 }
 
-void BRWTOptimizer::relax(BRWT *brwt_matrix,
-                          uint64_t max_arity,
-                          size_t num_threads) {
+void BRWTOptimizer::relax(BRWT *brwt_matrix, uint64_t max_arity, size_t num_threads) {
     assert(brwt_matrix);
 
     std::deque<BRWT*> parents;
@@ -329,118 +327,98 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix,
             parents.push_front(const_cast<BRWT*>(&node));
     });
 
-    ProgressBar progress_bar(parents.size(), "Optimizing BRWT",
+    ProgressBar progress_bar(parents.size(), "Relax Multi-BRWT",
                              std::cerr, !utils::get_verbose());
 
-    while (!parents.empty()) {
-        auto &parent = *parents.front();
-        parents.pop_front();
+    for (BRWT *parent : parents) {
+        assert(parent->child_nodes_.size());
 
-        assert(parent.child_nodes_.size());
+        for (int g = parent->child_nodes_.size() - 1; g >= 0; --g) {
+            const auto *node = dynamic_cast<const BRWT*>(parent->child_nodes_[g].get());
 
-        NodeBRWT updated_parent;
-
-        for (size_t g = 0; g < parent.child_nodes_.size(); ++g) {
-            // we leave the column arrangement unchanged
-            auto num_columns = parent.child_nodes_[g]->num_columns();
-            for (size_t r = 0; r < num_columns; ++r) {
-                updated_parent.column_arrangement.push_back(
-                    parent.assignments_.get(g, r)
-                );
+            if (node && better_split(*node)
+                     && parent->child_nodes_.size() - 1
+                            + node->child_nodes_.size() <= max_arity) {
+                // remove this node and reassign all its children directly to its parent
+                reassign(g, parent, num_threads);
             }
-            // column arrangement in the parrent is set
-            // now we need to initialize group_sizes and child_nodes
-            add_submatrix(
-                std::move(parent.child_nodes_[g]),
-                &updated_parent,
-                max_arity - std::min(max_arity,
-                        static_cast<uint64_t>(updated_parent.group_sizes.size())
-                            + parent.child_nodes_.size() - g - 1),
-                num_threads
-            );
         }
-
-        parent = BRWTBuilder::initialize(std::move(updated_parent),
-                                         std::move(*parent.nonzero_rows_));
 
         ++progress_bar;
     }
 }
 
-void BRWTOptimizer::add_submatrix(std::unique_ptr<BinaryMatrix>&& submatrix,
-                                  NodeBRWT *parent,
-                                  uint64_t max_delta_arity,
-                                  size_t num_threads) {
-    assert(parent);
-
-    const auto *brwt_cptr = dynamic_cast<const BRWT*>(submatrix.get());
-
-    // we don't relax other submatrix representations
-    bool prune = brwt_cptr != NULL;
-
+bool BRWTOptimizer::better_split(const BRWT &node) {
     // we don't remove leaves in BRWT
-    if (prune && !brwt_cptr->child_nodes_.size())
-        prune = false;
-
-    // check if the arity will not be exceeded
-    if (prune && brwt_cptr->child_nodes_.size() > max_delta_arity)
-        prune = false;
+    if (!node.child_nodes_.size())
+        return false;
 
     // we relax only those child nodes, that have only BRWT nodes
     // because nodes of other types can't be reassigned
-    if (prune) {
-        for (const auto &child_node : brwt_cptr->child_nodes_) {
-            if (!dynamic_cast<const BRWT *>(child_node.get())) {
-                prune = false;
-                break;
-            }
+    for (const auto &child_node : node.child_nodes_) {
+        if (!dynamic_cast<const BRWT *>(child_node.get()))
+            return false;
+    }
+
+    // we don't remove nodes if it doesn't reduce the size
+    return pruning_delta(node) <= 0;
+}
+
+void BRWTOptimizer::reassign(size_t node_rank, BRWT *parent, size_t num_threads) {
+    assert(parent);
+
+    BRWT &node = dynamic_cast<BRWT&>(*parent->child_nodes_.at(node_rank));
+
+    std::vector<uint64_t> column_arrangement;
+    std::vector<size_t> group_sizes;
+    for (size_t g = 0; g < parent->assignments_.num_groups(); ++g) {
+        if (g == node_rank)
+            continue;  // skip the columns assigned to |node|
+
+        size_t group_size = parent->child_nodes_[g]->num_columns();
+        group_sizes.push_back(group_size);
+        for (size_t r = 0; r < group_size; ++r) {
+            column_arrangement.push_back(parent->assignments_.get(g, r));
+        }
+    }
+    // reassign the node's columns
+    for (size_t g = 0; g < node.assignments_.num_groups(); ++g) {
+        size_t group_size = node.child_nodes_[g]->num_columns();
+        group_sizes.push_back(group_size);
+        for (size_t r = 0; r < group_size; ++r) {
+            column_arrangement.push_back(
+                parent->assignments_.get(node_rank, node.assignments_.get(g, r))
+            );
         }
     }
 
-    // we don't remove nodes if it doesn't reduce the space requirements
-    if (!prune || pruning_delta(*brwt_cptr) > 0) {
-        // leave this submatrix unchanged
-        parent->group_sizes.push_back(submatrix->num_columns());
-        parent->child_nodes.push_back(std::move(submatrix));
-    } else {
-        // at this point we are going to remove this node and
-        // reassign all its children to its parent directly
-        reassign(std::unique_ptr<BRWT>(dynamic_cast<BRWT*>(submatrix.release())),
-                 parent,
-                 num_threads);
-    }
-}
+    auto children_reassigned = std::move(node.child_nodes_);
+    const auto index_column = node.nonzero_rows_->convert_to<sdsl::bit_vector>();
 
-void BRWTOptimizer::reassign(std::unique_ptr<BRWT>&& node,
-                             NodeBRWT *parent,
-                             size_t num_threads) {
-    assert(node);
-    assert(parent);
+    // remove the |node| from the list of parent's children
+    // after erasing, |node| will be deleted and thus must not be accessed
+    parent->child_nodes_.erase(parent->child_nodes_.begin() + node_rank);
+    // insert new children to |parent|
+    parent->child_nodes_.resize(parent->child_nodes_.size()
+                                    + children_reassigned.size());
+    parent->assignments_ = RangePartition(column_arrangement, group_sizes);
 
-    // TODO: assignemnts?
-
-    const auto node_index = node->nonzero_rows_->convert_to<sdsl::bit_vector>();
-    node->nonzero_rows_.reset();
-
-    auto offset = parent->group_sizes.size();
-
-    parent->group_sizes.resize(parent->group_sizes.size() + node->child_nodes_.size());
-    parent->child_nodes.resize(parent->child_nodes.size() + node->child_nodes_.size());
-
+    // the column assignments are updated
+    // nonzero_rows_ stays unchanged in |parent|
+    // now we need to insert the child nodes and update them accordingly
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (size_t i = 0; i < node->child_nodes_.size(); ++i) {
-
-        auto submatrix = std::move(node->child_nodes_[i]);
-
-        assert(dynamic_cast<BRWT*>(submatrix.get()));
+    for (size_t t = 0; t < children_reassigned.size(); ++t) {
 
         std::unique_ptr<BRWT> grand_child {
-            dynamic_cast<BRWT*>(submatrix.release())
+            dynamic_cast<BRWT*>(children_reassigned[t].release())
         };
-        sdsl::bit_vector subindex(node_index.size(), false);
+        assert(grand_child);
+
+        sdsl::bit_vector subindex(index_column.size(), false);
 
         uint64_t child_i = 0;
-        call_ones(node_index, [&](auto i) {
+        call_ones(index_column, [&](auto i) {
+            // TODO: use get_int() for faster access
             if ((*grand_child->nonzero_rows_)[child_i])
                 subindex[i] = true;
 
@@ -450,8 +428,8 @@ void BRWTOptimizer::reassign(std::unique_ptr<BRWT>&& node,
         grand_child->nonzero_rows_
             = std::make_unique<bit_vector_small>(std::move(subindex));
 
-        parent->group_sizes[offset + i] = grand_child->num_columns();
-        parent->child_nodes[offset + i] = std::move(grand_child);
+        parent->child_nodes_[parent->child_nodes_.size()
+                        - children_reassigned.size() + t] = std::move(grand_child);
     }
 }
 

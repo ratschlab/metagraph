@@ -11,8 +11,6 @@
 
 
 class BRWTBuilder {
-    friend class BRWTOptimizer;
-
   public:
     virtual ~BRWTBuilder() {}
 
@@ -79,19 +77,11 @@ class BRWTOptimizer {
     static void relax(BRWT *brwt_matrix,
                       uint64_t max_arity = -1,
                       size_t num_threads = 1);
-
   private:
-    using NodeBRWT = BRWTBuilder::NodeBRWT;
-
-    static void add_submatrix(std::unique_ptr<BinaryMatrix>&& node,
-                              NodeBRWT *parent,
-                              uint64_t max_delta_arity,
-                              size_t num_threads);
-
-    // removes a node and reassigns all its children to its parent
-    static void reassign(std::unique_ptr<BRWT>&& node,
-                         NodeBRWT *parent,
-                         size_t num_threads);
+    // check if pruning is going to reduce the size
+    static bool better_split(const BRWT &node);
+    // remove the node and reassign all its children to its parent
+    static void reassign(size_t node_rank, BRWT *parent, size_t num_threads);
     // estimate delta between the transformed tree and the current one
     static double pruning_delta(const BRWT &node);
 };
