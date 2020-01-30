@@ -82,7 +82,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    VectorOrderedMap<row_index, size_t> index_counts;
+    std::vector<std::pair<row_index, size_t>> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
     size_t num_present_kmers = 0;
@@ -90,7 +90,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
-            index_counts[graph_to_anno_index(i)]++;
+            index_counts.emplace_back(graph_to_anno_index(i), 1);
             num_present_kmers++;
         } else {
             num_missing_kmers++;
@@ -104,7 +104,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     if (num_present_kmers < min_count)
         return {};
 
-    return get_labels(index_counts.values_container(), min_count);
+    return get_labels(index_counts, min_count);
 }
 
 std::vector<std::string>
@@ -162,7 +162,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
         return label_counts;
     }
 
-    VectorOrderedMap<row_index, size_t> index_counts;
+    std::vector<std::pair<row_index, size_t>> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
     size_t num_present_kmers = 0;
@@ -170,7 +170,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
-            index_counts[graph_to_anno_index(i)]++;
+            index_counts.emplace_back(graph_to_anno_index(i), 1);
             num_present_kmers++;
         } else {
             num_missing_kmers++;
@@ -183,7 +183,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     if (num_present_kmers < min_count)
         return {};
 
-    return get_top_labels(index_counts.values_container(), num_top_labels, min_count);
+    return get_top_labels(index_counts, num_top_labels, min_count);
 }
 
 std::vector<StringCountPair>
