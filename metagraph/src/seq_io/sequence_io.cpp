@@ -155,6 +155,130 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
         && gzputc(gz_out, '\n') == '\n';
 }
 
+
+FastaParser::FastaParser(const std::string &filename) : filename_(filename) {
+    // check if we can read from file
+    gzFile input_p = gzopen(filename_.c_str(), "r");
+    if (input_p == Z_NULL) {
+        std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
+        exit(1);
+    }
+    gzclose(input_p);
+}
+
+FastaParser::iterator FastaParser::begin() const { return iterator(filename_); }
+FastaParser::iterator FastaParser::end() const { return iterator(); }
+
+
+FastaParser::iterator::iterator(const iterator &other) { *this = other; }
+
+FastaParser::iterator::iterator(iterator&& other) { *this = std::move(other); }
+
+FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
+    if (!other.read_stream_) {
+        // free memory, reset members and return
+        deinit_stream();
+        filename_.clear();
+        read_stream_ = NULL;
+        return *this;
+    }
+
+    if (!read_stream_) {
+        *this = iterator(other.filename_);
+
+    } else if (filename_ != other.filename_) {
+        // The current iterator doesn't point to the target fasta file.
+        // Thus, we need to open a new descriptor and seek to the target position.
+
+        filename_ = other.filename_;
+
+        // close the old file descriptor
+        gzclose(read_stream_->f->f);
+
+        // open a new file descriptor
+        read_stream_->f->f = gzopen(filename_.c_str(), "r");
+        if (read_stream_->f->f == Z_NULL) {
+            std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
+            exit(1);
+        }
+    }
+
+    gzseek(read_stream_->f->f, gztell(other.read_stream_->f->f), SEEK_SET);
+
+#define KSTRING_COPY(kstr, other_kstr) \
+            kstr.l = other_kstr.l; \
+            if (kstr.m != other_kstr.m) { \
+                kstr.m = other_kstr.m; \
+                kstr.s = (char*)realloc(kstr.s, kstr.m); \
+                if (!kstr.s) { \
+                    std::cerr << "ERROR: realloc failed" << std::endl; \
+                    exit(1); \
+                } \
+            } \
+            memcpy(kstr.s, other_kstr.s, other_kstr.m); \
+
+    // copy last cached record
+    KSTRING_COPY(read_stream_->name, other.read_stream_->name);
+    KSTRING_COPY(read_stream_->comment, other.read_stream_->comment);
+    KSTRING_COPY(read_stream_->seq, other.read_stream_->seq);
+    KSTRING_COPY(read_stream_->qual, other.read_stream_->qual);
+
+    read_stream_->last_char = other.read_stream_->last_char;
+
+    // copy stream state
+    kstream_t *f = read_stream_->f;
+    kstream_t *other_f = other.read_stream_->f;
+
+    f->begin = other_f->begin;
+    f->end = other_f->end;
+    f->is_eof = other_f->is_eof;
+    f->seek_pos = other_f->seek_pos;
+    if (f->bufsize != other_f->bufsize) {
+        f->bufsize = other_f->bufsize;
+        f->buf = (unsigned char*)realloc(f->buf, f->bufsize);
+        if (!f->buf) {
+            std::cerr << "ERROR: realloc failed" << std::endl;
+            exit(1);
+        }
+    }
+    memcpy(f->buf, other_f->buf, other_f->bufsize);
+
+    return *this;
+}
+
+FastaParser::iterator& FastaParser::iterator::operator=(iterator&& other) {
+    std::swap(filename_, other.filename_);
+    std::swap(read_stream_, other.read_stream_);
+    // the destructor in |other| will be responsible for freeing the memory now
+    return *this;
+}
+
+FastaParser::iterator::iterator(const std::string &filename)
+      : filename_(filename) {
+    gzFile input_p = gzopen(filename_.c_str(), "r");
+    if (input_p == Z_NULL) {
+        std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
+        exit(1);
+    }
+
+    read_stream_ = kseq_init(input_p);
+    if (read_stream_ == NULL) {
+        std::cerr << "ERROR: failed to initialize kseq file descriptor" << std::endl;
+        exit(1);
+    }
+
+    ++(*this);
+}
+
+void FastaParser::iterator::deinit_stream() {
+    if (read_stream_) {
+        gzFile input_p = read_stream_->f->f;
+        kseq_destroy(read_stream_);
+        gzclose(input_p);
+    }
+}
+
+
 template <class Callback>
 void read_fasta_file_critical(gzFile input_p,
                               Callback callback,
