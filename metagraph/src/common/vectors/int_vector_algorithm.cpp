@@ -186,8 +186,8 @@ sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
         }
     }
 
-    assert(presence.size() - i >= offset - 1);
-    assert(presence.size() - i <= 128 - offset + 1);
+    assert(presence.size() - i >= static_cast<size_t>(offset) - 1);
+    assert(presence.size() - i <= 128 - static_cast<size_t>(offset) + 1);
 
     // handle last word
     if (vector.size() - i <= 64) {
@@ -211,6 +211,16 @@ sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
         presence.set_int(i, uint64_t(dword_masked));
         presence.set_int(i + 64, uint64_t(dword_masked >> 64), vector.size() - i - 64);
     }
+
+#ifndef NDEBUG
+    for (size_t i = 0; i < presence.size(); ++i) {
+        bool b = vector[i];
+        for (uint8_t j = 1; j < offset && i + j < presence.size(); ++j) {
+            b &= vector[i + j];
+        }
+        assert(b == presence[i]);
+    }
+#endif
 
     return presence;
 }
