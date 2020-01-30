@@ -259,6 +259,34 @@ inline __m256i expandepi8_epi64(uint64_t a) {
 }
 
 
+/**
+ * Helpers for score_kmer_presence_mask
+ */
+
+// based off of:
+// https://stackoverflow.com/questions/41144668/how-to-efficiently-perform-double-int64-conversions-with-sse-avx
+inline __m256d uint64_to_double(__m256i x) {
+    __m256d mask = _mm256_set1_pd(0x0010000000000000);
+
+    // this part only works for sizes < 2^52
+    if (LIKELY(!_mm256_movemask_epi8(_mm256_cmpgt_epi64(x, _mm256_set1_epi64x(0xFFFFFFFFFFFFF)))))
+        return _mm256_sub_pd(_mm256_castsi256_pd(_mm256_or_si256(x, _mm256_castpd_si256(mask))), mask);
+
+    __m256i xH = _mm256_srli_epi64(x, 32);
+    xH = _mm256_or_si256(xH, _mm256_castpd_si256(_mm256_set1_pd(19342813113834066795298816.)));          //  2^84
+    __m256i xL = _mm256_blend_epi16(x, _mm256_castpd_si256(mask), 0xcc);   //  2^52
+    __m256d f = _mm256_sub_pd(_mm256_castsi256_pd(xH), _mm256_set1_pd(19342813118337666422669312.));     //  2^84 + 2^52
+    return _mm256_add_pd(f, _mm256_castsi256_pd(xL));
+}
+
+inline double haddall_pd(__m256d v) {
+    // [ a, b, c, d ] -> [ a+b, 0, c+d, 0]
+    __m256d pairs = _mm256_hadd_pd(v, _mm256_setzero_pd());
+
+    // [ a+b, 0, c+d, 0] + [ c+d, 0, 0, 0] -> a+b+c+d
+    return _mm256_cvtsd_f64(_mm256_add_pd(pairs, _mm256_permute4x64_pd(pairs, 0x56)));
+}
+
 #endif
 
 #endif // __SIMD_UTILS_HPP__
