@@ -553,22 +553,16 @@ __m256d get_penalty_bigsi_avx2(__m256d counts,
     );
 
     // separate mul and add is faster than using FMA instructions
-    __m256d mean_N_snps = _mm256_add_pd(
-        _mm256_mul_pd(max_N_snps, _mm256_set1_pd(0.05)),
-        min_N_snps
-    );
+    __m256d mean_N_snps = fmafast_pd(max_N_snps, _mm256_set1_pd(0.05), min_N_snps);
 
     assert(!_mm256_movemask_pd(_mm256_cmp_pd(mean_N_snps, counts, 14)));
 
     __m256d mean_penalty = _mm256_mul_pd(mean_N_snps, mismatch_score);
 
-    __m256d penalties = _mm256_mul_pd(
-        _mm256_add_pd(_mm256_mul_pd(_mm256_sub_pd(mean_penalty, counts), match_score),
-                      mean_penalty),
-        neg_ones
-    );
-
-    return penalties;
+    return _mm256_mul_pd(fmafast_pd(_mm256_sub_pd(mean_penalty, counts),
+                                    match_score,
+                                    mean_penalty),
+                         neg_ones);
 }
 
 #endif

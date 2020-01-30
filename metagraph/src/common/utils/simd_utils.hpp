@@ -287,6 +287,11 @@ inline double haddall_pd(__m256d v) {
     return _mm256_cvtsd_f64(_mm256_add_pd(pairs, _mm256_permute4x64_pd(pairs, 0x56)));
 }
 
+// separate mul and add is faster than using FMA instructions
+inline __m256d fmafast_pd(__m256d a, __m256d b, __m256d c) {
+    return _mm256_add_pd(_mm256_mul_pd(a, b), c);
+}
+
 #endif
 
 #endif // __SIMD_UTILS_HPP__
