@@ -406,6 +406,11 @@ bool AnnotatedSequenceGraph::check_compatibility() const {
 /**
  * Helper functions for score_kmer_presence_mask
  */
+
+inline sdsl::uint128_t pushback_epi64(const sdsl::uint128_t &v, uint64_t a) {
+    return (v >> 64) | (sdsl::uint128_t(a) << 64);
+}
+
 sdsl::bit_vector smooth_bit_vector(const sdsl::bit_vector &vector) {
     if (vector.size() < 3)
         return vector;
@@ -415,10 +420,9 @@ sdsl::bit_vector smooth_bit_vector(const sdsl::bit_vector &vector) {
     // process one word at a time
     // TODO: is it worth vectorizing this?
     size_t i = 0;
-    sdsl::uint128_t dword(vector.data()[0]);
-    dword <<= 64;
+    auto dword = sdsl::uint128_t(vector.data()[0]) << 64;
     for (; i + 64 <= presence.size() - 2; i += 64) {
-        dword = (dword >> 64) | (sdsl::uint128_t(vector.data()[(i >> 6) + 1]) << 64);
+        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1]);
         presence.data()[i >> 6] &= uint64_t(dword >> 1) & uint64_t(dword >> 2);
     }
 
@@ -433,8 +437,8 @@ sdsl::bit_vector smooth_bit_vector(const sdsl::bit_vector &vector) {
                               & ((word >> 2) | (uint64_t(3) << (vector.size() - i - 2))),
                          vector.size() - i);
     } else {
-        dword = (dword >> 64) | (sdsl::uint128_t(vector.data()[(i >> 6) + 1]) << 64)
-            | sdsl::uint128_t(3) << (vector.size() - i);
+        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1])
+            | (sdsl::uint128_t(3) << (vector.size() - i));
         dword = dword & (dword >> 1) & (dword >> 2);
         presence.set_int(i, uint64_t(dword));
         presence.set_int(i + 64, uint64_t(dword >> 64), vector.size() - i - 64);
@@ -574,12 +578,12 @@ double add_penalty_bigsi(double cur,
                          double SNP_t) {
     double min_N_snps = count / SNP_t;
     double max_N_snps = std::max(count - SNP_t + 1, min_N_snps);
-    double mean_N_snps = min_N_snps + 0.05 * max_N_snps;
+    double mean_N_snps = max_N_snps * 0.05 + min_N_snps;
 
     assert(count >= mean_N_snps);
 
     double mean_penalty = mean_N_snps * mismatch_score;
-    return cur - mean_penalty + (count - mean_penalty) * match_score;
+    return cur + (count - mean_penalty) * match_score - mean_penalty;
 }
 
 int32_t AnnotatedDBG
