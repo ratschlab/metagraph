@@ -322,6 +322,7 @@ int query_graph(Config *config) {
     }
 
     std::vector<std::pair<std::string, std::string>> named_alignments;
+    std::vector<std::future<std::string>> future_alignments;
 
     // iterate over input files
     for (const auto &file : files) {
@@ -348,16 +349,37 @@ int query_graph(Config *config) {
             );
         };
 
+        auto query_seq_future_async = [&](std::string&& name,
+                                          std::future<std::string> seq) {
+            thread_pool.enqueue(execute_query,
+                fmt::format_int(seq_count++).str() + "\t" + name,
+                std::move(seq.get()),
+                config->count_labels,
+                config->print_signature,
+                config->suppress_unlabeled,
+                config->num_top_labels,
+                config->discovery_fraction,
+                config->anno_labels_delimiter,
+                std::ref(*graph_to_query),
+                std::ref(std::cout)
+            );
+        };
+
         auto query_seq_kseq_async = [&](kseq_t *read_stream) {
             query_seq_async(read_stream->name.s, read_stream->seq.s);
         };
 
-        auto get_alignment_match = [&](const kstring_t &seq) -> std::string {
-            auto alignments = aligner->align(seq.s);
-            if (alignments.size())
-                return const_cast<std::string&&>(alignments.front().get_sequence());
+        auto get_alignment = [&](const kstring_t &seq, ThreadPool &thread_pool) {
+            return thread_pool.enqueue(
+                [&](std::string s) -> std::string {
+                    auto alignments = aligner->align(s);
+                    if (alignments.size())
+                       return const_cast<std::string&&>(alignments.front().get_sequence());
 
-            return seq.s;
+                    return s;
+                },
+                seq.s
+            );
         };
 
         // Graph constructed from a batch of queried sequences
@@ -393,23 +415,31 @@ int query_graph(Config *config) {
 
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
-                            // Store the alignment for later
-                            named_alignments.emplace_back(
-                                it->name.s,
-                                get_alignment_match(it->seq)
-                            );
-                            call_sequence(named_alignments.back().second);
-                            num_bytes_read += named_alignments.back().second.length();
+                            future_alignments.push_back(get_alignment(it->seq, thread_pool));
+
+                            // store sequence name and a placeholder for the
+                            // alignment result
+                            named_alignments.emplace_back(it->name.s, std::string());
+                            num_bytes_read = it->seq.l;
 
                             if (config->forward_and_reverse) {
                                 reverse_complement(it->seq);
-                                named_alignments.emplace_back(
-                                    it->name.s,
-                                    get_alignment_match(it->seq)
+                                future_alignments.push_back(
+                                    get_alignment(it->seq, thread_pool)
                                 );
-                                call_sequence(named_alignments.back().second);
-                                num_bytes_read += named_alignments.back().second.length();
+
+                                named_alignments.emplace_back(it->name.s, std::string());
+                                num_bytes_read = it->seq.l;
                             }
+                        }
+
+                        // join alignments, store for later
+                        assert(named_alignments.size() == future_alignments.size());
+                        for (size_t i = 0; i < named_alignments.size(); ++i) {
+                            named_alignments[i].second
+                                = std::move(future_alignments[i].get());
+
+                            call_sequence(named_alignments[i].second);
                         }
                     },
                     config->count_labels ? 0 : config->discovery_fraction,
@@ -466,8 +496,10 @@ int query_graph(Config *config) {
                 read_fasta_file_critical(
                     file,
                     [&](kseq_t *read_stream) {
-                        query_seq_async(std::string(read_stream->name.s),
-                                        get_alignment_match(read_stream->seq));
+                        query_seq_future_async(
+                            std::string(read_stream->name.s),
+                            get_alignment(read_stream->seq, thread_pool)
+                        );
                     },
                     config->forward_and_reverse
                 );
