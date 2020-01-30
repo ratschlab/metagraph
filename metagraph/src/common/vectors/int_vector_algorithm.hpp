@@ -88,11 +88,14 @@ void call_zeros(const Bitmap &vector, Callback callback) {
     call_zeros(vector, 0, vector.size(), callback);
 }
 
-uint64_t count_ones(const sdsl::bit_vector &vector,
-                    uint64_t begin, uint64_t end);
+uint64_t count_ones(const sdsl::bit_vector &vector, uint64_t begin, uint64_t end);
 
-uint64_t inner_prod(const sdsl::bit_vector &first,
-                    const sdsl::bit_vector &second);
+uint64_t inner_prod(const sdsl::bit_vector &first, const sdsl::bit_vector &second);
+
+
+// Apply the bitwise AND of vector with right-shifts of itself. Only works for
+// values of offset < 64
+sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset);
 
 
 // Call (uint64_t index, uint64_t value) for each non-zero value in [begin, end)

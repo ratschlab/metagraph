@@ -9,7 +9,6 @@
 #include <cstdlib>
 
 #include <Eigen/StdVector>
-#include <sdsl/uint128_t.hpp>
 #include <tsl/ordered_map.h>
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
@@ -407,56 +406,6 @@ bool AnnotatedSequenceGraph::check_compatibility() const {
  * Helper functions for score_kmer_presence_mask
  */
 
-inline sdsl::uint128_t pushback_epi64(const sdsl::uint128_t &v, uint64_t a) {
-    return (v >> 64) | (sdsl::uint128_t(a) << 64);
-}
-
-sdsl::bit_vector smooth_bit_vector(const sdsl::bit_vector &vector) {
-    if (vector.size() < 3)
-        return vector;
-
-    auto presence = vector;
-
-    // process one word at a time
-    // TODO: is it worth vectorizing this?
-    size_t i = 0;
-    auto dword = sdsl::uint128_t(vector.data()[0]) << 64;
-    for (; i + 64 <= presence.size() - 2; i += 64) {
-        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1]);
-        presence.data()[i >> 6] &= uint64_t(dword >> 1) & uint64_t(dword >> 2);
-    }
-
-    assert(presence.size() - i >= 2);
-    assert(presence.size() - i <= 126);
-
-    // handle last word
-    if (vector.size() - i <= 64) {
-        uint64_t word = vector.get_int(i, vector.size() - i);
-        presence.set_int(i,
-                         word & ((word >> 1) | (uint64_t(1) << (vector.size() - i - 1)))
-                              & ((word >> 2) | (uint64_t(3) << (vector.size() - i - 2))),
-                         vector.size() - i);
-    } else {
-        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1])
-            | (sdsl::uint128_t(3) << (vector.size() - i));
-        dword = dword & (dword >> 1) & (dword >> 2);
-        presence.set_int(i, uint64_t(dword));
-        presence.set_int(i + 64, uint64_t(dword >> 64), vector.size() - i - 64);
-    }
-
-#ifndef NDEBUG
-    for (size_t i = 0; i < vector.size() - 2; ++i) {
-        assert(presence[i] == (vector[i] && vector[i + 1] && vector[i + 2]));
-    }
-
-    assert(presence[vector.size() - 2]
-            == (vector[vector.size() - 2] && vector[vector.size() - 1]));
-    assert(presence[vector.size() - 1] == vector[vector.size() - 1]);
-#endif
-
-    return presence;
-}
-
 std::array<AlignedVector<size_t>, 2>
 tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
     std::array<AlignedVector<size_t>, 2> table;
@@ -600,7 +549,7 @@ int32_t AnnotatedDBG
     const size_t sequence_length = kmer_presence_mask.size() + k - 1;
     const int32_t SNP_t = k + kmer_adjust;
 
-    auto score_counter = tabulate_score(smooth_bit_vector(kmer_presence_mask),
+    auto score_counter = tabulate_score(autocorrelate(kmer_presence_mask, kmer_adjust),
                                         tabulate_offset);
 
     double score_init = std::accumulate(score_counter[1].begin(),

@@ -10,6 +10,8 @@
 #include <emmintrin.h>
 #endif
 
+#include <sdsl/uint128_t.hpp>
+
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
     sdsl::bit_vector result(vector.size(), 0);
@@ -158,4 +160,57 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
     }
 
     return count;
+}
+
+
+inline sdsl::uint128_t pushback_epi64(const sdsl::uint128_t &v, uint64_t a) {
+    return (v >> 64) | (sdsl::uint128_t(a) << 64);
+}
+
+sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
+    assert(offset < 64);
+
+    if (vector.size() < offset)
+        return vector;
+
+    auto presence = vector;
+
+    // process one word at a time
+    // TODO: is it worth vectorizing this?
+    size_t i = 0;
+    auto dword = sdsl::uint128_t(vector.data()[0]) << 64;
+    for (; i + 64 <= presence.size() - offset + 1; i += 64) {
+        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1]);
+        for (uint8_t j = 1; j < offset; ++j) {
+            presence.data()[i >> 6] &= uint64_t(dword >> j);
+        }
+    }
+
+    assert(presence.size() - i >= offset - 1);
+    assert(presence.size() - i <= 128 - offset + 1);
+
+    // handle last word
+    if (vector.size() - i <= 64) {
+        uint64_t word = vector.get_int(i, vector.size() - i);
+        uint64_t word_masked = word;
+        uint64_t mask = 0;
+        for (uint8_t j = 1; j < offset; ++j) {
+            mask |= uint64_t(1) << (vector.size() - i - j);
+            word_masked &= (word >> j) | mask;
+        }
+
+        presence.set_int(i, word_masked, vector.size() - i);
+
+    } else {
+        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1])
+            | (sdsl::uint128_t((1llu << offset) - 1) << (vector.size() - i));
+        sdsl::uint128_t dword_masked = dword;
+        for (uint8_t j = 1; j < offset; ++j) {
+            dword_masked &= dword >> j;
+        }
+        presence.set_int(i, uint64_t(dword_masked));
+        presence.set_int(i + 64, uint64_t(dword_masked >> 64), vector.size() - i - 64);
+    }
+
+    return presence;
 }
