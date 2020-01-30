@@ -35,6 +35,7 @@ class RangePartition {
 
     uint64_t num_groups() const;
     uint64_t size() const;
+    uint64_t group_size(G group) const { return partition_[group].size(); }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;

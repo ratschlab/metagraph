@@ -10,61 +10,31 @@
 #include "BRWT.hpp"
 
 
-class BRWTBuilder {
+class BRWTBottomUpBuilder {
   public:
-    virtual ~BRWTBuilder() {}
+    typedef std::vector<const bit_vector *> VectorPtrs;
+    typedef std::vector<std::vector<BRWT::Column>> Partition;
+    typedef std::function<Partition(const VectorPtrs &)> Partitioner;
 
-    using Row = typename BRWT::Row;
-    using Column = typename BRWT::Column;
-    using Child = typename BRWT::Child;
+    static Partitioner get_basic_partitioner(size_t arity = 2);
 
-  protected:
-    struct NodeBRWT {
-        // indexes of columns in the initial matrix
-        // compressed in subtree with the root in this node
-        std::vector<Column> column_arrangement;
-        // sizes of groups in affine partition of |column_arrangement|
-        std::vector<size_t> group_sizes;
-        // compressed submatrices of the current matrix without zero rows
-        // with columns distributed accoring to partition
-        std::vector<std::unique_ptr<BinaryMatrix>> child_nodes;
-    };
-
-    static BRWT initialize(NodeBRWT&& node, bit_vector&& nonzero_rows);
-};
-
-
-class BRWTBottomUpBuilder : public BRWTBuilder {
-  public:
-    typedef std::vector<std::unique_ptr<bit_vector>> VectorsPtr;
-    typedef std::vector<Column> Group;
-    typedef std::vector<Group> Partition;
-    typedef std::function<Partition(const VectorsPtr &)> Partitioner;
-
-    static Partitioner get_basic_partitioner(size_t arity);
-
-    static BRWT build(VectorsPtr&& columns,
-                      Partitioner partitioner = get_basic_partitioner(2),
+    // Build the Multi-BRWT compressed representation of a binary matrix
+    static BRWT build(std::vector<std::unique_ptr<bit_vector>>&& columns,
+                      Partitioner partitioner = get_basic_partitioner(),
                       size_t num_nodes_parallel = 1,
                       size_t num_threads = 1);
 
-    static BRWT merge(std::vector<BRWT>&& nodes,
-                      Partitioner partitioner = get_basic_partitioner(2),
+    // Merge multiple binary matrices compressed with Multi-BRWT
+    static BRWT merge(std::vector<BRWT>&& matrices,
+                      Partitioner partitioner = get_basic_partitioner(),
                       size_t num_nodes_parallel = 1,
                       size_t num_threads = 1);
 
   private:
-    static std::pair<NodeBRWT, std::unique_ptr<bit_vector>>
-    merge(std::vector<NodeBRWT>&& nodes,
-          std::vector<std::unique_ptr<bit_vector>>&& nonzero_rows,
-          sdsl::bit_vector *buffer,
-          ThreadPool &thread_pool);
-
-    static BRWT merge(VectorsPtr&& columns,
-                      std::vector<NodeBRWT>&& nodes,
-                      Partitioner partitioner,
-                      size_t num_nodes_parallel,
-                      size_t num_threads);
+    // Concatenate multiple Multi-BRWT submatrices
+    static BRWT concatenate(std::vector<BRWT>&& submatrices,
+                            sdsl::bit_vector *buffer,
+                            ThreadPool &thread_pool);
 };
 
 
@@ -78,8 +48,8 @@ class BRWTOptimizer {
                       uint64_t max_arity = -1,
                       size_t num_threads = 1);
   private:
-    // check if pruning is going to reduce the size
-    static bool better_split(const BRWT &node);
+    // check if removing this node is going to reduce the size
+    static bool should_prune(const BRWT &node);
     // remove the node and reassign all its children to its parent
     static void reassign(size_t node_rank, BRWT *parent, size_t num_threads);
     // estimate delta between the transformed tree and the current one

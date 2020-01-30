@@ -9,7 +9,7 @@
 const uint64_t kNumRowsSampled = 1'000'000;
 
 typedef std::vector<std::vector<uint64_t>> Partition;
-typedef std::vector<std::unique_ptr<bit_vector>> VectorPtrs;
+typedef std::vector<const bit_vector *> VectorPtrs;
 
 
 std::vector<sdsl::bit_vector>
