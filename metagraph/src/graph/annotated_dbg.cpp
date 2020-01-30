@@ -442,11 +442,6 @@ sdsl::bit_vector smooth_bit_vector(const sdsl::bit_vector &vector) {
 
 #ifndef NDEBUG
     for (size_t i = 0; i < vector.size() - 2; ++i) {
-        if (presence[i] != (vector[i] && vector[i + 1] && vector[i + 2])) {
-            std::cerr << i << " " << vector.size() << " " << vector.capacity() << "\n"
-                      << vector << "\n" << presence << std::endl;
-        }
-
         assert(presence[i] == (vector[i] && vector[i + 1] && vector[i + 2]));
     }
 
