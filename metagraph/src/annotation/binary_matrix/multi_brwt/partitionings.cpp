@@ -152,6 +152,16 @@ inline T dist(T first, T second) {
                 : second - first;
 }
 
+template <typename P>
+inline bool first_closest(P first_pair, P second_pair) {
+    auto first_dist = dist(std::get<0>(first_pair), std::get<1>(first_pair));
+    auto second_dist = dist(std::get<0>(second_pair), std::get<1>(second_pair));
+    return first_dist < second_dist
+        || (first_dist == second_dist
+                && std::min(std::get<0>(first_pair), std::get<1>(first_pair))
+                    < std::min(std::get<0>(second_pair), std::get<1>(second_pair)));
+}
+
 // input: columns
 // output: partition, for instance -- a set of column pairs
 Partition greedy_matching(const VectorPtrs &columns, size_t num_threads) {
@@ -179,8 +189,7 @@ Partition greedy_matching(const VectorPtrs &columns, size_t num_threads) {
         [](const auto &first_pair, const auto &second_pair) {
               return std::get<2>(first_pair) > std::get<2>(second_pair)
                 || (std::get<2>(first_pair) == std::get<2>(second_pair)
-                        && dist(std::get<0>(first_pair), std::get<1>(first_pair))
-                            < dist(std::get<0>(second_pair), std::get<1>(second_pair)));
+                        && first_closest(first_pair, second_pair));
         },
         num_threads
     );
