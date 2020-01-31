@@ -63,29 +63,6 @@ bool RangePartition::initialize_groups_and_ranks() {
     return true;
 }
 
-RangePartition::G RangePartition::group(T value) const {
-    assert(value < groups_.size());
-    return groups_[value];
-}
-
-RangePartition::R RangePartition::rank(T value) const {
-    assert(value < ranks_.size());
-    return ranks_[value];
-}
-
-RangePartition::T RangePartition::get(G group, R rank) const {
-    return partition_[group][rank];
-}
-
-uint64_t RangePartition::num_groups() const {
-    return partition_.size();
-}
-
-uint64_t RangePartition::size() const {
-    assert(groups_.size() == ranks_.size());
-    return ranks_.size();
-}
-
 bool RangePartition::load(std::istream &in) {
     if (!in.good())
         return false;
