@@ -29,10 +29,12 @@ BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
     };
 }
 
-// Check if select-based iteration is faster than get_int for this bit vector
-// TODO: The thresholds here were estimated in rough benchmarks
-//       Run fine benchmarks and correct the thresholds
-bool fast_select(const bit_vector &bv) {
+// check if the bit vector is sparser than the threshold for its type
+bool is_sparser(const bit_vector &bv,
+                double threshold_stat,
+                double threshold_sd,
+                double threshold_rrr,
+                double threshold_other) {
     if (bv.size() < 64u)
         return false;
 
@@ -41,21 +43,21 @@ bool fast_select(const bit_vector &bv) {
     if (auto *adaptive = dynamic_cast<const bit_vector_adaptive *>(&bv)) {
         switch (adaptive->representation_tag()) {
             case bit_vector_adaptive::STAT_VECTOR:
-                return false;
+                return density < threshold_stat;
             case bit_vector_adaptive::SD_VECTOR:
-                return density < 1.0 / 6.4;
+                return density < threshold_sd;
             case bit_vector_adaptive::RRR_VECTOR:
-                return density < 1.0 / 20;
+                return density < threshold_rrr;
         }
     }
 
     if (dynamic_cast<const bit_vector_stat *>(&bv))
-        return false;
+        return density < threshold_stat;
 
     if (dynamic_cast<const bit_vector_sd *>(&bv))
-        return density < 1.0 / 6.4;
+        return density < threshold_sd;
 
-    return density < 1.0 / 20;
+    return density < threshold_other;
 }
 
 // TODO: move to int_vector_algorithm.hpp
@@ -84,9 +86,8 @@ void compute_or(const std::vector<const bit_vector *> &columns,
                 assert(col_ptr);
                 assert(col_ptr->size() == size);
 
-                if (fast_select(*col_ptr)) {
-                    col_ptr->call_ones_in_range(
-                        begin, end,
+                if (is_sparser(*col_ptr, 0, 0.2, 0.01, 0.01)) {
+                    col_ptr->call_ones_in_range(begin, end,
                         [result](uint64_t k) { (*result)[k] = true; }
                     );
                 } else {
@@ -120,20 +121,43 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
     sdsl::bit_vector subindex(shrinked_size, false);
 
     uint64_t rank = 0;
-    uint64_t offset = 0;
+    uint64_t i = 0;
 
-    // TODO: optimize for dense vectors
-    column.call_ones([&](auto i) {
-        assert(i >= offset);
-        assert(reference[i]);
+#if __BMI2__
+    if (is_sparser(column, 0, 0.02, 0.01, 0.01)) {
+#endif
+        // sparse
+        column.call_ones([&](uint64_t j) {
+            assert(j >= i);
+            assert(reference[j]);
 
-        rank += count_ones(reference, offset, i);
+            rank += count_ones(reference, i, j);
 
-        assert(rank < subindex.size());
+            assert(rank < subindex.size());
 
-        subindex[rank++] = true;
-        offset = i + 1;
-    });
+            subindex[rank++] = true;
+            i = j + 1;
+        });
+#if __BMI2__
+    } else {
+        // dense
+        uint64_t end = reference.size();
+
+        for (i = 0; i + 64 <= end; i += 64) {
+            uint64_t mask = reference.data()[i / 64];
+            int popcount = sdsl::bits::cnt(mask);
+            if (uint64_t a = column.get_int(i, 64))
+                subindex.set_int(rank, _pext_u64(a, mask), popcount);
+            rank += popcount;
+        }
+        if (i < end) {
+            uint64_t mask = reference.get_int(i, end - i);
+            int popcount = sdsl::bits::cnt(mask);
+            if (uint64_t a = column.get_int(i, end - i))
+                subindex.set_int(rank, _pext_u64(a, mask), popcount);
+        }
+    }
+#endif
 
     return subindex;
 }

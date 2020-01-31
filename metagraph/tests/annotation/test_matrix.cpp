@@ -100,6 +100,23 @@ TYPED_TEST(BinaryMatrixTest, AllOne) {
     }
 }
 
+TYPED_TEST(BinaryMatrixTest, AllOne100Rows) {
+    for (size_t num_rows = 1; num_rows < 100; ++num_rows) {
+        for (size_t num_columns = 1; num_columns < 5; ++num_columns) {
+            BitVectorPtrArray columns, copy1, copy2;
+
+            for (size_t j = 0; j < num_columns; ++j) {
+                columns.emplace_back(new bit_vector_stat(num_rows, 1));
+                copy1.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+                copy2.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+            }
+
+            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
+            test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+        }
+    }
+}
+
 TYPED_TEST(BinaryMatrixTest, AllMixed1) {
     for (size_t num_rows = 1; num_rows < 20; ++num_rows) {
         for (size_t num_columns = 1; num_columns < 20; ++num_columns) {
