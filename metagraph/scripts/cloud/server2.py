@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import urllib
+import urllib.parse
 
 # TODO:
 #  - maybe handle retries for pending jobs
@@ -109,9 +110,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def handle_ack(self, operation, post_vars, add_sets, pending_operations):
         sra_id = get_var(post_vars, 'id')
-        location = get_var(post_vars, 'location')
-        if None in (sra_id, location):
-            self.send_reply(400, 'id or location not specified')
+        if None in (sra_id,):
+            self.send_reply(400, 'id not specified')
             return False
         filename = os.path.join(args.output_dir, f'succeed_{operation}.id')
         with open(filename, 'a') as fp:
@@ -174,11 +174,16 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             return
         for sra_id in sra_ids.split(','):
             sra_id = sra_id.strip()
-            preempted_ids.add(sra_id)
-            pending_downloads.remove(sra_id)
-            pending_creates.remove(sra_id)
-            pending_cleans.remove(sra_id)
-            pending_transfers.remove(sra_id)
+            if sra_id in pending_jobs:  # if server was restarted, pending_jobs info was lost :(
+                preempted_ids.add(sra_id)
+            pending_downloads.discard(sra_id)
+            pending_creates.discard(sra_id)
+            pending_cleans.discard(sra_id)
+            pending_transfers.discard(sra_id)
+            downloaded_sras.discard(sra_id)
+            created_sras.discard(sra_id)
+            cleaned_sras.discard(sra_id)
+        self.send_reply(200, "")
 
     def send_reply(self, code, message, headers={}):
         self.send_response(code)
@@ -189,15 +194,15 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(message.encode('utf-8'))
         self.wfile.flush()
 
-    def get_post_vars(self):
+    def get_post_vars(self, query_string):
         ctype, pdict = cgi.parse_header(self.headers['content-type'])
         if ctype != 'application/x-www-form-urlencoded':
             self.send_reply(400, "Bad content-type, only application/x-www-form-urlencoded accepted")
             return None
-        length = int(self.headers['content-length'])
-        return urllib.parse.parse_qs(self.rfile.read(length), keep_blank_values=True)
+        return urllib.parse.parse_qs(query_string, keep_blank_values=True)
 
     def do_GET(self):
+        logging.info(f'GET {self.path}')
         parsed_url = urllib.parse.urlparse(self.path)
         if parsed_url.path == '/jobs':
             self.handle_get_job()
@@ -208,8 +213,10 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
-        post_vars = self.get_post_vars()
-        logging.debug(f'POST {parsed_url} {post_vars}')
+        length = int(self.headers.get('content-length', 0))
+        query_string = self.rfile.read(length)
+        post_vars = self.get_post_vars(query_string)
+        logging.info(f'POST {parsed_url.path} {query_string.decode("utf-8")}')
         if not post_vars:
             self.send_reply(400, f'No POST parameters specified.')
             return
