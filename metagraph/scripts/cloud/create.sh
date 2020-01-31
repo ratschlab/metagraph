@@ -48,6 +48,6 @@ if [[ -z "${input_filenames// }" ]]; then
   exit 1
 fi
 mkdir -p "$output_dir"
-execute metagraph build -v -p 4 -k 31 --container vector --canonical --count-kmers -o "${output_dir}/${sra_number}"  $input_filenames
+execute metagraph build -v -p 4 -k 31 --container vector_disk --canonical --count-kmers -o "${output_dir}/${sra_number}"  $input_filenames
 execute rm -rf "${input_dir}"
 echo "Create script finished."

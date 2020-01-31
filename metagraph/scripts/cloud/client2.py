@@ -165,8 +165,7 @@ def start_clean(sra_id, wait_time):
 
 def start_transfer(sra_id, cleaned_graph_location):
     transfer_processes[sra_id] = (subprocess.Popen(
-        f'gsutil -q -u metagraph cp -r {cleaned_graph_location} {args.destination}; '
-        f'rm -rf {cleaned_graph_location}', shell=True), time.time())
+        f'gsutil -q -u metagraph cp -r {cleaned_graph_location} {args.destination}', shell=True), time.time())
 
 
 def ack(operation, params):
@@ -470,7 +469,7 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='leomed:/cluster/work/grlab/projects/metagenome/scratch/cloud',
+    parser.add_argument('--destination', default='gs://metagraph/clean/',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
     parser.add_argument('--client_id', default='-1',
                         help='Unique id for each client, used to identify clients for logging purposes')
