@@ -29,16 +29,43 @@ BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
     };
 }
 
+// Check if select-based iteration is faster than get_int for this bit vector
+// TODO: The thresholds here were estimated in rough benchmarks
+//       Run fine benchmarks and correct the thresholds
+bool fast_select(const bit_vector &bv) {
+    if (bv.size() < 64u)
+        return false;
+
+    double density = static_cast<double>(bv.num_set_bits()) / bv.size();
+
+    if (auto *adaptive = dynamic_cast<const bit_vector_adaptive *>(&bv)) {
+        switch (adaptive->representation_tag()) {
+            case bit_vector_adaptive::STAT_VECTOR:
+                return false;
+            case bit_vector_adaptive::SD_VECTOR:
+                return density < 1.0 / 6.4;
+            case bit_vector_adaptive::RRR_VECTOR:
+                return density < 1.0 / 20;
+        }
+    }
+
+    if (dynamic_cast<const bit_vector_stat *>(&bv))
+        return false;
+
+    if (dynamic_cast<const bit_vector_sd *>(&bv))
+        return density < 1.0 / 6.4;
+
+    return density < 1.0 / 20;
+}
+
 // TODO: move to int_vector_algorithm.hpp
 void compute_or(const std::vector<const bit_vector *> &columns,
-                sdsl::bit_vector *buffer,
+                sdsl::bit_vector *result,
                 ThreadPool &thread_pool) {
     uint64_t size = columns.at(0)->size();
 
-    assert(buffer);
-    assert(buffer->size() == size);
-
-    auto &merged_result = *buffer;
+    assert(result);
+    assert(result->size() == size);
 
     const uint64_t block_size = std::max(kBlockSize, size / 100 / 64 * 64);
 
@@ -49,18 +76,29 @@ void compute_or(const std::vector<const bit_vector *> &columns,
 
     for (uint64_t i = 0; i < size; i += block_size) {
         results.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
-            std::fill(merged_result.data() + (begin >> 6),
-                      merged_result.data() + ((end + 63) >> 6),
+            std::fill(result->data() + (begin >> 6),
+                      result->data() + ((end + 63) >> 6),
                       0);
 
             for (const auto &col_ptr : columns) {
                 assert(col_ptr);
                 assert(col_ptr->size() == size);
-                // TODO: optimize for very dense vectors
-                col_ptr->call_ones_in_range(
-                    begin, end,
-                    [&merged_result](uint64_t k) { merged_result[k] = true; }
-                );
+
+                if (fast_select(*col_ptr)) {
+                    col_ptr->call_ones_in_range(
+                        begin, end,
+                        [result](uint64_t k) { (*result)[k] = true; }
+                    );
+                } else {
+                    assert((begin & 0x3F) == 0);
+
+                    uint64_t i;
+                    for (i = begin; i + 64 <= end; i += 64) {
+                        result->data()[i / 64] |= col_ptr->get_int(i, 64);
+                    }
+                    if (i < end)
+                        result->data()[i / 64] |= col_ptr->get_int(i, end - i);
+                }
             }
 
         }, i, std::min(i + block_size, size)));
