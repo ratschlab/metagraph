@@ -78,13 +78,13 @@ std::vector<uint64_t> inverted_arrangement(const VectorPtrs &vectors) {
     return { init_arrangement.rbegin(), init_arrangement.rend() };
 }
 
-std::vector<std::vector<double>>
+std::vector<std::vector<uint64_t>>
 correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
                        size_t num_threads) {
-    std::vector<std::vector<double>> similarities(cols.size());
+    std::vector<std::vector<uint64_t>> similarities(cols.size());
 
     for (size_t j = 1; j < cols.size(); ++j) {
-        similarities[j] = std::vector<double>(j, 0.);
+        similarities[j].assign(j, 0);
     }
 
     ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Correlations",
@@ -106,6 +106,12 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
 
 std::vector<std::vector<double>>
 jaccard_similarity(const std::vector<sdsl::bit_vector> &cols, size_t num_threads) {
+    std::vector<std::vector<double>> similarities(cols.size());
+
+    for (size_t j = 1; j < cols.size(); ++j) {
+        similarities[j].assign(j, 0);
+    }
+
     std::vector<uint64_t> num_set_bits(cols.size(), 0);
 
     #pragma omp parallel for num_threads(num_threads)
@@ -113,7 +119,8 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols, size_t num_threads
         num_set_bits[j] = sdsl::util::cnt_one_bits(cols[j]);
     }
 
-    auto similarities = correlation_similarity(cols, num_threads);
+    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Jaccard",
+                             std::cerr, !utils::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)
     for (size_t j = 0; j < cols.size(); ++j) {
@@ -121,10 +128,10 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols, size_t num_threads
             if (k >= j)
                 continue;
 
-            similarities[j][k] /= (num_set_bits[j]
-                                    + num_set_bits[k]
-                                    - similarities[j][k]);
-            std::cout << similarities[j][k] << std::endl;
+            uint64_t intersect = inner_prod(cols[j], cols[k]);
+            similarities[j][k]
+                = intersect / (num_set_bits[j] + num_set_bits[k] - intersect);
+            ++progress_bar;
         }
     }
 
@@ -132,7 +139,7 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols, size_t num_threads
 }
 
 // For each vector j return similarities with vectors 0, ..., j-1
-std::vector<std::vector<double>>
+std::vector<std::vector<uint64_t>>
 estimate_similarities(const VectorPtrs &vectors, size_t num_threads) {
     if (!vectors.size())
         return {};
@@ -168,12 +175,17 @@ Partition greedy_matching(const VectorPtrs &columns, size_t num_threads) {
     if (!columns.size())
         return {};
 
+    if (columns.size() > std::numeric_limits<uint32_t>::max()) {
+        std::cerr << "ERROR: too many columns" << std::endl;
+        exit(1);
+    }
+
     auto similarities = estimate_similarities(columns, num_threads);
 
     ProgressBar progress_bar(columns.size() * (columns.size() - 1), "Clustering",
                              std::cerr, !utils::get_verbose());
 
-    std::vector<std::tuple<size_t, size_t, uint64_t>> candidates;
+    std::vector<std::tuple<uint32_t, uint32_t, uint64_t>> candidates;
     candidates.reserve(columns.size() * (columns.size() - 1) / 2);
 
     for (size_t j = 1; j < similarities.size(); ++j) {
@@ -197,7 +209,7 @@ Partition greedy_matching(const VectorPtrs &columns, size_t num_threads) {
     Partition partition;
     partition.reserve((columns.size() + 1) / 2);
 
-    std::vector<bool> matched(columns.size(), false);
+    std::vector<uint_fast8_t> matched(columns.size(), false);
 
     for (const auto &next_candidate : candidates) {
         auto i = std::get<0>(next_candidate);
