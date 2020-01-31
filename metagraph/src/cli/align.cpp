@@ -278,7 +278,7 @@ int align_to_graph(Config *config) {
     auto aligner = build_aligner(*graph, *config);
 
     for (const auto &file : files) {
-        logger->info("Align sequences from file '{}'", file);
+        logger->trace("Align sequences from file '{}'", file);
 
         Timer data_reading_timer;
 
