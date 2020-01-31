@@ -345,7 +345,7 @@ int query_graph(Config *config) {
         // Graph constructed from a batch of queried sequences
         // Used only in fast mode
         if (config->fast) {
-            FastaParser fasta_parser(file);
+            FastaParser fasta_parser(file, config->forward_and_reverse);
             auto begin = fasta_parser.begin();
             auto end = fasta_parser.end();
 
@@ -362,11 +362,6 @@ int query_graph(Config *config) {
                         for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
                             call_sequence(it->seq.s);
                             num_bytes_read += it->seq.l;
-                            if (config->forward_and_reverse) {
-                                reverse_complement(it->seq);
-                                call_sequence(it->seq.s);
-                                num_bytes_read += it->seq.l;
-                            }
                         }
                     },
                     config->count_labels ? 0 : config->discovery_fraction,
@@ -384,10 +379,6 @@ int query_graph(Config *config) {
                     assert(begin != end);
 
                     query_seq_async(&*begin);
-                    if (config->forward_and_reverse) {
-                        reverse_complement(begin->seq);
-                        query_seq_async(&*begin);
-                    }
                 }
 
                 thread_pool.join();

@@ -8,6 +8,8 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
 
+#include "common/seq_tools/reverse_complement.hpp"
+
 KSEQ_INIT(gzFile, gzread);
 
 
@@ -107,15 +109,18 @@ class FastaParser {
   public:
     class iterator;
 
-    explicit FastaParser(const std::string &filename);
+    FastaParser(const std::string &filename,
+                bool with_reverse_complement = false)
+      : filename_(filename),
+        with_reverse_complement_(with_reverse_complement) {}
 
-    iterator begin() const;
-    iterator end() const;
+    inline iterator begin() const;
+    inline iterator end() const;
 
   private:
     std::string filename_;
+    bool with_reverse_complement_;
 };
-
 
 class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
                                                    kseq_t,
@@ -127,8 +132,8 @@ class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
   public:
     iterator() {}
 
-    iterator(const iterator &other);
-    iterator(iterator&& other);
+    iterator(const iterator &other) { *this = other; }
+    iterator(iterator&& other) { *this = std::move(other); }
 
     iterator& operator=(const iterator &other);
     iterator& operator=(iterator&& other);
@@ -142,17 +147,26 @@ class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
     const kseq_t* operator->() const { return read_stream_; }
 
     iterator& operator++() {
+        if (with_reverse_complement_ && !is_reverse_complement_) {
+            reverse_complement(read_stream_->seq);
+            is_reverse_complement_ = true;
+            return *this;
+        }
+
         if (kseq_read(read_stream_) < 0) {
             kseq_destroy(read_stream_);
             read_stream_ = NULL;
         }
+        is_reverse_complement_ = false;
         return *this;
     }
 
     bool operator==(const iterator &other) const {
         return (read_stream_ && other.read_stream_
-                    && filename_ == other.filename_
-                    && read_stream_->f->seek_pos == other.read_stream_->f->seek_pos)
+                    && is_reverse_complement_ == other.is_reverse_complement_
+                    && read_stream_->f->seek_pos == other.read_stream_->f->seek_pos
+                    && with_reverse_complement_ == other.with_reverse_complement_
+                    && filename_ == other.filename_)
             || (!read_stream_ && !other.read_stream_);
     }
 
@@ -161,11 +175,19 @@ class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
     }
 
   private:
-    explicit iterator(const std::string &filename);
+    iterator(const std::string &filename, bool with_reverse_complement);
     void deinit_stream();
 
     std::string filename_;
+    bool with_reverse_complement_;
     kseq_t *read_stream_ = NULL;
+    bool is_reverse_complement_ = false;
 };
+
+FastaParser::iterator
+FastaParser::begin() const { return iterator(filename_, with_reverse_complement_); }
+
+FastaParser::iterator
+FastaParser::end() const { return iterator(); }
 
 #endif // __SEQUENCE_IO__
