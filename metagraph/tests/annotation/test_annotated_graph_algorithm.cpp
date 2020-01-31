@@ -1,7 +1,6 @@
 #include "gtest/gtest.h"
 
 #include "../graph/all/test_dbg_helpers.hpp"
-#include "../graph/test_aligner_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
 #include "common/threads/threading.hpp"
