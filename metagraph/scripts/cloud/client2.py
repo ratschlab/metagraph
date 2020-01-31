@@ -165,8 +165,8 @@ def start_clean(sra_id, wait_time):
 
 def start_transfer(sra_id, cleaned_graph_location):
     transfer_processes[sra_id] = (subprocess.Popen(
-        f'scp -r {cleaned_graph_location} {args.destination}; rm -rf {cleaned_graph_location}', shell=True),
-                                  time.time())
+        f'gsutil -q -u metagraph cp -r {cleaned_graph_location} {args.destination}; '
+        f'rm -rf {cleaned_graph_location}', shell=True), time.time())
 
 
 def ack(operation, params):
@@ -441,6 +441,11 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             exit(0)
         elif parsed_url.path == '/status':
             self.handle_get_status()
+        elif parsed_url.path == '/healthz':
+            if not must_quit:
+                self.send_reply(200, 'OK')
+            else:
+                self.send_repy(200, 'Quit')
         else:
             self.send_reply(404, f'Invalid path: {self.path}\n')
 
