@@ -307,7 +307,7 @@ int query_graph(Config *config) {
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
-    std::mutex call_sequence_mutex;
+    std::mutex sequence_mutex;
 
     Timer timer;
 
@@ -335,23 +335,17 @@ int query_graph(Config *config) {
 
         const auto *graph_to_query = anno_graph.get();
 
-        auto query_seq_async = [&](std::string&& name, std::string&& seq) {
-            thread_pool.enqueue(execute_query,
-                fmt::format_int(seq_count++).str() + "\t" + name,
-                std::move(seq),
-                config->count_labels,
-                config->print_signature,
-                config->suppress_unlabeled,
-                config->num_top_labels,
-                config->discovery_fraction,
-                config->anno_labels_delimiter,
-                std::ref(*graph_to_query),
-                std::ref(std::cout)
-            );
-        };
-
-        auto query_seq_kseq_async = [&](kseq_t *read_stream) {
-            query_seq_async(read_stream->name.s, read_stream->seq.s);
+        auto execute = [&](std::string name, std::string seq) {
+            execute_query(fmt::format_int(seq_count++).str() + "\t" + name,
+                          std::move(seq),
+                          config->count_labels,
+                          config->print_signature,
+                          config->suppress_unlabeled,
+                          config->num_top_labels,
+                          config->discovery_fraction,
+                          config->anno_labels_delimiter,
+                          std::ref(*graph_to_query),
+                          std::ref(std::cout));
         };
 
         // Graph constructed from a batch of queried sequences
@@ -389,7 +383,7 @@ int query_graph(Config *config) {
                                 [&](std::string n, std::string s) {
                                     auto matches = aligner->align(s);
 
-                                    std::lock_guard<std::mutex> lock(call_sequence_mutex);
+                                    std::lock_guard<std::mutex> lock(sequence_mutex);
                                     named_alignments.emplace_back(
                                         std::move(n),
                                         matches.size()
@@ -425,11 +419,11 @@ int query_graph(Config *config) {
                     for ( ; begin != it; ++begin) {
                         assert(begin != end);
 
-                        query_seq_kseq_async(&*begin);
+                        thread_pool.enqueue(execute, begin->name.s, begin->seq.s);
                     }
                 } else {
                     for (auto&& [name, seq] : named_alignments) {
-                        query_seq_async(std::move(name), std::move(seq));
+                        thread_pool.enqueue(execute, std::move(name), std::move(seq));
                     }
                 }
 
@@ -441,37 +435,29 @@ int query_graph(Config *config) {
 
         } else {
             if (!aligner) {
-                read_fasta_file_critical(file,
-                                         query_seq_kseq_async,
-                                         config->forward_and_reverse);
-            } else {
-                // query the alignment matches against the annotator
-                // TODO: this deadlocks
                 read_fasta_file_critical(
                     file,
-                    [&](kseq_t *read_stream) {
+                    [&](kseq_t *kseq) {
+                        thread_pool.enqueue(execute, kseq->name.s, kseq->seq.s);
+                    },
+                    config->forward_and_reverse);
+            } else {
+                // query the alignment matches against the annotator
+                read_fasta_file_critical(
+                    file,
+                    [&](kseq_t *kseq) {
                         thread_pool.enqueue(
-                            [&](std::string n, std::string s) {
+                            [&](std::string&& n, std::string&& s) {
                                 auto matches = aligner->align(s);
-                                execute_query(
-                                    fmt::format_int(seq_count++).str() + "\t" + n,
-                                    matches.size()
-                                        ? const_cast<std::string&&>(
-                                              matches[0].get_sequence()
-                                          )
-                                        : std::move(s),
-                                    config->count_labels,
-                                    config->print_signature,
-                                    config->suppress_unlabeled,
-                                    config->num_top_labels,
-                                    config->discovery_fraction,
-                                    config->anno_labels_delimiter,
-                                    std::ref(*graph_to_query),
-                                    std::ref(std::cout)
-                                );
+                                execute(std::move(n),
+                                        matches.size()
+                                            ? const_cast<std::string&&>(
+                                                  matches[0].get_sequence()
+                                              )
+                                            : std::move(s));
                             },
-                            std::string(read_stream->name.s),
-                            std::string(read_stream->seq.s)
+                            kseq->name.s,
+                            kseq->seq.s
                         );
                     },
                     config->forward_and_reverse
