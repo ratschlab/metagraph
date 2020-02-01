@@ -402,14 +402,16 @@ int query_graph(Config *config) {
 
             while (begin != end) {
                 Timer batch_timer;
+                future_alignments.clear();
+                named_alignments.clear();
 
                 uint64_t num_bytes_read = 0;
                 auto query_graph = construct_query_graph(*anno_graph,
                     [&](auto call_sequence) {
                         num_bytes_read = 0;
-                        named_alignments.clear();
-                        for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
-                            if (!aligner) {
+
+                        if (!aligner) {
+                            for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
                                 call_sequence(it->seq.s);
                                 num_bytes_read += it->seq.l;
                                 if (config->forward_and_reverse) {
@@ -417,28 +419,30 @@ int query_graph(Config *config) {
                                     call_sequence(it->seq.s);
                                     num_bytes_read += it->seq.l;
                                 }
-
-                                continue;
                             }
 
+                            return;
+                        }
+
+                        for (; begin != end && num_bytes_read <= batch_size; ++begin) {
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
                             future_alignments.push_back(
-                                get_alignment(it->seq, call_sequence)
+                                get_alignment(begin->seq, call_sequence)
                             );
 
                             // store sequence name and a placeholder for the
                             // alignment result
-                            named_alignments.emplace_back(it->name.s, std::string());
-                            num_bytes_read = it->seq.l;
+                            named_alignments.emplace_back(begin->name.s, std::string());
+                            num_bytes_read = begin->seq.l;
 
                             if (config->forward_and_reverse) {
-                                reverse_complement(it->seq);
+                                reverse_complement(begin->seq);
                                 future_alignments.push_back(
-                                    get_alignment(it->seq, call_sequence)
+                                    get_alignment(begin->seq, call_sequence)
                                 );
-                                named_alignments.emplace_back(it->name.s, std::string());
-                                num_bytes_read = it->seq.l;
+                                named_alignments.emplace_back(begin->name.s, std::string());
+                                num_bytes_read = begin->seq.l;
                             }
                         }
 
@@ -460,28 +464,17 @@ int query_graph(Config *config) {
 
                 batch_timer.reset();
 
-                for (auto jt = named_alignments.begin(); begin != it; ++begin, ++jt) {
-                    assert(begin != end);
-
-                    if (!aligner) {
+                if (!aligner) {
+                    for (; begin != it; ++begin) {
                         query_seq_async(begin->name.s, begin->seq.s);
                         if (config->forward_and_reverse) {
                             reverse_complement(begin->seq);
                             query_seq_async(begin->name.s, begin->seq.s);
                         }
-                    } else {
-                        assert(jt != named_alignments.end());
-
-                        // query the previously computed alignments against
-                        // the annotator
-                        query_seq_async(std::move(jt->first), std::move(jt->second));
-                        if (config->forward_and_reverse) {
-                            // forward and reverse complement alignments are
-                            // stored interleaved
-                            ++jt;
-                            assert(jt != named_alignments.end());
-                            query_seq_async(std::move(jt->first), std::move(jt->second));
-                        }
+                    }
+                } else {
+                    for (auto&& [name, seq] : named_alignments) {
+                        query_seq_async(std::move(name), std::move(seq));
                     }
                 }
 
