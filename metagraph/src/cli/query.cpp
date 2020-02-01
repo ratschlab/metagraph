@@ -324,7 +324,6 @@ int query_graph(Config *config) {
     }
 
     std::vector<std::pair<std::string, std::string>> named_alignments;
-    std::vector<std::future<std::string>> future_alignments;
 
     // iterate over input files
     for (const auto &file : files) {
@@ -332,25 +331,22 @@ int query_graph(Config *config) {
 
         Timer curr_timer;
 
-        size_t seq_count = 0;
+        std::atomic<size_t> seq_count = 0;
 
         const auto *graph_to_query = anno_graph.get();
 
-        auto get_alignment = [&](const kstring_t &seq, auto call_sequence) {
-            return thread_pool.enqueue(
-                [&](std::string s, auto call_sequence) -> std::string {
+        auto get_alignment = [&](const kseq_t &seq, auto call_sequence) {
+            thread_pool.enqueue(
+                [&](std::string n, std::string s, auto call_sequence) {
                     auto alignments = aligner->align(s);
-                    if (alignments.size())
-                       s = const_cast<std::string&&>(alignments.front().get_sequence());
-
-                    {
-                        std::lock_guard<std::mutex> lock(call_sequence_mutex);
-                        call_sequence(s);
+                    if (alignments.size()) {
+                        s = const_cast<std::string&&>(alignments.front().get_sequence());
                     }
 
-                    return s;
+                    call_sequence(std::move(n), std::move(s));
                 },
-                seq.s,
+                std::string(seq.name.s),
+                std::string(seq.seq.s),
                 call_sequence
             );
         };
@@ -359,22 +355,6 @@ int query_graph(Config *config) {
             thread_pool.enqueue(execute_query,
                 fmt::format_int(seq_count++).str() + "\t" + name,
                 std::move(seq),
-                config->count_labels,
-                config->print_signature,
-                config->suppress_unlabeled,
-                config->num_top_labels,
-                config->discovery_fraction,
-                config->anno_labels_delimiter,
-                std::ref(*graph_to_query),
-                std::ref(std::cout)
-            );
-        };
-
-        auto query_seq_future_async = [&](std::string&& name,
-                                          std::future<std::string> seq) {
-            thread_pool.enqueue(execute_query,
-                fmt::format_int(seq_count++).str() + "\t" + name,
-                std::move(seq.get()),
                 config->count_labels,
                 config->print_signature,
                 config->suppress_unlabeled,
@@ -402,7 +382,6 @@ int query_graph(Config *config) {
 
             while (begin != end) {
                 Timer batch_timer;
-                future_alignments.clear();
                 named_alignments.clear();
 
                 uint64_t num_bytes_read = 0;
@@ -427,31 +406,33 @@ int query_graph(Config *config) {
                         for (; begin != end && num_bytes_read <= batch_size; ++begin) {
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
-                            future_alignments.push_back(
-                                get_alignment(begin->seq, call_sequence)
+                            get_alignment(
+                                *begin,
+                                [&](std::string&& n, std::string&& s) {
+                                    std::lock_guard<std::mutex> lock(call_sequence_mutex);
+                                    named_alignments.emplace_back(std::move(n),
+                                                                  std::move(s));
+                                    call_sequence(s);
+                                }
                             );
-
-                            // store sequence name and a placeholder for the
-                            // alignment result
-                            named_alignments.emplace_back(begin->name.s, std::string());
                             num_bytes_read = begin->seq.l;
 
                             if (config->forward_and_reverse) {
                                 reverse_complement(begin->seq);
-                                future_alignments.push_back(
-                                    get_alignment(begin->seq, call_sequence)
+                                get_alignment(
+                                    *begin,
+                                    [&](std::string&& n, std::string&& s) {
+                                        std::lock_guard<std::mutex> lock(call_sequence_mutex);
+                                        named_alignments.emplace_back(std::move(n),
+                                                                      std::move(s));
+                                        call_sequence(s);
+                                    }
                                 );
-                                named_alignments.emplace_back(begin->name.s, std::string());
                                 num_bytes_read = begin->seq.l;
                             }
                         }
 
-                        // join alignments, store for later
-                        assert(named_alignments.size() == future_alignments.size());
-                        for (size_t i = 0; i < named_alignments.size(); ++i) {
-                            named_alignments[i].second
-                                = std::move(future_alignments[i].get());
-                        }
+                        thread_pool.join();
                     },
                     config->count_labels ? 0 : config->discovery_fraction,
                     get_num_threads()
@@ -491,13 +472,11 @@ int query_graph(Config *config) {
                                          config->forward_and_reverse);
             } else {
                 // query the alignment matches against the annotator
-                // TODO: better parallelization here
+                // TODO: this deadlocks
                 read_fasta_file_critical(
                     file,
                     [&](kseq_t *read_stream) {
-                        query_seq_future_async(std::string(read_stream->name.s),
-                                               get_alignment(read_stream->seq,
-                                                             [](const std::string&) {}));
+                        get_alignment(*read_stream, query_seq_async);
                     },
                     config->forward_and_reverse
                 );
