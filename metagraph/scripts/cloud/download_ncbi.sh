@@ -26,7 +26,7 @@ download_dir=$3
 
 download_dir=${download_dir%/}  # remove trailing slash, if present
 
-sra_dir="${download_dir}/sra/${sra_number}"
+sra_dir="${download_dir}/${sra_number}/sra"
 
 if ! [ -d $download_dir ]; then
 	mkdir -p $download_dir
@@ -46,4 +46,4 @@ for sra_file in $(ls -p "${sra_dir}"); do
   execute fasterq-dump "${sra_dir}/${sra_file}" -f -e 4  -O "${download_dir}/${sra_number}" -t "${tmp_dir}"
   rm -rf "${tmp_dir}"
 done
-rm -rf ${sra_dir} # TODO: enable this
+# Note: sra_dir is deleted later in the python client, because we want to measure its size

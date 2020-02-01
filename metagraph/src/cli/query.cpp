@@ -335,22 +335,6 @@ int query_graph(Config *config) {
 
         const auto *graph_to_query = anno_graph.get();
 
-        auto get_alignment = [&](const kseq_t &seq, auto call_sequence) {
-            thread_pool.enqueue(
-                [&](std::string n, std::string s, auto call_sequence) {
-                    auto alignments = aligner->align(s);
-                    if (alignments.size()) {
-                        s = const_cast<std::string&&>(alignments.front().get_sequence());
-                    }
-
-                    call_sequence(std::move(n), std::move(s));
-                },
-                std::string(seq.name.s),
-                std::string(seq.seq.s),
-                call_sequence
-            );
-        };
-
         auto query_seq_async = [&](std::string&& name, std::string&& seq) {
             thread_pool.enqueue(execute_query,
                 fmt::format_int(seq_count++).str() + "\t" + name,
@@ -373,7 +357,7 @@ int query_graph(Config *config) {
         // Graph constructed from a batch of queried sequences
         // Used only in fast mode
         if (config->fast) {
-            FastaParser fasta_parser(file);
+            FastaParser fasta_parser(file, config->forward_and_reverse);
             auto begin = fasta_parser.begin();
             auto end = fasta_parser.end();
 
@@ -393,43 +377,35 @@ int query_graph(Config *config) {
                             for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
                                 call_sequence(it->seq.s);
                                 num_bytes_read += it->seq.l;
-                                if (config->forward_and_reverse) {
-                                    reverse_complement(it->seq);
-                                    call_sequence(it->seq.s);
-                                    num_bytes_read += it->seq.l;
-                                }
                             }
 
                             return;
                         }
 
-                        for (; begin != end && num_bytes_read <= batch_size; ++begin) {
+                        for ( ; begin != end && num_bytes_read <= batch_size; ++begin) {
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
-                            get_alignment(
-                                *begin,
-                                [&](std::string&& n, std::string&& s) {
-                                    std::lock_guard<std::mutex> lock(call_sequence_mutex);
-                                    named_alignments.emplace_back(std::move(n),
-                                                                  std::move(s));
-                                    call_sequence(s);
-                                }
-                            );
-                            num_bytes_read = begin->seq.l;
+                            thread_pool.enqueue(
+                                [&](std::string n, std::string s) {
+                                    auto matches = aligner->align(s);
 
-                            if (config->forward_and_reverse) {
-                                reverse_complement(begin->seq);
-                                get_alignment(
-                                    *begin,
-                                    [&](std::string&& n, std::string&& s) {
-                                        std::lock_guard<std::mutex> lock(call_sequence_mutex);
-                                        named_alignments.emplace_back(std::move(n),
-                                                                      std::move(s));
-                                        call_sequence(s);
-                                    }
-                                );
-                                num_bytes_read = begin->seq.l;
-                            }
+                                    std::lock_guard<std::mutex> lock(call_sequence_mutex);
+                                    named_alignments.emplace_back(
+                                        std::move(n),
+                                        matches.size()
+                                            ? const_cast<std::string&&>(
+                                                  matches[0].get_sequence()
+                                              )
+                                            : std::move(s)
+                                    );
+
+                                    call_sequence(named_alignments.back().second);
+                                },
+                                begin->name.s,
+                                begin->seq.s
+                            );
+
+                            num_bytes_read = begin->seq.l;
                         }
 
                         thread_pool.join();
@@ -446,12 +422,10 @@ int query_graph(Config *config) {
                 batch_timer.reset();
 
                 if (!aligner) {
-                    for (; begin != it; ++begin) {
-                        query_seq_async(begin->name.s, begin->seq.s);
-                        if (config->forward_and_reverse) {
-                            reverse_complement(begin->seq);
-                            query_seq_async(begin->name.s, begin->seq.s);
-                        }
+                    for ( ; begin != it; ++begin) {
+                        assert(begin != end);
+
+                        query_seq_kseq_async(&*begin);
                     }
                 } else {
                     for (auto&& [name, seq] : named_alignments) {
@@ -476,7 +450,29 @@ int query_graph(Config *config) {
                 read_fasta_file_critical(
                     file,
                     [&](kseq_t *read_stream) {
-                        get_alignment(*read_stream, query_seq_async);
+                        thread_pool.enqueue(
+                            [&](std::string n, std::string s) {
+                                auto matches = aligner->align(s);
+                                execute_query(
+                                    fmt::format_int(seq_count++).str() + "\t" + n,
+                                    matches.size()
+                                        ? const_cast<std::string&&>(
+                                              matches[0].get_sequence()
+                                          )
+                                        : std::move(s),
+                                    config->count_labels,
+                                    config->print_signature,
+                                    config->suppress_unlabeled,
+                                    config->num_top_labels,
+                                    config->discovery_fraction,
+                                    config->anno_labels_delimiter,
+                                    std::ref(*graph_to_query),
+                                    std::ref(std::cout)
+                                );
+                            },
+                            std::string(read_stream->name.s),
+                            std::string(read_stream->seq.s)
+                        );
                     },
                     config->forward_and_reverse
                 );

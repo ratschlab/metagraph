@@ -156,35 +156,19 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
 }
 
 
-FastaParser::FastaParser(const std::string &filename) : filename_(filename) {
-    // check if we can read from file
-    gzFile input_p = gzopen(filename_.c_str(), "r");
-    if (input_p == Z_NULL) {
-        std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
-        exit(1);
-    }
-    gzclose(input_p);
-}
-
-FastaParser::iterator FastaParser::begin() const { return iterator(filename_); }
-FastaParser::iterator FastaParser::end() const { return iterator(); }
-
-
-FastaParser::iterator::iterator(const iterator &other) { *this = other; }
-
-FastaParser::iterator::iterator(iterator&& other) { *this = std::move(other); }
-
 FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
     if (!other.read_stream_) {
         // free memory, reset members and return
         deinit_stream();
         filename_.clear();
+        with_reverse_complement_ = false;
         read_stream_ = NULL;
+        is_reverse_complement_ = false;
         return *this;
     }
 
     if (!read_stream_) {
-        *this = iterator(other.filename_);
+        *this = iterator(other.filename_, other.with_reverse_complement_);
 
     } else if (filename_ != other.filename_) {
         // The current iterator doesn't point to the target fasta file.
@@ -243,18 +227,24 @@ FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
     }
     memcpy(f->buf, other_f->buf, other_f->bufsize);
 
+    is_reverse_complement_ = other.is_reverse_complement_;
+
     return *this;
 }
 
 FastaParser::iterator& FastaParser::iterator::operator=(iterator&& other) {
     std::swap(filename_, other.filename_);
+    with_reverse_complement_ = other.with_reverse_complement_;
     std::swap(read_stream_, other.read_stream_);
+    is_reverse_complement_ = other.is_reverse_complement_;
     // the destructor in |other| will be responsible for freeing the memory now
     return *this;
 }
 
-FastaParser::iterator::iterator(const std::string &filename)
-      : filename_(filename) {
+FastaParser::iterator::iterator(const std::string &filename,
+                                bool with_reverse_complement)
+      : filename_(filename),
+        with_reverse_complement_(with_reverse_complement) {
     gzFile input_p = gzopen(filename_.c_str(), "r");
     if (input_p == Z_NULL) {
         std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
@@ -267,7 +257,10 @@ FastaParser::iterator::iterator(const std::string &filename)
         exit(1);
     }
 
-    ++(*this);
+    if (kseq_read(read_stream_) < 0) {
+        kseq_destroy(read_stream_);
+        read_stream_ = NULL;
+    }
 }
 
 void FastaParser::iterator::deinit_stream() {
