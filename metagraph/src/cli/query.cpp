@@ -440,7 +440,8 @@ int query_graph(Config *config) {
                     [&](kseq_t *kseq) {
                         thread_pool.enqueue(execute, kseq->name.s, kseq->seq.s);
                     },
-                    config->forward_and_reverse);
+                    config->forward_and_reverse
+                );
             } else {
                 // query the alignment matches against the annotator
                 read_fasta_file_critical(
