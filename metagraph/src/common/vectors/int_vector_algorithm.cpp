@@ -56,15 +56,14 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     }
 #endif
 
-    while (i < vector.size()) {
-        // at most 16 bits left
+    for ( ; i < vector.size(); i += 64) {
         uint64_t word = 0;
-        int num_iter = std::min(static_cast<uint64_t>(64), result.size() - i);
-        for (int j = 0; j < num_iter; ++j) {
-            word |= static_cast<uint64_t>(vector[i++]) << j;
+        uint8_t width = std::min(static_cast<uint64_t>(64), result.size() - i);
+        for (int64_t j = i + width - 1; j >= static_cast<int64_t>(i); --j) {
+            word = (word << 1) | (vector[j] >> 7);
         }
 
-        result.set_int(i - num_iter, word, num_iter);
+        result.set_int(i, word, width);
     }
 
     assert(static_cast<size_t>(std::count_if(vector.begin(), vector.end(),
