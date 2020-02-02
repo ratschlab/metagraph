@@ -157,7 +157,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                             size_t curpos,
                             uint64_t max_count,
                             sdsl::int_vector<> *weights) {
-        if (weights->capacity() == curpos) {
+        if (weights->size() == curpos) {
             weights->resize(weights->capacity() * 1.5);
         }
         if (weights) { // set weights for non-dummy k-mers
@@ -322,6 +322,22 @@ template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerE
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint32_t>> &, uint8_t);
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint32_t>> &, uint8_t);
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint32_t>> &, uint8_t);
+
+#define BossWithPair(T, C) \
+    BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<std::pair<T, C>> &, uint8_t);
+
+template BossWithPair(KmerExtractorBOSS::Kmer64, uint8_t);
+template BossWithPair(KmerExtractorBOSS::Kmer128, uint8_t);
+template BossWithPair(KmerExtractorBOSS::Kmer256, uint8_t);
+
+template BossWithPair(KmerExtractorBOSS::Kmer64, uint16_t);
+template BossWithPair(KmerExtractorBOSS::Kmer128, uint16_t);
+template BossWithPair(KmerExtractorBOSS::Kmer256, uint16_t);
+
+template BossWithPair(KmerExtractorBOSS::Kmer64, uint32_t);
+template BossWithPair(KmerExtractorBOSS::Kmer128, uint32_t);
+template BossWithPair(KmerExtractorBOSS::Kmer256, uint32_t);
+
 
 void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     assert(W < 2 * alph_size_);

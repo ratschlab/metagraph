@@ -7,7 +7,8 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
-#include "common/sorted_set_disk.hpp"
+#include "common/sorted_set_disk_new.hpp"
+#include "common/sorted_multiset_disk.hpp"
 #include "common/unix_tools.hpp"
 #include "kmer.hpp"
 #include "kmer_extractor.hpp"
@@ -76,7 +77,8 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  Container *kmers,
                  const std::vector<typename KmerExtractor::TAlphabet> &suffix) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
-    static_assert(utils::is_instance<Container, common::SortedMultiset>{});
+    static_assert(utils::is_instance<Container, common::SortedMultiset> {}
+                  || utils::is_instance<Container, common::SortedMultisetDisk> {});
     static_assert(std::is_same_v<KMER, typename Container::key_type>);
 
     using KmerCount = typename Container::count_type;
@@ -210,13 +212,16 @@ KmerCollector<KMER, KmerExtractor, Container>
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
         both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
-    if (utils::is_instance<Container, common::SortedSetDisk>{} && filter_suffix_encoded_.size()) {
-        common::logger->error("SortedSetDisk does not support chunking");
+    if ((utils::is_instance<Container, common::SortedSetDisk> {}
+         || utils::is_instance<Container, common::SortedMultisetDisk> {})
+        && filter_suffix_encoded_.size()) {
+        common::logger->error("Disk based sorting does not support chunking");
         exit(1);
     }
-    common::logger->trace("Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
-                          kmers_.buffer_size() * sizeof(typename Container::value_type) >> 20,
-                          kmers_.buffer_size());
+    common::logger->trace(
+            "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
+            kmers_.buffer_size() * sizeof(typename Container::value_type) >> 20,
+            kmers_.buffer_size());
 }
 
 template <typename KMER, class KmerExtractor, class Container>
@@ -284,6 +289,9 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
             common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint8_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint16_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint32_t>>;
 
 
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64)
