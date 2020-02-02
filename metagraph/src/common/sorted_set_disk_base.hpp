@@ -12,17 +12,19 @@
 #include "common/logger.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vector.hpp"
+
 namespace mg {
 namespace common {
+
 template <typename T>
-class SortedDiskBase {
+class SortedSetDiskBase {
     typedef T value_type;
     typedef Vector<value_type> storage_type;
     typedef ChunkedWaitQueue<value_type> result_type;
     typedef typename storage_type::iterator Iterator;
 
   public:
-    SortedDiskBase(
+    SortedSetDiskBase(
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
@@ -41,7 +43,7 @@ class SortedDiskBase {
         try_reserve(reserved_num_elements);
     }
 
-    virtual ~SortedDiskBase() {
+    virtual ~SortedSetDiskBase() {
         merge_queue_.shutdown(); // make sure the data was processed
     }
     /**

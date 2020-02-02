@@ -93,7 +93,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
 template <typename T, typename C>
 class MergingHeap {
     /** The heap stores triplets of the form <Element, Count, SourceIndex> */
-    using value_type =  std::tuple<T, C, uint32_t> ;
+    using value_type = std::tuple<T, C, uint32_t> ;
 
   public:
     bool emplace(T el, C count, uint32_t idx) {
@@ -118,7 +118,7 @@ class MergingHeap {
     bool empty() { return els.empty(); }
 
   private:
-    // elements stored in increasing order of the first tuple member
+    // elements stored in decreasing order of the first tuple member
     std::vector<value_type> els;
 };
 
@@ -165,11 +165,11 @@ uint64_t merge_files(const std::vector<std::string> sources,
     }
 
     while (!merge_heap.empty()) {
-        CountedEl largest = merge_heap.pop();
-        on_new_item({ std::get<0>(largest), std::get<1>(largest) });
+        CountedEl smallest = merge_heap.pop();
+        on_new_item({ std::get<0>(smallest), std::get<1>(smallest) });
 
         bool found = true;
-        uint32_t chunk_index = std::get<2>(largest);
+        uint32_t chunk_index = std::get<2>(smallest);
         while (found && chunk_files[chunk_index]
                && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
                                                 sizeof(std::pair<T, C>))) {
