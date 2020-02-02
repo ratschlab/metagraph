@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import os.path
 import subprocess
 import time
 
@@ -121,7 +122,7 @@ def stop_instances(compute, project, zone, name, count):
     wait_for_all_operations(compute, project, zone, ids)
 
 
-def send_create_request(compute, project, zone, name, startup_script_name, server_host):
+def send_create_request(compute, project, zone, name, script_dir, server_host):
     """ Send a request to creates a new instance with the given parameters """
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
@@ -141,12 +142,22 @@ def send_create_request(compute, project, zone, name, startup_script_name, serve
             'value': server_host
         }
     ]
-    if startup_script_name != '':
+    startup_script_name = os.path.join(script_dir, 'startup.sh')
+    if os.path.isfile(startup_script_name):
         startup_script = open(startup_script_name, 'r').read()
         metadata.append({
             # Startup script is automatically executed by the instance upon startup.
             'key': 'startup-script',
             'value': startup_script
+        })
+
+    shutdown_script_name = os.path.join(script_dir, 'shutdown.sh')
+    if os.path.isfile(shutdown_script_name):
+        shutdown_script = open(shutdown_script_name, 'r').read()
+        metadata.append({
+            # Startup script is automatically executed by the instance upon startup.
+            'key': 'shutdown-script',
+            'value': shutdown_script
         })
     config = {
         'name': name,
@@ -209,21 +220,21 @@ def send_create_request(compute, project, zone, name, startup_script_name, serve
     return None
 
 
-def create_instances(compute, project, zone, name, count, startup_script, server_host):
+def create_instances(compute, project, zone, name, count, script_dir, server_host):
     ids = []
     for i in range(count):
-        operation = send_create_request(compute, project, zone, name + '-' + str(i), startup_script, server_host)
+        operation = send_create_request(compute, project, zone, name + '-' + str(i), script_dir, server_host)
         if operation:
             ids.append(operation['id'])
 
     wait_for_all_operations(compute, project, zone, ids)
 
 
-def run_command(compute, project, zone, user, name, count, startup_script_name):
-    startup_script = open(startup_script_name, 'r').read()[:-1].replace("'", "\'")
+def run_command(compute, project, zone, user, name, count, command_file):
+    command_content = open(command_file, 'r').read()[:-1].replace("'", "\'")
     for i in range(count):
         instance = name + "-" + str(i)
-        command = ['gcloud', 'compute', 'ssh', user + '@' + instance, '--zone', zone, '--command', startup_script]
+        command = ['gcloud', 'compute', 'ssh', user + '@' + instance, '--zone', zone, '--command', command_content]
         print(f'Running command\n{command}')
         out_file = open('/tmp/log-' + instance, 'w')
         time.sleep(1)  # needed because gcloud crashes miserably if run in quick succession
@@ -244,7 +255,7 @@ if __name__ == '__main__':
         '--name', default='', help='Name (or prefix) of instances to perform the action on')
     parser.add_argument('-n', '--num_instances', default=1, type=int, choices=range(1, 200),
                         help='Number of instances to create/start')
-    parser.add_argument('--script', default='',
+    parser.add_argument('--script_dir', default='./',
                         help='Optional name of script to run at creation time')
     parser.add_argument('-u', '--user', default='ddanciu',
                         help='User to run comands under (for action==run)')
@@ -255,7 +266,7 @@ if __name__ == '__main__':
 
     compute = googleapiclient.discovery.build('compute', 'v1')
     if args.action == 'create' or args.action == 'c':
-        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script, args.server_host)
+        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script_dir, args.server_host)
     elif args.action == 'delete' or args.action == 'd':
         delete_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
     elif args.action == 'list' or args.action == 'l':

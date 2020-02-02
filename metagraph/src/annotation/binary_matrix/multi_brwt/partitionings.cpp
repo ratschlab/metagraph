@@ -87,7 +87,7 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
         similarities[j] = std::vector<double>(j, 0.);
     }
 
-    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Computing correlations",
+    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Correlations",
                              std::cerr, !utils::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)

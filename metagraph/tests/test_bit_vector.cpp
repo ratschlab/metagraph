@@ -786,6 +786,180 @@ TYPED_TEST(BitVectorTest, copy_to) {
     test_copy_convert_to< TypeParam, bit_vector_smart >();
 }
 
+
+TEST(bit_vector, count_ones_empty) {
+    sdsl::bit_vector v;
+    EXPECT_EQ(0u, count_ones(v, 0, v.size()));
+}
+
+TEST(bit_vector, count_ones_all_zero) {
+    {
+        sdsl::bit_vector v(1, 0);
+        EXPECT_EQ(0u, count_ones(v, 0, v.size()));
+    }
+    {
+        sdsl::bit_vector v(10, 0);
+        EXPECT_EQ(0u, count_ones(v, 0, v.size()));
+    }
+    {
+        sdsl::bit_vector v(999, 0);
+        EXPECT_EQ(0u, count_ones(v, 0, v.size()));
+    }
+    {
+        sdsl::bit_vector v(999999, 0);
+        EXPECT_EQ(0u, count_ones(v, 0, v.size()));
+    }
+    {
+        sdsl::bit_vector v(99999999, 0);
+        EXPECT_EQ(0u, count_ones(v, 0, v.size()));
+    }
+}
+
+TEST(bit_vector, count_ones_all_ones) {
+    {
+        sdsl::bit_vector v(1, 1);
+        EXPECT_EQ(1u, count_ones(v, 0, v.size()));
+    }
+    {
+        sdsl::bit_vector v(10, 1);
+        EXPECT_EQ(10u, count_ones(v, 0, v.size()));
+    }
+    {
+        sdsl::bit_vector v(999, 1);
+        EXPECT_EQ(999u, count_ones(v, 0, v.size()));
+    }
+    {
+        sdsl::bit_vector v(999999, 1);
+        EXPECT_EQ(999999u, count_ones(v, 0, v.size()));
+    }
+    {
+        sdsl::bit_vector v(99999999, 1);
+        EXPECT_EQ(99999999u, count_ones(v, 0, v.size()));
+    }
+}
+
+TEST(bit_vector, count_ones) {
+    {
+        sdsl::bit_vector v(1);
+        for (size_t i = 0; i < (v.size() + 63) >> 6; ++i) {
+            v.data()[i] = 18446744073709551557llu + i * 32416189321llu;
+        }
+        sdsl::rank_support_v5<> rk(&v);
+        for (size_t i = 0; i < v.size(); ++i) {
+            for (size_t j = i; j < v.size(); ++j) {
+                size_t first = count_ones(v, 0, i);
+                EXPECT_EQ(rk(i), first);
+                size_t second = count_ones(v, i, j);
+                EXPECT_EQ(rk(j) - first, second);
+                size_t third = count_ones(v, j, v.size());
+                EXPECT_EQ(sdsl::util::cnt_one_bits(v), first + second + third);
+            }
+        }
+    }
+    {
+        sdsl::bit_vector v(10);
+        for (size_t i = 0; i < (v.size() + 63) >> 6; ++i) {
+            v.data()[i] = 18446744073709551557llu + i * 32416189321llu;
+        }
+        sdsl::rank_support_v5<> rk(&v);
+        for (size_t i = 0; i < v.size(); ++i) {
+            for (size_t j = i; j < v.size(); ++j) {
+                size_t first = count_ones(v, 0, i);
+                EXPECT_EQ(rk(i), first);
+                size_t second = count_ones(v, i, j);
+                EXPECT_EQ(rk(j) - first, second);
+                size_t third = count_ones(v, j, v.size());
+                EXPECT_EQ(sdsl::util::cnt_one_bits(v), first + second + third);
+            }
+        }
+    }
+    {
+        sdsl::bit_vector v(999);
+        for (size_t i = 0; i < (v.size() + 63) >> 6; ++i) {
+            v.data()[i] = 18446744073709551557llu + i * 32416189321llu;
+        }
+        sdsl::rank_support_v5<> rk(&v);
+        for (size_t i = 0; i < v.size(); ++i) {
+            for (size_t j = i; j < v.size(); ++j) {
+                size_t first = count_ones(v, 0, i);
+                EXPECT_EQ(rk(i), first);
+                size_t second = count_ones(v, i, j);
+                EXPECT_EQ(rk(j) - first, second);
+                size_t third = count_ones(v, j, v.size());
+                EXPECT_EQ(sdsl::util::cnt_one_bits(v), first + second + third);
+            }
+        }
+    }
+    {
+        sdsl::bit_vector v(999999);
+        for (size_t i = 0; i < (v.size() + 63) >> 6; ++i) {
+            v.data()[i] = 18446744073709551557llu + i * 32416189321llu;
+        }
+        sdsl::rank_support_v5<> rk(&v);
+        for (size_t i = 0; i + 100000 <= v.size(); i += 100000) {
+            for (size_t j = i; j + 100000 <= v.size(); j += 100000) {
+                size_t first = count_ones(v, 0, i);
+                EXPECT_EQ(rk(i), first);
+                size_t second = count_ones(v, i, j);
+                EXPECT_EQ(rk(j) - first, second);
+                size_t third = count_ones(v, j, v.size());
+                EXPECT_EQ(sdsl::util::cnt_one_bits(v), first + second + third);
+            }
+        }
+    }
+    {
+        sdsl::bit_vector v(99999999);
+        for (size_t i = 0; i < (v.size() + 63) >> 6; ++i) {
+            v.data()[i] = 18446744073709551557llu + i * 32416189321llu;
+        }
+        sdsl::rank_support_v5<> rk(&v);
+        for (size_t i = 0; i + 10000000 <= v.size(); i += 10000000) {
+            for (size_t j = i; j + 10000000 <= v.size(); j += 10000000) {
+                size_t first = count_ones(v, 0, i);
+                EXPECT_EQ(rk(i), first);
+                size_t second = count_ones(v, i, j);
+                EXPECT_EQ(rk(j) - first, second);
+                size_t third = count_ones(v, j, v.size());
+                EXPECT_EQ(sdsl::util::cnt_one_bits(v), first + second + third);
+            }
+        }
+    }
+    for (size_t size = 0; size < 500; ++size) {
+        sdsl::bit_vector v(size);
+        for (size_t i = 0; i < (v.size() + 63) >> 6; ++i) {
+            v.data()[i] = 18446744073709551557llu + i * 32416189321llu;
+        }
+        sdsl::rank_support_v5<> rk(&v);
+        for (size_t i = 0; i < v.size(); ++i) {
+            for (size_t j = i; j < v.size(); ++j) {
+                size_t first = count_ones(v, 0, i);
+                EXPECT_EQ(rk(i), first);
+                size_t second = count_ones(v, i, j);
+                EXPECT_EQ(rk(j) - first, second);
+                size_t third = count_ones(v, j, v.size());
+                EXPECT_EQ(sdsl::util::cnt_one_bits(v), first + second + third);
+            }
+        }
+    }
+    for (size_t size = 99999999; size < 9999999 + 200; ++size) {
+        sdsl::bit_vector v(size);
+        for (size_t i = 0; i < (v.size() + 63) >> 6; ++i) {
+            v.data()[i] = 18446744073709551557llu + i * 32416189321llu;
+        }
+        sdsl::rank_support_v5<> rk(&v);
+        for (size_t i = 0; i + 10000000 <= v.size(); i += 10000000) {
+            for (size_t j = i; j + 10000000 <= v.size(); j += 10000000) {
+                size_t first = count_ones(v, 0, i);
+                EXPECT_EQ(rk(i), first);
+                size_t second = count_ones(v, i, j);
+                EXPECT_EQ(rk(j) - first, second);
+                size_t third = count_ones(v, j, v.size());
+                EXPECT_EQ(sdsl::util::cnt_one_bits(v), first + second + third);
+            }
+        }
+    }
+}
+
 TEST(bit_vector, inner_prod_empty) {
     sdsl::bit_vector first;
     sdsl::bit_vector second;

@@ -102,7 +102,12 @@ class MergingHeap {
                                        return std::get<0>(a) > std::get<0>(b);
                                    });
         if (it != els.end() && el == std::get<0>(*it)) {
-            std::get<1>(*it) += count;
+            C &value = std::get<1>(*it);
+            if (value < std::numeric_limits<C>::max() - count) {
+                value += count;
+            } else {
+                value = std::numeric_limits<C>::max();
+            }
             return true;
         }
         els.emplace(it, el, count, idx);
