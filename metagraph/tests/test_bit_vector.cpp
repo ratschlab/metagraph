@@ -1316,12 +1316,20 @@ TEST(bit_vector, to_sdsl_zeros) {
 TEST(bit_vector, to_sdsl_ones) {
     for (size_t i = 0; i < 1025; ++i) {
         auto vector_bool = to_sdsl(std::vector<bool>(i, true));
-        EXPECT_EQ(i, vector_bool.size());
-        EXPECT_EQ(i, sdsl::util::cnt_one_bits(vector_bool));
+        ASSERT_EQ(i, vector_bool.size());
+        ASSERT_EQ(i, sdsl::util::cnt_one_bits(vector_bool));
 
         auto vector_uint8_t = to_sdsl(std::vector<uint8_t>(i, true));
-        EXPECT_EQ(i, vector_uint8_t.size());
-        EXPECT_EQ(i, sdsl::util::cnt_one_bits(vector_uint8_t));
+        ASSERT_EQ(i, vector_uint8_t.size());
+        ASSERT_EQ(i, sdsl::util::cnt_one_bits(vector_uint8_t));
+
+        auto vector_uint8_msb = to_sdsl(std::vector<uint8_t>(i, 4));
+        ASSERT_EQ(i, vector_uint8_msb.size());
+        ASSERT_EQ(i, sdsl::util::cnt_one_bits(vector_uint8_msb));
+
+        auto vector_uint8_lsb = to_sdsl(std::vector<uint8_t>(i, 1));
+        ASSERT_EQ(i, vector_uint8_lsb.size());
+        ASSERT_EQ(i, sdsl::util::cnt_one_bits(vector_uint8_lsb));
     }
 }
 

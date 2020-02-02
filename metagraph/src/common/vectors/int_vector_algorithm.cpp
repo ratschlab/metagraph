@@ -60,7 +60,7 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
         uint64_t word = 0;
         uint8_t width = std::min(static_cast<uint64_t>(64), result.size() - i);
         for (int64_t j = i + width - 1; j >= static_cast<int64_t>(i); --j) {
-            word = (word << 1) | (vector[j] >> 7);
+            word = (word << 1) | static_cast<bool>(vector[j]);
         }
 
         result.set_int(i, word, width);
