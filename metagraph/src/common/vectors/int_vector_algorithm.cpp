@@ -12,6 +12,8 @@
 
 #include <sdsl/uint128_t.hpp>
 
+using sdsl::uint128_t;
+
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
     sdsl::bit_vector result(vector.size(), 0);
@@ -27,7 +29,7 @@ sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
 sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     sdsl::bit_vector result(vector.size(), 0);
 
-    size_t i = 0;
+    uint64_t i = 0;
 #ifdef __AVX2__
     for (; i + 32 <= vector.size(); i += 32) {
         result.set_int(
@@ -54,16 +56,16 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     }
 #endif
 
-    // at most 16 bits left
-    uint16_t last_word = 0;
-    size_t last_i = i;
-    size_t j = 0;
-    for (; i < vector.size(); ++i, ++j) {
-        if (vector[i])
-            last_word |= static_cast<uint16_t>(1) << j;
-    }
+    while (i < vector.size()) {
+        // at most 16 bits left
+        uint64_t word = 0;
+        int num_iter = std::min(static_cast<uint64_t>(64), result.size() - i);
+        for (int j = 0; j < num_iter; ++j) {
+            word |= static_cast<uint64_t>(vector[i++]) << j;
+        }
 
-    result.set_int(last_i, last_word, i - last_i);
+        result.set_int(i - num_iter, word, num_iter);
+    }
 
     assert(static_cast<size_t>(std::count_if(vector.begin(), vector.end(),
                                              [](uint8_t a) { return a; }))
@@ -163,8 +165,8 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
 }
 
 
-inline sdsl::uint128_t pushback_epi64(const sdsl::uint128_t &v, uint64_t a) {
-    return (v >> 64) | (sdsl::uint128_t(a) << 64);
+inline uint128_t pushback_epi64(const uint128_t &v, const uint128_t &a) {
+    return (v >> 64) | (a << 64);
 }
 
 sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
@@ -178,7 +180,7 @@ sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
     // process one word at a time
     // TODO: is it worth vectorizing this?
     size_t i = 0;
-    auto dword = sdsl::uint128_t(vector.data()[0]) << 64;
+    auto dword = uint128_t(vector.data()[0]) << 64;
     for (; i + 64 <= presence.size() - offset + 1; i += 64) {
         dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1]);
         for (uint8_t j = 1; j < offset; ++j) {
@@ -203,8 +205,8 @@ sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
 
     } else {
         dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1])
-            | (sdsl::uint128_t((1llu << offset) - 1) << (vector.size() - i));
-        sdsl::uint128_t dword_masked = dword;
+            | (uint128_t((1llu << offset) - 1) << (vector.size() - i));
+        uint128_t dword_masked = dword;
         for (uint8_t j = 1; j < offset; ++j) {
             dword_masked &= dword >> j;
         }
