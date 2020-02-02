@@ -346,10 +346,11 @@ int query_graph(Config *config) {
                           std::ref(std::cout));
         };
 
+        FastaParser fasta_parser(file, config->forward_and_reverse);
+
         // Graph constructed from a batch of queried sequences
         // Used only in fast mode
         if (config->fast) {
-            FastaParser fasta_parser(file, config->forward_and_reverse);
             auto begin = fasta_parser.begin();
             auto end = fasta_parser.end();
 
@@ -436,35 +437,22 @@ int query_graph(Config *config) {
             }
 
         } else {
-            if (!aligner) {
-                read_fasta_file_critical(
-                    file,
-                    [&](kseq_t *kseq) {
-                        thread_pool.enqueue(execute, kseq->name.s,
-                                                     seq_count++,
-                                                     kseq->seq.s);
+            for (const auto &kseq : fasta_parser) {
+                thread_pool.enqueue(
+                    [&](const std::string &n, size_t id, const std::string &s) {
+                        if (!aligner) {
+                            execute(n, id, s);
+                            return;
+                        }
+                        // query the alignment matches against the annotator
+                        auto matches = aligner->align(s);
+                        execute(n, id, matches.size()
+                                        ? matches[0].get_sequence()
+                                        : s);
                     },
-                    config->forward_and_reverse
-                );
-            } else {
-                // query the alignment matches against the annotator
-                read_fasta_file_critical(
-                    file,
-                    [&](kseq_t *kseq) {
-                        thread_pool.enqueue(
-                            [&](const std::string &n, size_t id, const std::string &s) {
-                                auto matches = aligner->align(s);
-                                execute(n, id,
-                                    matches.size() ? matches[0].get_sequence()
-                                                   : s
-                                );
-                            },
-                            kseq->name.s,
-                            seq_count++,
-                            kseq->seq.s
-                        );
-                    },
-                    config->forward_and_reverse
+                    kseq.name.s,
+                    seq_count++,
+                    kseq.seq.s
                 );
             }
 
