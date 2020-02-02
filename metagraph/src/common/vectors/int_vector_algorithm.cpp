@@ -31,7 +31,7 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
 
     uint64_t i = 0;
 #ifdef __AVX2__
-    for (; i + 32 <= vector.size(); i += 32) {
+    for ( ; i + 32 <= vector.size(); i += 32) {
         result.set_int(
             i,
             ~_mm256_movemask_epi8(_mm256_cmpeq_epi8(
@@ -44,7 +44,7 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
 #endif
 
 #ifdef __SSE2__
-    for (; i + 16 <= vector.size(); i += 16) {
+    for ( ; i + 16 <= vector.size(); i += 16) {
         result.set_int(
             i,
             ~_mm_movemask_epi8(_mm_cmpeq_epi8(
@@ -98,7 +98,7 @@ uint64_t count_ones(const sdsl::bit_vector &vector,
     __m256i counts = popcnt_avx2_hs(data, diff);
     data += diff;
 
-    for (; data + 4 <= data_end; data += 4) {
+    for ( ; data + 4 <= data_end; data += 4) {
         counts = _mm256_add_epi64(
             counts,
             popcnt256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(data)))
@@ -137,7 +137,7 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
     first_data += diff;
     second_data += diff;
 
-    for (; first_data + 4 <= first_end; first_data += 4, second_data += 4) {
+    for ( ; first_data + 4 <= first_end; first_data += 4, second_data += 4) {
         counts = _mm256_add_epi64(
             counts,
             popcnt256(_mm256_and_si256(
@@ -180,7 +180,7 @@ sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
     // TODO: is it worth vectorizing this?
     size_t i = 0;
     auto dword = uint128_t(vector.data()[0]) << 64;
-    for (; i + 64 <= presence.size() - offset + 1; i += 64) {
+    for ( ; i + 64 <= presence.size() - offset + 1; i += 64) {
         dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1]);
         for (uint8_t j = 1; j < offset; ++j) {
             presence.data()[i >> 6] &= uint64_t(dword >> j);
