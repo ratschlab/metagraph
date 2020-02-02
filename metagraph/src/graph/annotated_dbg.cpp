@@ -145,22 +145,6 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    if (presence_ratio == 1.) {
-        auto labels = get_labels(sequence, presence_ratio);
-        if (labels.size() > num_top_labels)
-            labels.erase(labels.begin() + num_top_labels, labels.end());
-
-        std::vector<StringCountPair> label_counts;
-        label_counts.reserve(labels.size());
-
-        for (auto&& label : labels) {
-            label_counts.emplace_back(std::move(label),
-                                      sequence.size() - dbg_.get_k() + 1);
-        }
-
-        return label_counts;
-    }
-
     VectorOrderedMap<row_index, size_t> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
@@ -235,19 +219,14 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     std::vector<std::pair<std::string, sdsl::bit_vector>> presence_vectors;
 
     if (presence_ratio == 1.) {
-        auto labels = get_labels(sequence, presence_ratio);
-        if (labels.size() > num_top_labels)
-            labels.erase(labels.begin() + num_top_labels, labels.end());
-
-        presence_vectors.reserve(labels.size());
-
-        for (auto&& label : labels) {
+        auto label_counts = get_top_labels(sequence, num_top_labels, presence_ratio);
+        presence_vectors.reserve(label_counts.size());
+        for (auto&& [label, count] : label_counts) {
             presence_vectors.emplace_back(
                 std::move(label),
                 sdsl::bit_vector(sequence.size() - dbg_.get_k() + 1, true)
             );
         }
-
         return presence_vectors;
     }
 
@@ -548,35 +527,31 @@ int32_t AnnotatedDBG
 
     const size_t k = dbg_.get_k();
     const int32_t kmer_adjust = 3;
-    const int32_t tabulate_offset = 1;
 
     const size_t sequence_length = kmer_presence_mask.size() + k - 1;
     const int32_t SNP_t = k + kmer_adjust;
 
-    auto score_counter = tabulate_score(autocorrelate(kmer_presence_mask, kmer_adjust),
-                                        tabulate_offset);
+    auto score_counter = tabulate_score(autocorrelate(kmer_presence_mask, kmer_adjust), 1);
 
-    double score_init = std::accumulate(score_counter[1].begin(),
-                                        score_counter[1].end(),
-                                        0) * match_score;
+    double score = std::accumulate(score_counter[1].begin(),
+                                   score_counter[1].end(), 0) * match_score;
 
     if (score_counter[0].empty())
-        return score_init * sequence_length / kmer_presence_mask.size();
+        return score * sequence_length / kmer_presence_mask.size();
 
-    if (!std::getenv("BIGSI_SCORE") && score_init == 0)
+    if (!std::getenv("BIGSI_SCORE") && score == 0)
         return 0;
 
     const auto *it = score_counter[0].data();
     const auto *end = it + score_counter[0].size();
 
 #ifdef __AVX2__
-
     __m256d match_score_packed = _mm256_set1_pd(match_score);
     __m256d mismatch_score_packed = _mm256_set1_pd(mismatch_score);
     __m256d SNP_t_packed = _mm256_set1_pd(SNP_t);
     __m256d penalties = _mm256_setzero_pd();
 
-    for (; it + 4 <= end; it += 4) {
+    for ( ; it + 4 <= end; it += 4) {
         __m256d penalty_add = get_penalty_bigsi_avx2(
             uint64_to_double(_mm256_load_si256(reinterpret_cast<const __m256i*>(it))),
             match_score_packed,
@@ -587,23 +562,21 @@ int32_t AnnotatedDBG
         // TODO: the least-significant bits are usually off by one, is there
         //       a way to fix this?
         assert(float(add_penalty_bigsi(0, *it, match_score, mismatch_score, SNP_t)
-            + add_penalty_bigsi(0, *(it + 1), match_score, mismatch_score, SNP_t)
-            + add_penalty_bigsi(0, *(it + 2), match_score, mismatch_score, SNP_t)
-            + add_penalty_bigsi(0, *(it + 3), match_score, mismatch_score, SNP_t))
+                    + add_penalty_bigsi(0, *(it + 1), match_score, mismatch_score, SNP_t)
+                    + add_penalty_bigsi(0, *(it + 2), match_score, mismatch_score, SNP_t)
+                    + add_penalty_bigsi(0, *(it + 3), match_score, mismatch_score, SNP_t))
             == float(haddall_pd(penalty_add)));
 
         penalties = _mm256_add_pd(penalties, penalty_add);
     }
 
     // reduce
-    score_init += haddall_pd(penalties);
-
+    score += haddall_pd(penalties);
 #endif
 
-    return std::max(double(0), std::accumulate(
-        it, end, score_init,
-        [&](double cur, double count) {
-            return add_penalty_bigsi(cur, count, match_score, mismatch_score, SNP_t);
-        }
-    ) * sequence_length / kmer_presence_mask.size());
+    for ( ; it != end; ++it) {
+        score += add_penalty_bigsi(score, *it, match_score, mismatch_score, SNP_t);
+    }
+
+    return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
 }
