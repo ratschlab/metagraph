@@ -1088,18 +1088,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_labels) {
 }
 
 TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
-    typedef std::pair<std::string, sdsl::bit_vector> Signature;
-    typedef std::vector<Signature> VectorSignature;
-    auto generate_comparator = [&](const auto &anno_graph) {
-        const auto &encoder = anno_graph.get_annotation().get_label_encoder();
-
-        return [&](const Signature &a, const Signature &b) {
-            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
-            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
-            return a_cnt > b_cnt
-                || (a_cnt == b_cnt && encoder.encode(a.first) < encoder.encode(b.first));
-        };
-    };
+    typedef std::vector<std::pair<std::string, sdsl::bit_vector>> VectorSignature;
 
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1113,7 +1102,15 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        auto comp = generate_comparator(*anno_graph);
+        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
+                        const std::pair<std::string, sdsl::bit_vector> &b) {
+            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
+            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
+            return a_cnt > b_cnt
+                || (a_cnt == b_cnt
+                        && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+        };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
         EXPECT_TRUE(anno_graph->label_exists("Second"));
@@ -1356,18 +1353,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_labels) {
 }
 
 TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
-    typedef std::pair<std::string, sdsl::bit_vector> Signature;
-    typedef std::vector<Signature> VectorSignature;
-    auto generate_comparator = [&](const auto &anno_graph) {
-        const auto &encoder = anno_graph.get_annotation().get_label_encoder();
-
-        return [&](const Signature &a, const Signature &b) {
-            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
-            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
-            return a_cnt > b_cnt
-                || (a_cnt == b_cnt && encoder.encode(a.first) < encoder.encode(b.first));
-        };
-    };
+    typedef std::vector<std::pair<std::string, sdsl::bit_vector>> VectorSignature;
 
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1381,7 +1367,15 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        auto comp = generate_comparator(*anno_graph);
+        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
+                        const std::pair<std::string, sdsl::bit_vector> &b) {
+            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
+            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
+            return a_cnt > b_cnt
+                || (a_cnt == b_cnt
+                        && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+        };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
         EXPECT_TRUE(anno_graph->label_exists("Second"));
@@ -1526,17 +1520,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
 }
 
 TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
-    typedef std::pair<std::string, size_t> MatchCount;
-    typedef std::vector<MatchCount> VectorCounts;
-    auto generate_comparator = [&](const auto &anno_graph) {
-        const auto &encoder = anno_graph.get_annotation().get_label_encoder();
-
-        return [&](const MatchCount &a, const MatchCount &b) {
-            return a.second > b.second
-                || (a.second == b.second
-                    && encoder.encode(a.first) < encoder.encode(b.first));
-        };
-    };
+    typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
 
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1550,7 +1534,13 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        auto comp = generate_comparator(*anno_graph);
+        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        auto comp = [&](const std::pair<std::string, size_t> &a,
+                        const std::pair<std::string, size_t> &b) {
+            return a.second > b.second
+                || (a.second == b.second
+                    && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+        };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
         EXPECT_TRUE(anno_graph->label_exists("Second"));
@@ -1699,17 +1689,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
 }
 
 TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
-    typedef std::pair<std::string, size_t> MatchCount;
-    typedef std::vector<MatchCount> VectorCounts;
-    auto generate_comparator = [&](const auto &anno_graph) {
-        const auto &encoder = anno_graph.get_annotation().get_label_encoder();
-
-        return [&](const MatchCount &a, const MatchCount &b) {
-            return a.second > b.second
-                || (a.second == b.second
-                    && encoder.encode(a.first) < encoder.encode(b.first));
-        };
-    };
+    typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
 
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1723,7 +1703,13 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        auto comp = generate_comparator(*anno_graph);
+        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        auto comp = [&](const std::pair<std::string, size_t> &a,
+                        const std::pair<std::string, size_t> &b) {
+            return a.second > b.second
+                || (a.second == b.second
+                    && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+        };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
         EXPECT_TRUE(anno_graph->label_exists("Second"));
