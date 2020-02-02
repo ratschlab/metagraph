@@ -8,7 +8,6 @@
 
 #include <ips4o.hpp>
 
-#include "common/sorted_set_disk_base.hpp"
 #include "common/sorted_set_disk.hpp"
 #include "common/threads/chunked_wait_queue.hpp"
 
