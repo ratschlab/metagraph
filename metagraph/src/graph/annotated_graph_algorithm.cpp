@@ -33,7 +33,6 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
             for (const auto node : path) {
-                // TODO: write to std::vector<uint8_t>, then convert
                 unitig_mask[node] = true;
             }
         }
