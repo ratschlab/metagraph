@@ -371,7 +371,6 @@ int query_graph(Config *config) {
                                 call_sequence(it->seq.s);
                                 num_bytes_read += it->seq.l;
                             }
-
                             return;
                         }
 
@@ -394,8 +393,7 @@ int query_graph(Config *config) {
 
                                     call_sequence(named_alignments.back().second);
                                 },
-                                begin->name.s,
-                                begin->seq.s
+                                begin->name.s, begin->seq.s
                             );
 
                             num_bytes_read = begin->seq.l;
@@ -418,15 +416,11 @@ int query_graph(Config *config) {
                     for ( ; begin != it; ++begin) {
                         assert(begin != end);
 
-                        thread_pool.enqueue(execute, begin->name.s,
-                                                     seq_count++,
-                                                     begin->seq.s);
+                        thread_pool.enqueue(execute, begin->name.s, seq_count++, begin->seq.s);
                     }
                 } else {
                     for (auto&& [name, seq] : named_alignments) {
-                        thread_pool.enqueue(execute, name,
-                                                     seq_count++,
-                                                     seq);
+                        thread_pool.enqueue(execute, name, seq_count++, seq);
                     }
                 }
 
@@ -450,9 +444,7 @@ int query_graph(Config *config) {
                                         ? matches[0].get_sequence()
                                         : s);
                     },
-                    kseq.name.s,
-                    seq_count++,
-                    kseq.seq.s
+                    kseq.name.s, seq_count++, kseq.seq.s
                 );
             }
 
