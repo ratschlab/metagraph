@@ -38,20 +38,18 @@ void execute_query(const std::string &seq_name,
     output.reserve(1'000);
 
     if (print_signature) {
-        auto kmer_presence_masks = anno_graph.get_top_label_signatures(
-            sequence,
-            num_top_labels,
-            discovery_fraction
-        );
+        auto top_labels
+            = anno_graph.get_top_label_signatures(sequence,
+                                                  num_top_labels,
+                                                  discovery_fraction);
 
-        if (!kmer_presence_masks.size() && suppress_unlabeled)
+        if (!top_labels.size() && suppress_unlabeled)
             return;
 
         output += seq_name;
 
-        for (const auto &[label, kmer_presence_mask] : kmer_presence_masks) {
-            output += fmt::format(
-                "\t<{}>:{}:{}:{}",
+        for (const auto &[label, kmer_presence_mask] : top_labels) {
+            output += fmt::format("\t<{}>:{}:{}:{}",
                 label,
                 sdsl::util::cnt_one_bits(kmer_presence_mask),
                 sdsl::util::to_string(kmer_presence_mask),
@@ -331,13 +329,13 @@ int query_graph(Config *config) {
 
         Timer curr_timer;
 
-        std::atomic<size_t> seq_count = 0;
+        size_t seq_count = 0;
 
         const auto *graph_to_query = anno_graph.get();
 
-        auto execute = [&](std::string name, std::string seq) {
-            execute_query(fmt::format_int(seq_count++).str() + "\t" + name,
-                          std::move(seq),
+        auto execute = [&](const std::string &name, size_t id, const std::string &seq) {
+            execute_query(fmt::format_int(id).str() + '\t' + name,
+                          seq,
                           config->count_labels,
                           config->print_signature,
                           config->suppress_unlabeled,
@@ -419,11 +417,15 @@ int query_graph(Config *config) {
                     for ( ; begin != it; ++begin) {
                         assert(begin != end);
 
-                        thread_pool.enqueue(execute, begin->name.s, begin->seq.s);
+                        thread_pool.enqueue(execute, begin->name.s,
+                                                     seq_count++,
+                                                     begin->seq.s);
                     }
                 } else {
                     for (auto&& [name, seq] : named_alignments) {
-                        thread_pool.enqueue(execute, std::move(name), std::move(seq));
+                        thread_pool.enqueue(execute, name,
+                                                     seq_count++,
+                                                     seq);
                     }
                 }
 
@@ -438,7 +440,9 @@ int query_graph(Config *config) {
                 read_fasta_file_critical(
                     file,
                     [&](kseq_t *kseq) {
-                        thread_pool.enqueue(execute, kseq->name.s, kseq->seq.s);
+                        thread_pool.enqueue(execute, kseq->name.s,
+                                                     seq_count++,
+                                                     kseq->seq.s);
                     },
                     config->forward_and_reverse
                 );
@@ -448,16 +452,15 @@ int query_graph(Config *config) {
                     file,
                     [&](kseq_t *kseq) {
                         thread_pool.enqueue(
-                            [&](std::string&& n, std::string&& s) {
+                            [&](const std::string &n, size_t id, const std::string &s) {
                                 auto matches = aligner->align(s);
-                                execute(std::move(n),
-                                        matches.size()
-                                            ? const_cast<std::string&&>(
-                                                  matches[0].get_sequence()
-                                              )
-                                            : std::move(s));
+                                execute(n, id,
+                                    matches.size() ? matches[0].get_sequence()
+                                                   : s
+                                );
                             },
                             kseq->name.s,
+                            seq_count++,
                             kseq->seq.s
                         );
                     },
