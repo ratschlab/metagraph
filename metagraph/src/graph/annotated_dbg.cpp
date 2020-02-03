@@ -169,6 +169,128 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     return get_top_labels(index_counts.values_container(), num_top_labels, min_count);
 }
 
+std::vector<std::pair<std::string, sdsl::bit_vector>>
+AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
+                                       size_t num_top_labels,
+                                       double presence_ratio) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
+    assert(check_compatibility());
+
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
+
+    if (presence_ratio == 1.) {
+        std::vector<std::pair<std::string, sdsl::bit_vector>> presence_vectors;
+
+        auto label_counts = get_top_labels(sequence, num_top_labels, presence_ratio);
+        presence_vectors.reserve(label_counts.size());
+        for (auto&& [label, count] : label_counts) {
+            presence_vectors.emplace_back(
+                std::move(label),
+                sdsl::bit_vector(num_kmers, true)
+            );
+        }
+        return presence_vectors;
+    }
+
+    // kmers and their positions in the query sequence
+    std::vector<row_index> row_indices;
+    row_indices.reserve(num_kmers);
+
+    std::vector<size_t> kmer_positions;
+    kmer_positions.reserve(num_kmers);
+
+    size_t j = 0;
+    graph_->map_to_nodes(sequence, [&](node_index i) {
+        if (i > 0) {
+            kmer_positions.push_back(j);
+            row_indices.push_back(graph_to_anno_index(i));
+        }
+        j++;
+    });
+    assert(j == num_kmers);
+
+    const uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
+
+    if (kmer_positions.size() < min_count)
+        return {};
+
+    // k-mer presence mask with the k-mer count
+    using SignatureCount = std::pair<std::vector<uint8_t>, size_t>;
+
+    typedef uint64_t LabelCode;
+    // map each label code to a k-mer presence mask and its popcount
+    VectorOrderedMap<LabelCode, SignatureCount> label_codes_to_presence;
+
+    auto label_codes = annotator_->get_label_codes(row_indices);
+
+    assert(label_codes.size() == row_indices.size());
+
+    for (size_t i = 0; i < row_indices.size(); ++i) {
+        for (size_t label_code : label_codes[i]) {
+            auto& [mask, label_count] = label_codes_to_presence[label_code];
+
+            if (mask.empty())
+                mask.resize(num_kmers, 0);
+
+            mask[kmer_positions[i]] = true;
+            label_count++;
+        }
+    }
+
+    // get label codes with k-mer match signatures and label counts
+    auto &vector = const_cast<std::vector<std::pair<LabelCode, SignatureCount>>&>(
+        label_codes_to_presence.values_container()
+    );
+
+    // sort to get top |num_top_labels| labels
+    if (vector.size() > num_top_labels) {
+        std::sort(vector.begin(), vector.end(),
+                  [](const auto &a, const auto &b) {
+                      return a.second.second > b.second.second
+                          || (a.second.second == b.second.second && a.first < b.first);
+                  });
+        vector.resize(num_top_labels);
+    }
+
+    std::vector<std::pair<std::string, sdsl::bit_vector>> results;
+    results.reserve(vector.size());
+
+    for (const auto &[code, mask_count] : vector) {
+        // TODO: check this before sorting
+        if (mask_count.second < min_count)
+            continue;
+
+        // TODO: remove the decoding step?
+        results.emplace_back(annotator_->get_label_encoder().decode(code),
+                             to_sdsl(mask_count.first));
+
+        assert(sdsl::util::cnt_one_bits(results.back().second)
+                == mask_count.second);
+        assert(results.back().second.size() == num_kmers);
+    }
+
+#ifndef NDEBUG
+    // sanity check, make sure that the same matches are output by get_top_labels
+    auto top_labels = get_top_labels(sequence, num_top_labels, presence_ratio);
+    assert(top_labels.size() == results.size());
+
+    std::unordered_map<std::string, uint64_t> check(top_labels.begin(), top_labels.end());
+    for (const auto &[label, mask] : results) {
+        auto find = check.find(label);
+        assert(find != check.end());
+        assert(find->second == sdsl::util::cnt_one_bits(mask));
+        check.erase(find);
+    }
+    assert(check.empty());
+#endif // NDEBUG
+
+    return results;
+}
+
 std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                              size_t num_top_labels,
@@ -182,15 +304,15 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
         [&](const auto &code_count) { return code_count.second >= min_count; }
     ));
 
-    // leave only first |num_top_labels| top labels
-    if (num_top_labels <= code_counts.size()) {
+    if (code_counts.size() > num_top_labels) {
+        // sort labels by counts to get the top |num_top_labels|
         std::sort(code_counts.begin(), code_counts.end(),
                   [](const auto &first, const auto &second) {
                       return first.second > second.second
                           || (first.second == second.second && first.first < second.first);
                   });
-
-        code_counts.erase(code_counts.begin() + num_top_labels, code_counts.end());
+        // leave only the first |num_top_labels| top labels
+        code_counts.resize(num_top_labels);
     }
 
     const auto &label_encoder = annotator_->get_label_encoder();
@@ -203,159 +325,6 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
     }
 
     return label_counts;
-}
-
-std::vector<std::pair<std::string, sdsl::bit_vector>>
-AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
-                                       size_t num_top_labels,
-                                       double presence_ratio) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
-    assert(check_compatibility());
-
-    if (sequence.size() < dbg_.get_k())
-        return {};
-
-    std::vector<std::pair<std::string, sdsl::bit_vector>> presence_vectors;
-
-    if (presence_ratio == 1.) {
-        auto label_counts = get_top_labels(sequence, num_top_labels, presence_ratio);
-        presence_vectors.reserve(label_counts.size());
-        for (auto&& [label, count] : label_counts) {
-            presence_vectors.emplace_back(
-                std::move(label),
-                sdsl::bit_vector(sequence.size() - dbg_.get_k() + 1, true)
-            );
-        }
-        return presence_vectors;
-    }
-
-    size_t num_present_kmers = 0;
-    size_t size = 0;
-
-    // maps each annotator row index to a vector of corresponding indices in the
-    // k-mer sequence of the query
-    VectorOrderedMap<row_index, std::vector<node_index>> index_map;
-    std::vector<row_index> row_indices;
-    index_map.reserve(sequence.size() - dbg_.get_k() + 1);
-
-    graph_->map_to_nodes(sequence, [&](node_index i) {
-        if (i > 0) {
-            auto row_index = graph_to_anno_index(i);
-            auto &row = index_map[row_index];
-            if (row.empty())
-                row_indices.push_back(row_index);
-
-            row.push_back(size);
-            ++num_present_kmers;
-        }
-
-        ++size;
-    });
-
-    assert(size == sequence.size() - dbg_.get_k() + 1);
-
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * size));
-    if (num_present_kmers < min_count)
-        return {};
-
-    // construct the k-mer presence masks for all label codes
-    using VectorCount = std::pair<std::vector<uint8_t>, size_t>;
-    using Storage = std::vector<std::pair<uint64_t, VectorCount>>;
-
-    // map each label code to a pair containing a k-mer presence mask and its popcount
-    VectorOrderedMap<uint64_t, VectorCount> label_codes_to_presence;
-    static_assert(std::is_same<
-        typename decltype(label_codes_to_presence)::values_container_type,
-        Storage
-    >::value);
-
-    auto label_codes = annotator_->get_label_codes(row_indices);
-    assert(label_codes.size() == row_indices.size());
-    auto it = label_codes.begin();
-    for (const auto &[row_index, query_indices] : index_map) {
-        for (const auto &code : *it) {
-            // for each label code associated with this k-mer, mark the
-            // corresponding k-mer presence mask at index i
-            auto &vector_count = label_codes_to_presence[code];
-
-            if (vector_count.first.empty())
-                vector_count.first.resize(size, 0);
-
-            for (auto i : query_indices) {
-                vector_count.second += !vector_count.first[i];
-                vector_count.first[i] = 0xFF;
-            }
-        }
-
-        ++it;
-    }
-
-    assert(it == label_codes.end());
-
-    // sort, decode, output
-    auto vector = const_cast<Storage&&>(label_codes_to_presence.values_container());
-
-    bool is_sorted = num_top_labels <= vector.size();
-    if (is_sorted) {
-        std::sort(vector.begin(), vector.end(),
-                  [](const auto &a, const auto &b) {
-                      return a.second.second > b.second.second
-                          || (a.second.second == b.second.second && a.first < b.first);
-                  });
-    }
-
-    presence_vectors.reserve(std::min(num_top_labels, vector.size()));
-
-    for (const auto &[code, mask_count] : vector) {
-        assert(mask_count.second == sdsl::util::cnt_one_bits(to_sdsl(mask_count.first)));
-        if (mask_count.second < min_count) {
-            if (is_sorted) {
-                break;
-            } else {
-                continue;
-            }
-        }
-
-        if (presence_vectors.size() == num_top_labels)
-            break;
-
-        // TODO: remove the decoding step?
-        presence_vectors.emplace_back(annotator_->get_label_encoder().decode(code),
-                                      to_sdsl(mask_count.first));
-        assert(sdsl::util::cnt_one_bits(presence_vectors.back().second)
-            == mask_count.second);
-        assert(presence_vectors.back().second.size()
-            == sequence.size() - dbg_.get_k() + 1);
-    }
-
-#ifndef NDEBUG
-    // sanity check, make sure that the same matches are output by get_top_labels
-    auto top_labels = get_top_labels(sequence, num_top_labels, presence_ratio);
-    assert(top_labels.size() == presence_vectors.size());
-
-    if (is_sorted) {
-        assert(std::equal(presence_vectors.begin(), presence_vectors.end(),
-                          top_labels.begin(),
-                          [](const auto &a, const auto &b) {
-                              return sdsl::util::cnt_one_bits(a.second) == b.second;
-                          }));
-        assert(std::equal(presence_vectors.begin(), presence_vectors.end(),
-                          top_labels.begin(),
-                          [](const auto &a, const auto &b) { return a.first == b.first; }));
-    } else {
-        std::unordered_map<std::string, uint64_t> check(top_labels.begin(), top_labels.end());
-        for (const auto &[label, mask] : presence_vectors) {
-            auto find = check.find(label);
-            assert(find != check.end());
-            assert(find->second == sdsl::util::cnt_one_bits(mask));
-            check.erase(find);
-        }
-        assert(check.empty());
-    }
-#endif
-
-    return presence_vectors;
 }
 
 bool AnnotatedSequenceGraph::label_exists(const std::string &label) const {
@@ -410,7 +379,7 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
         }
     }
 
-    for (; i < presence.size(); ++i) {
+    for ( ; i < presence.size(); ++i) {
         if (!(i & 0x3F) && i + 64 <= presence.size()) {
             // if at a word boundary and the next word is either all zeros or
             // all ones
@@ -468,7 +437,7 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
         assert(check[0] == table[0]);
         assert(check[1] == table[1]);
     }
-#endif
+#endif // NDEBUG
 
     return table;
 }
@@ -500,8 +469,7 @@ __m256d get_penalty_bigsi_avx2(__m256d counts,
                                     mean_penalty),
                          neg_ones);
 }
-
-#endif
+#endif // __AVX2__
 
 double add_penalty_bigsi(double cur,
                          double count,
@@ -535,12 +503,11 @@ int32_t AnnotatedDBG
 
     double score = std::accumulate(score_counter[1].begin(),
                                    score_counter[1].end(), 0) * match_score;
+    if (score == 0)
+        return 0;
 
     if (score_counter[0].empty())
         return score * sequence_length / kmer_presence_mask.size();
-
-    if (!std::getenv("BIGSI_SCORE") && score == 0)
-        return 0;
 
     const auto *it = score_counter[0].data();
     const auto *end = it + score_counter[0].size();
@@ -572,7 +539,7 @@ int32_t AnnotatedDBG
 
     // reduce
     score += haddall_pd(penalties);
-#endif
+#endif // __AVX2__
 
     for ( ; it != end; ++it) {
         score += add_penalty_bigsi(score, *it, match_score, mismatch_score, SNP_t);
