@@ -8,7 +8,7 @@
 
 #include <ips4o.hpp>
 
-#include "common/sorted_set_disk.hpp"
+#include "common/sorted_set_disk_base.hpp"
 #include "common/threads/chunked_wait_queue.hpp"
 
 
@@ -49,14 +49,14 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
             size_t reserved_num_elements = 1e6,
             const std::string &chunk_file_prefix = "/tmp/chunk_",
             std::function<void(const value_type &)> on_item_pushed
-            = [](const value_type &) {},
+                = [](const value_type &) {},
             size_t num_last_elements_cached = 100)
         : SortedSetDiskBase<std::pair<T, C>>(cleanup,
-                                          num_threads,
-                                          reserved_num_elements,
-                                          chunk_file_prefix,
-                                          on_item_pushed,
-                                          num_last_elements_cached) {}
+                                             num_threads,
+                                             reserved_num_elements,
+                                             chunk_file_prefix,
+                                             on_item_pushed,
+                                             num_last_elements_cached) {}
 
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 

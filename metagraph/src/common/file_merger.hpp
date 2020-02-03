@@ -14,7 +14,7 @@ namespace mg {
 namespace common {
 /**
  * Given a list of n source files, containing ordered elements of type T, merge the n
- * sources into a single (ordered) list.
+ * sources into a single (ordered) list and delete the original files.
  * @param sources the files containing sorted lists of type T
  * @param on_new_item callback to invoke when a new element was merged
  *
@@ -129,7 +129,8 @@ class MergingHeap {
 
 /**
  * Given a list of n source files, containing ordered pairs of  <element, count>,
- * merge the n sources (and the corresponding counts) into a single list, ordered by el.
+ * merge the n sources (and the corresponding counts) into a single list, ordered by el
+ * and delete the original files.
  * If two pairs have the same first element, the counts are added together.
  * @param sources the files containing sorted lists of pairs of type <T, C>
  * @param on_new_item callback to invoke when a new element was merged

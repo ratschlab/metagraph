@@ -8,7 +8,7 @@
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_multiset_disk.hpp"
 #include "common/sorted_set.hpp"
-#include "common/sorted_set_disk_new.hpp"
+#include "common/sorted_set_disk.hpp"
 #include "common/threads/threading.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/file_utils.hpp"
