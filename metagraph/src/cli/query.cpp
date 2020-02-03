@@ -312,11 +312,7 @@ int query_graph(Config *config) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only take the top match");
 
-        Config dummy = *config;
-        // forward and reverse-complement alignments already handled below
-        dummy.forward_and_reverse = false;
-
-        aligner = build_aligner(*graph, dummy);
+        aligner = build_aligner(*graph, *config);
     }
 
     // iterate over input files
