@@ -184,7 +184,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     assert(!(*index_in_full_graph)[0]);
 
-    // TODO: find a way to do this without running call_sequences twice
     if (discovery_fraction > 0) {
         sdsl::bit_vector mask(graph->max_index() + 1, false);
 
@@ -305,23 +304,20 @@ int query_graph(Config *config) {
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
-    std::mutex sequence_mutex;
 
     Timer timer;
 
     std::unique_ptr<IDBGAligner> aligner;
     if (config->align_sequences) {
-        Config dummy = *config;
+        assert(config->alignment_num_alternative_paths == 1u
+                && "only take the top match");
 
+        Config dummy = *config;
         // forward and reverse-complement alignments already handled below
         dummy.forward_and_reverse = false;
 
-        // only find the top match
-        dummy.alignment_num_alternative_paths = 1;
         aligner = build_aligner(*graph, dummy);
     }
-
-    std::vector<std::pair<std::string, std::string>> named_alignments;
 
     // iterate over input files
     for (const auto &file : files) {
@@ -333,7 +329,7 @@ int query_graph(Config *config) {
 
         const auto *graph_to_query = anno_graph.get();
 
-        auto execute = [&](const std::string &name, size_t id, const std::string &seq) {
+        auto execute = [&](size_t id, const std::string &name, const std::string &seq) {
             execute_query(fmt::format_int(id).str() + '\t' + name,
                           seq,
                           config->count_labels,
@@ -359,8 +355,8 @@ int query_graph(Config *config) {
 
             while (begin != end) {
                 Timer batch_timer;
-                named_alignments.clear();
 
+                std::vector<std::tuple<size_t, std::string, std::string>> named_alignments;
                 uint64_t num_bytes_read = 0;
                 auto query_graph = construct_query_graph(*anno_graph,
                     [&](auto call_sequence) {
@@ -374,31 +370,36 @@ int query_graph(Config *config) {
                             return;
                         }
 
+                        // Check if the sequences have been already aligned and
+                        // if the results are stored in |named_alignments|.
+                        if (named_alignments.size()) {
+                            for (const auto &[id, name, seq] : named_alignments) {
+                                call_sequence(seq);
+                            }
+                            return;
+                        }
+
+                        std::mutex sequence_mutex;
                         for ( ; begin != end && num_bytes_read <= batch_size; ++begin) {
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
                             thread_pool.enqueue(
-                                [&](std::string n, std::string s) {
-                                    auto matches = aligner->align(s);
+                                [&](size_t id, std::string&& name, std::string&& seq) {
+                                    auto matches = aligner->align(seq);
 
                                     std::lock_guard<std::mutex> lock(sequence_mutex);
-                                    named_alignments.emplace_back(
-                                        std::move(n),
-                                        matches.size()
-                                            ? const_cast<std::string&&>(
-                                                  matches[0].get_sequence()
-                                              )
-                                            : std::move(s)
+                                    named_alignments.emplace_back(id, std::move(name),
+                                        const_cast<std::string&&>(matches.size()
+                                                                    ? matches[0].get_sequence()
+                                                                    : seq)
                                     );
-
-                                    call_sequence(named_alignments.back().second);
+                                    call_sequence(std::get<2>(named_alignments.back()));
                                 },
-                                begin->name.s, begin->seq.s
+                                seq_count++, begin->name.s, begin->seq.s
                             );
 
-                            num_bytes_read = begin->seq.l;
+                            num_bytes_read += begin->seq.l;
                         }
-
                         thread_pool.join();
                     },
                     config->count_labels ? 0 : config->discovery_fraction,
@@ -416,11 +417,11 @@ int query_graph(Config *config) {
                     for ( ; begin != it; ++begin) {
                         assert(begin != end);
 
-                        thread_pool.enqueue(execute, begin->name.s, seq_count++, begin->seq.s);
+                        thread_pool.enqueue(execute, seq_count++, begin->name.s, begin->seq.s);
                     }
                 } else {
-                    for (auto&& [name, seq] : named_alignments) {
-                        thread_pool.enqueue(execute, name, seq_count++, seq);
+                    for (auto&& [id, name, seq] : named_alignments) {
+                        thread_pool.enqueue(execute, id, name, seq);
                     }
                 }
 
@@ -433,18 +434,18 @@ int query_graph(Config *config) {
         } else {
             for (const auto &kseq : fasta_parser) {
                 thread_pool.enqueue(
-                    [&](const std::string &n, size_t id, const std::string &s) {
+                    [&](size_t id, const std::string &name, const std::string &seq) {
                         if (!aligner) {
-                            execute(n, id, s);
+                            execute(id, name, seq);
                             return;
                         }
                         // query the alignment matches against the annotator
-                        auto matches = aligner->align(s);
-                        execute(n, id, matches.size()
+                        auto matches = aligner->align(seq);
+                        execute(id, name, matches.size()
                                         ? matches[0].get_sequence()
-                                        : s);
+                                        : seq);
                     },
-                    kseq.name.s, seq_count++, kseq.seq.s
+                    seq_count++, kseq.name.s, kseq.seq.s
                 );
             }
 
