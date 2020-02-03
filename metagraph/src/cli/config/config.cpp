@@ -182,7 +182,7 @@ Config::Config(int argc, char *argv[]) {
             alignment_seed_unimems = true;
         } else if (!strcmp(argv[i], "--align")) {
             align_sequences = true;
-        } else if (!strcmp(argv[i], "--align-both")) {
+        } else if (!strcmp(argv[i], "--align-both-strands")) {
             align_both_strands = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
@@ -788,7 +788,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\toutput alignment in JSON format [off]\n");
-            fprintf(stderr, "\t   --align-both \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
+            fprintf(stderr, "\t   --align-both-strands \t\treturn best alignments for either input sequence or its reverse complement [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\tuse unit costs for scoring matrix [off]\n");
@@ -987,7 +987,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
-            fprintf(stderr, "\t   --align-both \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
+            fprintf(stderr, "\t   --align-both-strands \t\treturn best alignments for either input sequence or its reverse complement [off]\n");
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\tuse unit costs for scoring matrix [off]\n");

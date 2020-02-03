@@ -310,7 +310,7 @@ int query_graph(Config *config) {
     std::unique_ptr<IDBGAligner> aligner;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
-                && "only take the top match");
+                && "only the best alignment is used in query");
 
         aligner = build_aligner(*graph, *config);
     }
