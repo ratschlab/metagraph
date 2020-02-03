@@ -23,6 +23,7 @@ target_include_directories(kmer
     ${EXTERNAL_LIB_DIR}/ips4o
   PUBLIC
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
+    ${EXTERNAL_LIB_DIR}/eigen
     ..
 )
 

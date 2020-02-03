@@ -198,44 +198,41 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
 TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
     ASSERT_TRUE(TypeParam::kWeighted);
 
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
-            std::vector<std::string> input_data = {
-                "ACAGCTAGCTAGCTAGCTAGCTG",
-                "ATATTATAAAAAATTTTAAAAAA",
-                "ATATATTCTCTCTCTCTCATA",
-                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-            };
+    for (size_t k = 1; k < kMaxK; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
 
-            BOSS constructed(k);
+        BOSS constructed(k);
 
-            auto constructor
-                    = IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
-                                                        "", 1, 0, container);
+        auto constructor
+                = IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0, "", 1, 0);
 
-            for (auto &&sequence : input_data) {
-                constructor->add_sequence(std::move(sequence));
-            }
+        for (auto &&sequence : input_data) {
+            constructor->add_sequence(std::move(sequence));
+        }
 
-            std::unique_ptr<BOSS::Chunk> chunk { constructor->build_chunk() };
+        std::unique_ptr<BOSS::Chunk> chunk { constructor->build_chunk() };
 
-            sdsl::int_vector<> weights;
-            chunk->initialize_boss(&constructed, &weights);
+        sdsl::int_vector<> weights;
+        chunk->initialize_boss(&constructed, &weights);
 
-            ASSERT_EQ(constructed.num_edges() + 1, weights.size());
+        ASSERT_EQ(constructed.num_edges() + 1, weights.size());
 
-            auto mask = constructed.mark_all_dummy_edges(1);
-            ASSERT_EQ(weights.size(), mask.size());
+        auto mask = constructed.mark_all_dummy_edges(1);
+        ASSERT_EQ(weights.size(), mask.size());
 
-            for (size_t i = 1; i < weights.size(); ++i) {
-                auto node_str = constructed.get_node_str(i)
-                        + constructed.decode(constructed.get_W(i) % constructed.alph_size);
+        for (size_t i = 1; i < weights.size(); ++i) {
+            auto node_str = constructed.get_node_str(i)
+                    + constructed.decode(constructed.get_W(i) % constructed.alph_size);
 
-                ASSERT_EQ(k + 1, node_str.size());
-                ASSERT_EQ(node_str[0] == '$' || node_str[k] == '$', mask[i]);
+            ASSERT_EQ(k + 1, node_str.size());
+            ASSERT_EQ(node_str[0] == '$' || node_str[k] == '$', mask[i]);
 
-                EXPECT_EQ(mask[i], weights[i] == 0) << i << " " << node_str;
-            }
+            EXPECT_EQ(mask[i], weights[i] == 0) << i << " " << node_str;
         }
     }
 }
