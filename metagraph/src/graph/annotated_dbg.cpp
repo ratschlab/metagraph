@@ -471,11 +471,14 @@ __m256d get_penalty_bigsi_avx2(__m256d counts,
 }
 #endif // __AVX2__
 
-double add_penalty_bigsi(double cur,
-                         double count,
-                         double match_score,
-                         double mismatch_score,
-                         double SNP_t) {
+
+/**
+ * A penalty function used in BIGSI
+ */
+double penalty_bigsi(double count,
+                     double match_score,
+                     double mismatch_score,
+                     double SNP_t) {
     double min_N_snps = count / SNP_t;
     double max_N_snps = std::max(count - SNP_t + 1, min_N_snps);
     double mean_N_snps = max_N_snps * 0.05 + min_N_snps;
@@ -483,7 +486,7 @@ double add_penalty_bigsi(double cur,
     assert(count >= mean_N_snps);
 
     double mean_penalty = mean_N_snps * mismatch_score;
-    return cur + (count - mean_penalty) * match_score - mean_penalty;
+    return (count - mean_penalty) * match_score - mean_penalty;
 }
 
 int32_t AnnotatedDBG
@@ -528,10 +531,10 @@ int32_t AnnotatedDBG
 
         // TODO: the least-significant bits are usually off by one, is there
         //       a way to fix this?
-        assert(float(add_penalty_bigsi(0, *it, match_score, mismatch_score, SNP_t)
-                    + add_penalty_bigsi(0, *(it + 1), match_score, mismatch_score, SNP_t)
-                    + add_penalty_bigsi(0, *(it + 2), match_score, mismatch_score, SNP_t)
-                    + add_penalty_bigsi(0, *(it + 3), match_score, mismatch_score, SNP_t))
+        assert(float(penalty_bigsi(*it, match_score, mismatch_score, SNP_t)
+                    + penalty_bigsi(*(it + 1), match_score, mismatch_score, SNP_t)
+                    + penalty_bigsi(*(it + 2), match_score, mismatch_score, SNP_t)
+                    + penalty_bigsi(*(it + 3), match_score, mismatch_score, SNP_t))
             == float(haddall_pd(penalty_add)));
 
         penalties = _mm256_add_pd(penalties, penalty_add);
@@ -542,7 +545,7 @@ int32_t AnnotatedDBG
 #endif // __AVX2__
 
     for ( ; it != end; ++it) {
-        score += add_penalty_bigsi(score, *it, match_score, mismatch_score, SNP_t);
+        score += penalty_bigsi(*it, match_score, mismatch_score, SNP_t);
     }
 
     return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
