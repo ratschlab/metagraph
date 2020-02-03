@@ -458,11 +458,32 @@ int query_graph(Config *config) {
                             execute(id, name, seq);
                             return;
                         }
+
                         // query the alignment matches against the annotator
                         auto matches = aligner->align(seq);
-                        execute(id, name, matches.size()
-                                        ? matches[0].get_sequence()
-                                        : seq);
+
+                        const std::string *query_seq;
+                        std::string seq_header;
+                        const char seq_header_format[] = "{}:{}:{}:{}";
+                        if (matches.size()) {
+                            seq_header = fmt::format(seq_header_format,
+                                name, seq, matches[0].get_score(),
+                                matches[0].get_cigar().to_string());
+
+                            // sequence for querying -- the best alignment
+                            query_seq = &matches[0].get_sequence();
+
+                        } else {
+                            // no alignment was found
+                            // the original sequence `seq` will be queried
+                            seq_header = fmt::format(seq_header_format,
+                                name, seq, 0,
+                                fmt::format("{}S", seq.length()));
+
+                            query_seq = &seq;
+                        }
+
+                        execute(id, seq_header, *query_seq);
                     },
                     seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s)
                 );
