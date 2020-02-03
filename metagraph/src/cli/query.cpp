@@ -384,18 +384,34 @@ int query_graph(Config *config) {
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
                             thread_pool.enqueue(
-                                [&](size_t id, std::string&& name, std::string&& seq) {
+                                [&](size_t id, std::string name, std::string seq) {
                                     auto matches = aligner->align(seq);
 
+                                    std::string seq_header;
+
+                                    const char seq_header_format[] = "{}:{}:{}:{}";
+                                    if (matches.size()) {
+                                        seq_header = fmt::format(seq_header_format,
+                                            name, seq, matches[0].get_score(),
+                                            matches[0].get_cigar().to_string());
+                                        // sequence for querying -- the best alignment
+                                        seq = const_cast<std::string&&>(matches[0].get_sequence());
+
+                                    } else {
+                                        // no alignment was found
+                                        // the original sequence `seq` will be queried
+                                        seq_header = fmt::format(seq_header_format,
+                                            name, seq, 0, "[TODO]: CIGAR");
+                                    }
+
                                     std::lock_guard<std::mutex> lock(sequence_mutex);
-                                    named_alignments.emplace_back(id, std::move(name),
-                                        const_cast<std::string&&>(matches.size()
-                                                                    ? matches[0].get_sequence()
-                                                                    : seq)
-                                    );
+
+                                    named_alignments.emplace_back(
+                                        id, std::move(seq_header), std::move(seq));
+
                                     call_sequence(std::get<2>(named_alignments.back()));
                                 },
-                                seq_count++, begin->name.s, begin->seq.s
+                                seq_count++, std::string(begin->name.s), std::string(begin->seq.s)
                             );
 
                             num_bytes_read += begin->seq.l;
@@ -417,7 +433,9 @@ int query_graph(Config *config) {
                     for ( ; begin != it; ++begin) {
                         assert(begin != end);
 
-                        thread_pool.enqueue(execute, seq_count++, begin->name.s, begin->seq.s);
+                        thread_pool.enqueue(execute, seq_count++,
+                                                     std::string(begin->name.s),
+                                                     std::string(begin->seq.s));
                     }
                 } else {
                     for (auto&& [id, name, seq] : named_alignments) {
@@ -445,7 +463,7 @@ int query_graph(Config *config) {
                                         ? matches[0].get_sequence()
                                         : seq);
                     },
-                    seq_count++, kseq.name.s, kseq.seq.s
+                    seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s)
                 );
             }
 

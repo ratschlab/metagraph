@@ -162,7 +162,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align --fwd-and-reverse -i {graph} {reads}'.format(
+        stats_command = '{exe} align --align-both-strands -i {graph} {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -200,7 +200,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -o {output} --json --fwd-and-reverse -i {graph} {reads}'.format(
+        stats_command = '{exe} align -o {output} --json --align-both-strands -i {graph} {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -237,7 +237,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -o {output} --json --fwd-and-reverse --align-edit-distance -i {graph} {reads}'.format(
+        stats_command = '{exe} align -o {output} --json --align-both-strands --align-edit-distance -i {graph} {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
