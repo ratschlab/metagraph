@@ -551,6 +551,18 @@ add_custom_target(check_all
 add_test(NAME integration_tests COMMAND make check)
 add_test(NAME unit_tests COMMAND unit_tests)
 
+# --- integration tests runner ---
+get_target_property(PythonPath Python3::Interpreter IMPORTED_LOCATION)
+file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests" "#!/bin/bash\n")
+file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+  "\n${PythonPath} ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
+)
+file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+  DESTINATION "${PROJECT_BINARY_DIR}/"
+  FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                   GROUP_READ GROUP_EXECUTE
+                   WORLD_READ WORLD_EXECUTE
+)
 
 #-------------------
 # Python interfaces

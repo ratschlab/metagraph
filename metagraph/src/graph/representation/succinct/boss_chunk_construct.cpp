@@ -6,6 +6,7 @@
 #include "common/file_merger.hpp"
 #include "common/logger.hpp"
 #include "common/sorted_multiset.hpp"
+#include "common/sorted_multiset_disk.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_set_disk.hpp"
 #include "common/threads/threading.hpp"
@@ -148,17 +149,18 @@ using RecentKmers = common::CircularBuffer<Kmer<T>>;
  * @param buffer queue that stores the last  |Alphabet|^2 k-mers used for identifying
  * redundant dummy source k-mers
  */
-template <typename T, typename TAlphabet>
-static void remove_redundant_dummy_source(const T &kmer, RecentKmers<T> *buffer) {
-    TAlphabet curW = kmer[0];
+template <typename T, typename KMER>
+static void remove_redundant_dummy_source(const KMER &kmer, RecentKmers<T> *buffer) {
+    using TAlphabet = typename KMER::CharType;
+    TAlphabet curW = utils::get_first(kmer)[0];
     if (buffer->size() < 2 || curW == 0) {
         return;
     }
     using ReverseIterator = typename RecentKmers<T>::reverse_iterator;
     ReverseIterator it = buffer->rbegin();
     ++it;
-    for (; T::compare_suffix(kmer, utils::get_first((*it).kmer), 1); ++it) {
-        const T prev_kmer = utils::get_first((*it).kmer);
+    for (; KMER::compare_suffix(kmer, utils::get_first((*it).kmer), 1); ++it) {
+        const KMER prev_kmer = utils::get_first((*it).kmer);
         assert((curW || prev_kmer[1]) && "Main dummy source k-mer must be unique");
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
             (*it).is_removed = true;
@@ -196,7 +198,7 @@ uint8_t write_kmer(size_t k,
     }
     writer->push(to_write.kmer);
     using KMER = std::remove_reference_t<decltype(utils::get_first(to_write.kmer))>;
-    using TAlphabet = typename T::CharType;
+    using TAlphabet = typename KMER::CharType;
 
     const KMER &kmer_to_write = utils::get_first(to_write.kmer);
     const TAlphabet node_last_char = kmer_to_write[1];
@@ -228,7 +230,7 @@ void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
                                 size_t num_threads,
                                 ThreadPool &async_worker) {
-    using KMER = T;
+    using KMER = std::remove_reference_t<decltype(utils::get_first(*(kmers->begin())))>;
 
     // name of the file containing dummy k-mers of given prefix length
     //TODO(ddanciu): make sure these path names are unique and can be changed
@@ -251,7 +253,6 @@ void recover_source_dummy_nodes(size_t k,
     files_to_merge.reserve(k + 1); // avoid re-allocations as we keep refs to elements
     std::ofstream *dummy_l1 = &files_to_merge.back().second;
 
-    using TAlphabet = typename T::CharType;
     RecentKmers<T> recent_buffer((1llu << KMER::kBitsPerChar)
                                   * (1llu << KMER::kBitsPerChar));
 
@@ -277,7 +278,7 @@ void recover_source_dummy_nodes(size_t k,
         num_parent_kmers++;
         const T el = *it;
         recent_buffer.push_back({ el, false });
-        remove_redundant_dummy_source<T, TAlphabet>(el, &recent_buffer);
+        remove_redundant_dummy_source<T, KMER>(utils::get_first(el), &recent_buffer);
         if (recent_buffer.full()) {
             num_dummy_parent_kmers += write_kmer(k, &dummy_kmers, &writer, &recent_buffer,
                                                  &sorted_dummy_kmers);
@@ -482,6 +483,18 @@ using KmerSetDisk
         = kmer::KmerCollector<KMER, KmerExtractorBOSS,
                               common::SortedSetDisk<KMER>>;
 
+template <typename KMER>
+using KmerMultsetDiskVector8
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultisetDisk<KMER, uint8_t>>;
+
+template <typename KMER>
+using KmerMultsetDiskVector16
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultisetDisk<KMER, uint16_t>>;
+
+template <typename KMER>
+using KmerMultsetDiskVector32
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultisetDisk<KMER, uint32_t>>;
+
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor
 ::initialize(size_t k,
@@ -492,25 +505,36 @@ IBOSSChunkConstructor
              double memory_preallocated,
              kmer::ContainerType container_type) {
 #define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, num_threads, memory_preallocated
-
-    if (!bits_per_count) {
-        switch (container_type) {
-            case kmer::ContainerType::VECTOR_DISK:
-                return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
-            case kmer::ContainerType::VECTOR:
+    switch (container_type) {
+        case kmer::ContainerType::VECTOR:
+            if (!bits_per_count) {
                 return initialize_boss_chunk_constructor<KmerSetVector>(OTHER_ARGS);
-            default:
-                logger->error("Invalid container type {}", container_type);
-                std::exit(1);
-        }
-    } else if (bits_per_count <= 8) {
-        return initialize_boss_chunk_constructor<KmerMultsetVector8>(OTHER_ARGS);
-    } else if (bits_per_count <= 16) {
-        return initialize_boss_chunk_constructor<KmerMultsetVector16>(OTHER_ARGS);
-    } else if (bits_per_count <= 32) {
-        return initialize_boss_chunk_constructor<KmerMultsetVector32>(OTHER_ARGS);
-    } else {
-        throw std::runtime_error("Error: trying to allocate too many bits per k-mer count");
+            } else if (bits_per_count <= 8) {
+                return initialize_boss_chunk_constructor<KmerMultsetVector8>(OTHER_ARGS);
+            } else if (bits_per_count <= 16) {
+                return initialize_boss_chunk_constructor<KmerMultsetVector16>(OTHER_ARGS);
+            } else if (bits_per_count <= 32) {
+                return initialize_boss_chunk_constructor<KmerMultsetVector32>(OTHER_ARGS);
+            } else {
+                throw std::runtime_error(
+                        "Error: trying to allocate too many bits per k-mer count");
+            }
+        case kmer::ContainerType::VECTOR_DISK:
+            if (!bits_per_count) {
+                return initialize_boss_chunk_constructor<KmerSetDisk>(OTHER_ARGS);
+            } else if (bits_per_count <= 8) {
+                return initialize_boss_chunk_constructor<KmerMultsetDiskVector8>(OTHER_ARGS);
+            } else if (bits_per_count <= 16) {
+                return initialize_boss_chunk_constructor<KmerMultsetDiskVector16>(OTHER_ARGS);
+            } else if (bits_per_count <= 32) {
+                return initialize_boss_chunk_constructor<KmerMultsetDiskVector32>(OTHER_ARGS);
+            } else {
+                throw std::runtime_error(
+                        "Error: trying to allocate too many bits per k-mer count");
+            }
+        default:
+            logger->error("Invalid container type {}", container_type);
+            std::exit(1);
     }
 }
 
