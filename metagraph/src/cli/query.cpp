@@ -401,7 +401,8 @@ int query_graph(Config *config) {
                                         // no alignment was found
                                         // the original sequence `seq` will be queried
                                         seq_header = fmt::format(seq_header_format,
-                                            name, seq, 0, "[TODO]: CIGAR");
+                                            name, seq, 0,
+                                            fmt::format("{}S", seq.length()));
                                     }
 
                                     std::lock_guard<std::mutex> lock(sequence_mutex);
