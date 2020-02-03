@@ -1521,7 +1521,6 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
 
 TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
     typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
-
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
             std::string(100, 'A') + std::string(k, 'C'),
@@ -1615,11 +1614,13 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
                         || results[i][1].first == "Second");
                 } else {
                     EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + j),
-                              label_counts) << k << " " << i << " " << j;
+                              label_counts)
+                        << k << " " << i << " " << j;
                 }
 #else
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + j),
-                          label_counts) << k << " " << i << " " << j;
+                          label_counts)
+                    << k << " " << i << " " << j;
 #endif
 
                 for (size_t m = 1; m <= j; ++m) {
@@ -1629,14 +1630,13 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
                         continue;
 #endif
 
-                    auto label_counts = anno_graph->get_top_labels(
-                        sequences[i],
-                        j,
-                        percentages[m] + 1e-9
-                    );
+                    auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                                   j,
+                                                                   percentages[m] + 1e-9);
                     std::sort(label_counts.begin(), label_counts.end(), comp);
                     EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m),
-                              label_counts) << k << " " << i << " " << j << " " << m;
+                              label_counts)
+                        << k << " " << i << " " << j << " " << m;
                 }
             }
 
@@ -1647,11 +1647,9 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
                     continue;
 #endif
 
-                auto label_counts = anno_graph->get_top_labels(
-                    sequences[i],
-                    results[i].size() + 1,
-                    percentages[m] + 1e-9
-                );
+                auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                               results[i].size() + 1,
+                                                               percentages[m] + 1e-9);
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m),
                           label_counts)
@@ -1665,24 +1663,22 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             size_t i = 2;
             size_t m = 2;
             for (size_t j = 2; j <= results[i].size(); ++j) {
-                auto label_counts = anno_graph->get_top_labels(
-                    sequences[i],
-                    j,
-                    percentages[m] + 1e-9
-                );
+                auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                               j,
+                                                               percentages[m] + 1e-9);
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m - 1),
-                          label_counts) << k << " " << i << " " << j << " " << m;
+                          label_counts)
+                    << k << " " << i << " " << j << " " << m;
             }
 
-            auto label_counts = anno_graph->get_top_labels(
-                sequences[i],
-                results[i].size() + 1,
-                percentages[m] + 1e-9
-            );
+            auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                           results[i].size() + 1,
+                                                           percentages[m] + 1e-9);
             std::sort(label_counts.begin(), label_counts.end(), comp);
             EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m - 1),
-                      label_counts) << k << " " << i << " " << results[i].size() + 1 << " " << m;
+                      label_counts)
+                << k << " " << i << " " << results[i].size() + 1 << " " << m;
         }
 #endif
     }
@@ -1690,7 +1686,6 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
 
 TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
     typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
-
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
             std::string(100, 'A') + std::string(k, 'C'),
@@ -1756,7 +1751,8 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
                         || results[i][1].first == "Second");
                 } else {
                     EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + j),
-                              label_counts) << k << " " << i << " " << j;
+                              label_counts)
+                        << k << " " << i << " " << j;
                 }
 
                 for (size_t m = 1; m <= j; ++m) {
@@ -1764,15 +1760,14 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
                     if (k == 1 && i == 2 && m == 2)
                         continue;
 
-                    auto label_counts = anno_graph->get_top_labels(
-                        sequences[i],
-                        j,
-                        percentages[m] + 1e-9
-                    );
+                    auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                                   j,
+                                                                   percentages[m] + 1e-9);
                     ASSERT_GE(j, label_counts.size());
                     std::sort(label_counts.begin(), label_counts.end(), comp);
                     EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m),
-                              label_counts) << k << " " << i << " " << j << " " << m;
+                              label_counts)
+                        << k << " " << i << " " << j << " " << m;
                 }
             }
 
@@ -1781,11 +1776,9 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
                 if (k == 1 && i == 2 && m == 2)
                     continue;
 
-                auto label_counts = anno_graph->get_top_labels(
-                    sequences[i],
-                    results[i].size() + 1,
-                    percentages[m] + 1e-9
-                );
+                auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                               results[i].size() + 1,
+                                                               percentages[m] + 1e-9);
                 ASSERT_GE(results[i].size() + 1, label_counts.size());
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m),
@@ -1799,22 +1792,19 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
             size_t i = 2;
             size_t m = 2;
             for (size_t j = 2; j <= results[i].size(); ++j) {
-                auto label_counts = anno_graph->get_top_labels(
-                    sequences[i],
-                    j,
-                    percentages[m] + 1e-9
-                );
+                auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                               j,
+                                                               percentages[m] + 1e-9);
                 ASSERT_GE(j, label_counts.size());
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m - 1),
-                          label_counts) << k << " " << i << " " << j << " " << m;
+                          label_counts)
+                    << k << " " << i << " " << j << " " << m;
             }
 
-            auto label_counts = anno_graph->get_top_labels(
-                sequences[i],
-                results[i].size() + 1,
-                percentages[m] + 1e-9
-            );
+            auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                           results[i].size() + 1,
+                                                           percentages[m] + 1e-9);
             ASSERT_GE(results[i].size() + 1, label_counts.size());
             std::sort(label_counts.begin(), label_counts.end(), comp);
             EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m - 1),
