@@ -359,6 +359,8 @@ int query_graph(Config *config) {
                         num_bytes_read = 0;
 
                         if (!aligner) {
+                            // basic query regime
+                            // the query graph is constructed directly from the input sequences
                             for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
                                 call_sequence(it->seq.s);
                                 num_bytes_read += it->seq.l;
@@ -366,7 +368,9 @@ int query_graph(Config *config) {
                             return;
                         }
 
-                        // Check if the sequences have been already aligned and
+                        // Query with alignment to graph
+
+                        // Check if the sequences have already been aligned and
                         // if the results are stored in |named_alignments|.
                         if (named_alignments.size()) {
                             for (const auto &[id, name, seq] : named_alignments) {

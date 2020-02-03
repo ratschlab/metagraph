@@ -21,7 +21,7 @@ std::string form_client_reply(const std::string &received_message,
                               const AnnotatedDBG &anno_graph,
                               const Config &config,
                               IDBGAligner *aligner = nullptr) {
-    // TODO: incorporate aligner
+    // TODO: query with alignment to graph
     // TODO: fast query
     std::ignore = aligner;
 
