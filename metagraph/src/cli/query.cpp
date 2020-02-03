@@ -20,6 +20,7 @@
 
 const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
+const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
 using mg::common::logger;
 
@@ -293,6 +294,29 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 }
 
 
+std::string get_alignment_header_and_swap_query(const std::string &name,
+                                                std::string *query_seq,
+                                                QueryAlignment<> *matches) {
+    std::string header;
+
+    if (matches->size()) {
+        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
+                             name, *query_seq, (*matches)[0].get_score(),
+                             (*matches)[0].get_cigar().to_string());
+        // sequence for querying -- the best alignment
+        *query_seq = const_cast<std::string&&>((*matches)[0].get_sequence());
+
+    } else {
+        // no alignment was found
+        // the original sequence `query_seq` will be queried
+        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
+                             name, *query_seq, 0,
+                             fmt::format("{}S", query_seq->length()));
+    }
+
+    return header;
+}
+
 int query_graph(Config *config) {
     assert(config);
 
@@ -387,23 +411,8 @@ int query_graph(Config *config) {
                                 [&](size_t id, std::string name, std::string seq) {
                                     auto matches = aligner->align(seq);
 
-                                    std::string seq_header;
-
-                                    const char seq_header_format[] = "{}:{}:{}:{}";
-                                    if (matches.size()) {
-                                        seq_header = fmt::format(seq_header_format,
-                                            name, seq, matches[0].get_score(),
-                                            matches[0].get_cigar().to_string());
-                                        // sequence for querying -- the best alignment
-                                        seq = const_cast<std::string&&>(matches[0].get_sequence());
-
-                                    } else {
-                                        // no alignment was found
-                                        // the original sequence `seq` will be queried
-                                        seq_header = fmt::format(seq_header_format,
-                                            name, seq, 0,
-                                            fmt::format("{}S", seq.length()));
-                                    }
+                                    std::string seq_header
+                                        = get_alignment_header_and_swap_query(name, &seq, &matches);
 
                                     std::lock_guard<std::mutex> lock(sequence_mutex);
 
@@ -453,7 +462,7 @@ int query_graph(Config *config) {
         } else {
             for (const auto &kseq : fasta_parser) {
                 thread_pool.enqueue(
-                    [&](size_t id, const std::string &name, const std::string &seq) {
+                    [&](size_t id, std::string name, std::string seq) {
                         if (!aligner) {
                             execute(id, name, seq);
                             return;
@@ -462,28 +471,10 @@ int query_graph(Config *config) {
                         // query the alignment matches against the annotator
                         auto matches = aligner->align(seq);
 
-                        const std::string *query_seq;
-                        std::string seq_header;
-                        const char seq_header_format[] = "{}:{}:{}:{}";
-                        if (matches.size()) {
-                            seq_header = fmt::format(seq_header_format,
-                                name, seq, matches[0].get_score(),
-                                matches[0].get_cigar().to_string());
+                        std::string seq_header
+                            = get_alignment_header_and_swap_query(name, &seq, &matches);
 
-                            // sequence for querying -- the best alignment
-                            query_seq = &matches[0].get_sequence();
-
-                        } else {
-                            // no alignment was found
-                            // the original sequence `seq` will be queried
-                            seq_header = fmt::format(seq_header_format,
-                                name, seq, 0,
-                                fmt::format("{}S", seq.length()));
-
-                            query_seq = &seq;
-                        }
-
-                        execute(id, seq_header, *query_seq);
+                        execute(id, seq_header, seq);
                     },
                     seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s)
                 );
