@@ -165,8 +165,6 @@ TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDup
             elements = { TypeParam(3 * i + 1), TypeParam(3 * i + 2) };
             underTest.insert(elements.begin(), elements.end());
         }));
-        std::array<TypeParam, 3> elements
-                = { TypeParam(3 * i), TypeParam(3 * i + 1), TypeParam(3 * i + 2) };
 
         expected_result.push_back(std::make_pair(TypeParam(3 * i), 1));
         expected_result.push_back(std::make_pair(TypeParam(3 * i + 1), 2));
