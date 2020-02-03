@@ -195,7 +195,7 @@ class TestQuery(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa',
+                input=TEST_DATA_DIR + '/transcripts_10.fa',
                 num_theads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
@@ -206,7 +206,7 @@ class TestQuery(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa',
+                input=TEST_DATA_DIR + '/transcripts_10.fa',
                 num_theads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
@@ -218,7 +218,7 @@ class TestQuery(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa',
+                input=TEST_DATA_DIR + '/transcripts_10.fa',
                 num_theads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
@@ -229,7 +229,7 @@ class TestQuery(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa',
+                input=TEST_DATA_DIR + '/transcripts_10.fa',
                 num_theads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
@@ -505,7 +505,7 @@ class TestQuery(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa',
+                input=TEST_DATA_DIR + '/transcripts_10.fa',
                 num_threads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
@@ -516,7 +516,7 @@ class TestQuery(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa',
+                input=TEST_DATA_DIR + '/transcripts_10.fa',
                 num_threads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
@@ -528,7 +528,7 @@ class TestQuery(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa',
+                input=TEST_DATA_DIR + '/transcripts_10.fa',
                 num_theads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
@@ -539,7 +539,7 @@ class TestQuery(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa',
+                input=TEST_DATA_DIR + '/transcripts_10.fa',
                 num_theads=NUM_THREADS
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
@@ -700,7 +700,7 @@ class TestQueryCanonical(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa'
+                input=TEST_DATA_DIR + '/transcripts_10.fa'
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
@@ -710,7 +710,7 @@ class TestQueryCanonical(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa'
+                input=TEST_DATA_DIR + '/transcripts_10.fa'
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
@@ -874,7 +874,7 @@ class TestQueryCanonical(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa'
+                input=TEST_DATA_DIR + '/transcripts_10.fa'
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
@@ -884,7 +884,7 @@ class TestQueryCanonical(unittest.TestCase):
                 exe=METAGRAPH,
                 graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-                input=TEST_DATA_DIR + '/transcripts_100.fa'
+                input=TEST_DATA_DIR + '/transcripts_10.fa'
             )
             res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0)
