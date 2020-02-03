@@ -421,7 +421,7 @@ int query_graph(Config *config) {
                     }
                 } else {
                     for (auto&& [id, name, seq] : named_alignments) {
-                        thread_pool.enqueue(execute, id, name, seq);
+                        thread_pool.enqueue(execute, id, std::move(name), std::move(seq));
                     }
                 }
 
