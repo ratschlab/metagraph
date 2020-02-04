@@ -54,7 +54,7 @@ class ChunkedWaitQueue {
     // typedefs for STL compatibility
     typedef size_t size_type;
     typedef T value_type;
-    typedef Iterator iterator;
+    typedef Iterator& iterator;
 
     static constexpr size_t WRITE_BUF_SIZE = 10000;
 
@@ -361,7 +361,12 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
      */
     Iterator &operator--() {
         assert(read_buf_idx_ > 0 && "Attempting to move before the first element.");
-        read_buf_idx_--;
+        if (idx_ == queue_->buffer_size_) {
+            read_buf_idx_ = read_buf_.size() - 1;
+            idx_ = queue_->last_;
+        } else {
+            read_buf_idx_--;
+        }
         return *this;
     }
 

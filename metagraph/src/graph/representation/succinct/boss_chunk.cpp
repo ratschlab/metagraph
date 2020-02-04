@@ -158,14 +158,12 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                             uint64_t max_count,
                             sdsl::int_vector<> *weights) {
         if (weights->size() == curpos) {
-            weights->resize(weights->capacity() * 1.5);
+            weights->resize(weights->size() * 1.5);
         }
-        if (weights) { // set weights for non-dummy k-mers
-            if (count && kmer[0] && kmer[1]) {
-                (*weights)[curpos] = std::min(static_cast<uint64_t>(count), max_count);
-            } else { // dummy k-mers have a weight of 0
-                (*weights)[curpos] = 0;
-            }
+        if (count && kmer[0] && kmer[1]) {
+            (*weights)[curpos] = std::min(static_cast<uint64_t>(count), max_count);
+        } else { // dummy k-mers have a weight of 0
+            (*weights)[curpos] = 0;
         }
     }
 
@@ -187,15 +185,13 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         assert(alph_size);
         assert(k);
         assert(W && last && F);
-        assert(bool(weights) == utils::is_pair<T>::value);
+        assert(weights == nullptr || utils::is_pair<T>::value);
 
         F->assign(alph_size, 0);
 
         uint64_t max_count __attribute__((unused)) = 0;
-        if (weights) {
+        if constexpr (utils::is_pair<T>::value) {
             weights->resize(100);
-            assert(utils::is_pair<T>::value);
-            sdsl::util::set_to_value(*weights, 0);
             max_count = sdsl::bits::lo_set[weights->width()];
         }
 
@@ -259,7 +255,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         W->resize(curpos);
         last->resize(curpos);
 
-        if (weights)
+        if constexpr (utils::is_pair<T>::value)
             weights->resize(curpos);
     }
 };
