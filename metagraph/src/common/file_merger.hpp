@@ -35,9 +35,9 @@ uint64_t merge_files(const std::vector<std::string> sources,
                         utils::GreaterFirst>
                     merge_heap;
     T data_item;
+    char *buffer = new char[sources.size() * 1024 * 1024];
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        // TODO: use a bigger buffer in stream to reduce the number
-        // of random reads or insert into the heap a batch of elements at a time
+        chunk_files[i].rdbuf()->pubsetbuf((buffer + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
         if (!chunk_files[i].good()) {
             logger->error("Error: Unable to open chunk file '{}'", sources[i]);
@@ -75,6 +75,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });
 
+    delete[] buffer;
     return num_elements;
 }
 
@@ -151,8 +152,9 @@ uint64_t merge_files(const std::vector<std::string> sources,
 
     MergingHeap<T, C> merge_heap;
     std::pair<T, C> data_item;
+    char *buffer = new char[sources.size() * 1024 * 1024];
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        // TODO: try setting a larger buffer size in ifstream to reduce disk I/O
+        chunk_files[i].rdbuf()->pubsetbuf((buffer + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
         if (!chunk_files[i].good()) {
             logger->error("Unable to open chunk file '{}'", sources[i]);
@@ -186,6 +188,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
 
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });
+    delete[] buffer;
 
     return num_elements;
 }
