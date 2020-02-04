@@ -211,4 +211,26 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwards) {
     }
 }
 
+TYPED_TEST(SortedSetDiskTest, IterateBackwardsFromEnd) {
+    constexpr size_t container_size = 8;
+    for (uint32_t cached = 1; cached < container_size / 3; ++cached) {
+        common::SortedSetDisk<TypeParam> underTest
+                = create_sorted_set_disk<TypeParam>(container_size, cached);
+        std::array<TypeParam, 2> elements = { 42, 45 };
+        underTest.insert(elements.begin(), elements.end());
+        using ChunkedQueueIterator = typename common::ChunkedWaitQueue<TypeParam>::Iterator;
+        common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.data();
+        ChunkedQueueIterator &iterator = merge_queue.begin();
+        for (; iterator != merge_queue.end(); ++iterator) {
+        }
+        --iterator;
+        EXPECT_EQ(45, *iterator);
+        --iterator;
+        EXPECT_EQ(42, *iterator);
+        ++iterator;
+        ++iterator;
+        EXPECT_EQ(merge_queue.end(), iterator);
+    }
+}
+
 } // namespace
