@@ -7,7 +7,7 @@
 
 #include "common/file_merger.hpp"
 
-constexpr size_t CHUNK_COUNT = 30;
+constexpr size_t CHUNK_COUNT = 10;
 constexpr size_t ITEM_COUNT = 100'000;
 const std::string chunk_prefix = "/tmp/chunk_";
 

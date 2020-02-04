@@ -12,6 +12,41 @@
 
 namespace mg {
 namespace common {
+
+/**
+ * Profiling shows that using a sorted vector instead of a std::priority queue is
+ * faster if the queue has less than ~45 elements, which is the case for us, as each
+ * element represents a 1GB chunk, and SRAs typically expand to ~15 chunks.
+ */
+template <typename T>
+class VectorHeap {
+    /** The heap stores triplets of the form <Element, Count, SourceIndex> */
+    using value_type = std::pair<T, uint32_t>;
+
+  public:
+    VectorHeap(size_t size) { els.resize(size); }
+    void emplace(T el, uint32_t idx) {
+        auto it = std::lower_bound(els.begin(), els.end(), value_type(el, idx),
+                                   [](const value_type &a, const value_type &b) {
+                                       return a.first > b.first;
+                                   });
+        els.emplace(it, el, idx);
+    }
+
+    value_type pop() {
+        value_type result = els.back();
+        els.pop_back();
+        return result;
+    }
+
+    bool empty() { return els.empty(); }
+
+  private:
+    // elements stored in decreasing order of the first tuple member
+    std::vector<value_type> els;
+};
+
+
 /**
  * Given a list of n source files, containing ordered elements of type T, merge the n
  * sources into a single (ordered) list and delete the original files.
@@ -30,11 +65,9 @@ uint64_t merge_files(const std::vector<std::string> sources,
     std::vector<std::ifstream> chunk_files(sources.size());
     uint64_t num_elements = 0;
 
-    std::priority_queue<std::pair<T, uint32_t>,
-                        std::vector<std::pair<T, uint32_t>>,
-                        utils::GreaterFirst>
-                    merge_heap;
+    VectorHeap<T> merge_heap(sources.size());
     T data_item;
+    // profiling iidicates that setting a larger buffer slightly increases performance
     char *buffer = new char[sources.size() * 1024 * 1024];
     for (uint32_t i = 0; i < sources.size(); ++i) {
         chunk_files[i].rdbuf()->pubsetbuf((buffer + i * 1024 * 1024), 1024 * 1024);
@@ -55,8 +88,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
     bool has_written = false;
 
     while (!merge_heap.empty()) {
-        std::pair<T, uint32_t> smallest = merge_heap.top();
-        merge_heap.pop();
+        std::pair<T, uint32_t> smallest = merge_heap.pop();
 
         if (!has_written || smallest.first != last_written) {
             has_written = true;
