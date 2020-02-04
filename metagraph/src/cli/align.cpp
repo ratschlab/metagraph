@@ -14,15 +14,7 @@
 using mg::common::logger;
 
 
-DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, Config &config) {
-    // fix seed length bounds
-    if (!config.alignment_min_seed_length || config.alignment_seed_unimems)
-        config.alignment_min_seed_length = graph.get_k();
-
-    if (config.alignment_max_seed_length == std::numeric_limits<size_t>::max()
-            && !config.alignment_seed_unimems)
-        config.alignment_max_seed_length = graph.get_k();
-
+DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Config &config) {
     DBGAlignerConfig aligner_config;
 
     aligner_config.queue_size = config.alignment_queue_size;
@@ -41,12 +33,17 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, Config &c
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
 
+    if (!aligner_config.min_seed_length)
+        aligner_config.min_seed_length = graph.get_k();
+
+    if (!aligner_config.max_seed_length)
+        aligner_config.max_seed_length = graph.get_k();
+
     logger->trace("Alignment settings:");
-    logger->trace("\t Seeding: {}", (config.alignment_seed_unimems ? "unimems" : "nodes"));
     logger->trace("\t Alignments to report: {}", config.alignment_num_alternative_paths);
     logger->trace("\t Priority queue size: {}", config.alignment_queue_size);
-    logger->trace("\t Min seed length: {}", config.alignment_min_seed_length);
-    logger->trace("\t Max seed length: {}", config.alignment_max_seed_length);
+    logger->trace("\t Min seed length: {}", aligner_config.min_seed_length);
+    logger->trace("\t Max seed length: {}", aligner_config.max_seed_length);
     logger->trace("\t Max num seeds per locus: {}", config.alignment_max_num_seeds_per_locus);
     logger->trace("\t Gap opening penalty: {}",
                   int64_t(config.alignment_gap_opening_penalty));
@@ -94,10 +91,10 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &c
 
     Cigar::initialize_opt_table(alphabet, alphabet_encoding);
 
-    if (config.alignment_seed_unimems) {
-        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, aligner_config);
+    assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
-    } else if (config.alignment_min_seed_length < graph.get_k()) {
+    if (aligner_config.min_seed_length < graph.get_k()) {
+        // seeds are ranges of nodes matching a suffix
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
             logger->error("SuffixSeeder can be used only with succinct graph representation");
             exit(1);
@@ -106,8 +103,15 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, Config &c
         // Use the seeder that seeds to node suffixes
         return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
 
-    } else {
+    } else if (aligner_config.max_seed_length == graph.get_k()) {
+        assert(config.alignment_min_seed_length == graph.get_k());
+
+        // seeds are single k-mers
         return std::make_unique<DBGAligner<>>(graph, aligner_config);
+
+    } else {
+        // seeds are maximal matches within unitigs (uni-MEMs)
+        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, aligner_config);
     }
 }
 

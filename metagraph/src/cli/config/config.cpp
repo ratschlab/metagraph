@@ -178,8 +178,6 @@ Config::Config(int argc, char *argv[]) {
             print_signature = true;
         } else if (!strcmp(argv[i], "--map")) {
             map_sequences = true;
-        } else if (!strcmp(argv[i], "--align-seed-unimems")) {
-            alignment_seed_unimems = true;
         } else if (!strcmp(argv[i], "--align")) {
             align_sequences = true;
         } else if (!strcmp(argv[i], "--align-both-strands")) {
@@ -418,6 +416,11 @@ Config::Config(int argc, char *argv[]) {
     // both forward and reverse complement sequences anyway.
     if (forward_and_reverse)
         align_both_strands = false;
+
+    if (alignment_min_seed_length > alignment_max_seed_length) {
+        std::cerr << "Error: min_seed_length must be <= max_seed_length" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     // only the best alignment is used in query
     // |alignment_num_alternative_paths| must be set to 1
@@ -804,7 +807,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximal exact matches along unitigs as seeds [off]\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");
@@ -1003,7 +1005,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximal exact matches along unitigs as seeds [off]\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");

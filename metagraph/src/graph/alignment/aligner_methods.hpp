@@ -102,11 +102,10 @@ template <typename NodeType = typename DeBruijnGraph::node_index>
 class UniMEMSeeder : public MEMSeeder<NodeType> {
   public:
     UniMEMSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-        : MEMSeeder<NodeType>(graph,
-                              config,
+        : MEMSeeder<NodeType>(graph, config,
                               std::make_unique<bitmap_lazy>(
                                       [&](auto i) {
-                                          return graph.outdegree(i) > 1
+                                          return graph.has_multiple_outgoing(i)
                                                   || graph.indegree(i) > 1;
                                       },
                                       graph.max_index() + 1)) {}

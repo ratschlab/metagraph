@@ -83,7 +83,6 @@ class Config {
     uint8_t count_width = 8;
 
     // Alignment options
-    bool alignment_seed_unimems = false;
     bool alignment_edit_distance = false;
 
     int8_t alignment_match_score = 2;
