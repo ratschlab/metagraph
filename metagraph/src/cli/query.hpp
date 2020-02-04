@@ -13,13 +13,13 @@ class Config;
 void execute_query(const std::string &seq_name,
                    const std::string &sequence,
                    bool count_labels,
+                   bool print_signature,
                    bool suppress_unlabeled,
                    size_t num_top_labels,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
                    const AnnotatedDBG &anno_graph,
-                   std::ostream &output_stream,
-                   IDBGAligner *aligner = nullptr);
+                   std::ostream &output_stream);
 
 
 using StringGenerator = std::function<void(std::function<void(const std::string&)>)>;

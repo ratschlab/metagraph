@@ -32,6 +32,7 @@ class Config {
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
     bool count_kmers = false;
+    bool print_signature = false;
     bool query_presence = false;
     bool filter_present = false;
     bool dump_text_anno = false;
@@ -49,6 +50,7 @@ class Config {
     bool call_breakpoints = false;
     bool map_sequences = false;
     bool align_sequences = false;
+    bool align_both_strands = false;
     bool filter_by_kmer = false;
     bool output_json = false;
 

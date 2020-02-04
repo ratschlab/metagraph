@@ -7,6 +7,7 @@
 #include "test_annotated_dbg_helpers.hpp"
 
 #include "common/threads/threading.hpp"
+#include "common/vectors/int_vector_algorithm.hpp"
 #include "annotation/annotation_converters.hpp"
 
 
@@ -1086,178 +1087,225 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_labels) {
     }
 }
 
-TYPED_TEST(AnnotatedDBGWithNTest, get_labels_equal_weights) {
+TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
+    typedef std::vector<std::pair<std::string, sdsl::bit_vector>> VectorSignature;
+
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
             std::string(100, 'A') + std::string(k, 'C'),
-            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
-            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'), //TTTTTGGNNNNN
+            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')  //GGGGGNNAAAAA
         };
-        const auto& seq_first = sequences[0];
-        const auto& seq_second = sequences[1];
-        const auto& seq_third = sequences[2];
 
         auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                            typename TypeParam::second_type>(
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        EXPECT_TRUE(anno_graph->label_exists("First"));
-        EXPECT_TRUE(anno_graph->label_exists("Second"));
-        EXPECT_TRUE(anno_graph->label_exists("Third"));
-        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
-
-        for (size_t i = 1; i < 4; ++i) {
-            std::vector<std::string> seqs_first(i, seq_first);
-            std::vector<std::string> seqs_second(i, seq_second);
-            std::vector<std::string> seqs_third(i, seq_third);
-            std::vector<double> weights(i, 1.0);
-
-            EXPECT_EQ(std::vector<std::string> { "First" },
-                      anno_graph->get_labels(seqs_first, weights, 1))
-                << i;
-
-#if _DNA_GRAPH
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                           / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                           / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                          / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                          / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
-#else
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
-#endif
-        }
-    }
-}
-
-TYPED_TEST(AnnotatedDBGWithNTest, get_labels_equal_nonone_weights) {
-    for (size_t k = 1; k < 10; ++k) {
-        const std::vector<std::string> sequences {
-            std::string(100, 'A') + std::string(k, 'C'),
-            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
-            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
+                        const std::pair<std::string, sdsl::bit_vector> &b) {
+            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
+            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
+            return a_cnt > b_cnt
+                || (a_cnt == b_cnt
+                        && label_encoder.encode(a.first) < label_encoder.encode(b.first));
         };
-        const auto& seq_first = sequences[0];
-        const auto& seq_second = sequences[1];
-        const auto& seq_third = sequences[2];
-
-        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
-                                           typename TypeParam::second_type>(
-            k + 1, sequences, { "First", "Second" , "Third" }
-        );
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
         EXPECT_TRUE(anno_graph->label_exists("Second"));
         EXPECT_TRUE(anno_graph->label_exists("Third"));
         EXPECT_FALSE(anno_graph->label_exists("Fourth"));
 
-        for (size_t i = 1; i < 4; ++i) {
-            std::vector<std::string> seqs_first(i, seq_first);
-            std::vector<std::string> seqs_second(i, seq_second);
-            std::vector<std::string> seqs_third(i, seq_third);
-            std::vector<double> weights(i, 0.5);
+        std::vector<std::vector<bool>> temps(6);
+        temps[0].assign(100 - (k + 1) + 1, true);
+        temps[0].insert(temps[0].end(), 100 + k - (k + 1) + 1 - (100 - (k + 1) + 1), false);
 
-            EXPECT_EQ(std::vector<std::string> { "First" },
-                      anno_graph->get_labels(seqs_first, weights, 1))
-                << i;
+        temps[1].assign(102 - (k + 1) + 1, true);
+        temps[1].insert(temps[1].end(), 202 - (k + 1) + 1 - (102 - (k + 1) + 1), false);
 
+        temps[2].assign(100 - (k + 1) + 1, true);
+        temps[2].insert(temps[2].end(), 202 - (k + 1) + 1 - 2 * (100 - (k + 1) + 1), false);
+        temps[2].insert(temps[2].end(), 100 - (k + 1) + 1, true);
+
+        temps[3].assign(202 - (k + 1) + 1 - (100 - (k + 1) + 1), false);
+        temps[3].insert(temps[3].end(), 100 - (k + 1) + 1, true);
+
+        std::vector<VectorSignature> results {
+            {
+                std::make_pair("First", sdsl::bit_vector((100 + k) - (k + 1) + 1, true)),
+                std::make_pair("Third", to_sdsl(temps[0]))
+            },
+            {
 #if _DNA_GRAPH
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                           / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                           / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                          / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                          / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+                std::make_pair("Second", to_sdsl(temps[1]))
 #else
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+                std::make_pair("Second", sdsl::bit_vector(202 - (k + 1) + 1, true))
 #endif
-        }
-    }
-}
-
-TYPED_TEST(AnnotatedDBGWithNTest, get_labels_unequal_weights) {
-    for (size_t k = 1; k < 10; ++k) {
-        const std::vector<std::string> sequences {
-            std::string(100, 'A') + std::string(k, 'C'),
-            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
-            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+            },
+            {
+#if _DNA_GRAPH
+                std::make_pair("Third", to_sdsl(temps[2])),
+                std::make_pair("First", to_sdsl(temps[3]))
+#else
+                std::make_pair("Third", sdsl::bit_vector(202 - (k + 1) + 1, true)),
+                std::make_pair("First", to_sdsl(temps[3]))
+#endif
+            }
         };
-        const auto& seq_first = sequences[0];
-        const auto& seq_second = sequences[1];
-        const auto& seq_third = sequences[2];
-
-        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
-                                           typename TypeParam::second_type>(
-            k + 1, sequences, { "First", "Second" , "Third" }
-        );
-
-        EXPECT_TRUE(anno_graph->label_exists("First"));
-        EXPECT_TRUE(anno_graph->label_exists("Second"));
-        EXPECT_TRUE(anno_graph->label_exists("Third"));
-        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
-
-        for (size_t i = 1; i < 4; ++i) {
-            std::vector<std::string> seqs_first(i, seq_first);
-            std::vector<std::string> seqs_second(i, seq_second);
-            std::vector<std::string> seqs_third(i, seq_third);
-            std::vector<double> weights(i);
-            std::iota(weights.begin(), weights.end(), 1.0);
-
-            EXPECT_EQ(std::vector<std::string> { "First" },
-                      anno_graph->get_labels(seqs_first, weights, 1))
-                << i;
-
+        if (k == 1) {
 #if _DNA_GRAPH
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                           / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights, 1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                           / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                          / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                          / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+            temps[4].assign(100 - (k + 1) + 1 + 1, false);
+            temps[4].insert(temps[4].end(), 1, true);
+            temps[4].insert(temps[4].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1 + 1) - 1, false);
+
+            temps[5].assign(100 - (k + 1) + 1, true);
+            temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1), false);
+
+            results[1].emplace_back("Third", to_sdsl(temps[4]));
+            results[2].emplace_back("Second", to_sdsl(temps[5]));
 #else
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
+            temps[4].assign(100 - (k + 1) + 1 + 1, false);
+            temps[4].insert(temps[4].end(), 102 - (k + 1) + 1, true);
+            temps[4].insert(temps[4].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1 + 1) - (102 - (k + 1) + 1), false);
+
+            temps[5].assign(102 - (k + 1) + 1, true);
+            temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (102 - (k + 1) + 1), false);
+
+            results[1].emplace_back("Third", to_sdsl(temps[4]));
+            results[2].emplace_back("Second", to_sdsl(temps[5]));
+            std::swap(results[2][1], results[2][2]);
 #endif
         }
+
+#ifndef _DNA_GRAPH
+        switch (k) {
+            case 2:
+                temps[4].assign(100 - (k + 1) + 1 + 2, false);
+                temps[4].insert(temps[4].end(), 2, true);
+                temps[4].insert(temps[4].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1 + 2) - 2, false);
+
+                temps[5].assign(100 - (k + 1) + 1, false);
+                temps[5].insert(temps[5].end(), 2, true);
+                temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1) - 2, false);
+
+                results[1].emplace_back("Third", to_sdsl(temps[4]));
+                results[2].emplace_back("Second", to_sdsl(temps[5]));
+                break;
+            case 3:
+                temps[4].assign(100 - (k + 1) + 1 + 3, false);
+                temps[4].insert(temps[4].end(), 1, true);
+                temps[4].insert(temps[4].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1 + 3) - 1, false);
+
+                temps[5].assign(100 - (k + 1) + 2, false);
+                temps[5].insert(temps[5].end(), 1, true);
+                temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 2) - 1, false);
+
+                results[1].emplace_back("Third", to_sdsl(temps[4]));
+                results[2].emplace_back("Second", to_sdsl(temps[5]));
+                break;
+        }
+#endif
+
+        std::vector<double> percentages;
+        for (size_t i = 0; i < results.size(); ++i) {
+            percentages.clear();
+            std::transform(results[i].begin(), results[i].end(),
+                           std::back_inserter(percentages),
+                           [&](const auto &pair) {
+                               return 1. * sdsl::util::cnt_one_bits(pair.second)
+                                   / (sequences[i].size() - (k + 1) + 1);
+                           });
+            percentages.emplace_back(0.0);
+
+            for (size_t j = 1; j <= results[i].size(); ++j) {
+                auto label_counts = anno_graph->get_top_label_signatures(sequences[i], j);
+                std::sort(label_counts.begin(), label_counts.end(), comp);
+                ASSERT_GE(j, label_counts.size());
+#if _DNA_GRAPH
+                if (k == 1 && i == 2 && j == 2) {
+                    ASSERT_EQ(2u, label_counts.size());
+                    EXPECT_EQ(results[i][0], label_counts[0]);
+                    EXPECT_EQ(results[i][1].second, label_counts[1].second);
+                    EXPECT_TRUE(results[i][1].first == "First"
+                        || results[i][1].first == "Second");
+                } else {
+                    EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + j),
+                              label_counts) << k << " " << i << " " << j;
+                }
+#else
+                EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + j),
+                          label_counts) << k << " " << i << " " << j;
+#endif
+
+                for (size_t m = 1; m <= j; ++m) {
+#ifdef _DNA_GRAPH
+                    // Special case to handle later
+                    if (k == 1 && i == 2 && m == 2)
+                        continue;
+#endif
+
+                    auto label_counts = anno_graph->get_top_label_signatures(
+                        sequences[i],
+                        j,
+                        percentages[m] + 1e-9
+                    );
+                    ASSERT_GE(j, label_counts.size());
+                    std::sort(label_counts.begin(), label_counts.end(), comp);
+                    EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m),
+                              label_counts) << k << " " << i << " " << j << " " << m;
+                }
+            }
+
+            for (size_t m = 1; m <= results[i].size(); ++m) {
+#ifdef _DNA_GRAPH
+                // Special case to handle later
+                if (k == 1 && i == 2 && m == 2)
+                    continue;
+#endif
+
+                auto label_counts = anno_graph->get_top_label_signatures(
+                    sequences[i],
+                    results[i].size() + 1,
+                    percentages[m] + 1e-9
+                );
+                ASSERT_GE(results[i].size() + 1, label_counts.size());
+                std::sort(label_counts.begin(), label_counts.end(), comp);
+                EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m),
+                          label_counts)
+                    << k << " " << i << " " << results[i].size() + 1 << " " << m;
+            }
+        }
+
+#ifdef _DNA_GRAPH
+        if (k == 1) {
+            // special case for third sequence (First and Second are equally good matches)
+            size_t i = 2;
+            size_t m = 2;
+            for (size_t j = 2; j <= results[i].size(); ++j) {
+                auto label_counts = anno_graph->get_top_label_signatures(
+                    sequences[i],
+                    j,
+                    percentages[m] + 1e-9
+                );
+                ASSERT_GE(j, label_counts.size());
+                std::sort(label_counts.begin(), label_counts.end(), comp);
+                EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m - 1),
+                          label_counts) << k << " " << i << " " << j << " " << m;
+            }
+
+            auto label_counts = anno_graph->get_top_label_signatures(
+                sequences[i],
+                results[i].size() + 1,
+                percentages[m] + 1e-9
+            );
+            ASSERT_GE(results[i].size() + 1, label_counts.size());
+            std::sort(label_counts.begin(), label_counts.end(), comp);
+            EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m - 1),
+                      label_counts)
+                << k << " " << i << " " << results[i].size() + 1 << " " << m;
+        }
+#endif
     }
 }
 
@@ -1304,153 +1352,169 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_labels) {
     }
 }
 
-TYPED_TEST(AnnotatedDBGNoNTest, get_labels_equal_weights) {
+TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
+    typedef std::vector<std::pair<std::string, sdsl::bit_vector>> VectorSignature;
+
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
             std::string(100, 'A') + std::string(k, 'C'),
-            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
-            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
+            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'), //TTTTTGGNNNNN
+            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')  //GGGGGNNAAAAA
         };
-        const auto& seq_first = sequences[0];
-        const auto& seq_second = sequences[1];
-        const auto& seq_third = sequences[2];
 
         auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                            typename TypeParam::second_type>(
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
+        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
+                        const std::pair<std::string, sdsl::bit_vector> &b) {
+            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
+            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
+            return a_cnt > b_cnt
+                || (a_cnt == b_cnt
+                        && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+        };
+
         EXPECT_TRUE(anno_graph->label_exists("First"));
         EXPECT_TRUE(anno_graph->label_exists("Second"));
         EXPECT_TRUE(anno_graph->label_exists("Third"));
         EXPECT_FALSE(anno_graph->label_exists("Fourth"));
 
-        for (size_t i = 1; i < 4; ++i) {
-            std::vector<std::string> seqs_first(i, seq_first);
-            std::vector<std::string> seqs_second(i, seq_second);
-            std::vector<std::string> seqs_third(i, seq_third);
-            std::vector<double> weights(i, 1.0);
+        std::vector<std::vector<bool>> temps(6);
+        temps[0].assign(100 - (k + 1) + 1, true);
+        temps[0].insert(temps[0].end(), 100 + k - (k + 1) + 1 - (100 - (k + 1) + 1), false);
 
-            EXPECT_EQ(std::vector<std::string> { "First" },
-                      anno_graph->get_labels(seqs_first, weights, 1)) << i;
+        temps[1].assign(102 - (k + 1) + 1, true);
+        temps[1].insert(temps[1].end(), 202 - (k + 1) + 1 - (102 - (k + 1) + 1), false);
 
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights,  1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+        temps[2].assign(100 - (k + 1) + 1, true);
+        temps[2].insert(temps[2].end(), 202 - (k + 1) + 1 - 2 * (100 - (k + 1) + 1), false);
+        temps[2].insert(temps[2].end(), 100 - (k + 1) + 1, true);
+
+        temps[3].assign(202 - (k + 1) + 1 - (100 - (k + 1) + 1), false);
+        temps[3].insert(temps[3].end(), 100 - (k + 1) + 1, true);
+
+        std::vector<VectorSignature> results {
+            {
+                std::make_pair("First", sdsl::bit_vector((100 + k) - (k + 1) + 1, true)),
+                std::make_pair("Third", to_sdsl(temps[0]))
+            },
+            {
+                std::make_pair("Second", to_sdsl(temps[1]))
+            },
+            {
+                std::make_pair("Third", to_sdsl(temps[2])),
+                std::make_pair("First", to_sdsl(temps[3]))
+            }
+        };
+
+        if (k == 1) {
+            temps[4].assign(100 - (k + 1) + 1 + 1, false);
+            temps[4].insert(temps[4].end(), 1, true);
+            temps[4].insert(temps[4].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1 + 1) - 1, false);
+
+            temps[5].assign(100 - (k + 1) + 1, true);
+            temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1), false);
+
+            results[1].emplace_back("Third", to_sdsl(temps[4]));
+            results[2].emplace_back("Second", to_sdsl(temps[5]));
         }
-    }
-}
 
-TYPED_TEST(AnnotatedDBGNoNTest, get_labels_equal_nonone_weights) {
-    for (size_t k = 1; k < 10; ++k) {
-        const std::vector<std::string> sequences {
-            std::string(100, 'A') + std::string(k, 'C'),
-            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
-            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
-        };
-        const auto& seq_first = sequences[0];
-        const auto& seq_second = sequences[1];
-        const auto& seq_third = sequences[2];
+        std::vector<double> percentages;
+        for (size_t i = 0; i < results.size(); ++i) {
+            percentages.clear();
+            for (size_t j = 0; j < results[i].size(); ++j) {
+                ASSERT_EQ(sequences[i].size() - (k + 1) + 1, results[i][j].second.size())
+                    << k << " " << i << " " << j;
+            }
 
-        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
-                                           typename TypeParam::second_type>(
-            k + 1, sequences, { "First", "Second" , "Third" }
-        );
+            std::transform(results[i].begin(), results[i].end(),
+                           std::back_inserter(percentages),
+                           [&](const auto &pair) {
+                               return 1. * sdsl::util::cnt_one_bits(pair.second)
+                                   / (sequences[i].size() - (k + 1) + 1);
+                           });
+            percentages.emplace_back(0.0);
 
-        EXPECT_TRUE(anno_graph->label_exists("First"));
-        EXPECT_TRUE(anno_graph->label_exists("Second"));
-        EXPECT_TRUE(anno_graph->label_exists("Third"));
-        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
+            for (size_t j = 1; j <= results[i].size(); ++j) {
+                auto label_counts = anno_graph->get_top_label_signatures(sequences[i], j);
+                std::sort(label_counts.begin(), label_counts.end(), comp);
+                ASSERT_GE(j, label_counts.size());
+                if (k == 1 && i == 2 && j == 2) {
+                    ASSERT_EQ(2u, label_counts.size());
+                    EXPECT_EQ(results[i][0], label_counts[0]);
+                    EXPECT_EQ(results[i][1].second, label_counts[1].second)
+                        << results[i][1].second << " " << label_counts[1].second;
+                    EXPECT_TRUE(results[i][1].first == "First"
+                        || results[i][1].first == "Second");
+                } else {
+                    EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + j),
+                              label_counts) << k << " " << i << " " << j;
+                }
 
-        for (size_t i = 1; i < 4; ++i) {
-            std::vector<std::string> seqs_first(i, seq_first);
-            std::vector<std::string> seqs_second(i, seq_second);
-            std::vector<std::string> seqs_third(i, seq_third);
-            std::vector<double> weights(i, 0.5);
+                for (size_t m = 1; m <= j; ++m) {
+                    // Special case to handle later
+                    if (k == 1 && i == 2 && m == 2)
+                        continue;
 
-            EXPECT_EQ(std::vector<std::string> { "First" },
-                      anno_graph->get_labels(seqs_first, weights, 1)) << i;
+                    auto label_counts = anno_graph->get_top_label_signatures(
+                        sequences[i],
+                        j,
+                        percentages[m] + 1e-9
+                    );
+                    ASSERT_GE(j, label_counts.size());
+                    std::sort(label_counts.begin(), label_counts.end(), comp);
+                    EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m),
+                              label_counts)<< k << " " << i << " " << j << " " << m;
+                }
+            }
 
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights,  1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+            for (size_t m = 1; m <= results[i].size(); ++m) {
+                // Special case to handle later
+                if (k == 1 && i == 2 && m == 2)
+                    continue;
+
+                auto label_counts = anno_graph->get_top_label_signatures(
+                    sequences[i],
+                    results[i].size() + 1,
+                    percentages[m] + 1e-9
+                );
+                ASSERT_GE(results[i].size() + 1, label_counts.size());
+                std::sort(label_counts.begin(), label_counts.end(), comp);
+                EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m),
+                          label_counts)
+                    << k << " " << i << " " << results[i].size() + 1 << " " << m;
+            }
         }
-    }
-}
 
-TYPED_TEST(AnnotatedDBGNoNTest, get_labels_unequal_weights) {
-    for (size_t k = 1; k < 10; ++k) {
-        const std::vector<std::string> sequences {
-            std::string(100, 'A') + std::string(k, 'C'),
-            std::string(100, 'T') + std::string(2, 'G') + std::string(100, 'N'),
-            std::string(100, 'G') + std::string(2, 'N') + std::string(100, 'A')
-        };
-        const auto& seq_first = sequences[0];
-        const auto& seq_second = sequences[1];
-        const auto& seq_third = sequences[2];
+        if (k == 1) {
+            // special case for third sequence (First and Second are equally good matches)
+            size_t i = 2;
+            size_t m = 2;
+            for (size_t j = 2; j <= results[i].size(); ++j) {
+                auto label_counts = anno_graph->get_top_label_signatures(
+                    sequences[i],
+                    j,
+                    percentages[m] + 1e-9
+                );
+                ASSERT_GE(j, label_counts.size());
+                std::sort(label_counts.begin(), label_counts.end(), comp);
+                EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m - 1),
+                          label_counts) << k << " " << i << " " << j << " " << m;
+            }
 
-        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
-                                           typename TypeParam::second_type>(
-            k + 1, sequences, { "First", "Second" , "Third" }
-        );
-
-        EXPECT_TRUE(anno_graph->label_exists("First"));
-        EXPECT_TRUE(anno_graph->label_exists("Second"));
-        EXPECT_TRUE(anno_graph->label_exists("Third"));
-        EXPECT_FALSE(anno_graph->label_exists("Fourth"));
-
-        for (size_t i = 1; i < 4; ++i) {
-            std::vector<std::string> seqs_first(i, seq_first);
-            std::vector<std::string> seqs_second(i, seq_second);
-            std::vector<std::string> seqs_third(i, seq_third);
-            std::vector<double> weights(i);
-            std::iota(weights.begin(), weights.end(), 1.0);
-
-            EXPECT_EQ(std::vector<std::string> { "First" },
-                      anno_graph->get_labels(seqs_first, weights, 1)) << i;
-
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights,  1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Second" },
-                      anno_graph->get_labels(seqs_second, weights,  1. * (seq_second.size() - (k + 1) + 1 - 100)
-                                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1)) << i;
-            EXPECT_EQ(std::vector<std::string> {},
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9)) << i;
-            EXPECT_EQ(std::vector<std::string> { "Third" },
-                      anno_graph->get_labels(seqs_third, weights, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
-                                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9)) << i;
+            auto label_counts = anno_graph->get_top_label_signatures(
+                sequences[i],
+                results[i].size() + 1,
+                percentages[m] + 1e-9
+            );
+            ASSERT_GE(results[i].size() + 1, label_counts.size());
+            std::sort(label_counts.begin(), label_counts.end(), comp);
+            EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m - 1),
+                      label_counts)
+                << k << " " << i << " " << results[i].size() + 1 << " " << m;
         }
     }
 }
@@ -1468,6 +1532,14 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
                                            typename TypeParam::second_type>(
             k + 1, sequences, { "First", "Second" , "Third" }
         );
+
+        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        auto comp = [&](const std::pair<std::string, size_t> &a,
+                        const std::pair<std::string, size_t> &b) {
+            return a.second > b.second
+                || (a.second == b.second
+                    && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+        };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
         EXPECT_TRUE(anno_graph->label_exists("Second"));
@@ -1531,9 +1603,10 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             percentages.emplace_back(0.0);
 
             for (size_t j = 1; j <= results[i].size(); ++j) {
+                auto label_counts = anno_graph->get_top_labels(sequences[i], j);
+                std::sort(label_counts.begin(), label_counts.end(), comp);
 #if _DNA_GRAPH
                 if (k == 1 && i == 2 && j == 2) {
-                    auto label_counts = anno_graph->get_top_labels(sequences[j], j);
                     ASSERT_EQ(2u, label_counts.size());
                     EXPECT_EQ(results[i][0], label_counts[0]);
                     EXPECT_EQ(results[i][1].second, label_counts[1].second);
@@ -1541,12 +1614,12 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
                         || results[i][1].first == "Second");
                 } else {
                     EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + j),
-                              anno_graph->get_top_labels(sequences[i], j))
+                              label_counts)
                         << k << " " << i << " " << j;
                 }
 #else
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + j),
-                          anno_graph->get_top_labels(sequences[i], j))
+                          label_counts)
                     << k << " " << i << " " << j;
 #endif
 
@@ -1557,10 +1630,12 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
                         continue;
 #endif
 
+                    auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                                   j,
+                                                                   percentages[m] + 1e-9);
+                    std::sort(label_counts.begin(), label_counts.end(), comp);
                     EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m),
-                              anno_graph->get_top_labels(sequences[i],
-                                                         j,
-                                                         percentages[m] + 1e-9))
+                              label_counts)
                         << k << " " << i << " " << j << " " << m;
                 }
             }
@@ -1572,10 +1647,12 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
                     continue;
 #endif
 
+                auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                               results[i].size() + 1,
+                                                               percentages[m] + 1e-9);
+                std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m),
-                          anno_graph->get_top_labels(sequences[i],
-                                                     results[i].size() + 1,
-                                                     percentages[m] + 1e-9))
+                          label_counts)
                     << k << " " << i << " " << results[i].size() + 1 << " " << m;
             }
         }
@@ -1586,17 +1663,21 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             size_t i = 2;
             size_t m = 2;
             for (size_t j = 2; j <= results[i].size(); ++j) {
+                auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                               j,
+                                                               percentages[m] + 1e-9);
+                std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m - 1),
-                          anno_graph->get_top_labels(sequences[i],
-                                                     j,
-                                                     percentages[m] + 1e-9))
+                          label_counts)
                     << k << " " << i << " " << j << " " << m;
             }
 
+            auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                           results[i].size() + 1,
+                                                           percentages[m] + 1e-9);
+            std::sort(label_counts.begin(), label_counts.end(), comp);
             EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m - 1),
-                      anno_graph->get_top_labels(sequences[i],
-                                                 results[i].size() + 1,
-                                                 percentages[m] + 1e-9))
+                      label_counts)
                 << k << " " << i << " " << results[i].size() + 1 << " " << m;
         }
 #endif
@@ -1616,6 +1697,14 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
                                            typename TypeParam::second_type>(
             k + 1, sequences, { "First", "Second" , "Third" }
         );
+
+        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        auto comp = [&](const std::pair<std::string, size_t> &a,
+                        const std::pair<std::string, size_t> &b) {
+            return a.second > b.second
+                || (a.second == b.second
+                    && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+        };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
         EXPECT_TRUE(anno_graph->label_exists("Second"));
@@ -1651,8 +1740,10 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
             percentages.emplace_back(0.0);
 
             for (size_t j = 1; j <= results[i].size(); ++j) {
+                auto label_counts = anno_graph->get_top_labels(sequences[i], j);
+                std::sort(label_counts.begin(), label_counts.end(), comp);
+                ASSERT_GE(j, label_counts.size());
                 if (k == 1 && i == 2 && j == 2) {
-                    auto label_counts = anno_graph->get_top_labels(sequences[j], j);
                     ASSERT_EQ(2u, label_counts.size());
                     EXPECT_EQ(results[i][0], label_counts[0]);
                     EXPECT_EQ(results[i][1].second, label_counts[1].second);
@@ -1660,7 +1751,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
                         || results[i][1].first == "Second");
                 } else {
                     EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + j),
-                              anno_graph->get_top_labels(sequences[i], j))
+                              label_counts)
                         << k << " " << i << " " << j;
                 }
 
@@ -1669,10 +1760,13 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
                     if (k == 1 && i == 2 && m == 2)
                         continue;
 
+                    auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                                   j,
+                                                                   percentages[m] + 1e-9);
+                    ASSERT_GE(j, label_counts.size());
+                    std::sort(label_counts.begin(), label_counts.end(), comp);
                     EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m),
-                              anno_graph->get_top_labels(sequences[i],
-                                                         j,
-                                                         percentages[m] + 1e-9))
+                              label_counts)
                         << k << " " << i << " " << j << " " << m;
                 }
             }
@@ -1682,10 +1776,13 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
                 if (k == 1 && i == 2 && m == 2)
                     continue;
 
+                auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                               results[i].size() + 1,
+                                                               percentages[m] + 1e-9);
+                ASSERT_GE(results[i].size() + 1, label_counts.size());
+                std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m),
-                          anno_graph->get_top_labels(sequences[i],
-                                                     results[i].size() + 1,
-                                                     percentages[m] + 1e-9))
+                          label_counts)
                     << k << " " << i << " " << results[i].size() + 1 << " " << m;
             }
         }
@@ -1695,18 +1792,178 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
             size_t i = 2;
             size_t m = 2;
             for (size_t j = 2; j <= results[i].size(); ++j) {
+                auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                               j,
+                                                               percentages[m] + 1e-9);
+                ASSERT_GE(j, label_counts.size());
+                std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m - 1),
-                          anno_graph->get_top_labels(sequences[i],
-                                                     j,
-                                                     percentages[m] + 1e-9))
+                          label_counts)
                     << k << " " << i << " " << j << " " << m;
             }
 
+            auto label_counts = anno_graph->get_top_labels(sequences[i],
+                                                           results[i].size() + 1,
+                                                           percentages[m] + 1e-9);
+            ASSERT_GE(results[i].size() + 1, label_counts.size());
+            std::sort(label_counts.begin(), label_counts.end(), comp);
             EXPECT_EQ(VectorCounts(results[i].begin(), results[i].begin() + m - 1),
-                      anno_graph->get_top_labels(sequences[i],
-                                                 results[i].size() + 1,
-                                                 percentages[m] + 1e-9))
+                      label_counts)
                 << k << " " << i << " " << results[i].size() + 1 << " " << m;
         }
+    }
+}
+
+TEST(AnnotatedDBG, score_kmer_presence_mask) {
+    auto anno_graph = build_anno_graph<DBGSuccinct>(31, {}, {});
+    std::vector<std::pair<sdsl::bit_vector, int32_t>> results {
+       { sdsl::bit_vector(), 0},
+       { sdsl::bit_vector({
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }), 0 },
+       { sdsl::bit_vector({
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }), 97 },
+       { sdsl::bit_vector({
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1 }), 924 },
+       { sdsl::bit_vector({
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }), 0 },
+       { sdsl::bit_vector({
+          0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0,
+          1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+          1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1,
+          0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1,
+          0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1,
+          0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0,
+          1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0,
+          1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0,
+          0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0,
+          1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+          0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0,
+          1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1,
+          1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0,
+          0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1,
+          1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1,
+          1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0,
+          0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0,
+          0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1,
+          0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1,
+          1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0,
+          0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0,
+          0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0,
+          0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+          0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+          1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1,
+          0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1,
+          0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1,
+          1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0,
+          1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+          1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1,
+          0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1,
+          0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1,
+          0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0,
+          1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0,
+          0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1,
+          0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1 }), 869 },
+       { sdsl::bit_vector({
+          1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1,
+          0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0,
+          1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0,
+          0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1,
+          0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0,
+          0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0,
+          0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
+          0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0,
+          0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+          0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0,
+          1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0,
+          1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1,
+          1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0,
+          1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0,
+          0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1,
+          1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1,
+          1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0,
+          1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1,
+          1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+          1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1,
+          0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0,
+          1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+          1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0,
+          0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0,
+          0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0,
+          0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0,
+          0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1,
+          1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0,
+          1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0,
+          0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+          1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1,
+          1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1,
+          0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1,
+          1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1,
+          0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0,
+          1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1 }), 822 }
+    };
+
+    size_t i = 0;
+    for (const auto &[vector, score] : results) {
+        EXPECT_EQ(score, anno_graph->score_kmer_presence_mask(vector)) << i;
+        ++i;
     }
 }

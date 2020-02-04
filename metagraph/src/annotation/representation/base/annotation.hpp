@@ -172,7 +172,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
      * Stop counting if count is greater than |count_cap|.
      */
     virtual std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-    count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
+    count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const;
 

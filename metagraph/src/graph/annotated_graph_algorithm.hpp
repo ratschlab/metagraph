@@ -63,29 +63,6 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                                   const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,
                          double min_frequency_for_frequent_label = 0.05);
 
-template <class Index, typename... Args>
-using VariantCallback = std::function<void(Alignment<Index>&&,
-                                           const std::string&, // query sequence
-                                           Args&&...)>;
-
-typedef VariantCallback<DeBruijnGraph::node_index,
-                        std::vector<AnnotatedDBG::Annotator::Label>&&> VariantLabelCallback;
-
-
-// These functions will callback nothing if graph is equal to the graph stored
-// in anno_graph
-
-void call_bubbles(const MaskedDeBruijnGraph &graph,
-                  const AnnotatedDBG &anno_graph,
-                  const VariantLabelCallback &callback,
-                  ThreadPool *thread_pool = nullptr,
-                  const std::function<bool()> &terminate = []() { return false; });
-
-void call_breakpoints(const MaskedDeBruijnGraph &graph,
-                      const AnnotatedDBG &anno_graph,
-                      const VariantLabelCallback &callback,
-                      ThreadPool *thread_pool = nullptr,
-                      const std::function<bool()> &terminate = []() { return false; });
 
 } // namespace annotated_graph_algorithm
 

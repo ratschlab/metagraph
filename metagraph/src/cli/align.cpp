@@ -35,7 +35,7 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, Config &c
     aligner_config.min_path_score = config.alignment_min_path_score;
     aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
     aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
-    aligner_config.forward_and_reverse_complement = config.forward_and_reverse;
+    aligner_config.forward_and_reverse_complement = config.align_both_strands;
     aligner_config.alignment_edit_distance = config.alignment_edit_distance;
     aligner_config.alignment_match_score = config.alignment_match_score;
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;

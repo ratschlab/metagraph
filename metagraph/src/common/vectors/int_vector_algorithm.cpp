@@ -6,13 +6,70 @@
 #include <immintrin.h>
 #endif
 
+#ifdef __SSE2__
+#include <emmintrin.h>
+#endif
+
+#include <sdsl/uint128_t.hpp>
+
+using sdsl::uint128_t;
+
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
     sdsl::bit_vector result(vector.size(), 0);
+
     for (size_t i = 0; i < vector.size(); ++i) {
         if (vector[i])
             result[i] = 1;
     }
+
+    return result;
+}
+
+sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
+    sdsl::bit_vector result(vector.size(), 0);
+
+    uint64_t i = 0;
+#ifdef __AVX2__
+    for ( ; i + 32 <= vector.size(); i += 32) {
+        result.set_int(
+            i,
+            ~_mm256_movemask_epi8(_mm256_cmpeq_epi8(
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&vector[i])),
+                _mm256_setzero_si256()
+            )),
+            32
+        );
+    }
+#endif
+
+#ifdef __SSE2__
+    for ( ; i + 16 <= vector.size(); i += 16) {
+        result.set_int(
+            i,
+            ~_mm_movemask_epi8(_mm_cmpeq_epi8(
+                _mm_loadu_si128(reinterpret_cast<const __m128i*>(&vector[i])),
+                _mm_setzero_si128()
+            )),
+            16
+        );
+    }
+#endif
+
+    for ( ; i < vector.size(); i += 64) {
+        uint64_t word = 0;
+        uint8_t width = std::min(static_cast<uint64_t>(64), result.size() - i);
+        for (int64_t j = i + width - 1; j >= static_cast<int64_t>(i); --j) {
+            word = (word << 1) | static_cast<bool>(vector[j]);
+        }
+
+        result.set_int(i, word, width);
+    }
+
+    assert(static_cast<size_t>(std::count_if(vector.begin(), vector.end(),
+                                             [](uint8_t a) { return a; }))
+        == sdsl::util::cnt_one_bits(result));
+
     return result;
 }
 
@@ -41,7 +98,7 @@ uint64_t count_ones(const sdsl::bit_vector &vector,
     __m256i counts = popcnt_avx2_hs(data, diff);
     data += diff;
 
-    for (; data + 4 <= data_end; data += 4) {
+    for ( ; data + 4 <= data_end; data += 4) {
         counts = _mm256_add_epi64(
             counts,
             popcnt256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(data)))
@@ -80,7 +137,7 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
     first_data += diff;
     second_data += diff;
 
-    for (; first_data + 4 <= first_end; first_data += 4, second_data += 4) {
+    for ( ; first_data + 4 <= first_end; first_data += 4, second_data += 4) {
         counts = _mm256_add_epi64(
             counts,
             popcnt256(_mm256_and_si256(
@@ -104,4 +161,67 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
     }
 
     return count;
+}
+
+
+inline uint128_t pushback_epi64(const uint128_t &v, const uint128_t &a) {
+    return (v >> 64) | (a << 64);
+}
+
+sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
+    assert(offset < 64);
+
+    if (vector.size() < offset)
+        return vector;
+
+    auto presence = vector;
+
+    // process one word at a time
+    // TODO: is it worth vectorizing this?
+    size_t i = 0;
+    auto dword = uint128_t(vector.data()[0]) << 64;
+    for ( ; i + 64 <= presence.size() - offset + 1; i += 64) {
+        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1]);
+        for (uint8_t j = 1; j < offset; ++j) {
+            presence.data()[i >> 6] &= uint64_t(dword >> j);
+        }
+    }
+
+    assert(presence.size() - i >= static_cast<size_t>(offset) - 1);
+    assert(presence.size() - i <= 128 - static_cast<size_t>(offset) + 1);
+
+    // handle last word
+    if (vector.size() - i <= 64) {
+        uint64_t word = vector.get_int(i, vector.size() - i);
+        uint64_t word_masked = word;
+        uint64_t mask = 0;
+        for (uint8_t j = 1; j < offset; ++j) {
+            mask |= uint64_t(1) << (vector.size() - i - j);
+            word_masked &= (word >> j) | mask;
+        }
+
+        presence.set_int(i, word_masked, vector.size() - i);
+
+    } else {
+        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1])
+            | (uint128_t((1llu << offset) - 1) << (vector.size() - i));
+        uint128_t dword_masked = dword;
+        for (uint8_t j = 1; j < offset; ++j) {
+            dword_masked &= dword >> j;
+        }
+        presence.set_int(i, uint64_t(dword_masked));
+        presence.set_int(i + 64, uint64_t(dword_masked >> 64), vector.size() - i - 64);
+    }
+
+#ifndef NDEBUG
+    for (size_t i = 0; i < presence.size(); ++i) {
+        bool b = vector[i];
+        for (uint8_t j = 1; j < offset && i + j < presence.size(); ++j) {
+            b &= vector[i + j];
+        }
+        assert(b == presence[i]);
+    }
+#endif
+
+    return presence;
 }

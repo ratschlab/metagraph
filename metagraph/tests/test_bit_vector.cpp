@@ -1295,3 +1295,103 @@ TYPED_TEST(BitVectorTest, operator_neq) {
         }
     }
 }
+
+TEST(bit_vector, to_sdsl_empty) {
+    EXPECT_EQ(0u, to_sdsl(std::vector<bool>()).size());
+    EXPECT_EQ(0u, to_sdsl(std::vector<uint8_t>()).size());
+}
+
+TEST(bit_vector, to_sdsl_zeros) {
+    for (size_t i = 0; i < 1025; ++i) {
+        auto vector_bool = to_sdsl(std::vector<bool>(i, false));
+        EXPECT_EQ(i, vector_bool.size());
+        EXPECT_EQ(0u, sdsl::util::cnt_one_bits(vector_bool));
+
+        auto vector_uint8_t = to_sdsl(std::vector<uint8_t>(i, false));
+        EXPECT_EQ(i, vector_uint8_t.size());
+        EXPECT_EQ(0u, sdsl::util::cnt_one_bits(vector_uint8_t));
+    }
+}
+
+TEST(bit_vector, to_sdsl_ones) {
+    for (size_t i = 0; i < 1025; ++i) {
+        auto vector_bool = to_sdsl(std::vector<bool>(i, true));
+        ASSERT_EQ(i, vector_bool.size());
+        ASSERT_EQ(i, sdsl::util::cnt_one_bits(vector_bool));
+
+        auto vector_uint8_t = to_sdsl(std::vector<uint8_t>(i, true));
+        ASSERT_EQ(i, vector_uint8_t.size());
+        ASSERT_EQ(i, sdsl::util::cnt_one_bits(vector_uint8_t));
+
+        auto vector_uint8_msb = to_sdsl(std::vector<uint8_t>(i, 4));
+        ASSERT_EQ(i, vector_uint8_msb.size());
+        ASSERT_EQ(i, sdsl::util::cnt_one_bits(vector_uint8_msb));
+
+        auto vector_uint8_lsb = to_sdsl(std::vector<uint8_t>(i, 1));
+        ASSERT_EQ(i, vector_uint8_lsb.size());
+        ASSERT_EQ(i, sdsl::util::cnt_one_bits(vector_uint8_lsb));
+    }
+}
+
+TEST(bit_vector, to_sdsl) {
+    std::vector<bool> bits_bool;
+    std::vector<uint8_t> bits_uint8_t_a;
+    std::vector<uint8_t> bits_uint8_t_b;
+    std::vector<uint64_t> ranks = { 0 };
+
+    for (size_t i = 0; i < 10'000'000; ++i) {
+        bits_bool.push_back((i + (i * i) % 31) % 2);
+        bits_uint8_t_a.push_back(static_cast<bool>((i + (i * i) % 31) % 2));
+        bits_uint8_t_b.push_back(((i + (i * i) % 31) % 2) ? 0xFF : 0);
+        if (bits_uint8_t_a.back()) {
+            ranks.back()++;
+        }
+        ranks.push_back(ranks.back());
+    }
+
+    bit_vector_stat a(to_sdsl(bits_bool));
+    bit_vector_stat b(to_sdsl(bits_uint8_t_a));
+    bit_vector_stat c(to_sdsl(bits_uint8_t_b));
+
+    for (size_t i = 0; i < bits_bool.size(); ++i) {
+        EXPECT_EQ(ranks[i], a.rank1(i));
+        EXPECT_EQ(ranks[i], b.rank1(i));
+        EXPECT_EQ(ranks[i], c.rank1(i));
+    }
+}
+
+TEST(bit_vector, autocorrelate) {
+    std::vector<std::tuple<sdsl::bit_vector, sdsl::bit_vector, uint8_t>> results {
+        { sdsl::bit_vector({}), sdsl::bit_vector({}), 5 },
+        { sdsl::bit_vector({ 0, 0, 0, 0, 0 }), sdsl::bit_vector({ 0, 0, 0, 0, 0 }), 5 },
+        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 5 },
+        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 4 },
+        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 3 },
+        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 2 },
+        { sdsl::bit_vector({ 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0  }),
+          sdsl::bit_vector({ 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  }), 3},
+    };
+
+    for (const auto &[input, output, offset] : results) {
+        sdsl::bit_vector reference(input);
+
+        if (input.size() >= offset) {
+            for (size_t i = 0; i < reference.size(); ++i) {
+                for (uint8_t j = 1; j < offset && i + j < reference.size(); ++j) {
+                    reference[i] = reference[i] && input[i + j];
+                }
+            }
+        }
+
+        ASSERT_EQ(reference, output);
+        EXPECT_EQ(reference, autocorrelate(input, offset));
+    };
+}
