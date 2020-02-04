@@ -155,7 +155,8 @@ TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
  * multiple inserts across multiple threads. Each insert will have dupes.
  */
 TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
-    common::SortedMultisetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
+    common::SortedMultisetDisk<TypeParam> underTest
+            = create_sorted_set_disk<TypeParam>(100, 3);
     std::vector<std::thread> workers;
     std::vector<std::pair<TypeParam, uint8_t>> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {

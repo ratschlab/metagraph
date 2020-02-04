@@ -83,7 +83,7 @@ class ChunkedWaitQueue {
           end_iterator_(Iterator(this, std::min(WRITE_BUF_SIZE, chunk_size_), buffer_size)),
           is_shutdown_(false) {
         assert(fence_size > 0);
-        assert(fence_size < chunk_size_);
+        assert(fence_size <= chunk_size_);
         write_buf_.reserve(std::min(WRITE_BUF_SIZE, chunk_size_));
     }
 
