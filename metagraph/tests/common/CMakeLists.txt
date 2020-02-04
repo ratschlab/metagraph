@@ -40,3 +40,20 @@ target_link_libraries(tests
     ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
 
+add_executable(file_merger_benchmark file_merger_benchmark.cpp)
+
+add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL benchmark)
+
+target_include_directories(file_merger_benchmark
+  PRIVATE
+    ${EXTERNAL_LIB_DIR}/benchmark/include
+    "../../src/"
+)
+
+target_link_libraries(file_merger_benchmark
+    PRIVATE
+    benchmark_main
+    benchmark
+    metagraph_common
+    )
+
