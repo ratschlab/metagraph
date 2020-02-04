@@ -28,13 +28,17 @@ def create_test_suite(filter_pattern="*"):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Metagraph integration tests.')
-    parser.add_argument('--test_filter', dest='filter', type=str, default="*",
-                        help='filter test cases (default: run all)')
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(description='Metagraph integration tests.')
+        parser.add_argument('--test_filter', dest='filter', type=str, default="*",
+                            help='filter test cases (default: run all)')
+        args = parser.parse_args()
 
-    result = unittest.TextTestRunner(
-        resultclass=TimeLoggingTestResult
-    ).run(create_test_suite(args.filter))
+        result = unittest.TextTestRunner(
+            resultclass=TimeLoggingTestResult
+        ).run(create_test_suite(args.filter))
 
-    exit(0 if result.wasSuccessful() else 1)
+        exit(0 if result.wasSuccessful() else 1)
+
+    except KeyboardInterrupt:
+        sys.exit(130)
