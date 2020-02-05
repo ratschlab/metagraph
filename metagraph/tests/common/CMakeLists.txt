@@ -15,7 +15,8 @@ findOpenMP()
 enable_testing()
 findGTest()
 
-file(GLOB test_files "*.cpp")
+file(GLOB test_files "*.cpp"
+    EXCLUDE REGEX "benchmark_.*")
 add_executable(tests ${test_files})
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
@@ -40,7 +41,7 @@ target_link_libraries(tests
     ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
 
-add_executable(file_merger_benchmark file_merger_benchmark.cpp)
+add_executable(file_merger_benchmark benchmark_file_merger.cpp)
 
 add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL benchmark)
 
@@ -51,7 +52,7 @@ target_include_directories(file_merger_benchmark
 )
 
 target_link_libraries(file_merger_benchmark
-    PRIVATE
+  PRIVATE
     benchmark_main
     benchmark
     metagraph_common
