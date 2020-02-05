@@ -45,6 +45,25 @@ static void BM_merge_files(benchmark::State &state) {
     }
 }
 
-BENCHMARK(BM_merge_files);
+static void BM_merge_files_pairs(benchmark::State &state) {
+    create_sources();
+    std::vector<std::string> sources(CHUNK_COUNT);
+    for (uint32_t i = 0; i < CHUNK_COUNT; ++i) {
+        sources[i] = chunk_prefix + std::to_string(i);
+    }
+    std::ofstream out;
+    char buffer[1024 * 1024];
+    out.rdbuf()->pubsetbuf(buffer, 1024 * 1024);
+    out.open("/tmp/out");
+    using Pair = std::pair<uint64_t, uint8_t>;
+    const auto file_writer = [&out](const Pair &v) {
+        out.write(reinterpret_cast<const char *>(&v), sizeof(Pair));
+    };
+    for (auto _ : state) {
+        mg::common::merge_files<uint64_t, uint8_t>(sources, file_writer);
+    }
+}
+
+BENCHMARK(BM_merge_files_pairs);
 
 BENCHMARK_MAIN();
