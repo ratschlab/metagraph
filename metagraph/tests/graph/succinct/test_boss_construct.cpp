@@ -578,8 +578,7 @@ template <typename Container>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         Container *kmers,
-                                        const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
-                                        size_t reserved_capacity) {
+                                        const std::vector<TAlphabet> &suffix) {
     // kmers->try_reserve(reserved_capacity);
     kmer::count_kmers<typename Container::key_type, KmerExtractorBOSS, Container>(
             [reads](kmer::CallStringCount callback) {
@@ -620,38 +619,34 @@ void check_counts() {
     const size_t fifteen_times = std::min(15 * (sequence_size - 2 + 1), max_value);
 
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result,
-            {}, 100'000);
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     assert_contents(result, { 5u, 5u, five_times });
 
 
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result,
-            {}, 100'000);
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     assert_contents(result, { 10u, 10u, ten_times });
 
 
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result,
-            {}, 100'000);
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     assert_contents(result, { 15u, 15u, fifteen_times });
 
 
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result,
-            {}, 100'000);
+            new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result, {});
     assert_contents(result, { 15u, 5u, 15u, fifteen_times, 5u, five_times });
 
 
     sequence_to_kmers_parallel_wrapper<Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result,
-            { 1 }, 100'000);
+            { 1 });
     assert_contents(result, { 15u, 5u, 15u, fifteen_times, 5u, five_times });
 
 
     sequence_to_kmers_parallel_wrapper<Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result,
-            { 0 }, 100'000);
+            { 0 });
     assert_contents(result, { 15u, 10u, 15u, fifteen_times, 5u, five_times });
 }
 
@@ -675,8 +670,7 @@ TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result,
-            {}, 100'000);
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     assert_contents(result, { 5u, 5u, 255u });
 }
 
@@ -688,8 +682,7 @@ TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result,
-            {}, 100'000);
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     assert_contents(result, { 5u, 5u, 5 * (sequence_size - 2 + 1) });
 }
 
@@ -700,22 +693,18 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result,
-            {}, 0);
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result,
-            {}, 0);
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result,
-            {}, 0);
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     ASSERT_EQ(3u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result,
-            {}, 0);
+            new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result, {});
     sequence_to_kmers_parallel_wrapper<Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result,
-            { 1 }, 0);
+            { 1 });
 #if _DNA_GRAPH
     ASSERT_EQ(3u, result.data().size());
 #else

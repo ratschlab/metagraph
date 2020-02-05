@@ -199,18 +199,21 @@ KmerCollector<KMER, KmerExtractor, Container>
                 bool both_strands_mode,
                 Sequence&& filter_suffix_encoded,
                 size_t num_threads,
-                double memory_preallocated)
+                double memory_preallocated,
+                const std::filesystem::path &tmp_dir)
       : k_(k),
         kmers_(get_cleanup<Extractor, typename Container::storage_type>(filter_suffix_encoded.empty()),
                num_threads,
-               memory_preallocated / sizeof(typename Container::value_type)),
+               memory_preallocated / sizeof(typename Container::value_type),
+               tmp_dir),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
         batch_accumulator_([this](auto&& sequences) { add_batch(std::move(sequences)); },
                            kMaxKmersChunkSize, kMaxKmersChunkSize, kMaxKmersChunkSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
-        both_strands_mode_(both_strands_mode) {
+        both_strands_mode_(both_strands_mode),
+        tmp_dir_(tmp_dir) {
     assert(num_threads_ > 0);
     if ((utils::is_instance<Container, common::SortedSetDisk> {}
          || utils::is_instance<Container, common::SortedMultisetDisk> {})
@@ -222,6 +225,11 @@ KmerCollector<KMER, KmerExtractor, Container>
             "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
             kmers_.buffer_size() * sizeof(typename Container::value_type) >> 20,
             kmers_.buffer_size());
+}
+
+template <typename KMER, class KmerExtractor, class Container>
+size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() {
+    return kmers_.buffer_size();
 }
 
 template <typename KMER, class KmerExtractor, class Container>

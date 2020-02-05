@@ -4,6 +4,7 @@
 #include <string>
 
 #include <benchmark/benchmark.h>
+#include <common/threads/chunked_wait_queue.hpp>
 
 #include "common/file_merger.hpp"
 
@@ -27,42 +28,51 @@ void create_sources() {
     }
 }
 
-static void BM_merge_files(benchmark::State &state) {
-    create_sources();
-    std::vector<std::string> sources(CHUNK_COUNT);
-    for (uint32_t i = 0; i < CHUNK_COUNT; ++i) {
-        sources[i] = chunk_prefix + std::to_string(i);
-    }
-    std::ofstream out;
-    out.open("/tmp/out");
-    const auto file_writer = [&out](const uint64_t &v) {
-      out.write(reinterpret_cast<const char *>(&v), sizeof(uint64_t));
-    };
+static void BM_queue_push_pop(benchmark::State &state) {
+    mg::common::ChunkedWaitQueue<uint64_t> queue(100, 10);
+    size_t sum = 0;
     for (auto _ : state) {
-        mg::common::merge_files<uint64_t>(sources, file_writer);
+        for (uint32_t i=0; i<100;++i) {
+            queue.push(i);
+        }
+        queue.shutdown();
+        auto& it = queue.begin();
+        for (; it!= queue.end();++it) {
+            sum+=*it;
+        }
+        for (uint32_t i=0; i<100;++i) {
+            --it;
+        }
+        queue.reset();
     }
+    printf("Sum is %zu\n", sum);
 }
 
-static void BM_merge_files_pairs(benchmark::State &state) {
-    create_sources();
-    std::vector<std::string> sources(CHUNK_COUNT);
-    for (uint32_t i = 0; i < CHUNK_COUNT; ++i) {
-        sources[i] = chunk_prefix + std::to_string(i);
-    }
-    std::ofstream out;
-    char buffer[1024 * 1024];
-    out.rdbuf()->pubsetbuf(buffer, 1024 * 1024);
-    out.open("/tmp/out");
-    using Pair = std::pair<uint64_t, uint8_t>;
-    const auto file_writer = [&out](const Pair &v) {
-      out.write(reinterpret_cast<const char *>(&v), sizeof(Pair));
-    };
+static void BM_queue_push_pop_back(benchmark::State &state) {
+    mg::common::ChunkedWaitQueue<uint64_t> queue(100, 10);
+    size_t sum = 0;
     for (auto _ : state) {
-        mg::common::merge_files<uint64_t, uint8_t>(sources, file_writer);
+        for (uint32_t i=0; i<100;++i) {
+            queue.push(i);
+        }
+        queue.shutdown();
+        auto& it = queue.begin();
+        for (; it!= queue.end();++it) {
+            sum+=*it;
+        }
+        for (uint32_t i=0; i<10;++i) {
+            --it;
+            sum += *it;
+        }
+        queue.reset();
     }
+    printf("Sum is %zu\n", sum);
 }
 
-BENCHMARK(BM_merge_files);
+
+
+BENCHMARK(BM_queue_push_pop);
+BENCHMARK(BM_queue_push_pop_back);
 
 BENCHMARK_MAIN();
 

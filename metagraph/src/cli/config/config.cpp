@@ -320,6 +320,8 @@ Config::Config(int argc, char *argv[]) {
             filter_by_kmer = true;
         } else if (!strcmp(argv[i], "--container")) {
             container = string_to_container(get_value(i++));
+        } else if (!strcmp(argv[i], "--tmp_dir")) {
+            tmp_dir = get_value(i++);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);

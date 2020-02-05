@@ -224,9 +224,9 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwardsFromEnd) {
         for (; iterator != merge_queue.end(); ++iterator) {
         }
         --iterator;
-        EXPECT_EQ(45, *iterator);
+        EXPECT_EQ(TypeParam(45), *iterator);
         --iterator;
-        EXPECT_EQ(42, *iterator);
+        EXPECT_EQ(TypeParam(42), *iterator);
         ++iterator;
         ++iterator;
         EXPECT_EQ(merge_queue.end(), iterator);

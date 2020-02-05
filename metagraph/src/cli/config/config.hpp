@@ -182,6 +182,8 @@ class Config {
 
     mg::kmer::ContainerType container = mg::kmer::ContainerType::VECTOR;
 
+    std::filesystem::path tmp_dir = "/tmp/";
+
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 
     static std::string annotype_to_string(AnnotationType state);
