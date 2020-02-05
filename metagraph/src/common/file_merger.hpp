@@ -107,8 +107,8 @@ uint64_t merge_files(const std::vector<std::string> sources,
         }
     }
 
-        std::for_each(sources.begin(), sources.end(),
-                      [](const std::string &s) { std::filesystem::remove(s); });
+    std::for_each(sources.begin(), sources.end(),
+                  [](const std::string &s) { std::filesystem::remove(s); });
 
     delete[] buffer;
     return num_elements;
@@ -121,30 +121,20 @@ uint64_t merge_files(const std::vector<std::string> sources,
  * @tparam T the actual heap element type; this is the type tested for equality
  * @tparam C the count type for elements in the heap (typically some unsigned integer)
  */
-// Note: Profiling indicates that merging elements within the heap is ~20% faster than
-// inserting duplicates and merging them when popping from the heap
+// Note: Profiling indicates that merging elements within the heap is ~30% slower than
+// inserting duplicates and merging them when popping from the heap, as we do now
 template <typename T, typename C>
 class MergingHeap {
     /** The heap stores triplets of the form <Element, Count, SourceIndex> */
     using value_type = std::tuple<T, C, uint32_t>;
 
   public:
-    bool emplace(T el, C count, uint32_t idx) {
+    void emplace(T el, C count, uint32_t idx) {
         auto it = std::lower_bound(els.begin(), els.end(), value_type(el, count, idx),
                                    [](const value_type &a, const value_type &b) {
                                        return std::get<0>(a) > std::get<0>(b);
                                    });
-        if (it != els.end() && el == std::get<0>(*it)) {
-            C &value = std::get<1>(*it);
-            if (value < std::numeric_limits<C>::max() - count) {
-                value += count;
-            } else {
-                value = std::numeric_limits<C>::max();
-            }
-            return true;
-        }
         els.emplace(it, el, count, idx);
-        return false;
     }
 
     value_type pop() {
@@ -192,34 +182,45 @@ uint64_t merge_files(const std::vector<std::string> sources,
             logger->error("Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
-        bool found = true;
-        while (found) {
-            if (chunk_files[i].read(reinterpret_cast<char *>(&data_item),
-                                    sizeof(std::pair<T, C>))) {
-                found = merge_heap.emplace(data_item.first, data_item.second, i);
-                num_elements++;
-            } else {
-                found = false;
-            }
-        }
-    }
-
-    while (!merge_heap.empty()) {
-        CountedEl smallest = merge_heap.pop();
-        on_new_item({ std::get<0>(smallest), std::get<1>(smallest) });
-
-        bool found = true;
-        uint32_t chunk_index = std::get<2>(smallest);
-        while (found && chunk_files[chunk_index]
-               && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
-                                                sizeof(std::pair<T, C>))) {
-            found = merge_heap.emplace(data_item.first, data_item.second, chunk_index);
+        if (chunk_files[i].read(reinterpret_cast<char *>(&data_item),
+                                sizeof(std::pair<T, C>))) {
+            merge_heap.emplace(data_item.first, data_item.second, i);
             num_elements++;
         }
     }
+    if (merge_heap.empty()) {
+        return num_elements;
+    }
 
-//    std::for_each(sources.begin(), sources.end(),
-//                  [](const std::string &s) { std::filesystem::remove(s); });
+    bool has_written = false;
+    CountedEl current = {};
+    while (!merge_heap.empty()) {
+        CountedEl smallest = merge_heap.pop();
+
+        if (has_written && std::get<0>(smallest) != std::get<0>(current)) {
+            on_new_item({ std::get<0>(current), std::get<1>(current) });
+            current = smallest;
+        } else {
+            if (has_written) {
+                std::get<1>(current) += std::get<1>(smallest);
+            } else {
+                current = smallest;
+                has_written = true;
+            }
+        }
+
+        uint32_t chunk_index = std::get<2>(smallest);
+        if (chunk_files[chunk_index]
+            && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
+                                             sizeof(std::pair<T, C>))) {
+            merge_heap.emplace(data_item.first, data_item.second, chunk_index);
+            num_elements++;
+        }
+    }
+    on_new_item({ std::get<0>(current), std::get<1>(current) });
+
+    std::for_each(sources.begin(), sources.end(),
+                  [](const std::string &s) { std::filesystem::remove(s); });
     delete[] buffer;
 
     return num_elements;
