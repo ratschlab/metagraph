@@ -1,4 +1,7 @@
 #include "gtest/gtest.h"
+
+#include <cstdlib>
+
 #include "test_helpers.hpp"
 
 #include "common/vectors/bit_vector.hpp"
@@ -1394,4 +1397,127 @@ TEST(bit_vector, autocorrelate) {
         ASSERT_EQ(reference, output);
         EXPECT_EQ(reference, autocorrelate(input, offset));
     };
+}
+
+
+TEST(select_support_scan_offset, vector_zeros) {
+    sdsl::bit_vector bv(156, false);
+    sdsl::select_support_scan_offset<0> select(&bv);
+
+    EXPECT_EQ(0, select.select_offset(1, 0));
+    EXPECT_EQ(1, select.select_offset(2, 0));
+    EXPECT_EQ(2, select.select_offset(3, 0));
+    EXPECT_EQ(62, select.select_offset(63, 0));
+    EXPECT_EQ(63, select.select_offset(64, 0));
+    EXPECT_EQ(64, select.select_offset(65, 0));
+    EXPECT_EQ(100, select.select_offset(101, 0));
+    EXPECT_EQ(155, select.select_offset(156, 0));
+
+    EXPECT_EQ(0 + 1, select.select_offset(1, 1));
+    EXPECT_EQ(1 + 1, select.select_offset(2, 1));
+    EXPECT_EQ(2 + 1, select.select_offset(3, 1));
+    EXPECT_EQ(62 + 1, select.select_offset(63, 1));
+    EXPECT_EQ(63 + 1, select.select_offset(64, 1));
+    EXPECT_EQ(64 + 1, select.select_offset(65, 1));
+    EXPECT_EQ(100 + 1, select.select_offset(101, 1));
+    EXPECT_EQ(155, select.select_offset(155, 1));
+
+    EXPECT_EQ(0 + 64, select.select_offset(1, 64));
+    EXPECT_EQ(1 + 64, select.select_offset(2, 64));
+    EXPECT_EQ(2 + 64, select.select_offset(3, 64));
+    EXPECT_EQ(62 + 64, select.select_offset(63, 64));
+    EXPECT_EQ(63 + 64, select.select_offset(64, 64));
+    EXPECT_EQ(64 + 64, select.select_offset(65, 64));
+    EXPECT_EQ(155, select.select_offset(92, 64));
+
+    EXPECT_EQ(100, select.select_offset(1, 100));
+    EXPECT_EQ(101, select.select_offset(2, 100));
+    EXPECT_EQ(102, select.select_offset(3, 100));
+    EXPECT_EQ(155, select.select_offset(56, 100));
+}
+
+TEST(select_support_scan_offset, vector_ones) {
+    sdsl::bit_vector bv(156, true);
+    sdsl::select_support_scan_offset<> select(&bv);
+
+    EXPECT_EQ(0, select.select_offset(1, 0));
+    EXPECT_EQ(1, select.select_offset(2, 0));
+    EXPECT_EQ(2, select.select_offset(3, 0));
+    EXPECT_EQ(62, select.select_offset(63, 0));
+    EXPECT_EQ(63, select.select_offset(64, 0));
+    EXPECT_EQ(64, select.select_offset(65, 0));
+    EXPECT_EQ(100, select.select_offset(101, 0));
+    EXPECT_EQ(155, select.select_offset(156, 0));
+
+    EXPECT_EQ(0 + 1, select.select_offset(1, 1));
+    EXPECT_EQ(1 + 1, select.select_offset(2, 1));
+    EXPECT_EQ(2 + 1, select.select_offset(3, 1));
+    EXPECT_EQ(62 + 1, select.select_offset(63, 1));
+    EXPECT_EQ(63 + 1, select.select_offset(64, 1));
+    EXPECT_EQ(64 + 1, select.select_offset(65, 1));
+    EXPECT_EQ(100 + 1, select.select_offset(101, 1));
+    EXPECT_EQ(155, select.select_offset(155, 1));
+
+    EXPECT_EQ(0 + 64, select.select_offset(1, 64));
+    EXPECT_EQ(1 + 64, select.select_offset(2, 64));
+    EXPECT_EQ(2 + 64, select.select_offset(3, 64));
+    EXPECT_EQ(62 + 64, select.select_offset(63, 64));
+    EXPECT_EQ(63 + 64, select.select_offset(64, 64));
+    EXPECT_EQ(64 + 64, select.select_offset(65, 64));
+    EXPECT_EQ(155, select.select_offset(92, 64));
+
+    EXPECT_EQ(100, select.select_offset(1, 100));
+    EXPECT_EQ(101, select.select_offset(2, 100));
+    EXPECT_EQ(102, select.select_offset(3, 100));
+    EXPECT_EQ(155, select.select_offset(56, 100));
+}
+
+TEST(select_support_scan_offset, vector_every_seventh_set) {
+    sdsl::bit_vector bv(10000, false);
+    for (size_t i = 0; i < bv.size(); i += 7) {
+        bv[i] = true;
+    }
+
+    sdsl::select_support_scan_offset<> select(&bv);
+
+    bit_vector_stat ref(bv);
+
+    const uint64_t num_set_bits = sdsl::util::cnt_one_bits(bv);
+
+    for (size_t begin = 0; begin < bv.size(); ++begin) {
+        uint64_t rank_offset = begin ? ref.rank1(begin - 1) : 0;
+
+        for (size_t r = rank_offset + 1; r <= num_set_bits; ++r) {
+            ASSERT_EQ(ref.select1(r), select.select_offset(r - rank_offset, begin))
+                << "offset: " << begin
+                << ", rank: " << r - rank_offset;
+        }
+    }
+}
+
+TEST(select_support_scan_offset, vector_random) {
+    srand(41);
+
+    for (size_t size = 1; size <= 1000; ++size) {
+        sdsl::bit_vector bv(size);
+        for (size_t i = 0; i < bv.size(); i += 7) {
+            bv[i] = rand() & 1;
+        }
+
+        sdsl::select_support_scan_offset<> select(&bv);
+
+        bit_vector_stat ref(bv);
+
+        const uint64_t num_set_bits = sdsl::util::cnt_one_bits(bv);
+
+        for (size_t begin = 0; begin < bv.size(); ++begin) {
+            uint64_t rank_offset = begin ? ref.rank1(begin - 1) : 0;
+
+            for (size_t r = rank_offset + 1; r <= num_set_bits; ++r) {
+                ASSERT_EQ(ref.select1(r), select.select_offset(r - rank_offset, begin))
+                    << "offset: " << begin
+                    << ", rank: " << r - rank_offset;
+            }
+        }
+    }
 }

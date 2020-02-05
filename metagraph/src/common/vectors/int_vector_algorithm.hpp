@@ -5,6 +5,7 @@
 #include <cassert>
 
 #include <sdsl/int_vector.hpp>
+#include <sdsl/select_support_scan.hpp>
 
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
@@ -161,5 +162,51 @@ template <class Callback>
 void call_nonzeros(const sdsl::int_vector<> &vector, Callback callback) {
     return call_nonzeros(vector, 0, vector.size(), callback);
 }
+
+
+namespace sdsl {
+
+// based on sdsl::select_support_scan
+template <uint8_t t_b = 1, uint8_t t_pat_len = 1>
+class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
+  public:
+    using typename select_support_scan<t_b, t_pat_len>::size_type;
+
+    explicit select_support_scan_offset(const bit_vector *v = nullptr)
+          : select_support_scan<t_b, t_pat_len>::select_support_scan(v) {}
+
+    select_support_scan_offset(const select_support_scan<t_b,t_pat_len> &ss)
+          : select_support_scan<t_b, t_pat_len>::select_support_scan(ss.m_v) {}
+
+    inline size_type select_offset(size_type i, size_type offset = 0) const {
+        using trait = select_support_trait<t_b, t_pat_len>;
+        const uint64_t *data = this->m_v->data() + (offset >> 6);
+        size_type word_pos = offset >> 6;
+        size_type word_off = offset & 0x3F;
+        uint64_t carry = trait::init_carry(data, word_pos);
+        size_type args = trait::args_in_the_first_word(*data, word_off, carry);
+        if (args >= i) {
+            return (word_pos << 6)
+                + trait::ith_arg_pos_in_the_first_word(*data, i, word_off, carry);
+        }
+        word_pos++;
+        size_type sum_args = args;
+        carry = trait::get_carry(*data);
+        uint64_t old_carry = carry;
+        args = trait::args_in_the_word(*(++data), carry);
+        while (sum_args + args < i) {
+            sum_args += args;
+            assert(data + 1 < this->m_v->data() + (this->m_v->capacity() >> 6));
+            old_carry = carry;
+            args = trait::args_in_the_word(*(++data), carry);
+            word_pos++;
+        }
+        return (word_pos << 6)
+            + trait::ith_arg_pos_in_the_word(*data, i - sum_args, old_carry);
+    }
+};
+
+} // namespace sdsl
+
 
 #endif // __INT_VECTOR_ALGORITHM_HPP__

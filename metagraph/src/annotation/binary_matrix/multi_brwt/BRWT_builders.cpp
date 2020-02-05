@@ -108,11 +108,68 @@ void compute_or(const std::vector<const bit_vector *> &columns,
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
 }
 
+void compute_subindex(const bit_vector &column,
+                      const sdsl::bit_vector &reference,
+                      uint64_t begin, uint64_t end,
+                      uint64_t reference_rank_begin,
+                      sdsl::bit_vector *subindex);
+
 sdsl::bit_vector generate_subindex(const bit_vector &column,
-                                   const sdsl::bit_vector &reference) {
+                                   const sdsl::bit_vector &reference,
+                                   uint64_t reference_num_set_bits,
+                                   ThreadPool &thread_pool) {
     assert(column.size() == reference.size());
 
-    uint64_t shrinked_size = sdsl::util::cnt_one_bits(reference);
+    sdsl::select_support_scan_offset<> reference_select(&reference);
+
+    // no shrinkage if vectors are the same
+    if (column.num_set_bits() == reference_num_set_bits)
+        return sdsl::bit_vector(reference_num_set_bits, true);
+
+    sdsl::bit_vector subindex(reference_num_set_bits, false);
+
+    const uint64_t block_size = std::max(kBlockSize, reference.size() / 100 / 64 * 64);
+    // Each block is a multiple of 64 bits for thread safety
+    assert(!(block_size & 0x3F));
+
+    std::vector<std::future<void>> futures;
+
+    uint64_t block_end = 0;
+
+    for (uint64_t offset = 0; offset < reference_num_set_bits; offset += block_size) {
+        // ........... [1     1       1    1  1] ............. //
+        //              ^                     ^                //
+        //          (rank = 1 mod 64)     (rank = 0 mod 64)    //
+        //              |                     |                //
+        //              |_______ BLOCK _______|                //
+
+        uint64_t block_begin = block_end;
+
+        if (offset + block_size >= reference_num_set_bits) {
+            block_end = reference.size();
+        } else {
+            block_end = reference_select.select_offset(block_size + 1, block_begin);
+            assert(count_ones(reference, block_begin, block_end) == block_size);
+        }
+
+        futures.push_back(thread_pool.enqueue(
+            [&](uint64_t begin, uint64_t end, uint64_t offset_rank) {
+                compute_subindex(column, reference, begin, end, offset_rank, &subindex);
+            },
+            block_begin, block_end, offset
+        ));
+    }
+
+    std::for_each(futures.begin(), futures.end(), [](auto &f) { f.wait(); });
+
+    return subindex;
+}
+
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const bit_vector_stat &reference) {
+    assert(column.size() == reference.size());
+
+    uint64_t shrinked_size = reference.num_set_bits();
 
     // no shrinkage if vectors are the same
     if (column.num_set_bits() == shrinked_size)
@@ -120,46 +177,78 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 
     sdsl::bit_vector subindex(shrinked_size, false);
 
-    uint64_t rank = 0;
-    uint64_t i = 0;
+    compute_subindex(column, reference.data(), 0, reference.size(), 0, &subindex);
+
+    return subindex;
+}
+
+void compute_subindex(const bit_vector &column,
+                      const sdsl::bit_vector &reference,
+                      uint64_t begin, uint64_t end,
+                      uint64_t offset,
+                      sdsl::bit_vector *subindex) {
+    assert(column.size() == reference.size());
+    assert(begin <= end);
+    assert(end <= reference.size());
+
+    if (begin == end)
+        return;
+
+    uint64_t popcount = column.rank1(end - 1)
+                        - (begin ? column.rank1(begin - 1) : 0);
+
+    // check if all zeros
+    if (!popcount)
+        return;
+
+    uint64_t i = begin;
+    uint64_t rank = offset;
+
+    // check if all ones
+    if (popcount == end - begin) {
+        for ( ; i + 64 <= end; i += 64, rank += 64) {
+            subindex->set_int(rank, 0xFFFF);
+        }
+        if (begin < end) {
+            subindex->set_int(rank, sdsl::bits::lo_set[end - begin], end - begin);
+        }
+        return;
+    }
+
 
 #if __BMI2__
     if (is_sparser(column, 0, 0.02, 0.01, 0.01)) {
 #endif
-        // sparse
-        column.call_ones([&](uint64_t j) {
+        // sparse or without __BMI2__
+        column.call_ones_in_range(begin, end, [&](uint64_t j) {
             assert(j >= i);
             assert(reference[j]);
 
             rank += count_ones(reference, i, j);
 
-            assert(rank < subindex.size());
+            assert(rank < subindex->size());
 
-            subindex[rank++] = true;
+            (*subindex)[rank++] = true;
             i = j + 1;
         });
 #if __BMI2__
     } else {
         // dense
-        uint64_t end = reference.size();
-
-        for (i = 0; i + 64 <= end; i += 64) {
-            uint64_t mask = reference.data()[i / 64];
+        for ( ; i + 64 <= end; i += 64) {
+            uint64_t mask = reference.get_int(i, 64);
             int popcount = sdsl::bits::cnt(mask);
             if (uint64_t a = column.get_int(i, 64))
-                subindex.set_int(rank, _pext_u64(a, mask), popcount);
+                subindex->set_int(rank, _pext_u64(a, mask), popcount);
             rank += popcount;
         }
         if (i < end) {
             uint64_t mask = reference.get_int(i, end - i);
             int popcount = sdsl::bits::cnt(mask);
             if (uint64_t a = column.get_int(i, end - i))
-                subindex.set_int(rank, _pext_u64(a, mask), popcount);
+                subindex->set_int(rank, _pext_u64(a, mask), popcount);
         }
     }
 #endif
-
-    return subindex;
 }
 
 BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
@@ -194,20 +283,35 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
 
     std::vector<std::future<void>> results;
 
-    for (size_t i = 0; i < submatrices.size(); ++i) {
-        results.push_back(thread_pool.enqueue([&,i]() {
-            // shrink index column
-            submatrices[i].nonzero_rows_ = std::make_unique<bit_vector_small>(
-                generate_subindex(std::move(*submatrices[i].nonzero_rows_), *buffer)
-            );
-
-            parent.child_nodes_[i].reset(new BRWT(std::move(submatrices[i])));
-        }));
-    }
-
+    // compress the parent index vector
     results.push_back(thread_pool.enqueue([&]() {
         parent.nonzero_rows_.reset(new bit_vector_smart(*buffer));
     }));
+
+    uint64_t subindex_size = sdsl::util::cnt_one_bits(*buffer);
+
+    #pragma omp parallel for schedule(dynamic)
+    for (size_t i = 0; i < submatrices.size(); ++i) {
+        // generate an index column for the child node
+        sdsl::bit_vector subindex
+            = generate_subindex(*submatrices[i].nonzero_rows_, *buffer,
+                                subindex_size, thread_pool);
+
+        // the full index vector is not needed anymore, the subindex
+        // will be used instead
+        submatrices[i].nonzero_rows_.reset();
+
+        #pragma omp critical
+        results.push_back(thread_pool.enqueue(
+            [&,i,subindex(std::move(subindex))]() {
+                // compress the subindex vector and set it to the child node
+                // all in a single thread
+                submatrices[i].nonzero_rows_
+                    = std::make_unique<bit_vector_small>(std::move(subindex));
+                parent.child_nodes_[i].reset(new BRWT(std::move(submatrices[i])));
+            }
+        ));
+    }
 
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
 
