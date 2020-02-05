@@ -36,7 +36,7 @@ static void BM_merge_files(benchmark::State &state) {
     std::ofstream out;
     out.open("/tmp/out");
     const auto file_writer = [&out](const uint64_t &v) {
-        out.write(reinterpret_cast<const char *>(&v), sizeof(uint64_t));
+      out.write(reinterpret_cast<const char *>(&v), sizeof(uint64_t));
     };
     for (auto _ : state) {
         mg::common::merge_files<uint64_t>(sources, file_writer);
@@ -55,7 +55,7 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     out.open("/tmp/out");
     using Pair = std::pair<uint64_t, uint8_t>;
     const auto file_writer = [&out](const Pair &v) {
-        out.write(reinterpret_cast<const char *>(&v), sizeof(Pair));
+      out.write(reinterpret_cast<const char *>(&v), sizeof(Pair));
     };
     for (auto _ : state) {
         mg::common::merge_files<uint64_t, uint8_t>(sources, file_writer);
@@ -65,3 +65,4 @@ static void BM_merge_files_pairs(benchmark::State &state) {
 BENCHMARK(BM_merge_files);
 
 BENCHMARK_MAIN();
+

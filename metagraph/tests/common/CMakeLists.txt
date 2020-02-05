@@ -15,8 +15,9 @@ findOpenMP()
 enable_testing()
 findGTest()
 
-file(GLOB test_files "*.cpp"
-    EXCLUDE REGEX "benchmark_.*")
+file(GLOB test_files "*.cpp")
+list(FILTER test_files  EXCLUDE REGEX "benchmark_.*")
+
 add_executable(tests ${test_files})
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
@@ -41,20 +42,34 @@ target_link_libraries(tests
     ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
 
-add_executable(file_merger_benchmark benchmark_file_merger.cpp)
-
 add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL benchmark)
 
-target_include_directories(file_merger_benchmark
+add_executable(benchmark_file_merger benchmark_file_merger.cpp)
+target_include_directories(benchmark_file_merger
   PRIVATE
     ${EXTERNAL_LIB_DIR}/benchmark/include
     "../../src/"
 )
-
-target_link_libraries(file_merger_benchmark
+target_link_libraries(benchmark_file_merger
   PRIVATE
     benchmark_main
     benchmark
     metagraph_common
+)
+
+add_executable(benchmark_chunked_wait_queue benchmark_chunked_wait_queue.cpp)
+target_include_directories(benchmark_chunked_wait_queue
+    PRIVATE
+    ${EXTERNAL_LIB_DIR}/benchmark/include
+    "../../src/"
     )
+target_link_libraries(benchmark_chunked_wait_queue
+    PRIVATE
+    benchmark_main
+    benchmark
+    metagraph_common
+)
+
+
+
 

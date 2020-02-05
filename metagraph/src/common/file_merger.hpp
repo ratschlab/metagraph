@@ -14,23 +14,30 @@ namespace mg {
 namespace common {
 
 /**
- * Profiling shows that using a sorted vector instead of a std::priority queue is
- * faster if the queue has less than ~45 elements, which is the case for us, as each
- * element represents a 1GB chunk, and SRAs typically expand to ~15 chunks.
+ * Heap implemented as a sorted vector.
  */
+// Note: profiling shows that using a sorted vector instead of a std::priority queue is
+// faster if the queue has less than ~45 elements. This is the case for us, as each
+// element represents a 1GB chunk, and SRAs typically expand to ~15 chunks. Using an
+// unsorted vector (faster insert, slower pop()) is ~40% slower. Allowing duplicates in
+// the heap and discarding them at pop() time is ~50% slower.
 template <typename T>
 class VectorHeap {
     /** The heap stores triplets of the form <Element, Count, SourceIndex> */
     using value_type = std::pair<T, uint32_t>;
 
   public:
-    VectorHeap(size_t size) { els.resize(size); }
-    void emplace(T el, uint32_t idx) {
+    VectorHeap(size_t size) { els.reserve(size); }
+    bool emplace(T el, uint32_t idx) {
         auto it = std::lower_bound(els.begin(), els.end(), value_type(el, idx),
                                    [](const value_type &a, const value_type &b) {
                                        return a.first > b.first;
                                    });
+        if (it != els.end() && (*it).first == el) {
+            return true;
+        }
         els.emplace(it, el, idx);
+        return false;
     }
 
     value_type pop() {
@@ -76,36 +83,33 @@ uint64_t merge_files(const std::vector<std::string> sources,
             logger->error("Error: Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
-        if (chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
-            merge_heap.emplace(data_item, i);
-            num_elements++;
+        bool found = true;
+        while (found) {
+            if (chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
+                found = merge_heap.emplace(data_item, i);
+                num_elements++;
+            } else {
+                found = false;
+            }
         }
     }
-
-    // initialized to suppress maybe-uninitialized warnings in GCC
-    T last_written = {};
-
-    bool has_written = false;
 
     while (!merge_heap.empty()) {
         std::pair<T, uint32_t> smallest = merge_heap.pop();
+        on_new_item(smallest.first);
 
-        if (!has_written || smallest.first != last_written) {
-            has_written = true;
-            on_new_item(smallest.first);
-            last_written = smallest.first;
-        }
-
-        if (chunk_files[smallest.second]
-             && chunk_files[smallest.second].read(reinterpret_cast<char *>(&data_item),
-                                                  sizeof(T))) {
-            merge_heap.emplace(data_item, smallest.second);
+        bool found = true;
+        uint32_t chunk_index = smallest.second;
+        while (found && chunk_files[chunk_index]
+               && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
+                                                sizeof(T))) {
+            found = merge_heap.emplace(data_item, chunk_index);
             num_elements++;
         }
     }
 
-    std::for_each(sources.begin(), sources.end(),
-                  [](const std::string &s) { std::filesystem::remove(s); });
+    //    std::for_each(sources.begin(), sources.end(),
+    //                  [](const std::string &s) { std::filesystem::remove(s); });
 
     delete[] buffer;
     return num_elements;
@@ -115,18 +119,15 @@ uint64_t merge_files(const std::vector<std::string> sources,
  * A heap that merges elements that are equal by adding their counts.
  * The heap uses a vector as the underlying data structure, thus making it efficient
  * only for a small (<100) number of elements.
- * //TODO(ddanciu): profile is using an actual binary heap is faster in practice
  * @tparam T the actual heap element type; this is the type tested for equality
  * @tparam C the count type for elements in the heap (typically some unsigned integer)
  */
- //TODO(ddanciu) - instead of using MergingHeap, we can use a simple
- // std::priority_queue which stores duplicate elements and merge elements when popping
- // Profile which one is faster. Also profile if using an  std::vector as in MergeQueue
- // is faster than using an std::queue.
+// Note: Profiling indicates that merging elements within the heap is ~20% faster than
+// inserting duplicates and merging them when popping from the heap
 template <typename T, typename C>
 class MergingHeap {
     /** The heap stores triplets of the form <Element, Count, SourceIndex> */
-    using value_type = std::tuple<T, C, uint32_t> ;
+    using value_type = std::tuple<T, C, uint32_t>;
 
   public:
     bool emplace(T el, C count, uint32_t idx) {
