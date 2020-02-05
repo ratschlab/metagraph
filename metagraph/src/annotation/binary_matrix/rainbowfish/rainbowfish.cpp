@@ -39,35 +39,33 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
         Vector<std::pair<uint64_t, uint64_t>> index_counts;
         index_counts.reserve(vector_counter.size());
 
-        for (auto it = vector_counter.begin(); it != vector_counter.end(); ++it) {
-            index_counts.emplace_back(index_counts.size(), it->second);
-            vectors.push_back(std::move(it->first));
+        for (auto&& [vec, count] : vector_counter) {
+            index_counts.emplace_back(index_counts.size(), count);
+            vectors.push_back(std::move(vec));
         }
+
         vector_counter.clear();
         num_relations_buffered = 0;
 
         // sort in the order of decreasing counts
         ips4o::parallel::sort(index_counts.begin(), index_counts.end(),
-            [](const auto &first, const auto &second) {
-                return first.second > second.second;
-            },
-            get_num_threads()
-        );
+                              [](const auto &first, const auto &second) {
+                                  return first.second > second.second;
+                              }, get_num_threads());
 
         SetBitPositions v;
 
-        for (const auto &index_count : index_counts) {
-            v.assign(vectors[index_count.first].begin(),
-                     vectors[index_count.first].end());
+        for (const auto &[index, count] : index_counts) {
+            v.assign(vectors[index].begin(), vectors[index].end());
             callback(v);
 
-            assert(vector_coder.find(vectors[index_count.first]) == vector_coder.end());
+            assert(vector_coder.find(vectors[index]) == vector_coder.end());
 
             uint64_t code = vector_coder.size();
 
-            vector_coder[std::move(vectors[index_count.first])] = code;
+            vector_coder[std::move(vectors[index])] = code;
 
-            total_code_length += (sdsl::bits::hi(code) + 1) * index_count.second;
+            total_code_length += (sdsl::bits::hi(code) + 1) * count;
         }
     };
 
