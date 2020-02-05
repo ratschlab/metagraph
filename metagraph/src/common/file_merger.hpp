@@ -19,8 +19,8 @@ namespace common {
 // Note: profiling shows that using a sorted vector instead of a std::priority queue is
 // faster if the queue has less than ~45 elements. This is the case for us, as each
 // element represents a 1GB chunk, and SRAs typically expand to ~15 chunks. Using an
-// unsorted vector (faster insert, slower pop()) is ~40% slower. Allowing duplicates in
-// the heap and discarding them at pop() time is ~50% slower.
+// unsorted vector (faster insert, slower pop()) is ~40% slower. Preventing duplicates
+// in the heap so that we don't need to test for dupes at pop time is ~60% slower.
 template <typename T>
 class VectorHeap {
     /** The heap stores triplets of the form <Element, Count, SourceIndex> */
