@@ -300,11 +300,11 @@ std::string get_alignment_header_and_swap_query(const std::string &name,
     std::string header;
 
     if (matches->size()) {
+        // sequence for querying -- the best alignment
+        *query_seq = const_cast<std::string&&>((*matches)[0].get_sequence());
         header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
                              name, *query_seq, (*matches)[0].get_score(),
                              (*matches)[0].get_cigar().to_string());
-        // sequence for querying -- the best alignment
-        *query_seq = const_cast<std::string&&>((*matches)[0].get_sequence());
 
     } else {
         // no alignment was found

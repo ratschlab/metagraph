@@ -146,27 +146,29 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
         return {};
 
     VectorOrderedMap<row_index, size_t> index_counts;
-    index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
+    index_counts.reserve(num_kmers);
 
     size_t num_present_kmers = 0;
-    size_t num_missing_kmers = 0;
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
-        } else {
-            num_missing_kmers++;
         }
     });
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio
-                                                    * (num_present_kmers
-                                                        + num_missing_kmers)));
+    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
     if (num_present_kmers < min_count)
         return {};
 
-    return get_top_labels(index_counts.values_container(), num_top_labels, min_count);
+    auto top_labels = get_top_labels(index_counts.values_container(),
+                                     num_top_labels, min_count);
+
+    assert(std::all_of(top_labels.begin(), top_labels.end(),
+                       [&](const auto &pair) { return pair.second <= num_kmers; }));
+
+    return top_labels;
 }
 
 std::vector<std::pair<std::string, sdsl::bit_vector>>
