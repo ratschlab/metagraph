@@ -58,11 +58,11 @@ DBGAlignerConfig::score_t DBGAlignerConfig
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Cigar::Operator::INSERTION: {
+            case Cigar::Operator::DELETION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 alt_it += op.second;
             } break;
-            case Cigar::Operator::DELETION: {
+            case Cigar::Operator::INSERTION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 ref_it += op.second;
             } break;

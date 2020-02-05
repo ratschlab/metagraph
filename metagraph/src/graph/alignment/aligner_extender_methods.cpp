@@ -149,7 +149,7 @@ inline void compute_match_scores(const char *align_begin,
 
 #ifdef __AVX2__
 
-inline void compute_match_delete_updates_avx2(size_t &i,
+inline void compute_match_insert_updates_avx2(size_t &i,
                                               size_t length,
                                               int64_t prev_node,
                                               int32_t gap_opening_penalty,
@@ -162,7 +162,7 @@ inline void compute_match_delete_updates_avx2(size_t &i,
                                               const int8_t *&char_scores,
                                               const int32_t *&match_ops) {
     const __m256i prev_packed = _mm256_set1_epi64x(prev_node);
-    const __m256i del_packed = _mm256_set1_epi32(Cigar::Operator::DELETION);
+    const __m256i ins_packed = _mm256_set1_epi32(Cigar::Operator::INSERTION);
     const __m256i gap_open_packed = _mm256_set1_epi32(gap_opening_penalty);
     const __m256i gap_extend_packed = _mm256_set1_epi32(gap_extension_penalty);
 
@@ -175,18 +175,18 @@ inline void compute_match_delete_updates_avx2(size_t &i,
             incoming_packed
         );
 
-        __m256i delete_scores_packed = _mm256_add_epi32(
+        __m256i insert_scores_packed = _mm256_add_epi32(
             rshiftpushback_epi32(incoming_packed, incoming_scores[7]),
             _mm256_blendv_epi8(gap_open_packed,
                                gap_extend_packed,
                                _mm256_cmpeq_epi32(
                                    _mm256_loadu_si256((__m256i*)incoming_ops),
-                                   del_packed
+                                   ins_packed
                                ))
         );
 
         // update scores
-        __m256i max_scores = _mm256_max_epi32(match_scores_packed, delete_scores_packed);
+        __m256i max_scores = _mm256_max_epi32(match_scores_packed, insert_scores_packed);
         __m256i both_cmp = _mm256_cmpgt_epi32(
             max_scores,
             _mm256_loadu_si256((__m256i*)update_scores)
@@ -200,8 +200,8 @@ inline void compute_match_delete_updates_avx2(size_t &i,
             update_ops,
             both_cmp,
             _mm256_blendv_epi8(_mm256_loadu_si256((__m256i*)match_ops),
-                               del_packed,
-                               _mm256_cmpgt_epi32(delete_scores_packed,
+                               ins_packed,
+                               _mm256_cmpgt_epi32(insert_scores_packed,
                                                   match_scores_packed))
         );
 
@@ -229,7 +229,7 @@ inline void compute_match_delete_updates_avx2(size_t &i,
 
 template <typename NodeType,
           typename score_t = typename Alignment<NodeType>::score_t>
-inline void compute_match_delete_updates(const DBGAlignerConfig &config,
+inline void compute_match_insert_updates(const DBGAlignerConfig &config,
                                          score_t *update_scores,
                                          NodeType *update_prevs,
                                          Cigar::Operator *update_ops,
@@ -247,11 +247,11 @@ inline void compute_match_delete_updates(const DBGAlignerConfig &config,
     auto match_ops_cast = reinterpret_cast<const int32_t*>(match_ops);
 
     // handle first element (i.e., no match update possible)
-    score_t gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::DELETION
+    score_t gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::INSERTION
         ? config.gap_extension_penalty : config.gap_opening_penalty);
 
     if (gap_score > *update_scores) {
-        *update_ops_cast = Cigar::Operator::DELETION;
+        *update_ops_cast = Cigar::Operator::INSERTION;
         *update_prevs_cast = prev_node;
         *update_scores = gap_score;
     }
@@ -270,7 +270,7 @@ inline void compute_match_delete_updates(const DBGAlignerConfig &config,
     static_assert(std::is_same<score_t, int32_t>::value);
 
     // update 8 scores at a time
-    compute_match_delete_updates_avx2(
+    compute_match_insert_updates_avx2(
         i,
         length,
         prev_node,
@@ -295,11 +295,11 @@ inline void compute_match_delete_updates(const DBGAlignerConfig &config,
         }
 
         // TODO: enable check for deletion after insertion?
-        gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::DELETION
+        gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::INSERTION
             ? config.gap_extension_penalty : config.gap_opening_penalty);
 
         if (gap_score > *update_scores) {
-            *update_ops_cast = Cigar::Operator::DELETION;
+            *update_ops_cast = Cigar::Operator::INSERTION;
             *update_prevs_cast = prev_node;
             *update_scores = gap_score;
         }
@@ -489,7 +489,7 @@ void DefaultColumnExtender<NodeType, Compare>
 
                 assert(end > begin);
 
-                compute_match_delete_updates(
+                compute_match_insert_updates(
                     config_,
                     update_scores.data() + (begin - overall_begin),
                     update_prevs.data() + (begin - overall_begin),
@@ -504,19 +504,18 @@ void DefaultColumnExtender<NodeType, Compare>
             }
 
 
-            // compute insert scores
-            score_t insert_score;
+            // compute deletion scores
+            score_t delete_score;
             for (size_t i = 1; i < update_scores.size(); ++i) {
-                // TODO: check for insertion after deletion?
-                insert_score = update_scores[i - 1]
-                    + (update_ops[i - 1] == Cigar::Operator::INSERTION
+                delete_score = update_scores[i - 1]
+                    + (update_ops[i - 1] == Cigar::Operator::DELETION
                         ? config_.gap_extension_penalty
                         : config_.gap_opening_penalty);
 
-                if (insert_score > update_scores[i]) {
-                    update_ops[i] = Cigar::Operator::INSERTION;
+                if (delete_score > update_scores[i]) {
+                    update_ops[i] = Cigar::Operator::DELETION;
                     update_prevs[i] = next_node;
-                    update_scores[i] = insert_score;
+                    update_scores[i] = delete_score;
                 }
             }
 

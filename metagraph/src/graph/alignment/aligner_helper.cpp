@@ -39,7 +39,7 @@ bool DPTable<NodeType>::add_seed(const SequenceGraph &graph,
 
     if (table_init.scores[start_pos] + gap_opening_penalty > table_init.scores[start_pos + 1]) {
         table_init.scores[start_pos + 1] = table_init.scores[start_pos] + gap_opening_penalty;
-        table_init.ops[start_pos + 1] = Cigar::Operator::INSERTION;
+        table_init.ops[start_pos + 1] = Cigar::Operator::DELETION;
         table_init.prev_nodes[start_pos + 1] = start_node;
         update = true;
     }
@@ -49,7 +49,7 @@ bool DPTable<NodeType>::add_seed(const SequenceGraph &graph,
             break;
 
         table_init.scores[i] = table_init.scores[i - 1] + gap_extension_penalty;
-        table_init.ops[i] = Cigar::Operator::INSERTION;
+        table_init.ops[i] = Cigar::Operator::DELETION;
         table_init.prev_nodes[i] = start_node;
         update = true;
     }
@@ -187,8 +187,8 @@ Alignment<NodeType>::Alignment(const std::string_view query,
     );
 
     assert(!(query_size - min_length) || (sequence_.size() - min_length));
-    cigar_.append(Cigar::Operator::INSERTION, query_size - min_length);
-    cigar_.append(Cigar::Operator::DELETION, sequence_.size() - min_length);
+    cigar_.append(Cigar::Operator::DELETION, query_size - min_length);
+    cigar_.append(Cigar::Operator::INSERTION, sequence_.size() - min_length);
 }
 
 template <typename NodeType>
@@ -220,10 +220,10 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     while (*prev_node != SequenceGraph::npos) {
         cigar_.append(*op);
 
-        if (*op != Cigar::Operator::INSERTION)
+        if (*op != Cigar::Operator::DELETION)
             out_columns.emplace_back(column);
 
-        if (*op != Cigar::Operator::DELETION)
+        if (*op != Cigar::Operator::INSERTION)
             --i;
 
         if (*op == Cigar::Operator::MATCH)
@@ -340,15 +340,15 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
             } break;
-            case Cigar::Operator::INSERTION: {
+            case Cigar::Operator::DELETION: {
                 assert(query_start + next_size <= query_end_);
-                // this assumes that INSERTIONS can't happen right after deletions
+                // this assumes that DELETIONS can't happen right after insertions
                 //edit["from_length"] = 0;
                 edit["to_length"] = Json::Value::UInt64(next_size);
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
             } break;
-            case Cigar::Operator::DELETION: {
+            case Cigar::Operator::INSERTION: {
                 edit["from_length"] = Json::Value::UInt64(next_size);
                 //edit["to_length"] = 0;
             } break;
@@ -391,11 +391,11 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         //position["is_reverse"] = false;
         mapping["position"] = position;
 
-        if (cigar_it->first == Cigar::Operator::INSERTION) {
+        if (cigar_it->first == Cigar::Operator::DELETION) {
             Json::Value edit;
             size_t length = cigar_it->second - cigar_offset;
             assert(query_start + length < query_end_);
-            // this assumes that INSERTIONS can't happen right after deletions
+            // TODO: this assumes that DELETIONS can't happen right after insertions
             //edit["from_length"] = 0;
             edit["to_length"] = Json::Value::UInt64(length);
             edit["sequence"] = std::string(query_start, length);
@@ -415,7 +415,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
                 edit["sequence"] = std::string(query_start, 1);
                 query_start++;
             } break;
-            case Cigar::Operator::DELETION: {
+            case Cigar::Operator::INSERTION: {
                 edit["from_length"] = 1;
                 //edit["to_length"] = 0;
             } break;
@@ -424,7 +424,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
                 edit["to_length"] = 1;
                 query_start++;
             } break;
-            case Cigar::Operator::INSERTION:
+            case Cigar::Operator::DELETION:
             case Cigar::Operator::CLIPPED: assert(false); break;
         }
 
@@ -592,13 +592,13 @@ std::shared_ptr<const std::string> Alignment<NodeType>
                 path_steps += edits[j]["from_length"].asUInt64();
                 query_end_ += edits[j]["to_length"].asUInt64();
             } else if (edits[j]["from_length"].asUInt64()) {
-                cigar_.append(Cigar::Operator::DELETION,
+                cigar_.append(Cigar::Operator::INSERTION,
                               edits[j]["from_length"].asUInt64());
 
                 path_steps += edits[j]["from_length"].asUInt64();
             } else {
                 assert(edits[j]["to_length"].asUInt64());
-                cigar_.append(Cigar::Operator::INSERTION,
+                cigar_.append(Cigar::Operator::DELETION,
                               edits[j]["to_length"].asUInt64());
 
                 query_end_ += edits[j]["to_length"].asUInt64();
@@ -661,7 +661,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
 
     for (; cigar_it != cigar_.end(); ++cigar_it) {
         if (query_it >= query_end_
-                && cigar_it->first != Cigar::Operator::DELETION
+                && cigar_it->first != Cigar::Operator::INSERTION
                 && cigar_it->first != Cigar::Operator::CLIPPED) {
             std::cerr << "ERROR: end of query reached before end of CIGAR" << std::endl
                       << "Processed " << cigar_it - cigar_.begin()
@@ -671,7 +671,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
         }
 
         if (node_it == nodes_.end()
-                && cigar_it->first != Cigar::Operator::INSERTION
+                && cigar_it->first != Cigar::Operator::DELETION
                 && cigar_it->first != Cigar::Operator::CLIPPED) {
             std::cerr << "ERROR: end of nodes reached before end of CIGAR" << std::endl
                       << "Processed " << cigar_it - cigar_.begin()
@@ -683,11 +683,11 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
         switch (cigar_it->first) {
             case Cigar::Operator::MATCH:
             case Cigar::Operator::MISMATCH:
-            case Cigar::Operator::DELETION: {
+            case Cigar::Operator::INSERTION: {
                 auto cur_query_it = query_it;
                 auto cur_path_steps = path_steps;
 
-                if (cigar_it->first != Cigar::Operator::DELETION)
+                if (cigar_it->first != Cigar::Operator::INSERTION)
                     query_it += cigar_it->second;
 
                 path_steps += cigar_it->second;
@@ -754,7 +754,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
                     return false;
                 }
             } break;
-            case Cigar::Operator::INSERTION: query_it += cigar_it->second; break;
+            case Cigar::Operator::DELETION: query_it += cigar_it->second; break;
             case Cigar::Operator::CLIPPED: break;
         }
     }

@@ -591,7 +591,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
     }
 }
 
-TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
+TYPED_TEST(DBGAlignerTest, align_delete_non_existent) {
     size_t k = 4;
     std::string reference = "TTTCC"     "TTGTT";
     std::string query =     "TTTCC" "A" "TTGTT";
@@ -607,7 +607,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.match_score(reference) + config.gap_opening_penalty, path.get_score());
-    EXPECT_EQ("5=1I5=", path.get_cigar().to_string());
+    EXPECT_EQ("5=1D5=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -622,7 +622,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, align_delete) {
+TYPED_TEST(DBGAlignerTest, align_insert) {
     size_t k = 4;
     std::string reference = "TTCGAT" "TGGCCT";
     std::string query =     "TTCGAT"  "GGCCT";
@@ -641,9 +641,9 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
     EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty, path.get_score());
 
     // TODO: the first should ideally always be true
-    EXPECT_TRUE("6=1D5=" == path.get_cigar().to_string()
-        || "5=1D6=" == path.get_cigar().to_string());
-    // EXPECT_EQ("6=1D5=", path.get_cigar().to_string());
+    EXPECT_TRUE("6=1I5=" == path.get_cigar().to_string()
+        || "5=1I6=" == path.get_cigar().to_string());
+    // EXPECT_EQ("6=1I5=", path.get_cigar().to_string());
 
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -676,7 +676,7 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty
         + score_t(3) * config.gap_extension_penalty, path.get_score());
-    EXPECT_EQ("10=4D9=", path.get_cigar().to_string());
+    EXPECT_EQ("10=4I9=", path.get_cigar().to_string());
     EXPECT_EQ(19u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());

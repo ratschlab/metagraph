@@ -176,7 +176,7 @@ bool Cigar::is_valid(const std::string_view reference,
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Operator::INSERTION: {
+            case Operator::DELETION: {
                 if (alt_it > query.end() - op.second) {
                     std::cerr << "Query too short" << std::endl
                               << to_string() << std::endl
@@ -187,7 +187,7 @@ bool Cigar::is_valid(const std::string_view reference,
 
                 alt_it += op.second;
             } break;
-            case Operator::DELETION: {
+            case Operator::INSERTION: {
                 if (ref_it > reference.end() - op.second) {
                     std::cerr << "Reference too short" << std::endl
                               << to_string() << std::endl
