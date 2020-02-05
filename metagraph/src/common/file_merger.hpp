@@ -28,16 +28,12 @@ class VectorHeap {
 
   public:
     VectorHeap(size_t size) { els.reserve(size); }
-    bool emplace(T el, uint32_t idx) {
+    void emplace(T el, uint32_t idx) {
         auto it = std::lower_bound(els.begin(), els.end(), value_type(el, idx),
                                    [](const value_type &a, const value_type &b) {
                                        return a.first > b.first;
                                    });
-        if (it != els.end() && (*it).first == el) {
-            return true;
-        }
         els.emplace(it, el, idx);
-        return false;
     }
 
     value_type pop() {
@@ -83,27 +79,30 @@ uint64_t merge_files(const std::vector<std::string> sources,
             logger->error("Error: Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
-        bool found = true;
-        while (found) {
-            if (chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
-                found = merge_heap.emplace(data_item, i);
-                num_elements++;
-            } else {
-                found = false;
-            }
+        if (chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
+            merge_heap.emplace(data_item, i);
+            num_elements++;
         }
     }
 
+    // initialized to suppress maybe-uninitialized warnings in GCC
+    T last_written = {};
+
+    bool has_written = false;
+
     while (!merge_heap.empty()) {
         std::pair<T, uint32_t> smallest = merge_heap.pop();
-        on_new_item(smallest.first);
 
-        bool found = true;
-        uint32_t chunk_index = smallest.second;
-        while (found && chunk_files[chunk_index]
-               && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
-                                                sizeof(T))) {
-            found = merge_heap.emplace(data_item, chunk_index);
+        if (!has_written || smallest.first != last_written) {
+            has_written = true;
+            on_new_item(smallest.first);
+            last_written = smallest.first;
+        }
+
+        if (chunk_files[smallest.second]
+             && chunk_files[smallest.second].read(reinterpret_cast<char *>(&data_item),
+                                                  sizeof(T))) {
+            merge_heap.emplace(data_item, smallest.second);
             num_elements++;
         }
     }
