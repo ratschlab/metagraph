@@ -51,6 +51,7 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
                   int64_t(config.alignment_gap_extension_penalty));
     logger->trace("\t Min DP table cell score: {}", int64_t(config.alignment_min_cell_score));
     logger->trace("\t Min alignment score: {}", config.alignment_min_path_score);
+    logger->trace("\t Bandwidth: {}", config.alignment_vertical_bandwidth);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {
