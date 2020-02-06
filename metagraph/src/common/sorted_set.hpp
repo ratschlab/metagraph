@@ -27,8 +27,7 @@ class SortedSet {
 
     SortedSet(std::function<void(storage_type *)> cleanup = [](storage_type *) {},
               size_t num_threads = 1,
-              size_t reserved_num_elements = 0,
-              const std::string & /* tmp_dir */ = "")
+              size_t reserved_num_elements = 0)
           : num_threads_(num_threads), cleanup_(cleanup) {
         reserve(reserved_num_elements);
     }

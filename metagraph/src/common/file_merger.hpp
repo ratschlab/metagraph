@@ -174,9 +174,9 @@ uint64_t merge_files(const std::vector<std::string> sources,
 
     MergingHeap<T, C> merge_heap;
     std::pair<T, C> data_item;
-    char *buffer = new char[sources.size() * 1024 * 1024];
+    std::unique_ptr<char []> buffer(new char[sources.size() * 1024 * 1024]);
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        chunk_files[i].rdbuf()->pubsetbuf((buffer + i * 1024 * 1024), 1024 * 1024);
+        chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
         if (!chunk_files[i].good()) {
             logger->error("Unable to open chunk file '{}'", sources[i]);
@@ -219,9 +219,8 @@ uint64_t merge_files(const std::vector<std::string> sources,
     }
     on_new_item({ std::get<0>(current), std::get<1>(current) });
 
-    std::for_each(sources.begin(), sources.end(),
-                  [](const std::string &s) { std::filesystem::remove(s); });
-    delete[] buffer;
+    //    std::for_each(sources.begin(), sources.end(),
+    //                  [](const std::string &s) { std::filesystem::remove(s); });
 
     return num_elements;
 }

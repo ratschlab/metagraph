@@ -141,7 +141,7 @@ TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -166,7 +166,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
 
 TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
     ASSERT_TRUE(TypeParam::kWeighted);
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -204,7 +204,7 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
 TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
     ASSERT_TRUE(TypeParam::kWeighted);
 
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -247,7 +247,7 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -273,7 +273,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionLong) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20'000, container);
@@ -290,7 +290,7 @@ TYPED_TEST(BOSSConstruct, ConstructionLong) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionShort) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20'000, container);

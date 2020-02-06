@@ -82,11 +82,11 @@ class KmerCollector {
 
     // FYI: This function should be used only in special cases.
     //      In general, use `add_sequences` if possible, to make use of multiple threads.
-    void add_kmer(const KMER &kmer) { kmers_.insert(&kmer, &kmer + 1); }
+    void add_kmer(const KMER &kmer) { kmers_->insert(&kmer, &kmer + 1); }
 
-    inline Data &data() { join(); return kmers_.data(); }
+    inline Data &data() { join(); return kmers_->data(); }
 
-    void clear() { join(); kmers_.clear(); }
+    void clear() { join(); kmers_->clear(); }
 
     inline bool is_both_strands_mode() const { return both_strands_mode_; }
     inline size_t num_threads() const { return num_threads_; }
@@ -103,7 +103,7 @@ class KmerCollector {
     void join();
 
     size_t k_;
-    Container kmers_;
+    std::unique_ptr<Container> kmers_;
 
     size_t num_threads_;
     ThreadPool thread_pool_;

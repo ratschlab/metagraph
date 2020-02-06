@@ -63,8 +63,13 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        std::filesystem::path tmp_dir
-                = config->tmp_dir / ("metagraph_" + utils::random_string(8));
+        std::filesystem::path tmp_dir;
+        for(;;) {
+           tmp_dir = config->tmp_dir / ("metagraph_" + utils::random_string(8));
+           if (!std::filesystem::exists(tmp_dir)) {
+               break;
+           }
+        }
         std::filesystem::create_directory(tmp_dir);
         logger->trace("Setting temporary directory to {}", tmp_dir);
 
@@ -83,7 +88,8 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                    config->container, tmp_dir);
+                config->container,
+                tmp_dir);
 
             parse_sequences(files, *config, timer,
                 [&](std::string_view seq) { constructor->add_sequence(seq); },

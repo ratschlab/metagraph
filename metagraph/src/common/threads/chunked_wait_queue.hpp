@@ -241,8 +241,7 @@ class ChunkedWaitQueue {
     void flush() {
         bool was_all_read = !iterator_.can_increment();
         for (auto &v : write_buf_) {
-            last_++;
-            if (last_ >= buffer_size_) {
+            if (++last_ >= buffer_size_) {
                 last_ = 0;
             }
             buffer_[last_] = std::move(v);
