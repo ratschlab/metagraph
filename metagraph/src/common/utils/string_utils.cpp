@@ -1,15 +1,9 @@
 #include "string_utils.hpp"
 
 #include <algorithm>
-#include <cassert>
-#include <cmath>
-#include <random>
 
 
 namespace utils {
-
-static std::random_device device;
-static std::mt19937 generator(device());
 
 bool ends_with(const std::string &str, const std::string &suffix) {
     auto actual_suffix = str.substr(
@@ -90,21 +84,6 @@ std::deque<std::string> generate_strings(const std::string &alphabet,
     }
     assert(suffixes.size() == std::pow(alphabet.size(), length));
     return suffixes;
-}
-
-std::string random_string(size_t length) {
-    auto get_random_char = []() -> char {
-        static constexpr char charset[]
-                = "0123456789"
-                  "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                  "abcdefghijklmnopqrstuvwxyz";
-        static constexpr size_t max_index = (sizeof(charset) - 2);
-        static std::uniform_int_distribution<int> distribution(0, max_index);
-        return charset[distribution(generator)];
-    };
-    std::string str(length, 0);
-    std::generate_n(str.begin(), length, get_random_char);
-    return str;
 }
 
 } // namespace utils

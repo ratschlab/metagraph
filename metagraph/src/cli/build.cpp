@@ -63,13 +63,9 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        std::filesystem::path tmp_dir;
-        for(;;) {
-           tmp_dir = config->tmp_dir / ("metagraph_" + utils::random_string(8));
-           if (!std::filesystem::exists(tmp_dir)) {
-               break;
-           }
-        }
+        char* tmp_dir_str = strdup((config->tmp_dir / "XXXXXX").c_str());
+        mkdtemp(tmp_dir_str);
+        std::filesystem::path tmp_dir(tmp_dir_str);
         std::filesystem::create_directory(tmp_dir);
         logger->trace("Setting temporary directory to {}", tmp_dir);
 

@@ -32,12 +32,6 @@ std::vector<std::string> split_string(const std::string &string,
 std::deque<std::string> generate_strings(const std::string &alphabet,
                                          size_t length);
 
-/**
- * Create a random string of the given length. The string will contain A-Z,a-z and 0-9.
- */
-std::string random_string( size_t length );
-
-
 } // namespace utils
 
 #endif // __STRING_UTILS_HPP__
