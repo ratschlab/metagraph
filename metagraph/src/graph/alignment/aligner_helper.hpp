@@ -10,7 +10,7 @@
 #include <cassert>
 
 #include <json/json.h>
-#include <tsl/ordered_map.h>
+#include <tsl/hopscotch_map.h>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
@@ -494,7 +494,7 @@ class DPTable {
                   int8_t gap_opening_penalty,
                   int8_t gap_extension_penalty);
 
-    typedef tsl::ordered_map<NodeType, Column> Storage;
+    typedef tsl::hopscotch_map<NodeType, Column> Storage;
 
     typedef NodeType key_type;
     typedef Column mapped_type;
@@ -528,7 +528,7 @@ class DPTable {
                             const char *align_start,
                             bool orientation,
                             score_t min_path_score,
-                            const value_type *start_node = nullptr);
+                            NodeType *node = nullptr);
 
     const Storage& data() const { return dp_table_; }
 

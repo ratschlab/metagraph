@@ -136,8 +136,7 @@ class Extender {
 };
 
 
-template <typename NodeType = typename DeBruijnGraph::node_index,
-          class Compare = std::less<typename DPTable<NodeType>::Column>>
+template <typename NodeType = typename DeBruijnGraph::node_index>
 class DefaultColumnExtender : public Extender<NodeType> {
   public:
     typedef typename Extender<NodeType>::DBGAlignment DBGAlignment;
@@ -170,15 +169,6 @@ class DefaultColumnExtender : public Extender<NodeType> {
     // compute perfect match scores for all suffixes
     // used for branch and bound checks
     std::vector<score_t> partial_sums_;
-
-    struct ColumnPriorityFunction {
-        bool operator()(const typename DPTable<NodeType>::value_type* a,
-                        const typename DPTable<NodeType>::value_type* b) const {
-            return compare_(a->second, b->second);
-        }
-
-        static constexpr Compare compare_ = Compare();
-    };
 };
 
 

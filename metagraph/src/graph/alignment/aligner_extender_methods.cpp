@@ -14,6 +14,9 @@
 template <typename T>
 using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
+template <typename NodeType, typename score_t = typename DPTable<NodeType>::score_t>
+using ColumnRef = std::pair<NodeType, score_t>;
+
 
 /*
  * Helpers for DefaultColumnExtender::operator()
@@ -23,14 +26,14 @@ using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 template <typename NodeType,
           typename Column = typename DPTable<NodeType>::Column,
           typename score_t = typename DPTable<NodeType>::score_t>
-inline std::vector<const typename DPTable<NodeType>::value_type*>
+inline std::vector<ColumnRef<NodeType>>
 get_outgoing_columns(const DeBruijnGraph &graph,
                      DPTable<NodeType> &dp_table,
                      NodeType cur_node,
                      size_t size,
                      size_t best_pos,
                      score_t min_cell_score) {
-    std::vector<const typename DPTable<NodeType>::value_type*> out_columns;
+    std::vector<ColumnRef<NodeType>> out_columns;
 
     graph.call_outgoing_kmers(
         cur_node,
@@ -54,7 +57,7 @@ get_outgoing_columns(const DeBruijnGraph &graph,
             }
 
             assert(find != dp_table.end());
-            out_columns.emplace_back(&*find);
+            out_columns.emplace_back(find->first, find->second.best_score());
         }
     );
 
@@ -380,12 +383,20 @@ inline size_t update_column_avx2(bool &updated,
 #endif
 
 
+template <class Pair>
+struct LessSecond {
+    bool operator()(const Pair &a, const Pair &b) const {
+        return a.second < b.second;
+    }
+};
+
+
 /*
  * DefaultColumnExtender::operator()
  */
 
-template <typename NodeType, class Compare>
-void DefaultColumnExtender<NodeType, Compare>
+template <typename NodeType>
+void DefaultColumnExtender<NodeType>
 ::operator()(const DBGAlignment &path,
              std::string_view query,
              std::function<void(DBGAlignment&&)> callback,
@@ -410,9 +421,11 @@ void DefaultColumnExtender<NodeType, Compare>
         return;
 
     // keep track of which columns to use next
-    BoundedPriorityQueue<const typename DPTable<NodeType>::value_type*,
-                         std::vector<const typename DPTable<NodeType>::value_type*>,
-                         ColumnPriorityFunction> columns_to_update(config_.queue_size);
+    BoundedPriorityQueue<ColumnRef<NodeType>,
+                         std::vector<ColumnRef<NodeType>>,
+                         LessSecond<ColumnRef<NodeType>>> columns_to_update(
+        config_.queue_size
+    );
 
     dp_table.clear();
     if (!dp_table.add_seed(graph_,
@@ -436,13 +449,14 @@ void DefaultColumnExtender<NodeType, Compare>
     AlignedVector<node_index> update_prevs;
 
     // dynamic programming
-    // keep track of node and position in column to start backtracking
-    // store raw pointer since they are not invalidated by emplace
-    const auto *start_node = &*dp_table.begin();
-    columns_to_update.emplace(&*dp_table.begin());
+    NodeType start_node = path.back();
+    score_t start_score = dp_table.find(start_node)->second.best_score();
+    columns_to_update.emplace(start_node, start_score);
+    start_score = std::max(start_score, min_path_score);
     while (columns_to_update.size()) {
-        const auto* cur_col = columns_to_update.pop_top();
-        auto cur_node = cur_col->first;
+        const auto next_pair = columns_to_update.pop_top();
+        const auto *cur_col = &*dp_table.find(next_pair.first);
+        auto cur_node = next_pair.first;
 
         // get next columns
         auto out_columns = get_outgoing_columns(graph_,
@@ -453,8 +467,8 @@ void DefaultColumnExtender<NodeType, Compare>
                                                 config_.min_cell_score);
 
         // update columns
-        for (auto *iter : out_columns) {
-            auto next_node = iter->first;
+        for (auto &[next_node, next_score] : out_columns) {
+            auto *iter = &*dp_table.find(next_node);
             auto &next_column = const_cast<typename DPTable<NodeType>::Column&>(
                 iter->second
             );
@@ -553,40 +567,37 @@ void DefaultColumnExtender<NodeType, Compare>
 
                 next_column.best_pos = max_pos - next_column.scores.begin();
 
-                if (*max_pos > start_node->second.best_score())
-                    start_node = iter;
+                if (*max_pos > start_score) {
+                    start_node = iter->first;
+                    start_score = iter->second.best_score();
+                }
 
                 // branch and bound
                 // TODO: this cuts off too early (before the scores have converged)
                 //       so the code below has to be used to compute correct scores
-                auto best_score = std::max(start_node->second.best_score(),
-                                           min_path_score);
-
                 if (!std::equal(match_score_begin + overall_begin,
                                 match_score_begin + overall_end,
                                 next_column.scores.begin() + overall_begin,
-                                [&](auto a, auto b) { return a + b < best_score; }))
-                    columns_to_update.emplace(iter);
+                                [&](auto a, auto b) { return a + b < start_score; }))
+                    columns_to_update.emplace(iter->first, iter->second.best_score());
             }
         }
     }
 
-    assert(start_node->second.best_score() > config_.min_cell_score);
+    assert(start_score > config_.min_cell_score);
 
     // no good path found
-    if (UNLIKELY(start_node->first == SequenceGraph::npos
-            || (start_node->first == path.back() && !start_node->second.best_pos)
-            || start_node->second.best_score() < min_path_score))
+    if (UNLIKELY(start_node == SequenceGraph::npos || start_score == path.get_score()))
         return;
 
     // check to make sure that start_node stores the best starting point
-    assert(start_node->second.best_score()
+    assert(start_score
         == std::max_element(dp_table.begin(), dp_table.end(),
                             [](const auto &a, const auto &b) {
                                 return a.second < b.second;
                             })->second.best_score());
 
-    assert(start_node->second.best_op() == Cigar::Operator::MATCH);
+    // assert(start_node->second.best_op() == Cigar::Operator::MATCH);
 
     // get all alignments
     dp_table.extract_alignments(graph_,
@@ -597,12 +608,12 @@ void DefaultColumnExtender<NodeType, Compare>
                                 align_start,
                                 orientation,
                                 min_path_score,
-                                start_node);
+                                &start_node);
 }
 
 
-template <typename NodeType, class Compare>
-void DefaultColumnExtender<NodeType, Compare>
+template <typename NodeType>
+void DefaultColumnExtender<NodeType>
 ::initialize_query(const std::string_view query) {
     dp_table.clear();
     partial_sums_.resize(query.size());

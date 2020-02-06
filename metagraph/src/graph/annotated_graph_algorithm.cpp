@@ -2,6 +2,8 @@
 
 #include <unordered_set>
 
+#include <tsl/ordered_map.h>
+
 #include "common/algorithms.hpp"
 #include "common/vectors/int_vector_algorithm.hpp"
 #include "kmer/alphabets.hpp"

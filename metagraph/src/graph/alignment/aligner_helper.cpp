@@ -67,12 +67,14 @@ void DPTable<NodeType>
                      const char *align_start,
                      bool orientation,
                      score_t min_path_score,
-                     const value_type *start_node) {
-    if (config.num_alternative_paths == 1 && start_node) {
+                     NodeType *node) {
+    if (config.num_alternative_paths == 1 && node) {
         // avoid sorting column iterators if we're only interested in the top path_
+        auto start_node = dp_table_.find(*node);
+        assert(start_node != dp_table_.end());
         Alignment<NodeType> alignment(*this,
                                       query,
-                                      start_node,
+                                      &*start_node,
                                       start_node->second.best_pos,
                                       start_node->second.best_score() - start_score,
                                       align_start,
