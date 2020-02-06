@@ -147,15 +147,12 @@ template <typename NodeType>
 void MEMSeeder<NodeType>
 ::call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const {
     size_t k = graph_.get_k();
-    auto it = query_nodes_.begin();
+
+    // find start of MEM
+    auto it = std::find_if(query_nodes_.begin(), query_nodes_.end(),
+                           [](NodeType node) { return node != DeBruijnGraph::npos; });
+
     while (it < query_nodes_.end()) {
-        // find start of MEM
-        it = std::find_if(it, query_nodes_.end(),
-                          [](NodeType node) { return node != DeBruijnGraph::npos; });
-
-        if (it == query_nodes_.end())
-            return;
-
         // find end of MEM
         auto next = std::find_if(
             it, query_nodes_.end(),
@@ -186,7 +183,8 @@ void MEMSeeder<NodeType>
 
         // if this k-mer was matched, then the next one will be accessible
         // by an extend call, so there's no need to seed from it
-        it = next;
+        it = std::find_if(next + 1, query_nodes_.end(),
+                          [](NodeType node) { return node != DeBruijnGraph::npos; });
     }
 }
 
