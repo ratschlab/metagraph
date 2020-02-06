@@ -1,5 +1,7 @@
 #include "string_utils.hpp"
 
+#include <cmath>
+#include <cassert>
 #include <algorithm>
 
 

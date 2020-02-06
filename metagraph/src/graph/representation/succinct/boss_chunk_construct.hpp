@@ -3,6 +3,7 @@
 
 #include <string>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 
 #include "kmer/kmer_collector_config.hpp"

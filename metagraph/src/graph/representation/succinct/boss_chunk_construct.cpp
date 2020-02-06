@@ -1,7 +1,5 @@
 #include "boss_chunk_construct.hpp"
 
-#include <filesystem>
-
 #include <ips4o.hpp>
 
 #include "common/circular_buffer.hpp"
