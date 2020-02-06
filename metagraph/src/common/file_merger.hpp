@@ -85,16 +85,11 @@ uint64_t merge_files(const std::vector<std::string> sources,
         }
     }
 
-    // initialized to suppress maybe-uninitialized warnings in GCC
-    T last_written = {};
-
-    bool has_written = false;
-
+    std::optional<T> last_written;
     while (!merge_heap.empty()) {
         std::pair<T, uint32_t> smallest = merge_heap.pop();
 
-        if (!has_written || smallest.first != last_written) {
-            has_written = true;
+        if (!last_written.has_value() || smallest.first != last_written.value()) {
             on_new_item(smallest.first);
             last_written = smallest.first;
         }
