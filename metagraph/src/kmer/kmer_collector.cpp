@@ -216,7 +216,7 @@ KmerCollector<KMER, KmerExtractor, Container>
     size_t num_elements = memory_preallocated / sizeof(typename Container::value_type);
     if constexpr ((utils::is_instance<Container, common::SortedSetDisk> {}
                    || utils::is_instance<Container, common::SortedMultisetDisk> {})) {
-        if (filter_suffix_encoded_.empty()) {
+        if (!filter_suffix_encoded_.empty()) {
             common::logger->error("Disk based sorting does not support chunking");
             exit(1);
         }
