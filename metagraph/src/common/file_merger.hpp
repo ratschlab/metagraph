@@ -18,12 +18,12 @@ namespace common {
  */
 // Note: profiling shows that using a sorted vector instead of a std::priority queue is
 // faster if the queue has less than ~45 elements. This is the case for us, as each
-// element represents a 1GB chunk, and SRAs typically expand to ~15 chunks. Using an
+// element represents a >1GB chunk, and SRAs typically expand to ~15 chunks. Using an
 // unsorted vector (faster insert, slower pop()) is ~40% slower. Preventing duplicates
 // in the heap so that we don't need to test for dupes at pop time is ~60% slower.
 template <typename T>
 class VectorHeap {
-    /** The heap stores triplets of the form <Element, Count, SourceIndex> */
+    /** The heap stores pairs of the form <Element, SourceIndex>  in descending order */
     using value_type = std::pair<T, uint32_t>;
 
   public:
@@ -45,7 +45,7 @@ class VectorHeap {
     bool empty() { return els.empty(); }
 
   private:
-    // elements stored in decreasing order of the first tuple member
+    // elements stored in decreasing order of T
     std::vector<value_type> els;
 };
 
