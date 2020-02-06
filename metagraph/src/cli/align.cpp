@@ -294,81 +294,78 @@ int align_to_graph(Config *config) {
         builder["indentation"] = "";
 
         read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-            thread_pool.enqueue([&](std::string query,
-                                    std::string header) {
-                    auto paths = aligner->align(query);
+            thread_pool.enqueue([&](std::string query, std::string header) {
+                auto paths = aligner->align(query);
 
-                    std::ostringstream ostr;
-                    if (!config->output_json) {
-                        for (const auto &path : paths) {
-                            const auto& path_query = path.get_orientation()
-                                ? paths.get_query_reverse_complement()
-                                : paths.get_query();
+                std::ostringstream ostr;
+                if (!config->output_json) {
+                    for (const auto &path : paths) {
+                        const auto& path_query = path.get_orientation()
+                            ? paths.get_query_reverse_complement()
+                            : paths.get_query();
 
-                            ostr << header << "\t"
-                                 << path_query << "\t"
-                                 << path
-                                 << std::endl;
-                        }
-
-                        if (paths.empty())
-                            ostr << header << "\t"
-                                 << query << "\t"
-                                 << "*\t*\t"
-                                 << config->alignment_min_path_score << "\t*\t*\t*"
-                                 << std::endl;
-                    } else {
-                        bool secondary = false;
-                        for (const auto &path : paths) {
-                            const auto& path_query = path.get_orientation()
-                                ? paths.get_query_reverse_complement()
-                                : paths.get_query();
-
-                            ostr << Json::writeString(
-                                        builder,
-                                        path.to_json(path_query,
-                                                     *graph,
-                                                     secondary,
-                                                     header)
-                                    )
-                                 << std::endl;
-
-                            secondary = true;
-                        }
-
-                        if (paths.empty()) {
-                            ostr << Json::writeString(
-                                        builder,
-                                        DBGAligner<>::DBGAlignment().to_json(
-                                            query,
-                                            *graph,
-                                            secondary,
-                                            header)
-                                    )
-                                 << std::endl;
-                        }
+                        ostr << header << "\t"
+                             << path_query << "\t"
+                             << path
+                             << std::endl;
                     }
 
-                    auto lock = std::lock_guard<std::mutex>(print_mutex);
-                    *outstream << ostr.str();
-                },
-                std::string(read_stream->seq.s),
-                config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                    && read_stream->comment.l
-                        ? utils::join_strings(
-                            { read_stream->name.s, read_stream->comment.s },
-                            config->fasta_anno_comment_delim,
-                            true)
-                        : std::string(read_stream->name.s)
-            );
+                    if (paths.empty())
+                        ostr << header << "\t"
+                             << query << "\t"
+                             << "*\t*\t"
+                             << config->alignment_min_path_score << "\t*\t*\t*"
+                             << std::endl;
+                } else {
+                    bool secondary = false;
+                    for (const auto &path : paths) {
+                        const auto& path_query = path.get_orientation()
+                            ? paths.get_query_reverse_complement()
+                            : paths.get_query();
 
-            logger->trace("File '{}' processed in {} sec, "
-                          "current mem usage: {} MiB, total time {} sec",
-                          file, data_reading_timer.elapsed(),
-                          get_curr_RSS() >> 20, timer.elapsed());
+                        ostr << Json::writeString(
+                                    builder,
+                                    path.to_json(path_query,
+                                                 *graph,
+                                                 secondary,
+                                                 header)
+                                )
+                             << std::endl;
+
+                        secondary = true;
+                    }
+
+                    if (paths.empty()) {
+                        ostr << Json::writeString(
+                                    builder,
+                                    DBGAligner<>::DBGAlignment().to_json(
+                                        query,
+                                        *graph,
+                                        secondary,
+                                        header)
+                                )
+                             << std::endl;
+                    }
+                }
+
+                auto lock = std::lock_guard<std::mutex>(print_mutex);
+                *outstream << ostr.str();
+            }, std::string(read_stream->seq.s),
+               config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                   && read_stream->comment.l
+                       ? utils::join_strings(
+                           { read_stream->name.s, read_stream->comment.s },
+                           config->fasta_anno_comment_delim,
+                           true)
+                       : std::string(read_stream->name.s));
         });
 
         thread_pool.join();
+
+        logger->trace("File '{}' processed in {} sec, "
+                      "current mem usage: {} MiB, total time {} sec",
+                      file, data_reading_timer.elapsed(),
+                      get_curr_RSS() >> 20, timer.elapsed());
 
         if (config->outfbase.size())
             delete outstream;
