@@ -455,15 +455,19 @@ void DefaultColumnExtender<NodeType>
     start_score = std::max(start_score, min_path_score);
     while (columns_to_update.size()) {
         const auto next_pair = columns_to_update.pop_top();
-        const auto *cur_col = &*dp_table.find(next_pair.first);
-        auto cur_node = next_pair.first;
+        const auto &cur_col = dp_table.find(next_pair.first)->second;
+
+        // if this happens, then it means that the column was in the priority
+        // queue multiple times, so we don't need to consider it again
+        if (next_pair.second != cur_col.best_score())
+            continue;
 
         // get next columns
         auto out_columns = get_outgoing_columns(graph_,
                                                 dp_table,
-                                                cur_node,
+                                                next_pair.first,
                                                 size,
-                                                cur_col->second.best_pos,
+                                                cur_col.best_pos,
                                                 config_.min_cell_score);
 
         // update columns
