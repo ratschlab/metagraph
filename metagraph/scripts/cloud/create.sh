@@ -26,7 +26,7 @@ function execute {
 
 # check the command-line arguments
 if [ "$#" -ne 3 ]; then
-	    echo_err "Usage: create.sh <sra_id> <input_dir> <output_dir>"
+	    echo_err "Usage: build.sh <sra_id> <input_dir> <output_dir>"
 	    exit 1
 fi
 
@@ -47,7 +47,10 @@ if [[ -z "${input_filenames// }" ]]; then
   echo_err "No input files given. Good-bye."
   exit 1
 fi
-mkdir -p "$output_dir"
-execute metagraph build -v -p 4 -k 31 --container vector_disk --canonical --count-kmers -o "${output_dir}/${sra_number}"  $input_filenames
+mkdir -p "${output_dir}"
+tmp_dir="${output_dir}/tmp"
+mkdir -p "${tmp_dir}"
+execute metagraph build -v -p 4 -k 31 --container vector_disk --canonical --count-kmers -o "${output_dir}/${sra_number}" --mem-cap-gb 3 --tmp_dir ${tmp_dir}  ${input_filenames}
 execute rm -rf "${input_dir}"
-echo "Create script finished."
+execute rm -rf ${tmp_dir}
+echo "Build script finished."

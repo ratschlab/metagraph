@@ -13,22 +13,22 @@ import urllib.request
 args = None
 
 download_processes = {}
-create_processes = {}
+build_processes = {}
 clean_processes = {}
 transfer_processes = {}
 
-# the location (host:/path) where clean and create get their files from; used to clean up files that are processed
-create_source = {}
+# the location (host:/path) where clean and build get their files from; used to clean up files that are processed
+build_source = {}
 clean_source = {}
 
 MAX_DOWNLOAD_PROCESSES = 1
-MAX_CREATE_PROCESSES = 1
+MAX_BUILD_PROCESSES = 1
 MAX_CLEAN_PROCESSES = 4
 
 
 def get_work():
     url = f'http://{args.server_host}:{args.server_port}/jobs?download={len(download_processes)}&' \
-          f'create={len(create_processes)}&clean={len(clean_processes)}&client_id={args.client_id}'
+          f'build={len(build_processes)}&clean={len(clean_processes)}&client_id={args.client_id}'
     for i in range(10):
         try:
             response = urllib.request.urlopen(url)
@@ -56,16 +56,16 @@ def download_dir(sra_id):
     return os.path.join(download_dir_base(), sra_id)
 
 
-def create_dir_base():
+def build_dir_base():
     return os.path.join(args.output_dir, 'graphs')
 
 
-def create_dir(sra_id):
-    return os.path.join(create_dir_base(), sra_id)
+def build_dir(sra_id):
+    return os.path.join(build_dir_base(), sra_id)
 
 
-def create_file(sra_id):
-    return os.path.join(create_dir(sra_id), f'{sra_id}.dbg')
+def build_file(sra_id):
+    return os.path.join(build_dir(sra_id), f'{sra_id}.dbg')
 
 
 def clean_dir():
@@ -92,10 +92,10 @@ def internal_ip():
         return '127.0.0.1'  # this usually happens on dev laptops; cloud machines work fine
 
 
-def start_create(sra_id, location):
+def start_build(sra_id, location):
     input_dir_base = download_dir_base()
     if not location.startswith(internal_ip()):
-        create_source[sra_id] = location
+        build_source[sra_id] = location
         return_code = subprocess.call(['scp', '-r', location, input_dir_base])
         if return_code != 0:
             logging.warning(f'Copying from {location} to {input_dir_base} failed')
@@ -105,8 +105,8 @@ def start_create(sra_id, location):
     else:
         logging.info(f'Luckily {location} already is on this machine.')
     input_dir = download_dir(sra_id)
-    output_dir = create_dir(sra_id)
-    create_processes[sra_id] = subprocess.Popen(['./create.sh', sra_id, input_dir, output_dir])
+    output_dir = build_dir(sra_id)
+    build_processes[sra_id] = subprocess.Popen(['./build.sh', sra_id, input_dir, output_dir])
     return True
 
 
@@ -118,7 +118,7 @@ def make_dir_if_needed(path):
 
 
 def start_clean(sra_id, location):
-    input_dir = create_dir_base()
+    input_dir = build_dir_base()
     if not location.startswith(internal_ip()):
         clean_source[sra_id] = location
         return_code = subprocess.call(['scp', '-r', location, input_dir])
@@ -129,7 +129,7 @@ def start_clean(sra_id, location):
             logging.info(f'Copying from {location} to {input_dir} completed successfully')
     else:
         logging.info('Luckily the files to use for building the graph already are on this machine.')
-    input_file = create_file(sra_id)
+    input_file = build_file(sra_id)
     output_file = os.path.join(clean_dir(), sra_id)
     clean_processes[sra_id] = subprocess.Popen(['./clean.sh', sra_id, input_file, output_file])
     return True
@@ -142,7 +142,7 @@ def start_transfer(sra_id, cleaned_graph_location):
 
 def is_full():
     return len(download_processes) == MAX_DOWNLOAD_PROCESSES and (
-            len(clean_processes) == MAX_CLEAN_PROCESSES or len(create_processes) == MAX_CREATE_PROCESSES)
+            len(clean_processes) == MAX_CLEAN_PROCESSES or len(build_processes) == MAX_BUILD_PROCESSES)
 
 
 def ack(operation, sra_id, location):
@@ -206,32 +206,32 @@ def check_status():
     for d in completed_downloads:
         del download_processes[d]
 
-    completed_creates = set()
-    for sra_id, create_process in create_processes.items():
-        return_code = create_process.poll()
+    completed_builds = set()
+    for sra_id, build_process in build_processes.items():
+        return_code = build_process.poll()
 
         if return_code is not None:
-            completed_creates.add(sra_id)
+            completed_builds.add(sra_id)
             # clean up the download path; if adding retries, do this only on success
-            if sra_id in create_source:
-                download_path = create_source[sra_id]
+            if sra_id in build_source:
+                download_path = build_source[sra_id]
                 logging.info(f'Cleaning up {download_path}')
                 parsed_download_path = urllib.parse.urlparse(download_path)
                 subprocess.run(['ssh', parsed_download_path.scheme, f'rm -rf {parsed_download_path.path}'])
-                del create_source[sra_id]
+                del build_source[sra_id]
 
             if return_code == 0:
                 logging.info(f'Building graph for SRA id {sra_id} completed successfully.')
-                location = f'{internal_ip()}:{create_dir(sra_id)}'
+                location = f'{internal_ip()}:{build_dir(sra_id)}'
 
-                if not ack('create', sra_id, location):  # all done, yay!
+                if not ack('build', sra_id, location):  # all done, yay!
                     return False;
             else:
                 logging.warning(f'Building graph for SRA id {sra_id} failed.')
-                if not nack('create', sra_id):
+                if not nack('build', sra_id):
                     return False  # this shouldn't happen, as we still have work to do
-    for d in completed_creates:
-        del create_processes[d]
+    for d in completed_builds:
+        del build_processes[d]
 
     completed_cleans = set()
     for sra_id, clean_process in clean_processes.items():
@@ -295,9 +295,9 @@ def do_work():
             break
         if 'download' in work_response:
             start_download(work_response['download'])
-        if 'create' in work_response:
-            if not start_create(work_response['create']['id'], work_response['create']['location']):
-                nack('create', work_response['create']['id'])
+        if 'build' in work_response:
+            if not start_build(work_response['build']['id'], work_response['build']['location']):
+                nack('build', work_response['build']['id'])
         if 'clean' in work_response:
             if not start_clean(work_response['clean']['id'], work_response['clean']['location']):
                 nack('clean', work_response['clean']['id'])
@@ -309,7 +309,7 @@ def check_env():
     directories """
 
     make_dir_if_needed(download_dir_base())
-    make_dir_if_needed(create_dir_base())
+    make_dir_if_needed(build_dir_base())
     make_dir_if_needed(clean_dir())
 
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
@@ -322,7 +322,7 @@ def check_env():
         exit(1)
 
     make_dir_if_needed(download_dir_base())
-    make_dir_if_needed(create_dir_base())
+    make_dir_if_needed(build_dir_base())
     make_dir_if_needed(clean_dir())
 
 

@@ -18,19 +18,19 @@ args = None  # the parsed command line arguments
 
 # jobs done
 downloaded_sras = {}  # the downloaded sras
-created_sras = {}  # the sras for which a BOSS graph was generated
+built_sras = {}  # the sras for which a BOSS graph was generated
 cleaned_sras = {}  # the sras for which the BOSS graph was cleaned (so processing is completed)
 transferred_sras = {}  # the sras that were successfully transferred to permanent storage
 
 # jobs in the queue (waiting for a worker)
 sra_download_gen = None  # the generator function that returns the next SRA id to be downloaded
-to_create_sras = {}
+to_build_sras = {}
 to_clean_sras = {}
 to_transfer_sras = {}
 
 # jobs currently being processed by a worker
 pending_downloads = set()
-pending_creates = set()
+pending_builds = set()
 pending_cleans = set()
 pending_transfers = set()
 
@@ -45,18 +45,18 @@ status_str = f"""
 <body>
 <h3> Pending jobs </h3>
 <p>Pending downloads: %s</p>
-<p>Pending create: %s</p>
+<p>Pending build: %s</p>
 <p>Pending clean: %s</p>
 <p>Pending transfer: %s</p>
 
 <h3> Jobs waiting to be scheduled </h3>
-<p>Waiting create: %s</p>
+<p>Waiting build: %s</p>
 <p>Waiting clean: %s</p>
 <p>Waiting transfer: %s</p>
 
 <h3> Jobs completed </h3>
 <p>Completed downloads: %s </p>
-<p>Completed create: %s</p>
+<p>Completed build: %s</p>
 <p>Completed clean: %s</p>
 <p>Completed transfer: %s</p>
 
@@ -76,13 +76,13 @@ def should_download():
     """ Returns true if it makes sense to download more data for processing, e.g. if we don't already have a
     large number of downloads waiting to be processed"""
 
-    return len(to_create_sras) < 10 and len(to_create_sras) < 3 * args.worker_count
+    return len(to_build_sras) < 10 and len(to_build_sras) < 3 * args.worker_count
 
 
-def should_create():
-    """ Returns true if it makes sense to create rather than clean """
+def should_build():
+    """ Returns true if it makes sense to build rather than clean """
 
-    return len(to_create_sras) <= len(to_clean_sras) or len(to_clean_sras) < 4 * args.worker_count
+    return len(to_build_sras) <= len(to_clean_sras) or len(to_clean_sras) < 4 * args.worker_count
 
 
 class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -92,14 +92,14 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         """ Handles a request for a new job """
 
         download_jobs = params.get('download')
-        create_jobs = params.get('create')
+        build_jobs = params.get('build')
         clean_jobs = params.get('clean')
-        if None in (download_jobs, create_jobs, clean_jobs):
-            self.send_reply(400, "One of 'download', 'create' or 'clean' parameters is missing\n")
+        if None in (download_jobs, build_jobs, clean_jobs):
+            self.send_reply(400, "One of 'download', 'build' or 'clean' parameters is missing\n")
             return
         global download_done
         if download_done and not (
-                to_create_sras or to_clean_sras or to_transfer_sras or pending_downloads or pending_creates
+                to_build_sras or to_clean_sras or to_transfer_sras or pending_downloads or pending_builds
                 or pending_cleans or pending_transfers):
             self.send_reply(204, 'All done, feel free to exit and pat yourself on the back')
         response = {}
@@ -112,13 +112,13 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 pending_downloads.add(sra_id_line[0])
             except StopIteration:
                 download_done = True  # nothing else to download
-        create_jobs_int = int(create_jobs[0])
+        build_jobs_int = int(build_jobs[0])
         clean_jobs_int = int(clean_jobs[0])
-        if create_jobs_int == 0:  # if we have a create job, we're done - the machine is full
-            if to_create_sras and clean_jobs_int == 0 and should_create():
-                sra_id, directory = to_create_sras.popitem()
-                response['create'] = {'id': sra_id, 'location': directory}
-                pending_creates.add(sra_id)
+        if build_jobs_int == 0:  # if we have a build job, we're done - the machine is full
+            if to_build_sras and clean_jobs_int == 0 and should_build():
+                sra_id, directory = to_build_sras.popitem()
+                response['build'] = {'id': sra_id, 'location': directory}
+                pending_builds.add(sra_id)
             elif to_clean_sras and (0 <= clean_jobs_int < 4):  # there is room for more clean jobs
                 sra_id, dbg_file = to_clean_sras.popitem()
                 response['clean'] = {'id': sra_id, 'location': dbg_file}
@@ -127,8 +127,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def handle_get_status(self):
         self.send_reply(200, status_str % (
-            pending_downloads, pending_creates, pending_cleans, pending_transfers, to_create_sras, to_clean_sras,
-            to_transfer_sras, downloaded_sras, created_sras, cleaned_sras, transferred_sras),
+            pending_downloads, pending_builds, pending_cleans, pending_transfers, to_build_sras, to_clean_sras,
+            to_transfer_sras, downloaded_sras, built_sras, cleaned_sras, transferred_sras),
                         {'Content-type': 'text/html'})
 
     def handle_ack(self, operation, post_vars, add_maps, pending_operations):
@@ -164,10 +164,10 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id}')
 
     def handle_ack_download(self, post_vars):
-        self.handle_ack('download', post_vars, [downloaded_sras, to_create_sras], pending_downloads)
+        self.handle_ack('download', post_vars, [downloaded_sras, to_build_sras], pending_downloads)
 
-    def handle_ack_create(self, post_vars):
-        self.handle_ack('create', post_vars, [created_sras, to_clean_sras], pending_creates)
+    def handle_ack_build(self, post_vars):
+        self.handle_ack('build', post_vars, [built_sras, to_clean_sras], pending_builds)
 
     def handle_ack_clean(self, post_vars):
         if self.handle_ack('clean', post_vars, [cleaned_sras, to_transfer_sras], pending_cleans):
@@ -181,8 +181,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def handle_nack_download(self, post_vars):
         self.handle_nack('download', post_vars, pending_downloads)
 
-    def handle_nack_create(self, post_vars):
-        self.handle_nack('create', post_vars, pending_creates)
+    def handle_nack_build(self, post_vars):
+        self.handle_nack('build', post_vars, pending_builds)
 
     def handle_nack_clean(self, post_vars):
         self.handle_nack('clean', post_vars, pending_cleans)
@@ -202,7 +202,7 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def get_post_vars(self):
         ctype, pdict = cgi.parse_header(self.headers['content-type'])
         if ctype != 'application/x-www-form-urlencoded':
-            self.send_reply(400, "Bad content-type, only application/x-www-form-urlencoded accepted")
+            self.send_reply(400, 'Bad content-type, only application/x-www-form-urlencoded accepted')
             return None
         length = int(self.headers['content-length'])
         return urllib.parse.parse_qs(self.rfile.read(length), keep_blank_values=True)
@@ -226,16 +226,16 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             return
         if parsed_url.path == '/jobs/ack/download':
             self.handle_ack_download(post_vars)
-        elif parsed_url.path == '/jobs/ack/create':
-            self.handle_ack_create(post_vars)
+        elif parsed_url.path == '/jobs/ack/build':
+            self.handle_ack_build(post_vars)
         elif parsed_url.path == '/jobs/ack/clean':
             self.handle_ack_clean(post_vars)
         elif parsed_url.path == '/jobs/ack/transfer':
             self.handle_ack_transfer(post_vars)
         elif parsed_url.path == '/jobs/nack/download':
             self.handle_nack_download(post_vars)
-        elif parsed_url.path == '/jobs/nack/create':
-            self.handle_nack_create(post_vars)
+        elif parsed_url.path == '/jobs/nack/build':
+            self.handle_nack_build(post_vars)
         elif parsed_url.path == '/jobs/nack/clean':
             self.handle_nack_clean(post_vars)
         else:
@@ -248,7 +248,8 @@ def load_file_dict(filename):
         with open(filename) as fp:
             for line in fp:
                 tokens = line.split()
-                assert len(tokens) == 2, f'Invalid line in downloads sras {line}'
+                print(f'{filename} {tokens}')
+                assert len(tokens) == 2, 'Invalid line in downloads sras ' + line
                 result[tokens[0]] = tokens[1]
     except FileNotFoundError:  # no downloaded sras yet, that's fine
         return result
@@ -279,17 +280,17 @@ def init_state():
         except OSError as exc:  # Guard against race condition
             if exc.errno != errno.EEXIST:
                 raise
-    global downloaded_sras, created_sras, cleaned_sras, transferred_sras, to_create_sras, to_clean_sras, to_transfer_sras
+    global downloaded_sras, built_sras, cleaned_sras, transferred_sras, to_build_sras, to_clean_sras, to_transfer_sras
     downloaded_sras = load_file_dict(filename)
-    created_sras = load_file_dict(os.path.join(args.output_dir, 'succeed_create.id'))
+    built_sras = load_file_dict(os.path.join(args.output_dir, 'succeed_build.id'))
     cleaned_sras = load_file_dict(os.path.join(args.output_dir, 'succeed_clean.id'))
     transferred_sras = load_file_dict(os.path.join(args.output_dir, 'succeed_transfer.id'))
 
-    to_create_sras = {k: downloaded_sras[k] for k in set(downloaded_sras) - set(created_sras)}
-    to_clean_sras = {k: created_sras[k] for k in set(created_sras) - set(cleaned_sras)}
+    to_build_sras = {k: downloaded_sras[k] for k in set(downloaded_sras) - set(built_sras)}
+    to_clean_sras = {k: built_sras[k] for k in set(built_sras) - set(cleaned_sras)}
     to_transfer_sras = {k: cleaned_sras[k] for k in set(cleaned_sras) - set(transferred_sras)}
 
-    # TODO: this incorrect because we need the create paths, not the clean path; need to implement transfer jobs
+    # TODO: this incorrect because we need the build paths, not the clean path; need to implement transfer jobs
     to_clean_sras.update(to_transfer_sras)  # because we don't support transfer only jobs
     to_transfer_sras = {}
 

@@ -20,15 +20,15 @@ args = None
 sra_info = {}  # global information about a processed SRA (for now, time only)
 
 download_processes = {}
-create_processes = {}
+build_processes = {}
 clean_processes = {}
 transfer_processes = {}
 
-waiting_creates = collections.OrderedDict()
+waiting_builds = collections.OrderedDict()
 waiting_cleans = collections.OrderedDict()
 
 MAX_DOWNLOAD_PROCESSES = 1
-MAX_CREATE_PROCESSES = 1
+MAX_build_PROCESSES = 1
 MAX_CLEAN_PROCESSES = 4
 
 downloads_done = False
@@ -47,7 +47,7 @@ status_str = f"""
 <p>Transferring: %s</p>
 
 <h3> Waiting </h3>
-<p>Waiting creates %s</p>
+<p>Waiting builds %s</p>
 <p>Waiting cleans %s</p>
 
 <h3> Download status </h3>
@@ -60,7 +60,7 @@ Download done: %s
 
 def get_work():
     global downloads_done
-    if downloads_done or len(download_processes) > 0 or len(waiting_creates) > 0:
+    if downloads_done or len(download_processes) > 0 or len(waiting_builds) > 0:
         return None
     url = f'http://{args.server}/jobs'
     for i in range(10):
@@ -97,16 +97,16 @@ def download_dir(sra_id):
     return os.path.join(download_dir_base(), sra_id)
 
 
-def create_dir_base():
+def build_dir_base():
     return os.path.join(args.output_dir, 'graphs')
 
 
-def create_dir(sra_id):
-    return os.path.join(create_dir_base(), sra_id)
+def build_dir(sra_id):
+    return os.path.join(build_dir_base(), sra_id)
 
 
-def create_file(sra_id):
-    return os.path.join(create_dir(sra_id), f'{sra_id}.dbg')
+def build_file(sra_id):
+    return os.path.join(build_dir(sra_id), f'{sra_id}.dbg')
 
 
 def clean_dir_base():
@@ -139,11 +139,11 @@ def internal_ip():
         return '127.0.0.1'  # this usually happens on dev laptops; cloud machines work fine
 
 
-def start_create(sra_id, wait_time):
+def start_build(sra_id, wait_time):
     input_dir = download_dir(sra_id)
-    output_dir = create_dir(sra_id)
-    create_processes[sra_id] = (
-        subprocess.Popen(['./create.sh', sra_id, input_dir, output_dir]), time.time(), wait_time)
+    output_dir = build_dir(sra_id)
+    build_processes[sra_id] = (
+        subprocess.Popen(['./build.sh', sra_id, input_dir, output_dir]), time.time(), wait_time)
     return True
 
 
@@ -155,7 +155,7 @@ def make_dir_if_needed(path):
 
 
 def start_clean(sra_id, wait_time):
-    input_file = create_file(sra_id)
+    input_file = build_file(sra_id)
     make_dir_if_needed(clean_dir(sra_id))
     output_file = os.path.join(clean_dir(sra_id), sra_id)
     clean_processes[sra_id] = (
@@ -247,7 +247,7 @@ def check_status():
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb}
                 sra_info[sra_id] = (*sra_info[sra_id], download_size_mb)
                 ack('download', params)
-                waiting_creates[sra_id] = (time.time())
+                waiting_builds[sra_id] = (time.time())
             else:
                 logging.warning(f'Download for SRA id {sra_id} failed.')
                 params = {'id': sra_id, 'time': int(time.time() - start_time),
@@ -256,31 +256,31 @@ def check_status():
     for d in completed_downloads:
         del download_processes[d]
 
-    completed_creates = set()
-    for sra_id, (create_process, start_time, wait_time) in create_processes.items():
-        return_code = create_process.poll()
+    completed_builds = set()
+    for sra_id, (build_process, start_time, wait_time) in build_processes.items():
+        return_code = build_process.poll()
 
         if return_code is not None:
-            completed_creates.add(sra_id)
+            completed_builds.add(sra_id)
             # clean up the download path; if adding retries, do this only on success
             download_path = download_dir(sra_id)
             logging.info(f'Cleaning up {download_path}')
             subprocess.run(['rm', '-rf', download_path])
 
-            create_location = create_dir(sra_id)
+            build_location = build_dir(sra_id)
             if return_code == 0:
                 logging.info(f'Building graph for SRA id {sra_id} completed successfully.')
                 params = {'id': sra_id, 'time': int(time.time() - start_time),
-                          'wait_time': int(wait_time), 'size_mb': dir_size(create_location)}
-                ack('create', params)
+                          'wait_time': int(wait_time), 'size_mb': dir_size(build_location)}
+                ack('build', params)
                 waiting_cleans[sra_id] = (time.time())
             else:
                 logging.warning(f'Building graph for SRA id {sra_id} failed.')
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
-                          'size_mb': dir_size(create_location)}
-                nack('create', params)
-    for d in completed_creates:
-        del create_processes[d]
+                          'size_mb': dir_size(build_location)}
+                nack('build', params)
+    for d in completed_builds:
+        del build_processes[d]
 
     completed_cleans = set()
     for sra_id, (clean_process, start_time, wait_time) in clean_processes.items():
@@ -289,7 +289,7 @@ def check_status():
             completed_cleans.add(sra_id)
 
             # clean up the original graph; if adding retries, do this only on success
-            build_path = create_dir(sra_id)
+            build_path = build_dir(sra_id)
             logging.info(f'Cleaning up {build_path}')
             subprocess.run(['rm', '-rf', build_path])
 
@@ -332,19 +332,19 @@ def check_status():
                           'size_mb': cleaned_size}
                 nack('transfer', params)
 
-    if len(create_processes) == 0 and len(clean_processes) < 2 and waiting_creates:
-        sra_id, (start_time) = waiting_creates.popitem()
-        start_create(sra_id, time.time() - start_time)
+    if len(build_processes) == 0 and len(clean_processes) < 2 and waiting_builds:
+        sra_id, (start_time) = waiting_builds.popitem()
+        start_build(sra_id, time.time() - start_time)
 
     # we do max one clean while we have a build, and up to 4 cleans if no build is running
-    if (len(clean_processes) == 0 or (len(clean_processes) < 4 and len(create_processes) == 0)) and waiting_cleans:
+    if (len(clean_processes) == 0 or (len(clean_processes) < 4 and len(build_processes) == 0)) and waiting_cleans:
         # remove the old clean waiting and append the new one after
         sra_id, start_time = waiting_cleans.popitem()
         start_clean(sra_id, time.time() - start_time)
 
     for d in completed_transfers:
         del transfer_processes[d]
-    return download_processes or create_processes or clean_processes or transfer_processes or not downloads_done
+    return download_processes or build_processes or clean_processes or transfer_processes or not downloads_done
 
 
 def do_work():
@@ -368,7 +368,7 @@ def check_env():
     directories """
 
     make_dir_if_needed(download_dir_base())
-    make_dir_if_needed(create_dir_base())
+    make_dir_if_needed(build_dir_base())
     make_dir_if_needed(clean_dir_base())
 
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
@@ -383,7 +383,7 @@ def check_env():
 
 def handle_quit():
     ids = ','.join(
-        list(download_processes) + list(create_processes) + list(clean_processes) + list(clean_processes))
+        list(download_processes) + list(build_processes) + list(clean_processes) + list(clean_processes))
     url = f'http://{args.server}/jobs/preempt'
     data = f'client_id={args.client_id}&ids={ids}'
     while True:
@@ -410,7 +410,7 @@ def handle_quit():
     must_quit = True
     for k, v in download_processes.items():
         v[0].kill()
-    for k, v in create_processes.items():
+    for k, v in build_processes.items():
         v[0].kill()
     for k, v in clean_processes.items():
         v[0].kill()
@@ -423,10 +423,10 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def handle_get_status(self):
         self.send_reply(200, status_str % (download_processes,
-                                           create_processes,
+                                           build_processes,
                                            clean_processes,
                                            transfer_processes,
-                                           waiting_creates,
+                                           waiting_builds,
                                            waiting_cleans,
                                            downloads_done),
                         {'Content-type': 'text/html'})

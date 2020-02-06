@@ -20,14 +20,14 @@ sra_download_gen = None  # the generator function that returns the next SRA id t
 
 # jobs done
 downloaded_sras = set()  # the downloaded sras
-created_sras = set()  # the sras for which a BOSS graph was generated
+built_sras = set()  # the sras for which a BOSS graph was generated
 cleaned_sras = set()  # the sras for which the BOSS graph was cleaned (so processing is completed)
 transferred_sras = set()  # the sras that were successfully transferred to permanent storage
 
 # jobs currently being processed by a worker
 pending_jobs = {}  # includes jobs that were pre-empted
 pending_downloads = set()
-pending_creates = set()
+pending_builds = set()
 pending_cleans = set()
 pending_transfers = set()
 
@@ -44,7 +44,7 @@ status_str = f"""
 <body>
 <h3> Pending jobs </h3>
 <p>Pending downloads: %s</p>
-<p>Pending create: %s</p>
+<p>Pending build: %s</p>
 <p>Pending clean: %s</p>
 <p>Pending transfer: %s</p>
 
@@ -53,7 +53,7 @@ status_str = f"""
 
 <h3> Jobs completed </h3>
 <p>Completed downloads: %s </p>
-<p>Completed create: %s</p>
+<p>Completed build: %s</p>
 <p>Completed clean: %s</p>
 <p>Completed transfer: %s</p>
 
@@ -104,8 +104,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def handle_get_status(self):
         self.send_reply(200, status_str % (
-            pending_downloads, pending_creates, pending_cleans, pending_transfers, preempted_ids, downloaded_sras,
-            created_sras, cleaned_sras, transferred_sras, download_done),
+            pending_downloads, pending_builds, pending_cleans, pending_transfers, preempted_ids, downloaded_sras,
+            built_sras, cleaned_sras, transferred_sras, download_done),
                         {'Content-type': 'text/html'})
 
     def handle_ack(self, operation, post_vars, add_sets, pending_operations):
@@ -140,10 +140,10 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id}')
 
     def handle_ack_download(self, post_vars):
-        self.handle_ack('download', post_vars, [downloaded_sras, pending_creates], pending_downloads)
+        self.handle_ack('download', post_vars, [downloaded_sras, pending_builds], pending_downloads)
 
-    def handle_ack_create(self, post_vars):
-        self.handle_ack('create', post_vars, [created_sras, pending_cleans], pending_creates)
+    def handle_ack_build(self, post_vars):
+        self.handle_ack('build', post_vars, [built_sras, pending_cleans], pending_builds)
 
     def handle_ack_clean(self, post_vars):
         if self.handle_ack('clean', post_vars, [cleaned_sras, pending_transfers], pending_cleans):
@@ -158,8 +158,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def handle_nack_download(self, post_vars):
         self.handle_nack('download', post_vars, pending_downloads)
 
-    def handle_nack_create(self, post_vars):
-        self.handle_nack('create', post_vars, pending_creates)
+    def handle_nack_build(self, post_vars):
+        self.handle_nack('build', post_vars, pending_builds)
 
     def handle_nack_clean(self, post_vars):
         self.handle_nack('clean', post_vars, pending_cleans)
@@ -177,11 +177,11 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             if sra_id in pending_jobs:  # if server was restarted, pending_jobs info was lost :(
                 preempted_ids.add(sra_id)
             pending_downloads.discard(sra_id)
-            pending_creates.discard(sra_id)
+            pending_builds.discard(sra_id)
             pending_cleans.discard(sra_id)
             pending_transfers.discard(sra_id)
             downloaded_sras.discard(sra_id)
-            created_sras.discard(sra_id)
+            built_sras.discard(sra_id)
             cleaned_sras.discard(sra_id)
         self.send_reply(200, "")
 
@@ -222,16 +222,16 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             return
         if parsed_url.path == '/jobs/ack/download':
             self.handle_ack_download(post_vars)
-        elif parsed_url.path == '/jobs/ack/create':
-            self.handle_ack_create(post_vars)
+        elif parsed_url.path == '/jobs/ack/build':
+            self.handle_ack_build(post_vars)
         elif parsed_url.path == '/jobs/ack/clean':
             self.handle_ack_clean(post_vars)
         elif parsed_url.path == '/jobs/ack/transfer':
             self.handle_ack_transfer(post_vars)
         elif parsed_url.path == '/jobs/nack/download':
             self.handle_nack_download(post_vars)
-        elif parsed_url.path == '/jobs/nack/create':
-            self.handle_nack_create(post_vars)
+        elif parsed_url.path == '/jobs/nack/build':
+            self.handle_nack_build(post_vars)
         elif parsed_url.path == '/jobs/nack/clean':
             self.handle_nack_clean(post_vars)
         elif parsed_url.path == '/jobs/preempt':
@@ -277,9 +277,9 @@ def init_state():
         except OSError as exc:  # Guard against race condition
             if exc.errno != errno.EEXIST:
                 raise
-    global downloaded_sras, created_sras, cleaned_sras, transferred_sras
+    global downloaded_sras, built_sras, cleaned_sras, transferred_sras
     downloaded_sras = load_file_set(filename)
-    created_sras = load_file_set(os.path.join(args.output_dir, 'succeed_create.id'))
+    built_sras = load_file_set(os.path.join(args.output_dir, 'succeed_build.id'))
     cleaned_sras = load_file_set(os.path.join(args.output_dir, 'succeed_clean.id'))
     transferred_sras = load_file_set(os.path.join(args.output_dir, 'succeed_transfer.id'))
 
