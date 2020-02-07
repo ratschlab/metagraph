@@ -101,8 +101,8 @@ uint64_t merge_files(const std::vector<std::string> sources,
         }
     }
 
-//    std::for_each(sources.begin(), sources.end(),
-//                  [](const std::string &s) { std::filesystem::remove(s); });
+    std::for_each(sources.begin(), sources.end(),
+                  [](const std::string &s) { std::filesystem::remove(s); });
 
     delete[] buffer;
     return num_elements_read;
