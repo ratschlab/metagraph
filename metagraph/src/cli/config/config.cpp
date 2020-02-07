@@ -320,7 +320,7 @@ Config::Config(int argc, char *argv[]) {
             filter_by_kmer = true;
         } else if (!strcmp(argv[i], "--container")) {
             container = string_to_container(get_value(i++));
-        } else if (!strcmp(argv[i], "--tmp_dir")) {
+        } else if (!strcmp(argv[i], "--tmp-dir")) {
             tmp_dir = get_value(i++);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
@@ -738,7 +738,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --container [STR] \tcontainer to use for storing k-mers: vector / vector_disk [vector]\n");
-            fprintf(stderr, "\t   --tmp_dir [STR] \tdirectory to use for temp files [/tmp/]\n");
+            fprintf(stderr, "\t   --tmp-dir [STR] \tdirectory to use for temp files [/tmp/]\n");
         } break;
         case CLEAN: {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());

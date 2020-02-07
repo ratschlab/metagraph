@@ -7,16 +7,17 @@
 
 #include "common/file_merger.hpp"
 
-constexpr size_t CHUNK_COUNT = 10;
+size_t CHUNK_COUNT = 10;
+
 constexpr size_t ITEM_COUNT = 100'000;
 const std::string chunk_prefix = "/tmp/chunk_";
 
-void create_sources() {
+void create_sources(int count) {
     std::mt19937 rng(123456);
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
 
-    for (uint32_t i = 0; i < CHUNK_COUNT; ++i) {
+    for (uint32_t i = 0; i < count; ++i) {
         std::vector<uint32_t> els(ITEM_COUNT);
         for (uint64_t j = 0; j < ITEM_COUNT; ++j) {
             els[i] = j + dist10(rng);
@@ -28,9 +29,9 @@ void create_sources() {
 }
 
 static void BM_merge_files(benchmark::State &state) {
-    create_sources();
-    std::vector<std::string> sources(CHUNK_COUNT);
-    for (uint32_t i = 0; i < CHUNK_COUNT; ++i) {
+    create_sources(state.range(0));
+    std::vector<std::string> sources(state.range(0));
+    for (uint32_t i = 0; i < state.range(0); ++i) {
         sources[i] = chunk_prefix + std::to_string(i);
     }
     std::ofstream out;
@@ -44,9 +45,9 @@ static void BM_merge_files(benchmark::State &state) {
 }
 
 static void BM_merge_files_pairs(benchmark::State &state) {
-    create_sources();
-    std::vector<std::string> sources(CHUNK_COUNT);
-    for (uint32_t i = 0; i < CHUNK_COUNT; ++i) {
+    create_sources(state.range(0));
+    std::vector<std::string> sources(state.range(0));
+    for (uint32_t i = 0; i < state.range(0); ++i) {
         sources[i] = chunk_prefix + std::to_string(i);
     }
     std::ofstream out;
@@ -62,6 +63,6 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     }
 }
 
-BENCHMARK(BM_merge_files_pairs);
+BENCHMARK(BM_merge_files)->DenseRange(10, 300, 10);;
 
 BENCHMARK_MAIN();
