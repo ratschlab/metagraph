@@ -49,10 +49,8 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     for (uint32_t i = 0; i < state.range(0); ++i) {
         sources[i] = chunk_prefix + std::to_string(i);
     }
-    std::ofstream out;
-    char buffer[1024 * 1024];
-    out.rdbuf()->pubsetbuf(buffer, 1024 * 1024);
-    out.open("/tmp/out");
+    utils::TempFile tempfile("/tmp/");
+    std::ofstream& out = tempfile.ofstream();
     using Pair = std::pair<uint64_t, uint8_t>;
     const auto file_writer = [&out](const Pair &v) {
         out.write(reinterpret_cast<const char *>(&v), sizeof(Pair));
