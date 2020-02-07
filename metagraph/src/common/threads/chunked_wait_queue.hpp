@@ -349,8 +349,7 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         read_buf_.resize(read_buf_size_ + fence_size);
         size_t i;
         for (i = read_buf_idx_; i < read_buf_.size() && idx_ != queue_->last_ ; ++i) {
-            idx_++;
-            if (idx_ == queue_->buffer_size_) {
+            if (++idx_ == queue_->buffer_size_) {
                 idx_ = 0;
             }
             read_buf_[i] = queue_->buffer_[idx_];
@@ -369,6 +368,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     Iterator &operator--() {
         assert(read_buf_idx_ > 0 && "Attempting to move before the first element.");
         if (idx_ == queue_->buffer_size_) {
+            // we went back from past the end of the queue; set #read_buf_idx_ to the last
+            // element in the buffer and move idx_ back to the last element
             read_buf_idx_ = read_buf_.size() - 1;
             idx_ = queue_->last_;
         } else {

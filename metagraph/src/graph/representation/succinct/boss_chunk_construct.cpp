@@ -506,14 +506,14 @@ using KmerMultsetDiskVector32
         = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultisetDisk<KMER, uint32_t>>;
 
 std::unique_ptr<IBOSSChunkConstructor>
-IBOSSChunkConstructor ::initialize(size_t k,
-                                   bool canonical_mode,
-                                   uint8_t bits_per_count,
-                                   const std::string &filter_suffix,
-                                   size_t num_threads,
-                                   double memory_preallocated,
-                                   kmer::ContainerType container_type,
-                                   const std::filesystem::path &tmp_dir) {
+IBOSSChunkConstructor::initialize(size_t k,
+                                  bool canonical_mode,
+                                  uint8_t bits_per_count,
+                                  const std::string &filter_suffix,
+                                  size_t num_threads,
+                                  double memory_preallocated,
+                                  kmer::ContainerType container_type,
+                                  const std::filesystem::path &tmp_dir) {
 #define OTHER_ARGS \
     k, canonical_mode, bits_per_count, filter_suffix, num_threads, memory_preallocated, tmp_dir
     switch (container_type) {

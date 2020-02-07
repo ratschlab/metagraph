@@ -522,6 +522,7 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM
 file(GLOB benchmark_files
   "benchmarks/*.cpp"
   "experiments/*.cpp"
+  "tests/common/benchmark_*.cpp"
 )
 list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER benchmark_files EXCLUDE REGEX "experiments/main.cpp")

@@ -72,5 +72,3 @@ static void BM_queue_push_pop_back(benchmark::State &state) {
 
 BENCHMARK(BM_queue_push_pop);
 BENCHMARK(BM_queue_push_pop_back);
-
-BENCHMARK_MAIN();

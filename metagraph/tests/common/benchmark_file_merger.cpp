@@ -15,7 +15,7 @@ constexpr size_t ITEM_COUNT = 10'000;
 const std::string chunk_prefix = "/tmp/bm_chunk_";
 std::vector<std::string> sources;
 
-std::vector<std::string> create_sources(int count) {
+std::vector<std::string> create_sources(size_t count) {
     std::mt19937 rng(123457);
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
@@ -64,5 +64,3 @@ static void BM_merge_files_pairs(benchmark::State &state) {
 }
 
 BENCHMARK(BM_merge_files)->DenseRange(10, 3000, 100);
-
-BENCHMARK_MAIN();
