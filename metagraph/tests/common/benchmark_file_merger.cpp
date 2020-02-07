@@ -11,7 +11,7 @@
 // Note: if testing with many chunks use 'ulimit -n <max_files>' to increase the maxium
 // number of files the sytem allows you to open. On mac the default is only 256!
 
-constexpr size_t ITEM_COUNT = 10'000;
+constexpr size_t ITEM_COUNT = 100'000;
 const std::string chunk_prefix = "/tmp/bm_chunk_";
 std::vector<std::string> sources;
 
@@ -63,6 +63,6 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     }
 }
 
-BENCHMARK(BM_merge_files)->DenseRange(10, 3000, 100);
+BENCHMARK(BM_merge_files)->DenseRange(10, 300, 10);
 
 BENCHMARK_MAIN();
