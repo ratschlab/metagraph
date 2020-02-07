@@ -70,7 +70,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
 
     VectorHeap<T> merge_heap(sources.size());
     T data_item;
-    // profiling iidicates that setting a larger buffer slightly increases performance
+    // profiling indicates that setting a larger buffer slightly increases performance
     char *buffer = new char[sources.size() * 1024 * 1024];
     for (uint32_t i = 0; i < sources.size(); ++i) {
         chunk_files[i].rdbuf()->pubsetbuf((buffer + i * 1024 * 1024), 1024 * 1024);
