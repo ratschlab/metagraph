@@ -55,8 +55,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<mg::bitmap_graph::DBGBitmap>(filename);
 
         case Config::GraphType::INVALID:
-            mg::common::logger->error("Cannot load graph from file '{}'",
-                                      ", needs a valid file extension", filename);
+            mg::common::logger->error(
+                    "Cannot load graph from file '{}', needs a valid file extension",
+                    filename);
             exit(1);
     }
     assert(false);
