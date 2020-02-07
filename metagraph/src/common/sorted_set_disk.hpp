@@ -54,11 +54,11 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100)
         : SortedSetDiskBase<T>(cleanup,
-                            num_threads,
-                            reserved_num_elements,
+                               num_threads,
+                               reserved_num_elements,
                                tmp_dir,
-                            on_item_pushed,
-                            num_last_elements_cached) {}
+                               on_item_pushed,
+                               num_last_elements_cached) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is

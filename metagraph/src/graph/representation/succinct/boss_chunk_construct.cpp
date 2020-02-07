@@ -407,7 +407,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
             // kmer_collector stores (BOSS::k_ + 1)-mers
             recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
-                                        &kmers,
+                                       &kmers,
                                        kmer_collector_.num_threads(),
                                        async_worker_,
                                        kmer_collector_.buffer_size(),

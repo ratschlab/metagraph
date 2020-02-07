@@ -32,15 +32,15 @@ static void BM_queue_push_pop(benchmark::State &state) {
     mg::common::ChunkedWaitQueue<uint64_t> queue(100, 10);
     size_t sum = 0;
     for (auto _ : state) {
-        for (uint32_t i=0; i<100;++i) {
+        for (uint32_t i = 0; i < 100; ++i) {
             queue.push(i);
         }
         queue.shutdown();
-        auto& it = queue.begin();
-        for (; it!= queue.end();++it) {
-            sum+=*it;
+        auto &it = queue.begin();
+        for (; it != queue.end(); ++it) {
+            sum += *it;
         }
-        for (uint32_t i=0; i<100;++i) {
+        for (uint32_t i = 0; i < 100; ++i) {
             --it;
         }
         queue.reset();
@@ -52,15 +52,15 @@ static void BM_queue_push_pop_back(benchmark::State &state) {
     mg::common::ChunkedWaitQueue<uint64_t> queue(100, 10);
     size_t sum = 0;
     for (auto _ : state) {
-        for (uint32_t i=0; i<100;++i) {
+        for (uint32_t i = 0; i < 100; ++i) {
             queue.push(i);
         }
         queue.shutdown();
-        auto& it = queue.begin();
-        for (; it!= queue.end();++it) {
-            sum+=*it;
+        auto &it = queue.begin();
+        for (; it != queue.end(); ++it) {
+            sum += *it;
         }
-        for (uint32_t i=0; i<10;++i) {
+        for (uint32_t i = 0; i < 10; ++i) {
             --it;
             sum += *it;
         }
@@ -70,9 +70,7 @@ static void BM_queue_push_pop_back(benchmark::State &state) {
 }
 
 
-
 BENCHMARK(BM_queue_push_pop);
 BENCHMARK(BM_queue_push_pop_back);
 
 BENCHMARK_MAIN();
-

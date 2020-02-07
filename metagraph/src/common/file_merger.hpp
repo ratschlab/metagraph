@@ -17,10 +17,9 @@ namespace common {
  * Heap implemented as a sorted vector.
  */
 // Note: profiling shows that using a sorted vector instead of a std::priority queue is
-// faster if the queue has less than ~45 elements. This is the case for us, as each
-// element represents a >1GB chunk, and SRAs typically expand to ~15 chunks. Using an
-// unsorted vector (faster insert, slower pop()) is ~40% slower. Preventing duplicates
-// in the heap so that we don't need to test for dupes at pop time is ~60% slower.
+// faster even if the queue has 300 elements.  Using an unsorted vector (faster insert,
+// slower pop()) is ~40% slower. Preventing duplicates in the heap so that we don't
+// need to test for dupes at pop time is ~60% slower.
 template <typename T>
 class VectorHeap {
     /** The heap stores pairs of the form <Element, SourceIndex>  in descending order */
@@ -66,7 +65,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     std::vector<std::ifstream> chunk_files(sources.size());
-    uint64_t num_elements = 0;
+    uint64_t num_elements_read = 0;
 
     VectorHeap<T> merge_heap(sources.size());
     T data_item;
@@ -81,7 +80,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
         }
         if (chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
             merge_heap.emplace(data_item, i);
-            num_elements++;
+            num_elements_read++;
         }
     }
 
@@ -95,18 +94,18 @@ uint64_t merge_files(const std::vector<std::string> sources,
         }
 
         if (chunk_files[smallest.second]
-             && chunk_files[smallest.second].read(reinterpret_cast<char *>(&data_item),
-                                                  sizeof(T))) {
+            && chunk_files[smallest.second].read(reinterpret_cast<char *>(&data_item),
+                                                 sizeof(T))) {
             merge_heap.emplace(data_item, smallest.second);
-            num_elements++;
+            num_elements_read++;
         }
     }
 
-//    std::for_each(sources.begin(), sources.end(),
-//                  [](const std::string &s) { std::filesystem::remove(s); });
+    std::for_each(sources.begin(), sources.end(),
+                  [](const std::string &s) { std::filesystem::remove(s); });
 
     delete[] buffer;
-    return num_elements;
+    return num_elements_read;
 }
 
 /**
@@ -187,20 +186,18 @@ uint64_t merge_files(const std::vector<std::string> sources,
         return num_elements;
     }
 
-    bool has_written = false;
-    CountedEl current = {};
+    std::optional<CountedEl> current;
     while (!merge_heap.empty()) {
         CountedEl smallest = merge_heap.pop();
 
-        if (has_written && std::get<0>(smallest) != std::get<0>(current)) {
-            on_new_item({ std::get<0>(current), std::get<1>(current) });
+        if (current.has_value() && std::get<0>(smallest) != std::get<0>(current.value())) {
+            on_new_item({ std::get<0>(current.value()), std::get<1>(current.value()) });
             current = smallest;
         } else {
-            if (has_written) {
-                std::get<1>(current) += std::get<1>(smallest);
+            if (current.has_value()) {
+                std::get<1>(current.value()) += std::get<1>(smallest);
             } else {
                 current = smallest;
-                has_written = true;
             }
         }
 
@@ -212,10 +209,10 @@ uint64_t merge_files(const std::vector<std::string> sources,
             num_elements++;
         }
     }
-    on_new_item({ std::get<0>(current), std::get<1>(current) });
+    on_new_item({ std::get<0>(current.value()), std::get<1>(current.value()) });
 
-    //    std::for_each(sources.begin(), sources.end(),
-    //                  [](const std::string &s) { std::filesystem::remove(s); });
+    std::for_each(sources.begin(), sources.end(),
+                  [](const std::string &s) { std::filesystem::remove(s); });
 
     return num_elements;
 }
