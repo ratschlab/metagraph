@@ -128,7 +128,9 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 
     sdsl::bit_vector subindex(reference_num_set_bits, false);
 
-    const uint64_t block_size = std::max(kBlockSize, reference.size() / 100 / 64 * 64);
+    const uint64_t block_size
+      = std::max(reference_num_set_bits / 100,
+                 static_cast<uint64_t>(1'000)) & ~0x3Full;
     // Each block is a multiple of 64 bits for thread safety
     assert(!(block_size & 0x3F));
 
@@ -207,7 +209,7 @@ void compute_subindex(const bit_vector &column,
     // check if all ones
     if (popcount == end - begin) {
         for ( ; i + 64 <= end; i += 64, rank += 64) {
-            subindex->set_int(rank, 0xFFFF);
+            subindex->set_int(rank, 0xFFFF, 64);
         }
         if (begin < end) {
             subindex->set_int(rank, sdsl::bits::lo_set[end - begin], end - begin);
@@ -290,7 +292,6 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
 
     uint64_t subindex_size = sdsl::util::cnt_one_bits(*buffer);
 
-    #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < submatrices.size(); ++i) {
         // generate an index column for the child node
         sdsl::bit_vector subindex
@@ -301,7 +302,6 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
         // will be used instead
         submatrices[i].nonzero_rows_.reset();
 
-        #pragma omp critical
         results.push_back(thread_pool.enqueue(
             [&,i,subindex(std::move(subindex))]() {
                 // compress the subindex vector and set it to the child node
@@ -355,6 +355,8 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
                                 size_t num_threads) {
     if (!nodes.size())
         return BRWT();
+
+    num_nodes_parallel = std::min(num_nodes_parallel, nodes.size());
 
     num_threads = std::max(num_nodes_parallel, num_threads);
 
@@ -415,8 +417,6 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
     assert(nodes.size() == 1u);
     assert(current_partition.size() == 1u);
 
-    const auto &column_arrangement = current_partition.at(0);
-
     // get the root node in Multi-BRWT
     BRWT root = std::move(nodes.at(0));
     // compress the index vector
@@ -425,6 +425,7 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
     );
     // update the column arrangement to be consistent with the initial
     // order 1,2,...,m
+    const auto &column_arrangement = current_partition.at(0);
     std::vector<size_t> submatrix_sizes;
     for (size_t g = 0; g < root.assignments_.num_groups(); ++g) {
         submatrix_sizes.push_back(root.assignments_.group_size(g));
@@ -537,7 +538,7 @@ void BRWTOptimizer::reassign(size_t node_rank, BRWT *parent, size_t num_threads)
         sdsl::bit_vector subindex(index_column.size(), false);
 
         uint64_t child_i = 0;
-        uint64_t w;
+        uint64_t w = 0;
         call_ones(index_column, [&](auto i) {
             if (child_i % 64 == 0) {
                 w = grand_child->nonzero_rows_->get_int(child_i,

@@ -9,6 +9,7 @@ RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,
                                const std::vector<size_t> &group_sizes) {
     size_t offset = 0;
     for (size_t group_size : group_sizes) {
+        assert(group_size && "partition blocks must not be empty");
         partition_.emplace_back(arrangement.begin() + offset,
                                 arrangement.begin() + offset + group_size);
         offset += group_size;
@@ -21,12 +22,8 @@ RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,
 RangePartition::RangePartition(std::vector<std::vector<uint64_t>>&& partition) {
     partition_.reserve(partition.size());
     for (auto &group : partition) {
-        partition_.push_back({});
-        partition_.back().reserve(group.size());
-        for (auto value : group) {
-            assert(uint64_t(value) <= std::numeric_limits<T>::max());
-            partition_.back().push_back(value);
-        }
+        assert(group.size() && "partition blocks must not be empty");
+        partition_.emplace_back(group.begin(), group.end());
         group.clear();
     }
     partition.clear();
