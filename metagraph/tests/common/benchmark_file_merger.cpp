@@ -63,4 +63,4 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     }
 }
 
-BENCHMARK(BM_merge_files)->DenseRange(10, 3000, 100);
+BENCHMARK(BM_merge_files)->DenseRange(10, 100, 10);
