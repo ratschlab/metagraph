@@ -16,7 +16,9 @@ unsigned int get_num_threads();
 
 
 /**
- * The code was copied and has been modified from:
+ * A Thread Pool for parallel execution of tasks with arbitrary parameters
+ *
+ * The implementation is based on:
  * https://github.com/progschj/ThreadPool/blob/master/ThreadPool.h
  */
 class ThreadPool {
