@@ -7,7 +7,7 @@
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/threads/threading.hpp"
-#include "BRWT.hpp"
+#include "brwt.hpp"
 
 
 class BRWTBottomUpBuilder {

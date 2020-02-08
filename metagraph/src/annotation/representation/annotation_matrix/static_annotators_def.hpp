@@ -5,7 +5,7 @@
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
-#include "annotation/binary_matrix/multi_brwt/BRWT.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 
 
 namespace annotate {

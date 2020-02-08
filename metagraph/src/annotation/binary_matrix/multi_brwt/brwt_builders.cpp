@@ -1,4 +1,4 @@
-#include "BRWT_builders.hpp"
+#include "brwt_builders.hpp"
 
 #include <omp.h>
 #include <progress_bar.hpp>

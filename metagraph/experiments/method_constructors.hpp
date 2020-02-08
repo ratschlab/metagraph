@@ -2,7 +2,7 @@
 #define __METHOD_CONSTRUCTORS_HPP__
 
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
-#include "annotation/binary_matrix/multi_brwt/BRWT_builders.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "annotation/binary_matrix/multi_brwt/partitionings.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"

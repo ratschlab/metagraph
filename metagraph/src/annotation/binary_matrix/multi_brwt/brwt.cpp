@@ -1,4 +1,4 @@
-#include "BRWT.hpp"
+#include "brwt.hpp"
 
 #include <queue>
 #include <numeric>
