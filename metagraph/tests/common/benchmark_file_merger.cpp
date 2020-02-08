@@ -43,8 +43,9 @@ static void BM_merge_files(benchmark::State &state) {
     const auto file_writer = [&out](const uint64_t &v) {
       out.write(reinterpret_cast<const char *>(&v), sizeof(uint64_t));
     };
+    bool do_cleanup = false;
     for (auto _ : state) {
-        mg::common::merge_files<uint64_t>(sources, file_writer);
+        mg::common::merge_files<uint64_t>(sources, file_writer, do_cleanup);
     }
 }
 
@@ -58,9 +59,11 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     const auto file_writer = [&out](const Pair &v) {
       out.write(reinterpret_cast<const char *>(&v), sizeof(Pair));
     };
+    bool do_cleanup = false;
     for (auto _ : state) {
-        mg::common::merge_files<uint64_t, uint8_t>(sources, file_writer);
+        mg::common::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
     }
 }
 
 BENCHMARK(BM_merge_files)->DenseRange(10, 100, 10);
+BENCHMARK(BM_merge_files_pairs)->DenseRange(10, 100, 10);

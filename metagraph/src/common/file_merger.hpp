@@ -61,7 +61,8 @@ class VectorHeap {
  */
 template <typename T>
 uint64_t merge_files(const std::vector<std::string> sources,
-                     std::function<void(const T &)> on_new_item) {
+                     std::function<void(const T &)> on_new_item,
+                     bool cleanup = true) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     std::vector<std::ifstream> chunk_files(sources.size());
@@ -101,9 +102,10 @@ uint64_t merge_files(const std::vector<std::string> sources,
         }
     }
 
-    std::for_each(sources.begin(), sources.end(),
-                  [](const std::string &s) { std::filesystem::remove(s); });
-
+    if (cleanup) {
+        std::for_each(sources.begin(), sources.end(),
+                      [](const std::string &s) { std::filesystem::remove(s); });
+    }
     delete[] buffer;
     return num_elements_read;
 }
@@ -158,7 +160,8 @@ class MergingHeap {
  */
 template <typename T, typename C>
 uint64_t merge_files(const std::vector<std::string> sources,
-                     std::function<void(const std::pair<T, C> &)> on_new_item) {
+                     std::function<void(const std::pair<T, C> &)> on_new_item,
+                     bool cleanup = true) {
     // Convenience type for storing a pair and it's source file index
     using CountedEl = std::tuple<T, C, uint32_t>;
     // start merging disk chunks by using a heap to store the current element
@@ -211,9 +214,10 @@ uint64_t merge_files(const std::vector<std::string> sources,
     }
     on_new_item({ std::get<0>(current.value()), std::get<1>(current.value()) });
 
-    std::for_each(sources.begin(), sources.end(),
-                  [](const std::string &s) { std::filesystem::remove(s); });
-
+    if (cleanup) {
+        std::for_each(sources.begin(), sources.end(),
+                      [](const std::string &s) { std::filesystem::remove(s); });
+    }
     return num_elements;
 }
 
