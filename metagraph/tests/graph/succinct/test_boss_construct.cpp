@@ -578,7 +578,7 @@ template <typename Container>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         Container *kmers,
-                                        const std::vector<TAlphabet> &suffix) {
+                                        const std::vector<KmerExtractorBOSS::TAlphabet> &suffix) {
     // kmers->try_reserve(reserved_capacity);
     kmer::count_kmers<typename Container::key_type, KmerExtractorBOSS, Container>(
             [reads](kmer::CallStringCount callback) {

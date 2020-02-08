@@ -503,6 +503,7 @@ file(GLOB unit_tests_files
   "tests/*/*/*.cpp"
 )
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
+list(FILTER unit_tests_files EXCLUDE REGEX ".*/benchmark_.*")
 
 link_directories(
   ${CMAKE_BINARY_DIR}
