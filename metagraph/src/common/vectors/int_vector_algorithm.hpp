@@ -7,6 +7,10 @@
 #include <sdsl/int_vector.hpp>
 #include <sdsl/select_support_scan.hpp>
 
+class ThreadPool;
+class bit_vector;
+class bit_vector_stat;
+
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
 sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector);
@@ -93,6 +97,19 @@ uint64_t count_ones(const sdsl::bit_vector &vector, uint64_t begin, uint64_t end
 
 uint64_t inner_prod(const sdsl::bit_vector &first, const sdsl::bit_vector &second);
 
+void compute_or(const std::vector<const bit_vector *> &columns,
+                sdsl::bit_vector *result,
+                ThreadPool &thread_pool);
+
+// assumes that all bits that are set in |column| are set in |reference| too.
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const bit_vector_stat &reference);
+
+// assumes that all bits that are set in |column| are set in |reference| too.
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const sdsl::bit_vector &reference,
+                                   uint64_t reference_num_set_bits,
+                                   ThreadPool &thread_pool);
 
 // Apply the bitwise AND of vector with right-shifts of itself. Only works for
 // values of offset < 64
@@ -207,6 +224,5 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
 };
 
 } // namespace sdsl
-
 
 #endif // __INT_VECTOR_ALGORITHM_HPP__
