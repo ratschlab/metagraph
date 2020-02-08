@@ -17,7 +17,7 @@ namespace common {
  * Heap implemented as a sorted vector.
  */
 // Note: profiling shows that using a sorted vector instead of a std::priority queue is
-// faster even if the queue has 300 elements.  Using an unsorted vector (faster insert,
+// faster up to ~1000 elements.  Using an unsorted vector (faster insert,
 // slower pop()) is ~40% slower. Preventing duplicates in the heap so that we don't
 // need to test for dupes at pop time is ~60% slower.
 template <typename T>
