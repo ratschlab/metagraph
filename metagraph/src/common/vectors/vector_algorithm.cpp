@@ -1,4 +1,4 @@
-#include "int_vector_algorithm.hpp"
+#include "vector_algorithm.hpp"
 
 #include <sdsl/uint128_t.hpp>
 

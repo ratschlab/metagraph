@@ -2,7 +2,7 @@
 
 #include "common/algorithms.hpp"
 #include "bit_vector.hpp"
-#include "int_vector_algorithm.hpp"
+#include "vector_algorithm.hpp"
 
 
 // since std::set needs 32 bytes per element

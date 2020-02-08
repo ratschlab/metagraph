@@ -4,7 +4,7 @@
 #include <progress_bar.hpp>
 
 #include "common/algorithms.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 const uint64_t kNumRowsSampled = 1'000'000;
 

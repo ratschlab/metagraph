@@ -8,7 +8,7 @@
 #define private public
 #include "common/vectors/bitmap.hpp"
 #include "common/vectors/bit_vector.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";

@@ -5,7 +5,7 @@
 #include "test_helpers.hpp"
 
 #include "common/vectors/bit_vector.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "common/threads/threading.hpp"
 
 const std::string test_data_dir = "../tests/data";

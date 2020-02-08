@@ -1,6 +1,6 @@
 #include "benchmark/benchmark.h"
 
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "data_generation.hpp"
 
 

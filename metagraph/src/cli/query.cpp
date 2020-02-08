@@ -7,7 +7,7 @@
 #include "common/unix_tools.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"

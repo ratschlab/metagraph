@@ -7,7 +7,7 @@
 #include "test_annotated_dbg_helpers.hpp"
 
 #include "common/threads/threading.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "annotation/annotation_converters.hpp"
 
 

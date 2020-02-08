@@ -4,7 +4,7 @@
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "graph/graph_extensions/node_weights.hpp"

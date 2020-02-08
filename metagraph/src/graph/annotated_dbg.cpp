@@ -13,7 +13,7 @@
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/utils/simd_utils.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
 

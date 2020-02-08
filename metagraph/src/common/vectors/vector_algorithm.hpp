@@ -1,5 +1,5 @@
-#ifndef __INT_VECTOR_ALGORITHM_HPP__
-#define __INT_VECTOR_ALGORITHM_HPP__
+#ifndef __VECTOR_ALGORITHM_HPP__
+#define __VECTOR_ALGORITHM_HPP__
 
 #include <functional>
 #include <cassert>
@@ -225,4 +225,4 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
 
 } // namespace sdsl
 
-#endif // __INT_VECTOR_ALGORITHM_HPP__
+#endif // __VECTOR_ALGORITHM_HPP__

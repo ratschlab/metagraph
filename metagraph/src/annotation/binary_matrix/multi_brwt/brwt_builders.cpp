@@ -5,7 +5,7 @@
 
 #include "common/algorithms.hpp"
 #include "common/logger.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 
 BRWTBottomUpBuilder::Partitioner

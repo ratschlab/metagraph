@@ -6,7 +6,7 @@
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 
 BinRelWT_sdsl
