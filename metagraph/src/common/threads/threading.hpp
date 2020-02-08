@@ -25,7 +25,7 @@ class ThreadPool {
 
     template <class F, typename... Args>
     auto enqueue(F&& f, Args&&... args) {
-        using return_type = decltype(f(std::forward<Args>(args)...));
+        using return_type = decltype(f(args...));
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
         );

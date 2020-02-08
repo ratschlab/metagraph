@@ -295,7 +295,8 @@ int align_to_graph(Config *config) {
         builder["indentation"] = "";
 
         read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-            thread_pool.enqueue([&](std::string query, std::string header) {
+            thread_pool.enqueue([&](const std::string &query,
+                                    const std::string &header) {
                 auto paths = aligner->align(query);
 
                 std::ostringstream ostr;

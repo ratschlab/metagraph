@@ -408,7 +408,7 @@ int query_graph(Config *config) {
                             // Align the sequence, then add the best match
                             // in the graph to the query graph.
                             thread_pool.enqueue(
-                                [&](size_t id, std::string name, std::string seq) {
+                                [&](size_t id, const std::string &name, std::string &seq) {
                                     auto matches = aligner->align(seq);
 
                                     std::string seq_header
@@ -462,7 +462,7 @@ int query_graph(Config *config) {
         } else {
             for (const auto &kseq : fasta_parser) {
                 thread_pool.enqueue(
-                    [&](size_t id, std::string name, std::string seq) {
+                    [&](size_t id, const std::string &name, std::string &seq) {
                         if (!aligner) {
                             execute(id, name, seq);
                             return;
