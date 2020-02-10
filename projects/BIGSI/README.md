@@ -206,6 +206,79 @@ for i in {1..33}; do
 done
 ```
 
+## Query graph
+`run_queries.sh`
+```bash
+QUERY=$1
+NAME=$2
+
+FLAGS="-q normal.120h -R \"select[model==XeonGold_6150]\""
+
+mkdir $NAME
+mkdir $NAME/lsf
+
+for b in $(seq 750 750 24750); do
+for a in brwt relaxed.brwt rbfish; do
+for c in small faster base; do
+bsub -Jmetagraph.${a}.${b}.$c \
+    -oo $NAME/lsf/$NAME.metagraph.${a}.${b}.$c.out.lsf \
+    -eo $NAME/lsf/$NAME.metagraph.${a}.${b}.$c.err.lsf \
+    -R"rusage[mem=150000]" \
+    $FLAGS \
+    ./query_metagraph.sh ${QUERY} ${b} ${a} ${NAME} ${c} --fast --verbose
+done
+done
+done
+```
+
+`query_metagraph.sh`
+```bash
+METAGRAPH=~/metagraph/projects2014-metagenome/metagraph/build/metagraph
+
+# basename of the query file
+QUERY=$1
+shift
+
+# size of the subgraph
+SIZE=$1
+shift
+
+# annotator
+ANNO_TYPE=$1
+shift
+
+# name of the output folder
+NAME=$1
+shift
+
+# graph type
+OTHERNAME=$1
+shift
+
+# other flags
+FLAGS=$@
+
+echo "Querying annotation"
+
+# first run
+$METAGRAPH query --discovery-fraction 0.0 --count-labels $FLAGS \
+    -i ~/metagraph/project/data/BIGSI/subsets/graph_subset_$SIZE.$OTHERNAME.dbg \
+    -a ~/metagraph/project/data/BIGSI/subsets/annotation_subset_$SIZE.$ANNO_TYPE.annodbg \
+    $QUERY.fasta \
+    >/dev/null 2>/dev/null
+
+# second run
+/usr/bin/time -v $METAGRAPH query \
+    --discovery-fraction 0.0 \
+    --count-labels \
+    $FLAGS \
+    -i ~/metagraph/project/data/BIGSI/subsets/graph_subset_$SIZE.$OTHERNAME.dbg \
+    -a ~/metagraph/project/data/BIGSI/subsets/annotation_subset_$SIZE.$ANNO_TYPE.annodbg \
+    $QUERY.fasta \
+     > $NAME/$NAME.query.metagraph.$OTHERNAME.$SIZE.$ANNO_TYPE.out \
+    2> $NAME/$NAME.query.metagraph.$OTHERNAME.$SIZE.$ANNO_TYPE.log
+```
+
 ## Generate BIGSI bloom filters
 ```bash
 bsub -J "bigsi_bloom[1-24750]%300" \
