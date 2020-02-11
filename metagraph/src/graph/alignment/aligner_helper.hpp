@@ -220,10 +220,9 @@ class Alignment {
               size_t offset = 0);
 
     // TODO: construct multiple alignments from the same starting point
-    // Since insertions into DPTable may invalidate iterators, use pointers instead
     Alignment(const DPTable &dp_table,
               const std::string_view query,
-              const typename DPTable::value_type *column,
+              typename DPTable::const_iterator column,
               size_t start_pos,
               score_t score,
               const char* path_end,

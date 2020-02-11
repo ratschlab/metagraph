@@ -77,7 +77,7 @@ void DPTable<NodeType>
         assert(start_node != dp_table_.end());
         Alignment<NodeType> alignment(*this,
                                       query,
-                                      &*start_node,
+                                      start_node,
                                       start_node->second.best_pos,
                                       start_node->second.best_score() - start_score,
                                       align_start,
@@ -102,12 +102,12 @@ void DPTable<NodeType>
     // store visited nodes in paths to avoid returning subalignments
     tsl::hopscotch_set<key_type> visited_nodes;
 
-    std::vector<const value_type*> starts;
+    std::vector<const_iterator> starts;
     starts.reserve(size());
-    for (const auto &pair : dp_table_) {
-        if (pair.second.best_score() > min_path_score
-                && pair.second.best_op() == Cigar::Operator::MATCH)
-            starts.emplace_back(&pair);
+    for (const_iterator it = dp_table_.begin(); it != dp_table_.end(); ++it) {
+        if (it->second.best_score() > min_path_score
+                && it->second.best_op() == Cigar::Operator::MATCH)
+            starts.emplace_back(it);
     }
 
     if (starts.empty())
@@ -119,7 +119,7 @@ void DPTable<NodeType>
               });
 
     size_t num_paths = 0;
-    for (const auto &column_it : starts) {
+    for (const_iterator column_it : starts) {
         if (num_paths >= config.num_alternative_paths)
             return;
 
@@ -199,7 +199,7 @@ Alignment<NodeType>::Alignment(const std::string_view query,
 template <typename NodeType>
 Alignment<NodeType>::Alignment(const DPTable &dp_table,
                                const std::string_view query,
-                               const typename DPTable::value_type *column,
+                               typename DPTable::const_iterator column,
                                size_t start_pos,
                                score_t score,
                                const char* path_end,
@@ -212,7 +212,6 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         orientation_(orientation),
         offset_(offset) {
     std::ignore = query;
-    assert(column);
 
     auto i = start_pos;
     const auto* op = &column->second.ops.at(i);
@@ -221,7 +220,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     if (!i && *prev_node == SequenceGraph::npos)
         return;
 
-    std::vector<const typename DPTable::value_type*> out_columns;
+    std::vector<typename DPTable::const_iterator> out_columns;
     while (*prev_node != SequenceGraph::npos) {
         cigar_.append(*op);
 
@@ -234,10 +233,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         if (*op == Cigar::Operator::MATCH)
             ++num_matches_;
 
-        auto find = dp_table.find(*prev_node);
-        assert(find != dp_table.end());
-        column = &*find;
-
+        column = dp_table.find(*prev_node);
         op = &column->second.ops.at(i);
         prev_node = &column->second.prev_nodes.at(i);
     }
