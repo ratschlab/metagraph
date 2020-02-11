@@ -95,6 +95,36 @@ for i in {1..33}; do
 done
 ```
 
+### Transform graphs
+```bash
+for i in {1..33}; do
+    N=$((750 * i));
+    bsub -J "to_small_graph_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/to_small_graph_${N}.lsf \
+         -W 1:00 \
+         -n 1 -R "rusage[mem=50000] span[hosts=1]" \
+        "/usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA transform -v \
+                --state small \
+                -o ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.small.dbg \
+                ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.dbg \
+                2>&1"; \
+done
+
+for i in {1..33}; do
+    N=$((750 * i));
+    bsub -J "to_faster_graph_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/to_faster_graph_${N}.lsf \
+         -W 1:00 \
+         -n 1 -R "rusage[mem=50000] span[hosts=1]" \
+        "/usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA transform -v \
+                --state faster \
+                -o ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.faster.dbg \
+                ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.dbg \
+                2>&1"; \
+done
+```
+
+
 ## Annotate graphs for subsets
 ```bash
 for i in {33..1}; do
@@ -201,6 +231,20 @@ for i in {1..33}; do
                 --anno-type brwt --greedy \
                 -o ~/metagenome/data/BIGSI/subsets/annotation_subset_${N} \
                 ~/metagenome/data/BIGSI/subsets/annotation_subset_${N}.column.annodbg \
+                --parallel 20 \
+                2>&1"; \
+done
+
+for i in {1..33}; do
+    N=$((750 * i));
+    bsub -J "relax_brwt_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/relax_brwt_subset_${N}.lsf \
+         -W 96:00 \
+         -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
+        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_static/metagraph_DNA relax_brwt -v \
+                --relax-arity 20 \
+                -o ~/metagenome/data/BIGSI/subsets/annotation_subset_${N}.relaxed \
+                ~/metagenome/data/BIGSI/subsets/annotation_subset_${N}.brwt.annodbg \
                 --parallel 20 \
                 2>&1"; \
 done
