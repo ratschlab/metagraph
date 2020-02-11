@@ -97,6 +97,8 @@ class Cigar {
     // character of the reference sequence after clipping is trimmed
     bool is_valid(const std::string_view reference, const std::string_view query) const;
 
+    static char opt_to_char(Cigar::Operator op);
+
   private:
     std::vector<value_type> cigar_;
 };

@@ -52,7 +52,7 @@ void Cigar::initialize_opt_table(const std::string &alphabet, const uint8_t *enc
     }
 }
 
-char opt_to_char(Cigar::Operator op) {
+char Cigar::opt_to_char(Cigar::Operator op) {
     switch (op) {
         case Cigar::Operator::MATCH: return '=';
         case Cigar::Operator::MISMATCH: return 'X';
