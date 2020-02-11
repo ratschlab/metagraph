@@ -10,6 +10,8 @@
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
 
+class Cigar;
+
 
 class AnnotatedSequenceGraph {
   public:
@@ -100,6 +102,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                              double presence_ratio = 0.0) const;
 
     int32_t score_kmer_presence_mask(const sdsl::bit_vector &kmer_presence_mask,
+                                     const Cigar *cigar = nullptr,
                                      int32_t match_score = 1,
                                      int32_t mismatch_score = 2) const;
 

@@ -41,6 +41,7 @@ void execute_query(const std::string &seq_name_in,
 
     std::unique_ptr<IDBGAligner::DBGQueryAlignment> alignments;
     std::string align_header, align_match;
+    std::unique_ptr<Cigar> cigar;
     if (align_config) {
         auto aligner = build_aligner(anno_graph.get_graph(), *align_config);
         alignments = std::make_unique<IDBGAligner::DBGQueryAlignment>(
@@ -48,6 +49,7 @@ void execute_query(const std::string &seq_name_in,
         );
         if (alignments->size()) {
             align_match = alignments->front().get_sequence();
+            cigar = std::make_unique<Cigar>(alignments->front().get_cigar());
             align_header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
                                        seq_name_in,
                                        align_match,
@@ -81,7 +83,7 @@ void execute_query(const std::string &seq_name_in,
                 label,
                 sdsl::util::cnt_one_bits(kmer_presence_mask),
                 sdsl::util::to_string(kmer_presence_mask),
-                anno_graph.score_kmer_presence_mask(kmer_presence_mask)
+                anno_graph.score_kmer_presence_mask(kmer_presence_mask, cigar.get())
             );
         }
 

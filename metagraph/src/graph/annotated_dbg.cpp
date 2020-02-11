@@ -14,6 +14,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "graph/alignment/aligner_helper.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
 
@@ -493,6 +494,7 @@ double penalty_bigsi(double count,
 
 int32_t AnnotatedDBG
 ::score_kmer_presence_mask(const sdsl::bit_vector &kmer_presence_mask,
+                           const Cigar *cigar,
                            int32_t match_score,
                            int32_t mismatch_score) const {
     if (!kmer_presence_mask.size())
@@ -504,15 +506,30 @@ int32_t AnnotatedDBG
     const size_t sequence_length = kmer_presence_mask.size() + k - 1;
     const int32_t SNP_t = k + kmer_adjust;
 
-    auto score_counter = tabulate_score(autocorrelate(kmer_presence_mask, kmer_adjust), 1);
+    const auto smooth_mask = autocorrelate(kmer_presence_mask, kmer_adjust);
+    auto score_counter = tabulate_score(smooth_mask, 1);
 
     double score = std::accumulate(score_counter[1].begin(),
                                    score_counter[1].end(), 0) * match_score;
+
     if (score == 0)
         return 0;
 
-    if (score_counter[0].empty())
-        return score * sequence_length / kmer_presence_mask.size();
+    if (score_counter[0].empty()) {
+        int32_t mismatch_penalties = cigar
+            ? std::accumulate(
+                  cigar->begin(), cigar->end(), 0,
+                  [&](int32_t sum, const auto &pair) {
+                      switch (pair.first) {
+                          case Cigar::Operator::MATCH:
+                          case Cigar::Operator::CLIPPED: return sum; break;
+                          default: return sum - static_cast<int32_t>(mismatch_score * pair.second); break;
+                      };
+                  }
+              )
+            : 0;
+        return score * sequence_length / kmer_presence_mask.size() + mismatch_penalties;
+    }
 
     const auto *it = score_counter[0].data();
     const auto *end = it + score_counter[0].size();
@@ -550,5 +567,67 @@ int32_t AnnotatedDBG
         score += penalty_bigsi(*it, match_score, mismatch_score, SNP_t);
     }
 
-    return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
+    int32_t mismatch_penalties = 0;
+    if (cigar) {
+        std::string cigar_unroll;
+        cigar_unroll.reserve(sequence_length);
+        for (const auto &[op, size] : *cigar) {
+            cigar_unroll.insert(cigar_unroll.end(), size, Cigar::opt_to_char(op));
+        }
+
+        auto it = std::find_if(cigar_unroll.begin(), cigar_unroll.end(),
+                               [](char c) { return c != 'S'; });
+        assert(it + k <= cigar_unroll.end());
+
+        size_t i = 0;
+        bool first = smooth_mask[0];
+        while (i < k) {
+            switch (*it) {
+                case 'S': assert(false); break;
+                case '=': {
+                    ++i;
+                } break;
+                case 'X': {
+                    ++i;
+                    mismatch_penalties -= mismatch_score * first;
+                } break;
+                case 'I': {
+                    // gap in query
+                    ++i;
+                    mismatch_penalties -= mismatch_score * first;
+                } break;
+                case 'D': {
+                    // gap in target
+                    mismatch_penalties -= mismatch_score * first;
+                } break;
+            }
+            ++it;
+        }
+
+        auto jt = smooth_mask.begin();
+        for ( ; it != cigar_unroll.end(); ++it) {
+            switch (*it) {
+                case 'S': break;
+                case '=': { ++jt; break; }
+                case 'X': {
+                    mismatch_penalties -= mismatch_score * *jt;
+                    ++jt;
+                } break;
+                case 'I': {
+                    // gap in query
+                    mismatch_penalties -= mismatch_score * *jt;
+                    ++jt;
+                } break;
+                case 'D': {
+                    // gap in target
+                    mismatch_penalties -= mismatch_score * *jt;
+                } break;
+            }
+        }
+
+        assert(jt == smooth_mask.end());
+    }
+
+    return std::max(score * sequence_length / kmer_presence_mask.size()
+                        + mismatch_penalties, 0.);
 }
