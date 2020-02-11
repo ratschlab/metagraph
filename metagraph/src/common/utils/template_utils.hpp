@@ -45,6 +45,18 @@ inline T& get_first(T &value) { return value; }
 template <typename T>
 inline const T& get_first(const T &value) { return value; }
 
+template <typename T, typename U, typename... Us>
+inline const U& get_second(const std::tuple<T, U, Us...> &tuple) { return std::get<1>(tuple); }
+
+template <typename T, typename U, typename... Us>
+inline U& get_second(std::tuple<T, U, Us...> &tuple) { return std::get<1>(tuple); }
+
+template <typename T, typename U>
+inline const U& get_second(const std::pair<T, U> &pair) { return pair.second; }
+
+template <typename T, typename U>
+inline U& get_second(std::pair<T, U> &pair) { return pair.second; }
+
 class GreaterFirst {
   public:
     template <typename T>
@@ -64,6 +76,13 @@ struct EqualFirst {
     template <typename T>
     bool operator()(const T &p1, const T &p2) const {
         return get_first(p1) == get_first(p2);
+    }
+};
+
+struct LessSecond {
+    template <typename T>
+    bool operator()(const T &p1, const T &p2) const {
+        return get_second(p1) < get_second(p2);
     }
 };
 

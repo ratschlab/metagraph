@@ -9,6 +9,7 @@
 #include "common/algorithms.hpp"
 #include "common/bounded_priority_queue.hpp"
 #include "common/utils/simd_utils.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 template <typename T>
@@ -383,14 +384,6 @@ inline size_t update_column_avx2(bool &updated,
 #endif
 
 
-template <class Pair>
-struct LessSecond {
-    bool operator()(const Pair &a, const Pair &b) const {
-        return a.second < b.second;
-    }
-};
-
-
 /*
  * DefaultColumnExtender::operator()
  */
@@ -463,7 +456,7 @@ void DefaultColumnExtender<NodeType>
     // keep track of which columns to use next
     BoundedPriorityQueue<ColumnRef<NodeType>,
                          std::vector<ColumnRef<NodeType>>,
-                         LessSecond<ColumnRef<NodeType>>> columns_to_update(
+                         utils::LessSecond> columns_to_update(
         config_.queue_size
     );
 
