@@ -252,32 +252,40 @@ done
 
 ## Query graph
 ```bash
-METAGRAPH=~/metagenome/metagraph_server/metagraph_DNA
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA
 
 # file to query
 for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCCXY_SL336225.fasta \
                 ~/metagenome/data/BIGSI/subsets/query/samples/nucleotide_fasta_protein_homolog_model.fasta \
-                ~/metagenome/data/BIGSI/subsets/query/samples/DRR014521.trimfq_0.02.fasta; do
+                ~/metagenome/data/BIGSI/subsets/query/samples/DRR067889.fasta; do
     NAME=metagraph.stat.brwt_relax
-
     # name of the output folder
-    DIR=~/metagenome/data/BIGSI/subsets/query_results/$(basename $QUERY)/${NAME}
-    mkdir -p $DIR
+    OUTDIR=~/metagenome/data/BIGSI/subsets/query_results/$(basename $QUERY)/${NAME}
+    mkdir -p $OUTDIR
 
-    for num_columns in $(seq 750 7500 24750); do
+    for num_columns in $(seq 750 3000 24750); do
         run="$METAGRAPH query -v --discovery-fraction 0.0 --count-labels --fast \
-                -i ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}.dbg \
-                -a ~/metagenome/data/BIGSI/subsets/annotation_subset_${num_columns}.relaxed.brwt.annodbg \
+                -i \${TMPDIR}/graph.dbg \
+                -a \${TMPDIR}/graph.brwt.annodbg \
                 $QUERY"
 
         bsub -J "${NAME}.${num_columns}" \
             -W 12:00 \
-            -n 1 -R "rusage[mem=50000] span[hosts=1] select[model==XeonGold_6150]" \
-            -o ${DIR}/${num_columns}.lsf \
-                "/usr/bin/time -v $run > /dev/null 2> /dev/null; \
+            -n 36 -R "rusage[mem=2000,scratch=5000] span[hosts=1] select[model==XeonGold_6150]" \
+            -o ${OUTDIR}/${num_columns}.lsf \
+            " \
+                cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}.dbg \
+                    \${TMPDIR}/graph.dbg; \
+                cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}.edgemask \
+                    \${TMPDIR}/graph.edgemask; \
+                cp ~/metagenome/data/BIGSI/subsets/annotation_subset_${num_columns}.relaxed.brwt.annodbg \
+                    \${TMPDIR}/graph.brwt.annodbg; \
                 /usr/bin/time -v $run > /dev/null 2> /dev/null; \
-                /usr/bin/time -v $run > ${DIR}/${num_columns}.out \
-                                     2> ${DIR}/${num_columns}.err"
+                for i in {1..5}; do \
+                    /usr/bin/time -v $run > \${TMPDIR}/out 2>> \${TMPDIR}/err;
+                done; \
+                mv \${TMPDIR}/out ${OUTDIR}/${num_columns}.out; \
+                mv \${TMPDIR}/err ${OUTDIR}/${num_columns}.err"
     done
 done
 ```
