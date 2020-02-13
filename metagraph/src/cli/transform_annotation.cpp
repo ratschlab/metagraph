@@ -262,7 +262,8 @@ int transform_annotation(Config *config) {
                     ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
                         std::move(*annotator),
                         config->parallel_nodes,
-                        get_num_threads())
+                        get_num_threads(),
+                        config->num_rows_subsampled)
                     : convert_to_simple_BRWT<MultiBRWTAnnotator>(
                         std::move(*annotator),
                         config->arity_brwt,

@@ -230,10 +230,13 @@ template <>
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotation,
                                                         size_t num_parallel_nodes,
-                                                        size_t num_threads) {
+                                                        size_t num_threads,
+                                                        uint64_t num_rows_subsampled) {
     return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
-        [num_threads](const auto &columns) { return greedy_matching(columns, num_threads); },
+        [num_threads,num_rows_subsampled](const auto &columns) {
+            return greedy_matching(columns, num_threads, num_rows_subsampled);
+        },
         num_parallel_nodes,
         num_threads
     );

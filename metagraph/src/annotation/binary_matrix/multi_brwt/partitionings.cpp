@@ -6,8 +6,6 @@
 #include "common/algorithms.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
-const uint64_t kNumRowsSampled = 1'000'000;
-
 typedef std::vector<std::vector<uint64_t>> Partition;
 typedef std::vector<const bit_vector *> VectorPtrs;
 
@@ -140,11 +138,13 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols, size_t num_threads
 
 // For each vector j return similarities with vectors 0, ..., j-1
 std::vector<std::vector<uint64_t>>
-estimate_similarities(const VectorPtrs &vectors, size_t num_threads) {
+estimate_similarities(const VectorPtrs &vectors,
+                      size_t num_threads,
+                      uint64_t num_rows_subsampled) {
     if (!vectors.size())
         return {};
 
-    uint64_t num_sampled_rows = std::min(kNumRowsSampled, vectors[0]->size());
+    uint64_t num_sampled_rows = std::min(num_rows_subsampled, vectors[0]->size());
 
     return correlation_similarity(
         random_submatrix(vectors, num_sampled_rows, 1, num_threads),
@@ -171,7 +171,9 @@ inline bool first_closest(P first_pair, P second_pair) {
 
 // input: columns
 // output: partition, for instance -- a set of column pairs
-Partition greedy_matching(const VectorPtrs &columns, size_t num_threads) {
+Partition greedy_matching(const VectorPtrs &columns,
+                          size_t num_threads,
+                          uint64_t num_rows_subsampled) {
     if (!columns.size())
         return {};
 
@@ -180,7 +182,7 @@ Partition greedy_matching(const VectorPtrs &columns, size_t num_threads) {
         exit(1);
     }
 
-    auto similarities = estimate_similarities(columns, num_threads);
+    auto similarities = estimate_similarities(columns, num_threads, num_rows_subsampled);
 
     ProgressBar progress_bar(columns.size() * (columns.size() - 1), "Clustering",
                              std::cerr, !utils::get_verbose());

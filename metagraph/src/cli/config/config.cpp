@@ -294,6 +294,8 @@ Config::Config(int argc, char *argv[]) {
         //    debug = true;
         } else if (!strcmp(argv[i], "--greedy")) {
             greedy_brwt = true;
+        } else if (!strcmp(argv[i], "--subsample")) {
+            num_rows_subsampled = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--arity")) {
             arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--relax-arity")) {
@@ -953,6 +955,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
+            fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
