@@ -64,8 +64,9 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
         for (size_t i = 0; i < row_ids.size(); ++i) {
             assert(row_ids[i] < num_rows());
 
-            if ((*nonzero_rows_)[row_ids[i]])
-                rows[i] = utils::arange<Column, SetBitPositions>(0, assignments_.size());
+            if ((*nonzero_rows_)[row_ids[i]]) {
+                rows[i] = { 0 };
+            }
         }
 
         return rows;
@@ -84,9 +85,9 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
         uint64_t global_offset = row_ids[i];
 
         // if next word containes three or more positions, query the whole word
-        if (i + 2 < row_ids.size()
-                && row_ids[i + 2] < global_offset + 64
-                && row_ids[i + 2] >= global_offset
+        if (i + 4 < row_ids.size()
+                && row_ids[i + 4] < global_offset + 64
+                && row_ids[i + 4] >= global_offset
                 && global_offset + 64 <= nonzero_rows_->size()) {
             // get the word
             uint64_t word = nonzero_rows_->get_int(global_offset, 64);
@@ -119,6 +120,9 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
             }
         }
     }
+
+    if (!child_row_ids.size())
+        return rows;
 
     // query all children subtrees
     for (size_t j = 0; j < child_nodes_.size(); ++j) {
