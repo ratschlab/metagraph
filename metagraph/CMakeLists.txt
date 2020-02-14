@@ -503,7 +503,6 @@ file(GLOB unit_tests_files
   "tests/*/*/*.cpp"
 )
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
-list(FILTER unit_tests_files EXCLUDE REGEX ".*/benchmark_.*")
 
 link_directories(
   ${CMAKE_BINARY_DIR}
@@ -522,8 +521,8 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM
 
 file(GLOB benchmark_files
   "benchmarks/*.cpp"
+  "benchmarks/*/*.cpp"
   "experiments/*.cpp"
-  "tests/common/benchmark_*.cpp"
 )
 list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER benchmark_files EXCLUDE REGEX "experiments/main.cpp")

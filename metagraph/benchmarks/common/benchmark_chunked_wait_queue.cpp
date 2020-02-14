@@ -45,7 +45,8 @@ static void BM_queue_push_pop(benchmark::State &state) {
         }
         queue.reset();
     }
-    printf("Sum is %zu\n", sum);
+    std::ofstream f("/tmp/dump");
+    f << sum;
 }
 
 static void BM_queue_push_pop_back(benchmark::State &state) {
@@ -66,7 +67,8 @@ static void BM_queue_push_pop_back(benchmark::State &state) {
         }
         queue.reset();
     }
-    printf("Sum is %zu\n", sum);
+    std::ofstream f("/tmp/dump");
+    f << sum;
 }
 
 

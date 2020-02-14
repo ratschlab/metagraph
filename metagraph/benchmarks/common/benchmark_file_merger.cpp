@@ -41,12 +41,14 @@ static void BM_merge_files(benchmark::State &state) {
     utils::TempFile tempfile;
     std::ofstream &out = tempfile.ofstream();
     const auto file_writer = [&out](const uint64_t &v) {
-      out.write(reinterpret_cast<const char *>(&v), sizeof(uint64_t));
+        out.write(reinterpret_cast<const char *>(&v), sizeof(uint64_t));
     };
     bool do_cleanup = false;
     for (auto _ : state) {
         mg::common::merge_files<uint64_t>(sources, file_writer, do_cleanup);
     }
+    std::for_each(sources.begin(), sources.end(),
+                  [](const std::string &s) { std::filesystem::remove(s); });
 }
 
 static void BM_merge_files_pairs(benchmark::State &state) {
@@ -57,12 +59,14 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     std::ofstream &out = tempfile.ofstream();
     using Pair = std::pair<uint64_t, uint8_t>;
     const auto file_writer = [&out](const Pair &v) {
-      out.write(reinterpret_cast<const char *>(&v), sizeof(Pair));
+        out.write(reinterpret_cast<const char *>(&v), sizeof(Pair));
     };
     bool do_cleanup = false;
     for (auto _ : state) {
         mg::common::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
     }
+    std::for_each(sources.begin(), sources.end(),
+                  [](const std::string &s) { std::filesystem::remove(s); });
 }
 
 BENCHMARK(BM_merge_files)->DenseRange(10, 100, 10);
