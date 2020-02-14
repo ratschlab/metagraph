@@ -128,9 +128,8 @@ void initialize_chunk(uint64_t alph_size,
 
 
 /**
- * Wrapper class around a static initializer for a BOSS chunk in order to allow
- * partial template specialization for ChunkedWaitQueue, which exposes a more
- * restrictive interface than Vector
+ * Wrapper class around #initialize_chunk() in order to allow partial template
+ * specialization for ChunkedWaitQueue.
  */
 template <class Container, class T, typename TAlphabet>
 struct Init {
