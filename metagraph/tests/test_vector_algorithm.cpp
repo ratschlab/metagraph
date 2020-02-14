@@ -692,72 +692,72 @@ TEST(select_support_scan_offset, vector_zeros) {
     sdsl::bit_vector bv(156, false);
     sdsl::select_support_scan_offset<0> select(&bv);
 
-    EXPECT_EQ(0, select.select_offset(1, 0));
-    EXPECT_EQ(1, select.select_offset(2, 0));
-    EXPECT_EQ(2, select.select_offset(3, 0));
-    EXPECT_EQ(62, select.select_offset(63, 0));
-    EXPECT_EQ(63, select.select_offset(64, 0));
-    EXPECT_EQ(64, select.select_offset(65, 0));
-    EXPECT_EQ(100, select.select_offset(101, 0));
-    EXPECT_EQ(155, select.select_offset(156, 0));
+    EXPECT_EQ(0UL, select.select_offset(1, 0));
+    EXPECT_EQ(1UL, select.select_offset(2, 0));
+    EXPECT_EQ(2UL, select.select_offset(3, 0));
+    EXPECT_EQ(62UL, select.select_offset(63, 0));
+    EXPECT_EQ(63UL, select.select_offset(64, 0));
+    EXPECT_EQ(64UL, select.select_offset(65, 0));
+    EXPECT_EQ(100UL, select.select_offset(101, 0));
+    EXPECT_EQ(155UL, select.select_offset(156, 0));
 
-    EXPECT_EQ(0 + 1, select.select_offset(1, 1));
-    EXPECT_EQ(1 + 1, select.select_offset(2, 1));
-    EXPECT_EQ(2 + 1, select.select_offset(3, 1));
-    EXPECT_EQ(62 + 1, select.select_offset(63, 1));
-    EXPECT_EQ(63 + 1, select.select_offset(64, 1));
-    EXPECT_EQ(64 + 1, select.select_offset(65, 1));
-    EXPECT_EQ(100 + 1, select.select_offset(101, 1));
-    EXPECT_EQ(155, select.select_offset(155, 1));
+    EXPECT_EQ(0UL + 1, select.select_offset(1, 1));
+    EXPECT_EQ(1UL + 1, select.select_offset(2, 1));
+    EXPECT_EQ(2UL + 1, select.select_offset(3, 1));
+    EXPECT_EQ(62UL + 1, select.select_offset(63, 1));
+    EXPECT_EQ(63UL + 1, select.select_offset(64, 1));
+    EXPECT_EQ(64UL + 1, select.select_offset(65, 1));
+    EXPECT_EQ(100UL + 1, select.select_offset(101, 1));
+    EXPECT_EQ(155UL, select.select_offset(155, 1));
 
-    EXPECT_EQ(0 + 64, select.select_offset(1, 64));
-    EXPECT_EQ(1 + 64, select.select_offset(2, 64));
-    EXPECT_EQ(2 + 64, select.select_offset(3, 64));
-    EXPECT_EQ(62 + 64, select.select_offset(63, 64));
-    EXPECT_EQ(63 + 64, select.select_offset(64, 64));
-    EXPECT_EQ(64 + 64, select.select_offset(65, 64));
-    EXPECT_EQ(155, select.select_offset(92, 64));
+    EXPECT_EQ(0UL + 64, select.select_offset(1, 64));
+    EXPECT_EQ(1UL + 64, select.select_offset(2, 64));
+    EXPECT_EQ(2UL + 64, select.select_offset(3, 64));
+    EXPECT_EQ(62UL + 64, select.select_offset(63, 64));
+    EXPECT_EQ(63UL + 64, select.select_offset(64, 64));
+    EXPECT_EQ(64UL + 64, select.select_offset(65, 64));
+    EXPECT_EQ(155UL, select.select_offset(92, 64));
 
-    EXPECT_EQ(100, select.select_offset(1, 100));
-    EXPECT_EQ(101, select.select_offset(2, 100));
-    EXPECT_EQ(102, select.select_offset(3, 100));
-    EXPECT_EQ(155, select.select_offset(56, 100));
+    EXPECT_EQ(100UL, select.select_offset(1, 100));
+    EXPECT_EQ(101UL, select.select_offset(2, 100));
+    EXPECT_EQ(102UL, select.select_offset(3, 100));
+    EXPECT_EQ(155UL, select.select_offset(56, 100));
 }
 
 TEST(select_support_scan_offset, vector_ones) {
     sdsl::bit_vector bv(156, true);
     sdsl::select_support_scan_offset<> select(&bv);
 
-    EXPECT_EQ(0, select.select_offset(1, 0));
-    EXPECT_EQ(1, select.select_offset(2, 0));
-    EXPECT_EQ(2, select.select_offset(3, 0));
-    EXPECT_EQ(62, select.select_offset(63, 0));
-    EXPECT_EQ(63, select.select_offset(64, 0));
-    EXPECT_EQ(64, select.select_offset(65, 0));
-    EXPECT_EQ(100, select.select_offset(101, 0));
-    EXPECT_EQ(155, select.select_offset(156, 0));
+    EXPECT_EQ(0UL, select.select_offset(1, 0));
+    EXPECT_EQ(1UL, select.select_offset(2, 0));
+    EXPECT_EQ(2UL, select.select_offset(3, 0));
+    EXPECT_EQ(62UL, select.select_offset(63, 0));
+    EXPECT_EQ(63UL, select.select_offset(64, 0));
+    EXPECT_EQ(64UL, select.select_offset(65, 0));
+    EXPECT_EQ(100UL, select.select_offset(101, 0));
+    EXPECT_EQ(155UL, select.select_offset(156, 0));
 
-    EXPECT_EQ(0 + 1, select.select_offset(1, 1));
-    EXPECT_EQ(1 + 1, select.select_offset(2, 1));
-    EXPECT_EQ(2 + 1, select.select_offset(3, 1));
-    EXPECT_EQ(62 + 1, select.select_offset(63, 1));
-    EXPECT_EQ(63 + 1, select.select_offset(64, 1));
-    EXPECT_EQ(64 + 1, select.select_offset(65, 1));
-    EXPECT_EQ(100 + 1, select.select_offset(101, 1));
-    EXPECT_EQ(155, select.select_offset(155, 1));
+    EXPECT_EQ(0UL + 1, select.select_offset(1, 1));
+    EXPECT_EQ(1UL + 1, select.select_offset(2, 1));
+    EXPECT_EQ(2UL + 1, select.select_offset(3, 1));
+    EXPECT_EQ(62UL + 1, select.select_offset(63, 1));
+    EXPECT_EQ(63UL + 1, select.select_offset(64, 1));
+    EXPECT_EQ(64UL + 1, select.select_offset(65, 1));
+    EXPECT_EQ(100UL + 1, select.select_offset(101, 1));
+    EXPECT_EQ(155UL, select.select_offset(155, 1));
 
-    EXPECT_EQ(0 + 64, select.select_offset(1, 64));
-    EXPECT_EQ(1 + 64, select.select_offset(2, 64));
-    EXPECT_EQ(2 + 64, select.select_offset(3, 64));
-    EXPECT_EQ(62 + 64, select.select_offset(63, 64));
-    EXPECT_EQ(63 + 64, select.select_offset(64, 64));
-    EXPECT_EQ(64 + 64, select.select_offset(65, 64));
-    EXPECT_EQ(155, select.select_offset(92, 64));
+    EXPECT_EQ(0UL + 64, select.select_offset(1, 64));
+    EXPECT_EQ(1UL + 64, select.select_offset(2, 64));
+    EXPECT_EQ(2UL + 64, select.select_offset(3, 64));
+    EXPECT_EQ(62UL + 64, select.select_offset(63, 64));
+    EXPECT_EQ(63UL + 64, select.select_offset(64, 64));
+    EXPECT_EQ(64UL + 64, select.select_offset(65, 64));
+    EXPECT_EQ(155UL, select.select_offset(92, 64));
 
-    EXPECT_EQ(100, select.select_offset(1, 100));
-    EXPECT_EQ(101, select.select_offset(2, 100));
-    EXPECT_EQ(102, select.select_offset(3, 100));
-    EXPECT_EQ(155, select.select_offset(56, 100));
+    EXPECT_EQ(100UL, select.select_offset(1, 100));
+    EXPECT_EQ(101UL, select.select_offset(2, 100));
+    EXPECT_EQ(102UL, select.select_offset(3, 100));
+    EXPECT_EQ(155UL, select.select_offset(56, 100));
 }
 
 TEST(select_support_scan_offset, vector_every_seventh_set) {
