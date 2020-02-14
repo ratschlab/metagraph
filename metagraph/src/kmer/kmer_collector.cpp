@@ -212,7 +212,7 @@ KmerCollector<KMER, KmerExtractor, Container>
         tmp_dir_(tmp_dir) {
     assert(num_threads_ > 0);
     auto cleanup = get_cleanup<Extractor, typename Container::storage_type>(
-            filter_suffix_encoded.empty());
+            filter_suffix_encoded_.empty());
     size_t num_elements = memory_preallocated / sizeof(typename Container::value_type);
     if constexpr ((utils::is_instance<Container, common::SortedSetDisk> {}
                    || utils::is_instance<Container, common::SortedMultisetDisk> {})) {
