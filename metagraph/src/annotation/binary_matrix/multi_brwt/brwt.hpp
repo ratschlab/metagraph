@@ -34,6 +34,8 @@ class BRWT : public BinaryMatrix {
     SetBitPositions get_row(Row row) const;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
+    // get all selected rows appended with -1 and concatenated
+    std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
