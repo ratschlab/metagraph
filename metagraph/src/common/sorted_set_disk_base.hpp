@@ -140,7 +140,9 @@ class SortedSetDiskBase {
     }
 
     template <class value_type>
-    static void merge_l1(const std::string &chunk_file_prefix, uint32_t chunk_count) {
+    static void merge_l1(const std::string &chunk_file_prefix,
+                         uint32_t chunk_count,
+                         uint32_t *merged_index) {
         const std::string &merged_l1_file_name
                 = merged_l1_name(chunk_file_prefix, chunk_count / MERGE_L1_COUNT);
         std::fstream merged_file(merged_l1_file_name, std::ios::binary | std::ios::out);
@@ -148,6 +150,10 @@ class SortedSetDiskBase {
         std::vector<std::string> to_merge(to_merge_count);
         for (uint32_t i = 0; i < to_merge_count; ++i) {
             to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
+        }
+        if (to_merge_count == 1) { // small optimization if only 1 file to merge
+            std::filesystem::rename(to_merge[0], merged_l1_file_name);
+            return;
         }
         logger->trace("Starting merging last {} chunks into {}", to_merge_count,
                       merged_l1_file_name);
@@ -160,6 +166,7 @@ class SortedSetDiskBase {
                       }
                   };
         merge_files(to_merge, on_new_item, true /* clean up */);
+        (*merged_index)++;
         logger->trace("Merging last {} chunks into {} done", to_merge_count,
                       merged_l1_file_name);
     }
@@ -193,9 +200,8 @@ class SortedSetDiskBase {
         if (is_done) {
             threadPool->clear();
         } else if ((chunk_count + 1) % MERGE_L1_COUNT == 0) {
-            (*merged_index)++;
             threadPool->enqueue(merge_l1<typename storage_type::value_type>,
-                                chunk_file_prefix, chunk_count);
+                                chunk_file_prefix, chunk_count, merged_index);
         }
         data->resize(0);
     }
