@@ -148,6 +148,8 @@ class SortedSetDiskBase {
         for (uint32_t i = 0; i < to_merge_count; ++i) {
             to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
         }
+        logger->trace("Starting merging last {} chunks into {}", to_merge_count,
+                      merged_l1_file_name);
         std::function<void(const value_type &)> on_new_item
                 = [&merged_file, &merged_l1_file_name](const value_type &v) {
                       if (!merged_file.write(reinterpret_cast<const char *>(&v), sizeof(T))) {
@@ -157,6 +159,8 @@ class SortedSetDiskBase {
                       }
                   };
         merge_files(to_merge, on_new_item, true /* clean up */);
+        logger->trace("Merging last {} chunks into {} done", to_merge_count,
+                      merged_l1_file_name);
     }
 
     /**
