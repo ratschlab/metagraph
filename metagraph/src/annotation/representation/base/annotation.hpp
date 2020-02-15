@@ -132,6 +132,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
 
     virtual VLabels get(Index i) const override final;
 
+    // TODO: remove, use get_matrix().get_rows()
     virtual SetBitPositions get_label_codes(Index i) const = 0;
     virtual std::vector<SetBitPositions>
     get_label_codes(const std::vector<Index> &indices) const;
