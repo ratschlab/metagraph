@@ -273,6 +273,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     ips4o::parallel::sort(from_full_to_query.begin(), from_full_to_query.end(),
                           utils::LessFirst(), num_threads);
 
+    logger->trace("[Query graph construction] Prepared row indexes for query {} sec",
+                  timer.elapsed());
+    timer.reset();
+
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
     auto annotation = std::make_unique<annotate::RowCompressed<>>(

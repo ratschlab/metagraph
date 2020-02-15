@@ -1160,7 +1160,10 @@ int main(int argc, char *argv[]) {
                             row_indexes.push_back(from_full_to_query[i].first);
                         }
 
+                        Timer timer;
                         auto rows = annotation->get_label_codes(row_indexes);
+                        std::cout << "Annotation block extracted in "
+                                  << timer.elapsed() << " sec" << std::endl;
 
                         assert(rows.size() == batch_end - batch_begin);
 
