@@ -111,11 +111,12 @@ class SortedSetDiskBase {
         async_merge_l1_.join(); // make sure all L1 merges are done
 
         async_worker_.enqueue([this]() {
-            const uint32_t l1_chunk_count
-                    = (chunk_count_ + MERGE_L1_COUNT - 1) / MERGE_L1_COUNT;
-            std::vector<std::string> file_names(l1_chunk_count);
-            for (size_t i = 0; i < l1_chunk_count; ++i) {
-                file_names[i] = merged_l1_name(chunk_file_prefix_, i);
+            std::vector<std::string> file_names;
+            for (size_t i = 0; i < merged_index_; ++i) {
+                file_names.push_back(merged_l1_name(chunk_file_prefix_, i));
+            }
+            for (size_t i = MERGE_L1_COUNT * merged_index_; i < chunk_count_; ++i) {
+                file_names.push_back(chunk_file_prefix_ + std::to_string(i));
             }
             std::function<void(const value_type &)> on_new_item
                     = [this](const value_type &v) { merge_queue_.push(v); };
@@ -176,7 +177,8 @@ class SortedSetDiskBase {
                              const std::string &chunk_file_prefix,
                              storage_type *data,
                              uint32_t chunk_count,
-                             bool is_done) {
+                             bool is_done,
+                             uint32_t *merged_index) {
         std::string file_name = chunk_file_prefix + std::to_string(chunk_count);
         std::fstream binary_file(file_name, std::ios::out | std::ios::binary);
         if (!binary_file) {
@@ -188,7 +190,10 @@ class SortedSetDiskBase {
             std::exit(EXIT_FAILURE);
         }
         binary_file.close();
-        if (is_done || (chunk_count + 1) % MERGE_L1_COUNT == 0) {
+        if (is_done) {
+            threadPool->clear();
+        } else if ((chunk_count + 1) % MERGE_L1_COUNT == 0) {
+            (*merged_index)++;
             threadPool->enqueue(merge_l1<typename storage_type::value_type>,
                                 chunk_file_prefix, chunk_count);
         }
@@ -208,7 +213,8 @@ class SortedSetDiskBase {
 
         data_dump_.swap(data_);
         async_worker_.enqueue(dump_to_file<storage_type>, &async_merge_l1_,
-                              chunk_file_prefix_, &data_dump_, chunk_count_, is_done);
+                              chunk_file_prefix_, &data_dump_, chunk_count_, is_done,
+                              &merged_index_);
         chunk_count_++;
     }
 
@@ -270,6 +276,12 @@ class SortedSetDiskBase {
      * the order of thousands, so a 32 bit integer should suffice for storage.
      */
     uint32_t chunk_count_ = 0;
+
+    /**
+     * The number of L1 merges that were successfully performed.
+     */
+    __uint32_t merged_index_ = 0;
+
     /**
      * Hold the data filled in via #insert.
      */

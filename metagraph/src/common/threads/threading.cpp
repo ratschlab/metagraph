@@ -43,6 +43,15 @@ void ThreadPool::join() {
 
     if (!stop_)
         initialize(num_workers);
+
+
+}
+
+void ThreadPool::clear() {
+    std::unique_lock<std::mutex> lock(this->queue_mutex);
+    std::queue<std::function<void()>> empty;
+    this->tasks.swap(empty);
+    this->empty_condition.notify_all();
 }
 
 void ThreadPool::initialize(size_t num_workers) {

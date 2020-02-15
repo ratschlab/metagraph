@@ -51,6 +51,8 @@ class ThreadPool {
 
     void join();
 
+    void clear();
+
     ~ThreadPool();
 
   private:
