@@ -357,7 +357,7 @@ int main(int argc, char *argv[]) {
     try {
         TCLAP::CmdLine cmd("Benchmarks and data generation for metagraph", ' ', "");
 
-        std::vector<std::string> regimes {
+        ValuesConstraint<std::string> regimes({
             "vectors",
             "matrices",
             "subsets",
@@ -369,10 +369,8 @@ int main(int argc, char *argv[]) {
             "evaluate_alignment",
             "query_annotation_rows",
             "to_dna4"
-        };
-
-        ValuesConstraint<std::string> regime_constraint(regimes);
-        UnlabeledValueArg<std::string> regime_arg("regime", "Regime", true, "", &regime_constraint, cmd);
+        });
+        UnlabeledValueArg<std::string> regime_arg("regime", "Regime", true, "", &regimes, cmd);
         cmd.parse(std::min(argc, 2), argv);
 
         std::string regime = regime_arg.getValue();
