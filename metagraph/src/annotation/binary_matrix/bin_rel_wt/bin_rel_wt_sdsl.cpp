@@ -100,6 +100,19 @@ std::vector<BinRelWT_sdsl::Row> BinRelWT_sdsl::get_column(Column column) const {
     return column_vec;
 }
 
+size_t BinRelWT_sdsl::get_column_count(Column column) const {
+    return wt_.rank(wt_.size(), column);
+}
+std::vector<size_t> BinRelWT_sdsl::get_column_counts() const {
+    std::vector<size_t> counts(num_columns_);
+
+    for (Column i = 0; i < num_columns_; ++i) {
+        counts[i] = get_column_count(i);
+    }
+
+    return counts;
+}
+
 bool BinRelWT_sdsl::get(Row row, Column column) const {
     // Not counting i first 1s indicating the boundries.
     uint64_t first_string_index = delimiters_.select1(row + 1) - row;

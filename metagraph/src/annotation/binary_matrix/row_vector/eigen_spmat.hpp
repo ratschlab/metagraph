@@ -24,6 +24,8 @@ class EigenSpMat : public BinaryMatrixRowDynamic {
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
+    std::vector<size_t> get_column_counts() const;
+    size_t get_column_count(Column column) const;
 
     void set(Row row, Column column);
     void clear_row(Row row);

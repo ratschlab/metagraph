@@ -64,6 +64,30 @@ RowConcatenated<BitVector>::get_column(Column column) const {
 }
 
 template <typename BitVector>
+size_t RowConcatenated<BitVector>::get_column_count(Column column) const {
+    assert(compressed_rows_.get());
+    assert(column < num_columns_);
+
+    size_t count = 0;
+    for (uint64_t i = column; i < compressed_rows_->size(); i += num_columns_) {
+        if ((*compressed_rows_)[i])
+            ++count;
+    }
+
+    return count;
+}
+
+template <typename BitVector>
+std::vector<size_t> RowConcatenated<BitVector>::get_column_counts() const {
+    std::vector<size_t> counts(num_columns_);
+
+    if (compressed_rows_.get())
+        compressed_rows_->call_ones([&](auto i) { ++counts.at(i % num_columns_); });
+
+    return counts;
+}
+
+template <typename BitVector>
 bool RowConcatenated<BitVector>::load(std::istream &in) {
     compressed_rows_.reset(new BitVector());
     try {

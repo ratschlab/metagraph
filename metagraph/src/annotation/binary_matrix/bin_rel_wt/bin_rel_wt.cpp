@@ -164,6 +164,27 @@ std::vector<BinRelWT::Row> BinRelWT::get_column(Column column) const {
     return relations_in_column;
 }
 
+size_t BinRelWT::get_column_count(Column column) const {
+    return (is_zero_column(column) || binary_relation_.size() == 0 ? 0 :
+        static_cast<uint64_t>(binary_relation_.obj_rank(to_object_id(max_used_object),
+                                                        to_label_id(column))));
+}
+
+std::vector<size_t> BinRelWT::get_column_counts() const {
+    std::vector<size_t> counts(num_labels);
+
+    auto last_object = to_object_id(max_used_object);
+    for (Column i = 0; i < num_labels; ++i) {
+        if (is_zero_column(i))
+            continue;
+
+        counts[i] = (binary_relation_.size() == 0 ? 0 :
+            static_cast<uint64_t>(binary_relation_.obj_rank(last_object, to_label_id(i))));
+    }
+
+    return counts;
+}
+
 bool BinRelWT::get(Row row, Column column) const {
     assert(column < num_labels);
     assert(row < num_objects);

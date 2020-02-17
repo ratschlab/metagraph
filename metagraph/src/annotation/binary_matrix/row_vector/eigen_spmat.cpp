@@ -49,6 +49,26 @@ EigenSpMat::get_column(Column column) const {
     return result;
 }
 
+size_t EigenSpMat::get_column_count(Column column) const {
+    size_t count = 0;
+    for (uint64_t i = 0; i < num_rows(); ++i) {
+        if (get(i, column))
+            ++count;
+    }
+
+    return count;
+}
+
+std::vector<size_t> EigenSpMat::get_column_counts() const {
+    std::vector<size_t> counts(num_columns_);
+
+    for (Column i = 0; i < counts.size(); ++i) {
+        counts[i] = get_column_count(i);
+    }
+
+    return counts;
+}
+
 void EigenSpMat::clear_row(Row row) {
     assert(row < num_rows());
 

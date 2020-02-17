@@ -5,6 +5,7 @@
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
+#include "common/threads/threading.hpp"
 
 
 bool BRWT::get(Row row, Column column) const {
@@ -194,7 +195,7 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
         return {};
 
     // check whether it is a leaf
-    if (!child_nodes_.size()) {
+    if (child_nodes_.empty()) {
         // return the index column
         std::vector<BRWT::Row> result;
         result.reserve(num_nonzero_rows);
@@ -214,6 +215,36 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
         rows[i] = nonzero_rows_->select1(rows[i] + 1);
     }
     return rows;
+}
+
+size_t BRWT::get_column_count(Column column) const {
+    assert(column < num_columns());
+
+    auto num_nonzero_rows = nonzero_rows_->num_set_bits();
+
+    // check if the column is empty
+    if (!num_nonzero_rows)
+        return 0;
+
+    // check if the column is empty or is a leaf
+    if (child_nodes_.empty())
+        return num_nonzero_rows;
+
+    return child_nodes_[assignments_.group(column)]->get_column_count(
+        assignments_.rank(column)
+    );
+}
+
+std::vector<size_t> BRWT::get_column_counts() const {
+    std::vector<size_t> counts(num_columns());
+
+    // TODO: compute for multiple columns at a time
+#pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (Column i = 0; i < counts.size(); ++i) {
+        counts[i] = get_column_count(i);
+    }
+
+    return counts;
 }
 
 bool BRWT::load(std::istream &in) {
