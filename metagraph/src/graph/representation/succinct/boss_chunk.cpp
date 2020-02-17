@@ -151,16 +151,18 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
     using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
 
     template <typename KMER>
-    static void set_weight(const size_t count,
-                            const KMER &kmer,
-                            size_t curpos,
-                            uint64_t max_count,
-                            sdsl::int_vector<> *weights) {
-        if (weights->size() == curpos) {
+    static void set_weight(const uint64_t count,
+                           const KMER &kmer,
+                           size_t curpos,
+                           uint64_t max_count,
+                           sdsl::int_vector<> *weights) {
+        assert(weights);
+
+        if (weights->size() == curpos)
             weights->resize(weights->size() * 1.5);
-        }
+
         if (count && kmer[0] && kmer[1]) {
-            (*weights)[curpos] = std::min(static_cast<uint64_t>(count), max_count);
+            (*weights)[curpos] = std::min(count, max_count);
         } else { // dummy k-mers have a weight of 0
             (*weights)[curpos] = 0;
         }
@@ -184,12 +186,12 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         assert(alph_size);
         assert(k);
         assert(W && last && F);
-        assert(weights == nullptr || utils::is_pair<T>::value);
+        assert(bool(weights) == utils::is_pair<T>::value);
 
         F->assign(alph_size, 0);
 
         uint64_t max_count __attribute__((unused)) = 0;
-        if constexpr (utils::is_pair<T>::value) {
+        if constexpr(utils::is_pair<T>::value) {
             weights->resize(100);
             max_count = sdsl::bits::lo_set[weights->width()];
         }
@@ -240,7 +242,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                 F->at(++lastF) = curpos - 1;
             }
 
-            if constexpr (utils::is_pair<T>::value) {
+            if constexpr(utils::is_pair<T>::value) {
                 set_weight((*it).second, kmer, curpos, max_count, weights);
             }
 
@@ -254,7 +256,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         W->resize(curpos);
         last->resize(curpos);
 
-        if constexpr (utils::is_pair<T>::value)
+        if constexpr(utils::is_pair<T>::value)
             weights->resize(curpos);
     }
 };

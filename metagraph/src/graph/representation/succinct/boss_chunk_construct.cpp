@@ -378,13 +378,13 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          size_t num_threads = 1,
                          double memory_preallocated = 0,
                          const std::filesystem::path &tmp_dir = "/tmp")
-        : kmer_collector_(k + 1,
-                          canonical_mode,
-                          encode_filter_suffix_boss(filter_suffix),
-                          num_threads,
-                          memory_preallocated,
-                          tmp_dir),
-          bits_per_count_(bits_per_count) {
+          : kmer_collector_(k + 1,
+                            canonical_mode,
+                            encode_filter_suffix_boss(filter_suffix),
+                            num_threads,
+                            memory_preallocated,
+                            tmp_dir),
+            bits_per_count_(bits_per_count) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
@@ -514,8 +514,9 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   double memory_preallocated,
                                   kmer::ContainerType container_type,
                                   const std::filesystem::path &tmp_dir) {
-#define OTHER_ARGS \
-    k, canonical_mode, bits_per_count, filter_suffix, num_threads, memory_preallocated, tmp_dir
+#define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
+                   num_threads, memory_preallocated, tmp_dir
+
     switch (container_type) {
         case kmer::ContainerType::VECTOR:
             if (!bits_per_count) {

@@ -63,10 +63,9 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        char* tmp_dir_str = strdup((config->tmp_dir / "XXXXXX").c_str());
-        mkdtemp(tmp_dir_str);
+        std::string tmp_dir_str(config->tmp_dir / "XXXXXX");
+        mkdtemp(tmp_dir_str.data());
         std::filesystem::path tmp_dir(tmp_dir_str);
-        std::filesystem::create_directory(tmp_dir);
         logger->trace("Setting temporary directory to {}", tmp_dir);
 
         //one pass per suffix
@@ -85,7 +84,8 @@ int build_graph(Config *config) {
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
                 config->container,
-                tmp_dir);
+                tmp_dir
+            );
 
             parse_sequences(files, *config, timer,
                 [&](std::string_view seq) { constructor->add_sequence(seq); },

@@ -71,9 +71,9 @@ uint64_t merge_files(const std::vector<std::string> sources,
     VectorHeap<T> merge_heap(sources.size());
     T data_item;
     // profiling indicates that setting a larger buffer slightly increases performance
-    char *buffer = new char[sources.size() * 1024 * 1024];
+    std::unique_ptr<char[]> buffer(new char[sources.size() * 1024 * 1024]);
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        chunk_files[i].rdbuf()->pubsetbuf((buffer + i * 1024 * 1024), 1024 * 1024);
+        chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
         if (!chunk_files[i].good()) {
             logger->error("Error: Unable to open chunk file '{}'", sources[i]);
@@ -106,7 +106,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
         std::for_each(sources.begin(), sources.end(),
                       [](const std::string &s) { std::filesystem::remove(s); });
     }
-    delete[] buffer;
+
     return num_elements_read;
 }
 
@@ -171,7 +171,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
 
     MergingHeap<T, C> merge_heap;
     std::pair<T, C> data_item;
-    std::unique_ptr<char []> buffer(new char[sources.size() * 1024 * 1024]);
+    std::unique_ptr<char[]> buffer(new char[sources.size() * 1024 * 1024]);
     for (uint32_t i = 0; i < sources.size(); ++i) {
         chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
@@ -185,26 +185,35 @@ uint64_t merge_files(const std::vector<std::string> sources,
             num_elements++;
         }
     }
+
     if (merge_heap.empty()) {
+        if (cleanup) {
+            std::for_each(sources.begin(), sources.end(),
+                          [](const std::string &s) { std::filesystem::remove(s); });
+        }
         return num_elements;
     }
 
-    std::optional<CountedEl> current;
+    CountedEl current = merge_heap.pop();
+    uint32_t chunk_index = std::get<2>(current);
+    if (chunk_files[chunk_index]
+        && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
+                                         sizeof(std::pair<T, C>))) {
+        merge_heap.emplace(data_item.first, data_item.second, chunk_index);
+        num_elements++;
+    }
+
     while (!merge_heap.empty()) {
         CountedEl smallest = merge_heap.pop();
 
-        if (current.has_value() && std::get<0>(smallest) != std::get<0>(current.value())) {
-            on_new_item({ std::get<0>(current.value()), std::get<1>(current.value()) });
+        if (std::get<0>(smallest) != std::get<0>(current)) {
+            on_new_item({ std::get<0>(current), std::get<1>(current) });
             current = smallest;
         } else {
-            if (current.has_value()) {
-                std::get<1>(current.value()) += std::get<1>(smallest);
-            } else {
-                current = smallest;
-            }
+            std::get<1>(current) += std::get<1>(smallest);
         }
 
-        uint32_t chunk_index = std::get<2>(smallest);
+        chunk_index = std::get<2>(smallest);
         if (chunk_files[chunk_index]
             && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
                                              sizeof(std::pair<T, C>))) {
@@ -212,12 +221,13 @@ uint64_t merge_files(const std::vector<std::string> sources,
             num_elements++;
         }
     }
-    on_new_item({ std::get<0>(current.value()), std::get<1>(current.value()) });
+    on_new_item({ std::get<0>(current), std::get<1>(current) });
 
     if (cleanup) {
         std::for_each(sources.begin(), sources.end(),
                       [](const std::string &s) { std::filesystem::remove(s); });
     }
+
     return num_elements;
 }
 

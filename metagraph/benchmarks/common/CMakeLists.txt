@@ -34,12 +34,12 @@ target_link_libraries(benchmark_file_merger
 
 add_executable(benchmark_chunked_wait_queue benchmark_chunked_wait_queue.cpp)
 target_include_directories(benchmark_chunked_wait_queue
-    PRIVATE
+  PRIVATE
     ${EXTERNAL_LIB_DIR}/benchmark/include
     "../../src/"
-    )
+)
 target_link_libraries(benchmark_chunked_wait_queue
-    PRIVATE
+  PRIVATE
     benchmark_main
     benchmark
     metagraph_common
