@@ -2,6 +2,7 @@
 
 #include <ips4o.hpp>
 #include <fmt/format.h>
+#include <tsl/ordered_map.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -17,12 +18,20 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "align.hpp"
+#include "parse_sequences.hpp"
 
 const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
 using mg::common::logger;
+
+template <typename Key, typename T>
+using VectorOrderedMap = tsl::ordered_map<Key, T,
+                                          std::hash<Key>, std::equal_to<Key>,
+                                          std::allocator<std::pair<Key, T>>,
+                                          std::vector<std::pair<Key, T>>,
+                                          uint64_t>;
 
 
 void execute_query(const std::string &seq_name,
@@ -293,6 +302,70 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     return std::make_unique<AnnotatedDBG>(masked_graph, std::move(annotation));
 }
 
+int get_coverage(const AnnotatedDBG &anno_graph,
+                 const Config &config,
+                 Timer timer,
+                 std::ostream &output_stream) {
+    const auto &graph = anno_graph.get_graph();
+    const auto &files = config.fnames;
+    const auto &annotator = anno_graph.get_annotation();
+    const auto &label_encoder = annotator.get_label_encoder();
+
+    logger->trace("Computing counts for each label");
+    const auto label_counts = annotator.get_label_counts();
+    logger->trace("Counts for labels computed in {} sec", timer.elapsed());
+
+#pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < files.size(); ++i) {
+        const auto &file = files[i];
+        Timer curr_timer;
+
+        VectorOrderedMap<AnnotatedDBG::row_index, size_t> nodes;
+
+        logger->trace("Parsing sequences from file '{}'", file);
+
+        auto add_sequence = [&](std::string_view seq, uint32_t = 0) {
+            // TODO: does nodes need to be locked?
+            graph.map_to_nodes(seq, [&](auto i) {
+                if (i > 0)
+                    nodes.emplace(anno_graph.graph_to_anno_index(i), 1);
+            });
+        };
+
+        parse_sequences({ file }, config, timer, add_sequence, add_sequence,
+                        [&](const auto &loop) { loop(add_sequence); });
+
+        auto coverage = annotator.count_labels(nodes.values_container());
+
+        if (!coverage.size() && config.suppress_unlabeled)
+            continue;
+
+        std::string output;
+        output.reserve(1'000);
+
+        output += file;
+
+        for (const auto &[label_code, count] : coverage) {
+            output += fmt::format("\t<{}>:{}:{}",
+                                  label_encoder.decode(label_code),
+                                  count,
+                                  label_counts[label_code]);
+        }
+
+        output += '\n';
+
+#pragma omp critical
+        {
+            output_stream << output;
+        }
+
+        logger->trace("File '{}' was processed in {} sec, total time: {}", file,
+                      curr_timer.elapsed(), timer.elapsed());
+    }
+
+    return 0;
+}
+
 
 std::string get_alignment_header_and_swap_query(const std::string &name,
                                                 std::string *query_seq,
@@ -330,6 +403,10 @@ int query_graph(Config *config) {
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 
     Timer timer;
+
+    if (config->get_coverage) {
+        return get_coverage(*anno_graph, *config, timer, std::ref(std::cout));
+    }
 
     std::unique_ptr<IDBGAligner> aligner;
     if (config->align_sequences) {
