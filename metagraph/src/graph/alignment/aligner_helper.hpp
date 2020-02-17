@@ -499,7 +499,8 @@ class DPTable {
                   size_t size,
                   size_t start_pos,
                   int8_t gap_opening_penalty,
-                  int8_t gap_extension_penalty);
+                  int8_t gap_extension_penalty,
+                  size_t query_offset = 0);
 
     typedef tsl::hopscotch_map<NodeType, Column> Storage;
 
@@ -538,9 +539,11 @@ class DPTable {
                             NodeType *node = nullptr);
 
     const Storage& data() const { return dp_table_; }
+    size_t get_query_offset() const { return query_offset_; }
 
   private:
     Storage dp_table_;
+    size_t query_offset_ = 0;
 };
 
 

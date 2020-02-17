@@ -14,8 +14,11 @@ bool DPTable<NodeType>::add_seed(const SequenceGraph &graph,
                                  size_t size,
                                  size_t start_pos,
                                  int8_t gap_opening_penalty,
-                                 int8_t gap_extension_penalty) {
+                                 int8_t gap_extension_penalty,
+                                 size_t query_offset) {
     assert(start_pos < size);
+
+    query_offset_ = query_offset;
 
     auto &table_init = dp_table_[start_node];
     if (!table_init.size()) {
