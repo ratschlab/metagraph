@@ -57,7 +57,7 @@ get_outgoing_columns(const DeBruijnGraph &graph,
             }
 
             assert(find != dp_table.end());
-            out_columns.emplace_back(find->first, find->second.best_score());
+            out_columns.emplace_back(next_node, find->second.best_score());
         }
     );
 

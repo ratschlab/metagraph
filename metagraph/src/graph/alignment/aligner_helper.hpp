@@ -451,7 +451,14 @@ class DPTable {
     typedef ::score_t score_t;
 
     struct Column {
-        Column() {}
+        Column() = default;
+
+        Column(Column&&) noexcept = default;
+        Column& operator=(Column&&) noexcept = default;
+
+        Column(const Column&) = delete;
+        Column& operator=(const Column&) = delete;
+
         Column(size_t size,
                score_t min_score,
                char start_char,
