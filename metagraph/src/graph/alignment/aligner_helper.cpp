@@ -25,7 +25,7 @@ bool DPTable<NodeType>::add_seed(const SequenceGraph &graph,
         // Initialize first column
         std::vector<NodeType> in_nodes;
         graph.adjacent_incoming_nodes(start_node, [&](auto i) { in_nodes.push_back(i); });
-        table_init = std::move(Column(size, min_score, start_char, std::move(in_nodes), start_pos));
+        table_init = Column(size, min_score, start_char, std::move(in_nodes), start_pos);
     }
 
     bool update = false;

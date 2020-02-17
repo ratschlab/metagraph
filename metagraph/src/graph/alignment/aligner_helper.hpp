@@ -453,11 +453,13 @@ class DPTable {
     struct Column {
         Column() = default;
 
-        Column(Column&&) noexcept = default;
-        Column& operator=(Column&&) noexcept = default;
-
+        // Prevent the copy constructor from being used
         Column(const Column&) = delete;
         Column& operator=(const Column&) = delete;
+
+        // Ensure that the move constructor is still available
+        Column(Column&&) noexcept = default;
+        Column& operator=(Column&&) noexcept = default;
 
         Column(size_t size,
                score_t min_score,
