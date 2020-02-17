@@ -27,6 +27,7 @@ class Rainbowfish : public BinaryMatrix {
     SetBitPositions get_row(Row row) const;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
+    const std::vector<size_t>& get_column_counts() const { return column_counts_; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -51,6 +52,7 @@ class Rainbowfish : public BinaryMatrix {
     bit_vector_rrr<> row_codes_;
     bit_vector_rrr<> row_code_delimiters_;
     std::vector<std::unique_ptr<BinaryMatrix>> reduced_matrix_;
+    std::vector<size_t> column_counts_;
 
     uint64_t get_code(Row row) const;
 };

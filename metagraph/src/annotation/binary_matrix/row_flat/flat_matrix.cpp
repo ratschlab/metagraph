@@ -15,12 +15,14 @@ RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
                 uint64_t num_rows,
                 uint64_t num_set_bits)
       : num_columns_(num_columns),
-        num_rows_(num_columns ? num_rows : 0) {
+        num_rows_(num_columns ? num_rows : 0),
+        column_counts_(num_columns_) {
     compressed_rows_.reset(new BitVector(
         [&](const std::function<void(uint64_t)> &callback) {
             uint64_t pos = 0;
             call_rows([&](const auto &column_indices) {
                 for (const auto &a : column_indices) {
+                    ++column_counts_[a];
                     callback(pos + a);
                 }
                 pos += num_columns_;
@@ -79,6 +81,9 @@ bool RowConcatenated<BitVector>::load(std::istream &in) {
         } catch (...) {
             num_rows_ = compressed_rows_->size() / num_columns_;
         }
+
+        return load_number_vector(in, &column_counts_);
+
     } catch (...) {
         return false;
     }
@@ -91,6 +96,12 @@ void RowConcatenated<BitVector>::serialize(std::ostream &out) const {
     serialize_number(out, num_columns_);
     compressed_rows_->serialize(out);
     serialize_number(out, num_rows_);
+    serialize_number_vector(out, column_counts_);
+}
+
+template <typename BitVector>
+uint64_t RowConcatenated<BitVector>::num_relations() const {
+    return std::accumulate(column_counts_.begin(), column_counts_.end(), uint64_t(0));
 }
 
 template class RowConcatenated<bit_vector_sd>;

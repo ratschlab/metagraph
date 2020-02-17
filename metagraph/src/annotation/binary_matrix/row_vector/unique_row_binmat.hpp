@@ -26,6 +26,7 @@ class UniqueRowBinmat : public BinaryMatrix {
     SetBitPositions get_row(Row row) const;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
     std::vector<Row> get_column(Column column) const;
+    const std::vector<size_t>& get_column_counts() const { return column_counts_; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -40,6 +41,7 @@ class UniqueRowBinmat : public BinaryMatrix {
     uint32_t num_relations_ = 0;
     std::vector<row_type> unique_rows_;
     std::vector<uint32_t> row_rank_;
+    std::vector<size_t> column_counts_;
 };
 
 #endif // __UNIQUE_ROW_BINMAT_HPP__

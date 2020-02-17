@@ -28,6 +28,11 @@ class BRWT : public BinaryMatrix {
     SetBitPositions get_row(Row row) const;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
+    const std::vector<size_t>& get_column_counts() const {
+        assert(column_counts_ && "can only count columns of root nodes");
+        return *column_counts_;
+    }
+
     // get all selected rows appended with -1 and concatenated
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
 
@@ -54,6 +59,7 @@ class BRWT : public BinaryMatrix {
     RangePartition assignments_;
     std::unique_ptr<bit_vector> nonzero_rows_;
     std::vector<std::unique_ptr<BinaryMatrix>> child_nodes_;
+    std::shared_ptr<std::vector<size_t>> column_counts_;
 };
 
 #endif // __BRWT_HPP__

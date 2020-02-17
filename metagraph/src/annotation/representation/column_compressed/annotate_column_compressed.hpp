@@ -93,7 +93,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
-    ColumnMajor annotation_matrix_view_ = ColumnMajor::construct_view(bitmatrix_);
+    mutable std::vector<size_t> column_counts_;
+    ColumnMajor annotation_matrix_view_ = ColumnMajor::construct_view(bitmatrix_, column_counts_);
 
     mutable std::mutex bitmap_conversion_mu_;
     mutable bool flushed_ = true;

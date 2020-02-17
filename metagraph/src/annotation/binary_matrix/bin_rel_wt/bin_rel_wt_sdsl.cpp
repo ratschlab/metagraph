@@ -12,7 +12,8 @@ BinRelWT_sdsl
 ::BinRelWT_sdsl(const std::function<void(const RowCallback &)> &generate_rows,
                 uint64_t num_relations,
                 uint64_t num_columns)
-      : num_columns_(num_columns) {
+      : num_columns_(num_columns),
+        column_counts_(num_columns_) {
     sdsl::int_vector<> flat(num_relations, 0, sdsl::bits::hi(num_columns) + 1);
 
     // delimiters_ includes a 0 for each char in base
@@ -26,6 +27,7 @@ BinRelWT_sdsl
         for (const auto &col_index : row_set_bits) {
             assert(col_index < num_columns);
             assert(index < flat.size());
+            ++column_counts_[col_index];
             flat[index++] = col_index;
             delimiters_vec.push_back(0);
         }
@@ -116,7 +118,12 @@ bool BinRelWT_sdsl::load(std::istream &in) {
     try {
         num_columns_ = load_number(in);
         wt_.load(in);
-        return delimiters_.load(in);
+
+        if (!delimiters_.load(in))
+            return false;
+
+        return load_number_vector(in, &column_counts_);
+
     } catch (...) {
         return false;
     }
@@ -129,6 +136,7 @@ void BinRelWT_sdsl::serialize(std::ostream &out) const {
     serialize_number(out, num_columns_);
     wt_.serialize(out);
     delimiters_.serialize(out);
+    serialize_number_vector(out, column_counts_);
 }
 
 uint64_t BinRelWT_sdsl::num_relations() const {

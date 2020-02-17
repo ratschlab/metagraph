@@ -22,6 +22,7 @@ class BinRelWT : public BinaryMatrix {
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
+    const std::vector<size_t>& get_column_counts() const { return column_counts_; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -38,6 +39,7 @@ class BinRelWT : public BinaryMatrix {
     uint64_t max_used_label = 0;
     uint64_t max_used_object = 0;
     uint64_t num_objects = 0;
+    std::vector<size_t> column_counts_;
 };
 
 #endif // __BIN_REL_WT_HPP__

@@ -65,11 +65,14 @@ class MultiLabelAnnotation
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
     virtual const std::vector<Label>& get_all_labels() const = 0;
+    virtual const std::vector<size_t>& get_label_counts() const = 0;
 
     virtual bool label_exists(const Label &label) const = 0;
 
     virtual void call_objects(const Label &label,
                               std::function<void(Index)> callback) const = 0;
+
+    virtual uint64_t num_objects(const Label &label) const = 0;
 
     virtual std::string file_extension() const = 0;
 };
@@ -150,6 +153,10 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
         return label_encoder_.get_labels();
     }
 
+    virtual const std::vector<size_t>& get_label_counts() const override final {
+        return get_matrix().get_column_counts();
+    }
+
     virtual inline bool label_exists(const Label &label) const override final {
         return label_encoder_.label_exists(label);
     }
@@ -157,6 +164,9 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     // TODO: return a shared_ptr to const bitmap
     virtual void call_objects(const Label &label,
                               std::function<void(Index)> callback) const override;
+
+    virtual uint64_t num_objects() const override = 0;
+    virtual uint64_t num_objects(const Label &label) const override;
 
     virtual const BinaryMatrix& get_matrix() const = 0;
 

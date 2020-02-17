@@ -5,6 +5,7 @@
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
+#include "common/threads/threading.hpp"
 
 
 bool BRWT::get(Row row, Column column) const {
@@ -195,7 +196,7 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
         return {};
 
     // check whether it is a leaf
-    if (!child_nodes_.size()) {
+    if (child_nodes_.empty()) {
         // return the index column
         std::vector<BRWT::Row> result;
         result.reserve(num_nonzero_rows);
@@ -236,8 +237,16 @@ bool BRWT::load(std::istream &in) {
             if (!child_nodes_.back()->load(in))
                 return false;
         }
-        return !child_nodes_.size()
-                    || child_nodes_.size() == assignments_.num_groups();
+        if (child_nodes_.size()
+                    && child_nodes_.size() != assignments_.num_groups())
+            return false;
+
+        if (!load_number(in))
+            return true;
+
+        column_counts_.reset(new std::vector<size_t>());
+        return load_number_vector(in, column_counts_.get());
+
     } catch (...) {
         return false;
     }
@@ -258,9 +267,17 @@ void BRWT::serialize(std::ostream &out) const {
     for (const auto &child : child_nodes_) {
         child->serialize(out);
     }
+
+    serialize_number(out, static_cast<bool>(column_counts_.get()));
+
+    if (column_counts_)
+        serialize_number_vector(out, *column_counts_);
 }
 
 uint64_t BRWT::num_relations() const {
+    if (column_counts_)
+        return std::accumulate(column_counts_->begin(), column_counts_->end(), uint64_t(0));
+
     if (!child_nodes_.size())
         return nonzero_rows_->num_set_bits();
 

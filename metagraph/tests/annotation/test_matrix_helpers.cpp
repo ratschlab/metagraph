@@ -265,6 +265,14 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
+    // check get_column_counts
+    const auto &column_counts = matrix.get_column_counts();
+    ASSERT_EQ(columns.size(), column_counts.size());
+    for (size_t i = 0; i < column_counts.size(); ++i) {
+        EXPECT_EQ(columns.at(i)->num_set_bits(), column_counts[i]);
+        EXPECT_EQ(columns.at(i)->num_set_bits(), matrix.get_column_count(i));
+    }
+
     // check serialization
     test_serialization(matrix);
 }

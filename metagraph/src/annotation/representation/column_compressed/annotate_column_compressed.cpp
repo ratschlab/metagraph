@@ -49,6 +49,7 @@ void ColumnCompressed<Label>::set(Index i, const VLabels &labels) {
     for (const auto &label : labels) {
         label_encoder_.insert_and_encode(label);
     }
+
     // labels as a row
     std::vector<bool> row(label_encoder_.size(), 0);
     for (const auto &label : labels) {
@@ -65,8 +66,11 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
                                          const VLabels &labels) {
     for (const auto &label : labels) {
         const auto j = label_encoder_.insert_and_encode(label);
-        decompress_builder(j).add_ones(indices.data(),
-                                       indices.data() + indices.size());
+
+        decompress_builder(j).add_ones(
+            indices.data(),
+            indices.data() + indices.size()
+        );
     }
 }
 
@@ -105,6 +109,8 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
         assert(column.get());
         column->serialize(outstream);
     }
+
+    // column_counts_ is recomputed during load, so no need to serialize it
 }
 
 template <typename Label>
@@ -112,6 +118,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // release the columns stored
     cached_columns_.Clear();
     bitmatrix_.clear();
+    column_counts_.clear();
 
     label_encoder_.clear();
 
@@ -119,29 +126,31 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
     bool merge_successful = merge_load(filenames,
         [&](uint64_t, const Label &label, std::unique_ptr<bit_vector>&& column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("Column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
             #pragma omp critical
             {
-                uint64_t num_set_bits = column->num_set_bits();
-                logger->trace("Column: {}, Density: {}, Set bits: {}", label,
-                              static_cast<double>(num_set_bits) / column->size(),
-                              num_set_bits);
+                if (no_errors) {
+                    // set |num_rows_| with the first column inserted
+                    if (!bitmatrix_.size())
+                        num_rows_ = column->size();
 
-                // set |num_rows_| with the first column inserted
-                if (!bitmatrix_.size())
-                    num_rows_ = column->size();
+                    if (column->size() == num_rows_) {
+                        size_t col = label_encoder_.insert_and_encode(label);
+                        assert(col <= bitmatrix_.size());
 
-                if (column->size() == num_rows_) {
-                    size_t col = label_encoder_.insert_and_encode(label);
-                    assert(col <= bitmatrix_.size());
-
-                    if (col == bitmatrix_.size()) {
-                        bitmatrix_.emplace_back(std::move(column));
+                        if (col == bitmatrix_.size()) {
+                            bitmatrix_.emplace_back(std::move(column));
+                        } else {
+                            assert(bitmatrix_.at(col).get());
+                            decompress_bitmap(col) |= *column;
+                        }
                     } else {
-                        assert(bitmatrix_.at(col).get());
-                        decompress_bitmap(col) |= *column;
+                        no_errors = false;
                     }
-                } else {
-                    no_errors = false;
                 }
             }
         },
@@ -149,6 +158,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     );
 
     if (merge_successful && no_errors) {
+        flush();
         logger->trace("Annotation loading finished ({} columns)", bitmatrix_.size());
         return true;
     } else {
@@ -349,7 +359,6 @@ void ColumnCompressed<Label>
 
     for (const auto &label : new_index_to_label) {
         label_encoder_.insert_and_encode(label);
-
         const auto &cols = old_columns[label];
 
         assert(cols.size());
@@ -364,6 +373,8 @@ void ColumnCompressed<Label>
             bitmatrix_.emplace_back(new bit_vector_smart(bit_vector));
         }
     }
+
+    flushed_ = false;
 }
 
 template <typename Label>
@@ -373,6 +384,9 @@ uint64_t ColumnCompressed<Label>::num_objects() const {
 
 template <typename Label>
 uint64_t ColumnCompressed<Label>::num_relations() const {
+    if (flushed_)
+        return get_matrix().num_relations();
+
     uint64_t num_rels = 0;
     for (size_t i = 0; i < num_labels(); ++i) {
         num_rels += get_column(i).num_set_bits();
@@ -404,6 +418,10 @@ void ColumnCompressed<Label>::flush() const {
             const_cast<ColumnCompressed*>(this)->flush(
                 cached_vector.first, *cached_vector.second
             );
+        }
+        column_counts_.resize(bitmatrix_.size());
+        for (size_t i = 0; i < bitmatrix_.size(); ++i) {
+            column_counts_[i] = bitmatrix_[i]->num_set_bits();
         }
         flushed_ = true;
     }

@@ -173,8 +173,11 @@ BRWT BRWTBottomUpBuilder::build(std::vector<std::unique_ptr<bit_vector>>&& colum
                                 Partitioner partitioner,
                                 size_t num_nodes_parallel,
                                 size_t num_threads) {
-    if (!columns.size())
-        return BRWT();
+    if (!columns.size()) {
+        BRWT empty;
+        empty.column_counts_ = std::make_shared<std::vector<size_t>>();
+        return empty;
+    }
 
     std::vector<BRWT> nodes(columns.size());
 
@@ -194,8 +197,11 @@ BRWT BRWTBottomUpBuilder::build(
         size_t num_nodes_parallel,
         size_t num_threads) {
 
-    if (!linkage.size())
-        return BRWT();
+    if (!linkage.size()) {
+        BRWT empty;
+        empty.column_counts_ = std::make_shared<std::vector<size_t>>();
+        return empty;
+    }
 
     std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_path, "brwt");
 
@@ -346,6 +352,30 @@ BRWT BRWTBottomUpBuilder::build(
     }
     root.assignments_ = RangePartition(column_arrangement, submatrix_sizes);
 
+    root.column_counts_.reset(new std::vector<size_t>(root.num_columns()));
+    auto &column_counts = *root.column_counts_;
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (BRWT::Column i = 0; i < column_counts.size(); ++i) {
+        BRWT::Column column = i;
+        const BRWT *cur = &root;
+        while (cur->child_nodes_.size()) {
+            const BinaryMatrix *next = cur->child_nodes_[cur->assignments_.group(column)].get();
+            const BRWT *next_brwt = dynamic_cast<const BRWT*>(next);
+            column = cur->assignments_.rank(column);
+
+            if (next_brwt) {
+                cur = next_brwt;
+            } else {
+                column_counts[i] = next->get_column_count(column);
+                break;
+            }
+        }
+
+        if (cur->child_nodes_.empty())
+            column_counts[i] = cur->nonzero_rows_->num_set_bits();
+    }
+
     return root;
 }
 
@@ -353,8 +383,11 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
                                 Partitioner partitioner,
                                 size_t num_nodes_parallel,
                                 size_t num_threads) {
-    if (!nodes.size())
-        return BRWT();
+    if (!nodes.size()) {
+        BRWT empty;
+        empty.column_counts_ = std::make_shared<std::vector<size_t>>();
+        return empty;
+    }
 
     num_nodes_parallel = std::min(num_nodes_parallel, nodes.size());
 
@@ -431,6 +464,30 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
         submatrix_sizes.push_back(root.assignments_.group_size(g));
     }
     root.assignments_ = RangePartition(column_arrangement, submatrix_sizes);
+
+    root.column_counts_.reset(new std::vector<size_t>(root.num_columns()));
+    auto &column_counts = *root.column_counts_;
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (BRWT::Column i = 0; i < column_counts.size(); ++i) {
+        BRWT::Column column = i;
+        const BRWT *cur = &root;
+        while (cur->child_nodes_.size()) {
+            const BinaryMatrix *next = cur->child_nodes_[cur->assignments_.group(column)].get();
+            const BRWT *next_brwt = dynamic_cast<const BRWT*>(next);
+            column = cur->assignments_.rank(column);
+
+            if (next_brwt) {
+                cur = next_brwt;
+            } else {
+                column_counts[i] = next->get_column_count(column);
+                break;
+            }
+        }
+
+        if (cur->child_nodes_.empty())
+            column_counts[i] = cur->nonzero_rows_->num_set_bits();
+    }
 
     return root;
 }

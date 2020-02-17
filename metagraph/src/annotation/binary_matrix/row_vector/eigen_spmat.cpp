@@ -3,7 +3,8 @@
 #include "common/serialization.hpp"
 
 
-EigenSpMat::EigenSpMat(uint64_t num_rows, uint64_t max_num_cols) {
+EigenSpMat::EigenSpMat(uint64_t num_rows, uint64_t max_num_cols)
+      : column_counts_(max_num_cols) {
     initialize(num_rows, max_num_cols);
 }
 
@@ -19,11 +20,15 @@ bool EigenSpMat::get(Row row, Column column) const {
 
 void EigenSpMat::set(Row row, Column column) {
     assert(row < num_rows());
-    if (!get(row, column))
-        mat_.coeffRef(row, column) = 1;
-
-    if (column >= num_columns_)
+    if (column >= num_columns_) {
         num_columns_ = column + 1;
+        column_counts_.resize(num_columns_);
+    }
+
+    if (!get(row, column)) {
+        mat_.coeffRef(row, column) = 1;
+        ++column_counts_[column];
+    }
 }
 
 EigenSpMat::SetBitPositions
@@ -45,6 +50,9 @@ EigenSpMat::get_column(Column column) const {
         if (get(i, column))
             result.push_back(i);
     }
+
+    assert(result.size() == column_counts_[column]);
+
     return result;
 }
 
@@ -52,6 +60,8 @@ void EigenSpMat::clear_row(Row row) {
     assert(row < num_rows());
 
     for (decltype(mat_)::InnerIterator it(mat_, row); it; ++it) {
+        assert(column_counts_[it.valueRef()]);
+        --column_counts_[it.valueRef()];
         it.valueRef() = 0;
     }
 }
@@ -84,7 +94,8 @@ bool EigenSpMat::load(std::istream &instream) {
             }
         }
 
-        return true;
+        return load_number_vector(instream, &column_counts_);
+
     } catch (...) {
         return false;
     }
@@ -106,15 +117,12 @@ void EigenSpMat::serialize(std::ostream &outstream) const {
     }
 
     full_vector.serialize(outstream);
+    serialize_number_vector(outstream, column_counts_);
 }
 
 // number of ones in the matrix
 uint64_t EigenSpMat::num_relations() const {
-    uint64_t num_set_bits = 0;
-    for (uint64_t i = 0, n_rows = num_rows(); i < n_rows; ++i) {
-        num_set_bits += mat_.innerVector(i).nonZeros();
-    }
-    return num_set_bits;
+    return std::accumulate(column_counts_.begin(), column_counts_.end(), uint64_t(0));
 }
 
 // matrix density

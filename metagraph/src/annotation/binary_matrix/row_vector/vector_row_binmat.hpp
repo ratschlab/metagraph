@@ -22,6 +22,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
+    const std::vector<size_t>& get_column_counts() const { return column_counts_; }
 
     void set(Row row, Column column);
     // do not check for existance before adding the label
@@ -44,6 +45,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
   private:
     uint64_t num_columns_ = 0;
     std::vector<RowType> vector_;
+    std::vector<size_t> column_counts_;
 };
 
 #endif // __VECTOR_ROW_BINMAT_HPP__

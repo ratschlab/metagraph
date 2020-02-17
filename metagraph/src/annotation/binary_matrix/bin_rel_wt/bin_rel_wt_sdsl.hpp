@@ -21,6 +21,7 @@ class BinRelWT_sdsl : public BinaryMatrix {
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
+    const std::vector<size_t>& get_column_counts() const { return column_counts_; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -32,6 +33,7 @@ class BinRelWT_sdsl : public BinaryMatrix {
     sdsl::wt_int<sdsl::rrr_vector<63>> wt_;
     bit_vector_rrr<> delimiters_;
     uint64_t num_columns_ = 0;
+    std::vector<size_t> column_counts_;
 };
 
 #endif // __BIN_REL_WT_SDSL_HPP__

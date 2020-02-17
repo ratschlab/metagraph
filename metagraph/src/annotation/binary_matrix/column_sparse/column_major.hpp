@@ -19,6 +19,8 @@ class ColumnMajor : public BinaryMatrix {
     SetBitPositions get_row(Row row) const;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
+    const std::vector<size_t>& get_column_counts() const { return *column_counts_; }
+
     // get all selected rows appended with -1 and concatenated
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
 
@@ -29,9 +31,11 @@ class ColumnMajor : public BinaryMatrix {
     uint64_t num_relations() const;
 
     static ColumnMajor
-    construct_view(const std::vector<std::unique_ptr<bit_vector>> &columns) {
+    construct_view(const std::vector<std::unique_ptr<bit_vector>> &columns,
+                   const std::vector<size_t> &column_counts) {
         ColumnMajor view;
         view.columns_ = &columns;
+        view.column_counts_ = &column_counts;
         return view;
     }
 
@@ -40,6 +44,8 @@ class ColumnMajor : public BinaryMatrix {
   private:
     std::vector<std::unique_ptr<bit_vector>> data_;
     const std::vector<std::unique_ptr<bit_vector>> *columns_ = &data_;
+    std::vector<size_t> column_count_data_;
+    const std::vector<size_t> *column_counts_ = &column_count_data_;
 };
 
 #endif // __COLUMN_MAJOR_HPP__

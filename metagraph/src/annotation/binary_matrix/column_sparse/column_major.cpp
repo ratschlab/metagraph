@@ -3,9 +3,17 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "common/serialization.hpp"
 
+std::vector<size_t> count_columns(const std::vector<std::unique_ptr<bit_vector>> &columns) {
+    std::vector<size_t> column_counts(columns.size());
+    for (size_t i = 0; i < columns.size(); ++i) {
+        column_counts[i] = columns[i]->num_set_bits();
+    }
+    return column_counts;
+}
 
 ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)
-      : data_(std::move(columns)) {}
+      : data_(std::move(columns)),
+        column_count_data_(count_columns(data_)) {}
 
 uint64_t ColumnMajor::num_rows() const {
     if (!columns_->size()) {
@@ -94,9 +102,12 @@ bool ColumnMajor::load(std::istream &in) {
             auto next = std::make_unique<bit_vector_sd>();
             if (!next->load(in))
                 return false;
+
             column = std::move(next);
         }
-        return true;
+
+        return load_number_vector(in, &column_count_data_);
+
     } catch (...) {
         return false;
     }
@@ -109,15 +120,11 @@ void ColumnMajor::serialize(std::ostream &out) const {
         assert(column.get());
         column->serialize(out);
     }
+
+    serialize_number_vector(out, column_count_data_);
 }
 
 // number of ones in the matrix
 uint64_t ColumnMajor::num_relations() const {
-    uint64_t num_set_bits = 0;
-
-    for (const auto &column : *columns_) {
-        assert(column.get());
-        num_set_bits += column->num_set_bits();
-    }
-    return num_set_bits;
+    return std::accumulate(column_counts_->begin(), column_counts_->end(), uint64_t(0));
 }

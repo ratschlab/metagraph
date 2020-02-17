@@ -23,12 +23,13 @@ class RowConcatenated : public BinaryMatrix {
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
+    const std::vector<size_t>& get_column_counts() const { return column_counts_; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
     // number of ones in the matrix
-    uint64_t num_relations() const { return compressed_rows_->num_set_bits(); }
+    uint64_t num_relations() const;
 
     const BitVector& data() const { return *compressed_rows_; }
 
@@ -36,6 +37,7 @@ class RowConcatenated : public BinaryMatrix {
     std::unique_ptr<BitVector> compressed_rows_;
     uint64_t num_columns_ = 0;
     uint64_t num_rows_ = 0;
+    std::vector<size_t> column_counts_;
 };
 
 #endif // __FLAT_MATRIX_HPP__

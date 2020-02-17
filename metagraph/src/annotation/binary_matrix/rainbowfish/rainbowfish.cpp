@@ -5,6 +5,7 @@
 
 #include <ips4o.hpp>
 #include <tsl/hopscotch_map.h>
+#include <tsl/ordered_map.h>
 
 #include "common/vector.hpp"
 #include "common/serialization.hpp"
@@ -13,12 +14,20 @@
 #include "common/utils/template_utils.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
+template <typename Key, typename T>
+using VectorOrderedMap = tsl::ordered_map<Key, T,
+                                          std::hash<Key>, std::equal_to<Key>,
+                                          std::allocator<std::pair<Key, T>>,
+                                          std::vector<std::pair<Key, T>>,
+                                          uint64_t>;
+
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
                          uint64_t num_columns,
                          uint64_t buffer_size)
       : num_columns_(num_columns),
-        buffer_size_(buffer_size) {
+        buffer_size_(buffer_size),
+        column_counts_(num_columns_) {
     assert(buffer_size_);
 
     using IndexVectorMap = tsl::hopscotch_map<SmallVector<uint32_t>,
@@ -118,6 +127,10 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
     row_indices_small.clear();
 
     call_rows([&](const auto &row_indices) {
+        for (auto i : row_indices) {
+            ++column_counts_[i];
+        }
+
         row_indices_small.assign(row_indices.begin(), row_indices.end());
 
         num_relations_ += row_indices_small.size();
@@ -217,8 +230,7 @@ std::vector<Rainbowfish::Row> Rainbowfish::get_column(Column column) const {
     std::vector<Row> row_indices;
     uint64_t rows = num_rows();
     for (uint64_t i = 0; i < rows; ++i) {
-        auto code = get_code(i);
-        if (distinct_row_indices[code])
+        if (distinct_row_indices[get_code(i)])
             row_indices.emplace_back(i);
     }
     return row_indices;
@@ -238,8 +250,12 @@ bool Rainbowfish::load(std::istream &in) {
         reduced_matrix_.reserve(num_blocks);
         while (num_blocks--) {
             reduced_matrix_.emplace_back(new ReducedMatrixType());
-            reduced_matrix_.back()->load(in);
+            if (!reduced_matrix_.back()->load(in))
+                return false;
         }
+
+        return load_number_vector(in, &column_counts_);
+
     } catch (...) {
         return false;
     }
@@ -259,6 +275,8 @@ void Rainbowfish::serialize(std::ostream &out) const {
     for (auto &matrix : reduced_matrix_) {
         matrix->serialize(out);
     }
+
+    serialize_number_vector(out, column_counts_);
 }
 
 // number of ones in the matrix

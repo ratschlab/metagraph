@@ -16,24 +16,31 @@ UniqueRowBinmat::UniqueRowBinmat(std::vector<row_type>&& unique_rows,
                                  uint32_t num_columns)
       : num_columns_(num_columns),
         unique_rows_(std::move(unique_rows)),
-        row_rank_(std::move(row_rank)) {
-    // make sure there are no columns with indexes greater than num_labels
-    assert(std::all_of(unique_rows_.begin(), unique_rows_.end(), [&](const auto &row) {
-        return std::all_of(row.begin(), row.end(),
-                           [num_columns](uint32_t j) { return j < num_columns; });
-    }));
+        row_rank_(std::move(row_rank)),
+        column_counts_(num_columns_) {
 
+    // compute multiplicities for each unique row
+    std::vector<size_t> unique_row_counts(unique_rows_.size());
     for (uint32_t r : row_rank_) {
         assert(r < unique_rows_.size());
         num_relations_ += unique_rows_[r].size();
+        ++unique_row_counts[r];
+    }
+
+    // then aggregate column counts
+    std::vector<size_t> column_counts(num_columns_);
+    for (uint32_t r = 0; r < unique_rows_.size(); ++r) {
+        for (Column c : unique_rows_[r]) {
+            column_counts_.at(c) += unique_row_counts[r];
+        }
     }
 }
 
 UniqueRowBinmat
 ::UniqueRowBinmat(const std::function<void(const RowCallback &)> &call_rows,
-                  uint32_t num_columns) {
-    num_columns_ = num_columns;
-
+                  uint32_t num_columns)
+      : num_columns_(num_columns),
+        column_counts_(num_columns_) {
     using RowSet = tsl::ordered_set<row_type,
                                     utils::VectorHash,
                                     std::equal_to<row_type>,
@@ -44,6 +51,9 @@ UniqueRowBinmat
 
     call_rows([&](const SetBitPositions &row) {
         num_relations_ += row.size();
+        for (const auto &i : row) {
+            ++column_counts_[i];
+        }
         auto it = unique_rows.emplace(row.begin(), row.end()).first;
         row_rank_.push_back(it - unique_rows.begin());
         if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
@@ -126,7 +136,8 @@ bool UniqueRowBinmat::load(std::istream &instream) {
             }
         }
 
-        return load_number_vector(instream, &row_rank_);
+        return load_number_vector(instream, &row_rank_)
+            && load_number_vector(instream, &column_counts_);
     } catch (...) {
         return false;
     }
@@ -155,6 +166,7 @@ void UniqueRowBinmat::serialize(std::ostream &outstream) const {
     full_vector.serialize(outstream);
 
     serialize_number_vector(outstream, row_rank_);
+    serialize_number_vector(outstream, column_counts_);
 }
 
 // matrix density

@@ -12,12 +12,14 @@
 template <typename RowType>
 VectorRowBinMat<RowType>::VectorRowBinMat(std::vector<RowType>&& rows,
                                           uint64_t num_columns)
-      : num_columns_(num_columns), vector_(std::move(rows)) {
-    // make sure there are no columns with indexes greater than num_labels
-    assert(std::all_of(vector_.begin(), vector_.end(), [&](const auto &row) {
-        return std::all_of(row.begin(), row.end(),
-                           [num_columns](uint64_t col_id) { return col_id < num_columns; });
-    }));
+      : num_columns_(num_columns),
+        vector_(std::move(rows)),
+        column_counts_(num_columns_) {
+    for (const RowType &row : vector_) {
+        for (auto i : row) {
+            ++column_counts_.at(i);
+        }
+    }
 }
 
 template <typename RowType>
@@ -31,31 +33,43 @@ template <typename RowType>
 void VectorRowBinMat<RowType>::set(Row row, Column column) {
     assert(row < vector_.size());
 
-    if (!get(row, column))
-        vector_[row].push_back(column);
-
-    if (column >= num_columns_)
+    if (column >= num_columns_) {
         num_columns_ = column + 1;
+        column_counts_.resize(num_columns_);
+    }
+
+    if (!get(row, column)) {
+        vector_[row].push_back(column);
+        ++column_counts_[column];
+    }
 }
 
 template <typename RowType>
 void VectorRowBinMat<RowType>::force_set(Row row, Column column) {
     assert(row < vector_.size());
 
-    vector_[row].push_back(column);
-
-    if (column >= num_columns_)
+    if (column >= num_columns_) {
         num_columns_ = column + 1;
+        column_counts_.resize(num_columns_);
+    }
+
+    vector_[row].push_back(column);
+    ++column_counts_[column];
 }
 
 template <typename RowType>
 void VectorRowBinMat<RowType>::standardize_rows() {
+    __atomic_thread_fence(__ATOMIC_RELEASE);
     #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < vector_.size(); ++i) {
         std::sort(vector_[i].begin(), vector_[i].end());
         vector_[i].erase(std::unique(vector_[i].begin(), vector_[i].end()),
                          vector_[i].end());
+        for (const auto &column : vector_[i]) {
+            __atomic_fetch_add(&column_counts_[column], 1, __ATOMIC_RELAXED);
+        }
     }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
 }
 
 template <typename RowType>
@@ -73,6 +87,9 @@ VectorRowBinMat<RowType>::get_row(Row row) const {
 template <typename RowType>
 void VectorRowBinMat<RowType>::clear_row(Row row) {
     assert(row < vector_.size());
+    for (const auto &col : vector_[row]) {
+        --column_counts_[col];
+    }
     vector_[row].clear();
 }
 
@@ -118,7 +135,8 @@ bool VectorRowBinMat<RowType>::load(std::istream &instream) {
             }
         }
 
-        return true;
+        return load_number_vector(instream, &column_counts_);
+
     } catch (...) {
         return false;
     }
@@ -141,15 +159,13 @@ void VectorRowBinMat<RowType>::serialize(std::ostream &outstream) const {
     }
 
     full_vector.serialize(outstream);
+    serialize_number_vector(outstream, column_counts_);
 }
 
 // number of ones in the matrix
 template <typename RowType>
 uint64_t VectorRowBinMat<RowType>::num_relations() const {
-    return std::accumulate(
-        vector_.begin(), vector_.end(), uint64_t(0),
-        [](uint64_t sum, const auto &v) { return sum + v.size(); }
-    );
+    return std::accumulate(column_counts_.begin(), column_counts_.end(), uint64_t(0));
 }
 
 // matrix density
