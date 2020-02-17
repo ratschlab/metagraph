@@ -25,6 +25,8 @@ class ColumnMajor : public BinaryMatrix {
     SetBitPositions get_row(Row row) const;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
+    std::vector<size_t> get_column_counts() const;
+    size_t get_column_count(Column column) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;

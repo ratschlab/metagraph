@@ -5,6 +5,7 @@
 
 #include <ips4o.hpp>
 #include <tsl/hopscotch_map.h>
+#include <tsl/ordered_map.h>
 
 #include "common/vector.hpp"
 #include "common/serialization.hpp"
@@ -12,6 +13,13 @@
 #include "common/hash/hash.hpp"
 #include "common/utils/template_utils.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+
+template <typename Key, typename T>
+using VectorOrderedMap = tsl::ordered_map<Key, T,
+                                          std::hash<Key>, std::equal_to<Key>,
+                                          std::allocator<std::pair<Key, T>>,
+                                          std::vector<std::pair<Key, T>>,
+                                          uint64_t>;
 
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
@@ -215,11 +223,60 @@ std::vector<Rainbowfish::Row> Rainbowfish::get_column(Column column) const {
     std::vector<Row> row_indices;
     uint64_t rows = num_rows();
     for (uint64_t i = 0; i < rows; ++i) {
-        auto code = get_code(i);
-        if (distinct_row_indices[code])
+        if (distinct_row_indices[get_code(i)])
             row_indices.emplace_back(i);
     }
     return row_indices;
+}
+
+size_t Rainbowfish::get_column_count(Column column) const {
+    sdsl::bit_vector distinct_row_indices(num_distinct_rows(), false);
+    uint64_t offset = 0;
+    for (const auto &mat : reduced_matrix_) {
+        for (const auto &a : mat->get_column(column)) {
+            distinct_row_indices[offset + a] = true;
+        }
+        offset += mat->num_rows();
+    }
+
+    size_t count = 0;
+    uint64_t rows = num_rows();
+    for (uint64_t i = 0; i < rows; ++i) {
+        if (distinct_row_indices[get_code(i)])
+            ++count;
+    }
+    return count;
+}
+
+std::vector<size_t> Rainbowfish::get_column_counts() const {
+    std::vector<size_t> counts(num_columns_);
+
+    // TODO: store multiplicities for each row code to speed this up
+    // map from distinct row codes to their multiplicities
+    VectorOrderedMap<uint64_t, size_t> code_counts;
+    size_t rows = num_rows();
+    code_counts.reserve(num_distinct_rows());
+
+    for (size_t i = 0; i < rows; ++i) {
+        ++code_counts[get_code(i)];
+    }
+
+    // sort the underlying storage to speed up the next step
+    auto &codes = const_cast<typename decltype(code_counts)::values_container_type&>(
+        code_counts.values_container()
+    );
+
+    ips4o::parallel::sort(codes.begin(), codes.end(),
+                          utils::LessFirst(), get_num_threads());
+
+    // access each distict row and add counts to column counters
+    for (const auto &[code, count] : codes) {
+        for (auto j : reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_)) {
+            counts[j] += count;
+        }
+    }
+
+    return counts;
 }
 
 bool Rainbowfish::load(std::istream &in) {

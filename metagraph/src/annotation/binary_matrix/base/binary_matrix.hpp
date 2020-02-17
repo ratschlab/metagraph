@@ -28,6 +28,8 @@ class BinaryMatrix {
     virtual SetBitPositions get_row(Row row) const = 0;
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
+    virtual std::vector<size_t> get_column_counts() const = 0;
+    virtual size_t get_column_count(Column column) const = 0;
 
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;

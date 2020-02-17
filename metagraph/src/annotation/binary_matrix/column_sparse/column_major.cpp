@@ -63,6 +63,22 @@ std::vector<ColumnMajor::Row> ColumnMajor::get_column(Column column) const {
     return result;
 }
 
+size_t ColumnMajor::get_column_count(Column column) const {
+    return num_columns() ? columns_->at(column)->num_set_bits() : 0;
+}
+
+std::vector<size_t> ColumnMajor::get_column_counts() const {
+    std::vector<size_t> counts(num_columns());
+
+    if (counts.size()) {
+        assert(counts.size() == columns_->size());
+        std::transform(columns_->begin(), columns_->end(), counts.begin(),
+                       [](const auto &column) { return column->num_set_bits(); });
+    }
+
+    return counts;
+}
+
 bool ColumnMajor::load(std::istream &in) {
     if (!in.good())
         return false;
