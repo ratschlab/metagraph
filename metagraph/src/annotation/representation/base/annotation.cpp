@@ -95,6 +95,14 @@ void MultiLabelEncoded<LabelType>
     }
 }
 
+template <typename LabelType>
+uint64_t MultiLabelEncoded<LabelType>::num_objects(const Label &label) const {
+    if (!label_exists(label))
+        return 0;
+
+    return get_matrix().get_column_count(label_encoder_.encode(label));
+}
+
 // calls get_row(i)
 template <typename LabelType>
 typename MultiLabelEncoded<LabelType>::VLabels

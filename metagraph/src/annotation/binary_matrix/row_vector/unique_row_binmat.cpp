@@ -101,6 +101,36 @@ std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {
     return result;
 }
 
+std::vector<size_t> UniqueRowBinmat::get_column_counts() const {
+    // compute multiplicities for each unique row
+    std::vector<size_t> unique_row_counts(unique_rows_.size());
+    for (uint64_t rank : row_rank_) {
+        ++unique_row_counts[rank];
+    }
+
+    // then aggregate column counts
+    std::vector<size_t> column_counts(num_columns_);
+    for (uint32_t r = 0; r < unique_rows_.size(); ++r) {
+        for (Column c : unique_rows_[r]) {
+            column_counts[c] += unique_row_counts[r];
+        }
+    }
+
+    return column_counts;
+}
+
+size_t UniqueRowBinmat::get_column_count(Column j) const {
+    tsl::ordered_set<uint32_t> row_ranks;
+    for (uint32_t r = 0; r < unique_rows_.size(); ++r) {
+        const auto &row = unique_rows_[r];
+        if (std::find(row.begin(), row.end(), j) != row.end())
+            row_ranks.insert(r);
+    }
+
+    return std::count_if(row_rank_.begin(), row_rank_.end(),
+                         [&](uint64_t rank) { return row_ranks.count(rank); });
+}
+
 bool UniqueRowBinmat::load(std::istream &instream) {
     if (!instream.good())
         return false;

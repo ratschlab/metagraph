@@ -88,6 +88,28 @@ VectorRowBinMat<RowType>::get_column(Column column) const {
 }
 
 template <typename RowType>
+size_t VectorRowBinMat<RowType>::get_column_count(Column column) const {
+    return std::count_if(
+        vector_.begin(), vector_.end(),
+        [&](const auto &vector) {
+            return std::find(vector.begin(), vector.end(), column) != vector.end();
+        }
+    );
+}
+
+template <typename RowType>
+std::vector<size_t> VectorRowBinMat<RowType>::get_column_counts() const {
+    std::vector<size_t> counts(num_columns_);
+    for (const RowType &row : vector_) {
+        for (auto i : row) {
+            ++counts[i];
+        }
+    }
+
+    return counts;
+}
+
+template <typename RowType>
 void VectorRowBinMat<RowType>::insert_rows(const std::vector<Row> &rows) {
     assert(std::is_sorted(rows.begin(), rows.end()));
     utils::insert(&vector_, rows, {});
