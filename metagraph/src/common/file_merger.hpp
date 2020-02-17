@@ -40,6 +40,8 @@ class MergeHeap {
         els.emplace(it, el, idx);
     }
 
+    const value_type& top() const { return els.back(); }
+
     value_type pop() {
         value_type result = els.back();
         els.pop_back();
@@ -163,20 +165,11 @@ uint64_t merge_files(const std::vector<std::string> sources,
         return num_elements;
     }
 
-    std::pair<T, C> current;
-    uint32_t chunk_index;
-    std::tie(current, chunk_index) = merge_heap.pop();
-
-    if (chunk_files[chunk_index]
-        && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
-                                         sizeof(std::pair<T, C>))) {
-        merge_heap.emplace(data_item, chunk_index);
-        num_elements++;
-    }
+    // initialize the smallest element
+    std::pair<T, C> current = { merge_heap.top().first.first, 0 };
 
     while (!merge_heap.empty()) {
-        std::pair<T, C> smallest;
-        std::tie(smallest, chunk_index) = merge_heap.pop();
+        auto [smallest, chunk_index] = merge_heap.pop();
 
         if (smallest.first != current.first) {
             on_new_item(current);
