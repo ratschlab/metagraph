@@ -84,7 +84,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
         chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
         if (!chunk_files[i].good()) {
-            logger->error("Error: Unable to open chunk file '{}'", sources[i]);
+            logger->error("Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
         if (chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
@@ -93,19 +93,29 @@ uint64_t merge_files(const std::vector<std::string> sources,
         }
     }
 
-    std::optional<T> last_written;
-    while (!merge_heap.empty()) {
-        std::pair<T, uint32_t> smallest = merge_heap.pop();
+    if (merge_heap.empty()) {
+        if (cleanup) {
+            std::for_each(sources.begin(), sources.end(),
+                          [](const std::string &s) { std::filesystem::remove(s); });
+        }
+        return num_elements_read;
+    }
 
-        if (!last_written.has_value() || smallest.first != last_written.value()) {
-            on_new_item(smallest.first);
-            last_written = smallest.first;
+    T last_written = merge_heap.top().first;
+    on_new_item(last_written);
+
+    while (!merge_heap.empty()) {
+        auto [smallest, chunk_index] = merge_heap.pop();
+
+        if (smallest != last_written) {
+            on_new_item(smallest);
+            last_written = smallest;
         }
 
-        if (chunk_files[smallest.second]
-            && chunk_files[smallest.second].read(reinterpret_cast<char *>(&data_item),
-                                                 sizeof(T))) {
-            merge_heap.emplace(data_item, smallest.second);
+        if (chunk_files[chunk_index]
+            && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
+                                             sizeof(T))) {
+            merge_heap.emplace(data_item, chunk_index);
             num_elements_read++;
         }
     }
