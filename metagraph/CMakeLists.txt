@@ -252,11 +252,12 @@ include_directories(
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
   external-libraries/zlib
+  external-libraries/Simple-Web-Server
   ${PROJECT_SOURCE_DIR}/src
 )
 
 # makes ASIO not depend on boost
-string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE")
+string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE -DUSE_STANDALONE_ASIO")
 
 add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
 

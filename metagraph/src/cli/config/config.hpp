@@ -135,6 +135,7 @@ class Config {
     std::string annotation_label = "";
     std::string header = "";
     std::string accession2taxid;
+    std::string host_address;
 
     std::filesystem::path tmp_dir;
 

@@ -234,7 +234,9 @@ Config::Config(int argc, char *argv[]) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
             port = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--suffix")) {
+        } else if (!strcmp(argv[i], "--address")) {
+            host_address = get_value(i++);
+        }else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
         } else if (!strcmp(argv[i], "--initialize-bloom")) {
             initialize_bloom = true;
@@ -1022,6 +1024,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for server_query:\n");
             fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
+            fprintf(stderr, "\t   --address \tinterface for incoming connections (default: all)\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
