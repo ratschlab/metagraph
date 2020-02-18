@@ -25,9 +25,9 @@ size_t kNumRowsInBlock = 50'000;
 
 typedef LabelEncoder<std::string> LEncoder;
 
-// TODO: template callback
-void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
-               const BinaryMatrix &row_major_matrix) {
+template <class RowCallback>
+void call_rows(const BinaryMatrix &row_major_matrix,
+               const RowCallback &callback) {
     const auto num_rows = row_major_matrix.num_rows();
 
     for (size_t i = 0; i < num_rows; ++i) {
@@ -52,13 +52,12 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
 
     auto matrix = std::make_unique<RowConcatenated<>>(
         [&](auto callback) {
-            call_rows(
+            call_rows(annotator.get_matrix(),
                 [&](const auto &row) {
                     assert(std::is_sorted(row.begin(), row.end()));
                     callback(row);
                     ++progress_bar;
-                },
-                annotator.get_matrix()
+                }
             );
         },
         num_columns,
@@ -76,7 +75,7 @@ convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotato
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        call_rows(callback, annotator.get_matrix());
+        call_rows(annotator.get_matrix(), callback);
     }, num_columns);
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
@@ -91,7 +90,7 @@ convert<BinRelWT_sdslAnnotator, std::string>(RowCompressed<std::string>&& annota
 
     auto matrix = std::make_unique<BinRelWT_sdsl>(
         [&](auto callback) {
-            call_rows(callback, annotator.get_matrix());
+            call_rows(annotator.get_matrix(), callback);
         },
         num_set_bits,
         num_columns
@@ -109,7 +108,7 @@ convert<BinRelWTAnnotator, std::string>(RowCompressed<std::string>&& annotator) 
 
     auto matrix = std::make_unique<BinRelWT>(
         [&](auto callback) {
-            call_rows(callback, annotator.get_matrix());
+            call_rows(annotator.get_matrix(), callback);
         },
         num_set_bits,
         num_columns
