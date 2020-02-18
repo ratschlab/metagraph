@@ -541,10 +541,20 @@ target_compile_options(benchmarks PRIVATE -Wno-undefined-var-template)
 #-------------------
 find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
 
+add_custom_command(OUTPUT ${PROJECT_SOURCE_DIR}/integration_tests/integration_test_env/DONE
+  COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh
+)
+
+# creating a make target, s.t. the environment can be set up explicitly
+add_custom_target(install_test_environment
+  DEPENDS ${PROJECT_SOURCE_DIR}/integration_tests/integration_test_env/DONE
+)
+
 # --- integration tests ---
 add_custom_target(check
-  COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/integration_tests/main.py
+  COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/integration_test_env/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
   DEPENDS metagraph
+  DEPENDS ${PROJECT_SOURCE_DIR}/integration_tests/integration_test_env/DONE
 )
 # --- integration tests + unit tests ---
 add_custom_target(check_all
@@ -559,7 +569,8 @@ add_test(NAME unit_tests COMMAND unit_tests)
 get_target_property(PythonPath Python3::Interpreter IMPORTED_LOCATION)
 file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests" "#!/bin/bash\n")
 file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
-  "\n${PythonPath} ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
+  "\nsource ${PROJECT_SOURCE_DIR}/integration_tests/integration_test_env/bin/activate"
+  "\npython ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
 )
 file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
   DESTINATION "${PROJECT_BINARY_DIR}/"
