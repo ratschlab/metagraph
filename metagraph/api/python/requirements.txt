@@ -1,2 +1,2 @@
 pandas>=0.22
-Click>=6.0
+requests

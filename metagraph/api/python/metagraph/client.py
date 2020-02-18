@@ -1,55 +1,74 @@
 # -*- coding: utf-8 -*-
 
-import time
-import sys
-import os
-import traceback
 import json
-import pandas as pd
-from socket import error as socket_error
-from .client_annotator import RemoteEngine
-from .helpers import get_js_sample_list
+from typing import Dict, Tuple, List
 
+import pandas as pd
+import requests
 
 """Metagraph client."""
 
 
 class Client:
     def __init__(self):
-        self.servers = []
+        self.graphs = {}
 
-    def connect(self, host, port, server_name=""):
-        print("Trying to connect to Metagraph server {}:{}".format(host, port))
-        annotated_dbg = RemoteEngine(host, port)
-        self.servers.append((host, port, server_name))
+    def add_graph(self, host: str, port: int, label: str = None) -> None:
+        if not label:
+            label = f"{host}:{port}"
+        self.graphs[label] = (host, port)
 
-    def search(self, sequence='AACGCTAATGTAGATTGAT', discovery_threshold=1.0):
-        if len(self.servers) == 0:
-            print("Error: connect to a database first")
+    def list_graphs(self) -> Dict[str, Tuple[str, str]]:
+        return self.graphs
 
-        results = []
+    # TODO: discovery threshoold unit?
+    def search(self, sequence: str, discovery_threshold: float = 1.0) -> Dict[
+        str, Tuple[pd.DataFrame, str]]:
 
-        for (host, port, server_name) in self.servers:
-            try:
-                annotated_dbg = RemoteEngine(host, port)
+        json_res = self.search_json(sequence, discovery_threshold)
 
-                task_context = json.dumps({
-                    "FASTA": "\n".join([ ">query",
-                                            sequence,
-                    ]),
-                    "count_labels": True,
-                    "discovery_fraction": discovery_threshold / 100,
-                    "num_labels": 10000
-                })
+        def build_dict(row):
+            d = dict(row)
+            props = d.pop('properties')
+            return {**d, **props}
 
-                annotations = annotated_dbg.compute(task_context)
+        def build_df_from_json(j):
+            return pd.DataFrame([build_dict(r) for r in j['results']])
 
-                js_sample_list = get_js_sample_list(annotations)
+        return {l: (build_df_from_json(j) if j else pd.DataFrame()) for (l, (j, e))
+                in json_res.items()}
 
-                results.append(pd.DataFrame(json.loads(js_sample_list)))
+    def search_json(self, sequence: str, discovery_threshold: float = 1.0) -> \
+    Dict[str, Tuple[str, str]]:
+        if not self.graphs:
+            raise ValueError("No graphs registered")  # TODO: better error
 
-            except socket_error as e:
-                traceback.print_exc(limit=20, file=sys.stderr)
-                output = "Error: Server does not respond"
+        results = {}
 
+        for label, (host, port) in self.graphs.items():
+            payload = json.dumps({
+                "FASTA": "\n".join([">query",
+                                    sequence,
+                                    ]),
+                "count_labels": True,
+                "discovery_fraction": discovery_threshold / 100,
+                "num_labels": 10000
+            })
+
+            ret = requests.post(url=f'http://{host}:{port}/search', data=payload)
+
+            if ret.ok:
+                results[label] = (ret.json(), None)
+            else:
+                results[label] = ("", str(ret.status_code) + " " + ret.json()['error'])
         return results
+
+    def column_labels(self) -> Dict[str, List[str]]:
+        ret = {}
+        for label, (host, port) in self.graphs.items():
+            r = requests.get(url=f'http://{host}:{port}/column_labels')
+
+            # TODO: how to handle errors?
+            ret[label] = r.json()
+
+        return ret
