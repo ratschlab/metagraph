@@ -599,6 +599,7 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMergeAll) {
     );
 }
 
+/*
 TYPED_TEST(AnnotatorStaticLargeTest, CheckCache) {
     size_t num_rows = 20000;
     size_t num_columns = 200;
@@ -691,4 +692,4 @@ TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
                   << "Time:\t" << timer.elapsed();
     }
 }
-
+*/

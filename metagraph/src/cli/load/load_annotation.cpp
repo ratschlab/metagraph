@@ -58,23 +58,23 @@ initialize_annotation(Config::AnnotationType anno_type,
             break;
         }
         case Config::BRWT: {
-            annotation.reset(new annotate::MultiBRWTAnnotator(config.row_cache_size));
+            annotation.reset(new annotate::MultiBRWTAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {
-            annotation.reset(new annotate::BinRelWT_sdslAnnotator(config.row_cache_size));
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator());
             break;
         }
         case Config::BinRelWT: {
-            annotation.reset(new annotate::BinRelWTAnnotator(config.row_cache_size));
+            annotation.reset(new annotate::BinRelWTAnnotator());
             break;
         }
         case Config::RowFlat: {
-            annotation.reset(new annotate::RowFlatAnnotator(config.row_cache_size));
+            annotation.reset(new annotate::RowFlatAnnotator());
             break;
         }
         case Config::RBFish: {
-            annotation.reset(new annotate::RainbowfishAnnotator(config.row_cache_size));
+            annotation.reset(new annotate::RainbowfishAnnotator());
             break;
         }
     }

@@ -24,7 +24,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
   public:
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
-    using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
@@ -42,10 +41,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
-
-    SetBitPositions get_label_codes(Index i) const override;
-    std::vector<SetBitPositions>
-    get_label_codes(const std::vector<Index> &indices) const override;
 
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
