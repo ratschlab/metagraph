@@ -3,8 +3,6 @@
 
 #include <memory>
 
-#include <Eigen/Sparse>
-
 #include "annotation/representation/base/annotation.hpp"
 
 
@@ -20,11 +18,9 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
-    // TODO: pass matrix
-    typedef std::function<void(Index, BinaryMatrix::SetBitPositions&&)> CallRow;
-    RowCompressed(uint64_t num_rows,
-                  const std::vector<Label> &labels,
-                  std::function<void(CallRow)> call_rows);
+    template <typename RowType>
+    RowCompressed(std::vector<RowType>&& annotation_rows,
+                  const std::vector<Label> &column_labels);
 
     void reinitialize(uint64_t num_rows);
 

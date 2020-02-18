@@ -278,40 +278,41 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     // initialize fast query annotation
+    // TODO: use SmallVector if it doesn't slow it down too much. Increase the batch size
+    std::vector<BinaryMatrix::SetBitPositions> annotation_rows(graph->max_index());
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t batch_begin = 0;
+                        batch_begin < from_full_to_query.size();
+                                        batch_begin += kRowBatchSize) {
+
+        const uint64_t batch_end
+            = std::min(batch_begin + kRowBatchSize,
+                       static_cast<uint64_t>(from_full_to_query.size()));
+
+        std::vector<uint64_t> row_indexes;
+        row_indexes.reserve(batch_end - batch_begin);
+
+        for (uint64_t i = batch_begin; i < batch_end; ++i) {
+            assert(from_full_to_query[i].first < full_annotation.num_objects());
+
+            row_indexes.push_back(from_full_to_query[i].first);
+        }
+
+        auto rows = full_annotation.get_matrix().get_rows(row_indexes);
+
+        assert(rows.size() == batch_end - batch_begin);
+
+        for (uint64_t i = batch_begin; i < batch_end; ++i) {
+            annotation_rows[from_full_to_query[i].second]
+                = std::move(rows[i - batch_begin]);
+        }
+    }
+
     // copy annotations from the full graph to the query graph
     auto annotation = std::make_unique<annotate::RowCompressed<>>(
-        graph->max_index(),
-        full_annotation.get_label_encoder().get_labels(),
-        [&](annotate::RowCompressed<>::CallRow call_row) {
-
-            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-            for (uint64_t batch_begin = 0;
-                                batch_begin < from_full_to_query.size();
-                                                batch_begin += kRowBatchSize) {
-
-                const uint64_t batch_end
-                    = std::min(batch_begin + kRowBatchSize,
-                               static_cast<uint64_t>(from_full_to_query.size()));
-
-                std::vector<uint64_t> row_indexes;
-                row_indexes.reserve(batch_end - batch_begin);
-
-                for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                    assert(from_full_to_query[i].first < full_annotation.num_objects());
-
-                    row_indexes.push_back(from_full_to_query[i].first);
-                }
-
-                auto rows = full_annotation.get_matrix().get_rows(row_indexes);
-
-                assert(rows.size() == batch_end - batch_begin);
-
-                for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                    call_row(from_full_to_query[i].second,
-                             std::move(rows[i - batch_begin]));
-                }
-            }
-        }
+        std::move(annotation_rows),
+        full_annotation.get_label_encoder().get_labels()
     );
 
     logger->trace("[Query graph construction] Query annotation constructed in {} sec",
