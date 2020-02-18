@@ -227,7 +227,7 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     // map each label code to a k-mer presence mask and its popcount
     VectorOrderedMap<LabelCode, SignatureCount> label_codes_to_presence;
 
-    auto label_codes = annotator_->get_label_codes(row_indices);
+    auto label_codes = annotator_->get_matrix().get_rows(row_indices);
 
     assert(label_codes.size() == row_indices.size());
 

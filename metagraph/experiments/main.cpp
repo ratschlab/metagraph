@@ -309,8 +309,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 
 typedef annotate::MultiLabelEncoded<std::string> Annotator;
 
-std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
-                                                 size_t cache_size = 0) {
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename) {
     std::unique_ptr<Annotator> annotation;
 
     switch (parse_annotation_type(filename)) {
@@ -323,23 +322,23 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
             break;
         }
         case Config::BRWT: {
-            annotation.reset(new annotate::MultiBRWTAnnotator(cache_size));
+            annotation.reset(new annotate::MultiBRWTAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {
-            annotation.reset(new annotate::BinRelWT_sdslAnnotator(cache_size));
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator());
             break;
         }
         case Config::BinRelWT: {
-            annotation.reset(new annotate::BinRelWTAnnotator(cache_size));
+            annotation.reset(new annotate::BinRelWTAnnotator());
             break;
         }
         case Config::RowFlat: {
-            annotation.reset(new annotate::RowFlatAnnotator(cache_size));
+            annotation.reset(new annotate::RowFlatAnnotator());
             break;
         }
         case Config::RBFish: {
-            annotation.reset(new annotate::RainbowfishAnnotator(cache_size));
+            annotation.reset(new annotate::RainbowfishAnnotator());
             break;
         }
     }
@@ -1098,7 +1097,7 @@ int main(int argc, char *argv[]) {
         } else if (regime == "query_annotation_rows") {
             UnlabeledValueArg<std::string> annotation_arg("input_file", "Annotation", true, "", "string", cmd);
             ValueArg<int> num_rows_arg("", "num_rows", "Rows to query", true, 0, "int", cmd);
-            ValueArg<int> cache_size_arg("", "cache_size", "Number of rows cached", false, 0, "int", cmd);
+            // ValueArg<int> cache_size_arg("", "cache_size", "Number of rows cached", false, 0, "int", cmd);
             ValueArg<int> batch_size_arg("", "batch_size", "Number of rows in batch (task)", false, 100'000, "int", cmd);
             ValueArg<int> num_threads_arg("", "num_threads", "Number threads", false, 1, "int", cmd);
             cmd.parse(argc, argv);
@@ -1110,8 +1109,7 @@ int main(int argc, char *argv[]) {
 
             Timer timer;
 
-            auto annotation = initialize_annotation(annotation_arg.getValue(),
-                                                    cache_size_arg.getValue());
+            auto annotation = initialize_annotation(annotation_arg.getValue());
 
             std::cout << "Annotation loaded in " << timer.elapsed() << " sec" << std::endl;
             timer.reset();
@@ -1161,7 +1159,7 @@ int main(int argc, char *argv[]) {
                         }
 
                         Timer timer;
-                        auto rows = annotation->get_label_codes(row_indexes);
+                        auto rows = annotation->get_matrix().get_rows(row_indexes);
                         std::cout << "Annotation block extracted in "
                                   << timer.elapsed() << " sec" << std::endl;
 

@@ -302,7 +302,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                     row_indexes.push_back(from_full_to_query[i].first);
                 }
 
-                auto rows = full_annotation.get_label_codes(row_indexes);
+                auto rows = full_annotation.get_matrix().get_rows(row_indexes);
 
                 assert(rows.size() == batch_end - batch_begin);
 

@@ -23,7 +23,7 @@ bool ColumnMajor::get(Row row, Column column) const {
 }
 
 ColumnMajor::SetBitPositions ColumnMajor::get_row(Row row) const {
-    assert(row < num_rows());
+    assert(row < num_rows() || columns_->size() == 0u);
 
     SetBitPositions result;
     for (size_t i = 0; i < columns_->size(); ++i) {

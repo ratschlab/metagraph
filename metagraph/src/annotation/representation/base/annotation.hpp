@@ -124,18 +124,12 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     using Index = typename MultiLabelAnnotation<uint64_t, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<uint64_t, LabelType>::Label;
     using VLabels = typename MultiLabelAnnotation<uint64_t, LabelType>::VLabels;
-    typedef Vector<uint64_t> SetBitPositions;
 
     virtual ~MultiLabelEncoded() {}
 
     /******************* General functionality *******************/
 
     virtual VLabels get(Index i) const override final;
-
-    // TODO: remove, use get_matrix().get_rows()
-    virtual SetBitPositions get_label_codes(Index i) const = 0;
-    virtual std::vector<SetBitPositions>
-    get_label_codes(const std::vector<Index> &indices) const;
 
     virtual inline const LabelEncoder<Label>& get_label_encoder() const final {
         return label_encoder_;

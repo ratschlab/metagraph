@@ -95,13 +95,13 @@ void MultiLabelEncoded<LabelType>
     }
 }
 
-// calls get_label_codes(i)
+// calls get_row(i)
 template <typename LabelType>
 typename MultiLabelEncoded<LabelType>::VLabels
 MultiLabelEncoded<LabelType>::get(Index i) const {
     assert(i < this->num_objects());
 
-    const auto &label_codes = get_label_codes(i);
+    const auto &label_codes = get_matrix().get_row(i);
 
     VLabels labels(label_codes.size());
 
@@ -139,7 +139,7 @@ MultiLabelEncoded<LabelType>
         if (max_matched + (total_sum_count - total_checked) < min_count)
             break;
 
-        for (size_t label_code : get_label_codes(i)) {
+        for (size_t label_code : get_matrix().get_row(i)) {
             assert(label_code < code_counts.size());
 
             code_counts[label_code] += count;
@@ -163,22 +163,6 @@ MultiLabelEncoded<LabelType>
     }
 
     return label_counts;
-}
-
-// calls get_label_codes(i)
-template <typename LabelType>
-std::vector<typename MultiLabelEncoded<LabelType>::SetBitPositions>
-MultiLabelEncoded<LabelType>
-::get_label_codes(const std::vector<Index> &indices) const {
-    std::vector<SetBitPositions> rows(indices.size());
-
-    for (size_t i = 0; i < indices.size(); ++i) {
-        assert(indices[i] < this->num_objects());
-
-        rows[i] = get_label_codes(indices[i]);
-    }
-
-    return rows;
 }
 
 template class MultiLabelEncoded<std::string>;
