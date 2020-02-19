@@ -93,7 +93,6 @@ std::string form_client_reply(const std::string &received_message,
     }
 
     const auto &fasta = json["FASTA"];
-    const auto &seq = json["SEQ"];
 
     // discovery_fraction a proxy of 1 - %similarity
     auto discovery_fraction = json.get("discovery_fraction",
@@ -112,16 +111,21 @@ std::string form_client_reply(const std::string &received_message,
                                             config.anno_labels_delimiter, anno_graph);
     };
 
-    if (!seq.isNull()) {
-        // input is plain sequence
-        execute_server_query(seq.asString(), seq.asString());
-    } else if (!fasta.isNull()) {
+    if (!fasta.isNull()) {
         // input is a FASTA sequence
         read_fasta_from_string(
             fasta.asString(),
             [&](kseq_t *read_stream) {
-                execute_server_query(read_stream->name.s,
-                                     read_stream->seq.s);
+                execute_query(read_stream->name.s,
+                              read_stream->seq.s,
+                              count_labels,
+                              print_signature,
+                              config.suppress_unlabeled,
+                              num_top_labels,
+                              discovery_fraction,
+                              config.anno_labels_delimiter,
+                              anno_graph,
+                              oss);
             }
         );
     } else {
