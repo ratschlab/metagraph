@@ -12,8 +12,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
-typedef BinaryMatrix::SetBitPositions RowSetBits;
-typedef std::function<void(const RowSetBits &)> RowCallback;
+typedef std::function<void(const BinaryMatrix::SetBitPositions &)> RowCallback;
 
 
 // Used to generate a set of columns from a row generator

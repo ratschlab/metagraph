@@ -99,18 +99,15 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
                       size_t num_threads) {
-    const auto *full_dbg = &anno_graph.get_graph();
-    if (!full_dbg)
-        throw std::runtime_error("Error: batch queries are supported only for de Bruijn graphs");
-
+    const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
 
     Timer timer;
 
     // construct graph storing all k-mers in query
-    auto graph = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), false);
+    auto graph = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), false);
 
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(full_dbg);
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&full_dbg);
     if (kPrefilterWithBloom && dbg_succ) {
         if (dbg_succ->get_bloom_filter())
             logger->trace("[Query graph construction] Started indexing k-mers pre-filtered with Bloom filter");
@@ -134,7 +131,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
     graph->call_sequences(
         [&](auto&&... contig_args) { contigs.emplace_back(std::move(contig_args)...); },
-        full_dbg->is_canonical_mode()
+        full_dbg.is_canonical_mode()
     );
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
@@ -143,14 +140,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map contigs onto the full graph
     auto index_in_full_graph = std::make_shared<std::vector<uint64_t>>();
 
-    if (full_dbg->is_canonical_mode()) {
+    if (full_dbg.is_canonical_mode()) {
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
             const std::string &contig = contigs[i].first;
             auto &nodes_in_full = contigs[i].second;
 
             size_t j = 0;
-            full_dbg->map_to_nodes(contig,
+            full_dbg.map_to_nodes(contig,
                 [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
             );
             assert(j == nodes_in_full.size());
@@ -160,7 +157,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         // construct canonical graph storing all k-mers found in the full graph
-        graph = std::make_shared<DBGHashOrdered>(full_dbg->get_k(), true);
+        graph = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), true);
 
         for (size_t i = 0; i < contigs.size(); ++i) {
             const std::string &contig = contigs[i].first;
@@ -200,7 +197,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             const auto &path = contigs[i].second;
 
             size_t j = 0;
-            full_dbg->map_to_nodes(contig,
+            full_dbg.map_to_nodes(contig,
                 [&](auto node_in_full) { (*index_in_full_graph)[path[j++]] = node_in_full; }
             );
             assert(j == path.size());
