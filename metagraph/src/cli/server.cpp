@@ -213,7 +213,7 @@ void write_compressed_if_possible(SimpleWeb::StatusCode status, const string& ms
         shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
     auto encoding_header = request->header.find("Accept-Encoding");
 
-    if (encoding_header != request->header.end() && encoding_header->second.find("deflate") >= 0) {
+    if (encoding_header != request->header.end() && encoding_header->second.find("deflate") != std::string::npos) {
         auto compressed = compress_string(msg);
         auto header = SimpleWeb::CaseInsensitiveMultimap({{"Content-Encoding", "deflate"},
                                                      {"Content-Length",   std::to_string(compressed.size())}});
