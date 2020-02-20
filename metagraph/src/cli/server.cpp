@@ -1,4 +1,5 @@
 #include <json/json.h>
+#include <zlib.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -33,35 +34,43 @@ Json::Value adjust_for_types(const string &v) {
 }
 
 string convert_to_json(const string &ret_str) {
-    string no_endl = utils::remove_suffix(ret_str, "\n");
-    vector<string> parts = utils::split_string(no_endl, "\t");
+    vector<string> queries = utils::split_string(ret_str, "\n");
 
-    Json::Value root;
-    // only supporting single query at the moment
-    root["query"] =  parts[0];
+    Json::Value root = Json::Value(Json::arrayValue);
 
-    root["results"] = Json::Value(Json::arrayValue);
+    for (auto qit = queries.begin(); qit != queries.end(); ++qit) {
+        vector<string> parts = utils::split_string(*qit, "\t");
 
-    for (auto it = ++parts.begin(); it != parts.end(); ++it) {
-        Json::Value sampleEntry;
+        Json::Value res_obj;
+        res_obj["query"] =  parts[0];
 
-        vector<string> entries = utils::split_string(*it, ":");
+        res_obj["results"] = Json::Value(Json::arrayValue);
 
-        vector<string> labels = utils::split_string(entries[0].substr(1, entries[0].size()-2), ";");
+        for (auto it = ++parts.begin(); it != parts.end(); ++it) {
+            Json::Value sampleEntry;
 
-        sampleEntry["sampleName"] = labels[0];
+            vector<string> entries = utils::split_string(*it, ":");
 
-        Json::Value properties = Json::objectValue;
+            vector<string> labels = utils::split_string(entries[0].substr(1, entries[0].size()-2), ";");
 
-        for (auto lit = ++labels.begin(); lit != labels.end(); ++lit) {
-            vector<string> keyValue = utils::split_string(*lit, "=");
-            properties[keyValue[0]] = adjust_for_types(keyValue[1]);
+            sampleEntry["sampleName"] = labels[0];
+
+            Json::Value properties = Json::objectValue;
+
+            for (auto lit = ++labels.begin(); lit != labels.end(); ++lit) {
+                vector<string> keyValue = utils::split_string(*lit, "=");
+                properties[keyValue[0]] = adjust_for_types(keyValue[1]);
+            }
+
+            if(properties.size() > 0) {
+                sampleEntry["properties"] = properties;
+            }
+            sampleEntry["sampleCount"] = (int) atoi(entries[1].c_str());
+
+            res_obj["results"].append(sampleEntry);
         }
 
-        sampleEntry["properties"] = properties;
-        sampleEntry["sampleCount"] = (int) atoi(entries[1].c_str());
-
-        root["results"].append(sampleEntry);
+        root.append(res_obj);
     }
 
     Json::StreamWriterBuilder builder;
@@ -156,6 +165,65 @@ string json_str_with_error_msg(const string &msg) {
     return Json::writeString(Json::StreamWriterBuilder(), root);
 }
 
+//https://panthema.net/2007/0328-ZLibString.html
+/** Compress a STL string using zlib with given compression level and return
+  * the binary data. */
+std::string compress_string(const std::string& str,
+                            int compressionlevel = Z_BEST_COMPRESSION)
+{
+    z_stream zs;                        // z_stream is zlib's control structure
+    memset(&zs, 0, sizeof(zs));
+
+    if (deflateInit(&zs, compressionlevel) != Z_OK)
+        throw(std::runtime_error("deflateInit failed while compressing."));
+
+    zs.next_in = (Bytef*)str.data();
+    zs.avail_in = str.size();           // set the z_stream's input
+
+    int ret;
+    char outbuffer[32768];
+    std::string outstring;
+
+    // retrieve the compressed bytes blockwise
+    do {
+        zs.next_out = reinterpret_cast<Bytef*>(outbuffer);
+        zs.avail_out = sizeof(outbuffer);
+
+        ret = deflate(&zs, Z_FINISH);
+
+        if (outstring.size() < zs.total_out) {
+            // append the block to the output string
+            outstring.append(outbuffer,
+                             zs.total_out - outstring.size());
+        }
+    } while (ret == Z_OK);
+
+    deflateEnd(&zs);
+
+    if (ret != Z_STREAM_END) {          // an error occurred that was not EOF
+        std::ostringstream oss;
+        oss << "Exception during zlib compression: (" << ret << ") " << zs.msg;
+        throw(std::runtime_error(oss.str()));
+    }
+
+    return outstring;
+}
+
+void write_compressed_if_possible(SimpleWeb::StatusCode status, const string& msg,
+        shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
+    auto encoding_header = request->header.find("Accept-Encoding");
+
+    if (encoding_header != request->header.end() && encoding_header->second.find("deflate") >= 0) {
+        auto compressed = compress_string(msg);
+        auto header = SimpleWeb::CaseInsensitiveMultimap({{"Content-Encoding", "deflate"},
+                                                     {"Content-Length",   std::to_string(compressed.size())}});
+        response->write(status, compressed, header);
+    } else {
+        response->write(status, msg);
+    }
+}
+
+
 int run_server(Config *config) {
     assert(config);
 
@@ -191,7 +259,7 @@ int run_server(Config *config) {
 
         try {
             auto ret = form_client_reply(content, *anno_graph, *config, aligner.get());
-            response->write(SimpleWeb::StatusCode::success_ok, ret);
+            write_compressed_if_possible(SimpleWeb::StatusCode::success_ok, ret, response, request);
         }  catch(const std::exception &e) {
             logger->info("Error on request " + string(e.what()));
             response->write(SimpleWeb::StatusCode::client_error_bad_request, json_str_with_error_msg(e.what()));

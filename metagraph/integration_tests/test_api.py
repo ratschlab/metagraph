@@ -54,7 +54,7 @@ class TestApi(TestingBase):
 
         self.assertIn(self.graph_name, ret.keys())
 
-        json_obj = ret[self.graph_name][0]
+        json_obj = ret[self.graph_name][0][0]
         self.assertEqual(len(json_obj['results']), 98)
 
         first_ret = json_obj['results'][0]
@@ -62,7 +62,7 @@ class TestApi(TestingBase):
         self.assertEqual(first_ret['sampleCount'], 39)
 
         self.assertTrue(first_ret['sampleName'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
-        self.assertEqual(len(first_ret['properties']), 0)
+        self.assertTrue('properties' not in first_ret.keys()) # doesn't have properties, so don't sent them
 
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
