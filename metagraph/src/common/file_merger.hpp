@@ -17,7 +17,7 @@ namespace common {
  * Heap implemented as a sorted vector.
  *
  * The heap uses a vector as the underlying data structure, thus making it efficient
- * only for a small (<100) number of elements.
+ * only for a small (<1000) number of elements.
  * @tparam T the actual heap element type; this is the type tested for equality
  */
 // Note: profiling shows that using a sorted vector instead of a std::priority queue is
@@ -28,7 +28,7 @@ namespace common {
 // inserting duplicates and merging them when popping from the heap, as we do now
 template <typename T, class Compare = std::greater<T>>
 class MergeHeap {
-    /** The heap stores triplets of the form <Element, Count, SourceIndex> */
+    /** The heap stores pairs <Element, SourceIndex> */
     using value_type = std::pair<T, uint32_t>;
 
   public:
