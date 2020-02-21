@@ -42,4 +42,6 @@ target_link_libraries(tests
     ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
 
-add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL benchmark)
+add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark
+    EXCLUDE_FROM_ALL benchmark
+)

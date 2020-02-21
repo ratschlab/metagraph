@@ -226,7 +226,7 @@ class ChunkedWaitQueue {
 
     void pop_chunk() {
         const bool could_flush = can_flush();
-        first_+=chunk_size_;
+        first_ += chunk_size_;
         if (first_ >= buffer_size_) {
             first_ -= buffer_size_;
         }

@@ -212,10 +212,11 @@ KmerCollector<KMER, KmerExtractor, Container>
         tmp_dir_(tmp_dir) {
     assert(num_threads_ > 0);
     auto cleanup = get_cleanup<Extractor, typename Container::storage_type>(
-            filter_suffix_encoded_.empty());
+        filter_suffix_encoded_.empty()
+    );
     size_t num_elements = memory_preallocated / sizeof(typename Container::value_type);
-    if constexpr ((utils::is_instance<Container, common::SortedSetDisk> {}
-                   || utils::is_instance<Container, common::SortedMultisetDisk> {})) {
+    if constexpr((utils::is_instance<Container, common::SortedSetDisk> {}
+                    || utils::is_instance<Container, common::SortedMultisetDisk> {})) {
         if (!filter_suffix_encoded_.empty()) {
             common::logger->error("Disk based sorting does not support chunking");
             exit(1);
@@ -238,17 +239,18 @@ size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() {
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
-    if constexpr (std::is_same_v<KMER, typename Container::value_type>) {
+    if constexpr(std::is_same_v<KMER, typename Container::value_type>) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
-                             generate_sequences, k_, both_strands_mode_, kmers_.get(),
+                             generate_sequences,
+                             k_, both_strands_mode_, kmers_.get(),
                              filter_suffix_encoded_, true);
     } else {
-        thread_pool_.enqueue(
-                count_kmers<KMER, Extractor, Container>,
-                [generate_sequences](CallStringCount callback) {
-                    generate_sequences([&](const std::string &seq) { callback(seq, 1); });
-                },
-                k_, both_strands_mode_, kmers_.get(), filter_suffix_encoded_);
+        thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
+                             [generate_sequences](CallStringCount callback) {
+                                 generate_sequences([&](const std::string &seq) { callback(seq, 1); });
+                             },
+                             k_, both_strands_mode_, kmers_.get(),
+                             filter_suffix_encoded_);
     }
 }
 
@@ -256,16 +258,19 @@ template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
     if constexpr (std::is_same_v<KMER, typename Container::value_type>) {
-        thread_pool_.enqueue(
-                extract_kmers<KMER, Extractor, Container>,
-                [generate_sequences](CallString callback) {
-                    generate_sequences(
-                            [&](const std::string &seq, uint64_t) { callback(seq); });
-                },
-                k_, both_strands_mode_, kmers_.get(), filter_suffix_encoded_, true);
+        thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
+                             [generate_sequences](CallString callback) {
+                                 generate_sequences([&](const std::string &seq, uint64_t) {
+                                     callback(seq);
+                                 });
+                             },
+                             k_, both_strands_mode_, kmers_.get(),
+                             filter_suffix_encoded_, true);
     } else {
-        thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>, generate_sequences,
-                             k_, both_strands_mode_, kmers_.get(), filter_suffix_encoded_);
+        thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
+                             generate_sequences,
+                             k_, both_strands_mode_, kmers_.get(),
+                             filter_suffix_encoded_);
     }
 }
 
