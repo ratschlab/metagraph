@@ -253,6 +253,7 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/Simple-Web-Server
+  external-libraries/libcount/include
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -279,6 +280,15 @@ add_library(progress_bar STATIC
 add_library(mersenne_twister STATIC
   external-libraries/rollinghashcpp/mersennetwister.cpp
 )
+
+add_library(hll STATIC
+  "external-libraries/libcount/count/c.cc"
+  "external-libraries/libcount/count/empirical_data.cc"
+  "external-libraries/libcount/count/hll.cc"
+  "external-libraries/libcount/count/hll_data.cc"
+  "external-libraries/libcount/count/utility.cc"
+)
+target_include_directories(hll PUBLIC external-libraries/libcount)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -371,6 +381,7 @@ set(METALIBS ${METALIBS}
   fmt::fmt
   mersenne_twister
   spdlog::spdlog
+  hll
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})

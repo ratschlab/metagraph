@@ -34,10 +34,12 @@ target_include_directories(tests
     ${EXTERNAL_LIB_DIR}/libmaus2/include
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
+    ${EXTERNAL_LIB_DIR}/libcount/include
 )
 target_link_libraries(tests
     metagraph_common
     test_utils
+    hll
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
     ${SDSL_LIBRARY}
