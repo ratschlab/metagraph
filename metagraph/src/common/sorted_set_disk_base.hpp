@@ -53,21 +53,17 @@ class SortedSetDiskBase {
                       std::function<void(const T &)> on_item_pushed,
                       size_t num_last_elements_cached)
         : num_threads_(num_threads),
+          reserved_num_elements_(reserved_num_elements),
           chunk_file_prefix_(tmp_dir / "chunk_"),
-          merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
-                       num_last_elements_cached,
-                       on_item_pushed),
-          cleanup_(cleanup) {
+          cleanup_(cleanup),
+          on_item_pushed_(on_item_pushed),
+          num_last_elements_cached_(num_last_elements_cached) {
         std::filesystem::create_directory(tmp_dir);
         if (reserved_num_elements == 0) {
             logger->error("SortedSetDisk buffer cannot have size 0");
             std::exit(EXIT_FAILURE);
         }
         try_reserve(reserved_num_elements);
-    }
-
-    virtual ~SortedSetDiskBase() {
-        merge_queue_.shutdown(); // make sure the data was processed
     }
 
     size_t buffer_size() const { return data_.capacity(); }
@@ -79,38 +75,36 @@ class SortedSetDiskBase {
     ChunkedWaitQueue<T> &data() {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-
-        if (!is_merging_) {
-            is_merging_ = true;
-            // write any residual data left
-            if (!data_.empty()) {
-                sort_and_remove_duplicates(&data_, num_threads_);
-                dump_to_file_async(true /* is_done */);
-            }
-            start_merging();
+        ChunkedWaitQueue<T> result(std::min(data_.size(), QUEUE_EL_COUNT),
+                                   num_last_elements_cached_, on_item_pushed_);
+        // write any residual data left
+        if (!data_.empty()) {
+            sort_and_remove_duplicates(&data_, num_threads_);
+            dump_to_file_async(true /* is_done */);
         }
-        return merge_queue_;
+        data_.reserve(0);
+        data_dump_.reserve(0);
+        start_merging(&result);
+        return result;
     }
 
     void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {}) {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-        is_merging_ = false;
+        try_reserve(reserved_num_elements_);
         chunk_count_ = 0;
-        data_.resize(0); // this makes sure the buffer is not reallocated
-        data_dump_.resize(0);
-        merge_queue_.reset(on_item_pushed);
+        on_item_pushed_ = on_item_pushed;
     }
 
   protected:
     virtual void sort_and_remove_duplicates(storage_type *vector,
                                             size_t num_threads) const = 0;
 
-    void start_merging() {
+    void start_merging(ChunkedWaitQueue<T>* queue) {
         async_worker_.join(); // make sure all pending data was written
         async_merge_l1_.join(); // make sure all L1 merges are done
 
-        async_worker_.enqueue([this]() {
+        async_worker_.enqueue([this, queue]() {
             std::vector<std::string> file_names;
             for (size_t i = 0; i < merged_index_; ++i) {
                 file_names.push_back(merged_l1_name(chunk_file_prefix_, i));
@@ -119,9 +113,9 @@ class SortedSetDiskBase {
                 file_names.push_back(chunk_file_prefix_ + std::to_string(i));
             }
             std::function<void(const value_type &)> on_new_item
-                    = [this](const value_type &v) { merge_queue_.push(v); };
+                    = [queue](const value_type &v) { queue->push(v); };
             merge_files(file_names, on_new_item);
-            merge_queue_.shutdown();
+            queue->shutdown();
         });
     }
 
@@ -299,11 +293,10 @@ class SortedSetDiskBase {
     storage_type data_dump_;
 
     size_t num_threads_;
+
+    size_t reserved_num_elements_;
+
     const std::string chunk_file_prefix_;
-    /**
-     * True if the data merging thread was started, and data started flowing into the #merge_queue_.
-     */
-    bool is_merging_ = false;
 
     /**
      * Ensures mutually exclusive access (and thus thread-safety) to #data.
@@ -328,9 +321,17 @@ class SortedSetDiskBase {
     // TODO: this is suboptimal, as ThreadPool imposes a max of 5*threads tasks
     ThreadPool async_merge_l1_ = ThreadPool(1, 100);
 
-    ChunkedWaitQueue<T> merge_queue_;
-
     std::function<void(storage_type *)> cleanup_;
+
+    /**
+     * Function to call when an item is pushed into the final sorted set.
+     */
+    std::function<void(const T &)> on_item_pushed_;
+
+    /**
+     * Number of elements cached by the sorted set for backwards iteration.
+     */
+    size_t num_last_elements_cached_;
 };
 
 } // namespace common
