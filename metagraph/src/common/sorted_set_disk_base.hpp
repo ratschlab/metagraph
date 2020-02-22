@@ -88,12 +88,15 @@ class SortedSetDiskBase {
         return result;
     }
 
-    void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {}) {
+    void clear(std::function<void(const T &)> on_item_pushed = [](const T &) {},
+            const std::filesystem::path& tmp_path = "/tmp/") {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         try_reserve(reserved_num_elements_);
         chunk_count_ = 0;
         on_item_pushed_ = on_item_pushed;
+        chunk_file_prefix_ = tmp_path / "chunk_";
+        std::filesystem::create_directory(tmp_path);
     }
 
   protected:

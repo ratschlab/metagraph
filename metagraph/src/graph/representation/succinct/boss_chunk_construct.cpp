@@ -303,18 +303,17 @@ void recover_source_dummy_nodes(size_t k,
                   num_dummy_parent_kmers);
 
     // generate dummy k-mers of prefix length 3..k
-    common::SortedSetDisk<T> sorted_dummy_kmers2(no_cleanup, num_threads, buffer_size,
-                                                 tmp_path2);
-    common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
-    common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
     for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
+        const filesystem::path tmp_path
+                = tmp_dir / ("dummy_source" + std::to_string(dummy_pref_len));
         files_to_merge.push_back(create_stream(get_file_name(dummy_pref_len)));
-        dest->clear(file_writer(files_to_merge.back().second));
+        sorted_dummy_kmers.clear(file_writer(files_to_merge.back().second), tmp_path);
         dummy_kmers.resize(0);
         size_t num_kmers = 0;
-        for (auto &it = source->data().begin(); it != source->data().end(); ++it) {
+        const common::ChunkedWaitQueue<T> &source = sorted_dummy_kmers.data();
+        for (auto &it = source.begin(); it != source.end(); ++it) {
             if (dummy_kmers.size() == dummy_kmers.capacity()) {
-                dest->insert(dummy_kmers.begin(), dummy_kmers.end());
+                sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
                 dummy_kmers.resize(0);
             }
 
@@ -322,16 +321,15 @@ void recover_source_dummy_nodes(size_t k,
             num_kmers++;
         }
         // push out the leftover dummy kmers
-        dest->insert(dummy_kmers.begin(), dummy_kmers.end());
+        sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                       dummy_pref_len - 1, num_kmers);
-
-        std::swap(source, dest);
     }
     uint32_t num_kmers = 0;
     // iterate to merge the data and write it to disk
-    for (auto &it = source->data().begin(); it != source->data().end(); ++it, ++num_kmers) {
+    const common::ChunkedWaitQueue<T> &source = sorted_dummy_kmers.data();
+    for (auto &it = source.begin(); it != source.end(); ++it, ++num_kmers) {
     }
     logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}", k, num_kmers);
 
