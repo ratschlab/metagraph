@@ -89,7 +89,7 @@ class SortedSetDiskBase {
                 sort_and_remove_duplicates(&data_, num_threads_);
                 dump_to_file(true /* is_done */);
             }
-            std::vector<T>().swap(data_);
+            Vector<T>().swap(data_);
             start_merging();
         }
         return merge_queue_;
