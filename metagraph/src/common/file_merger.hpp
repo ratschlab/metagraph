@@ -68,7 +68,7 @@ class MergeHeap {
  * Note: this method blocks until all the data was successfully merged.
  */
 template <typename T>
-uint64_t merge_files(const std::vector<std::string> sources,
+uint64_t merge_files(const std::vector<std::string> &sources,
                      std::function<void(const T &)> on_new_item,
                      bool cleanup = true) {
     // start merging disk chunks by using a heap to store the current element
@@ -142,7 +142,7 @@ uint64_t merge_files(const std::vector<std::string> sources,
  * Note: this method blocks until all the data was successfully merged.
  */
 template <typename T, typename C>
-uint64_t merge_files(const std::vector<std::string> sources,
+uint64_t merge_files(const std::vector<std::string> &sources,
                      std::function<void(const std::pair<T, C> &)> on_new_item,
                      bool cleanup = true) {
     // start merging disk chunks by using a heap to store the current element

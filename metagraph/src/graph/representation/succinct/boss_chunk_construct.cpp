@@ -262,14 +262,13 @@ void recover_source_dummy_nodes(size_t k,
 
     const std::string file_name_l2 = get_file_name(2);
     files_to_merge.push_back(create_stream(file_name_l2));
-    std::ofstream *dummy_l2 = &files_to_merge.back().second;
 
     const filesystem::path tmp_path1 = tmp_dir / "dummy_source1";
     const filesystem::path tmp_path2 = tmp_dir / "dummy_source2";
 
     // this will contain dummy k-mers of prefix length 2
     common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads, buffer_size,
-                                                tmp_path1, file_writer(*dummy_l2));
+                                                tmp_path1, [](const T &) {});
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
@@ -301,16 +300,23 @@ void recover_source_dummy_nodes(size_t k,
     logger->trace("Total number of k-mers: {}", num_parent_kmers);
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   num_dummy_parent_kmers);
-
+    ThreadPool async_merge = ThreadPool(1, 1);
     // generate dummy k-mers of prefix length 3..k
     for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
         const filesystem::path tmp_path
                 = tmp_dir / ("dummy_source" + std::to_string(dummy_pref_len));
-        files_to_merge.push_back(create_stream(get_file_name(dummy_pref_len)));
-        sorted_dummy_kmers.clear(file_writer(files_to_merge.back().second), tmp_path);
+        const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
+        common::ChunkedWaitQueue<T> source(10000, 1,
+                                           file_writer(files_to_merge.back().second));
+        async_merge.enqueue([&chunk_files, &source]() {
+            std::function<void(const T &)> on_new_item
+                    = [&source](const T &v) { source.push(v); };
+            common::merge_files(chunk_files, on_new_item);
+            source.shutdown();
+        });
+        sorted_dummy_kmers.clear(tmp_path);
         dummy_kmers.resize(0);
         size_t num_kmers = 0;
-        const common::ChunkedWaitQueue<T> &source = sorted_dummy_kmers.data();
         for (auto &it = source.begin(); it != source.end(); ++it) {
             if (dummy_kmers.size() == dummy_kmers.capacity()) {
                 sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
@@ -325,10 +331,19 @@ void recover_source_dummy_nodes(size_t k,
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                       dummy_pref_len - 1, num_kmers);
+        files_to_merge.push_back(create_stream(get_file_name(dummy_pref_len)));
     }
     uint32_t num_kmers = 0;
     // iterate to merge the data and write it to disk
-    const common::ChunkedWaitQueue<T> &source = sorted_dummy_kmers.data();
+    const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
+    common::ChunkedWaitQueue<T> source(10000, 1,
+                                       file_writer(files_to_merge.back().second));
+    async_merge.enqueue([&chunk_files, &source]() {
+      std::function<void(const T &)> on_new_item
+              = [&source](const T &v) { source.push(v); };
+      common::merge_files(chunk_files, on_new_item);
+      source.shutdown();
+    });
     for (auto &it = source.begin(); it != source.end(); ++it, ++num_kmers) {
     }
     logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}", k, num_kmers);
@@ -397,7 +412,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     }
 
     BOSS::Chunk* build_chunk() {
-        auto &kmers = kmer_collector_.data();
+        typename KmerCollector::Data &kmers = kmer_collector_.data();
 
         if (!kmer_collector_.suffix_length()) {
             logger->trace("Reconstructing all required dummy source k-mers...");
