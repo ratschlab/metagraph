@@ -6,6 +6,7 @@
 #define private public
 #include "test_matrix_helpers.hpp"
 #include "common/unix_tools.hpp"
+#include "data_generation.hpp"
 
 
 TYPED_TEST(AnnotatorTest, EmptyConstructor) {
@@ -605,16 +606,15 @@ TYPED_TEST(AnnotatorStaticLargeTest, CheckCache) {
     BitVectorPtrArray columns, copy;
     annotate::LabelEncoder label_encoder;
 
+    DataGenerator random_generator;
+
     for (size_t j = 0; j < num_columns; ++j) {
 
-        columns.emplace_back(new bit_vector_stat(num_rows));
-
-        for (size_t i = 0; i < num_rows; ++i) {
-            columns.back()->set(i, (i + 2 * j) % 1000);
-        }
-        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+        columns.push_back(random_generator.generate_random_column(num_rows, 0.1));
 
         label_encoder.insert_and_encode(std::to_string(j));
+
+        copy.push_back(columns.back()->copy());
     }
 
     auto annotator = TypeParam(
@@ -646,16 +646,15 @@ TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
     BitVectorPtrArray columns, copy;
     annotate::LabelEncoder label_encoder;
 
+    DataGenerator random_generator;
+
     for (size_t j = 0; j < num_columns; ++j) {
 
-        columns.emplace_back(new bit_vector_stat(num_rows));
-
-        for (size_t i = 0; i < num_rows; ++i) {
-            columns.back()->set(i, (i + 2 * j) % 1000);
-        }
-        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+        columns.push_back(random_generator.generate_random_column(num_rows, 0.1));
 
         label_encoder.insert_and_encode(std::to_string(j));
+
+        copy.push_back(columns.back()->copy());
     }
 
     auto annotator = TypeParam(
