@@ -89,7 +89,7 @@ class SortedSetDiskBase {
                 sort_and_remove_duplicates(&data_, num_threads_);
                 dump_to_file(true /* is_done */);
             }
-            Vector<T>().swap(data_);
+            Vector<T>().swap(data_); // free up the (usually very large) buffer
             start_merging();
         }
         return merge_queue_;
@@ -115,6 +115,7 @@ class SortedSetDiskBase {
         chunk_file_prefix_ = tmp_path / "chunk_";
         std::filesystem::create_directory(tmp_path);
         merge_queue_.reset(on_item_pushed_);
+        total_chunk_size_bytes_ = 0;
     }
 
   protected: // TODO: move most of these methods to private before submitting
@@ -160,7 +161,9 @@ class SortedSetDiskBase {
     template <class value_type>
     static void merge_l1(const std::string &chunk_file_prefix,
                          uint32_t chunk_count,
-                         uint32_t *merged_index) {
+                         uint32_t *merged_index,
+                         int64_t *size_diff) {
+        *size_diff = 0;
         const std::string &merged_l1_file_name
                 = merged_l1_name(chunk_file_prefix, chunk_count / MERGE_L1_COUNT);
         std::fstream merged_file(merged_l1_file_name, std::ios::binary | std::ios::out);
@@ -168,9 +171,11 @@ class SortedSetDiskBase {
         std::vector<std::string> to_merge(to_merge_count);
         for (uint32_t i = 0; i < to_merge_count; ++i) {
             to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
+            *size_diff -= static_cast<int64_t>(std::filesystem::file_size(to_merge[i]));
         }
         if (to_merge_count == 1) { // small optimization if only 1 file to merge
             std::filesystem::rename(to_merge[0], merged_l1_file_name);
+            *size_diff = 0;
             return;
         }
         logger->trace("Starting merging last {} chunks into {}", to_merge_count,
@@ -187,6 +192,7 @@ class SortedSetDiskBase {
         (*merged_index)++;
         logger->trace("Merging last {} chunks into {} done", to_merge_count,
                       merged_l1_file_name);
+        *size_diff += std::filesystem::file_size(merged_l1_file_name);
     }
 
 
@@ -203,16 +209,21 @@ class SortedSetDiskBase {
             logger->error("Error: Creating chunk file '{}' failed", file_name);
             std::exit(EXIT_FAILURE);
         }
-        if (!binary_file.write((char *)&(data_[0]), sizeof(data_[0]) * data_.size())) {
+        const size_t data_size = sizeof(data_[0]) * data_.size();
+        if (!binary_file.write((char *)&(data_[0]), data_size)) {
             logger->error("Error: Writing to '{}' failed", file_name);
             std::exit(EXIT_FAILURE);
         }
         binary_file.close();
+        total_chunk_size_bytes_ += data_size;
         if (is_done) {
             async_merge_l1_.clear();
         } else if ((chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
+            int64_t size_diff;
             async_merge_l1_.enqueue(merge_l1<typename storage_type::value_type>,
-                                    chunk_file_prefix_, chunk_count_, &merged_index_);
+                                    chunk_file_prefix_, chunk_count_, &merged_index_,
+                                    &size_diff);
+            total_chunk_size_bytes_ += size_diff;
         }
         data_.resize(0);
         chunk_count_++;
@@ -324,6 +335,8 @@ class SortedSetDiskBase {
     ThreadPool async_merge_l1_ = ThreadPool(1, 100);
 
     std::function<void(storage_type *)> cleanup_;
+
+    size_t total_chunk_size_bytes_ = 0;
 };
 
 } // namespace common
