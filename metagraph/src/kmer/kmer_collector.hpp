@@ -115,6 +115,8 @@ class KmerCollector {
     bool both_strands_mode_;
 
     std::filesystem::path tmp_dir_;
+
+    size_t buffer_size_;
 };
 
 /** Visible For Testing */
