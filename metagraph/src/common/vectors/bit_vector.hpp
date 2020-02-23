@@ -31,7 +31,7 @@ class bit_vector : public bitmap {
 
     virtual void insert_bit(uint64_t id, bool val) = 0;
     virtual void delete_bit(uint64_t id) = 0;
-    virtual void set(uint64_t id, bool val) override = 0;
+    virtual void set(uint64_t id, bool val) = 0;
 
     virtual bool operator[](uint64_t id) const override = 0;
     virtual uint64_t get_int(uint64_t id, uint32_t width) const override = 0;
