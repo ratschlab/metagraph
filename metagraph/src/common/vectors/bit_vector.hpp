@@ -71,6 +71,8 @@ class bit_vector : public bitmap {
     virtual std::unique_ptr<bit_vector> copy() const = 0;
 
     virtual sdsl::bit_vector to_vector() const = 0;
+
+    virtual void add_to(sdsl::bit_vector *other) const override;
 };
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv);

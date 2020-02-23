@@ -63,7 +63,7 @@ class bitmap : public bitmap_builder {
     virtual uint64_t size() const = 0;
     virtual uint64_t num_set_bits() const = 0;
 
-    virtual void add_to(sdsl::bit_vector *other) const;
+    virtual void add_to(sdsl::bit_vector *other) const = 0;
     virtual void call_ones(const VoidCall<uint64_t> &callback) const final;
     virtual void call_ones_in_range(uint64_t begin, uint64_t end,
                                     const VoidCall<uint64_t> &callback) const = 0;
@@ -98,6 +98,7 @@ class bitmap_set : public bitmap_dyn {
     uint64_t size() const override { return size_; }
     uint64_t num_set_bits() const override { return bits_.size(); }
 
+    void add_to(sdsl::bit_vector *other) const override;
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const override;
 
@@ -204,6 +205,7 @@ class bitmap_lazy : public bitmap {
     uint64_t size() const { return size_; }
     uint64_t num_set_bits() const;
 
+    void add_to(sdsl::bit_vector *other) const;
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const;
 

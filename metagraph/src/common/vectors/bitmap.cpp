@@ -68,12 +68,6 @@ bool bitmap::operator==(const bitmap &other) const {
     return true;
 }
 
-void bitmap::add_to(sdsl::bit_vector *other) const {
-    assert(other);
-    assert(other->size() == size());
-    call_ones([other](auto i) { (*other)[i] = true; });
-}
-
 void bitmap::call_ones(const VoidCall<uint64_t> &callback) const {
     call_ones_in_range(0, size(), callback);
 }
@@ -156,6 +150,12 @@ void bitmap_set::insert_zeros(const std::vector<uint64_t> &pos) {
     assert(bits.size() == bits_.size());
 
     bits_ = std::move(bits);
+}
+
+void bitmap_set::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
+    call_ones([other](auto i) { (*other)[i] = true; });
 }
 
 void bitmap_set::call_ones_in_range(uint64_t begin, uint64_t end,
@@ -352,6 +352,12 @@ uint64_t bitmap_lazy::num_set_bits() const {
     }
 
     return num_set_bits_;
+}
+
+void bitmap_lazy::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
+    call_ones([other](auto i) { (*other)[i] = true; });
 }
 
 void bitmap_lazy::call_ones_in_range(uint64_t begin, uint64_t end,

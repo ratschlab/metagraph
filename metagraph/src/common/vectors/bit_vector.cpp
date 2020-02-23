@@ -120,6 +120,28 @@ template<> bit_vector_smart bit_vector::copy_to() const {
     return bit_vector_smart(*this);
 }
 
+void bit_vector::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
+
+    // TODO: tune the coefficient for each representation
+    if (num_set_bits() * 3 < size()) {
+        // for sparse vectors
+        call_ones([other](auto i) { (*other)[i] = true; });
+
+    } else {
+        uint64_t i;
+        const uint64_t end = size();
+        uint64_t *data = other->data();
+        for (i = 0; i + 64 <= end; i += 64, ++data) {
+            *data |= get_int(i, 64);
+        }
+        if (i < size()) {
+            *data |= get_int(i, size() - i);
+        }
+    }
+}
+
 
 
 // taken from https://github.com/xxsds/sdsl-lite/blob/master/include/sdsl/util.hpp
