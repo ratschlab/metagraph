@@ -89,7 +89,7 @@ class SortedSetDiskBase {
                 sort_and_remove_duplicates(&data_, num_threads_);
                 dump_to_file(true /* is_done */);
             }
-            data_.reserve(0);
+            std::vector<T>().swap(data_);
             start_merging();
         }
         return merge_queue_;
@@ -110,11 +110,10 @@ class SortedSetDiskBase {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         is_merging_ = false;
-        try_reserve(reserved_num_elements_);
         chunk_count_ = 0;
+        data_.resize(0); // this makes sure the buffer is not reallocated
         chunk_file_prefix_ = tmp_path / "chunk_";
         std::filesystem::create_directory(tmp_path);
-        data_.resize(0); // this makes sure the buffer is not reallocated
         merge_queue_.reset(on_item_pushed_);
     }
 
