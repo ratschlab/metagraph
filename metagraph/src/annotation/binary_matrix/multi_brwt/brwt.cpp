@@ -64,6 +64,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     auto row_begin = slice.begin();
 
     for (size_t i = 0; i < rows.size(); ++i) {
+        // every row in `slice` ends with `-1`
         auto row_end = std::find(row_begin, slice.end(),
                                  std::numeric_limits<Column>::max());
         rows[i].assign(row_begin, row_end);
@@ -88,6 +89,7 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
             assert(row_ids[i] < num_rows());
 
             if ((*nonzero_rows_)[row_ids[i]]) {
+                // only a single column is stored in leafs
                 slice.push_back(0);
             }
             slice.push_back(delim);
@@ -107,7 +109,8 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
 
         uint64_t global_offset = row_ids[i];
 
-        // if next word containes three or more positions, query the whole word
+        // if next word contains 5 or more positions, query the whole word
+        // we assume that get_int is roughly 5 times slower than operator[]
         if (i + 4 < row_ids.size()
                 && row_ids[i + 4] < global_offset + 64
                 && row_ids[i + 4] >= global_offset
