@@ -197,7 +197,7 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
             }
 
             // set all bits from the next block
-            for (uint64_t i = 0; i < next_block->num_rows(); ++i) {
+            for (uint64_t i = 0, n_rows = next_block->num_rows(); i < n_rows; ++i) {
                 for (auto j : next_block->get_row(i)) {
                     matrix.force_set(i, new_column_positions[j]);
                 }

@@ -327,7 +327,7 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
     }
 
     // check get_row
-    for (size_t i = 0; i < matrix.num_rows(); ++i) {
+    for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
         auto row_set_bits = matrix.get_row(i);
 
         // make sure all returned indexes are unique
@@ -409,7 +409,7 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
     }
 
     // check get
-    for (size_t i = 0; i < matrix.num_rows(); ++i) {
+    for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
         for (size_t j = 0; j < matrix.num_columns(); ++j) {
             EXPECT_EQ(columns[j]->operator[](i), matrix.get(i, j))
                 << i << " " << j;

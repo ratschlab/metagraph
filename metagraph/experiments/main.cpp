@@ -78,10 +78,10 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
             || static_cast<int>(another.rank0(another.size() / 2)) < -1)
         throw std::runtime_error("Never happens, just initializing the rank support");
 
-   if (another.num_set_bits()
+    if (another.num_set_bits()
             && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
             && static_cast<int>(another.select1(1)) < -1)
-       throw std::runtime_error("Never happens, just initializing the select support");
+        throw std::runtime_error("Never happens, just initializing the select support");
 
     auto RAM = get_curr_RSS() - mem_before;
 
@@ -225,7 +225,8 @@ double test_row_time(const BinaryMatrix &matrix,
     generator.set_seed(42);
     //std::cout << "Generating " << num_samples << " samples";
     auto positions = generator.generate_random_ints(
-        num_samples, 0, matrix.num_rows());
+        num_samples, 0, matrix.num_rows()
+    );
 
     Timer timer;
     timer.reset();

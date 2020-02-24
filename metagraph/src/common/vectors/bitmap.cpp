@@ -346,6 +346,7 @@ uint64_t bitmap_lazy::get_int(uint64_t id, uint32_t width) const {
     return (word << 1) | operator[](id);
 }
 
+// TODO: remove num_set_bits() from bitmap and from bitmap_lazy
 uint64_t bitmap_lazy::num_set_bits() const {
     if (num_set_bits_ == static_cast<size_t>(-1)) {
         throw std::runtime_error("Number of set bits not pre-computed");
