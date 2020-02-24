@@ -1,7 +1,7 @@
 #include <tsl/hopscotch_set.h>
 #include <algorithm>
 
-#include "data_generation.hpp"
+#include "common/data_generation.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
 std::vector<uint64_t>
@@ -50,16 +50,17 @@ std::unique_ptr<bit_vector>
 DataGenerator::generate_random_column_fixed_size(uint64_t n, uint64_t n_set_bits) {
     std::uniform_int_distribution<> dis(0, n - 1);
 
-    std::unique_ptr<bit_vector> column(new bit_vector_stat(n, false));
+    sdsl::bit_vector bv(n, false);
+
     while (n_set_bits) {
         uint64_t pos = dis(gen);
-        if (!(*column)[pos]) {
-            column->set(pos, true);
+        if (!bv[pos]) {
+            bv[pos] = true;
             --n_set_bits;
         }
     }
 
-    return column;
+    return std::make_unique<bit_vector_stat>(std::move(bv));
 }
 
 std::vector<std::unique_ptr<bit_vector>>

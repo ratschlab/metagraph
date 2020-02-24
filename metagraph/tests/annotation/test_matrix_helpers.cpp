@@ -22,20 +22,25 @@ build_matrix_from_columns(const std::function<void(const RowCallback &)> &genera
                           uint64_t num_columns,
                           uint64_t num_rows,
                           uint64_t) {
-    BitVectorPtrArray columns;
+    std::vector<sdsl::bit_vector> columns;
     while (num_columns--) {
-        columns.emplace_back(new bit_vector_stat(num_rows, false));
+        columns.emplace_back(num_rows, false);
     }
 
     uint64_t cur_row = 0;
     generate_rows([&](auto row) {
         for (const auto &column : row) {
-            columns.at(column)->set(cur_row, true);
+            columns.at(column)[cur_row] = true;
         }
         cur_row++;
     });
 
-    return build_matrix_from_columns<BinMat>(std::move(columns), num_rows);
+    BitVectorPtrArray data;
+    for (auto &bv : columns) {
+        data.emplace_back(new bit_vector_stat(std::move(bv)));
+    }
+
+    return build_matrix_from_columns<BinMat>(std::move(data), num_rows);
 }
 
 template <typename BinMat>

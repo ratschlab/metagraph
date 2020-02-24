@@ -1,7 +1,7 @@
 #include "benchmark/benchmark.h"
 
 #include "common/vectors/bit_vector.hpp"
-#include "data_generation.hpp"
+#include "common/data_generation.hpp"
 
 
 namespace mg {

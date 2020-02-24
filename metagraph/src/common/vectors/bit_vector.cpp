@@ -405,6 +405,8 @@ bit_vector_stat::bit_vector_stat(uint64_t size, bool value)
       : vector_(size, value) {
     if (value)
         num_set_bits_ = size;
+
+    init_rs();
 }
 
 bit_vector_stat::bit_vector_stat(const sdsl::bit_vector &vector) noexcept
@@ -427,16 +429,17 @@ bit_vector_stat
         vector_[pos] = true;
         num_set_bits_++;
     });
+    init_rs();
 }
 
 bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector) noexcept
-      : vector_(std::move(vector)),
-        num_set_bits_(sdsl::util::cnt_one_bits(vector_)) {}
+      : bit_vector_stat(std::move(vector), sdsl::util::cnt_one_bits(vector)) {}
 
 bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector, uint64_t num_set_bits)
       : vector_(std::move(vector)),
         num_set_bits_(num_set_bits) {
     assert(num_set_bits_ == sdsl::util::cnt_one_bits(vector_));
+    init_rs();
 }
 
 bit_vector_stat::bit_vector_stat(bit_vector_stat&& other) noexcept {
@@ -449,26 +452,24 @@ bit_vector_stat::bit_vector_stat(std::initializer_list<bool> init)
 bit_vector_stat& bit_vector_stat::operator=(const bit_vector_stat &other) {
     vector_ = other.vector_;
     num_set_bits_ = other.num_set_bits_;
-    if (!other.requires_update_) {
-        rk_ = other.rk_;
-        rk_.set_vector(&vector_);
-        slct_ = other.slct_;
-        slct_.set_vector(&vector_);
-        requires_update_ = false;
-    }
+
+    rk_ = other.rk_;
+    rk_.set_vector(&vector_);
+    slct_ = other.slct_;
+    slct_.set_vector(&vector_);
+
     return *this;
 }
 
 bit_vector_stat& bit_vector_stat::operator=(bit_vector_stat&& other) noexcept {
     vector_ = std::move(other.vector_);
     num_set_bits_ = other.num_set_bits_;
-    if (!other.requires_update_) {
-        rk_ = std::move(other.rk_);
-        rk_.set_vector(&vector_);
-        slct_ = std::move(other.slct_);
-        slct_.set_vector(&vector_);
-        requires_update_ = false;
-    }
+
+    rk_ = std::move(other.rk_);
+    rk_.set_vector(&vector_);
+    slct_ = std::move(other.slct_);
+    slct_.set_vector(&vector_);
+
     return *this;
 }
 
@@ -477,17 +478,12 @@ std::unique_ptr<bit_vector> bit_vector_stat::copy() const {
 }
 
 uint64_t bit_vector_stat::rank1(uint64_t id) const {
-    if (requires_update_)
-        init_rs();
     //the rank method in SDSL does not include id in the count
     return rk_(id >= this->size() ? this->size() : id + 1);
 }
 
 uint64_t bit_vector_stat::select1(uint64_t id) const {
     assert(id > 0 && size() > 0);
-
-    if (requires_update_)
-        init_rs();
 
     assert(id <= num_set_bits_);
     return slct_(id);
@@ -530,51 +526,8 @@ uint64_t bit_vector_stat::get_int(uint64_t id, uint32_t width) const {
     return vector_.get_int(id, width);
 }
 
-void bit_vector_stat::set(uint64_t id, bool val) {
-    if (vector_[id] == val)
-        return;
-
-    if (val) {
-        num_set_bits_++;
-    } else {
-        num_set_bits_--;
-    }
-
-    vector_[id] = val;
-    requires_update_ = true;
-}
-
-void bit_vector_stat::insert_bit(uint64_t id, bool val) {
-    assert(id <= size());
-
-    if (val)
-        num_set_bits_++;
-
-    vector_.resize(size() + 1);
-    std::copy_backward(vector_.begin() + id, vector_.end() - 1, vector_.end());
-
-    vector_[id] = val;
-    requires_update_ = true;
-}
-
-void bit_vector_stat::delete_bit(uint64_t id) {
-    assert(size() > 0);
-    assert(id < size());
-
-    if (vector_[id])
-        num_set_bits_--;
-
-    std::copy(vector_.begin() + id + 1, vector_.end(), vector_.begin() + id);
-
-    vector_.resize(vector_.size() - 1);
-    requires_update_ = true;
-}
-
 void bit_vector_stat::serialize(std::ostream &out) const {
     vector_.serialize(out);
-
-    if (requires_update_)
-        init_rs();
 
     serialize_number(out, num_set_bits_);
     rk_.serialize(out);
@@ -588,20 +541,9 @@ bool bit_vector_stat::load(std::istream &in) {
     try {
         vector_.load(in);
 
-        try {
-            num_set_bits_ = load_number(in);
-            rk_.load(in, &vector_);
-            slct_.load(in, &vector_);
-            requires_update_ = false;
-        } catch (...) {
-            std::cerr << "Warning: Loading from file without bit_vector rank"
-                      << " and select support dumped. Reserialize to"
-                      << " make the loading faster." << std::endl;
-
-            num_set_bits_ = sdsl::util::cnt_one_bits(vector_);
-            requires_update_ = true;
-            init_rs();
-        }
+        num_set_bits_ = load_number(in);
+        rk_.load(in, &vector_);
+        slct_.load(in, &vector_);
         return true;
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load bit_vector_stat." << std::endl;
@@ -625,15 +567,8 @@ void bit_vector_stat::call_ones_in_range(uint64_t begin, uint64_t end,
 }
 
 void bit_vector_stat::init_rs() const {
-    std::unique_lock<std::mutex> lock(mu_);
-
-    if (!requires_update_)
-        return;
-
     rk_ = sdsl::rank_support_v5<>(&vector_);
     slct_ = sdsl::select_support_mcl<>(&vector_);
-
-    requires_update_ = false;
 
     assert(num_set_bits_ == (size() ? rank1(size() - 1) : 0));
     assert(num_set_bits_ == num_set_bits());
@@ -780,10 +715,6 @@ uint64_t bit_vector_sd::prev1(uint64_t pos) const {
     return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_SD);
 }
 
-void bit_vector_sd::set(uint64_t, bool) {
-    throw std::runtime_error("Not supported");
-}
-
 bool bit_vector_sd::operator[](uint64_t id) const {
     assert(id < size());
     return vector_[id] != inverted_;
@@ -794,14 +725,6 @@ uint64_t bit_vector_sd::get_int(uint64_t id, uint32_t width) const {
         return ~vector_.get_int(id, width) & sdsl::bits::lo_set[width];
 
     return vector_.get_int(id, width);
-}
-
-void bit_vector_sd::insert_bit(uint64_t, bool) {
-    throw std::runtime_error("Not supported");
-}
-
-void bit_vector_sd::delete_bit(uint64_t) {
-    throw std::runtime_error("Not supported");
 }
 
 bool bit_vector_sd::load(std::istream &in) {
@@ -975,11 +898,6 @@ uint64_t bit_vector_rrr<log_block_size>::prev1(uint64_t pos) const {
 }
 
 template <size_t log_block_size>
-void bit_vector_rrr<log_block_size>::set(uint64_t, bool) {
-    throw std::runtime_error("Not supported");
-}
-
-template <size_t log_block_size>
 bool bit_vector_rrr<log_block_size>::operator[](uint64_t id) const {
     assert(id < size());
     return vector_[id];
@@ -989,16 +907,6 @@ template <size_t log_block_size>
 uint64_t bit_vector_rrr<log_block_size>
 ::get_int(uint64_t id, uint32_t width) const {
     return vector_.get_int(id, width);
-}
-
-template <size_t log_block_size>
-void bit_vector_rrr<log_block_size>::insert_bit(uint64_t, bool) {
-    throw std::runtime_error("Not supported");
-}
-
-template <size_t log_block_size>
-void bit_vector_rrr<log_block_size>::delete_bit(uint64_t) {
-    throw std::runtime_error("Not supported");
 }
 
 template <size_t log_block_size>
@@ -1238,11 +1146,6 @@ uint64_t bit_vector_hyb<block_rate>::prev1(uint64_t pos) const {
 }
 
 template <uint32_t block_rate>
-void bit_vector_hyb<block_rate>::set(uint64_t, bool) {
-    throw std::runtime_error("Not supported");
-}
-
-template <uint32_t block_rate>
 bool bit_vector_hyb<block_rate>::operator[](uint64_t id) const {
     assert(id < size());
     return vector_[id];
@@ -1252,16 +1155,6 @@ template <uint32_t block_rate>
 uint64_t bit_vector_hyb<block_rate>
 ::get_int(uint64_t id, uint32_t width) const {
     return vector_.get_int(id, width);
-}
-
-template <uint32_t block_rate>
-void bit_vector_hyb<block_rate>::insert_bit(uint64_t, bool) {
-    throw std::runtime_error("Not supported");
-}
-
-template <uint32_t block_rate>
-void bit_vector_hyb<block_rate>::delete_bit(uint64_t) {
-    throw std::runtime_error("Not supported");
 }
 
 template <uint32_t block_rate>
@@ -1424,11 +1317,6 @@ uint64_t bit_vector_il<block_size>::prev1(uint64_t pos) const {
 }
 
 template <uint32_t block_size>
-void bit_vector_il<block_size>::set(uint64_t, bool) {
-    throw std::runtime_error("Not supported");
-}
-
-template <uint32_t block_size>
 bool bit_vector_il<block_size>::operator[](uint64_t id) const {
     assert(id < size());
     return vector_[id];
@@ -1438,16 +1326,6 @@ template <uint32_t block_size>
 uint64_t bit_vector_il<block_size>
 ::get_int(uint64_t id, uint32_t width) const {
     return vector_.get_int(id, width);
-}
-
-template <uint32_t block_size>
-void bit_vector_il<block_size>::insert_bit(uint64_t, bool) {
-    throw std::runtime_error("Not supported");
-}
-
-template <uint32_t block_size>
-void bit_vector_il<block_size>::delete_bit(uint64_t) {
-    throw std::runtime_error("Not supported");
 }
 
 template <uint32_t block_size>

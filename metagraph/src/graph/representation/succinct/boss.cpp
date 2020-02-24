@@ -48,12 +48,14 @@ BOSS::BOSS(size_t k)
     assert(bits_per_char_W_ <= sizeof(TAlphabet) * 8
             && "Choose type for TAlphabet properly");
 
-    last_->insert_bit(0, false);
-    W_->insert(0, 0);
+    assert(get_state() == BOSS::State::DYN);
+
+    dynamic_cast<bit_vector_dyn&>(*last_).insert_bit(0, false);
+    dynamic_cast<wavelet_tree_dyn&>(*W_).insert(0, 0);
 
     // add the dummy source node
-    last_->insert_bit(1, true);
-    W_->insert(0, 0);
+    dynamic_cast<bit_vector_dyn&>(*last_).insert_bit(1, true);
+    dynamic_cast<wavelet_tree_dyn&>(*W_).insert(0, 0);
     for (size_t j = 1; j < alph_size; j++) {
         F_[j] = 1;
     }
@@ -1027,6 +1029,9 @@ void BOSS::add_sequence(std::string_view seq,
     if (seq.size() < k_ + 1)
         return;
 
+    if (get_state() != State::DYN)
+        throw std::runtime_error("representation must be dynamic");
+
     // prepend k buffer characters, in case we need to start with dummy node
     std::vector<TAlphabet> sequence(seq.size() + k_);
     std::transform(seq.begin(), seq.end(), sequence.begin() + k_,
@@ -1080,6 +1085,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     assert(std::vector<TAlphabet>(source_node_kmer, source_node_kmer + k_)
                                                 == get_node_seq(source_node));
     assert(c < alph_size);
+    assert(get_state() == State::DYN);
 
     // get range of identical nodes (without W) pos current end position
     uint64_t begin = pred_last(source_node - 1) + 1;
@@ -1125,7 +1131,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
         // The inserted edge will not be the only incoming for its target node.
         // Relabel the next incoming edge from c to c- since
         // the new edge is the first incoming for that target node.
-        W_->set(first_c, c + alph_size);
+        dynamic_cast<wavelet_tree_dyn&>(*W_).set(first_c, c + alph_size);
     }
 
     // insert the edge
@@ -1140,8 +1146,8 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     uint64_t sentinel_pos = select_last(rank_last(F_[c]) + rank_W(begin - 1, c)) + 1;
 
     update_F(c, +1);
-    W_->insert(sentinel_pos, kSentinelCode);
-    last_->insert_bit(sentinel_pos, true);
+    dynamic_cast<wavelet_tree_dyn&>(*W_).insert(sentinel_pos, kSentinelCode);
+    dynamic_cast<bit_vector_dyn&>(*last_).insert_bit(sentinel_pos, true);
 
     if (edges_inserted)
         edges_inserted->push_back(sentinel_pos);
@@ -1155,11 +1161,12 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
 uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
     assert(c != alph_size);
     assert(c < 2 * alph_size);
+    assert(get_state() == State::DYN);
 
     if (begin > 1 && get_W(begin) == kSentinelCode) {
         // the source node is the dead-end with outgoing sentinel
         // replace this sentinel with the proper label
-        W_->set(begin, c);
+        dynamic_cast<wavelet_tree_dyn&>(*W_).set(begin, c);
         return 0;
     } else {
         // the source node already has some outgoing edges
@@ -1172,8 +1179,8 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 
         // insert the new edge
         update_F(get_node_last_value(begin), +1);
-        last_->insert_bit(begin, false);
-        W_->insert(pos, c);
+        dynamic_cast<bit_vector_dyn&>(*last_).insert_bit(begin, false);
+        dynamic_cast<wavelet_tree_dyn&>(*W_).insert(pos, c);
 
         assert(pos);
         return pos;
@@ -1186,6 +1193,9 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
     uint64_t shift = 0;
 
+    if (get_state() != State::DYN)
+        throw std::runtime_error("representation must be dynamic");
+
     for (edge_index edge : edges) {
         assert(edge >= shift);
         uint64_t edge_id = edge - shift;
@@ -1195,17 +1205,17 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
             //fix W array
             auto [next, d_next] = succ_W(edge_id + 1, d, d + alph_size);
             if (d_next == d + alph_size)
-                W_->set(next, d);
+                dynamic_cast<wavelet_tree_dyn&>(*W_).set(next, d);
         }
-        W_->remove(edge_id);
+        dynamic_cast<wavelet_tree_dyn&>(*W_).remove(edge_id);
         update_F(get_node_last_value(edge_id), -1);
         // If the current node has multiple outgoing edges,
         // remove one of the 0s from last instead of 1.
         if (get_last(edge_id) && (edge >= shift + 1)
                               && !get_last(edge_id - 1)) {
-            last_->delete_bit(edge_id - 1);
+            dynamic_cast<bit_vector_dyn&>(*last_).delete_bit(edge_id - 1);
         } else {
-            last_->delete_bit(edge_id);
+            dynamic_cast<bit_vector_dyn&>(*last_).delete_bit(edge_id);
         }
         shift++;
     }
@@ -1498,6 +1508,7 @@ BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
     if (get_last(1))
         return redundant_dummy_edges_mask;
 
+    State state = get_state();
     switch_state(State::STAT);
 
     auto num_dummy_traversed = traverse_dummy_edges(
@@ -1517,6 +1528,8 @@ BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
         std::cout << "Number of source dummy edges removed: "
                   << num_edges_erased << std::endl;
     }
+
+    switch_state(state);
 
     return redundant_dummy_edges_mask;
 }
