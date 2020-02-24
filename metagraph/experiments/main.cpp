@@ -19,12 +19,12 @@
 #include "common/vectors/wavelet_tree.hpp"
 #include "common/vectors/bit_vector.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/data_generation.hpp"
 #include "graph/alignment/aligner_helper.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/kmc_parser.hpp"
 #include "cli/config/config.hpp"
 #include "method_constructors.hpp"
-#include "data_generation.hpp"
 
 using namespace std::chrono_literals;
 

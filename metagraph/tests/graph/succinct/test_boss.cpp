@@ -1605,11 +1605,12 @@ TEST(BOSS, CallUnitigsMasked) {
     constructor.add_sequences(sequences);
     BOSS graph(&constructor);
 
-    bit_vector_stat mask(graph.num_edges() + 1, false);
+    sdsl::bit_vector mask_bv(graph.num_edges() + 1, false);
     graph.map_to_edges(
         sequences[0],
-        [&](auto edge) { mask.set(edge, true); }
+        [&](auto edge) { mask_bv[edge] = true; }
     );
+    bit_vector_stat mask(std::move(mask_bv));
 
     std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
     std::unordered_multiset<std::string> obs;

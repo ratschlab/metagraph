@@ -7,7 +7,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
-#include "data_generation.hpp"
+#include "common/data_generation.hpp"
 
 
 template <typename T>

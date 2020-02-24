@@ -273,7 +273,7 @@ TYPED_TEST(BitVectorTestSelect0, select0) {
     }
 }
 
-void test_bit_vector_set(bit_vector *vector, sdsl::bit_vector *numbers) {
+void test_bit_vector_set(bit_vector_dyn *vector, sdsl::bit_vector *numbers) {
     reference_based_test(*vector, *numbers);
 
     for (size_t i = 0; i < numbers->size(); ++i) {
@@ -305,64 +305,13 @@ TEST(bit_vector_dyn, set) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_dyn(numbers);
-    ASSERT_TRUE(vector);
+    bit_vector_dyn vector(numbers);
 
-    test_bit_vector_set(vector, &numbers);
-
-    delete vector;
-}
-
-TEST(bit_vector_stat, set) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_stat(numbers);
-    ASSERT_TRUE(vector);
-
-    test_bit_vector_set(vector, &numbers);
-
-    delete vector;
-}
-
-TEST(bit_vector_sd, setException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_sd(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_set(vector, &numbers), "");
-
-    delete vector;
-}
-
-TEST(bit_vector_rrr, setException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_rrr<>(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_set(vector, &numbers), "");
-
-    delete vector;
-}
-
-TEST(bit_vector_small, setException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_small(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_set(vector, &numbers), "");
-
-    delete vector;
+    test_bit_vector_set(&vector, &numbers);
 }
 
 
-void test_bit_vector_ins_del(bit_vector *vector,
+void test_bit_vector_ins_del(bit_vector_dyn *vector,
                              const sdsl::bit_vector &reference) {
     reference_based_test(*vector, reference);
 
@@ -388,60 +337,9 @@ TEST(bit_vector_dyn, InsertDelete) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_dyn(numbers);
-    ASSERT_TRUE(vector);
+    bit_vector_dyn vector(numbers);
 
-    test_bit_vector_ins_del(vector, numbers);
-
-    delete vector;
-}
-
-TEST(bit_vector_stat, InsertDelete) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_stat(numbers);
-    ASSERT_TRUE(vector);
-
-    test_bit_vector_ins_del(vector, numbers);
-
-    delete vector;
-}
-
-TEST(bit_vector_sd, InsertDeleteException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_sd(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_ins_del(vector, numbers), "");
-
-    delete vector;
-}
-
-TEST(bit_vector_rrr, InsertDeleteException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_rrr<>(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_ins_del(vector, numbers), "");
-
-    delete vector;
-}
-
-TEST(bit_vector_small, InsertDeleteException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_small(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_ins_del(vector, numbers), "");
-
-    delete vector;
+    test_bit_vector_ins_del(&vector, numbers);
 }
 
 
@@ -637,37 +535,6 @@ TEST(bit_vector_sd, InitializeByBitsDense) {
         },
         first.size(), set_bits.size());
     reference_based_test(second, numbers);
-}
-
-TEST(bit_vector_stat, ConcurrentReadingAfterWriting) {
-    ThreadPool thread_pool(3);
-    bit_vector_stat vector;
-
-    std::vector<bool> bits;
-    std::vector<uint64_t> ranks = { 0 };
-
-    for (size_t i = 0; i < 10'000'000; ++i) {
-        bits.push_back((i + (i * i) % 31) % 2);
-        if (bits.back()) {
-            ranks.back()++;
-        }
-        ranks.push_back(ranks.back());
-    }
-
-    for (size_t i = 0; i < bits.size(); ++i) {
-        ASSERT_EQ(0u, vector.rank1(i));
-    }
-    for (size_t i = 0; i < bits.size(); ++i) {
-        vector.insert_bit(i, bits[i]);
-    }
-    for (size_t t = 0; t < 5; ++t) {
-        thread_pool.enqueue([&]() {
-            for (size_t i = 0; i < bits.size(); ++i) {
-                ASSERT_EQ(ranks[i], vector.rank1(i));
-            }
-        });
-    }
-    thread_pool.join();
 }
 
 TEST(bit_vector_sd, CheckIfInverts) {

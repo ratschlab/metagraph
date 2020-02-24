@@ -6,7 +6,7 @@
 #define private public
 #include "test_matrix_helpers.hpp"
 #include "common/unix_tools.hpp"
-#include "data_generation.hpp"
+#include "common/data_generation.hpp"
 
 
 TYPED_TEST(AnnotatorTest, EmptyConstructor) {
