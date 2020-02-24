@@ -94,6 +94,32 @@ void execute_query(const std::string &seq_name,
     output_stream << output;
 }
 
+/**
+ * Construct a de Bruijn graph from the query sequences
+ * fetched in |call_sequences|.
+ *
+ *  Algorithm.
+ *
+ * 1. Index k-mers from the query sequences in a non-canonical query de Bruijn
+ *    graph (with pre-filtering by a Bloom filter, if initialized).
+ *    This query graph will be rebuilt as a canonical one in step 2.b), if the
+ *    full graph is canonical.
+ *
+ * 2. Extract contigs from this small de Bruijn graph and map them to the full
+ *    graph to map each k-mer to its respective annotation row index.
+ *    --> here we map each unique k-mer in sequences only once.
+ *
+ *    (b, canonical) If the full graph is canonical, rebuild the query graph
+ *                   in the canonical mode storing all k-mers found in the full
+ *                   graph.
+ *
+ * 3. If |discovery_fraction| is greater than zero, map all query sequences to
+ *    the query graph and filter out those having too few k-mer matches.
+ *    Then, remove from the query graph those k-mers occurring only in query
+ *    sequences that have been filtered out.
+ *
+ * 4. Extract annotation for the nodes of the query graph and return.
+ */
 std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
