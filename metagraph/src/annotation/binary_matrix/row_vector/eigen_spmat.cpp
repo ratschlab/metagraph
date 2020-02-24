@@ -42,7 +42,7 @@ std::vector<EigenSpMat::Row>
 EigenSpMat::get_column(Column column) const {
     std::vector<Row> result;
 
-    for (uint64_t i = 0; i < num_rows(); ++i) {
+    for (uint64_t i = 0, n_rows = num_rows(); i < n_rows; ++i) {
         if (get(i, column))
             result.push_back(i);
     }
@@ -99,7 +99,7 @@ void EigenSpMat::serialize(std::ostream &outstream) const {
                                    0,
                                    sdsl::bits::hi(num_columns()) + 1);
 
-    for (uint64_t i = 0, p = 0; i < num_rows(); ++i) {
+    for (uint64_t i = 0, p = 0, n_rows = num_rows(); i < n_rows; ++i) {
         for (decltype(mat_)::InnerIterator it(mat_, i); it; ++it) {
             full_vector[p++] = it.index() + 1;
         }
@@ -112,7 +112,7 @@ void EigenSpMat::serialize(std::ostream &outstream) const {
 // number of ones in the matrix
 uint64_t EigenSpMat::num_relations() const {
     uint64_t num_set_bits = 0;
-    for (uint64_t i = 0; i < num_rows(); ++i) {
+    for (uint64_t i = 0, n_rows = num_rows(); i < n_rows; ++i) {
         num_set_bits += mat_.innerVector(i).nonZeros();
     }
     return num_set_bits;
