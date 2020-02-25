@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <thread>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/string_utils.hpp"
@@ -471,6 +472,7 @@ void read_extended_fasta_file_critical(const std::string &filebase,
                                        std::function<void(size_t, const kseq_t*, const uint64_t*)> callback,
                                        bool with_reverse);
 
+
 void read_fasta_from_string(const std::string &fasta_flat,
                             std::function<void(kseq_t*)> callback,
                             bool with_reverse) {
@@ -480,14 +482,20 @@ void read_fasta_from_string(const std::string &fasta_flat,
         std::cerr << "ERROR: opening for writing to pipe failed" << std::endl;
         exit(1);
     }
-    auto sent = write(p[1], fasta_flat.c_str(), fasta_flat.length());
-    close(p[1]);
 
-    if (sent != static_cast<int64_t>(fasta_flat.length())) {
-        std::cerr << "ERROR: writing to pipe failed" << std::endl;
-        close(p[0]);
-        exit(1);
-    }
+    // seems silly to spawn a thread for that, but for larger strings write would just block.
+    // attempted with fmemopen as well, which, however, doesn't provide a file descriptor. But this seems necessary for gzdopen/gzopen
+    std::thread writer([&]() {
+        auto sent = write(p[1], fasta_flat.c_str(), fasta_flat.size());
+        close(p[1]);
+
+        if (sent != static_cast<int64_t>(fasta_flat.length())) {
+            std::cerr << "ERROR: writing to pipe failed" << std::endl;
+
+            close(p[0]);
+            exit(1);
+        }
+    });
 
     // gzFile from pipe
     gzFile input_p = gzdopen(p[0], "r");
@@ -498,6 +506,9 @@ void read_fasta_from_string(const std::string &fasta_flat,
     }
 
     read_fasta_file_critical(input_p, callback, with_reverse);
+
+    writer.join();
+    close(p[1]);
 
     gzclose(input_p);
     close(p[0]);

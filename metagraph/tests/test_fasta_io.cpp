@@ -752,3 +752,23 @@ TEST(FastaFileWithCanonical, iterator_read_1M_multiple_copies) {
 
     std::filesystem::remove(dump_filename);
 }
+
+TEST(FastaFromString, read_fasta_from_string) {
+    std::string fasta_str = "";
+
+    int nr_seqs = 20'000;
+    for(int i = 0; i<nr_seqs; i++) {
+        fasta_str.append(">hello\nAAA\n");
+    }
+
+    // precondition for test, want to test for larger fasta strings
+    EXPECT_GT(fasta_str.size(), 65536);
+
+    int seqs_cnt = 0;
+    read_fasta_from_string(fasta_str,
+                           [&](kseq_t*) {
+                               seqs_cnt++;
+                           });
+
+    EXPECT_EQ(seqs_cnt, nr_seqs);
+}
