@@ -163,12 +163,12 @@ class DBGAligner : public IDBGAligner {
                    query,
                    [&](DBGAlignment&& extension) {
                        assert(extension.is_valid(graph_, &config_));
+                       extension.extend_query_end(query.data() + query.size());
 
                        if (extension.get_clipping()) {
                            // if the extension starts at a different position
                            // from the seed end, then it's a new alignment
                            extension.extend_query_begin(query.data());
-                           extension.extend_query_end(query.data() + query.size());
                            path_queue.emplace(std::move(extension));
                            return;
                        }
@@ -177,7 +177,6 @@ class DBGAligner : public IDBGAligner {
 
                        auto next_path = seed;
                        next_path.append(std::move(extension));
-                       next_path.extend_query_end(query.data() + query.size());
                        assert(next_path.is_valid(graph_, &config_));
 
                        path_queue.emplace(std::move(next_path));
