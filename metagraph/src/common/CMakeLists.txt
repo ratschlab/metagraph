@@ -15,7 +15,7 @@ file(GLOB src_files "*.cpp" "*/*.cpp")
 
 add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
-
+SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -ftemplate-backtrace-limit=0")
 # ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
 target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
 target_include_directories(metagraph_common
