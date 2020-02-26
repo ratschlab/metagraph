@@ -116,12 +116,12 @@ class DBGAlignerConfig {
     DBGAlignerConfig() {}
 
     explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
-                              int8_t gap_opening = -3,
-                              int8_t gap_extension = -1);
+                              int8_t gap_opening = -5,
+                              int8_t gap_extension = -2);
 
     DBGAlignerConfig(ScoreMatrix&& score_matrix,
-                     int8_t gap_opening = -3,
-                     int8_t gap_extension = -1);
+                     int8_t gap_opening = -5,
+                     int8_t gap_extension = -2);
 
     score_t score_sequences(const std::string_view a, const std::string_view b) const {
         return std::inner_product(

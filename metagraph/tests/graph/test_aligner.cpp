@@ -853,8 +853,8 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.min_cell_score = std::numeric_limits<score_t>::min() + 3;
-    config.min_path_score = std::numeric_limits<score_t>::min() + 3;
+    config.min_cell_score = std::numeric_limits<score_t>::min() - config.gap_opening_penalty;
+    config.min_path_score = std::numeric_limits<score_t>::min() - config.gap_opening_penalty;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -891,8 +891,8 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
         config.min_seed_length = 2;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-        config.min_cell_score = std::numeric_limits<score_t>::min() + 3;
-        config.min_path_score = std::numeric_limits<score_t>::min() + 3;
+        config.min_cell_score = std::numeric_limits<score_t>::min() - config.gap_opening_penalty;
+        config.min_path_score = std::numeric_limits<score_t>::min() - config.gap_opening_penalty;
         DBGAligner<SuffixSeeder<>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
@@ -919,8 +919,8 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
         config.min_seed_length = 1;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-        config.min_cell_score = std::numeric_limits<score_t>::min() + 3;
-        config.min_path_score = std::numeric_limits<score_t>::min() + 3;
+        config.min_cell_score = std::numeric_limits<score_t>::min() - config.gap_opening_penalty;
+        config.min_path_score = std::numeric_limits<score_t>::min() - config.gap_opening_penalty;
         DBGAligner<SuffixSeeder<>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
@@ -953,8 +953,8 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-    config.min_cell_score = std::numeric_limits<score_t>::min() + 3;
-    config.min_path_score = std::numeric_limits<score_t>::min() + 3;
+    config.min_cell_score = std::numeric_limits<score_t>::min() - config.gap_opening_penalty;
+    config.min_path_score = std::numeric_limits<score_t>::min() - config.gap_opening_penalty;
     DBGAligner<SuffixSeeder<>> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
