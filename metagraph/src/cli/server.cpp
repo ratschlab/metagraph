@@ -20,11 +20,7 @@ using mg::common::logger;
 std::string form_client_reply(const std::string &received_message,
                               const AnnotatedDBG &anno_graph,
                               const Config &config,
-                              IDBGAligner *aligner = nullptr) {
-    // TODO: query with alignment to graph
-    // TODO: fast query
-    std::ignore = aligner;
-
+                              bool align_sequences) {
     try {
         Json::Value json;
 
@@ -67,7 +63,8 @@ std::string form_client_reply(const std::string &received_message,
                           discovery_fraction,
                           config.anno_labels_delimiter,
                           anno_graph,
-                          oss);
+                          oss,
+                          align_sequences ? &config : nullptr);
         };
 
         if (!seq.isNull()) {
@@ -118,10 +115,6 @@ int run_server(Config *config) {
 
     logger->info("Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
 
-    std::unique_ptr<IDBGAligner> aligner;
-    if (config->align_sequences && !config->fast)
-        aligner.reset(build_aligner(*graph, *config).release());
-
     const size_t num_threads = std::max(1u, get_num_threads());
 
     logger->info("Initializing a TCP service with {} threads"
@@ -139,7 +132,7 @@ int run_server(Config *config) {
                     received_message,
                     *anno_graph,
                     *config,
-                    aligner.get()
+                    config->align_sequences
                 );
             }
         );

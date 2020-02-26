@@ -7,7 +7,6 @@
 #include <string>
 
 class AnnotatedDBG;
-class IDBGAligner;
 class Config;
 
 void execute_query(const std::string &seq_name,
@@ -19,7 +18,8 @@ void execute_query(const std::string &seq_name,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
                    const AnnotatedDBG &anno_graph,
-                   std::ostream &output_stream);
+                   std::ostream &output_stream,
+                   const Config *align_config = nullptr);
 
 
 using StringGenerator = std::function<void(std::function<void(const std::string&)>)>;
@@ -30,6 +30,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       double discovery_fraction,
                       size_t num_threads);
 
-int query_graph(Config *config);
+int query_graph(const Config *config);
 
 #endif // __QUERY_GRAPH_HPP__
