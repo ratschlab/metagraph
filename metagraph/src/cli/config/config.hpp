@@ -87,9 +87,9 @@ class Config {
     // Alignment options
     bool alignment_edit_distance = false;
 
-    int8_t alignment_match_score = 1;
-    int8_t alignment_mm_transition_score = 1;
-    int8_t alignment_mm_transversion_score = 1;
+    int8_t alignment_match_score = 2;
+    int8_t alignment_mm_transition_score = 3;
+    int8_t alignment_mm_transversion_score = 3;
     int8_t alignment_gap_opening_penalty = 5;
     int8_t alignment_gap_extension_penalty = 2;
 
