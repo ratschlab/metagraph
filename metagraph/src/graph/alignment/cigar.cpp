@@ -1,5 +1,7 @@
 #include "aligner_helper.hpp"
 
+#include "kmer/alphabets.hpp"
+
 
 Cigar::Cigar(const std::string &cigar_str) {
     std::string op_count;
@@ -31,15 +33,36 @@ Cigar::Cigar(const std::string &cigar_str) {
     }
 }
 
-Cigar::OperatorTable Cigar::char_to_op;
 
-void Cigar::initialize_opt_table(const std::string &alphabet, const uint8_t *encoding) {
+Cigar::OperatorTable Cigar::initialize_opt_table() {
+    OperatorTable char_to_op;
+
+    // TODO: fix this when alphabets are no longer set at compile time
+    #if _PROTEIN_GRAPH
+        const auto *alphabet = alphabets::kAlphabetProtein;
+        const auto *alphabet_encoding = alphabets::kCharToProtein;
+    #elif _DNA_CASE_SENSITIVE_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #elif _DNA5_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #elif _DNA_GRAPH
+        const auto *alphabet = alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = alphabets::kCharToDNA;
+    #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+    #endif
+
     for (auto& row : char_to_op) {
         row.fill(Cigar::Operator::MISMATCH);
     }
 
-    for (uint8_t c : alphabet) {
-        if (encoding[c] == encoding[0])
+    for (uint8_t c : std::string(alphabet)) {
+        if (alphabet_encoding[c] == alphabet_encoding[0])
             continue;
 
         char upper = toupper(c);
@@ -50,7 +73,11 @@ void Cigar::initialize_opt_table(const std::string &alphabet, const uint8_t *enc
             = char_to_op[lower][upper]
             = char_to_op[lower][lower] = Cigar::Operator::MATCH;
     }
+
+    return char_to_op;
 }
+
+Cigar::OperatorTable Cigar::char_to_op = Cigar::initialize_opt_table();
 
 char Cigar::opt_to_char(Cigar::Operator op) {
     switch (op) {

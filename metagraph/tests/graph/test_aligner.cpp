@@ -113,9 +113,7 @@ void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
 
 
 template <typename Graph>
-class DBGAlignerTest : public DeBruijnGraphTest<Graph> {
-    void SetUp() { Cigar::initialize_opt_table(alphabet, alphabet_encoding); }
-};
+class DBGAlignerTest : public DeBruijnGraphTest<Graph> {};
 
 TYPED_TEST_SUITE(DBGAlignerTest, FewGraphTypes);
 
@@ -882,7 +880,6 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
-    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
     size_t k = 7;
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";
     std::string query =        "AC" "CTTTCGAGGCCAA";
@@ -947,7 +944,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_snp) {
-    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
     size_t k = 7;
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";
     std::string query =        "AC" "CTTTCGAGGCCAA";
@@ -981,7 +977,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_nodummy) {
-    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
     size_t k = 7;
     std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
     std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
@@ -1012,7 +1007,6 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
 }
 
 TEST(DBGAlignerTest, align_dummy) {
-    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
     size_t k = 7;
     std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
     std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";

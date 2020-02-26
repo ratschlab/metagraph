@@ -8,7 +8,7 @@ class DeBruijnGraph;
 class IDBGAligner;
 
 std::unique_ptr<IDBGAligner>
-build_aligner(const DeBruijnGraph &graph, Config &config);
+build_aligner(const DeBruijnGraph &graph, const Config &config);
 
 int align_to_graph(Config *config);
 

@@ -33,7 +33,6 @@ class Cigar {
 
     static OperatorTable char_to_op;
     static const OperatorTableRow& get_op_row(char a) { return char_to_op[a]; }
-    static void initialize_opt_table(const std::string &alphabet, const uint8_t *encoding);
 
     Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
@@ -101,6 +100,8 @@ class Cigar {
 
   private:
     std::vector<value_type> cigar_;
+
+    static OperatorTable initialize_opt_table();
 };
 
 typedef int32_t score_t;
