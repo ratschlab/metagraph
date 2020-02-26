@@ -258,6 +258,7 @@ FastaParser::iterator::iterator(const std::string &filename,
     }
 
     if (kseq_read(read_stream_) < 0) {
+        gzclose(read_stream_->f->f);
         kseq_destroy(read_stream_);
         read_stream_ = NULL;
     }
