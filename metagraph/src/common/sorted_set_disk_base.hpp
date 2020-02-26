@@ -1,6 +1,7 @@
 #ifndef __SORTED_SET_DISK_BASE_HPP__
 #define __SORTED_SET_DISK_BASE_HPP__
 
+#include <atomic>
 #include <cassert>
 #include <filesystem>
 #include <functional>
@@ -44,7 +45,7 @@ class SortedSetDiskBase {
      * Maximum amount of temporary disk space allowed for chunks. When this value is
      * reached, a global merge is triggered to reduce disk space.
      */
-    static constexpr uint64_t MAX_DISK_SPACE_BYTES = 200e9; // 200G
+    static constexpr uint64_t MAX_DISK_SPACE_BYTES = 100; // 200e9; // 200G
 
     /**
      * The number of elements in the merge queue. Should be large enough to reduce lock
@@ -188,33 +189,27 @@ class SortedSetDiskBase {
         };
     }
 
-
     static void merge_l1(const std::string &chunk_file_prefix,
                          uint32_t chunk_count,
-                         uint32_t *merged_index,
-                         int64_t *size_diff) {
-        //*size_diff = 0;
+                         std::atomic<uint32_t> *l1_chunk_count,
+                         std::atomic<size_t> *total_size) {
         const std::string &merged_l1_file_name
                 = merged_l1_name(chunk_file_prefix, chunk_count / MERGE_L1_COUNT);
         std::fstream merged_file(merged_l1_file_name, std::ios::binary | std::ios::out);
         std::vector<std::string> to_merge(MERGE_L1_COUNT);
         for (uint32_t i = 0; i < MERGE_L1_COUNT; ++i) {
             to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
-            //*size_diff -= static_cast<int64_t>(std::filesystem::file_size(to_merge[i]));
+            *total_size -= static_cast<int64_t>(std::filesystem::file_size(to_merge[i]));
         }
         logger->trace("Starting merging last {} chunks into {}", MERGE_L1_COUNT,
                       merged_l1_file_name);
         merge_files(to_merge, write_or_die(merged_l1_file_name, &merged_file),
                     true /* clean up */);
         merged_file.close();
-        (*merged_index)++;
+        (*l1_chunk_count)++;
         logger->trace("Merging last {} chunks into {} done", MERGE_L1_COUNT,
                       merged_l1_file_name);
-        // (*size_diff) += std::filesystem::file_size(merged_l1_file_name);
-        std::cout << "Dif is " << *size_diff << std::endl;
-        if (*size_diff > 10000000) {
-            printf("boo");
-        }
+        *total_size += std::filesystem::file_size(merged_l1_file_name);
     }
 
     static void merge_all(const std::string &out_file,
@@ -246,6 +241,7 @@ class SortedSetDiskBase {
         }
         binary_file.close();
         total_chunk_size_bytes_ += data_size;
+        data_.resize(0);
         if (is_done) {
             async_merge_l1_.clear();
         } else if (total_chunk_size_bytes_ > MAX_DISK_SPACE_BYTES) {
@@ -265,13 +261,12 @@ class SortedSetDiskBase {
             std::filesystem::rename(all_merged_file, merged_all_name(chunk_file_prefix_));
             chunk_count_ = 0;
             l1_chunk_count_ = 0;
+            return;
         } else if ((chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
-            int64_t size_diff = 0;
             async_merge_l1_.enqueue(merge_l1, chunk_file_prefix_, chunk_count_,
-                                    &l1_chunk_count_, &size_diff);
-            total_chunk_size_bytes_ += size_diff;
+                                    &l1_chunk_count_,
+                                    &total_chunk_size_bytes_);
         }
-        data_.resize(0);
         chunk_count_++;
     }
 
@@ -335,7 +330,7 @@ class SortedSetDiskBase {
     /**
      * The number of L1 merges that were successfully performed.
      */
-    __uint32_t l1_chunk_count_ = 0;
+    std::atomic<uint32_t > l1_chunk_count_ = 0;
 
     /**
      * Hold the data filled in via #insert.
@@ -382,7 +377,7 @@ class SortedSetDiskBase {
 
     std::function<void(storage_type *)> cleanup_;
 
-    size_t total_chunk_size_bytes_ = 0;
+    std::atomic<size_t> total_chunk_size_bytes_ = 0;
 
     bool merged_all_ = false;
 };
