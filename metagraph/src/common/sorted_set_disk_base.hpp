@@ -58,10 +58,12 @@ class SortedSetDiskBase {
                       size_t num_threads,
                       size_t reserved_num_elements,
                       const std::filesystem::path &tmp_dir,
+                      size_t max_disk_space_bytes,
                       std::function<void(const T &)> on_item_pushed,
                       size_t num_last_elements_cached)
         : num_threads_(num_threads),
           reserved_num_elements_(reserved_num_elements),
+          max_disk_space_bytes_(max_disk_space_bytes),
           on_item_pushed_(on_item_pushed),
           chunk_file_prefix_(tmp_dir / "chunk_"),
           merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
@@ -343,6 +345,7 @@ class SortedSetDiskBase {
 
     size_t reserved_num_elements_;
 
+    size_t max_disk_space_bytes_;
 
     std::function<void(const T &)> on_item_pushed_;
 

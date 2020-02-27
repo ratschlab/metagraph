@@ -39,10 +39,12 @@ template <typename T>
 common::SortedMultisetDisk<T, uint8_t>
 create_sorted_set_disk(size_t container_size = 8, size_t num_elements_cached = 2) {
     constexpr size_t thread_count = 1;
+    constexpr size_t max_disk_space = 1e6;
     auto on_item_pushed = [](const std::pair<T, uint8_t> &) {};
     return common::SortedMultisetDisk<T, uint8_t>(
             nocleanup<typename common::SortedMultisetDisk<T>::storage_type>, thread_count,
-            container_size, "/tmp/test_chunk_", on_item_pushed, num_elements_cached);
+            container_size, "/tmp/test_chunk_", max_disk_space, on_item_pushed,
+            num_elements_cached);
 }
 
 TYPED_TEST(SortedMultisetDiskTest, Empty) {
@@ -247,9 +249,11 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
 
     constexpr size_t thread_count = 1;
     auto on_item_pushed = [](const std::pair<TypeParam, uint8_t> &) {};
+    constexpr size_t max_disk_space = 1e6;
     common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
             nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
-            thread_count, container_size, "/tmp/test_chunk_", on_item_pushed, 2);
+            thread_count, container_size, "/tmp/test_chunk_", max_disk_space,
+            on_item_pushed, 2);
     // make sure we correctly count up to the max value of the counter
     for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
         std::vector<TypeParam> values = { TypeParam(value) };

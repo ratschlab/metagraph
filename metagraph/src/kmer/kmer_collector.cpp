@@ -196,12 +196,13 @@ std::function<void(StorageType*)> get_cleanup(bool clean_dummy_boss_kmers) {
 template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::KmerCollector(size_t k,
-                bool both_strands_mode,
-                Sequence&& filter_suffix_encoded,
-                size_t num_threads,
-                double memory_preallocated,
-                const std::filesystem::path &tmp_dir)
-      : k_(k),
+                                                             bool both_strands_mode,
+                                                             Sequence &&filter_suffix_encoded,
+                                                             size_t num_threads,
+                                                             double memory_preallocated,
+                                                             const std::filesystem::path &tmp_dir,
+                                                             size_t max_disk_space)
+    : k_(k),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
@@ -215,13 +216,13 @@ KmerCollector<KMER, KmerExtractor, Container>
         filter_suffix_encoded_.empty()
     );
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
-    if constexpr((utils::is_instance<Container, common::SortedSetDisk> {}
-                    || utils::is_instance<Container, common::SortedMultisetDisk> {})) {
+    if constexpr ((utils::is_instance<typename KmerCollector::Data, common::ChunkedWaitQueue> {})) {
         if (!filter_suffix_encoded_.empty()) {
             common::logger->error("Disk based sorting does not support chunking");
             exit(1);
         }
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_, tmp_dir);
+        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_, tmp_dir,
+                                             max_disk_space);
     } else {
         kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_);
     }
@@ -232,7 +233,7 @@ KmerCollector<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() {
+size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() const {
     return buffer_size_;
 }
 

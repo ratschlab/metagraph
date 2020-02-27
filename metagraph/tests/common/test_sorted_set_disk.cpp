@@ -36,11 +36,12 @@ template <typename T>
 common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8,
                                                 size_t num_elements_cached = 2) {
     constexpr size_t thread_count = 1;
+    constexpr size_t max_disk_space = 1e6;
     auto nocleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
     auto on_item_pushed = [](const T &) {};
     return common::SortedSetDisk<T>(nocleanup, thread_count, container_size,
-                                    "/tmp/test_chunk_", on_item_pushed, num_elements_cached);
-
+                                    "/tmp/test_chunk_", max_disk_space, on_item_pushed,
+                                    num_elements_cached);
 }
 
 TYPED_TEST(SortedSetDiskTest, Empty) {

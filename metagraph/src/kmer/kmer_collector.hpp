@@ -55,10 +55,11 @@ class KmerCollector {
      */
     KmerCollector(size_t k,
                   bool both_strands_mode = false,
-                  Sequence&& filter_suffix_encoded = {},
+                  Sequence &&filter_suffix_encoded = {},
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
-                  const std::filesystem::path &tmp_dir = "/tmp");
+                  const std::filesystem::path &tmp_dir = "/tmp",
+                  size_t max_disk_space = 1e9);
 
     inline size_t get_k() const { return k_; }
 
@@ -76,7 +77,7 @@ class KmerCollector {
             batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, std::move(sequence), count);
     }
 
-    size_t buffer_size();
+    size_t buffer_size() const;
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
     void add_sequences(const std::function<void(CallStringCount)> &generate_sequences);
 
@@ -84,20 +85,26 @@ class KmerCollector {
     //      In general, use `add_sequences` if possible, to make use of multiple threads.
     void add_kmer(const KMER &kmer) { kmers_->insert(&kmer, &kmer + 1); }
 
-    inline Data &data() { join(); return kmers_->data(); }
+    inline Data &data() {
+        join();
+        return kmers_->data();
+    }
 
-    void clear() { join(); kmers_->clear(); }
+    void clear() {
+        join();
+        kmers_->clear();
+    }
 
     inline bool is_both_strands_mode() const { return both_strands_mode_; }
     inline size_t num_threads() const { return num_threads_; }
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
-
-    std::filesystem::path tmp_dir() { return tmp_dir_; }
+    inline std::filesystem::path tmp_dir() const { return tmp_dir_; }
+    inline size_t max_disk_space() const { return max_disk_space_; }
 
     /**
      * Sends sequences accumulated in #batch_accumulator_ for processing
      * on the thread pool. */
-    void add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences);
+    void add_batch(std::vector<std::pair<std::string, uint64_t>> &&sequences);
 
   private:
     void join();
@@ -117,6 +124,9 @@ class KmerCollector {
     std::filesystem::path tmp_dir_;
 
     size_t buffer_size_;
+
+    /** Maximum disk space in bytes used by #kmers_ */
+    size_t max_disk_space_;
 };
 
 /** Visible For Testing */

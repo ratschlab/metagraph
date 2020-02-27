@@ -74,13 +74,12 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * @tparam Container the data structure in which the k-mers were merged (e.g. a
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
-template <typename Container>
-void recover_source_dummy_nodes(size_t k,
-                                Container *kmers,
-                                size_t num_threads,
-                                ThreadPool & /* async_worker */,
-                                size_t /* buffer_size */,
-                                const std::filesystem::path & /* tmp_dir*/) {
+template <typename KmerCollector>
+void recover_source_dummy_nodes(const KmerCollector &kmer_collector,
+                                typename KmerCollector::Data *kmers) {
+    size_t k = kmer_collector.get_k() - 1;
+    size_t num_threads = kmer_collector.num_threads();
+
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
@@ -219,21 +218,21 @@ uint8_t write_kmer(size_t k,
 }
 
 /**
- * Specialization of recover_dummy_nodes for a #common::ChunkedWaitQueue container
- * (used by #common::SortedSetDisk).
+ * Specialization of recover_dummy_nodes for a disk-based container, such as
+ * #SortedSetDisk and #SortedMultisetDisk.
  * The method first removes redundant dummy source k-mers of prefix length 1, then
  * gradually constructs dummy source k-mers of prefix length 2..k and writes them into
  * separate files, de-duped and sorted. The final result is obtained by merging the
  * original #kmers (minus the redundant dummy source k-mers of prefix length 1) with  the
  * dummy source k-mers for prefix length 2..k which were generated and saved into files.
  */
-template <typename T>
-void recover_source_dummy_nodes(size_t k,
-                                common::ChunkedWaitQueue<T> *kmers,
-                                size_t num_threads,
-                                ThreadPool &async_worker,
-                                size_t buffer_size,
-                                const std::filesystem::path &tmp_dir) {
+template <typename KmerCollector>
+void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
+                                     typename KmerCollector::Data *kmers,
+                                     ThreadPool &async_worker) {
+    std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
+    using T = typename KmerCollector::Value;
+
     using KMER = std::remove_reference_t<decltype(utils::get_first(*(kmers->begin())))>;
 
     // name of the file containing dummy k-mers of given prefix length
@@ -254,21 +253,22 @@ void recover_source_dummy_nodes(size_t k,
 
     const std::string file_name = tmp_dir / "original_and_dummy_l1";
     files_to_merge.push_back(create_stream(file_name));
+    size_t k = kmer_collector.get_k() - 1;
     files_to_merge.reserve(k + 1); // avoid re-allocations as we keep refs to elements
     std::ofstream *dummy_l1 = &files_to_merge.back().second;
 
-    RecentKmers<T> recent_buffer((1llu << KMER::kBitsPerChar)
-                                  * (1llu << KMER::kBitsPerChar));
+    RecentKmers<T> recent_buffer((1llu << KMER::kBitsPerChar) * (1llu << KMER::kBitsPerChar));
 
     const std::string file_name_l2 = get_file_name(2);
     files_to_merge.push_back(create_stream(file_name_l2));
 
-    const filesystem::path tmp_path1 = tmp_dir / "dummy_source1";
     const filesystem::path tmp_path2 = tmp_dir / "dummy_source2";
 
     // this will contain dummy k-mers of prefix length 2
-    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads, buffer_size,
-                                                tmp_path1, [](const T &) {});
+    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, kmer_collector.num_threads(),
+                                                kmer_collector.buffer_size(), tmp_path2,
+                                                kmer_collector.max_disk_space(),
+                                                [](const T &) {});
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
@@ -390,16 +390,19 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
                          double memory_preallocated = 0,
-                         const std::filesystem::path &tmp_dir = "/tmp")
-          : kmer_collector_(k + 1,
-                            canonical_mode,
-                            encode_filter_suffix_boss(filter_suffix),
-                            num_threads,
-                            memory_preallocated,
-                            tmp_dir),
-            bits_per_count_(bits_per_count) {
+                         const std::filesystem::path &tmp_dir = "/tmp",
+                         size_t max_disk_space = 1e9)
+        : kmer_collector_(k + 1,
+                          canonical_mode,
+                          encode_filter_suffix_boss(filter_suffix),
+                          num_threads,
+                          memory_preallocated,
+                          tmp_dir,
+                          max_disk_space),
+          bits_per_count_(bits_per_count) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
-            kmer_collector_.add_kmer(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
+            kmer_collector_.add_kmer(
+                    std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
 
@@ -417,15 +420,13 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         if (!kmer_collector_.suffix_length()) {
             logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
-
-            // kmer_collector stores (BOSS::k_ + 1)-mers
-            recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
-                                       &kmers,
-                                       kmer_collector_.num_threads(),
-                                       async_worker_,
-                                       kmer_collector_.buffer_size(),
-                                       kmer_collector_.tmp_dir());
-
+            if constexpr ((utils::is_instance<typename KmerCollector::Data,
+                                              common::ChunkedWaitQueue> {})) {
+                recover_source_dummy_nodes_disk(kmer_collector_, &kmers, async_worker_);
+            } else {
+                // kmer_collector stores (BOSS::k_ + 1)-mers
+                recover_source_dummy_nodes(kmer_collector_, &kmers);
+            }
             logger->trace("Dummy source k-mers were reconstructed in {} sec",
                           timer.elapsed());
         }
@@ -526,9 +527,11 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   size_t num_threads,
                                   double memory_preallocated,
                                   kmer::ContainerType container_type,
-                                  const std::filesystem::path &tmp_dir) {
-#define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
-                   num_threads, memory_preallocated, tmp_dir
+                                  const std::filesystem::path &tmp_dir,
+                                  size_t max_disk_space_bytes) {
+#define OTHER_ARGS \
+    k, canonical_mode, bits_per_count, filter_suffix, num_threads, memory_preallocated, \
+            tmp_dir, max_disk_space_bytes
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:
