@@ -216,6 +216,8 @@ TYPED_TEST(SortedMultisetDiskTest, IterateBackwards) {
 TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeDisk) {
     constexpr uint32_t value = 12342341;
     // make sure we correctly count up to the max value of the counter
+    // the container size is 8, so we are guaranteed to generate many chunk files that
+    // will have to be merged and overflow handled correctly
     common::SortedMultisetDisk<TypeParam, uint8_t> underTest
             = create_sorted_set_disk<TypeParam>();
     for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
