@@ -208,4 +208,27 @@ TYPED_TEST(SortedMultisetDiskTest, IterateBackwards) {
     }
 }
 
+/**
+ * Test that count overflows are handled correctly, i.e. the counter stays at the maximum
+ * possible value rather than rolling over.
+ */
+TYPED_TEST(SortedMultisetDiskTest, CounterOverflow) {
+    constexpr uint32_t value = 12342341;
+    // make sure we correctly count up to the max value of the counter
+    common::SortedMultisetDisk<TypeParam, uint8_t> underTest = create_sorted_set_disk<TypeParam>();
+    for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
+        std::vector<TypeParam> values = {TypeParam(value)};
+        underTest.insert(values.begin(), values.end());
+    }
+    expect_equals(underTest, {std::make_pair(TypeParam(value), 255)});
+
+    // now let's generate an overflow in the counter
+    underTest.clear();
+    for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max() +10; ++idx) {
+        std::vector<TypeParam> values = {TypeParam(value)};
+        underTest.insert(values.begin(), values.end());
+    }
+    expect_equals(underTest, {std::make_pair(TypeParam(value), 255)});
+}
+
 } // namespace
