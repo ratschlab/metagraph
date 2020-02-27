@@ -124,6 +124,7 @@ class SortedSetDiskBase {
         chunk_count_ = 0;
         l1_chunk_count_ = 0;
         total_chunk_size_bytes_ = 0;
+        try_reserve(reserved_num_elements_);
         data_.resize(0); // this makes sure the buffer is not reallocated
         chunk_file_prefix_ = tmp_path / "chunk_";
         std::filesystem::create_directory(tmp_path);
