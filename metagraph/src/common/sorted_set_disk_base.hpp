@@ -42,12 +42,6 @@ class SortedSetDiskBase {
     static constexpr uint32_t MERGE_L1_COUNT = 4;
 
     /**
-     * Maximum amount of temporary disk space allowed for chunks. When this value is
-     * reached, a global merge is triggered to reduce disk space.
-     */
-    static constexpr uint64_t MAX_DISK_SPACE_BYTES = 200e9; // 200G
-
-    /**
      * The number of elements in the merge queue. Should be large enough to reduce lock
      * contention, but small enough to not lose time with memory allocation.
      */
@@ -247,7 +241,7 @@ class SortedSetDiskBase {
         data_.resize(0);
         if (is_done) {
             async_merge_l1_.clear();
-        } else if (total_chunk_size_bytes_ > MAX_DISK_SPACE_BYTES) {
+        } else if (total_chunk_size_bytes_ > max_disk_space_bytes_) {
             logger->warn(
                     "Max allocated disk capacity reached. "
                     "Attempting to merge all chunks");
@@ -258,7 +252,7 @@ class SortedSetDiskBase {
             merge_all(all_merged_file, get_file_names());
             merged_all_ = true;
             total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
-            if (total_chunk_size_bytes_ > MAX_DISK_SPACE_BYTES * 0.8) {
+            if (total_chunk_size_bytes_ > max_disk_space_bytes_ * 0.8) {
                 logger->critical("Disk space reduced by < 20%. Giving up.");
                 std::exit(EXIT_FAILURE);
             }

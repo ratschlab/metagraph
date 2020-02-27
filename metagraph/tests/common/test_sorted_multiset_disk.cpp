@@ -270,4 +270,37 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
     expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
 }
 
+/**
+ * Test that reaching the maximum allowed disk space is handled correctly: the data is
+ * de-duped and building can continue with the reduced disk space
+ */
+TYPED_TEST(SortedMultisetDiskTest, ExhaustMaxAllowedDiskSpace) {
+    // make sure the container is large enough to hold all values - this way we are
+    // guaranteed to test de-duping in memory rather than on disk
+    constexpr uint32_t container_size = 256;
+
+    constexpr size_t thread_count = 1;
+    auto on_item_pushed = [](const std::pair<TypeParam, uint8_t> &) {};
+    constexpr size_t max_disk_space
+            = container_size * sizeof(std::pair<uint32_t, uint8_t>) * 2;
+    common::logger->set_level(spdlog::level::trace);
+    common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
+            nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
+            thread_count, container_size, "/tmp/test_chunk_", max_disk_space,
+            on_item_pushed, 2);
+    std::vector<TypeParam> values(container_size+1);
+    std::iota(values.begin(), values.end(), 0);
+    // these values will fill the buffer and write to disk filling half the allowed space
+    underTest.insert(values.begin(), values.end());
+    // now we fill the other half
+    underTest.insert(values.begin(), values.end());
+
+    auto &data = underTest.data();
+    uint32_t i = 0;
+    for (auto &it = data.begin(); it != data.end(); ++it) {
+        ASSERT_EQ(std::make_pair((TypeParam)i, (uint8_t)2), *it);
+        i++;
+    }
+}
+
 } // namespace
