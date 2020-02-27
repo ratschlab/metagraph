@@ -288,17 +288,21 @@ TYPED_TEST(SortedMultisetDiskTest, ExhaustMaxAllowedDiskSpace) {
             nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
             thread_count, container_size, "/tmp/test_chunk_", max_disk_space,
             on_item_pushed, 2);
-    std::vector<TypeParam> values(container_size+1);
+    std::vector<TypeParam> values(container_size / 1.5);
     std::iota(values.begin(), values.end(), 0);
     // these values will fill the buffer and write to disk filling half the allowed space
     underTest.insert(values.begin(), values.end());
     // now we fill the other half
     underTest.insert(values.begin(), values.end());
+    // now the disk space will be exhausted, but it's okay, because duplicates will be
+    // reduced
+    underTest.insert(values.begin(), values.end());
+    underTest.insert(values.begin(), values.end());
 
     auto &data = underTest.data();
     uint32_t i = 0;
     for (auto &it = data.begin(); it != data.end(); ++it) {
-        ASSERT_EQ(std::make_pair((TypeParam)i, (uint8_t)2), *it);
+        ASSERT_EQ(std::make_pair((TypeParam)i, (uint8_t)4), *it);
         i++;
     }
 }

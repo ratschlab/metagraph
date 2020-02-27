@@ -212,9 +212,13 @@ class SortedSetDiskBase {
     static void merge_all(const std::string &out_file,
                           const std::vector<std::string> &to_merge) {
         std::fstream merged_file(out_file, std::ios::binary | std::ios::out);
-        logger->trace("Starting merging all {} chunks into {}", to_merge.size(), out_file);
+        logger->trace(
+                "Max allocated disk capacity exceeded. Starting merging all {} chunks "
+                "into {}",
+                to_merge.size(), out_file);
         merge_files(to_merge, write_or_die(out_file, &merged_file), true /* clean up */);
-        logger->trace("Merging all {} chunks into {} done", to_merge.size(), out_file);
+        logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
+                      to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
     }
 
 
@@ -242,9 +246,6 @@ class SortedSetDiskBase {
         if (is_done) {
             async_merge_l1_.clear();
         } else if (total_chunk_size_bytes_ > max_disk_space_bytes_) {
-            logger->warn(
-                    "Max allocated disk capacity reached. "
-                    "Attempting to merge all chunks");
             async_merge_l1_.clear();
             async_merge_l1_.join();
             std::string all_merged_file = chunk_file_prefix_ + "_all.tmp";
