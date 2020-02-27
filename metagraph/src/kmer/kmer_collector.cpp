@@ -196,13 +196,13 @@ std::function<void(StorageType*)> get_cleanup(bool clean_dummy_boss_kmers) {
 template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::KmerCollector(size_t k,
-                                                             bool both_strands_mode,
-                                                             Sequence &&filter_suffix_encoded,
-                                                             size_t num_threads,
-                                                             double memory_preallocated,
-                                                             const std::filesystem::path &tmp_dir,
-                                                             size_t max_disk_space)
-    : k_(k),
+                bool both_strands_mode,
+                Sequence&& filter_suffix_encoded,
+                size_t num_threads,
+                double memory_preallocated,
+                const std::filesystem::path &tmp_dir,
+                size_t __attribute__((unused)) max_disk_space)
+      : k_(k),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
