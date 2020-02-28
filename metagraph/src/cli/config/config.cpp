@@ -322,8 +322,8 @@ Config::Config(int argc, char *argv[]) {
             container = string_to_container(get_value(i++));
         } else if (!strcmp(argv[i], "--tmp-dir")) {
             tmp_dir = get_value(i++);
-        } else if (!strcmp(argv[i], "--max-disk-space-merge")) {
-            max_disk_space_merge = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--disk-cap-gb")) {
+            disk_cap_bytes = atoi(get_value(i++)) * 1e9;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -741,7 +741,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --container [STR] \tcontainer to use for storing k-mers: vector / vector_disk [vector]\n");
             fprintf(stderr, "\t   --tmp-dir [STR] \tdirectory to use for temporary files [/tmp/]\n");
-            fprintf(stderr, "\t   --max-disk-space-merge [INT] \tmax temp disk space to use before forcing a merge, in bytes [1e9]\n");
+            fprintf(stderr, "\t   --disk-cap-gb [INT] \tmax temp disk space to use before forcing a merge, in bytes [1e9]\n");
         } break;
         case CLEAN: {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());

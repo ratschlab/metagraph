@@ -185,7 +185,7 @@ class Config {
 
     std::filesystem::path tmp_dir = "/tmp/";
 
-    size_t max_disk_space_merge = 1e9;
+    size_t disk_cap_bytes = 1e9;
 
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 

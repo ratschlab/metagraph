@@ -85,7 +85,7 @@ int build_graph(Config *config) {
                 config->memory_available * kBytesInGigabyte,
                 config->container,
                 tmp_dir,
-                config->max_disk_space_merge
+                config->disk_cap_bytes
             );
 
             parse_sequences(files, *config, timer,
