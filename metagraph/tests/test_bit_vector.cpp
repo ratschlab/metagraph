@@ -7,6 +7,7 @@
 #include "common/vectors/bit_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/threads/threading.hpp"
+#include "common/data_generation.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
@@ -552,6 +553,69 @@ TEST(bit_vector_sd, CheckIfInverts) {
                 });
             }, bvs.size(), bvs.num_set_bits());
         ASSERT_EQ(bvs.is_inverted(), bvs_bits.is_inverted());
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_to_all_zero) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            sdsl::bit_vector vector(size, false);
+            TypeParam bvs(gen.generate_random_column(size, density)->to_vector());
+            bvs.add_to(&vector);
+            EXPECT_EQ(bvs.to_vector(), vector);
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_to_all_one) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            sdsl::bit_vector vector(size, true);
+            TypeParam bvs(gen.generate_random_column(size, density)->to_vector());
+            bvs.add_to(&vector);
+            EXPECT_EQ(sdsl::bit_vector(size, true), vector);
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_to_same) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            auto bv = gen.generate_random_column(size, density);
+            sdsl::bit_vector vector = bv->to_vector();
+            TypeParam bvs(vector);
+            bvs.add_to(&vector);
+            EXPECT_EQ(bvs.to_vector(), vector);
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_all_zero) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            auto bv = gen.generate_random_column(size, density);
+            sdsl::bit_vector vector = bv->to_vector();
+            TypeParam bvs(sdsl::bit_vector(size, false));
+            bvs.add_to(&vector);
+            EXPECT_EQ(bv->to_vector(), vector);
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_all_ones) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            auto bv = gen.generate_random_column(size, density);
+            sdsl::bit_vector vector = bv->to_vector();
+            TypeParam bvs(sdsl::bit_vector(size, true));
+            bvs.add_to(&vector);
+            EXPECT_EQ(sdsl::bit_vector(size, true), vector);
+        }
     }
 }
 
