@@ -49,40 +49,6 @@ plt.rcParams.update({ 'font.size': 22 })
 
 figsize = 8
 
-def plot_feature(feature=bits_per_entry, name="Bits per entry"):
-    for vs in np.unique(vector_size):
-        plt.figure(figsize=(figsize * 1.2, figsize))
-
-        ms = np.linspace(10, 4, len(np.unique(method)))
-
-        for i, m in enumerate(np.unique(method)):
-            dens = density[(method == m) & (vector_size == vs)]
-            sizes = feature[(method == m) & (vector_size == vs)]
-            idx = dens.argsort()
-            plt.plot(dens[idx], sizes[idx],
-                     label=m, marker='o', ms=ms[i])
-
-        for i, m in enumerate(np.unique(method)):
-            dens = density[(method == m) & (vector_size == vs)]
-            sizes = bits_per_entry_expected[(method == m) & (vector_size == vs)]
-            idx = dens.argsort()
-            plt.plot(dens[idx], sizes[idx],
-                     label=m + ' predicted', marker='*', ms=ms[i])
-
-        plt.title('{}: {:.1e}'.format(name, vs))
-        plt.xlabel('Density')
-        plt.ylabel('Bits per entry')
-
-        plt.grid(True)
-        plt.legend(fontsize=18)
-        plt.tight_layout()
-        plt.savefig('vectors_{}_{}.pdf'.format('_'.join(name.split(' ')).lower(), vs), fmt='pdf')
-        # plt.show()
-
-plot_feature(bits_per_entry, 'Serialized Size')
-plot_feature(RAM_per_entry, 'RAM')
-
-
 access_time = lines[:, 7].astype(float)
 access_word_time = lines[:, 8].astype(float)
 rank_time = lines[:, 9].astype(float)
@@ -94,7 +60,7 @@ seq_rank_time = lines[:, 13].astype(float)
 seq_select_time = lines[:, 14].astype(float)
 
 for vs in np.unique(vector_size):
-    fig, ax = plt.subplots(4, 2, figsize=(figsize * 1.2 * 2, figsize * 3))
+    fig, ax = plt.subplots(5, 2, figsize=(figsize * 1.4 * 2, figsize * 3.7))
 
     ms = np.linspace(10, 4, len(np.unique(method)))
 
@@ -109,6 +75,8 @@ for vs in np.unique(vector_size):
             ax=ax[2, 0], label=m, marker='o', ms=ms[i])
         sns.lineplot(dens[idx], select_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[3, 0], label=m, marker='o', ms=ms[i])
+        sns.lineplot(dens[idx], RAM_per_entry[(method == m) & (vector_size == vs)][idx],
+            ax=ax[4, 0], label=m, marker='o', ms=ms[i])
 
         sns.lineplot(dens[idx], seq_access_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[0, 1], label=m, marker='o', ms=ms[i])
@@ -118,25 +86,34 @@ for vs in np.unique(vector_size):
             ax=ax[2, 1], label=m, marker='o', ms=ms[i])
         sns.lineplot(dens[idx], seq_select_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[3, 1], label=m, marker='o', ms=ms[i])
+        sns.lineplot(dens[idx], bits_per_entry[(method == m) & (vector_size == vs)][idx],
+            ax=ax[4, 1], label=m, marker='o', ms=ms[i])
 
-    ax[0, 0].set_title('Random Access: {:.1e}'.format(vs))
-    ax[1, 0].set_title('Random Access 64 Bits Word: {:.1e}'.format(vs))
-    ax[2, 0].set_title('Random Rank: {:.1e}'.format(vs))
-    ax[3, 0].set_title('Random Select: {:.1e}'.format(vs))
+    ax[0, 0].set_title('Random Access')
+    ax[1, 0].set_title('Random Access 64 Bits Word')
+    ax[2, 0].set_title('Random Rank')
+    ax[3, 0].set_title('Random Select')
+    ax[4, 0].set_title('RAM')
 
-    ax[0, 1].set_title('Sequential Access: {:.1e}'.format(vs))
-    ax[1, 1].set_title('Sequential Access 64 Bits Word: {:.1e}'.format(vs))
-    ax[2, 1].set_title('Sequential Rank: {:.1e}'.format(vs))
-    ax[3, 1].set_title('Sequential Select: {:.1e}'.format(vs))
+    ax[0, 1].set_title('Sequential Access')
+    ax[1, 1].set_title('Sequential Access 64 Bits Word')
+    ax[2, 1].set_title('Sequential Rank')
+    ax[3, 1].set_title('Sequential Select')
+    ax[4, 1].set_title('Serialized Size')
 
     for axis_ in ax:
         for axis in axis_:
             axis.set_xlabel('Density')
             axis.set_ylabel('Time, s')
             axis.grid(True)
-            axis.legend(loc='upper left', fontsize=18)
+            axis.legend(loc='upper left', fontsize=18, bbox_to_anchor=(1.0, 0.95), ncol=1)
             axis.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
 
+    ax[4, 0].set_ylabel('Bits per entry')
+    ax[4, 1].set_ylabel('Bits per entry')
+
+    plt.suptitle('Size of vectors: {:.1e}'.format(vs), size=28)
     plt.tight_layout()
-    plt.savefig('vectors_time_{}.pdf'.format(vs), fmt='pdf')
+    fig.subplots_adjust(top=0.94)
+    plt.savefig('vectors_all_{}.pdf'.format(vs), fmt='pdf')
     # plt.show()

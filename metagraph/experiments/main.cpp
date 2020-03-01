@@ -49,8 +49,8 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     auto other = generator.generate_random_column(n, d)->convert_to<BitVector>();
 
-    if (static_cast<int>(other.rank1(1)) < -1
-            || static_cast<int>(other.rank0(1)) < -1)
+    if (static_cast<int64_t>(other.rank1(1)) < -1
+            || static_cast<int64_t>(other.rank0(1)) < -1)
         throw std::runtime_error("Never happens, just initializing the rank support");
 
     std::filesystem::path path(std::string("test.")
@@ -64,26 +64,34 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     const auto serialized_size = std::filesystem::file_size(path);
 
+    std::this_thread::sleep_for(3s);
+
     auto mem_before = get_curr_RSS();
 
-    BitVector another;
+    std::this_thread::sleep_for(3s);
+
+    std::vector<BitVector> vectors(20);
+
+    for (auto &another : vectors) {
+        std::ifstream in(path, std::ios::binary);
+        another.load(in);
+
+        if (static_cast<int64_t>(another.rank1(another.size() / 2)) < -1
+                || static_cast<int64_t>(another.rank0(another.size() / 2)) < -1)
+            throw std::runtime_error("Never happens, just initializing the rank support");
+
+        if (another.num_set_bits()
+                && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
+                && static_cast<int64_t>(another.select1(1)) < -1)
+            throw std::runtime_error("Never happens, just initializing the select support");
+    }
 
     std::this_thread::sleep_for(5s);
 
-    std::ifstream in(path, std::ios::binary);
-    another.load(in);
-    in.close();
+    auto RAM = (get_curr_RSS() - mem_before) / vectors.size();
 
-    if (static_cast<int>(another.rank1(another.size() / 2)) < -1
-            || static_cast<int>(another.rank0(another.size() / 2)) < -1)
-        throw std::runtime_error("Never happens, just initializing the rank support");
-
-    if (another.num_set_bits()
-            && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
-            && static_cast<int>(another.select1(1)) < -1)
-        throw std::runtime_error("Never happens, just initializing the select support");
-
-    auto RAM = get_curr_RSS() - mem_before;
+    BitVector another = std::move(vectors.back());
+    vectors.clear();
 
     Timer timer;
     int result = 0;
@@ -384,6 +392,8 @@ int main(int argc, char *argv[]) {
                 "sd",
                 "hyb",
                 "il",
+                "rrr15",
+                "rrr31",
                 "rrr63",
                 "rrr127",
                 "rrr255",
@@ -425,6 +435,14 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_il<>>(length_arg.getValue(),
                                                     density_arg.getValue(),
                                                     "il");
+            } else if (vector_type == "rrr15") {
+                test_vector_points<bit_vector_rrr<15>>(length_arg.getValue(),
+                                                     density_arg.getValue(),
+                                                     "rrr15");
+            } else if (vector_type == "rrr31") {
+                test_vector_points<bit_vector_rrr<31>>(length_arg.getValue(),
+                                                     density_arg.getValue(),
+                                                     "rrr31");
             } else if (vector_type == "rrr63") {
                 test_vector_points<bit_vector_rrr<>>(length_arg.getValue(),
                                                      density_arg.getValue(),
