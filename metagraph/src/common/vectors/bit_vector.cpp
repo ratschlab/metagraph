@@ -8,8 +8,8 @@
 #include "vector_algorithm.hpp"
 
 const double STAT_BITS_PER_BIT_IF_SPARSE = 1.07;
-// TODO: why is this so large? Check the sdsl implementation
-const double STAT_BITS_PER_BIT_IF_DENSE = 1.51;
+// FYI: rank support takes 0.0625 bits per bit, the other ~0.31 are taken by select
+const double STAT_BITS_PER_BIT_IF_DENSE = 1.37;
 
 // sequential access for bit_vector_dyn is 18 times faster than select
 const size_t SEQ_ACCESS_VS_SELECT_FACTOR_DYN = 18;
