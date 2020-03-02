@@ -139,9 +139,10 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
 
         } else {
             // check index
-            if ((*nonzero_rows_)[global_offset]) {
+            auto [bit, rank] = nonzero_rows_->inverse_select(global_offset);
+            if (bit) {
                 // map index from parent's to children's coordinate system
-                child_row_ids.push_back(nonzero_rows_->rank1(global_offset) - 1);
+                child_row_ids.push_back(rank - 1);
                 skip_row[i] = false;
             }
         }
