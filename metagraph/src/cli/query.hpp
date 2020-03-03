@@ -5,6 +5,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 class AnnotatedDBG;
 class Config;
@@ -28,7 +30,8 @@ std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
-                      size_t num_threads);
+                      size_t num_threads,
+                      std::vector<uint64_t> *index_in_full_graph_ptr = nullptr);
 
 int query_graph(const Config *config);
 

@@ -40,6 +40,7 @@ class Config {
     bool sparse = false;
     bool fast = false;
     bool count_labels = false;
+    bool get_coverage = false;
     bool suppress_unlabeled = false;
     bool clear_dummy = false;
     bool count_dummy = false;

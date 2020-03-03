@@ -174,6 +174,8 @@ Config::Config(int argc, char *argv[]) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
+        } else if (!strcmp(argv[i], "--get-coverage")) {
+            get_coverage = true;
         } else if (!strcmp(argv[i], "--print-signature")) {
             print_signature = true;
         } else if (!strcmp(argv[i], "--map")) {
