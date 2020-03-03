@@ -73,8 +73,8 @@ void AnnotatedSequenceGraph
     annotator_->add_labels(indices, labels);
 }
 
-std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
-                                                  double presence_ratio) const {
+std::vector<std::pair<AnnotatedDBG::row_index, size_t>>
+AnnotatedDBG::aggregate_matches(const std::string &sequence, double presence_ratio) const {
     assert(presence_ratio >= 0.);
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
@@ -82,29 +82,37 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
     VectorOrderedMap<row_index, size_t> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
     size_t num_present_kmers = 0;
-    size_t num_missing_kmers = 0;
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
-        } else {
-            num_missing_kmers++;
         }
     });
 
-    size_t min_count = std::max(1.0, std::ceil(presence_ratio
-                                                 * (num_present_kmers
-                                                     + num_missing_kmers)));
+    size_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
 
     if (num_present_kmers < min_count)
         return {};
 
-    return get_labels(index_counts.values_container(), min_count);
+    return const_cast<std::vector<std::pair<AnnotatedDBG::row_index, size_t>>&&>(
+        index_counts.values_container()
+    );
+}
+
+std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
+                                                  double presence_ratio) const {
+    const auto matches = aggregate_matches(sequence, presence_ratio);
+    size_t min_count = std::max(
+        1.0,
+        std::ceil(presence_ratio * (sequence.size() - dbg_.get_k() + 1))
+    );
+    return get_labels(matches, min_count);
 }
 
 std::vector<std::string>
@@ -139,32 +147,10 @@ std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(const std::string &sequence,
                              size_t num_top_labels,
                              double presence_ratio) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
-    assert(check_compatibility());
-
-    if (sequence.size() < dbg_.get_k())
-        return {};
-
-    VectorOrderedMap<row_index, size_t> index_counts;
+    const auto matches = aggregate_matches(sequence, presence_ratio);
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
-    index_counts.reserve(num_kmers);
-
-    size_t num_present_kmers = 0;
-
-    graph_->map_to_nodes(sequence, [&](node_index i) {
-        if (i > 0) {
-            index_counts[graph_to_anno_index(i)]++;
-            num_present_kmers++;
-        }
-    });
-
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
-    if (num_present_kmers < min_count)
-        return {};
-
-    auto top_labels = get_top_labels(index_counts.values_container(),
-                                     num_top_labels, min_count);
+    size_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
+    auto top_labels = get_top_labels(matches, num_top_labels, min_count);
 
     assert(std::all_of(top_labels.begin(), top_labels.end(),
                        [&](const auto &pair) { return pair.second <= num_kmers; }));
