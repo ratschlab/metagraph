@@ -76,6 +76,9 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     /*********************** Special queries **********************/
 
+    std::vector<std::pair<row_index, size_t>>
+    aggregate_matches(const std::string &sequence, double presence_ratio) const;
+
     // return labels that occur at least in |presence_ratio| k-mers
     std::vector<std::string> get_labels(const std::string &sequence,
                                         double presence_ratio) const;
