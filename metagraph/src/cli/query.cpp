@@ -5,6 +5,7 @@
 #include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
+#include "common/hash/hash.hpp"
 #include "common/unix_tools.hpp"
 #include "common/hash/hash.hpp"
 #include "common/utils/template_utils.hpp"
@@ -27,8 +28,24 @@ namespace cli {
 const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
+const double kHLLCounterError = 0.003;
 
 using mtg::common::logger;
+
+
+QueryExecutor::QueryExecutor(const Config &config,
+                             const AnnotatedDBG &anno_graph,
+                             const IDBGAligner *aligner,
+                             ThreadPool &thread_pool)
+      : config_(config),
+        anno_graph_(anno_graph),
+        aligner_(aligner),
+        thread_pool_(thread_pool) {
+    if (config_.get_coverage) {
+        label_counts_ = anno_graph_.get_annotation().get_label_counts();
+        match_counter_.resize(label_counts_.size(), kHLLCounterError);
+    }
+}
 
 
 std::string QueryExecutor::execute_query(const std::string &seq_name,
@@ -123,7 +140,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
  *
  * 4. Extract annotation for the nodes of the query graph and return.
  */
-std::unique_ptr<AnnotatedDBG>
+std::pair<std::unique_ptr<AnnotatedDBG>, std::vector<uint64_t>>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
@@ -375,7 +392,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     // build annotated graph from the query graph and copied annotations
-    return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
+    return std::make_pair(
+        std::make_unique<AnnotatedDBG>(graph, std::move(annotation)),
+        std::move(index_in_full_graph)
+    );
 }
 
 
@@ -451,13 +471,164 @@ inline std::string query_sequence(size_t id,
                                         anno_graph);
 }
 
+inline void update_counters(const AnnotatedDBG &anno_graph,
+                            HLLCounter &file_kmer_counter,
+                            std::vector<HLLCounter> &match_counter,
+                            std::mutex &match_counter_mutex,
+                            const std::string *seq = nullptr,
+                            const std::vector<uint64_t> *index_in_full_graph = nullptr) {
+    const auto &graph = anno_graph.get_graph();
+    const auto &matrix = anno_graph.get_annotation().get_matrix();
+
+    std::vector<uint64_t> node_hashes;
+
+    if (!seq) {
+        // a query graph was passed, so there's no need to process seq
+        assert(index_in_full_graph);
+        size_t num_rows = matrix.num_rows();
+        node_hashes.reserve(num_rows);
+        for (size_t i = 0; i < num_rows; ++i) {
+            node_hashes.push_back(utils::Hash<DeBruijnGraph::node_index>()(
+                index_in_full_graph->at(AnnotatedDBG::anno_to_graph_index(i))
+            ));
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(match_counter_mutex);
+            file_kmer_counter.insert(node_hashes.data(), node_hashes.data() + node_hashes.size());
+        }
+
+        for (size_t i = 0; i < num_rows; ++i) {
+            for (BinaryMatrix::Column j : matrix.get_row(i)) {
+                std::lock_guard<std::mutex> lock(match_counter_mutex);
+                match_counter[j].insert(node_hashes[i]);
+            }
+        }
+
+        return;
+    }
+
+    node_hashes.reserve(seq->size() - graph.get_k() + 1);
+    std::vector<uint64_t> rows;
+    rows.reserve(node_hashes.capacity());
+
+    graph.map_to_nodes(*seq, [&](DeBruijnGraph::node_index node) {
+        if (node) {
+            assert(!index_in_full_graph || index_in_full_graph->at(node));
+            rows.push_back(AnnotatedDBG::graph_to_anno_index(node));
+            node_hashes.push_back(utils::Hash<DeBruijnGraph::node_index>()(
+                index_in_full_graph ? index_in_full_graph->at(node) : node
+            ));
+        }
+    });
+
+    if (node_hashes.empty())
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(match_counter_mutex);
+        file_kmer_counter.insert(node_hashes.data(), node_hashes.data() + node_hashes.size());
+    }
+
+    std::vector<std::vector<uint64_t>> node_hash_map(match_counter.size());
+    auto jt = node_hashes.begin();
+    for (const auto &row : matrix.get_rows(rows)) {
+        assert(jt != node_hashes.end());
+
+        for (uint64_t j : row) {
+            node_hash_map.at(j).push_back(*jt);
+        }
+
+        ++jt;
+    }
+    assert(jt == node_hashes.end());
+
+    auto it = node_hash_map.begin();
+    for (auto &counter : match_counter) {
+        assert(it != node_hash_map.end());
+        std::lock_guard<std::mutex> lock(match_counter_mutex);
+        counter.insert(it->data(), it->data() + it->size());
+        ++it;
+    }
+    assert(it == node_hash_map.end());
+}
+
+inline std::string print_counter(const AnnotatedDBG &anno_graph,
+                                 const std::string &file,
+                                 const HLLCounter &file_kmer_counter,
+                                 const std::vector<HLLCounter> &match_counter,
+                                 const std::vector<size_t> &label_counts) {
+    assert(match_counter.size() == label_counts.size());
+    std::string output;
+    output.reserve(1'000);
+
+    output += fmt::format(
+        "{}:{}",
+        file,
+        static_cast<size_t>(std::roundl(file_kmer_counter.estimate_cardinality()))
+    );
+
+    const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
+    for (size_t i = 0; i < label_counts.size(); ++i) {
+        const auto &counter = match_counter[i];
+        size_t estimate = std::min(
+            static_cast<size_t>(std::roundl(counter.estimate_cardinality())),
+            label_counts[i]
+        );
+
+        if (estimate) {
+            output += fmt::format("\t<{}>:{}:{}",
+                                  label_encoder.decode(i),
+                                  estimate,
+                                  label_counts[i]);
+        }
+    }
+
+    output += "\n";
+
+    return output;
+}
+
+inline std::string print_coverage(const AnnotatedDBG &anno_graph,
+                                  const std::string &file,
+                                  const std::vector<size_t> &full_label_counts) {
+    std::string output;
+    output.reserve(1'000);
+
+    const auto &annotation = anno_graph.get_annotation();
+
+    // TODO: fix k-mer count
+    output += fmt::format(
+        "{}:{}",
+        file,
+        annotation.num_objects() / (1 + anno_graph.get_graph().is_canonical_mode())
+    );
+
+    const auto &labels = annotation.get_all_labels();
+    const auto label_counts = annotation.get_label_counts();
+    assert(labels.size() == label_counts.size());
+    assert(labels.size() == full_label_counts.size());
+    for (size_t i = 0; i < labels.size(); ++i) {
+        if (label_counts[i]) {
+            output += fmt::format("\t<{}>:{}:{}",
+                                  labels[i],
+                                  label_counts[i],
+                                  full_label_counts[i]);
+        }
+    }
+
+    output += "\n";
+
+    return output;
+}
+
 void QueryExecutor::query_fasta(const string &file,
                                 const std::function<void(const std::string &)> &callback) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
 
-    if (config_.fast) {
+    if (config_.fast || config_.get_coverage) {
         // Construct a query graph and query against it
         batched_query_fasta(fasta_parser, callback);
         return;
@@ -498,6 +669,14 @@ void QueryExecutor
                       const std::function<void(const std::string &)> &callback) {
     auto begin = fasta_parser.begin();
     auto end = fasta_parser.end();
+
+    HLLCounter file_kmer_counter(kHLLCounterError);
+    std::mutex match_counter_mutex;
+    if (config_.get_coverage) {
+        for (auto &counter : match_counter_) {
+            counter.reset();
+        }
+    }
 
     const uint64_t batch_size = config_.query_batch_size_in_bytes;
     seq_io::FastaParser::iterator it;
@@ -561,10 +740,10 @@ void QueryExecutor
             thread_pool_.join();
         };
 
-        auto query_graph = construct_query_graph(
+        auto [query_graph, index_in_full_graph] = construct_query_graph(
             anno_graph_,
             generate_batch,
-            config_.count_labels ? 0 : config_.discovery_fraction,
+            config_.count_labels || config_.get_coverage ? 0 : config_.discovery_fraction,
             get_num_threads()
         );
 
@@ -574,21 +753,68 @@ void QueryExecutor
         batch_timer.reset();
 
         if (!aligner_) {
-            for ( ; begin != it; ++begin) {
-                assert(begin != end);
+            if (config_.get_coverage) {
+                if (it == end) {
+                    callback(print_coverage(*query_graph,
+                                            fasta_parser.get_filename(),
+                                            label_counts_));
+                    return;
+                }
 
-                thread_pool_.enqueue(
-                    [&](size_t id, const std::string &name, const std::string &seq) {
-                        callback(query_sequence(id, name, seq, *query_graph, config_));
-                    },
-                    seq_count++, std::string(begin->name.s),
-                    std::string(begin->seq.s)
-                );
+                update_counters(*query_graph,
+                                file_kmer_counter,
+                                match_counter_,
+                                match_counter_mutex,
+                                nullptr,
+                                &index_in_full_graph);
+
+                begin = it;
+            } else {
+                for ( ; begin != it; ++begin) {
+                    assert(begin != end);
+
+                    thread_pool_.enqueue(
+                        [&](size_t id, const std::string &name, const std::string &seq) {
+                            callback(query_sequence(id, name, seq, *query_graph, config_));
+                        },
+                        seq_count++, std::string(begin->name.s),
+                        std::string(begin->seq.s)
+                    );
+                }
             }
         } else {
+            if (config_.get_coverage && begin == end) {
+                auto [align_graph, index_in_full_graph] = construct_query_graph(
+                    anno_graph_,
+                    [&](auto call_sequence) {
+                        for (auto&& [id, name, seq] : named_alignments) {
+                            call_sequence(std::move(seq));
+                        }
+                    },
+                    0,
+                    get_num_threads()
+                );
+
+                callback(print_coverage(*align_graph,
+                                        fasta_parser.get_filename(),
+                                        label_counts_));
+
+                return;
+            }
+
             for (auto&& [id, name, seq] : named_alignments) {
                 thread_pool_.enqueue(
                     [&](size_t id, const std::string &name, const std::string &seq) {
+                        if (config_.get_coverage) {
+                            update_counters(*query_graph,
+                                            file_kmer_counter,
+                                            match_counter_,
+                                            match_counter_mutex,
+                                            &seq,
+                                            &index_in_full_graph);
+                            return;
+                        }
+
                         callback(query_sequence(id, name, seq, *query_graph, config_));
                     },
                     id, std::move(name), std::move(seq)
@@ -599,6 +825,14 @@ void QueryExecutor
         thread_pool_.join();
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
                       fasta_parser.get_filename(), batch_timer.elapsed());
+    }
+
+    if (config_.get_coverage) {
+        callback(print_counter(anno_graph_,
+                               fasta_parser.get_filename(),
+                               file_kmer_counter,
+                               match_counter_,
+                               label_counts_));
     }
 }
 

@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 
+#include "common/hash/hll_counter.hpp"
+
 class AnnotatedDBG;
 class IDBGAligner;
 class ThreadPool;
@@ -23,7 +25,7 @@ class Config;
 
 using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
-std::unique_ptr<AnnotatedDBG>
+std::pair<std::unique_ptr<AnnotatedDBG>, std::vector<uint64_t>>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
@@ -35,11 +37,7 @@ class QueryExecutor {
     QueryExecutor(const Config &config,
                   const AnnotatedDBG &anno_graph,
                   const IDBGAligner *aligner,
-                  ThreadPool &thread_pool)
-      : config_(config),
-        anno_graph_(anno_graph),
-        aligner_(aligner),
-        thread_pool_(thread_pool) {}
+                  ThreadPool &thread_pool);
 
     void query_fasta(const std::string &file_path,
                      const std::function<void(const std::string &)> &callback);
@@ -59,6 +57,8 @@ class QueryExecutor {
     const AnnotatedDBG &anno_graph_;
     const IDBGAligner *aligner_;
     ThreadPool &thread_pool_;
+    std::vector<size_t> label_counts_;
+    std::vector<HLLCounter> match_counter_;
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
                              const std::function<void(const std::string &)> &callback);

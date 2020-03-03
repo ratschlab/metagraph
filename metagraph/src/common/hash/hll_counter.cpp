@@ -66,6 +66,10 @@ void HLLCounter::insert(uint64_t hash) {
 }
 
 void HLLCounter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_end) {
+    assert(counter_);
+    assert(precision_ >= 4);
+    assert(precision_ <= 18);
+
     counter_->Update(hashes_begin, hashes_end - hashes_begin);
 }
 

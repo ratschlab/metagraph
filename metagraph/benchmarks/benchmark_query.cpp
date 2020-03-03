@@ -66,7 +66,7 @@ std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
         },
         0.0,
         1
-    );
+    ).first;
 }
 
 
