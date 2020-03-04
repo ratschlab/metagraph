@@ -25,8 +25,9 @@ size_t kNumRowsInBlock = 50'000;
 
 typedef LabelEncoder<std::string> LEncoder;
 
-void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
-               const BinaryMatrix &row_major_matrix) {
+template <class RowCallback>
+void call_rows(const BinaryMatrix &row_major_matrix,
+               const RowCallback &callback) {
     const auto num_rows = row_major_matrix.num_rows();
 
     for (size_t i = 0; i < num_rows; ++i) {
@@ -51,13 +52,12 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
 
     auto matrix = std::make_unique<RowConcatenated<>>(
         [&](auto callback) {
-            call_rows(
+            call_rows(annotator.get_matrix(),
                 [&](const auto &row) {
                     assert(std::is_sorted(row.begin(), row.end()));
                     callback(row);
                     ++progress_bar;
-                },
-                annotator.get_matrix()
+                }
             );
         },
         num_columns,
@@ -75,7 +75,7 @@ convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotato
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        call_rows(callback, annotator.get_matrix());
+        call_rows(annotator.get_matrix(), callback);
     }, num_columns);
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
@@ -90,7 +90,7 @@ convert<BinRelWT_sdslAnnotator, std::string>(RowCompressed<std::string>&& annota
 
     auto matrix = std::make_unique<BinRelWT_sdsl>(
         [&](auto callback) {
-            call_rows(callback, annotator.get_matrix());
+            call_rows(annotator.get_matrix(), callback);
         },
         num_set_bits,
         num_columns
@@ -108,7 +108,7 @@ convert<BinRelWTAnnotator, std::string>(RowCompressed<std::string>&& annotator) 
 
     auto matrix = std::make_unique<BinRelWT>(
         [&](auto callback) {
-            call_rows(callback, annotator.get_matrix());
+            call_rows(annotator.get_matrix(), callback);
         },
         num_set_bits,
         num_columns
@@ -346,30 +346,30 @@ class Iterate {
 };
 
 template <class Annotator>
-class IterateRows : public Iterate<typename Annotator::SetBitPositions> {
+class IterateRows : public Iterate<BinaryMatrix::SetBitPositions> {
   public:
-    IterateRows(const Annotator &annotator) : annotator_(annotator) {};
+    IterateRows(const Annotator &annotator) : matrix_(annotator.get_matrix()) {};
 
-    typename Annotator::SetBitPositions next() override {
-        return annotator_.get_label_codes(i_++);
+    BinaryMatrix::SetBitPositions next() override {
+        return matrix_.get_row(i_++);
     };
 
   private:
-    typename Annotator::Index i_ = 0;
-    const Annotator &annotator_;
+    typename BinaryMatrix::Row i_ = 0;
+    const BinaryMatrix &matrix_;
 };
 
 // TODO: remove this if not crucial.
 // Support only merge with streaming and only converted to row-major.
 template <>
 class IterateRows<ColumnCompressed<std::string>>
-            : public Iterate<ColumnCompressed<std::string>::SetBitPositions> {
+            : public Iterate<BinaryMatrix::SetBitPositions> {
   public:
     IterateRows(const ColumnCompressed<std::string> &annotator)
           : row_iterator_(std::make_unique<utils::RowsFromColumnsTransformer>(annotator.get_matrix().data())) {}
 
-    ColumnCompressed<std::string>::SetBitPositions next() override {
-        return row_iterator_.next_row<ColumnCompressed<std::string>::SetBitPositions>();
+    BinaryMatrix::SetBitPositions next() override {
+        return row_iterator_.next_row<BinaryMatrix::SetBitPositions>();
     }
 
   private:
@@ -395,8 +395,8 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
     assert(num_rows);
 
     std::vector<const LEncoder*> label_encoders;
-    using RowType = typename MultiLabelEncoded<Label>::SetBitPositions;
-    std::vector<std::unique_ptr<Iterate<RowType>>> annotator_row_iterators;
+
+    std::vector<std::unique_ptr<Iterate<BinaryMatrix::SetBitPositions>>> annotator_row_iterators;
     for (const auto &annotator : annotators) {
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
@@ -525,7 +525,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                 uint64_t begin = i;
                 uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
 
-                std::vector<typename ColumnCompressed<Label>::SetBitPositions> rows(end - begin);
+                std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);
 
                 assert(begin <= end);
                 assert(end <= num_rows);

@@ -60,38 +60,6 @@ void ColumnCompressed<Label>::set(Index i, const VLabels &labels) {
 }
 
 template <typename Label>
-typename ColumnCompressed<Label>::SetBitPositions
-ColumnCompressed<Label>::get_label_codes(Index i) const {
-    assert(i < num_rows_);
-
-    SetBitPositions label_indices;
-    for (size_t j = 0; j < num_labels(); ++j) {
-        if (get_column(j)[i])
-            label_indices.push_back(j);
-    }
-    return label_indices;
-}
-
-template <typename Label>
-std::vector<typename ColumnCompressed<Label>::SetBitPositions>
-ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) const {
-    std::vector<SetBitPositions> rows(indices.size());
-
-    for (size_t j = 0; j < num_labels(); ++j) {
-        const auto &column = get_column(j);
-
-        for (size_t i = 0; i < indices.size(); ++i) {
-            assert(indices[i] < num_rows_);
-
-            if (column[indices[i]])
-                rows[i].push_back(j);
-        }
-    }
-
-    return rows;
-}
-
-template <typename Label>
 void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
                                          const VLabels &labels) {
     for (const auto &label : labels) {

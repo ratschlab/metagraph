@@ -9,6 +9,7 @@
 #include "common/algorithms.hpp"
 #include "common/bounded_priority_queue.hpp"
 #include "common/utils/simd_utils.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 template <typename T>
@@ -57,7 +58,7 @@ get_outgoing_columns(const DeBruijnGraph &graph,
             }
 
             assert(find != dp_table.end());
-            out_columns.emplace_back(find->first, find->second.best_score());
+            out_columns.emplace_back(next_node, find->second.best_score());
         }
     );
 
@@ -383,14 +384,6 @@ inline size_t update_column_avx2(bool &updated,
 #endif
 
 
-template <class Pair>
-struct LessSecond {
-    bool operator()(const Pair &a, const Pair &b) const {
-        return a.second < b.second;
-    }
-};
-
-
 /*
  * DefaultColumnExtender::operator()
  */
@@ -420,12 +413,23 @@ void DefaultColumnExtender<NodeType>
     if (path.get_score() + match_score_begin[1] < min_path_score)
         return;
 
-    // keep track of which columns to use next
-    BoundedPriorityQueue<ColumnRef<NodeType>,
-                         std::vector<ColumnRef<NodeType>>,
-                         LessSecond<ColumnRef<NodeType>>> columns_to_update(
-        config_.queue_size
-    );
+    // if the nodes from this seed were in the previous alignment and had a
+    // better score, don't redo the extension
+    assert(path.get_query_end() > query.data());
+    size_t query_offset = path.get_query_end() - query.data() - 1;
+    assert(query_offset + size == query.size());
+
+    if (dp_table.size()
+            && query_offset >= dp_table.get_query_offset()
+            && std::all_of(path.begin(), path.end(),
+                           [&](auto i) { return dp_table.find(i) != dp_table.end(); })) {
+        auto find = dp_table.find(path.back());
+        if (find != dp_table.end()
+                && find->second.scores.at(query_offset - dp_table.get_query_offset())
+                       >= path.get_score()) {
+            return;
+        }
+    }
 
     dp_table.clear();
     if (!dp_table.add_seed(graph_,
@@ -436,7 +440,8 @@ void DefaultColumnExtender<NodeType>
                            size,
                            0,
                            config_.gap_opening_penalty,
-                           config_.gap_extension_penalty))
+                           config_.gap_extension_penalty,
+                           query_offset))
         return;
 
     // for storage of intermediate values
@@ -448,7 +453,13 @@ void DefaultColumnExtender<NodeType>
     AlignedVector<Cigar::Operator> update_ops;
     AlignedVector<node_index> update_prevs;
 
-    // dynamic programming
+    // keep track of which columns to use next
+    BoundedPriorityQueue<ColumnRef<NodeType>,
+                         std::vector<ColumnRef<NodeType>>,
+                         utils::LessSecond> columns_to_update(
+        config_.queue_size
+    );
+
     NodeType start_node = path.back();
     score_t start_score = dp_table.find(start_node)->second.best_score();
     columns_to_update.emplace(start_node, start_score);
@@ -619,7 +630,6 @@ void DefaultColumnExtender<NodeType>
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::initialize_query(const std::string_view query) {
-    dp_table.clear();
     partial_sums_.resize(query.size());
     std::transform(query.begin(), query.end(),
                    partial_sums_.begin(),

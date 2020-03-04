@@ -33,7 +33,6 @@ class Cigar {
 
     static OperatorTable char_to_op;
     static const OperatorTableRow& get_op_row(char a) { return char_to_op[a]; }
-    static void initialize_opt_table(const std::string &alphabet, const uint8_t *encoding);
 
     Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
@@ -97,8 +96,12 @@ class Cigar {
     // character of the reference sequence after clipping is trimmed
     bool is_valid(const std::string_view reference, const std::string_view query) const;
 
+    static char opt_to_char(Cigar::Operator op);
+
   private:
     std::vector<value_type> cigar_;
+
+    static OperatorTable initialize_opt_table();
 };
 
 typedef int32_t score_t;
@@ -220,10 +223,9 @@ class Alignment {
               size_t offset = 0);
 
     // TODO: construct multiple alignments from the same starting point
-    // Since insertions into DPTable may invalidate iterators, use pointers instead
     Alignment(const DPTable &dp_table,
               const std::string_view query,
-              const typename DPTable::value_type *column,
+              typename DPTable::const_iterator column,
               size_t start_pos,
               score_t score,
               const char* path_end,
@@ -451,7 +453,16 @@ class DPTable {
     typedef ::score_t score_t;
 
     struct Column {
-        Column() {}
+        Column() = default;
+
+        // Prevent the copy constructor from being used
+        Column(const Column&) = delete;
+        Column& operator=(const Column&) = delete;
+
+        // Ensure that the move constructor is still available
+        Column(Column&&) noexcept = default;
+        Column& operator=(Column&&) noexcept = default;
+
         Column(size_t size,
                score_t min_score,
                char start_char,
@@ -492,7 +503,8 @@ class DPTable {
                   size_t size,
                   size_t start_pos,
                   int8_t gap_opening_penalty,
-                  int8_t gap_extension_penalty);
+                  int8_t gap_extension_penalty,
+                  size_t query_offset = 0);
 
     typedef tsl::hopscotch_map<NodeType, Column> Storage;
 
@@ -531,9 +543,11 @@ class DPTable {
                             NodeType *node = nullptr);
 
     const Storage& data() const { return dp_table_; }
+    size_t get_query_offset() const { return query_offset_; }
 
   private:
     Storage dp_table_;
+    size_t query_offset_ = 0;
 };
 
 

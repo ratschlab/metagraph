@@ -29,10 +29,6 @@ class bit_vector : public bitmap {
     virtual uint64_t next1(uint64_t id) const = 0;
     virtual uint64_t prev1(uint64_t id) const = 0;
 
-    virtual void insert_bit(uint64_t id, bool val) = 0;
-    virtual void delete_bit(uint64_t id) = 0;
-    virtual void set(uint64_t id, bool val) override = 0;
-
     virtual bool operator[](uint64_t id) const override = 0;
     virtual uint64_t get_int(uint64_t id, uint32_t width) const override = 0;
 
@@ -71,6 +67,8 @@ class bit_vector : public bitmap {
     virtual std::unique_ptr<bit_vector> copy() const = 0;
 
     virtual sdsl::bit_vector to_vector() const = 0;
+
+    virtual void add_to(sdsl::bit_vector *other) const override;
 };
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
@@ -91,12 +89,12 @@ class bit_vector_dyn : public bit_vector {
     uint64_t next1(uint64_t id) const override;
     uint64_t prev1(uint64_t id) const override;
 
-    void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
 
-    void insert_bit(uint64_t id, bool val) override;
-    void delete_bit(uint64_t id) override;
+    void insert_bit(uint64_t id, bool val);
+    void delete_bit(uint64_t id);
+    void set(uint64_t id, bool val);
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
@@ -139,12 +137,8 @@ class bit_vector_stat : public bit_vector {
     uint64_t next1(uint64_t id) const override;
     uint64_t prev1(uint64_t id) const override;
 
-    void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
-
-    void insert_bit(uint64_t id, bool val) override;
-    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
@@ -170,8 +164,6 @@ class bit_vector_stat : public bit_vector {
     // maintain rank/select operations
     mutable sdsl::rank_support_v5<> rk_;
     mutable sdsl::select_support_mcl<> slct_;
-    mutable std::atomic_bool requires_update_ { true };
-    mutable std::mutex mu_;
 };
 
 
@@ -200,12 +192,8 @@ class bit_vector_sd : public bit_vector {
     uint64_t next1(uint64_t id) const override;
     uint64_t prev1(uint64_t id) const override;
 
-    void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
-
-    void insert_bit(uint64_t id, bool val) override;
-    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
@@ -240,9 +228,6 @@ class bit_vector_hyb : public bit_vector {
 
     bit_vector_hyb(bit_vector_hyb&& other) noexcept;
     bit_vector_hyb(std::initializer_list<bool> init);
-    bit_vector_hyb(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
-                  uint64_t size,
-                  uint64_t num_set_bits);
 
     bit_vector_hyb& operator=(const bit_vector_hyb &other);
     bit_vector_hyb& operator=(bit_vector_hyb&& other) noexcept;
@@ -256,12 +241,8 @@ class bit_vector_hyb : public bit_vector {
     uint64_t next1(uint64_t id) const override;
     uint64_t prev1(uint64_t id) const override;
 
-    void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
-
-    void insert_bit(uint64_t id, bool val) override;
-    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
@@ -295,9 +276,6 @@ class bit_vector_il : public bit_vector {
 
     bit_vector_il(bit_vector_il&& other) noexcept;
     bit_vector_il(std::initializer_list<bool> init);
-    bit_vector_il(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
-                  uint64_t size,
-                  uint64_t num_set_bits);
 
     bit_vector_il& operator=(const bit_vector_il &other);
     bit_vector_il& operator=(bit_vector_il&& other) noexcept;
@@ -311,12 +289,8 @@ class bit_vector_il : public bit_vector {
     uint64_t next1(uint64_t id) const override;
     uint64_t prev1(uint64_t id) const override;
 
-    void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
-
-    void insert_bit(uint64_t id, bool val) override;
-    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
@@ -363,12 +337,8 @@ class bit_vector_rrr : public bit_vector {
     uint64_t next1(uint64_t id) const override;
     uint64_t prev1(uint64_t id) const override;
 
-    void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
-
-    void insert_bit(uint64_t id, bool val) override;
-    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
@@ -402,14 +372,10 @@ class bit_vector_adaptive : public bit_vector {
     virtual uint64_t next1(uint64_t id) const override final { return vector_->next1(id); }
     virtual uint64_t prev1(uint64_t id) const override final { return vector_->prev1(id); }
 
-    virtual void set(uint64_t id, bool val) override final { vector_->set(id, val); }
     virtual bool operator[](uint64_t id) const override final { return (*vector_)[id]; }
     virtual uint64_t get_int(uint64_t id, uint32_t width) const override final {
         return vector_->get_int(id, width);
     }
-
-    virtual void insert_bit(uint64_t id, bool val) override final { vector_->insert_bit(id, val); }
-    virtual void delete_bit(uint64_t id) override final { vector_->delete_bit(id); }
 
     virtual bool load(std::istream &in) override final;
     virtual void serialize(std::ostream &out) const override final;

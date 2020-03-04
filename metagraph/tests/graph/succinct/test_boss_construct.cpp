@@ -1,5 +1,3 @@
-#include "graph/representation/succinct/boss_construct.hpp"
-
 #include <stdio.h>
 #include <string>
 #include <sstream>
@@ -12,8 +10,8 @@
 #define protected public
 #define private public
 
+#include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/succinct/boss.hpp"
-
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"

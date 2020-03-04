@@ -154,8 +154,7 @@ class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
         }
 
         if (kseq_read(read_stream_) < 0) {
-            kseq_destroy(read_stream_);
-            read_stream_ = NULL;
+            deinit_stream();
         }
         is_reverse_complement_ = false;
         return *this;

@@ -23,7 +23,7 @@ bool ColumnMajor::get(Row row, Column column) const {
 }
 
 ColumnMajor::SetBitPositions ColumnMajor::get_row(Row row) const {
-    assert(row < num_rows());
+    assert(row < num_rows() || columns_->size() == 0u);
 
     SetBitPositions result;
     for (size_t i = 0; i < columns_->size(); ++i) {
@@ -52,6 +52,20 @@ ColumnMajor::get_rows(const std::vector<Row> &row_ids) const {
     }
 
     return rows;
+}
+
+std::vector<ColumnMajor::Column>
+ColumnMajor::slice_rows(const std::vector<Row> &row_ids) const {
+    std::vector<Column> slice;
+
+    for (const auto &row : get_rows(row_ids)) {
+        for (uint64_t j : row) {
+            slice.push_back(j);
+        }
+        slice.push_back(std::numeric_limits<Column>::max());
+    }
+
+    return slice;
 }
 
 std::vector<ColumnMajor::Row> ColumnMajor::get_column(Column column) const {

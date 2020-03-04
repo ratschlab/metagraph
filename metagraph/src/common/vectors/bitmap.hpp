@@ -7,55 +7,18 @@
 
 #include <sdsl/int_vector.hpp>
 
-
-/**
- * An abstract interface for a bitmap constructor.
- */
-class bitmap_builder {
-  public:
-    virtual ~bitmap_builder() {}
-
-    virtual void add_one(uint64_t pos) = 0;
-    virtual void add_ones(const uint64_t *begin, const uint64_t *end) {
-        std::for_each(begin, end, [&](uint64_t pos) { add_one(pos); });
-    }
-
-    template <class T>
-    using VoidCall = std::function<void(T)>;
-
-    // Data for initializing a bitmap
-    struct InitializationData {
-        const uint64_t size;
-        const uint64_t num_set_bits;
-        const std::function<void(const VoidCall<uint64_t> &callback)> call_ones;
-    };
-
-    InitializationData get_initialization_data() const {
-        return { size(), num_set_bits(),
-                 [&](auto callback) { call_ones(callback); } };
-    }
-
-  private:
-    virtual uint64_t size() const = 0;
-    virtual uint64_t num_set_bits() const = 0;
-    virtual void call_ones(const VoidCall<uint64_t> &callback) const = 0;
-};
+#include "bitmap_builder.hpp"
 
 
 /**
  * An abstract bitmap class: vector of a fixed size with elements 0 and 1.
- * Given an exising bitmap, can initialize another bitmap.
- * Thus, the class is inherited from `bitmap_builder`.
  */
-class bitmap : public bitmap_builder {
+class bitmap {
   public:
     virtual ~bitmap() {}
 
     virtual bool operator==(const bitmap &other) const final;
     virtual bool operator!=(const bitmap &other) const final { return !(*this == other); }
-
-    virtual void add_one(uint64_t id) { set(id, true); }
-    virtual void set(uint64_t id, bool val) = 0;
 
     virtual bool operator[](uint64_t id) const = 0;
     virtual uint64_t get_int(uint64_t id, uint32_t width) const = 0;
@@ -63,21 +26,31 @@ class bitmap : public bitmap_builder {
     virtual uint64_t size() const = 0;
     virtual uint64_t num_set_bits() const = 0;
 
-    virtual void add_to(sdsl::bit_vector *other) const;
+    virtual void add_to(sdsl::bit_vector *other) const = 0;
+    template <class T>
+    using VoidCall = std::function<void(T)>;
     virtual void call_ones(const VoidCall<uint64_t> &callback) const final;
     virtual void call_ones_in_range(uint64_t begin, uint64_t end,
                                     const VoidCall<uint64_t> &callback) const = 0;
 };
 
 
-class bitmap_dyn : public bitmap {
+class bitmap_dyn : public bitmap, public bitmap_builder {
   public:
     virtual ~bitmap_dyn() {}
+
+    virtual void add_one(uint64_t id) { set(id, true); }
+    virtual void set(uint64_t id, bool val) = 0;
 
     // indexes - positions of newly inserted elements in resulting vector
     virtual void insert_zeros(const std::vector<uint64_t> &indexes) = 0;
 
     virtual bitmap_dyn& operator|=(const bitmap &other);
+
+    virtual InitializationData get_initialization_data() const {
+        return { size(), num_set_bits(),
+                 [&](auto callback) { call_ones(callback); } };
+    }
 };
 
 
@@ -98,6 +71,7 @@ class bitmap_set : public bitmap_dyn {
     uint64_t size() const override { return size_; }
     uint64_t num_set_bits() const override { return bits_.size(); }
 
+    void add_to(sdsl::bit_vector *other) const override;
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const override;
 
@@ -188,6 +162,7 @@ class bitmap_adaptive : public bitmap_dyn {
     static const size_t kNumIndicesMargin;
 };
 
+
 class bitmap_lazy : public bitmap {
   public:
     explicit bitmap_lazy(size_t size = 0, bool value = false);
@@ -196,14 +171,13 @@ class bitmap_lazy : public bitmap {
                 size_t size,
                 size_t num_set_bits = -1) noexcept;
 
-    void set(uint64_t, bool) { throw std::runtime_error("Not implemented."); }
-
     bool operator[](uint64_t id) const { return is_bit_set_(id); }
     uint64_t get_int(uint64_t id, uint32_t width) const;
 
     uint64_t size() const { return size_; }
     uint64_t num_set_bits() const;
 
+    void add_to(sdsl::bit_vector *other) const;
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const;
 

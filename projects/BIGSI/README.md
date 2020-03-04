@@ -270,10 +270,12 @@ for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCC
                 $QUERY"
 
         bsub -J "${NAME}.${num_columns}" \
-            -W 12:00 \
-            -n 36 -R "rusage[mem=2000,scratch=5000] span[hosts=1] select[model==XeonGold_6150]" \
-            -o ${OUTDIR}/${num_columns}.lsf \
+            -W 3:50 \
+            -n 36 -R "rusage[mem=4000] span[hosts=1] select[model==XeonGold_6150]" \
+            -oo ${OUTDIR}/${num_columns}.lsf \
             " \
+                TMPDIR=/dev/shm/$NAME_$num_columns_\${LSB_JOBID};
+                mkdir \${TMPDIR};
                 cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}.dbg \
                     \${TMPDIR}/graph.dbg; \
                 cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}.edgemask \
@@ -281,11 +283,12 @@ for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCC
                 cp ~/metagenome/data/BIGSI/subsets/annotation_subset_${num_columns}.relaxed.brwt.annodbg \
                     \${TMPDIR}/graph.brwt.annodbg; \
                 /usr/bin/time -v $run > /dev/null 2> /dev/null; \
-                for i in {1..5}; do \
+                for i in {1..10}; do \
                     /usr/bin/time -v $run > \${TMPDIR}/out 2>> \${TMPDIR}/err;
                 done; \
                 mv \${TMPDIR}/out ${OUTDIR}/${num_columns}.out; \
-                mv \${TMPDIR}/err ${OUTDIR}/${num_columns}.err"
+                mv \${TMPDIR}/err ${OUTDIR}/${num_columns}.err; \
+                rm -r \${TMPDIR}"
     done
 done
 ```

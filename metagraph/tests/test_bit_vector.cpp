@@ -7,6 +7,7 @@
 #include "common/vectors/bit_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/threads/threading.hpp"
+#include "common/data_generation.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
@@ -273,7 +274,7 @@ TYPED_TEST(BitVectorTestSelect0, select0) {
     }
 }
 
-void test_bit_vector_set(bit_vector *vector, sdsl::bit_vector *numbers) {
+void test_bit_vector_set(bit_vector_dyn *vector, sdsl::bit_vector *numbers) {
     reference_based_test(*vector, *numbers);
 
     for (size_t i = 0; i < numbers->size(); ++i) {
@@ -305,64 +306,13 @@ TEST(bit_vector_dyn, set) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_dyn(numbers);
-    ASSERT_TRUE(vector);
+    bit_vector_dyn vector(numbers);
 
-    test_bit_vector_set(vector, &numbers);
-
-    delete vector;
-}
-
-TEST(bit_vector_stat, set) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_stat(numbers);
-    ASSERT_TRUE(vector);
-
-    test_bit_vector_set(vector, &numbers);
-
-    delete vector;
-}
-
-TEST(bit_vector_sd, setException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_sd(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_set(vector, &numbers), "");
-
-    delete vector;
-}
-
-TEST(bit_vector_rrr, setException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_rrr<>(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_set(vector, &numbers), "");
-
-    delete vector;
-}
-
-TEST(bit_vector_small, setException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_small(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_set(vector, &numbers), "");
-
-    delete vector;
+    test_bit_vector_set(&vector, &numbers);
 }
 
 
-void test_bit_vector_ins_del(bit_vector *vector,
+void test_bit_vector_ins_del(bit_vector_dyn *vector,
                              const sdsl::bit_vector &reference) {
     reference_based_test(*vector, reference);
 
@@ -388,60 +338,9 @@ TEST(bit_vector_dyn, InsertDelete) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_dyn(numbers);
-    ASSERT_TRUE(vector);
+    bit_vector_dyn vector(numbers);
 
-    test_bit_vector_ins_del(vector, numbers);
-
-    delete vector;
-}
-
-TEST(bit_vector_stat, InsertDelete) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_stat(numbers);
-    ASSERT_TRUE(vector);
-
-    test_bit_vector_ins_del(vector, numbers);
-
-    delete vector;
-}
-
-TEST(bit_vector_sd, InsertDeleteException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_sd(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_ins_del(vector, numbers), "");
-
-    delete vector;
-}
-
-TEST(bit_vector_rrr, InsertDeleteException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_rrr<>(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_ins_del(vector, numbers), "");
-
-    delete vector;
-}
-
-TEST(bit_vector_small, InsertDeleteException) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector *vector = new bit_vector_small(numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_bit_vector_ins_del(vector, numbers), "");
-
-    delete vector;
+    test_bit_vector_ins_del(&vector, numbers);
 }
 
 
@@ -639,37 +538,6 @@ TEST(bit_vector_sd, InitializeByBitsDense) {
     reference_based_test(second, numbers);
 }
 
-TEST(bit_vector_stat, ConcurrentReadingAfterWriting) {
-    ThreadPool thread_pool(3);
-    bit_vector_stat vector;
-
-    std::vector<bool> bits;
-    std::vector<uint64_t> ranks = { 0 };
-
-    for (size_t i = 0; i < 10'000'000; ++i) {
-        bits.push_back((i + (i * i) % 31) % 2);
-        if (bits.back()) {
-            ranks.back()++;
-        }
-        ranks.push_back(ranks.back());
-    }
-
-    for (size_t i = 0; i < bits.size(); ++i) {
-        ASSERT_EQ(0u, vector.rank1(i));
-    }
-    for (size_t i = 0; i < bits.size(); ++i) {
-        vector.insert_bit(i, bits[i]);
-    }
-    for (size_t t = 0; t < 5; ++t) {
-        thread_pool.enqueue([&]() {
-            for (size_t i = 0; i < bits.size(); ++i) {
-                ASSERT_EQ(ranks[i], vector.rank1(i));
-            }
-        });
-    }
-    thread_pool.join();
-}
-
 TEST(bit_vector_sd, CheckIfInverts) {
     sdsl::bit_vector vector(10);
     for (uint64_t i = 0; i < 1024; ++i) {
@@ -685,6 +553,69 @@ TEST(bit_vector_sd, CheckIfInverts) {
                 });
             }, bvs.size(), bvs.num_set_bits());
         ASSERT_EQ(bvs.is_inverted(), bvs_bits.is_inverted());
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_to_all_zero) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            sdsl::bit_vector vector(size, false);
+            TypeParam bvs(gen.generate_random_column(size, density)->to_vector());
+            bvs.add_to(&vector);
+            EXPECT_EQ(bvs.to_vector(), vector);
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_to_all_one) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            sdsl::bit_vector vector(size, true);
+            TypeParam bvs(gen.generate_random_column(size, density)->to_vector());
+            bvs.add_to(&vector);
+            EXPECT_EQ(sdsl::bit_vector(size, true), vector);
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_to_same) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            auto bv = gen.generate_random_column(size, density);
+            sdsl::bit_vector vector = bv->to_vector();
+            TypeParam bvs(vector);
+            bvs.add_to(&vector);
+            EXPECT_EQ(bvs.to_vector(), vector);
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_all_zero) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            auto bv = gen.generate_random_column(size, density);
+            sdsl::bit_vector vector = bv->to_vector();
+            TypeParam bvs(sdsl::bit_vector(size, false));
+            bvs.add_to(&vector);
+            EXPECT_EQ(bv->to_vector(), vector);
+        }
+    }
+}
+
+TYPED_TEST(BitVectorTest, add_all_ones) {
+    for (uint64_t size : { 0, 10, 100, 1000000 }) {
+        DataGenerator gen;
+        for (double density : { 0.0, 0.5, 1.0 }) {
+            auto bv = gen.generate_random_column(size, density);
+            sdsl::bit_vector vector = bv->to_vector();
+            TypeParam bvs(sdsl::bit_vector(size, true));
+            bvs.add_to(&vector);
+            EXPECT_EQ(sdsl::bit_vector(size, true), vector);
+        }
     }
 }
 

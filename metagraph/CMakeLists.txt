@@ -522,10 +522,8 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM
 file(GLOB benchmark_files
   "benchmarks/*.cpp"
   "benchmarks/*/*.cpp"
-  "experiments/*.cpp"
 )
 list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
-list(FILTER benchmark_files EXCLUDE REGEX "experiments/main.cpp")
 
 add_executable(benchmarks ${benchmark_files})
 target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")

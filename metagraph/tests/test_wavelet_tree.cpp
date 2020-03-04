@@ -201,38 +201,32 @@ TYPED_TEST(WaveletTreeTest, Queries) {
 }
 
 
-TYPED_TEST(WaveletTreeTest, Set) {
+TEST(wavelet_tree_dyn, Set) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new TypeParam(4, numbers);
-    ASSERT_TRUE(vector);
+    wavelet_tree_dyn vector(4, numbers);
 
-    reference_based_test(*vector, numbers);
+    reference_based_test(vector, numbers);
 
     for (size_t i = 0; i < numbers.size(); ++i) {
-        if constexpr(std::is_same_v<TypeParam, wavelet_tree_small>) {
-            ASSERT_DEATH(vector->set(i, 1), "");
-        } else {
-            uint64_t value = numbers.at(i);
+        uint64_t value = numbers.at(i);
 
-            numbers.at(i) = 1;
-            vector->set(i, 1);
-            reference_based_test(*vector, numbers);
+        numbers.at(i) = 1;
+        vector.set(i, 1);
+        reference_based_test(vector, numbers);
 
-            numbers.at(i) = 0;
-            vector->set(i, 0);
-            reference_based_test(*vector, numbers);
+        numbers.at(i) = 0;
+        vector.set(i, 0);
+        reference_based_test(vector, numbers);
 
-            numbers.at(i) = value;
-            vector->set(i, value);
-        }
+        numbers.at(i) = value;
+        vector.set(i, value);
     }
-
-    delete vector;
 }
 
 
-void test_wavelet_tree_ins_del(wavelet_tree *vector, std::vector<uint64_t> *numbers) {
+void test_wavelet_tree_ins_del(wavelet_tree_dyn *vector,
+                               std::vector<uint64_t> *numbers) {
     reference_based_test(*vector, *numbers);
 
     for (size_t i = 0; i < numbers->size(); ++i) {
@@ -250,8 +244,7 @@ void test_wavelet_tree_ins_del(wavelet_tree *vector, std::vector<uint64_t> *numb
     }
 }
 
-template <class wavelet_tree>
-void test_wavelet_tree_batch_ins_del(wavelet_tree *vector,
+void test_wavelet_tree_batch_ins_del(wavelet_tree_dyn *vector,
                                      const std::vector<uint64_t> &numbers) {
     assert(vector);
 
@@ -332,91 +325,12 @@ void test_wavelet_tree_batch_ins_del(wavelet_tree *vector,
     reference_based_test(*vector, numbers);
 }
 
-
-TEST(wavelet_tree_stat, InsertDelete) {
-    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                      0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new wavelet_tree_stat(4, numbers);
-    ASSERT_TRUE(vector);
-
-    test_wavelet_tree_ins_del(vector, &numbers);
-
-    delete vector;
-}
-
-TEST(wavelet_tree_stat, InsertDeleteBatch) {
-    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                      0, 1, 2, 0, 3, 2, 1, 1,
-                                      3, 1, 0, 2, 3, 2, 2, 1,
-                                      3, 2, 1, 2, 3, 3, 3, 0 };
-    wavelet_tree *vector = new wavelet_tree_stat(4);
-    ASSERT_TRUE(vector);
-
-    test_wavelet_tree_batch_ins_del(vector, numbers);
-
-    delete vector;
-}
-
-
-TEST(wavelet_tree_fast, InsertDelete) {
-    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                      0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new wavelet_tree_fast(4, numbers);
-    ASSERT_TRUE(vector);
-
-    test_wavelet_tree_ins_del(vector, &numbers);
-
-    delete vector;
-}
-
-TEST(wavelet_tree_fast, InsertDeleteBatch) {
-    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                      0, 1, 2, 0, 3, 2, 1, 1,
-                                      3, 1, 0, 2, 3, 2, 2, 1,
-                                      3, 2, 1, 2, 3, 3, 3, 0 };
-    wavelet_tree *vector = new wavelet_tree_fast(4);
-    ASSERT_TRUE(vector);
-
-    test_wavelet_tree_batch_ins_del(vector, numbers);
-
-    delete vector;
-}
-
-
-TEST(wavelet_tree_small, InsertDelete) {
-    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                      0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new wavelet_tree_small(4, numbers);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_wavelet_tree_ins_del(vector, &numbers), "");
-
-    delete vector;
-}
-
-TEST(wavelet_tree_small, InsertDeleteBatch) {
-    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                      0, 1, 2, 0, 3, 2, 1, 1,
-                                      3, 1, 0, 2, 3, 2, 2, 1,
-                                      3, 2, 1, 2, 3, 3, 3, 0 };
-    wavelet_tree *vector = new wavelet_tree_small(4);
-    ASSERT_TRUE(vector);
-
-    ASSERT_DEATH(test_wavelet_tree_batch_ins_del(vector, numbers), "");
-
-    delete vector;
-}
-
-
 TEST(wavelet_tree_dyn, InsertDelete) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new wavelet_tree_dyn(4, numbers);
-    ASSERT_TRUE(vector);
+    wavelet_tree_dyn vector(4, numbers);
 
-    test_wavelet_tree_ins_del(vector, &numbers);
-
-    delete vector;
+    test_wavelet_tree_ins_del(&vector, &numbers);
 }
 
 TEST(wavelet_tree_dyn, InsertDeleteBatch) {
@@ -424,14 +338,10 @@ TEST(wavelet_tree_dyn, InsertDeleteBatch) {
                                       0, 1, 2, 0, 3, 2, 1, 1,
                                       3, 1, 0, 2, 3, 2, 2, 1,
                                       3, 2, 1, 2, 3, 3, 3, 0 };
-    wavelet_tree *vector = new wavelet_tree_dyn(4);
-    ASSERT_TRUE(vector);
+    wavelet_tree_dyn vector(4);
 
-    test_wavelet_tree_batch_ins_del(vector, numbers);
-
-    delete vector;
+    test_wavelet_tree_batch_ins_del(&vector, numbers);
 }
-
 
 TEST(wavelet_tree_dyn, Insert) {
     std::vector<uint64_t> numbers(1024, 0);
@@ -525,40 +435,6 @@ TYPED_TEST(WaveletTreeTest, initialize_large) {
     vector<int> initial_content(1'000'000, 6);
     TypeParam vector(3, initial_content);
     EXPECT_EQ(initial_content.size(), vector.size());
-}
-
-
-TEST(wavelet_tree_stat, ConcurrentReadingAfterWriting) {
-    ThreadPool thread_pool(3);
-    wavelet_tree_stat vector(4);
-
-    size_t tested_number = 15;
-
-    std::vector<uint64_t> numbers;
-    std::vector<uint64_t> ranks = { 0 };
-
-    for (size_t i = 0; i < 10'000'000; ++i) {
-        numbers.push_back((i + (i * i) % 31) % 16);
-        if (numbers.back() == tested_number) {
-            ranks.back()++;
-        }
-        ranks.push_back(ranks.back());
-    }
-
-    for (size_t i = 0; i < numbers.size(); ++i) {
-        ASSERT_EQ(0u, vector.rank(tested_number, i));
-    }
-    for (size_t i = 0; i < numbers.size(); ++i) {
-        vector.insert(i, numbers[i]);
-    }
-    for (size_t t = 0; t < 5; ++t) {
-        thread_pool.enqueue([&]() {
-            for (size_t i = 0; i < numbers.size(); ++i) {
-                ASSERT_EQ(ranks[i], vector.rank(tested_number, i));
-            }
-        });
-    }
-    thread_pool.join();
 }
 
 TYPED_TEST(WaveletTreeTest, operator_eq) {

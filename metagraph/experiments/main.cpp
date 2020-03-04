@@ -19,12 +19,12 @@
 #include "common/vectors/wavelet_tree.hpp"
 #include "common/vectors/bit_vector.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/data_generation.hpp"
 #include "graph/alignment/aligner_helper.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/kmc_parser.hpp"
 #include "cli/config/config.hpp"
 #include "method_constructors.hpp"
-#include "data_generation.hpp"
 
 using namespace std::chrono_literals;
 
@@ -78,10 +78,10 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
             || static_cast<int>(another.rank0(another.size() / 2)) < -1)
         throw std::runtime_error("Never happens, just initializing the rank support");
 
-   if (another.num_set_bits()
+    if (another.num_set_bits()
             && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
             && static_cast<int>(another.select1(1)) < -1)
-       throw std::runtime_error("Never happens, just initializing the select support");
+        throw std::runtime_error("Never happens, just initializing the select support");
 
     auto RAM = get_curr_RSS() - mem_before;
 
@@ -225,7 +225,8 @@ double test_row_time(const BinaryMatrix &matrix,
     generator.set_seed(42);
     //std::cout << "Generating " << num_samples << " samples";
     auto positions = generator.generate_random_ints(
-        num_samples, 0, matrix.num_rows());
+        num_samples, 0, matrix.num_rows()
+    );
 
     Timer timer;
     timer.reset();
@@ -309,8 +310,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 
 typedef annotate::MultiLabelEncoded<std::string> Annotator;
 
-std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
-                                                 size_t cache_size = 0) {
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename) {
     std::unique_ptr<Annotator> annotation;
 
     switch (parse_annotation_type(filename)) {
@@ -323,23 +323,23 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
             break;
         }
         case Config::BRWT: {
-            annotation.reset(new annotate::MultiBRWTAnnotator(cache_size));
+            annotation.reset(new annotate::MultiBRWTAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {
-            annotation.reset(new annotate::BinRelWT_sdslAnnotator(cache_size));
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator());
             break;
         }
         case Config::BinRelWT: {
-            annotation.reset(new annotate::BinRelWTAnnotator(cache_size));
+            annotation.reset(new annotate::BinRelWTAnnotator());
             break;
         }
         case Config::RowFlat: {
-            annotation.reset(new annotate::RowFlatAnnotator(cache_size));
+            annotation.reset(new annotate::RowFlatAnnotator());
             break;
         }
         case Config::RBFish: {
-            annotation.reset(new annotate::RainbowfishAnnotator(cache_size));
+            annotation.reset(new annotate::RainbowfishAnnotator());
             break;
         }
     }
@@ -357,7 +357,7 @@ int main(int argc, char *argv[]) {
     try {
         TCLAP::CmdLine cmd("Benchmarks and data generation for metagraph", ' ', "");
 
-        std::vector<std::string> regimes {
+        ValuesConstraint<std::string> regimes({
             "vectors",
             "matrices",
             "subsets",
@@ -369,10 +369,8 @@ int main(int argc, char *argv[]) {
             "evaluate_alignment",
             "query_annotation_rows",
             "to_dna4"
-        };
-
-        ValuesConstraint<std::string> regime_constraint(regimes);
-        UnlabeledValueArg<std::string> regime_arg("regime", "Regime", true, "", &regime_constraint, cmd);
+        });
+        UnlabeledValueArg<std::string> regime_arg("regime", "Regime", true, "", &regimes, cmd);
         cmd.parse(std::min(argc, 2), argv);
 
         std::string regime = regime_arg.getValue();
@@ -1100,7 +1098,7 @@ int main(int argc, char *argv[]) {
         } else if (regime == "query_annotation_rows") {
             UnlabeledValueArg<std::string> annotation_arg("input_file", "Annotation", true, "", "string", cmd);
             ValueArg<int> num_rows_arg("", "num_rows", "Rows to query", true, 0, "int", cmd);
-            ValueArg<int> cache_size_arg("", "cache_size", "Number of rows cached", false, 0, "int", cmd);
+            // ValueArg<int> cache_size_arg("", "cache_size", "Number of rows cached", false, 0, "int", cmd);
             ValueArg<int> batch_size_arg("", "batch_size", "Number of rows in batch (task)", false, 100'000, "int", cmd);
             ValueArg<int> num_threads_arg("", "num_threads", "Number threads", false, 1, "int", cmd);
             cmd.parse(argc, argv);
@@ -1112,8 +1110,7 @@ int main(int argc, char *argv[]) {
 
             Timer timer;
 
-            auto annotation = initialize_annotation(annotation_arg.getValue(),
-                                                    cache_size_arg.getValue());
+            auto annotation = initialize_annotation(annotation_arg.getValue());
 
             std::cout << "Annotation loaded in " << timer.elapsed() << " sec" << std::endl;
             timer.reset();
@@ -1138,40 +1135,43 @@ int main(int argc, char *argv[]) {
             timer.reset();
 
             // initialize fast query annotation
+            std::vector<BinaryMatrix::SetBitPositions> annotation_rows(num_rows_arg.getValue());
+
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (uint64_t batch_begin = 0;
+                                batch_begin < from_full_to_query.size();
+                                                batch_begin += batch_size) {
+
+                const uint64_t batch_end
+                    = std::min(batch_begin + batch_size_arg.getValue(),
+                               static_cast<uint64_t>(from_full_to_query.size()));
+
+                std::vector<uint64_t> row_indexes;
+                row_indexes.reserve(batch_end - batch_begin);
+
+                for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                    assert(from_full_to_query[i].first < annotation->num_objects());
+
+                    row_indexes.push_back(from_full_to_query[i].first);
+                }
+
+                Timer timer;
+                auto rows = annotation->get_matrix().get_rows(row_indexes);
+                std::cout << "Annotation block extracted in "
+                          << timer.elapsed() << " sec" << std::endl;
+
+                assert(rows.size() == batch_end - batch_begin);
+
+                for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                    annotation_rows[from_full_to_query[i].second]
+                        = std::move(rows[i - batch_begin]);
+                }
+            }
+
             // copy annotations from the full graph to the query graph
             auto row_annotation = std::make_unique<annotate::RowCompressed<>>(
-                num_rows_arg.getValue(),
-                annotation->get_label_encoder().get_labels(),
-                [&](annotate::RowCompressed<>::CallRow call_row) {
-
-                    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-                    for (uint64_t batch_begin = 0;
-                                        batch_begin < from_full_to_query.size();
-                                                        batch_begin += batch_size) {
-
-                        const uint64_t batch_end
-                            = std::min(batch_begin + batch_size_arg.getValue(),
-                                       static_cast<uint64_t>(from_full_to_query.size()));
-
-                        std::vector<uint64_t> row_indexes;
-                        row_indexes.reserve(batch_end - batch_begin);
-
-                        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                            assert(from_full_to_query[i].first < annotation->num_objects());
-
-                            row_indexes.push_back(from_full_to_query[i].first);
-                        }
-
-                        auto rows = annotation->get_label_codes(row_indexes);
-
-                        assert(rows.size() == batch_end - batch_begin);
-
-                        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                            call_row(from_full_to_query[i].second,
-                                     std::move(rows[i - batch_begin]));
-                        }
-                    }
-                }
+                std::move(annotation_rows),
+                annotation->get_label_encoder().get_labels()
             );
 
             std::cout << "Submatrix constructed in " << timer.elapsed() << " sec" << std::endl;

@@ -112,5 +112,44 @@ BENCHMARK_TEMPLATE(BM_BRWTCompressTranscripts, 0)
     ->Arg(4);
 
 
+template <size_t rows_arg = 300000,
+          size_t cols_arg = 100,
+          size_t unique_arg = 10,
+          size_t arity_arg = 2,
+          bool greedy_arg = true,
+          size_t relax_arg = 2>
+static void BM_BRWTQueryRows(benchmark::State& state) {
+    DataGenerator generator;
+    generator.set_seed(42);
+
+    auto density_arg = std::vector<double>(unique_arg, state.range(0) / 100.);
+    auto generated_columns = generator.generate_random_columns(
+        rows_arg,
+        unique_arg,
+        get_densities(unique_arg, density_arg),
+        std::vector<uint32_t>(unique_arg, cols_arg / unique_arg)
+    );
+
+    std::unique_ptr<BinaryMatrix> matrix = generate_brwt_from_rows(
+        std::move(generated_columns),
+        arity_arg,
+        greedy_arg,
+        relax_arg
+    );
+
+    std::vector<uint64_t> indexes;
+    generator.generate_random_column(rows_arg, 1. / 100)->call_ones(
+        [&](uint64_t i) { indexes.push_back(i); }
+    );
+
+    for (auto _ : state) {
+        matrix->get_rows(indexes);
+    }
+}
+
+BENCHMARK_TEMPLATE(BM_BRWTQueryRows, 3000000, 100, 30, 2, false, 0)
+    ->Unit(benchmark::kMillisecond)
+    ->DenseRange(0, 10, 1);
+
 } // namespace bm
 } // namespace mg

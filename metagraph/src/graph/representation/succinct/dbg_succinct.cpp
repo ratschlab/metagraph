@@ -191,10 +191,13 @@ void DBGSuccinct::add_sequence(std::string_view sequence,
     }
 
     for (uint64_t new_boss_edge : boss_edges_inserted) {
+        if (get_state() != BOSS::State::DYN)
+            throw std::runtime_error("representation must be dynamic");
+
         // update bitmask with valid k-mers -- assume all inserted k-mers valid
         // TODO: detect dummy BOSS edges and insert zeros to mask them out
         if (valid_edges_)
-            valid_edges_->insert_bit(new_boss_edge, 1);
+            dynamic_cast<bit_vector_dyn&>(*valid_edges_).insert_bit(new_boss_edge, 1);
 
         // Call all new nodes inserted including the dummy ones, unless they
         // are masked out.

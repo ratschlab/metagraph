@@ -3,8 +3,6 @@
 
 #include <memory>
 
-#include <Eigen/Sparse>
-
 #include "annotation/representation/base/annotation.hpp"
 
 
@@ -17,14 +15,12 @@ class RowCompressed : public MultiLabelEncoded<Label> {
   public:
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
-    using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
-    typedef std::function<void(Index, SetBitPositions&&)> CallRow;
-    RowCompressed(uint64_t num_rows,
-                  const std::vector<Label> &labels,
-                  std::function<void(CallRow)> call_rows);
+    template <typename RowType>
+    RowCompressed(std::vector<RowType>&& annotation_rows,
+                  const std::vector<Label> &column_labels);
 
     void reinitialize(uint64_t num_rows);
 
@@ -37,8 +33,6 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     bool has_label(Index i, const Label &label) const;
     bool has_labels(Index i, const VLabels &labels) const;
-
-    SetBitPositions get_label_codes(Index i) const { return matrix_->get_row(i); }
 
     uint64_t num_objects() const;
     uint64_t num_relations() const;

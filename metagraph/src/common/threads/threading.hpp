@@ -23,7 +23,9 @@ unsigned int get_num_threads();
  */
 class ThreadPool {
   public:
-    ThreadPool(size_t num_workers, size_t max_num_tasks = -1);
+    ThreadPool(size_t num_workers, size_t max_num_tasks);
+    explicit ThreadPool(size_t num_workers)
+        : ThreadPool(num_workers, num_workers * 5) {}
 
     template <class F, typename... Args>
     auto enqueue(F&& f, Args&&... args) {

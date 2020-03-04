@@ -113,9 +113,7 @@ void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
 
 
 template <typename Graph>
-class DBGAlignerTest : public DeBruijnGraphTest<Graph> {
-    void SetUp() { Cigar::initialize_opt_table(alphabet, alphabet_encoding); }
-};
+class DBGAlignerTest : public DeBruijnGraphTest<Graph> {};
 
 TYPED_TEST_SUITE(DBGAlignerTest, FewGraphTypes);
 
@@ -190,6 +188,37 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     EXPECT_EQ("14=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_num_matches());
     EXPECT_TRUE(path.is_exact_match());
+    EXPECT_EQ(0u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_end_clipping());
+    EXPECT_EQ(0u, path.get_offset());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph,
+                         path,
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
+
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
+TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    std::string query = "AGCTNCGAGGCCAA";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths.front();
+
+    EXPECT_EQ(reference.size() - k + 1, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+    EXPECT_EQ(config.score_sequences(reference, query), path.get_score());
+    EXPECT_EQ("4=1X9=", path.get_cigar().to_string());
+    EXPECT_EQ(13u, path.get_num_matches());
+    EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -851,7 +880,6 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
-    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
     size_t k = 7;
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";
     std::string query =        "AC" "CTTTCGAGGCCAA";
@@ -916,7 +944,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_snp) {
-    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
     size_t k = 7;
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";
     std::string query =        "AC" "CTTTCGAGGCCAA";
@@ -950,7 +977,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_nodummy) {
-    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
     size_t k = 7;
     std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
     std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
@@ -981,7 +1007,6 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
 }
 
 TEST(DBGAlignerTest, align_dummy) {
-    Cigar::initialize_opt_table(alphabet, alphabet_encoding);
     size_t k = 7;
     std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
     std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
