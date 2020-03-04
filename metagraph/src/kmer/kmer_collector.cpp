@@ -266,8 +266,12 @@ void KmerCollector<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
-    add_sequences([buffered_sequences{std::move(sequences)}](CallStringCount callback) {
-        for (const auto &[seq, count] : buffered_sequences) {
+    // we keep only a pointer to #sequences in the #add_sequences callback to avoid
+    // copying the vector when the callback is later std::bound in the thread-pool
+    auto seq = std::make_shared<std::vector<std::pair<std::string, uint64_t>>>(
+            std::move(sequences));
+    add_sequences([seq](CallStringCount callback) {
+        for (const auto &[seq, count] : *seq) {
             callback(seq, count);
         }
     });
