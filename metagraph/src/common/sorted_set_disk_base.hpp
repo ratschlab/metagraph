@@ -372,7 +372,6 @@ class SortedSetDiskBase {
      * Thread pool for doing the "level 1" merging, i.e. merging #MERGE_L1_COUNT chunk
      * files at a time, while new files are still being added to the data structure.
      */
-    // TODO: this is suboptimal, as ThreadPool imposes a max of 5*threads tasks
     ThreadPool async_merge_l1_ = ThreadPool(1, 100);
 
     std::function<void(storage_type *)> cleanup_;

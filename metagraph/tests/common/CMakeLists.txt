@@ -8,7 +8,7 @@ add_subdirectory(../../src/common metagraph_common)
 
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
-SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -ftemplate-backtrace-limit=0")
+
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 

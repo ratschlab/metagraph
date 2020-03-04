@@ -55,7 +55,7 @@ class KmerCollector {
      */
     KmerCollector(size_t k,
                   bool both_strands_mode = false,
-                  Sequence &&filter_suffix_encoded = {},
+                  Sequence&& filter_suffix_encoded = {},
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
                   const std::filesystem::path &tmp_dir = "/tmp",
@@ -85,15 +85,9 @@ class KmerCollector {
     //      In general, use `add_sequences` if possible, to make use of multiple threads.
     void add_kmer(const KMER &kmer) { kmers_->insert(&kmer, &kmer + 1); }
 
-    inline Data &data() {
-        join();
-        return kmers_->data();
-    }
+    inline Data &data() { join(); return kmers_->data(); }
 
-    void clear() {
-        join();
-        kmers_->clear();
-    }
+    void clear() { join(); kmers_->clear(); }
 
     inline bool is_both_strands_mode() const { return both_strands_mode_; }
     inline size_t num_threads() const { return num_threads_; }
@@ -104,7 +98,7 @@ class KmerCollector {
     /**
      * Sends sequences accumulated in #batch_accumulator_ for processing
      * on the thread pool. */
-    void add_batch(std::vector<std::pair<std::string, uint64_t>> &&sequences);
+    void add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences);
 
   private:
     void join();
