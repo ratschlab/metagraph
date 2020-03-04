@@ -14,12 +14,12 @@ import gzip
 METAGRAPH = './metagraph'
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
-graph_type_to_data = {'succinct': ('.dbg', 'vector'),
-                      'succinct': ('.dbg', 'vector_disk'),
-                      'bitmap': ('.bitmapdbg', 'vector'),
-                      'hash': ('.orhashdbg', 'vector'),
-                      'hashfast': ('.hashfastdbg', 'vector'),
-                      'hashstr': ('.hashstrdbg', 'vector')}
+graph_type_to_data = {'succinct': ('succinct', '.dbg', 'vector'),
+                      'succinct_disk': ('succinct', '.dbg', 'vector_disk'),
+                      'bitmap': ('bitmap', '.bitmapdbg', 'vector'),
+                      'hash': ('hash', '.orhashdbg', 'vector'),
+                      'hashfast': ('hashfast', '.hashfastdbg', 'vector'),
+                      'hashstr': ('hashstr', '.hashstrdbg', 'vector')}
 
 GRAPH_TYPES = [graph_type for graph_type, _ in graph_type_to_data.items()]
 
@@ -34,17 +34,18 @@ class TestBuildWeighted(unittest.TestCase):
         construct_command = '{exe} build \
                 --graph {repr} -k 20 --count-kmers --container {container} -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            repr=representation,
-            container=graph_type_to_data[representation][1],
+            repr=graph_type_to_data[representation][0],
+            container=graph_type_to_data[representation][2],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
+        
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -56,14 +57,14 @@ class TestBuildWeighted(unittest.TestCase):
         self.assertEqual('avg weight: 2.48587', params_str[4])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
-    @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    @parameterized.expand(['succinct', 'succinct_disk', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_simple_all_graphs_canonical(self, representation):
 
         construct_command = '{exe} build \
                 --graph {repr} --canonical --count-kmers --container {container} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            repr=representation,
-            container=graph_type_to_data[representation][1],
+            repr=graph_type_to_data[representation][0],
+            container=graph_type_to_data[representation][2],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -73,7 +74,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -86,9 +87,9 @@ class TestBuildWeighted(unittest.TestCase):
 
     @parameterized.expand(GRAPH_TYPES)
     def test_build_tiny_k(self, representation):
-        args = [METAGRAPH, 'build', '--graph', representation,
+        args = [METAGRAPH, 'build', '--graph', graph_type_to_data[representation][0],
                 '--count-kmers',
-                '--container', graph_type_to_data[representation][1],
+                '--container', graph_type_to_data[representation][2],
                 '-k', '2',
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
@@ -99,7 +100,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -111,11 +112,11 @@ class TestBuildWeighted(unittest.TestCase):
         self.assertEqual('avg weight: 255', params_str[4])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
-    @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    @parameterized.expand(['succinct', 'succinct_disk', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_build_tiny_k_canonical(self, representation):
-        args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
+        args = [METAGRAPH, 'build', '--graph', graph_type_to_data[representation][0], '--canonical',
                 '--count-kmers',
-                '--container', graph_type_to_data[representation][1],
+                '--container', graph_type_to_data[representation][2],
                 '-k', '2',
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
@@ -126,7 +127,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -142,8 +143,8 @@ class TestBuildWeighted(unittest.TestCase):
         construct_command = '{exe} build \
                 --graph {repr} --count-kmers --container {container} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            repr=representation,
-            container=graph_type_to_data[representation][1],
+            repr=graph_type_to_data[representation][0],
+            container=graph_type_to_data[representation][2],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -153,7 +154,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -169,8 +170,8 @@ class TestBuildWeighted(unittest.TestCase):
         construct_command = '{exe} build \
                 --graph {repr} --count-kmers --container {container} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            repr=representation,
-            container=graph_type_to_data[representation][1],
+            repr=graph_type_to_data[representation][0],
+            container=graph_type_to_data[representation][2],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -180,7 +181,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -192,13 +193,13 @@ class TestBuildWeighted(unittest.TestCase):
         self.assertEqual('avg weight: 3.68754', params_str[4])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
-    @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    @parameterized.expand(['succinct', 'succinct_disk', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_build_from_kmc_canonical(self, representation):
         construct_command = '{exe} build \
                 --graph {repr} --count-kmers --container {container} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            repr=representation,
-            container=graph_type_to_data[representation][1],
+            repr=graph_type_to_data[representation][0],
+            container=graph_type_to_data[representation][2],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -208,7 +209,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -220,13 +221,13 @@ class TestBuildWeighted(unittest.TestCase):
         self.assertEqual('avg weight: 3.68754', params_str[4])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
-    @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    @parameterized.expand(['succinct', 'succinct_disk', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_build_from_kmc_both_canonical(self, representation):
         construct_command = '{exe} build \
                 --graph {repr} --count-kmers --container {container} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            repr=representation,
-            container=graph_type_to_data[representation][1],
+            repr=graph_type_to_data[representation][0],
+            container=graph_type_to_data[representation][2],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -236,7 +237,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -265,8 +266,8 @@ class TestBuildWeighted(unittest.TestCase):
         construct_command = '{exe} build \
                 --graph {repr} -k 4 --count-kmers --container {container} --count-width {width} -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            repr=representation,
-            container=graph_type_to_data[representation][1],
+            repr=graph_type_to_data[representation][0],
+            container=graph_type_to_data[representation][2],
             width=count_width,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
@@ -277,7 +278,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -326,8 +327,8 @@ class TestBuildWeighted(unittest.TestCase):
         construct_command = '{exe} build \
                 --graph {repr} -k {k} --count-kmers --container {container} --count-width {width} -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            repr=representation,
-            container=graph_type_to_data[representation][1],
+            repr=graph_type_to_data[representation][0],
+            container=graph_type_to_data[representation][2],
             k=k,
             width=count_width,
             outfile=self.tempdir.name + '/graph',
@@ -339,7 +340,7 @@ class TestBuildWeighted(unittest.TestCase):
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][0],
+            graph=self.tempdir.name + '/graph' + graph_type_to_data[representation][1],
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
