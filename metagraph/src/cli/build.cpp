@@ -63,6 +63,11 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
+        std::string tmp_dir_str(config->tmp_dir / "XXXXXX");
+        mkdtemp(tmp_dir_str.data());
+        std::filesystem::path tmp_dir(tmp_dir_str);
+        logger->trace("Setting temporary directory to {}", tmp_dir);
+
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
             timer.reset();
@@ -78,7 +83,8 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                config->container
+                config->container,
+                tmp_dir
             );
 
             parse_sequences(files, *config, timer,
@@ -104,6 +110,7 @@ int build_graph(Config *config) {
             graph_data.extend(*next_block);
             delete next_block;
         }
+        std::filesystem::remove_all(tmp_dir);
 
         if (config->count_kmers) {
             sdsl::int_vector<> kmer_counts;

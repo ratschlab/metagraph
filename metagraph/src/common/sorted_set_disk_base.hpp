@@ -2,6 +2,7 @@
 #define __SORTED_SET_DISK_BASE_HPP__
 
 #include <cassert>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <iostream>
@@ -36,18 +37,27 @@ class SortedSetDiskBase {
     typedef ChunkedWaitQueue<value_type> result_type;
     typedef typename storage_type::iterator Iterator;
 
+    /**
+     * The number of elements in the merge queue. Should be large enough to reduce lock
+     * contention, but small enough to not lose time with memory allocation.
+     */
+    static constexpr size_t QUEUE_EL_COUNT = 30'000;
+
   public:
     SortedSetDiskBase(
-            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-            size_t num_threads = 1,
-            size_t reserved_num_elements = 1e6,
-            const std::string &chunk_file_prefix = "/tmp/chunk_",
-            std::function<void(const T &)> on_item_pushed = [](const T &) {},
-            size_t num_last_elements_cached = 100)
+            std::function<void(storage_type *)> cleanup,
+            size_t num_threads,
+            size_t reserved_num_elements,
+            const std::filesystem::path &tmp_dir,
+            std::function<void(const T &)> on_item_pushed,
+            size_t num_last_elements_cached)
         : num_threads_(num_threads),
-          chunk_file_prefix_(chunk_file_prefix),
-          merge_queue_(reserved_num_elements, num_last_elements_cached, on_item_pushed),
+          chunk_file_prefix_(tmp_dir / "chunk_"),
+          merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
+                       num_last_elements_cached,
+                       on_item_pushed),
           cleanup_(cleanup) {
+        std::filesystem::create_directory(tmp_dir);
         if (reserved_num_elements == 0) {
             logger->error("SortedSetDisk buffer cannot have size 0");
             std::exit(EXIT_FAILURE);
@@ -57,32 +67,6 @@ class SortedSetDiskBase {
 
     virtual ~SortedSetDiskBase() {
         merge_queue_.shutdown(); // make sure the data was processed
-    }
-
-    //TODO: move to private once CL is reviewed
-    /**
-     * Prepare inserting the data between #begin and #end into the buffer. If the
-     * buffer is full, the data is processed using #shink_data(), then written to disk,
-     * after which the buffer is cleared.
-     */
-    template <class Iterator>
-    size_t prepare_insert(Iterator begin, Iterator end) {
-        uint64_t batch_size = end - begin;
-
-        assert(begin <= end && batch_size <= data_.capacity());
-
-        if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
-            std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
-            shrink_data();
-
-            dump_to_file_async();
-        }
-
-        size_t offset = data_.size();
-        // resize to the future size after insertion (no reallocation will happen)
-        data_.resize(data_.size() + batch_size);
-
-        return offset;
     }
 
     size_t buffer_size() const { return data_.capacity(); }
@@ -208,10 +192,32 @@ class SortedSetDiskBase {
     template <typename Iterator>
     Iterator safe_advance(const Iterator &it, const Iterator &end, size_t step) {
         assert(it <= end);
-        if (it>end) {
-            printf("bum");
-        }
         return static_cast<size_t>(end - it) < this->buffer_size() ? end : it + step;
+    }
+
+    /**
+     * Prepare inserting the data between #begin and #end into the buffer. If the
+     * buffer is full, the data is processed using #shink_data(), then written to disk,
+     * after which the buffer is cleared.
+     */
+    template <class Iterator>
+    size_t prepare_insert(Iterator begin, Iterator end) {
+        uint64_t batch_size = end - begin;
+
+        assert(begin <= end && batch_size <= data_.capacity());
+
+        if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
+            std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
+            shrink_data();
+
+            dump_to_file_async();
+        }
+
+        size_t offset = data_.size();
+        // resize to the future size after insertion (no reallocation will happen)
+        data_.resize(data_.size() + batch_size);
+
+        return offset;
     }
 
     /**

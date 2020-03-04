@@ -41,7 +41,7 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
      * @param cleanup function to run each time a chunk is written to disk; typically
      * performs cleanup operations, such as removing redundant dummy source k-mers
      * @param num_threads the number of threads to use by the sorting algorithm
-     * @param chunk_file_prefix the prefix of the temporary files where chunks are
+     * @param tmp_dir the prefix of the temporary files where chunks are
      * written before being merged
      * @param container_size the size of the in-memory container that is written
      * to disk when full
@@ -50,15 +50,15 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
             std::function<void(storage_type *)> cleanup = [](storage_type *) {},
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
-            const std::string &chunk_file_prefix = "/tmp/chunk_",
+            const std::filesystem::path &tmp_dir = "/tmp/",
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100)
         : SortedSetDiskBase<T>(cleanup,
-                            num_threads,
-                            reserved_num_elements,
-                            chunk_file_prefix,
-                            on_item_pushed,
-                            num_last_elements_cached) {}
+                               num_threads,
+                               reserved_num_elements,
+                               tmp_dir,
+                               on_item_pushed,
+                               num_last_elements_cached) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is

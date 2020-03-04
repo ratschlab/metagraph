@@ -1,6 +1,7 @@
 #ifndef __CONFIG_HPP__
 #define __CONFIG_HPP__
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -181,6 +182,8 @@ class Config {
     GraphType graph_type = SUCCINCT;
 
     mg::kmer::ContainerType container = mg::kmer::ContainerType::VECTOR;
+
+    std::filesystem::path tmp_dir = "/tmp/";
 
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 
