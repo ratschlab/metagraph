@@ -68,13 +68,13 @@ class KmerCollector {
     void add_sequence(std::string_view sequence, uint64_t count = 1) {
         // push read to the processing queue
         if (sequence.size() >= k_)
-            batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, sequence, count);
+            batch_accumulator_.push_and_pay(sequence.size(), sequence, count);
     }
 
     void add_sequence(std::string&& sequence, uint64_t count = 1) {
         // push read to the processing queue
         if (sequence.size() >= k_)
-            batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, std::move(sequence), count);
+            batch_accumulator_.push_and_pay(sequence.size(), std::move(sequence), count);
     }
 
     size_t buffer_size() const;
