@@ -12,13 +12,14 @@ import os
 METAGRAPH = './metagraph'
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
-graph_file_extension = {'succinct': '.dbg',
-                        'bitmap': '.bitmapdbg',
-                        'hash': '.orhashdbg',
-                        'hashfast': '.hashfastdbg',
-                        'hashstr': '.hashstrdbg'}
+graph_type_to_data = {'succinct': ('.dbg', 'vector'),
+                      'succinct': ('.dbg', 'vector_disk'),
+                      'bitmap': ('.bitmapdbg', 'vector'),
+                      'hash': ('.orhashdbg', 'vector'),
+                      'hashfast': ('.hashfastdbg', 'vector'),
+                      'hashstr': ('.hashstrdbg', 'vector')}
 
-GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
+GRAPH_TYPES = [graph_type for graph_type, _ in graph_type_to_data.items()]
 
 
 class TestBuild(unittest.TestCase):
@@ -33,9 +34,10 @@ class TestBuild(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs(self, representation):
 
-        construct_command = '{exe} build --graph {repr} -k 20 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --graph {repr} --container {container} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
+            container=graph_type_to_data[representation][1],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -43,7 +45,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -53,9 +55,10 @@ class TestBuild(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_simple_bloom_graph(self, representation):
 
-        construct_command = '{exe} build --graph {repr} -k 20 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --graph {repr} --container {container} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
+            container=graph_type_to_data[representation][1],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -63,7 +66,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -99,6 +102,7 @@ class TestBuild(unittest.TestCase):
                 --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
+            container=graph_type_to_data[representation][1],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -106,7 +110,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -117,6 +121,7 @@ class TestBuild(unittest.TestCase):
     def test_build_tiny_k(self, representation):
         args = [METAGRAPH, 'build', '--graph', representation,
                 '-k', '2',
+                '--container', graph_type_to_data[representation][1],
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
         construct_command = ' '.join(args)
@@ -124,7 +129,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 2', params_str[0])
@@ -136,6 +141,7 @@ class TestBuild(unittest.TestCase):
     def test_build_tiny_k_canonical(self, representation):
         args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
                 '-k', '2',
+                '--container', graph_type_to_data[representation][1],
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
         construct_command = ' '.join(args)
@@ -143,7 +149,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 2', params_str[0])
@@ -152,9 +158,10 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand(GRAPH_TYPES)
     def test_build_from_kmc(self, representation):
-        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --graph {repr} --container {container} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
+            container=graph_type_to_data[representation][1],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -162,7 +169,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -171,9 +178,10 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand(GRAPH_TYPES)
     def test_build_from_kmc_both(self, representation):
-        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --graph {repr} --container {container} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
+            container=graph_type_to_data[representation][1],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -181,7 +189,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -191,9 +199,10 @@ class TestBuild(unittest.TestCase):
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_build_from_kmc_canonical(self, representation):
         construct_command = '{exe} build \
-                --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
+                --graph {repr} --container {container} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
+            container=graph_type_to_data[representation][1],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -201,7 +210,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -211,9 +220,10 @@ class TestBuild(unittest.TestCase):
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_build_from_kmc_both_canonical(self, representation):
         construct_command = '{exe} build \
-                --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
+                --graph {repr} --container {container} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
+            container=graph_type_to_data[representation][1],
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -221,7 +231,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -233,7 +243,8 @@ class TestBuild(unittest.TestCase):
 
         # Build chunks
         for suffix in ['$', 'A', 'C', 'G', 'T']:
-            construct_command = '{exe} build --graph {repr} -k 11 --suffix {suffix} -o {outfile} {input}'.format(
+            construct_command = '{exe} build \
+                                --graph {repr} -k 11 --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
                 outfile=self.tempdir.name + '/graph',
@@ -257,7 +268,7 @@ class TestBuild(unittest.TestCase):
 
         # Check graph
         res = self.__get_stats(self.tempdir.name + '/graph_from_chunks'
-                                    + graph_file_extension[representation])
+                               + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -294,7 +305,7 @@ class TestBuild(unittest.TestCase):
 
         # Check graph
         res = self.__get_stats(self.tempdir.name + '/graph_from_chunks'
-                                    + graph_file_extension[representation])
+                               + graph_type_to_data[representation][0])
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
