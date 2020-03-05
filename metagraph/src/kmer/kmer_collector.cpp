@@ -199,45 +199,57 @@ KmerCollector<KMER, KmerExtractor, Container>
                 bool both_strands_mode,
                 Sequence&& filter_suffix_encoded,
                 size_t num_threads,
-                double memory_preallocated)
+                double memory_preallocated,
+                const std::filesystem::path &tmp_dir)
       : k_(k),
-        kmers_(get_cleanup<Extractor, typename Container::storage_type>(filter_suffix_encoded.empty()),
-               num_threads,
-               memory_preallocated / sizeof(typename Container::value_type)),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
         batch_accumulator_([this](auto&& sequences) { add_batch(std::move(sequences)); },
                            kMaxKmersChunkSize, kMaxKmersChunkSize, kMaxKmersChunkSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
-        both_strands_mode_(both_strands_mode) {
+        both_strands_mode_(both_strands_mode),
+        tmp_dir_(tmp_dir) {
     assert(num_threads_ > 0);
-    if ((utils::is_instance<Container, common::SortedSetDisk> {}
-         || utils::is_instance<Container, common::SortedMultisetDisk> {})
-        && filter_suffix_encoded_.size()) {
-        common::logger->error("Disk based sorting does not support chunking");
-        exit(1);
+    auto cleanup = get_cleanup<Extractor, typename Container::storage_type>(
+        filter_suffix_encoded_.empty()
+    );
+    size_t num_elements = memory_preallocated / sizeof(typename Container::value_type);
+    if constexpr((utils::is_instance<Container, common::SortedSetDisk> {}
+                    || utils::is_instance<Container, common::SortedMultisetDisk> {})) {
+        if (!filter_suffix_encoded_.empty()) {
+            common::logger->error("Disk based sorting does not support chunking");
+            exit(1);
+        }
+        kmers_ = std::make_unique<Container>(cleanup, num_threads, num_elements, tmp_dir);
+    } else {
+        kmers_ = std::make_unique<Container>(cleanup, num_threads, num_elements);
     }
     common::logger->trace(
             "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
-            kmers_.buffer_size() * sizeof(typename Container::value_type) >> 20,
-            kmers_.buffer_size());
+            kmers_->buffer_size() * sizeof(typename Container::value_type) >> 20,
+            kmers_->buffer_size());
+}
+
+template <typename KMER, class KmerExtractor, class Container>
+size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() {
+    return kmers_->buffer_size();
 }
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
-    if constexpr (std::is_same_v<KMER, typename Container::value_type>) {
-        thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>, generate_sequences,
-                             k_, both_strands_mode_, &kmers_, filter_suffix_encoded_, true);
+    if constexpr(std::is_same_v<KMER, typename Container::value_type>) {
+        thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
+                             generate_sequences,
+                             k_, both_strands_mode_, kmers_.get(),
+                             filter_suffix_encoded_, true);
     } else {
         thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallStringCount callback) {
-                                 generate_sequences([&](const std::string &seq) {
-                                     callback(seq, 1);
-                                 });
+                                 generate_sequences([&](const std::string &seq) { callback(seq, 1); });
                              },
-                             k_, both_strands_mode_, &kmers_,
+                             k_, both_strands_mode_, kmers_.get(),
                              filter_suffix_encoded_);
     }
 }
@@ -252,13 +264,12 @@ void KmerCollector<KMER, KmerExtractor, Container>
                                      callback(seq);
                                  });
                              },
-                             k_, both_strands_mode_, &kmers_,
-                             filter_suffix_encoded_,
-                             true);
+                             k_, both_strands_mode_, kmers_.get(),
+                             filter_suffix_encoded_, true);
     } else {
         thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
                              generate_sequences,
-                             k_, both_strands_mode_, &kmers_,
+                             k_, both_strands_mode_, kmers_.get(),
                              filter_suffix_encoded_);
     }
 }

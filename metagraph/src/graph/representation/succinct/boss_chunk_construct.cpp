@@ -78,7 +78,9 @@ template <typename Container>
 void recover_source_dummy_nodes(size_t k,
                                 Container *kmers,
                                 size_t num_threads,
-                                ThreadPool & /* async_worker */) {
+                                ThreadPool & /* async_worker */,
+                                size_t /* buffer_size */,
+                                const std::filesystem::path & /* tmp_dir*/) {
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
@@ -229,13 +231,15 @@ template <typename T>
 void recover_source_dummy_nodes(size_t k,
                                 common::ChunkedWaitQueue<T> *kmers,
                                 size_t num_threads,
-                                ThreadPool &async_worker) {
+                                ThreadPool &async_worker,
+                                size_t buffer_size,
+                                const std::filesystem::path &tmp_dir) {
     using KMER = std::remove_reference_t<decltype(utils::get_first(*(kmers->begin())))>;
 
     // name of the file containing dummy k-mers of given prefix length
-    //TODO(ddanciu): make sure these path names are unique and can be changed
-    const auto get_file_name
-            = [](uint32_t pref_len) { return "/tmp/dummy" + std::to_string(pref_len); };
+    const auto get_file_name = [&tmp_dir](uint32_t pref_len) {
+        return tmp_dir / ("dummy_l" + std::to_string(pref_len));
+    };
 
     const auto no_cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
 
@@ -248,7 +252,7 @@ void recover_source_dummy_nodes(size_t k,
         return std::make_pair(filename, std::move(f));
     };
 
-    const std::string file_name = "/tmp/original_and_dummy_l1";
+    const std::string file_name = tmp_dir / "original_and_dummy_l1";
     files_to_merge.push_back(create_stream(file_name));
     files_to_merge.reserve(k + 1); // avoid re-allocations as we keep refs to elements
     std::ofstream *dummy_l1 = &files_to_merge.back().second;
@@ -260,10 +264,12 @@ void recover_source_dummy_nodes(size_t k,
     files_to_merge.push_back(create_stream(file_name_l2));
     std::ofstream *dummy_l2 = &files_to_merge.back().second;
 
+    const filesystem::path tmp_path1 = tmp_dir / "dummy_source1";
+    const filesystem::path tmp_path2 = tmp_dir / "dummy_source2";
+
     // this will contain dummy k-mers of prefix length 2
-    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads,
-                                                kmers->buffer_size(), "/tmp/chunk_",
-                                                file_writer(*dummy_l2));
+    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, num_threads, buffer_size,
+                                                tmp_path1, file_writer(*dummy_l2));
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
@@ -297,8 +303,8 @@ void recover_source_dummy_nodes(size_t k,
                   num_dummy_parent_kmers);
 
     // generate dummy k-mers of prefix length 3..k
-    common::SortedSetDisk<T> sorted_dummy_kmers2(no_cleanup, num_threads,
-                                                 kmers->buffer_size(), "/tmp/chunk2_");
+    common::SortedSetDisk<T> sorted_dummy_kmers2(no_cleanup, num_threads, buffer_size,
+                                                 tmp_path2);
     common::SortedSetDisk<T> *source = &sorted_dummy_kmers;
     common::SortedSetDisk<T> *dest = &sorted_dummy_kmers2;
     for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
@@ -370,12 +376,14 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          uint8_t bits_per_count = 0,
                          const std::string &filter_suffix = "",
                          size_t num_threads = 1,
-                         double memory_preallocated = 0)
+                         double memory_preallocated = 0,
+                         const std::filesystem::path &tmp_dir = "/tmp")
           : kmer_collector_(k + 1,
                             canonical_mode,
                             encode_filter_suffix_boss(filter_suffix),
                             num_threads,
-                            memory_preallocated),
+                            memory_preallocated,
+                            tmp_dir),
             bits_per_count_(bits_per_count) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
@@ -401,7 +409,9 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
             recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
                                        &kmers,
                                        kmer_collector_.num_threads(),
-                                       async_worker_);
+                                       async_worker_,
+                                       kmer_collector_.buffer_size(),
+                                       kmer_collector_.tmp_dir());
 
             logger->trace("Dummy source k-mers were reconstructed in {} sec",
                           timer.elapsed());
@@ -496,15 +506,17 @@ using KmerMultsetDiskVector32
         = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultisetDisk<KMER, uint32_t>>;
 
 std::unique_ptr<IBOSSChunkConstructor>
-IBOSSChunkConstructor
-::initialize(size_t k,
-             bool canonical_mode,
-             uint8_t bits_per_count,
-             const std::string &filter_suffix,
-             size_t num_threads,
-             double memory_preallocated,
-             kmer::ContainerType container_type) {
-#define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, num_threads, memory_preallocated
+IBOSSChunkConstructor::initialize(size_t k,
+                                  bool canonical_mode,
+                                  uint8_t bits_per_count,
+                                  const std::string &filter_suffix,
+                                  size_t num_threads,
+                                  double memory_preallocated,
+                                  kmer::ContainerType container_type,
+                                  const std::filesystem::path &tmp_dir) {
+#define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
+                   num_threads, memory_preallocated, tmp_dir
+
     switch (container_type) {
         case kmer::ContainerType::VECTOR:
             if (!bits_per_count) {

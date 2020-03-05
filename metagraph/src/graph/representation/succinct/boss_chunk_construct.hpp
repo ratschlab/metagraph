@@ -3,6 +3,7 @@
 
 #include <string>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 
 #include "kmer/kmer_collector_config.hpp"
@@ -24,7 +25,8 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                const std::string &filter_suffix = "",
                size_t num_threads = 1,
                double memory_preallocated = 0,
-               mg::kmer::ContainerType container_type = mg::kmer::ContainerType::VECTOR);
+               mg::kmer::ContainerType container_type = mg::kmer::ContainerType::VECTOR,
+               const std::filesystem::path& tmp_dir = "/tmp");
 
     virtual void add_sequence(std::string_view sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
