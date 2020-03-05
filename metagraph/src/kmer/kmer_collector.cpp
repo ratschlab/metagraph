@@ -277,8 +277,13 @@ void KmerCollector<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
-    add_sequences([buffered_sequences{std::move(sequences)}](CallStringCount callback) {
-        for (const auto &[seq, count] : buffered_sequences) {
+    // we capture only a pointer to #sequences in the lambda expression to avoid
+    // copying the sequences when the lambda is transformed to a callback which is passed
+    // to std::bind by const reference in #add_sequences and hence is copied with all
+    // its parameters captured.
+    auto seqs = std::make_shared<std::vector<std::pair<std::string, uint64_t>>>(std::move(sequences));
+    add_sequences([seqs](CallStringCount callback) {
+        for (const auto &[seq, count] : *seqs) {
             callback(seq, count);
         }
     });
