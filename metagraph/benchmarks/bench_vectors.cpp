@@ -13,7 +13,7 @@ static void BM_bit_vector_query_rank(benchmark::State& state) {
     generator.set_seed(42);
 
     bit_vector_type bv(
-        generator.generate_random_column(size, density_percent / 100.)->to_vector()
+        generator.generate_random_column(size, density_percent / 100.)
     );
 
     uint64_t i = 0;
@@ -47,7 +47,7 @@ static void BM_bit_vector_sequential_query_rank(benchmark::State& state) {
     generator.set_seed(42);
 
     bit_vector_type bv(
-        generator.generate_random_column(size, density_percent / 100.)->to_vector()
+        generator.generate_random_column(size, density_percent / 100.)
     );
 
     uint64_t i = 0;
@@ -81,7 +81,7 @@ static void BM_bit_vector_query_access(benchmark::State& state) {
     generator.set_seed(42);
 
     bit_vector_type bv(
-        generator.generate_random_column(size, density_percent / 100.)->to_vector()
+        generator.generate_random_column(size, density_percent / 100.)
     );
 
     uint64_t i = 0;
@@ -115,7 +115,7 @@ static void BM_bit_vector_query_inverse_select(benchmark::State& state) {
     generator.set_seed(42);
 
     bit_vector_type bv(
-        generator.generate_random_column(size, density_percent / 100.)->to_vector()
+        generator.generate_random_column(size, density_percent / 100.)
     );
 
     uint64_t i = 0;
@@ -149,7 +149,7 @@ static void BM_bit_vector_query_select(benchmark::State& state) {
     generator.set_seed(42);
 
     bit_vector_type bv(
-        generator.generate_random_column(size, density_percent / 100.)->to_vector()
+        generator.generate_random_column(size, density_percent / 100.)
     );
 
     uint64_t i = 0;

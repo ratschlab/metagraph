@@ -47,7 +47,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     DataGenerator generator;
     generator.set_seed(42);
 
-    auto other = generator.generate_random_column(n, d)->convert_to<BitVector>();
+    BitVector other(generator.generate_random_column(n, d));
 
     if (static_cast<int64_t>(other.rank1(1)) < -1
             || static_cast<int64_t>(other.rank0(1)) < -1)

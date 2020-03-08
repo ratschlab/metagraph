@@ -561,7 +561,7 @@ TYPED_TEST(BitVectorTest, add_to_all_zero) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
             sdsl::bit_vector vector(size, false);
-            TypeParam bvs(gen.generate_random_column(size, density)->to_vector());
+            TypeParam bvs(gen.generate_random_column(size, density));
             bvs.add_to(&vector);
             EXPECT_EQ(bvs.to_vector(), vector);
         }
@@ -573,7 +573,7 @@ TYPED_TEST(BitVectorTest, add_to_all_one) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
             sdsl::bit_vector vector(size, true);
-            TypeParam bvs(gen.generate_random_column(size, density)->to_vector());
+            TypeParam bvs(gen.generate_random_column(size, density));
             bvs.add_to(&vector);
             EXPECT_EQ(sdsl::bit_vector(size, true), vector);
         }
@@ -584,8 +584,7 @@ TYPED_TEST(BitVectorTest, add_to_same) {
     for (uint64_t size : { 0, 10, 100, 1000000 }) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
-            auto bv = gen.generate_random_column(size, density);
-            sdsl::bit_vector vector = bv->to_vector();
+            sdsl::bit_vector vector = gen.generate_random_column(size, density);
             TypeParam bvs(vector);
             bvs.add_to(&vector);
             EXPECT_EQ(bvs.to_vector(), vector);
@@ -597,11 +596,11 @@ TYPED_TEST(BitVectorTest, add_all_zero) {
     for (uint64_t size : { 0, 10, 100, 1000000 }) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
-            auto bv = gen.generate_random_column(size, density);
-            sdsl::bit_vector vector = bv->to_vector();
+            sdsl::bit_vector bv = gen.generate_random_column(size, density);
+            sdsl::bit_vector vector = bv;
             TypeParam bvs(sdsl::bit_vector(size, false));
             bvs.add_to(&vector);
-            EXPECT_EQ(bv->to_vector(), vector);
+            EXPECT_EQ(bv, vector);
         }
     }
 }
@@ -610,8 +609,7 @@ TYPED_TEST(BitVectorTest, add_all_ones) {
     for (uint64_t size : { 0, 10, 100, 1000000 }) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
-            auto bv = gen.generate_random_column(size, density);
-            sdsl::bit_vector vector = bv->to_vector();
+            sdsl::bit_vector vector = gen.generate_random_column(size, density);
             TypeParam bvs(sdsl::bit_vector(size, true));
             bvs.add_to(&vector);
             EXPECT_EQ(sdsl::bit_vector(size, true), vector);
