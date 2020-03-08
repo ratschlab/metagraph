@@ -13,7 +13,7 @@ static void BM_count_ones(benchmark::State& state) {
     generator.set_seed(42);
 
     sdsl::bit_vector bv
-        = generator.generate_random_column(1'000'000, density_percent / 100.)->to_vector();
+        = generator.generate_random_column(1'000'000, density_percent / 100.);
 
     for (auto _ : state) {
         count_ones(bv, 640, 640 + size);
@@ -40,7 +40,7 @@ static void BM_bit_vector_or_call_ones(benchmark::State& state) {
     generator.set_seed(42);
 
     bit_vector_type bv(
-        generator.generate_random_column(size, density_percent / 100.)->to_vector()
+        generator.generate_random_column(size, density_percent / 100.)
     );
 
     sdsl::bit_vector result(bv.size(), false);
@@ -79,7 +79,7 @@ static void BM_bit_vector_or_get_int(benchmark::State& state) {
     generator.set_seed(42);
 
     bit_vector_type bv(
-        generator.generate_random_column(size, density_percent / 100.)->to_vector()
+        generator.generate_random_column(size, density_percent / 100.)
     );
 
     sdsl::bit_vector result(bv.size(), false);
@@ -124,10 +124,10 @@ static void BM_subvector_via_call_ones(benchmark::State& state) {
     generator.set_seed(42);
 
     sdsl::bit_vector bv
-        = generator.generate_random_column(size, density_percent / 100.)->to_vector();
+        = generator.generate_random_column(size, density_percent / 100.);
 
     sdsl::bit_vector reference
-        = generator.generate_random_column(size, density_percent / 100.)->to_vector();
+        = generator.generate_random_column(size, density_percent / 100.);
 
     reference |= bv;
 
@@ -180,10 +180,10 @@ static void BM_subvector_via_pext(benchmark::State& state) {
     generator.set_seed(42);
 
     sdsl::bit_vector bv
-        = generator.generate_random_column(size, density_percent / 100.)->to_vector();
+        = generator.generate_random_column(size, density_percent / 100.);
 
     sdsl::bit_vector reference
-        = generator.generate_random_column(size, density_percent / 100.)->to_vector();
+        = generator.generate_random_column(size, density_percent / 100.);
 
     reference |= bv;
 

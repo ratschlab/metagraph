@@ -9,6 +9,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 
 namespace mg {
@@ -138,7 +139,7 @@ static void BM_BRWTQueryRows(benchmark::State& state) {
     );
 
     std::vector<uint64_t> indexes;
-    generator.generate_random_column(rows_arg, 1. / 100)->call_ones(
+    call_ones(generator.generate_random_column(rows_arg, 1. / 100),
         [&](uint64_t i) { indexes.push_back(i); }
     );
 
