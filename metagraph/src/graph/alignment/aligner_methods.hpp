@@ -92,10 +92,11 @@ class MEMSeeder : public Seeder<NodeType> {
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
     std::string_view query_;
-    std::vector<NodeType> query_nodes_;
     bool orientation_;
     std::vector<score_t> partial_sum;
     const std::unique_ptr<bitmap> is_mem_terminus_;
+    std::vector<NodeType> query_nodes_;
+    std::vector<uint8_t> query_node_flags_;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
