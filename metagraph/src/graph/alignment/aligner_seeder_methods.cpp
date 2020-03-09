@@ -148,6 +148,15 @@ void MEMSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
     assert(config_.match_score(query_) == partial_sum.back());
     assert(config_.get_row(query_.front())[query_.front()] == partial_sum[1]);
     assert(!partial_sum.front());
+
+    query_node_flags_.resize(query_nodes_.size());
+
+    std::transform(query_nodes_.begin(), query_nodes_.end(), query_node_flags_.begin(),
+                   [&](auto i) {
+                       return i != DeBruijnGraph::npos
+                           ? static_cast<uint8_t>(!(*is_mem_terminus_)[i]) | 2
+                           : 0;
+                   });
 }
 
 // TODO: make this work with unmasked DBGSuccinct
@@ -157,35 +166,36 @@ void MEMSeeder<NodeType>
     size_t k = graph_.get_k();
 
     // find start of MEM
-    auto it = query_nodes_.begin();
+    auto it = query_node_flags_.begin();
 
-    while ((it = std::find_if(it, query_nodes_.end(),
-                              [](NodeType node) { return node != DeBruijnGraph::npos; }))
-            < query_nodes_.end()) {
+    while ((it = std::find_if(it, query_node_flags_.end(),
+                              [](uint8_t flags) { return flags & 2; }))
+            < query_node_flags_.end()) {
         // find end of MEM
-        auto next = std::find_if(
-            it, query_nodes_.end(),
-            [&](NodeType node) { return node == DeBruijnGraph::npos || (*is_mem_terminus_)[node]; }
-        );
+        auto next = std::find_if(it, query_node_flags_.end(),
+                                 [](uint8_t flags) { return flags != 3; });
 
-        if (next != query_nodes_.end() && *next != DeBruijnGraph::npos)
+        if (next != query_node_flags_.end() && ((*next) & 2))
             ++next;
 
         assert(next > it);
         assert(next <= query_nodes_.end());
 
         // compute the correct string offsets
-        const char *begin_it = query_.data() + (it - query_nodes_.begin());
-        const char *end_it = (next == query_nodes_.end())
+        const char *begin_it = query_.data() + (it - query_node_flags_.begin());
+        const char *end_it = (next == query_node_flags_.end())
             ? query_.data() + query_.size()
-            : query_.data() + (next - query_nodes_.begin()) + k - 1;
+            : query_.data() + (next - query_node_flags_.begin()) + k - 1;
 
         score_t match_score = partial_sum[end_it - query_.data()]
             - partial_sum[begin_it - query_.data()];
 
+        auto node_begin_it = query_nodes_.begin() + (it - query_node_flags_.begin());
+        auto node_end_it = node_begin_it + (next - it);
+
         if (match_score > config_.min_cell_score) {
             callback(Alignment<NodeType>(std::string_view(begin_it, end_it - begin_it),
-                                         std::vector<NodeType>(it, next),
+                                         std::vector<NodeType>(node_begin_it, node_end_it),
                                          match_score,
                                          begin_it - query_.data(),
                                          orientation_));
