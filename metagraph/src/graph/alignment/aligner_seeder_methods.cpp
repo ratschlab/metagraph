@@ -9,6 +9,10 @@ void ExactSeeder<NodeType>::initialize(std::string_view query, bool orientation)
     query_ = query;
     orientation_ = orientation;
     query_nodes_.clear();
+
+    if (query_.size() < graph_.get_k())
+        return;
+
     query_nodes_.reserve(query_.size() - graph_.get_k() + 1);
     graph_.map_to_nodes_sequentially(query_, [&](auto i) { query_nodes_.push_back(i); });
     assert(query_nodes_.size() == query_.size() - graph_.get_k() + 1);
@@ -127,6 +131,10 @@ template <typename NodeType>
 void MEMSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
     query_ = query;
     orientation_ = orientation;
+
+    if (query_.size() < graph_.get_k())
+        return;
+
     query_nodes_.clear();
     query_nodes_.reserve(query.size() - graph_.get_k() + 1);
     graph_.map_to_nodes_sequentially(query, [&](auto i) { query_nodes_.push_back(i); });
