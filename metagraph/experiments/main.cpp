@@ -118,6 +118,13 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     }
     double random_rank = timer.elapsed() / num_iterations;
 
+    // Random conditional rank time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size(); i < num_iterations; ++i) {
+        result += another.conditional_rank1((i * 87'178'291'199) % size).second;
+    }
+    double random_cond_rank = timer.elapsed() / num_iterations;
+
     // Random select time
     timer.reset();
     double random_select = 0.0 / 0.0;
@@ -155,6 +162,15 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     }
     double sequential_rank = timer.elapsed() / num_iterations;
 
+    // Sequential conditional rank time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size(); i < num_iterations; ++i) {
+        if (j == size)
+            j = 0;
+        result += another.conditional_rank1(j++).second;
+    }
+    double sequential_cond_rank = timer.elapsed() / num_iterations;
+
     // Sequential select time
     double sequential_select = 0.0 / 0.0;
     if (another.num_set_bits() && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
@@ -183,14 +199,11 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
               << "\t" << 1. * serialized_size * 8 / n
               << "\t" << RAM
               << "\t" << 1. * predicted_size / another.size()
-              << "\t" << random_access
-              << "\t" << random_access_word
-              << "\t" << random_rank
-              << "\t" << random_select
-              << "\t" << sequential_access
-              << "\t" << sequential_access_word
-              << "\t" << sequential_rank
-              << "\t" << sequential_select
+              << "\t" << random_access      << "\t" << sequential_access
+              << "\t" << random_access_word << "\t" << sequential_access_word
+              << "\t" << random_rank        << "\t" << sequential_rank
+              << "\t" << random_select      << "\t" << sequential_select
+              << "\t" << random_cond_rank   << "\t" << sequential_cond_rank
               << std::endl;
 }
 

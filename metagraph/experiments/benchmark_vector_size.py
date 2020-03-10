@@ -50,17 +50,22 @@ plt.rcParams.update({ 'font.size': 22 })
 figsize = 8
 
 access_time = lines[:, 7].astype(float)
-access_word_time = lines[:, 8].astype(float)
-rank_time = lines[:, 9].astype(float)
-select_time = lines[:, 10].astype(float)
+seq_access_time = lines[:, 8].astype(float)
 
-seq_access_time = lines[:, 11].astype(float)
-seq_access_word_time = lines[:, 12].astype(float)
-seq_rank_time = lines[:, 13].astype(float)
+access_word_time = lines[:, 9].astype(float)
+seq_access_word_time = lines[:, 10].astype(float)
+
+rank_time = lines[:, 11].astype(float)
+seq_rank_time = lines[:, 12].astype(float)
+
+select_time = lines[:, 13].astype(float)
 seq_select_time = lines[:, 14].astype(float)
 
+cond_rank_time = lines[:, 15].astype(float)
+seq_cond_rank_time = lines[:, 16].astype(float)
+
 for vs in np.unique(vector_size):
-    fig, ax = plt.subplots(5, 2, figsize=(figsize * 1.4 * 2, figsize * 3.7))
+    fig, ax = plt.subplots(6, 2, figsize=(figsize * 1.4 * 2, figsize * 4.7))
 
     ms = np.linspace(10, 4, len(np.unique(method)))
 
@@ -73,10 +78,12 @@ for vs in np.unique(vector_size):
             ax=ax[1, 0], label=m, marker='o', ms=ms[i])
         sns.lineplot(dens[idx], rank_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[2, 0], label=m, marker='o', ms=ms[i])
-        sns.lineplot(dens[idx], select_time[(method == m) & (vector_size == vs)][idx],
+        sns.lineplot(dens[idx], cond_rank_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[3, 0], label=m, marker='o', ms=ms[i])
-        sns.lineplot(dens[idx], RAM_per_entry[(method == m) & (vector_size == vs)][idx],
+        sns.lineplot(dens[idx], select_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[4, 0], label=m, marker='o', ms=ms[i])
+        sns.lineplot(dens[idx], RAM_per_entry[(method == m) & (vector_size == vs)][idx],
+            ax=ax[5, 0], label=m, marker='o', ms=ms[i])
 
         sns.lineplot(dens[idx], seq_access_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[0, 1], label=m, marker='o', ms=ms[i])
@@ -84,22 +91,26 @@ for vs in np.unique(vector_size):
             ax=ax[1, 1], label=m, marker='o', ms=ms[i])
         sns.lineplot(dens[idx], seq_rank_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[2, 1], label=m, marker='o', ms=ms[i])
-        sns.lineplot(dens[idx], seq_select_time[(method == m) & (vector_size == vs)][idx],
+        sns.lineplot(dens[idx], seq_cond_rank_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[3, 1], label=m, marker='o', ms=ms[i])
-        sns.lineplot(dens[idx], bits_per_entry[(method == m) & (vector_size == vs)][idx],
+        sns.lineplot(dens[idx], seq_select_time[(method == m) & (vector_size == vs)][idx],
             ax=ax[4, 1], label=m, marker='o', ms=ms[i])
+        sns.lineplot(dens[idx], bits_per_entry[(method == m) & (vector_size == vs)][idx],
+            ax=ax[5, 1], label=m, marker='o', ms=ms[i])
 
     ax[0, 0].set_title('Random Access')
     ax[1, 0].set_title('Random Access 64 Bits Word')
     ax[2, 0].set_title('Random Rank')
-    ax[3, 0].set_title('Random Select')
-    ax[4, 0].set_title('RAM')
+    ax[3, 0].set_title('Random Rank-if-Access')
+    ax[4, 0].set_title('Random Select')
+    ax[5, 0].set_title('RAM')
 
     ax[0, 1].set_title('Sequential Access')
     ax[1, 1].set_title('Sequential Access 64 Bits Word')
     ax[2, 1].set_title('Sequential Rank')
-    ax[3, 1].set_title('Sequential Select')
-    ax[4, 1].set_title('Serialized Size')
+    ax[3, 1].set_title('Sequential Rank-if-Access')
+    ax[4, 1].set_title('Sequential Select')
+    ax[5, 1].set_title('Serialized Size')
 
     for axis_ in ax:
         for axis in axis_:
@@ -109,8 +120,8 @@ for vs in np.unique(vector_size):
             axis.legend(loc='upper left', fontsize=18, bbox_to_anchor=(1.0, 0.95), ncol=1)
             axis.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
 
-    ax[4, 0].set_ylabel('Bits per entry')
-    ax[4, 1].set_ylabel('Bits per entry')
+    ax[5, 0].set_ylabel('Bits per entry')
+    ax[5, 1].set_ylabel('Bits per entry')
 
     plt.suptitle('Size of vectors: {:.1e}'.format(vs), size=28)
     plt.tight_layout()
