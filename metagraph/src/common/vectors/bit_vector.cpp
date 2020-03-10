@@ -891,8 +891,21 @@ bit_vector_rrr<log_block_size>::inverse_select(uint64_t id) const {
         return bit_vector::inverse_select(id);
     } else {
         std::pair<bool, uint64_t> pair = vector_.inverse_select(id);
-        if (pair.first) {
-            pair.second += 1;
+        pair.second += pair.first;
+        return pair;
+    }
+}
+
+template <size_t log_block_size>
+std::pair<bool, uint64_t>
+bit_vector_rrr<log_block_size>::inverse_select(uint64_t id, bool condition) const {
+    if constexpr(kBlockSize == 15) {
+        // TODO: implement inverse_select for sdsl::rrr_vector<15> as well
+        return bit_vector::inverse_select(id);
+    } else {
+        std::pair<bool, uint64_t> pair = vector_.inverse_select(id);
+        if (pair.first == condition) {
+            pair.second += condition;
         } else {
             pair.second = 0;
         }
