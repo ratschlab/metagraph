@@ -17,9 +17,8 @@ const size_t SEQ_ACCESS_VS_SELECT_FACTOR_DYN = 18;
 // sequential word access for bit_vector_rrr per bit is 21 times faster than select
 const size_t SEQ_BITWICE_WORD_ACCESS_VS_SELECT_FACTOR_RRR = 21;
 
-// TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
-const size_t MAX_ITER_BIT_VECTOR_DYN = 50;
+const size_t MAX_ITER_BIT_VECTOR_DYN = 10;
 const size_t MAX_ITER_BIT_VECTOR_SD = 10;
 const size_t MAX_ITER_BIT_VECTOR_RRR = 1;
 const size_t MAX_ITER_BIT_VECTOR_HYB = std::numeric_limits<size_t>::max();
@@ -298,13 +297,15 @@ uint64_t bit_vector_dyn::select0(uint64_t id) const {
 uint64_t bit_vector_dyn::next1(uint64_t pos) const {
     assert(pos < size());
 
-    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_DYN);
+    return ::next1(*this, pos, num_set_bits() < size() / 3
+                                ? 0 : MAX_ITER_BIT_VECTOR_DYN);
 }
 
 uint64_t bit_vector_dyn::prev1(uint64_t pos) const {
     assert(pos < size());
 
-    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_DYN);
+    return ::prev1(*this, pos, num_set_bits() < size() / 3
+                                ? 0 : MAX_ITER_BIT_VECTOR_DYN);
 }
 
 void bit_vector_dyn::set(uint64_t id, bool val) {
@@ -729,13 +730,13 @@ uint64_t bit_vector_sd::select1(uint64_t id) const {
 uint64_t bit_vector_sd::next1(uint64_t pos) const {
     assert(pos < size());
 
-    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_SD);
+    return ::next1(*this, pos, !is_inverted() ? 0 : MAX_ITER_BIT_VECTOR_SD);
 }
 
 uint64_t bit_vector_sd::prev1(uint64_t pos) const {
     assert(pos < size());
 
-    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_SD);
+    return ::prev1(*this, pos, !is_inverted() ? 0 : MAX_ITER_BIT_VECTOR_SD);
 }
 
 bool bit_vector_sd::operator[](uint64_t id) const {
