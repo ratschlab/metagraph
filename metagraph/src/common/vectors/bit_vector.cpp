@@ -21,7 +21,7 @@ const size_t SEQ_BITWICE_WORD_ACCESS_VS_SELECT_FACTOR_RRR = 21;
 const size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
 const size_t MAX_ITER_BIT_VECTOR_DYN = 50;
 const size_t MAX_ITER_BIT_VECTOR_SD = 10;
-const size_t MAX_ITER_BIT_VECTOR_RRR = 5;
+const size_t MAX_ITER_BIT_VECTOR_RRR = 1;
 const size_t MAX_ITER_BIT_VECTOR_HYB = std::numeric_limits<size_t>::max();
 
 
@@ -198,15 +198,26 @@ inline uint64_t next1(const BitVector &v,
                       size_t num_steps) {
     assert(pos < v.size());
 
-    if (v[pos])
+    for (size_t t = 1; t < num_steps; ++t, ++pos) {
+        if (pos == v.size() || v[pos])
+            return pos;
+    }
+    if (pos == v.size())
         return pos;
 
-    for (size_t t = 1; t < num_steps; ++t) {
-        if (pos + t == v.size() || v[pos + t])
-            return pos + t;
+    uint64_t rk;
+
+    if (num_steps >= 1) {
+        auto pair = v.inverse_select(pos);
+        if (pair.first)
+            return pos;
+
+        rk = pair.second + 1;
+
+    } else {
+        rk = pos ? v.rank1(pos - 1) + 1 : 1;
     }
 
-    uint64_t rk = v.rank1(pos) + 1;
     return rk <= v.num_set_bits() ? v.select1(rk) : v.size();
 }
 
@@ -216,7 +227,7 @@ inline uint64_t prev1(const BitVector &v,
                       size_t num_steps) {
     assert(pos < v.size());
 
-    for (size_t t = 0; t < num_steps; ++t, --pos) {
+    for (size_t t = 1; t < num_steps; ++t, --pos) {
         if (v[pos])
             return pos;
 
@@ -224,7 +235,19 @@ inline uint64_t prev1(const BitVector &v,
             return v.size();
     }
 
-    uint64_t rk = v.rank1(pos);
+    uint64_t rk;
+
+    if (num_steps >= 1) {
+        auto pair = v.inverse_select(pos);
+        if (pair.first)
+            return pos;
+
+        rk = pair.second;
+
+    } else {
+        rk = v.rank1(pos);
+    }
+
     return rk ? v.select1(rk) : v.size();
 }
 
