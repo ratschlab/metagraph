@@ -213,6 +213,21 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_straight_min_path_score) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    std::string query = reference;
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.min_path_score = 100;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    EXPECT_TRUE(paths.empty()) << paths.size() << "\t" << paths.front();
+
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
 TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
