@@ -152,7 +152,8 @@ class DBGAligner : public IDBGAligner {
             assert(seed.get_clipping() == seed.get_query().data() - query.data());
             assert(seed.is_valid(graph_, &config_));
 
-            if (seed.get_query_end() == query.data() + query.size()) {
+            if (seed.get_query_end() == query.data() + query.size()
+                    && seed.get_score() >= config_.min_path_score) {
                 path_queue.emplace(std::move(seed));
                 return;
             }
@@ -184,7 +185,7 @@ class DBGAligner : public IDBGAligner {
                    orientation,
                    min_path_score);
 
-            if (!extended) {
+            if (!extended && seed.get_score() >= config_.min_path_score) {
                 seed.extend_query_end(query.data() + query.size());
                 assert(seed.is_valid(graph_, &config_));
                 path_queue.emplace(std::move(seed));
