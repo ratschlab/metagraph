@@ -459,8 +459,9 @@ void DefaultColumnExtender<NodeType>
 
     NodeType start_node = path.back();
     score_t start_score = dp_table.find(start_node)->second.best_score();
+    score_t score_cutoff = std::max(start_score, min_path_score);
+
     columns_to_update.emplace(start_node, start_score);
-    start_score = std::max(start_score, min_path_score);
     while (columns_to_update.size()) {
         const auto next_pair = columns_to_update.pop_top();
         const auto &cur_col = dp_table.find(next_pair.first)->second;
@@ -506,6 +507,16 @@ void DefaultColumnExtender<NodeType>
 
             // match and deletion scores
             for (const auto *prev_node_it : in_nodes) {
+
+#ifndef NDEBUG
+                bool found = false;
+                graph_.call_outgoing_kmers(prev_node_it->first, [&](auto node, char) {
+                    if (node == next_node)
+                        found = true;
+                });
+                assert(found);
+#endif
+
                 const auto &incoming = prev_node_it->second;
 
                 size_t begin = incoming.best_pos >= config_.bandwidth
@@ -582,6 +593,7 @@ void DefaultColumnExtender<NodeType>
                 if (*max_pos > start_score) {
                     start_node = iter->first;
                     start_score = iter->second.best_score();
+                    score_cutoff = std::max(start_score, min_path_score);
                 }
 
                 // branch and bound
@@ -590,7 +602,7 @@ void DefaultColumnExtender<NodeType>
                 if (!std::equal(match_score_begin + overall_begin,
                                 match_score_begin + overall_end,
                                 next_column.scores.begin() + overall_begin,
-                                [&](auto a, auto b) { return a + b < start_score; }))
+                                [&](auto a, auto b) { return a + b < score_cutoff; }))
                     columns_to_update.emplace(iter->first, iter->second.best_score());
             }
         }
@@ -599,7 +611,7 @@ void DefaultColumnExtender<NodeType>
     assert(start_score > config_.min_cell_score);
 
     // no good path found
-    if (UNLIKELY(start_node == SequenceGraph::npos || start_score == path.get_score()))
+    if (start_node == SequenceGraph::npos || start_score == path.get_score() || score_cutoff > start_score)
         return;
 
     // check to make sure that start_node stores the best starting point
