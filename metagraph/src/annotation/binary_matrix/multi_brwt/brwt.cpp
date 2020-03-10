@@ -85,10 +85,10 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
     if (!child_nodes_.size()) {
         assert(assignments_.size() == 1);
 
-        for (size_t i = 0; i < row_ids.size(); ++i) {
-            assert(row_ids[i] < num_rows());
+        for (Row i : row_ids) {
+            assert(i < num_rows());
 
-            if ((*nonzero_rows_)[row_ids[i]]) {
+            if ((*nonzero_rows_)[i]) {
                 // only a single column is stored in leafs
                 slice.push_back(0);
             }
@@ -151,6 +151,10 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
     if (!child_row_ids.size())
         return std::vector<Column>(row_ids.size(), delim);
 
+    // TODO: query by columns and merge them in the very end to avoid remapping
+    //       the same column indexes many times when propagating to the root.
+    // TODO: implement a cache efficient method for merging the columns.
+
     // query all children subtrees and get relations from them
     std::vector<std::vector<Column>> child_slices(child_nodes_.size());
     std::vector<const Column *> pos(child_nodes_.size());
@@ -168,15 +172,12 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
     }
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        if (skip_row[i]) {
-            slice.push_back(delim);
-            continue;
-        }
-
-        // merge rows from child submatrices
-        for (auto &p : pos) {
-            while (*(++p) != delim) {
-                slice.push_back(*p);
+        if (!skip_row[i]) {
+            // merge rows from child submatrices
+            for (auto &p : pos) {
+                while (*(++p) != delim) {
+                    slice.push_back(*p);
+                }
             }
         }
         slice.push_back(delim);
