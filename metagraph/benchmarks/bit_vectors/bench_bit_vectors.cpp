@@ -50,6 +50,7 @@ DEFINE_BV_QUERY_BENCHMARK(inverse_select, inverse_select, 0, size);
 DEFINE_BV_QUERY_BENCHMARK(select,         select1,        1, num_set_bits);
 DEFINE_BV_QUERY_BENCHMARK(next,           next1,          0, size);
 DEFINE_BV_QUERY_BENCHMARK(prev,           prev1,          0, size);
+DEFINE_BV_QUERY_BENCHMARK(cond_rank,   conditional_rank1, 0, size);
 
 #define INST_BV_QUERY_BENCHMARK(BV_TYPE, NAME) \
 BENCHMARK_TEMPLATE(BM_bv_query_##NAME, BV_TYPE, 10000000, 0) -> Unit(benchmark::kMicrosecond); \
@@ -98,6 +99,7 @@ INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, inverse_select);
 INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, select);
 INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, next);
 INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, prev);
+INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, cond_rank);
 
 } // namespace bm
 } // namespace mg
