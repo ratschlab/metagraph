@@ -101,8 +101,13 @@ void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                   const std::string &query) {
     assert(graph.get());
     EXPECT_EQ(query, paths.get_query());
+    auto uniconfig = config;
+    uniconfig.max_seed_length = std::numeric_limits<size_t>::max();
 
-    auto unimem_paths = DBGAligner<UniMEMSeeder<>>(*graph, config).align(query);
+    auto unimem_paths = std::dynamic_pointer_cast<const DBGSuccinct>(graph)
+        ? DBGAligner<SuffixSeeder<>>(*graph, uniconfig).align(query)
+        : DBGAligner<UniMEMSeeder<>>(*graph, uniconfig).align(query);
+
     ASSERT_EQ(paths.size(), unimem_paths.size());
 
     for (size_t i = 0; i < paths.size(); ++i) {
@@ -984,6 +989,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 3;
         config.min_path_score = std::numeric_limits<score_t>::min() + 3;
+        config.max_seed_length = k;
         DBGAligner<SuffixSeeder<>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
@@ -1012,6 +1018,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 3;
         config.min_path_score = std::numeric_limits<score_t>::min() + 3;
+        config.max_seed_length = k;
         DBGAligner<SuffixSeeder<>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
@@ -1031,6 +1038,8 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
                              path,
                              paths.get_query(),
                              paths.get_query_reverse_complement());
+
+        check_extend(graph, aligner.get_config(), paths, query);
     }
 }
 
@@ -1046,6 +1055,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min() + 3;
     config.min_path_score = std::numeric_limits<score_t>::min() + 3;
+    config.max_seed_length = k;
     DBGAligner<SuffixSeeder<>> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
@@ -1065,6 +1075,8 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
                          path,
                          paths.get_query(),
                          paths.get_query_reverse_complement());
+
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, align_nodummy) {
@@ -1074,6 +1086,7 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.max_seed_length = k;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
@@ -1124,6 +1137,7 @@ TEST(DBGAlignerTest, align_dummy) {
 
     auto graph = std::make_shared<DBGSuccinct>(k);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.max_seed_length = k;
     graph->add_sequence(reference);
 
     DBGAligner<SuffixSeeder<>> aligner(*graph, config);
@@ -1146,6 +1160,5 @@ TEST(DBGAlignerTest, align_dummy) {
                          paths.get_query(),
                          paths.get_query_reverse_complement());
 
-    // TODO: make uni-mem seeder work with unmasked DBGSuccinct
-    // check_extend(graph, aligner.get_config(), paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
