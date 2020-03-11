@@ -19,6 +19,7 @@ bool DPTable<NodeType>::add_seed(const SequenceGraph &graph,
     assert(start_pos < size);
 
     query_offset_ = query_offset;
+    start_node_ = start_node;
 
     auto &table_init = dp_table_[start_node];
     if (!table_init.size()) {
@@ -65,30 +66,29 @@ void DPTable<NodeType>
 ::extract_alignments(const DeBruijnGraph &graph,
                      const DBGAlignerConfig &config,
                      const std::string_view query,
-                     std::function<void(Alignment<NodeType>&&)> callback,
-                     score_t start_score,
+                     std::function<void(Alignment<NodeType>&&, NodeType)> callback,
                      const char *align_start,
                      bool orientation,
                      score_t min_path_score,
                      NodeType *node) {
+    NodeType start_node;
     if (config.num_alternative_paths == 1 && node) {
         // avoid sorting column iterators if we're only interested in the top path_
-        auto start_node = dp_table_.find(*node);
-        assert(start_node != dp_table_.end());
+        start_node = DeBruijnGraph::npos;
+        auto column_it = dp_table_.find(*node);
+        assert(column_it != dp_table_.end());
         Alignment<NodeType> alignment(*this,
                                       query,
-                                      start_node,
-                                      start_node->second.best_pos,
-                                      start_node->second.best_score() - start_score,
+                                      column_it,
+                                      column_it->second.best_pos,
                                       align_start,
                                       orientation,
-                                      graph.get_k() - 1);
+                                      graph.get_k() - 1,
+                                      &start_node);
 
         if (UNLIKELY(alignment.empty() && !alignment.get_query().data())) {
             return;
         }
-
-        assert(alignment.get_score() + start_score == start_node->second.best_score());
 
         // TODO: remove this when the branch and bound is set to only consider
         //       converged scores
@@ -96,7 +96,7 @@ void DPTable<NodeType>
 
         assert(alignment.is_valid(graph, &config));
 
-        callback(std::move(alignment));
+        callback(std::move(alignment), start_node);
     }
 
     // store visited nodes in paths to avoid returning subalignments
@@ -127,14 +127,15 @@ void DPTable<NodeType>
         if (visited_nodes.find(column_it->first) != visited_nodes.end())
             continue;
 
+        start_node = DeBruijnGraph::npos;
         Alignment<NodeType> next(*this,
                                  query,
                                  column_it,
                                  column_it->second.best_pos,
-                                 column_it->second.best_score() - start_score,
                                  align_start,
                                  orientation,
-                                 graph.get_k() - 1);
+                                 graph.get_k() - 1,
+                                 &start_node);
 
         if (UNLIKELY(next.empty() && !next.get_query().data())) {
             continue;
@@ -146,7 +147,7 @@ void DPTable<NodeType>
         assert(next.is_valid(graph, &config));
         visited_nodes.insert(next.begin(), next.end());
 
-        callback(std::move(next));
+        callback(std::move(next), start_node);
 
         ++num_paths;
     }
@@ -201,16 +202,17 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
                                const std::string_view query,
                                typename DPTable::const_iterator column,
                                size_t start_pos,
-                               score_t score,
                                const char* path_end,
                                bool orientation,
-                               size_t offset)
+                               size_t offset,
+                               NodeType *start_node)
       : query_begin_(NULL),
         query_end_(NULL),
         num_matches_(0),
-        score_(score),
+        score_(column->second.scores.at(start_pos)),
         orientation_(orientation),
         offset_(offset) {
+    assert(start_node);
     std::ignore = query;
 
     auto i = start_pos;
@@ -237,6 +239,11 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         op = &column->second.ops.at(i);
         prev_node = &column->second.prev_nodes.at(i);
     }
+
+    if (column->first == dp_table.get_start_node())
+        score_ -= column->second.scores.front();
+
+    *start_node = column->first;
 
     if (UNLIKELY(i > std::numeric_limits<Cigar::LengthType>::max())) {
         throw std::runtime_error("Error: clipping length can't be stored in CIGAR");

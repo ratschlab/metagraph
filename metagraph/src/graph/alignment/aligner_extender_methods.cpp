@@ -392,7 +392,7 @@ template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::operator()(const DBGAlignment &path,
              std::string_view query,
-             std::function<void(DBGAlignment&&)> callback,
+             std::function<void(DBGAlignment&&, NodeType)> callback,
              bool orientation,
              score_t min_path_score) {
     size_t start_index = path.get_query_end() - 1 - query.data();
@@ -631,7 +631,6 @@ void DefaultColumnExtender<NodeType>
                                 config_,
                                 query,
                                 callback,
-                                path.get_score(),
                                 align_start,
                                 orientation,
                                 min_path_score,
