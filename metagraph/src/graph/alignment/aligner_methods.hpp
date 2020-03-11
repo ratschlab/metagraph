@@ -10,69 +10,112 @@
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class Seeder {
   public:
+    typedef Alignment<NodeType> Seed;
+
     virtual ~Seeder() {}
 
     virtual void initialize(std::string_view /* query string */,
                             bool /* orientation */) {}
 
-    virtual void call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const = 0;
+    virtual void call_seeds(std::function<void(Seed&&)> callback) const = 0;
+
+    virtual const DeBruijnGraph& get_graph() const = 0;
+    virtual const DBGAlignerConfig& get_config() const = 0;
+    virtual const std::string_view get_query() const = 0;
 };
 
-template <typename NodeType = typename DeBruijnGraph::node_index>
-class ExactSeeder : public Seeder<NodeType> {
-  public:
-    ExactSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
 
-    void initialize(std::string_view query, bool orientation);
+template <typename NodeType>
+class ExactMapSeeder;
 
-    void call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const;
-
-    const DeBruijnGraph& get_graph() const { return graph_; }
-    const DBGAlignerConfig& get_config() const { return config_; }
-    const std::string_view get_query() const { return query_; }
-    const std::vector<NodeType>& get_query_nodes() const { return query_nodes_; }
-    const std::vector<score_t>& get_partial_sums() const { return partial_sum; }
-    bool get_orientation() const { return orientation_; }
-
-  protected:
-    const DeBruijnGraph &graph_;
-    const DBGAlignerConfig &config_;
-    std::string_view query_;
-    bool orientation_;
-    std::vector<score_t> partial_sum;
-    std::vector<NodeType> query_nodes_;
-};
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class SuffixSeeder : public Seeder<NodeType> {
   public:
+    typedef typename Seeder<NodeType>::Seed Seed;
+
     SuffixSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config);
 
-    void initialize(std::string_view query, bool orientation) {
-        exact_seeder_.initialize(query, orientation);
-    }
+    void initialize(std::string_view query, bool orientation);
 
-    void call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const;
+    void call_seeds(std::function<void(Seed&&)> callback) const;
 
-    const DeBruijnGraph& get_graph() const { return exact_seeder_.get_graph(); }
-    const DBGAlignerConfig& get_config() const { return exact_seeder_.get_config(); }
+    const DeBruijnGraph& get_graph() const { return base_seeder_->get_graph(); }
+    virtual const std::string_view get_query() const { return base_seeder_->get_query(); }
+    const DBGAlignerConfig& get_config() const { return base_seeder_->get_config(); }
 
   private:
-    ExactSeeder<NodeType> exact_seeder_;
+    std::unique_ptr<ExactMapSeeder<NodeType>> base_seeder_;
+    std::vector<std::vector<NodeType>> alt_query_nodes;
+
+    std::vector<NodeType>& get_query_nodes() { return base_seeder_->get_query_nodes(); }
+    std::vector<uint8_t>& get_offsets() { return base_seeder_->get_offsets(); }
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
-class MEMSeeder : public Seeder<NodeType> {
+class ExactMapSeeder : public Seeder<NodeType> {
+  friend SuffixSeeder<NodeType>;
+
   public:
+    typedef typename Seeder<NodeType>::Seed Seed;
+
+    ExactMapSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+          : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
+
+    virtual ~ExactMapSeeder() {}
+
+    virtual const DeBruijnGraph& get_graph() const override final { return graph_; }
+    virtual const DBGAlignerConfig& get_config() const override final { return config_; }
+
+    const std::string_view get_query() const { return query_; }
+    const std::vector<NodeType>& get_query_nodes() const { return query_nodes_; }
+    const std::vector<uint8_t>& get_offsets() const { return offsets_; }
+    const std::vector<score_t>& get_partial_sums() const { return partial_sum_; }
+    bool get_orientation() const { return orientation_; }
+
+    virtual void initialize(std::string_view query, bool orientation);
+
+  protected:
+    std::vector<NodeType>& get_query_nodes() { return query_nodes_; }
+    std::vector<uint8_t>& get_offsets() { return offsets_; }
+
+  private:
+    const DeBruijnGraph &graph_;
+    const DBGAlignerConfig &config_;
+    std::string_view query_;
+    bool orientation_;
+    std::vector<score_t> partial_sum_;
+    std::vector<NodeType> query_nodes_;
+    std::vector<uint8_t> offsets_;
+};
+
+template <typename NodeType = typename DeBruijnGraph::node_index>
+class ExactSeeder : public ExactMapSeeder<NodeType> {
+  public:
+    typedef typename Seeder<NodeType>::Seed Seed;
+
+    ExactSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+          : ExactMapSeeder<NodeType>(graph, config) {}
+
+    void call_seeds(std::function<void(Seed&&)> callback) const;
+};
+
+template <typename NodeType = typename DeBruijnGraph::node_index>
+class MEMSeeder : public ExactMapSeeder<NodeType> {
+  friend SuffixSeeder<NodeType>;
+
+  public:
+    typedef typename Seeder<NodeType>::Seed Seed;
+
+    MEMSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+          : ExactMapSeeder<NodeType>(graph, config) {}
+
     virtual ~MEMSeeder() {}
 
-    virtual void initialize(std::string_view query, bool orientation) override final;
+    void initialize(std::string_view query, bool orientation);
 
-    virtual void call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const override final;
+    void call_seeds(std::function<void(Seed&&)> callback) const;
 
-    const DeBruijnGraph& get_graph() const { return graph_; }
-    const DBGAlignerConfig& get_config() const { return config_; }
     const bitmap& get_mem_terminator() const {
         assert(is_mem_terminus_.get());
         return *is_mem_terminus_;
@@ -82,28 +125,23 @@ class MEMSeeder : public Seeder<NodeType> {
     MEMSeeder(const DeBruijnGraph &graph,
               const DBGAlignerConfig &config,
               std::unique_ptr<bitmap>&& is_mem_terminus)
-          : graph_(graph),
-            config_(config),
-            orientation_(false),
+          : ExactMapSeeder<NodeType>(graph, config),
             is_mem_terminus_(std::move(is_mem_terminus)) {
         assert(is_mem_terminus_->size() == graph.max_index() + 1);
-        assert(config_.check_config_scores());
     }
 
+    std::vector<uint8_t>& get_query_node_flags() { return query_node_flags_; }
+
   private:
-    const DeBruijnGraph &graph_;
-    const DBGAlignerConfig &config_;
-    std::string_view query_;
-    bool orientation_;
-    std::vector<score_t> partial_sum;
     const std::unique_ptr<bitmap> is_mem_terminus_;
-    std::vector<NodeType> query_nodes_;
     std::vector<uint8_t> query_node_flags_;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class UniMEMSeeder : public MEMSeeder<NodeType> {
   public:
+    typedef typename Seeder<NodeType>::Seed Seed;
+
     UniMEMSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
         : MEMSeeder<NodeType>(graph, config,
                               std::make_unique<bitmap_lazy>(
