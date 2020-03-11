@@ -46,7 +46,7 @@ class EliasFanoEncoder {
 
     /**
      * Encodes the given vector using Elias-Fano encoding. The encoded output is
-     * written to #sink. The vector elements be non-decreasing.
+     * written to #sink. The vector elements must be non-decreasing.
      */
     EliasFanoEncoder(const Vector<T> &data, std::ofstream &sink)
         : EliasFanoEncoder(data.size(), data.back(), sink) {
