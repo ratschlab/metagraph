@@ -227,10 +227,10 @@ class Alignment {
               const std::string_view query,
               typename DPTable::const_iterator column,
               size_t start_pos,
-              score_t score,
               const char* path_end,
               bool orientation,
-              size_t offset);
+              size_t offset,
+              NodeType *start_node);
 
     void append(Alignment&& other);
 
@@ -535,8 +535,7 @@ class DPTable {
     void extract_alignments(const DeBruijnGraph &graph,
                             const DBGAlignerConfig &config,
                             const std::string_view query,
-                            std::function<void(Alignment<NodeType>&&)> callback,
-                            score_t start_score,
+                            std::function<void(Alignment<NodeType>&&, NodeType)> callback,
                             const char *align_start,
                             bool orientation,
                             score_t min_path_score,
@@ -544,9 +543,11 @@ class DPTable {
 
     const Storage& data() const { return dp_table_; }
     size_t get_query_offset() const { return query_offset_; }
+    NodeType get_start_node() const { return start_node_; }
 
   private:
     Storage dp_table_;
+    NodeType start_node_;
     size_t query_offset_ = 0;
 };
 
