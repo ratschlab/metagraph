@@ -629,9 +629,8 @@ void DefaultColumnExtender<NodeType>
     // get all alignments
     dp_table.extract_alignments(graph_,
                                 config_,
-                                query,
+                                std::string_view(align_start, query.data() + query.size() - align_start),
                                 callback,
-                                align_start,
                                 orientation,
                                 min_path_score,
                                 &start_node);

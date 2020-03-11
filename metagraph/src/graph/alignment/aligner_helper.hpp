@@ -224,10 +224,9 @@ class Alignment {
 
     // TODO: construct multiple alignments from the same starting point
     Alignment(const DPTable &dp_table,
-              const std::string_view query,
+              const std::string_view query_view,
               typename DPTable::const_iterator column,
               size_t start_pos,
-              const char* path_end,
               bool orientation,
               size_t offset,
               NodeType *start_node);
@@ -534,9 +533,8 @@ class DPTable {
 
     void extract_alignments(const DeBruijnGraph &graph,
                             const DBGAlignerConfig &config,
-                            const std::string_view query,
+                            const std::string_view query_view,
                             std::function<void(Alignment<NodeType>&&, NodeType)> callback,
-                            const char *align_start,
                             bool orientation,
                             score_t min_path_score,
                             NodeType *node = nullptr);

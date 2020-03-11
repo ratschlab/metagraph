@@ -65,9 +65,8 @@ template <typename NodeType>
 void DPTable<NodeType>
 ::extract_alignments(const DeBruijnGraph &graph,
                      const DBGAlignerConfig &config,
-                     const std::string_view query,
+                     const std::string_view query_view,
                      std::function<void(Alignment<NodeType>&&, NodeType)> callback,
-                     const char *align_start,
                      bool orientation,
                      score_t min_path_score,
                      NodeType *node) {
@@ -78,10 +77,9 @@ void DPTable<NodeType>
         auto column_it = dp_table_.find(*node);
         assert(column_it != dp_table_.end());
         Alignment<NodeType> alignment(*this,
-                                      query,
+                                      query_view,
                                       column_it,
                                       column_it->second.best_pos,
-                                      align_start,
                                       orientation,
                                       graph.get_k() - 1,
                                       &start_node);
@@ -129,10 +127,9 @@ void DPTable<NodeType>
 
         start_node = DeBruijnGraph::npos;
         Alignment<NodeType> next(*this,
-                                 query,
+                                 query_view,
                                  column_it,
                                  column_it->second.best_pos,
-                                 align_start,
                                  orientation,
                                  graph.get_k() - 1,
                                  &start_node);
@@ -199,10 +196,9 @@ Alignment<NodeType>::Alignment(const std::string_view query,
 
 template <typename NodeType>
 Alignment<NodeType>::Alignment(const DPTable &dp_table,
-                               const std::string_view query,
+                               const std::string_view query_view,
                                typename DPTable::const_iterator column,
                                size_t start_pos,
-                               const char* path_end,
                                bool orientation,
                                size_t offset,
                                NodeType *start_node)
@@ -213,7 +209,6 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         orientation_(orientation),
         offset_(offset) {
     assert(start_node);
-    std::ignore = query;
 
     auto i = start_pos;
     const auto* op = &column->second.ops.at(i);
@@ -252,8 +247,8 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     cigar_.append(Cigar::Operator::CLIPPED, i);
     assert(cigar_.size());
 
-    query_begin_ = path_end + i;
-    query_end_ = path_end + start_pos;
+    query_begin_ = query_view.data() + i;
+    query_end_ = query_view.data() + start_pos;
 
     std::reverse(cigar_.begin(), cigar_.end());
 
