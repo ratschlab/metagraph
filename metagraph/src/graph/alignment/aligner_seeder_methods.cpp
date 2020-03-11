@@ -87,6 +87,9 @@ void SuffixSeeder<NodeType>
     if (query_nodes.empty())
         query_nodes.assign(1, DeBruijnGraph::npos);
 
+    if (query_nodes.front() != DeBruijnGraph::npos)
+        return;
+
     const auto &graph = dynamic_cast<const DBGSuccinct&>(get_graph());
     size_t k = graph.get_k();
     size_t max_seed_length = std::min(query.size(), std::min(config.max_seed_length, k));
