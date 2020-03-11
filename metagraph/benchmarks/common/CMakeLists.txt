@@ -44,3 +44,16 @@ target_link_libraries(benchmark_chunked_wait_queue
     benchmark
     metagraph_common
 )
+
+add_executable(benchmark_elias_fano benchmark_elias_fano.cpp)
+target_include_directories(benchmark_elias_fano
+    PRIVATE
+    ${EXTERNAL_LIB_DIR}/benchmark/include
+    "../../src/"
+    )
+target_link_libraries(benchmark_elias_fano
+    PRIVATE
+    benchmark_main
+    benchmark
+    metagraph_common
+    )

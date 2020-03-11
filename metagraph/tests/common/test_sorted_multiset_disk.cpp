@@ -12,7 +12,7 @@ using namespace mg;
 template <typename T>
 class SortedMultisetDiskTest : public ::testing::Test {};
 
-typedef ::testing::Types<uint64_t, int32_t> SortedDiskElementTypes;
+typedef ::testing::Types<uint64_t, uint32_t> SortedDiskElementTypes;
 
 TYPED_TEST_SUITE(SortedMultisetDiskTest, SortedDiskElementTypes);
 

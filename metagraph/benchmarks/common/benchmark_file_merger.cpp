@@ -9,7 +9,7 @@
 #include "common/utils/file_utils.hpp"
 
 // Note: if testing with many chunks use 'ulimit -n <max_files>' to increase the maxium
-// number of files the sytem allows you to open. On mac the default is only 256!
+// number of files the system allows you to open. On mac the default is only 256!
 
 constexpr size_t ITEM_COUNT = 10'000;
 const std::string chunk_prefix = "/tmp/bm_chunk_";

@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 
+
 #include "common/utils/template_utils.hpp"
+#include "common/elias_fano.hpp"
 #include "common/logger.hpp"
 
 namespace mg {
@@ -77,9 +79,10 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     uint64_t num_elements_read = 0;
 
     MergeHeap<T> merge_heap;
-    T data_item;
+    std::optional<T> data_item;
     // profiling indicates that setting a larger buffer slightly increases performance
     std::unique_ptr<char[]> buffer(new char[sources.size() * 1024 * 1024]);
+    std::vector<std::unique_ptr<EliasFanoDecoder<T>>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
         chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
@@ -87,8 +90,10 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             logger->error("Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
-        if (chunk_files[i].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
-            merge_heap.emplace(data_item, i);
+        decoders[i] = std::make_unique<EliasFanoDecoder<T>>(chunk_files[i]);
+        data_item = decoders[i]->next();
+        if (data_item.has_value()) {
+            merge_heap.emplace(data_item.value(), i);
             num_elements_read++;
         }
     }
@@ -113,9 +118,9 @@ uint64_t merge_files(const std::vector<std::string> &sources,
         }
 
         if (chunk_files[chunk_index]
-            && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
-                                             sizeof(T))) {
-            merge_heap.emplace(data_item, chunk_index);
+            && (data_item = decoders[chunk_index]->next())
+            .has_value()) {
+            merge_heap.emplace(data_item.value(), chunk_index);
             num_elements_read++;
         }
     }

@@ -13,9 +13,11 @@
 
 #include <ips4o.hpp>
 
+#include "common/elias_fano.hpp"
 #include "common/file_merger.hpp"
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/vector.hpp"
+
 
 namespace mg {
 namespace common {
@@ -186,6 +188,14 @@ class SortedSetDiskBase {
         };
     }
 
+    static inline void write_or_die(std::fstream *out, char *data, size_t size) {
+        if (!out->write(data, size)) {
+            std::cerr << "Error: Writing data to stream." << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+
     static void merge_l1(const std::string &chunk_file_prefix,
                          uint32_t chunk_count,
                          std::atomic<uint32_t> *l1_chunk_count,
@@ -223,25 +233,46 @@ class SortedSetDiskBase {
 
 
     /**
-     * Dumps the given data to a file, synchronously.
+     * Dumps the given data to a file, synchronously. If the maximum allowd disk size
+     * is reached, all chunks will be merged into a single chunk in an effort to reduce
+     * disk space.
      * @param is_done if this is the last chunk being dumped
      */
     void dump_to_file(bool is_done) {
         assert(!data_.empty());
 
         std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
-        std::fstream binary_file(file_name, std::ios::out | std::ios::binary);
-        if (!binary_file) {
-            logger->error("Error: Creating chunk file '{}' failed", file_name);
+        std::ofstream kmer_file(file_name, std::ios::out | std::ios::binary);
+        if (!kmer_file) {
+            logger->error("Creating chunk file '{}' failed", file_name);
             std::exit(EXIT_FAILURE);
         }
-        const size_t data_size = sizeof(data_[0]) * data_.size();
-        if (!binary_file.write((char *)&(data_[0]), data_size)) {
-            logger->error("Error: Writing to '{}' failed", file_name);
-            std::exit(EXIT_FAILURE);
+        if constexpr (utils::is_instance<T, std::pair> {}) {
+            using T1 = std::decay_t<decltype(utils::get_first(data_[0]))>;
+            using T2 = std::decay_t<decltype(utils::get_second(data_[0]))>;
+            EliasFanoEncoder<T1> encoder(data_.size(), utils::get_first(data_.back()), kmer_file);
+            std::string count_file_name = file_name + ".counts";
+            std::fstream counts_file(count_file_name, std::ios::out | std::ios::binary);
+            if (!counts_file) {
+                logger->error("Creating count file '{}' failed", count_file_name);
+                std::exit(EXIT_FAILURE);
+            }
+            for (const auto &v : data_) {
+                encoder.add(v.first);
+                counts_file.write(reinterpret_cast<const char *>(&v.second), sizeof(T2));
+            }
+            size_t first_size = encoder.finish();
+            if (!counts_file) {
+                logger->error("Writing to {}' failed", file_name);
+                std::exit(EXIT_FAILURE);
+            }
+            counts_file.close();
+
+            total_chunk_size_bytes_ += (first_size + data_.size() * sizeof(T2));
+        } else {
+            EliasFanoEncoder<T> encoder(data_, kmer_file);
+            total_chunk_size_bytes_ += encoder.finish();
         }
-        binary_file.close();
-        total_chunk_size_bytes_ += data_size;
         data_.resize(0);
         if (is_done) {
             async_merge_l1_.clear();

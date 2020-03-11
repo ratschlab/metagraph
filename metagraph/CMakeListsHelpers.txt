@@ -71,7 +71,7 @@ endfunction()
 
 
 function (findFolly)
-set(FOLLY_LIBRARIES "")
+unset(FOLLY_LIBRARIES)
 find_library(FOLLY_LIBRARIES
   NAMES folly
   HINTS

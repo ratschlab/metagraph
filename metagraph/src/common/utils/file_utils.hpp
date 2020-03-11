@@ -27,6 +27,8 @@ class TempFile {
     std::ofstream& ofstream();
     std::ifstream& ifstream();
 
+    const std::string& name() const;
+
   private:
     std::string tmp_file_name_;
     State state_;
