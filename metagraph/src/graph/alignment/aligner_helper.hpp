@@ -92,6 +92,12 @@ class Cigar {
             : 0;
     }
 
+    size_t get_num_matches() const {
+        return std::accumulate(begin(), end(), 0, [&](size_t old, const value_type &op) {
+            return old + (op.first == Operator::MATCH) * op.second;
+        });
+    }
+
     // Return true if the cigar is valid. reference_begin points to the first
     // character of the reference sequence after clipping is trimmed
     bool is_valid(const std::string_view reference, const std::string_view query) const;
@@ -205,7 +211,6 @@ class Alignment {
           : Alignment(query,
                       std::move(nodes),
                       std::string(query),
-                      query.size(),
                       score,
                       Cigar(Cigar::Operator::MATCH, query.size()),
                       clipping,
@@ -224,10 +229,9 @@ class Alignment {
 
     // TODO: construct multiple alignments from the same starting point
     Alignment(const DPTable &dp_table,
-              const std::string_view query,
+              const std::string_view query_view,
               typename DPTable::const_iterator column,
               size_t start_pos,
-              const char* path_end,
               bool orientation,
               size_t offset,
               NodeType *start_node);
@@ -241,7 +245,7 @@ class Alignment {
     bool empty() const { return nodes_.empty(); }
 
     score_t get_score() const { return score_; }
-    uint64_t get_num_matches() const { return num_matches_; }
+    uint64_t get_num_matches() const { return cigar_.get_num_matches(); }
 
     void recompute_score(const DBGAlignerConfig &config);
 
@@ -307,7 +311,6 @@ class Alignment {
     bool operator==(const Alignment &other) const {
         return orientation_ == other.orientation_
             && score_ == other.score_
-            && num_matches_ == other.num_matches_
             && sequence_ == other.sequence_
             && std::equal(query_begin_, query_end_, other.query_begin_, other.query_end_)
             && cigar_ == other.cigar_;
@@ -337,7 +340,6 @@ class Alignment {
     Alignment(const std::string_view query,
               std::vector<NodeType>&& nodes = {},
               std::string&& sequence = "",
-              size_t num_matches = 0,
               score_t score = 0,
               Cigar&& cigar = Cigar(),
               size_t clipping = 0,
@@ -347,7 +349,6 @@ class Alignment {
             query_end_(query.data() + query.size()),
             nodes_(std::move(nodes)),
             sequence_(std::move(sequence)),
-            num_matches_(num_matches),
             score_(score),
             cigar_(Cigar::Operator::CLIPPED, clipping),
             orientation_(orientation),
@@ -359,7 +360,6 @@ class Alignment {
     const char* query_end_;
     std::vector<NodeType> nodes_;
     std::string sequence_;
-    uint64_t num_matches_;
     score_t score_;
     Cigar cigar_;
     bool orientation_;
@@ -534,9 +534,8 @@ class DPTable {
 
     void extract_alignments(const DeBruijnGraph &graph,
                             const DBGAlignerConfig &config,
-                            const std::string_view query,
+                            const std::string_view query_view,
                             std::function<void(Alignment<NodeType>&&, NodeType)> callback,
-                            const char *align_start,
                             bool orientation,
                             score_t min_path_score,
                             NodeType *node = nullptr);

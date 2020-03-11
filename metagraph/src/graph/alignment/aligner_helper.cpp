@@ -68,9 +68,8 @@ template <typename NodeType>
 void DPTable<NodeType>
 ::extract_alignments(const DeBruijnGraph &graph,
                      const DBGAlignerConfig &config,
-                     const std::string_view query,
+                     const std::string_view query_view,
                      std::function<void(Alignment<NodeType>&&, NodeType)> callback,
-                     const char *align_start,
                      bool orientation,
                      score_t min_path_score,
                      NodeType *node) {
@@ -81,10 +80,9 @@ void DPTable<NodeType>
         auto column_it = dp_table_.find(*node);
         assert(column_it != dp_table_.end());
         Alignment<NodeType> alignment(*this,
-                                      query,
+                                      query_view,
                                       column_it,
                                       column_it->second.best_pos,
-                                      align_start,
                                       orientation,
                                       graph.get_k() - 1,
                                       &start_node);
@@ -132,10 +130,9 @@ void DPTable<NodeType>
 
         start_node = DeBruijnGraph::npos;
         Alignment<NodeType> next(*this,
-                                 query,
+                                 query_view,
                                  column_it,
                                  column_it->second.best_pos,
-                                 align_start,
                                  orientation,
                                  graph.get_k() - 1,
                                  &start_node);
@@ -169,7 +166,6 @@ Alignment<NodeType>::Alignment(const std::string_view query,
         query_end_(query.data() + query.size()),
         nodes_(std::move(nodes)),
         sequence_(std::move(sequence)),
-        num_matches_(0),
         score_(score),
         orientation_(orientation),
         offset_(offset) {
@@ -185,7 +181,6 @@ Alignment<NodeType>::Alignment(const std::string_view query,
         sequence_.c_str(),
         Cigar(Cigar::Operator::CLIPPED, clipping),
         [&](Cigar &cigar, bool equal) -> Cigar& {
-            num_matches_ += equal;
             cigar.append(equal
                   ? Cigar::Operator::MATCH
                   : Cigar::Operator::MISMATCH
@@ -202,21 +197,18 @@ Alignment<NodeType>::Alignment(const std::string_view query,
 
 template <typename NodeType>
 Alignment<NodeType>::Alignment(const DPTable &dp_table,
-                               const std::string_view query,
+                               const std::string_view query_view,
                                typename DPTable::const_iterator column,
                                size_t start_pos,
-                               const char* path_end,
                                bool orientation,
                                size_t offset,
                                NodeType *start_node)
       : query_begin_(NULL),
         query_end_(NULL),
-        num_matches_(0),
         score_(column->second.scores.at(start_pos)),
         orientation_(orientation),
         offset_(offset) {
     assert(start_node);
-    std::ignore = query;
 
     auto i = start_pos;
     const auto* op = &column->second.ops.at(i);
@@ -235,9 +227,6 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         if (*op != Cigar::Operator::INSERTION)
             --i;
 
-        if (*op == Cigar::Operator::MATCH)
-            ++num_matches_;
-
         column = dp_table.find(*prev_node);
         op = &column->second.ops.at(i);
         prev_node = &column->second.prev_nodes.at(i);
@@ -255,8 +244,8 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     cigar_.append(Cigar::Operator::CLIPPED, i);
     assert(cigar_.size());
 
-    query_begin_ = path_end + i;
-    query_end_ = path_end + start_pos;
+    query_begin_ = query_view.data() + i;
+    query_end_ = query_view.data() + start_pos;
 
     std::reverse(cigar_.begin(), cigar_.end());
 
@@ -283,7 +272,6 @@ void Alignment<NodeType>::append(Alignment&& other) {
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
     sequence_ += std::move(other.sequence_);
     score_ += other.score_;
-    num_matches_ += other.num_matches_;
 
     cigar_.append(std::move(other.cigar_));
     query_end_ = other.query_end_;
@@ -500,7 +488,7 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
         alignment["is_secondary"] = is_secondary;
 
     alignment["identity"] = query_end_ != query_begin_
-        ? static_cast<double>(num_matches_) / (query_end_ - query_begin_)
+        ? static_cast<double>(get_num_matches()) / (query_end_ - query_begin_)
         : 0;
 
     alignment["read_mapped"] = (query_end_ != query_begin_);
@@ -546,7 +534,6 @@ std::shared_ptr<const std::string> Alignment<NodeType>
                  const DeBruijnGraph &graph) {
     cigar_.clear();
     nodes_.clear();
-    num_matches_ = 0;
     sequence_.clear();
 
     auto query_sequence = std::make_shared<const std::string>(
@@ -595,7 +582,6 @@ std::shared_ptr<const std::string> Alignment<NodeType>
                 } else {
                     cigar_.append(Cigar::Operator::MATCH,
                                   edits[j]["from_length"].asUInt64());
-                    num_matches_ += edits[j]["from_length"].asUInt64();
                 }
 
                 path_steps += edits[j]["from_length"].asUInt64();
