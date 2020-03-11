@@ -146,34 +146,8 @@ bool Cigar::is_valid(const std::string_view reference,
                     return false;
                 }
             } break;
-            case Operator::MATCH: {
-                if (ref_it > reference.end() - op.second) {
-                    std::cerr << "Reference too short" << std::endl
-                              << to_string() << std::endl
-                              << reference << std::endl
-                              << query << std::endl;
-                    return false;
-                }
-
-                if (alt_it > query.end() - op.second) {
-                    std::cerr << "Query too short" << std::endl
-                              << to_string() << std::endl
-                              << reference << std::endl
-                              << query << std::endl;
-                    return false;
-                }
-
-                if (strncmp(ref_it, alt_it, op.second)) {
-                    std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
-                              << to_string() << std::endl
-                              << reference << std::endl
-                              << query << std::endl;
-                    return false;
-                }
-
-                ref_it += op.second;
-                alt_it += op.second;
-            } break;
+            case Operator::MATCH:
+                // do nothing
             case Operator::MISMATCH: {
                 if (ref_it > reference.end() - op.second) {
                     std::cerr << "Reference too short" << std::endl
@@ -191,9 +165,9 @@ bool Cigar::is_valid(const std::string_view reference,
                     return false;
                 }
 
-                if (std::mismatch(ref_it, ref_it + op.second,
-                                  alt_it, alt_it + op.second).first != ref_it) {
-                    std::cerr << "Match despite MISMATCH in CIGAR" << std::endl
+                if (std::equal(ref_it, ref_it + op.second, alt_it)
+                        == (op.first != Cigar::Operator::MATCH)) {
+                    std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
