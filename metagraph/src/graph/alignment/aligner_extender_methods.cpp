@@ -392,15 +392,18 @@ void DefaultColumnExtender<NodeType>
              std::function<void(DBGAlignment&&, NodeType)> callback,
              bool orientation,
              score_t min_path_score) {
-    size_t start_index = path.get_query_end() - 1 - query.data();
-    const score_t *match_score_begin = partial_sums_.data() + start_index;
+    assert(graph_);
 
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query().data());
+    assert(path.get_query_end() > query.data());
     assert(query.data() + query.size() >= path.get_query_end());
 
+
+    size_t start_index = path.get_query_end() - 1 - query.data();
     const auto *align_start = path.get_query_end();
     size_t size = query.data() + query.size() - align_start + 1;
+    const score_t *match_score_begin = partial_sums_.data() + start_index;
 
     assert(config_.match_score(std::string_view(align_start - 1, size))
         == *match_score_begin);
@@ -412,7 +415,6 @@ void DefaultColumnExtender<NodeType>
 
     // if the nodes from this seed were in the previous alignment and had a
     // better score, don't redo the extension
-    assert(path.get_query_end() > query.data());
     size_t query_offset = path.get_query_end() - query.data() - 1;
     assert(query_offset + size == query.size());
 
@@ -428,8 +430,8 @@ void DefaultColumnExtender<NodeType>
         }
     }
 
-    dp_table.clear();
-    if (!dp_table.add_seed(graph_,
+    reset();
+    if (!dp_table.add_seed(*graph_,
                            path.back(),
                            *(align_start - 1),
                            path.get_score(),
@@ -462,6 +464,15 @@ void DefaultColumnExtender<NodeType>
     score_t score_cutoff = std::max(start_score, min_path_score);
 
     columns_to_update.emplace(start_node, start_score);
+
+    // TODO: this cuts off too early (before the scores have converged)
+    //       so path scores have to be recomputed after alignment
+    auto extendable = [&](size_t begin, size_t end, score_t cutoff, const score_t *scores) {
+
+        return !std::equal(match_score_begin + begin, match_score_begin + end,
+                           scores + begin, [&](auto a, auto b) { return a + b < cutoff; });
+    };
+
     while (columns_to_update.size()) {
         const auto next_pair = columns_to_update.pop_top();
         const auto &cur_col = dp_table.find(next_pair.first)->second;
@@ -472,7 +483,7 @@ void DefaultColumnExtender<NodeType>
             continue;
 
         // get next columns
-        auto out_columns = get_outgoing_columns(graph_,
+        auto out_columns = get_outgoing_columns(*graph_,
                                                 dp_table,
                                                 next_pair.first,
                                                 size,
@@ -510,7 +521,7 @@ void DefaultColumnExtender<NodeType>
 
 #ifndef NDEBUG
                 bool found = false;
-                graph_.call_outgoing_kmers(prev_node_it->first, [&](auto node, char) {
+                graph_->call_outgoing_kmers(prev_node_it->first, [&](auto node, char) {
                     if (node == next_node)
                         found = true;
                 });
@@ -597,12 +608,7 @@ void DefaultColumnExtender<NodeType>
                 }
 
                 // branch and bound
-                // TODO: this cuts off too early (before the scores have converged)
-                //       so the code below has to be used to compute correct scores
-                if (!std::equal(match_score_begin + overall_begin,
-                                match_score_begin + overall_end,
-                                next_column.scores.begin() + overall_begin,
-                                [&](auto a, auto b) { return a + b < score_cutoff; }))
+                if (extendable(overall_begin, overall_end, score_cutoff, next_column.scores.data()))
                     columns_to_update.emplace(iter->first, iter->second.best_score());
             }
         }
@@ -625,11 +631,10 @@ void DefaultColumnExtender<NodeType>
         logger->trace("best alignment does not end with a MATCH");
 
     // get all alignments
-    dp_table.extract_alignments(graph_,
+    dp_table.extract_alignments(*graph_,
                                 config_,
-                                query,
+                                std::string_view(align_start, query.data() + query.size() - align_start),
                                 callback,
-                                align_start,
                                 orientation,
                                 min_path_score,
                                 &start_node);

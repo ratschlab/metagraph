@@ -134,6 +134,10 @@ class Extender {
 
     virtual const DeBruijnGraph& get_graph() const = 0;
     virtual const DBGAlignerConfig& get_config() const = 0;
+
+  protected:
+    virtual void set_graph(const DeBruijnGraph &graph) = 0;
+    virtual void reset() = 0;
 };
 
 
@@ -145,24 +149,32 @@ class DefaultColumnExtender : public Extender<NodeType> {
     typedef typename Extender<NodeType>::score_t score_t;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
+          : graph_(&graph), config_(config) { assert(config_.check_config_scores()); }
 
-    void
+    virtual void
     operator()(const DBGAlignment &path,
                std::string_view query,
                std::function<void(DBGAlignment&&, NodeType)> callback,
                bool orientation,
-               score_t min_path_score = std::numeric_limits<score_t>::min());
+               score_t min_path_score = std::numeric_limits<score_t>::min()) override;
 
-    void initialize(const DBGAlignment &) {}
+    virtual void initialize(const DBGAlignment &) override {}
 
-    void initialize_query(const std::string_view query);
+    virtual void initialize_query(const std::string_view query) override;
 
-    const DeBruijnGraph& get_graph() const { return graph_; }
-    const DBGAlignerConfig& get_config() const { return config_; }
+    virtual const DeBruijnGraph& get_graph() const override {
+        assert(graph_);
+        return *graph_;
+    }
+
+    virtual const DBGAlignerConfig& get_config() const override { return config_; }
+
+  protected:
+    virtual void set_graph(const DeBruijnGraph &graph) override { graph_ = &graph; }
+    virtual void reset() override { dp_table.clear(); }
 
   private:
-    const DeBruijnGraph &graph_;
+    const DeBruijnGraph *graph_;
     const DBGAlignerConfig &config_;
 
     DPTable<NodeType> dp_table;
