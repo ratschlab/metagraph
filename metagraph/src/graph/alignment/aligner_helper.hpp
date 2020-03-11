@@ -189,14 +189,19 @@ class DBGAlignerConfig {
 };
 
 
-template <typename NodeType = SequenceGraph::node_index>
+template <typename NodeType>
 class DPTable;
+
+template <typename NodeType>
+class SuffixSeeder;
 
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
 template <typename NodeType = SequenceGraph::node_index>
 class Alignment {
+  friend SuffixSeeder<NodeType>;
+
   public:
     typedef NodeType node_index;
     typedef ::score_t score_t;
@@ -448,7 +453,7 @@ class QueryAlignment {
 
 
 // dynamic programming table stores score columns and steps needed to reconstruct paths
-template <typename NodeType>
+template <typename NodeType = SequenceGraph::node_index>
 class DPTable {
   public:
     typedef ::score_t score_t;

@@ -5,7 +5,7 @@
 
 
 template <typename NodeType>
-void ExactSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
+void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
     query_ = query;
     orientation_ = orientation;
     query_nodes_.clear();
@@ -13,192 +13,215 @@ void ExactSeeder<NodeType>::initialize(std::string_view query, bool orientation)
     if (query_.size() < graph_.get_k())
         return;
 
-    query_nodes_.reserve(query_.size() - graph_.get_k() + 1);
-    graph_.map_to_nodes_sequentially(query_, [&](auto i) { query_nodes_.push_back(i); });
-    assert(query_nodes_.size() == query_.size() - graph_.get_k() + 1);
+    query_nodes_ = map_sequence_to_nodes(graph_, query_);
+    offsets_.assign(query_nodes_.size(), 0);
 
-    partial_sum.resize(query_.size() + 1);
+    partial_sum_.resize(query_.size() + 1);
     std::transform(query_.begin(), query_.end(),
-                   partial_sum.begin() + 1,
+                   partial_sum_.begin() + 1,
                    [&](char c) { return config_.get_row(c)[c]; });
 
-    std::partial_sum(partial_sum.begin(), partial_sum.end(), partial_sum.begin());
-    assert(config_.match_score(query_) == partial_sum.back());
-    assert(config_.get_row(query_.front())[query_.front()] == partial_sum[1]);
-    assert(!partial_sum.front());
+    std::partial_sum(partial_sum_.begin(), partial_sum_.end(), partial_sum_.begin());
+    assert(config_.match_score(query_) == partial_sum_.back());
+    assert(config_.get_row(query_.front())[query_.front()] == partial_sum_[1]);
+    assert(!partial_sum_.front());
 }
 
 template <typename NodeType>
-void ExactSeeder<NodeType>
-::call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const {
-    size_t k = graph_.get_k();
-    for (size_t i = 0; i < query_nodes_.size(); ++i) {
-        assert(query_.begin() + i + k <= query_.end());
-        if (query_nodes_[i] == DeBruijnGraph::npos)
+void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
+    const auto &graph = this->get_graph();
+    size_t k = graph.get_k();
+    const auto &config = this->get_config();
+    const auto &query_nodes = this->get_query_nodes();
+    const auto &partial_sum = this->get_partial_sums();
+    const auto &offsets = this->get_offsets();
+    auto query = this->get_query();
+    bool orientation = this->get_orientation();
+
+    for (size_t i = 0; i < query_nodes.size(); ++i) {
+        if (query_nodes[i] == DeBruijnGraph::npos)
             continue;
 
-        score_t match_score = partial_sum[i + k] - partial_sum[i];
+        size_t seed_length = k - offsets[i];
 
-        if (match_score <= config_.min_cell_score)
+        assert(i + seed_length <= query.size());
+
+        score_t match_score = partial_sum[i + seed_length] - partial_sum[i];
+
+        if (match_score <= config.min_cell_score)
             continue;
 
-        callback(Alignment<NodeType>(std::string_view(query_.data() + i, k),
-                                     { query_nodes_[i] },
-                                     match_score,
-                                     i,
-                                     orientation_));
+        Seed seed(std::string_view(query.data() + i, seed_length),
+                  { query_nodes[i] },
+                  match_score,
+                  i,
+                  orientation,
+                  offsets[i]);
 
-        // if this k-mer was matched, then the next one will be accessible
-        // by an extend call, so there's no need to seed from it
-        ++i;
+        assert(seed.is_valid(graph, &config));
+        callback(std::move(seed));
     }
 }
 
 template <typename NodeType>
 SuffixSeeder<NodeType>::SuffixSeeder(const DeBruijnGraph &graph,
-                                     const DBGAlignerConfig &config)
-      : exact_seeder_(graph, config) {
+                                     const DBGAlignerConfig &config) {
     if (!dynamic_cast<const DBGSuccinct*>(&graph))
         throw std::runtime_error("Only implemented for DBGSuccinct");
+
+    if (config.max_seed_length > graph.get_k()) {
+        base_seeder_ = std::make_unique<UniMEMSeeder<NodeType>>(graph, config);
+    } else {
+        base_seeder_ = std::make_unique<ExactSeeder<NodeType>>(graph, config);
+    }
 }
 
 template <typename NodeType>
 void SuffixSeeder<NodeType>
-::call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const {
-    // TODO: handle cases where
-    // 1) the query is less than k
-    const auto &graph_ = dynamic_cast<const DBGSuccinct&>(get_graph());
-    const auto &config_ = exact_seeder_.get_config();
-    auto query_ = exact_seeder_.get_query();
-    const auto &query_nodes_ = exact_seeder_.get_query_nodes();
-    const auto &partial_sum = exact_seeder_.get_partial_sums();
-    bool orientation_ = exact_seeder_.get_orientation();
+::initialize(std::string_view query, bool orientation) {
+    const auto &config = get_config();
+    auto &query_nodes = get_query_nodes();
+    auto &offsets = get_offsets();
 
-    if (config_.min_seed_length > std::min(graph_.get_k(), query_.size()))
-        return;
+    base_seeder_->initialize(query, orientation);
+    if (query_nodes.empty())
+        query_nodes.assign(1, DeBruijnGraph::npos);
 
-    size_t max_seed_length = std::min(
-        query_.size(),
-        std::min(config_.max_seed_length, graph_.get_k())
-    );
+    const auto &graph = dynamic_cast<const DBGSuccinct&>(get_graph());
+    size_t k = graph.get_k();
+    size_t max_seed_length = std::min(query.size(), std::min(config.max_seed_length, k));
 
-    for (size_t i = 0; i < query_nodes_.size(); ++i) {
-        assert(query_.begin() + i + graph_.get_k() <= query_.end());
-        if (query_nodes_[i] != DeBruijnGraph::npos) {
-            score_t match_score = partial_sum[i + graph_.get_k()] - partial_sum[i];
+    if (config.max_num_seeds_per_locus > 1) {
+        alt_query_nodes.clear();
+        alt_query_nodes.resize(query_nodes.size());
+    }
 
-            if (match_score <= config_.min_cell_score)
-                continue;
+    auto *unimem_seeder = dynamic_cast<MEMSeeder<NodeType>*>(base_seeder_.get());
+    auto *query_node_flags = unimem_seeder ? &unimem_seeder->get_query_node_flags() : nullptr;
 
-            callback(Alignment<NodeType>(
-                std::string_view(query_.data() + i, graph_.get_k()),
-                { query_nodes_[i] },
-                match_score,
-                i,
-                orientation_)
-            );
+    for (size_t i = 0; i < query_nodes.size(); ++i) {
+        if (query_nodes[i] != DeBruijnGraph::npos)
+            continue;
 
-            // if this k-mer was matched, then the next one will be accessible
-            // by an extend call, so there's no need to seed from it
-            ++i;
-        } else {
-            graph_.call_nodes_with_suffix(
-                query_.substr(i, max_seed_length),
-                [&](NodeType node, size_t seed_length) {
-                    assert(node != DeBruijnGraph::npos);
+        bool is_alt = false;
+        graph.call_nodes_with_suffix(
+            std::string_view(query.data() + i, max_seed_length),
+            [&](NodeType alt_node, size_t seed_length) {
+                assert(alt_node != DeBruijnGraph::npos);
 
-                    score_t match_score = partial_sum[i + seed_length] - partial_sum[i];
+                if (is_alt && seed_length < k - 1) {
+                    alt_query_nodes.at(i).push_back(alt_node);
+                    assert(offsets.at(i) == k - seed_length);
+                } else {
+                    assert(seed_length < k);
+                    query_nodes.at(i) = alt_node;
+                    offsets.at(i) = k - seed_length;
 
-                    if (match_score > config_.min_cell_score) {
-                        callback(Alignment<NodeType>(
-                            std::string_view(query_.data() + i, seed_length),
-                            std::vector<NodeType>{ node },
-                            match_score,
-                            i,
-                            orientation_,
-                            graph_.get_k() - seed_length)
-                        );
+                    if (query_node_flags) {
+                        query_node_flags->at(i) = 3;
+
+                        if (i)
+                            query_node_flags->at(i - 1) |= 1;
+
+                        if (i + 1 < query_node_flags->size() && seed_length < k - 1)
+                            query_node_flags->at(i + 1) |= 1;
                     }
-                },
-                config_.min_seed_length,
-                config_.max_num_seeds_per_locus
-            );
+                }
+
+                is_alt = true;
+            },
+            config.min_seed_length,
+            config.max_num_seeds_per_locus
+        );
+    }
+}
+
+template <typename NodeType>
+void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
+    auto query = get_query();
+    base_seeder_->call_seeds([&](auto&& alignment) {
+        size_t i = alignment.get_query().data() - query.data();
+
+        if (alt_query_nodes.size()) {
+            for (auto alt_node : alt_query_nodes.at(i)) {
+                auto alt_alignment = alignment;
+                alt_alignment.nodes_.front() = alt_node;
+                assert(alt_alignment.is_valid(get_graph(), &get_config()));
+                callback(std::move(alt_alignment));
+            }
+        }
+
+        callback(std::move(alignment));
+    });
+}
+
+template <typename NodeType>
+void MEMSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
+    ExactMapSeeder<NodeType>::initialize(query, orientation);
+
+    const auto &query_nodes = this->get_query_nodes();
+
+    query_node_flags_.assign(query_nodes.size(), 0);
+
+    for (size_t i = 0; i < query_nodes.size(); ++i) {
+        if (query_nodes[i] != DeBruijnGraph::npos) {
+            query_node_flags_[i] = 2 | (*is_mem_terminus_)[query_nodes[i]];
         }
     }
 }
 
 template <typename NodeType>
-void MEMSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
-    query_ = query;
-    orientation_ = orientation;
-
-    if (query_.size() < graph_.get_k())
-        return;
-
-    query_nodes_.clear();
-    query_nodes_.reserve(query.size() - graph_.get_k() + 1);
-    graph_.map_to_nodes_sequentially(query, [&](auto i) { query_nodes_.push_back(i); });
-
-    partial_sum.resize(query_.size() + 1);
-    std::transform(query_.begin(), query_.end(),
-                   partial_sum.begin() + 1,
-                   [&](char c) { return config_.get_row(c)[c]; });
-
-    std::partial_sum(partial_sum.begin(), partial_sum.end(), partial_sum.begin());
-    assert(config_.match_score(query_) == partial_sum.back());
-    assert(config_.get_row(query_.front())[query_.front()] == partial_sum[1]);
-    assert(!partial_sum.front());
-
-    query_node_flags_.resize(query_nodes_.size());
-
-    std::transform(query_nodes_.begin(), query_nodes_.end(), query_node_flags_.begin(),
-                   [&](auto i) {
-                       return i != DeBruijnGraph::npos
-                           ? static_cast<uint8_t>(!(*is_mem_terminus_)[i]) | 2
-                           : 0;
-                   });
-}
-
-// TODO: make this work with unmasked DBGSuccinct
-template <typename NodeType>
-void MEMSeeder<NodeType>
-::call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const {
-    size_t k = graph_.get_k();
+void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
+    const auto &graph = this->get_graph();
+    size_t k = graph.get_k();
+    auto query = this->get_query();
+    const auto &query_nodes = this->get_query_nodes();
+    const auto &offsets = this->get_offsets();
+    const auto &config = this->get_config();
+    bool orientation = this->get_orientation();
+    const auto &partial_sum = this->get_partial_sums();
 
     // find start of MEM
     auto it = query_node_flags_.begin();
-
     while ((it = std::find_if(it, query_node_flags_.end(),
                               [](uint8_t flags) { return flags & 2; }))
             < query_node_flags_.end()) {
         // find end of MEM
         auto next = std::find_if(it, query_node_flags_.end(),
-                                 [](uint8_t flags) { return flags != 3; });
+                                 [](uint8_t flags) { return (flags & 1) == 1 || (flags & 2) == 0; });
 
         if (next != query_node_flags_.end() && ((*next) & 2))
             ++next;
 
         assert(next > it);
-        assert(next <= query_nodes_.end());
+        assert(next <= query_node_flags_.end());
 
-        // compute the correct string offsets
-        const char *begin_it = query_.data() + (it - query_node_flags_.begin());
-        const char *end_it = (next == query_node_flags_.end())
-            ? query_.data() + query_.size()
-            : query_.data() + (next - query_node_flags_.begin()) + k - 1;
+        size_t i = it - query_node_flags_.begin();
+        assert(it == query_node_flags_.end() || query_nodes[i] != DeBruijnGraph::npos);
 
-        score_t match_score = partial_sum[end_it - query_.data()]
-            - partial_sum[begin_it - query_.data()];
+        size_t mem_length = (next - it) + k - 1 - offsets.at(i);
 
-        auto node_begin_it = query_nodes_.begin() + (it - query_node_flags_.begin());
+        assert(i + mem_length <= query.size());
+
+        const char *begin_it = query.data() + i;
+        const char *end_it = begin_it + mem_length;
+
+        score_t match_score = partial_sum[end_it - query.data()]
+            - partial_sum[begin_it - query.data()];
+
+        auto node_begin_it = query_nodes.begin() + (it - query_node_flags_.begin());
         auto node_end_it = node_begin_it + (next - it);
+        assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
-        if (match_score > config_.min_cell_score) {
-            callback(Alignment<NodeType>(std::string_view(begin_it, end_it - begin_it),
-                                         std::vector<NodeType>(node_begin_it, node_end_it),
-                                         match_score,
-                                         begin_it - query_.data(),
-                                         orientation_));
+        if (match_score > config.min_cell_score) {
+            Seed seed(std::string_view(begin_it, end_it - begin_it),
+                      std::vector<NodeType>(node_begin_it, node_end_it),
+                      match_score,
+                      begin_it - query.data(),
+                      orientation,
+                      offsets.at(i));
+            assert(seed.is_valid(graph, &config));
+            callback(std::move(seed));
         }
 
         it = next;
