@@ -162,11 +162,11 @@ class DBGAligner : public IDBGAligner {
             bool extended = false;
             extend(seed,
                    query,
-                   [&](DBGAlignment&& extension) {
+                   [&](DBGAlignment&& extension, auto start_node) {
                        assert(extension.is_valid(graph_, &config_));
                        extension.extend_query_end(query.data() + query.size());
 
-                       if (extension.get_clipping()) {
+                       if (extension.get_clipping() || start_node != seed.back()) {
                            // if the extension starts at a different position
                            // from the seed end, then it's a new alignment
                            extension.extend_query_begin(query.data());
