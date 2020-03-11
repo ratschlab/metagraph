@@ -125,7 +125,7 @@ class Extender {
     virtual void
     operator()(const DBGAlignment &path,
                std::string_view query,
-               std::function<void(DBGAlignment&&)> callback,
+               std::function<void(DBGAlignment&&, NodeType)> callback,
                bool orientation,
                score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
@@ -150,7 +150,7 @@ class DefaultColumnExtender : public Extender<NodeType> {
     void
     operator()(const DBGAlignment &path,
                std::string_view query,
-               std::function<void(DBGAlignment&&)> callback,
+               std::function<void(DBGAlignment&&, NodeType)> callback,
                bool orientation,
                score_t min_path_score = std::numeric_limits<score_t>::min());
 
