@@ -1080,21 +1080,7 @@ uint64_t bit_vector_hyb<block_rate>::select0(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
 
-    // return slct0_(id);
-
-    // select is not implemented in sdsl, do binary search
-    uint64_t begin = 0;
-    uint64_t end = size();
-
-    while (begin + 1 < end) {
-        uint64_t mid = (begin + end - 1) / 2;
-        if (id > rank0(mid)) {
-            begin = mid + 1;
-        } else {
-            end = mid + 1;
-        }
-    }
-    return begin;
+    return slct0_(id);
 }
 
 template <uint32_t block_rate>
@@ -1102,21 +1088,7 @@ uint64_t bit_vector_hyb<block_rate>::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
 
-    // return slct1_(id);
-
-    // select is not implemented in sdsl, do binary search
-    uint64_t begin = 0;
-    uint64_t end = size();
-
-    while (begin + 1 < end) {
-        uint64_t mid = (begin + end - 1) / 2;
-        if (id > rank1(mid)) {
-            begin = mid + 1;
-        } else {
-            end = mid + 1;
-        }
-    }
-    return begin;
+    return slct1_(id);
 }
 
 template <uint32_t block_rate>
