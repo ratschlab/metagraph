@@ -12,6 +12,7 @@
 #include <sdsl/bit_vector_il.hpp>
 #include <dynamic.hpp>
 
+#include "vector_algorithm.hpp"
 #include "bitmap.hpp"
 
 
@@ -230,148 +231,256 @@ class bit_vector_sd : public bit_vector {
 };
 
 
-template <uint32_t block_rate = 16>
-class bit_vector_hyb : public bit_vector {
+template <class bv_type,
+          class rank_1_type,
+          class select_1_type,
+          class select_0_type>
+class bit_vector_sdsl : public bit_vector {
+    template<typename>
+    struct is_rrr : std::false_type {};
+    template<uint16_t t_bs, class t_rac, uint16_t t_k>
+    struct is_rrr<sdsl::rrr_vector<t_bs, t_rac, t_k>> : std::true_type {};
+
+    template<typename>
+    struct bv_traits {};
+
+    template<uint32_t k_sblock_rate>
+    struct bv_traits<sdsl::hyb_vector<k_sblock_rate>> {
+        // hyb_vector doesn't support select
+        static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
+        static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
+    };
+    template<uint32_t t_bs>
+    struct bv_traits<sdsl::bit_vector_il<t_bs>> {
+        static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
+        static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
+    };
+    template<uint16_t t_bs, class t_rac, uint16_t t_k>
+    struct bv_traits<sdsl::rrr_vector<t_bs, t_rac, t_k>> {
+        static constexpr size_t MAX_ITER_BIT_VECTOR = 1;
+        // sequential word access for bit_vector_rrr per bit is 21 times faster than select
+        static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 21;
+    };
+
   public:
-    explicit bit_vector_hyb(uint64_t size = 0, bool value = false);
-    explicit bit_vector_hyb(const sdsl::bit_vector &vector);
-    explicit bit_vector_hyb(const sdsl::bit_vector &vector, uint64_t num_set_bits);
-    explicit bit_vector_hyb(const bit_vector_hyb &other);
+    explicit bit_vector_sdsl(uint64_t size = 0, bool value = false)
+      : bit_vector_sdsl(sdsl::bit_vector(size, value)) {}
+    explicit bit_vector_sdsl(const sdsl::bit_vector &vector)
+      : vector_(vector), rk1_(&vector_), slct1_(&vector_), slct0_(&vector_) {}
+    explicit bit_vector_sdsl(const bit_vector_sdsl &other) { *this = other; }
 
-    bit_vector_hyb(bit_vector_hyb&& other) noexcept;
-    bit_vector_hyb(std::initializer_list<bool> init);
+    bit_vector_sdsl(sdsl::bit_vector&& other) noexcept
+      : vector_(std::move(other)), rk1_(&vector_), slct1_(&vector_), slct0_(&vector_) {}
+    bit_vector_sdsl(bit_vector_sdsl&& other) noexcept { *this = std::move(other); }
+    bit_vector_sdsl(std::initializer_list<bool> init)
+      : bit_vector_sdsl(sdsl::bit_vector(init)) {}
 
-    bit_vector_hyb& operator=(const bit_vector_hyb &other);
-    bit_vector_hyb& operator=(bit_vector_hyb&& other) noexcept;
+    bit_vector_sdsl& operator=(const bit_vector_sdsl &other) {
+        vector_ = other.vector_;
+        rk1_ = other.rk1_;
+        rk1_.set_vector(&vector_);
+        slct1_ = other.slct1_;
+        slct1_.set_vector(&vector_);
+        slct0_ = other.slct0_;
+        slct0_.set_vector(&vector_);
+        return *this;
+    }
+    bit_vector_sdsl& operator=(bit_vector_sdsl&& other) noexcept {
+        vector_ = std::move(other.vector_);
+        rk1_ = std::move(other.rk1_);
+        rk1_.set_vector(&vector_);
+        slct1_ = std::move(other.slct1_);
+        slct1_.set_vector(&vector_);
+        slct0_ = std::move(other.slct0_);
+        slct0_.set_vector(&vector_);
+        return *this;
+    }
 
-    std::unique_ptr<bit_vector> copy() const override;
+    std::unique_ptr<bit_vector> copy() const override {
+        return std::make_unique<bit_vector_sdsl>(*this);
+    }
 
-    uint64_t rank1(uint64_t id) const override;
-    uint64_t select0(uint64_t id) const;
-    uint64_t select1(uint64_t id) const override;
+    uint64_t rank1(uint64_t id) const override {
+        //the rank method in SDSL does not include id in the count
+        return rk1_(id >= this->size() ? this->size() : id + 1);
+    }
+    uint64_t select0(uint64_t id) const {
+        assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
+        assert(num_set_bits() == rank1(size() - 1));
+        return slct0_(id);
+    }
+    uint64_t select1(uint64_t id) const override {
+        assert(id > 0 && size() > 0 && id <= num_set_bits());
+        assert(num_set_bits() == rank1(size() - 1));
+        return slct1_(id);
+    }
+    std::pair<bool, uint64_t> inverse_select(uint64_t id) const override {
+        if constexpr(is_rrr<bv_type>{}) {
+            if constexpr(bv_type::block_size != 15) {
+                std::pair<bool, uint64_t> pair = vector_.inverse_select(id);
+                pair.second += pair.first;
+                return pair;
+            }
+        }
+        // TODO: implement inverse_select for other bit vectors as well
+        return bit_vector::inverse_select(id);
+    }
+    uint64_t conditional_rank1(uint64_t id) const override {
+        if constexpr(is_rrr<bv_type>{}) {
+            if constexpr(bv_type::block_size != 15) {
+                return vector_.conditional_rank(id);
+            }
+        }
+        return bit_vector::conditional_rank1(id);
+    }
 
-    uint64_t next1(uint64_t id) const override;
-    uint64_t prev1(uint64_t id) const override;
+    uint64_t next1(uint64_t id) const override {
+        assert(id < size());
+        return ::next1(*this, id, bv_traits<bv_type>::MAX_ITER_BIT_VECTOR);
+    }
+    uint64_t prev1(uint64_t id) const override {
+        assert(id < size());
+        return ::prev1(*this, id, bv_traits<bv_type>::MAX_ITER_BIT_VECTOR);
+    }
 
-    bool operator[](uint64_t id) const override;
-    uint64_t get_int(uint64_t id, uint32_t width) const override;
+    bool operator[](uint64_t id) const override {
+        assert(id < size());
+        return vector_[id];
+    }
+    uint64_t get_int(uint64_t id, uint32_t width) const override {
+        return vector_.get_int(id, width);
+    }
 
-    bool load(std::istream &in) override;
-    void serialize(std::ostream &out) const override;
+    bool load(std::istream &in) override {
+        if (!in.good())
+            return false;
+
+        try {
+            vector_.load(in);
+            if (!in.good())
+                return false;
+            rk1_ = decltype(rk1_)(&vector_);
+            slct1_ = decltype(slct1_)(&vector_);
+            slct0_ = decltype(slct0_)(&vector_);
+            return true;
+        } catch (const std::bad_alloc &exception) {
+            std::cerr << "ERROR: Not enough memory to load "
+                      << typeid(bv_type).name() << std::endl;
+            return false;
+        } catch (...) {
+            return false;
+        }
+    }
+    void serialize(std::ostream &out) const override {
+        vector_.serialize(out);
+
+        if (!out.good())
+            throw std::ofstream::failure("Error when dumping bit_vector_rrr");
+    }
 
     uint64_t size() const override { return vector_.size(); }
 
-    sdsl::bit_vector to_vector() const override;
+    sdsl::bit_vector to_vector() const override {
+        if (num_set_bits()
+                < size() / bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR) {
+            // sparse
+            sdsl::bit_vector vector(size(), 0);
+            uint64_t max_rank = size() ? rank1(size() - 1) : 0;
+            for (uint64_t i = 1; i <= max_rank; ++i) {
+                vector[slct1_(i)] = 1;
+            }
+            return vector;
+
+        } else if ((size() - num_set_bits())
+                < size() / bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR) {
+            // dense
+            sdsl::bit_vector vector(size(), 1);
+            uint64_t max_rank = size() ? rank0(size() - 1) : 0;
+            for (uint64_t i = 1; i <= max_rank; ++i) {
+                vector[slct0_(i)] = 0;
+            }
+            return vector;
+
+        } else {
+            // moderate density
+            sdsl::bit_vector vector(size());
+
+            uint64_t i;
+            for (i = 0; i + 64 <= vector.size(); i += 64) {
+                vector.set_int(i, vector_.get_int(i));
+            }
+            if (i < vector.size())
+                vector.set_int(i, vector_.get_int(i, vector.size() - i), vector.size() - i);
+
+            return vector;
+        }
+    }
 
     void call_ones_in_range(uint64_t begin, uint64_t end,
-                            const VoidCall<uint64_t> &callback) const override;
+                            const VoidCall<uint64_t> &callback) const override {
+        assert(begin <= end);
+        assert(end <= size());
 
-    const sdsl::hyb_vector<block_rate>& data() const { return vector_; }
+        if (num_set_bits()
+                < size() / bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR) {
+            // sparse
+            uint64_t num_ones = end ? rank1(end - 1) : 0;
+            for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
+                callback(select1(r));
+            }
+        } else if ((size() - num_set_bits())
+                    < size() / bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR) {
+            // dense
+            uint64_t one_pos = 0;
+            uint64_t zero_pos = 0;
+            uint64_t num_zeros = end ? rank0(end - 1) : 0;
+            for (uint64_t r = begin ? rank0(begin - 1) + 1 : 1; r <= num_zeros; ++r) {
+                zero_pos = select0(r);
+                while (one_pos < zero_pos) {
+                    callback(one_pos++);
+                }
+                one_pos++;
+            }
+            while (one_pos < end) {
+                callback(one_pos++);
+            }
+        } else {
+            // moderate density
+            assert(begin <= end);
+            assert(end <= size());
+            ::call_ones(vector_, begin, end, callback);
+        }
+    }
+
+    const bv_type& data() const { return vector_; }
 
   private:
-    sdsl::hyb_vector<block_rate> vector_;
-    typename sdsl::hyb_vector<block_rate>::rank_1_type rk1_;
-    typename sdsl::hyb_vector<block_rate>::select_1_type slct1_;
-    typename sdsl::hyb_vector<block_rate>::select_0_type slct0_;
+    bv_type vector_;
+    rank_1_type rk1_;
+    select_1_type slct1_;
+    select_0_type slct0_;
 };
 
+template <uint32_t k_sblock_rate = 16>
+using bit_vector_hyb
+    = bit_vector_sdsl<sdsl::hyb_vector<k_sblock_rate>,
+                      typename sdsl::hyb_vector<k_sblock_rate>::rank_1_type,
+                      typename sdsl::hyb_vector<k_sblock_rate>::select_1_type,
+                      typename sdsl::hyb_vector<k_sblock_rate>::select_0_type>;
 
 template <uint32_t block_size = 512>
-class bit_vector_il : public bit_vector {
-    static constexpr auto kBlockSize = block_size;
+using bit_vector_il
+    = bit_vector_sdsl<sdsl::bit_vector_il<block_size>,
+                      typename sdsl::bit_vector_il<block_size>::rank_1_type,
+                      typename sdsl::bit_vector_il<block_size>::select_1_type,
+                      typename sdsl::bit_vector_il<block_size>::select_0_type>;
 
-  public:
-    explicit bit_vector_il(uint64_t size = 0, bool value = false);
-    explicit bit_vector_il(const sdsl::bit_vector &vector);
-    explicit bit_vector_il(const sdsl::bit_vector &vector, uint64_t num_set_bits);
-    explicit bit_vector_il(const bit_vector_il &other);
-
-    bit_vector_il(bit_vector_il&& other) noexcept;
-    bit_vector_il(std::initializer_list<bool> init);
-
-    bit_vector_il& operator=(const bit_vector_il &other);
-    bit_vector_il& operator=(bit_vector_il&& other) noexcept;
-
-    std::unique_ptr<bit_vector> copy() const override;
-
-    uint64_t rank1(uint64_t id) const override;
-    uint64_t select0(uint64_t id) const;
-    uint64_t select1(uint64_t id) const override;
-
-    uint64_t next1(uint64_t id) const override;
-    uint64_t prev1(uint64_t id) const override;
-
-    bool operator[](uint64_t id) const override;
-    uint64_t get_int(uint64_t id, uint32_t width) const override;
-
-    bool load(std::istream &in) override;
-    void serialize(std::ostream &out) const override;
-
-    uint64_t size() const override { return vector_.size(); }
-
-    sdsl::bit_vector to_vector() const override;
-
-    void call_ones_in_range(uint64_t begin, uint64_t end,
-                            const VoidCall<uint64_t> &callback) const override;
-
-    const sdsl::bit_vector_il<kBlockSize>& data() const { return vector_; }
-
-  private:
-    sdsl::bit_vector_il<kBlockSize> vector_;
-    typename sdsl::bit_vector_il<kBlockSize>::rank_1_type rk1_;
-    typename sdsl::bit_vector_il<kBlockSize>::select_1_type slct1_;
-    typename sdsl::bit_vector_il<kBlockSize>::select_0_type slct0_;
-};
-
-
-// default block size: 63
-template <size_t log_block_size = 63>
-class bit_vector_rrr : public bit_vector {
-    static constexpr auto kBlockSize = log_block_size;
-
-  public:
-    explicit bit_vector_rrr(uint64_t size = 0, bool value = false);
-    explicit bit_vector_rrr(const sdsl::bit_vector &vector);
-    explicit bit_vector_rrr(const bit_vector_rrr &other);
-
-    bit_vector_rrr(bit_vector_rrr&& other) noexcept;
-    bit_vector_rrr(std::initializer_list<bool> init);
-
-    bit_vector_rrr& operator=(const bit_vector_rrr &other);
-    bit_vector_rrr& operator=(bit_vector_rrr&& other) noexcept;
-
-    std::unique_ptr<bit_vector> copy() const override;
-
-    uint64_t rank1(uint64_t id) const override;
-    uint64_t select0(uint64_t id) const;
-    uint64_t select1(uint64_t id) const override;
-    std::pair<bool, uint64_t> inverse_select(uint64_t id) const override;
-    uint64_t conditional_rank1(uint64_t id) const override;
-
-    uint64_t next1(uint64_t id) const override;
-    uint64_t prev1(uint64_t id) const override;
-
-    bool operator[](uint64_t id) const override;
-    uint64_t get_int(uint64_t id, uint32_t width) const override;
-
-    bool load(std::istream &in) override;
-    void serialize(std::ostream &out) const override;
-
-    uint64_t size() const override { return vector_.size(); }
-
-    sdsl::bit_vector to_vector() const override;
-
-    void call_ones_in_range(uint64_t begin, uint64_t end,
-                            const VoidCall<uint64_t> &callback) const override;
-
-    const sdsl::rrr_vector<kBlockSize>& data() const { return vector_; }
-
-  private:
-    sdsl::rrr_vector<kBlockSize> vector_;
-    typename sdsl::rrr_vector<kBlockSize>::rank_1_type rk1_;
-    typename sdsl::rrr_vector<kBlockSize>::select_1_type slct1_;
-    typename sdsl::rrr_vector<kBlockSize>::select_0_type slct0_;
-};
+template <uint32_t block_size = 63>
+using bit_vector_rrr
+    = bit_vector_sdsl<sdsl::rrr_vector<block_size>,
+                      typename sdsl::rrr_vector<block_size>::rank_1_type,
+                      typename sdsl::rrr_vector<block_size>::select_1_type,
+                      typename sdsl::rrr_vector<block_size>::select_0_type>;
 
 
 class bit_vector_adaptive : public bit_vector {
