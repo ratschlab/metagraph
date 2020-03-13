@@ -121,7 +121,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     // Random conditional rank time
     timer.reset();
     for (uint64_t i = 0, size = another.size(); i < num_iterations; ++i) {
-        result += another.conditional_rank1((i * 87'178'291'199) % size).second;
+        result += another.conditional_rank1((i * 87'178'291'199) % size);
     }
     double random_cond_rank = timer.elapsed() / num_iterations;
 
@@ -167,7 +167,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     for (uint64_t i = 0, j = 0, size = another.size(); i < num_iterations; ++i) {
         if (j == size)
             j = 0;
-        result += another.conditional_rank1(j++).second;
+        result += another.conditional_rank1(j++);
     }
     double sequential_cond_rank = timer.elapsed() / num_iterations;
 

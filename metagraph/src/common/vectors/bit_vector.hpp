@@ -29,12 +29,12 @@ class bit_vector : public bitmap {
     virtual std::pair<bool, uint64_t> inverse_select(uint64_t id) const {
         return std::make_pair(operator[](id), rank1(id));
     }
-    // Query bit and rank if the bit is equal to |condition|
-    virtual std::pair<bool, uint64_t> conditional_rank1(uint64_t id, bool condition = true) const {
-        if (operator[](id) == condition) {
-            return std::make_pair(condition, rank1(id));
+    // Query bit and return rank if the bit is set, otherwise return zero
+    virtual uint64_t conditional_rank1(uint64_t id) const {
+        if (operator[](id)) {
+            return rank1(id);
         } else {
-            return std::make_pair(!condition, 0);
+            return 0;
         }
     }
 
@@ -346,7 +346,7 @@ class bit_vector_rrr : public bit_vector {
     uint64_t select0(uint64_t id) const;
     uint64_t select1(uint64_t id) const override;
     std::pair<bool, uint64_t> inverse_select(uint64_t id) const override;
-    std::pair<bool, uint64_t> conditional_rank1(uint64_t id, bool condition = true) const override;
+    uint64_t conditional_rank1(uint64_t id) const override;
 
     uint64_t next1(uint64_t id) const override;
     uint64_t prev1(uint64_t id) const override;
@@ -385,8 +385,8 @@ class bit_vector_adaptive : public bit_vector {
     virtual std::pair<bool, uint64_t> inverse_select(uint64_t id) const override final {
         return vector_->inverse_select(id);
     }
-    virtual std::pair<bool, uint64_t> conditional_rank1(uint64_t id, bool condition = true) const override final {
-        return vector_->conditional_rank1(id, condition);
+    virtual uint64_t conditional_rank1(uint64_t id) const override final {
+        return vector_->conditional_rank1(id);
     }
 
     virtual uint64_t next1(uint64_t id) const override final { return vector_->next1(id); }
