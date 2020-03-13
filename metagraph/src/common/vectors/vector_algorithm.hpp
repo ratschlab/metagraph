@@ -181,6 +181,66 @@ void call_nonzeros(const sdsl::int_vector<> &vector, Callback callback) {
 }
 
 
+template <typename BitVector>
+inline uint64_t next1(const BitVector &v,
+                      uint64_t pos,
+                      size_t num_steps) {
+    assert(pos < v.size());
+
+    for (size_t t = 1; t < num_steps; ++t, ++pos) {
+        if (pos == v.size() || v[pos])
+            return pos;
+    }
+    if (pos == v.size())
+        return pos;
+
+    uint64_t rk;
+
+    if (num_steps >= 1) {
+        auto pair = v.inverse_select(pos);
+        if (pair.first)
+            return pos;
+
+        rk = pair.second + 1;
+
+    } else {
+        rk = pos ? v.rank1(pos - 1) + 1 : 1;
+    }
+
+    return rk <= v.num_set_bits() ? v.select1(rk) : v.size();
+}
+
+template <typename BitVector>
+inline uint64_t prev1(const BitVector &v,
+                      uint64_t pos,
+                      size_t num_steps) {
+    assert(pos < v.size());
+
+    for (size_t t = 1; t < num_steps; ++t, --pos) {
+        if (v[pos])
+            return pos;
+
+        if (pos == 0)
+            return v.size();
+    }
+
+    uint64_t rk;
+
+    if (num_steps >= 1) {
+        auto pair = v.inverse_select(pos);
+        if (pair.first)
+            return pos;
+
+        rk = pair.second;
+
+    } else {
+        rk = v.rank1(pos);
+    }
+
+    return rk ? v.select1(rk) : v.size();
+}
+
+
 namespace sdsl {
 
 // based on sdsl::select_support_scan
