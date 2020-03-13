@@ -36,8 +36,7 @@ TYPED_TEST(EliasFanoTest, WriteEmpty) {
 
 TYPED_TEST(EliasFanoTest, ReadEmpty) {
     utils::TempFile out;
-    common::EliasFanoEncoder<TypeParam> encoder(0, std::numeric_limits<TypeParam>::max(),
-                                               out.ofstream());
+    common::EliasFanoEncoder<TypeParam> encoder(0, 0, out.ofstream());
     encoder.finish();
 
     common::EliasFanoDecoder<TypeParam> decoder(out.ifstream());

@@ -104,6 +104,7 @@ TYPED_TEST(SortedSetDiskTest, OneInsertLargerThanBuffer) {
  * multiple inserts.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
+    common::logger->set_level(spdlog::level::trace);
     constexpr size_t container_size = 8;
     for (uint32_t cached = 1; cached < container_size / 3; ++cached) {
         common::SortedSetDisk<TypeParam> underTest

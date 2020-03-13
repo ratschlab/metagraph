@@ -305,10 +305,10 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
             common::SortedMultiset<KMER, uint16_t, Vector<std::pair<KMER, uint16_t>>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
             common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint8_t>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint16_t>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint32_t>>;
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER, KMER::WordType>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint8_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint16_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint32_t>>;
 
 
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64)

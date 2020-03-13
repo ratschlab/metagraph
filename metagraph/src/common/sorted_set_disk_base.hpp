@@ -33,15 +33,12 @@ namespace common {
  * @tparam T the type of the elements that are being stored and sorted,
  * typically #KMerBOSS instances, or <#KmerBOSS, count> pairs.
  */
-template <typename T>
+template <typename T, typename INT>
 class SortedSetDiskBase {
     typedef T value_type;
     typedef Vector<value_type> storage_type;
     typedef ChunkedWaitQueue<value_type> result_type;
     typedef typename storage_type::iterator Iterator;
-
-    /** Number of chunks for "level 1" intermediary merging. */
-    static constexpr uint32_t MERGE_L1_COUNT = 4;
 
     /**
      * The number of elements in the merge queue. Should be large enough to reduce lock
@@ -133,15 +130,7 @@ class SortedSetDiskBase {
     virtual void sort_and_remove_duplicates(storage_type *vector,
                                             size_t num_threads) const = 0;
 
-    void start_merging() {
-        const std::vector<std::string> file_names = get_file_names();
-        async_worker_.enqueue([file_names, this]() {
-            std::function<void(const value_type &)> on_new_item
-                    = [this](const value_type &v) { merge_queue_.push(v); };
-            merge_files(file_names, on_new_item);
-            merge_queue_.shutdown();
-        });
-    }
+    virtual void start_merging() = 0;
 
     std::vector<std::string> get_file_names() {
         async_merge_l1_.join(); // make sure all L1 merges are done
@@ -177,128 +166,13 @@ class SortedSetDiskBase {
         return prefix + "_all";
     }
 
-    static std::function<void(const value_type &)> write_or_die(const std::string &name,
-                                                                std::fstream *out) {
-        return [out, &name](const value_type &v) {
-            if (!out->write(reinterpret_cast<const char *>(&v), sizeof(T))) {
-                std::cerr << "Error: Writing of merged data to " << name << " failed."
-                          << std::endl;
-                std::exit(EXIT_FAILURE);
-            }
-        };
-    }
-
-    static inline void write_or_die(std::fstream *out, char *data, size_t size) {
-        if (!out->write(data, size)) {
-            std::cerr << "Error: Writing data to stream." << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
-    }
-
-
-    static void merge_l1(const std::string &chunk_file_prefix,
-                         uint32_t chunk_count,
-                         std::atomic<uint32_t> *l1_chunk_count,
-                         std::atomic<size_t> *total_size) {
-        const std::string &merged_l1_file_name
-                = merged_l1_name(chunk_file_prefix, chunk_count / MERGE_L1_COUNT);
-        std::fstream merged_file(merged_l1_file_name, std::ios::binary | std::ios::out);
-        std::vector<std::string> to_merge(MERGE_L1_COUNT);
-        for (uint32_t i = 0; i < MERGE_L1_COUNT; ++i) {
-            to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
-            *total_size -= static_cast<int64_t>(std::filesystem::file_size(to_merge[i]));
-        }
-        logger->trace("Starting merging last {} chunks into {}", MERGE_L1_COUNT,
-                      merged_l1_file_name);
-        merge_files(to_merge, write_or_die(merged_l1_file_name, &merged_file),
-                    true /* clean up */);
-        merged_file.close();
-        (*l1_chunk_count)++;
-        logger->trace("Merging last {} chunks into {} done", MERGE_L1_COUNT,
-                      merged_l1_file_name);
-        *total_size += std::filesystem::file_size(merged_l1_file_name);
-    }
-
-    static void merge_all(const std::string &out_file,
-                          const std::vector<std::string> &to_merge) {
-        std::fstream merged_file(out_file, std::ios::binary | std::ios::out);
-        logger->trace(
-                "Max allocated disk capacity exceeded. Starting merging all {} chunks "
-                "into {}",
-                to_merge.size(), out_file);
-        merge_files(to_merge, write_or_die(out_file, &merged_file), true /* clean up */);
-        logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
-                      to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
-    }
-
-
     /**
      * Dumps the given data to a file, synchronously. If the maximum allowd disk size
      * is reached, all chunks will be merged into a single chunk in an effort to reduce
      * disk space.
      * @param is_done if this is the last chunk being dumped
      */
-    void dump_to_file(bool is_done) {
-        assert(!data_.empty());
-
-        std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
-        std::ofstream kmer_file(file_name, std::ios::out | std::ios::binary);
-        if (!kmer_file) {
-            logger->error("Creating chunk file '{}' failed", file_name);
-            std::exit(EXIT_FAILURE);
-        }
-        if constexpr (utils::is_instance<T, std::pair> {}) {
-            using T1 = std::decay_t<decltype(utils::get_first(data_[0]))>;
-            using T2 = std::decay_t<decltype(utils::get_second(data_[0]))>;
-            EliasFanoEncoder<T1> encoder(data_.size(), utils::get_first(data_.back()), kmer_file);
-            std::string count_file_name = file_name + ".counts";
-            std::fstream counts_file(count_file_name, std::ios::out | std::ios::binary);
-            if (!counts_file) {
-                logger->error("Creating count file '{}' failed", count_file_name);
-                std::exit(EXIT_FAILURE);
-            }
-            for (const auto &v : data_) {
-                encoder.add(v.first);
-                counts_file.write(reinterpret_cast<const char *>(&v.second), sizeof(T2));
-            }
-            size_t first_size = encoder.finish();
-            if (!counts_file) {
-                logger->error("Writing to {}' failed", file_name);
-                std::exit(EXIT_FAILURE);
-            }
-            counts_file.close();
-
-            total_chunk_size_bytes_ += (first_size + data_.size() * sizeof(T2));
-        } else {
-            EliasFanoEncoder<T> encoder(data_, kmer_file);
-            total_chunk_size_bytes_ += encoder.finish();
-        }
-        data_.resize(0);
-        if (is_done) {
-            async_merge_l1_.clear();
-        } else if (total_chunk_size_bytes_ > max_disk_space_bytes_) {
-            async_merge_l1_.clear();
-            async_merge_l1_.join();
-            std::string all_merged_file = chunk_file_prefix_ + "_all.tmp";
-            chunk_count_++; // needs to be incremented, so that get_file_names() returns correct values
-            merge_all(all_merged_file, get_file_names());
-            merged_all_ = true;
-            total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
-            if (total_chunk_size_bytes_ > max_disk_space_bytes_ * 0.8) {
-                logger->critical("Disk space reduced by < 20%. Giving up.");
-                std::exit(EXIT_FAILURE);
-            }
-            std::filesystem::rename(all_merged_file, merged_all_name(chunk_file_prefix_));
-            chunk_count_ = 0;
-            l1_chunk_count_ = 0;
-            return;
-        } else if ((chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
-            async_merge_l1_.enqueue(merge_l1, chunk_file_prefix_, chunk_count_,
-                                    &l1_chunk_count_,
-                                    &total_chunk_size_bytes_);
-        }
-        chunk_count_++;
-    }
+    virtual void dump_to_file(bool is_done) = 0;
 
     void try_reserve(size_t size, size_t min_size = 0) {
         size = std::max(size, min_size);
@@ -410,6 +284,9 @@ class SortedSetDiskBase {
     std::atomic<size_t> total_chunk_size_bytes_ = 0;
 
     bool merged_all_ = false;
+  private:
+    /** Number of chunks for "level 1" intermediary merging. */
+    static constexpr uint32_t MERGE_L1_COUNT = 4;
 };
 
 } // namespace common

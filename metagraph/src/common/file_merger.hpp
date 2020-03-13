@@ -7,10 +7,9 @@
 #include <string>
 #include <vector>
 
-
-#include "common/utils/template_utils.hpp"
 #include "common/elias_fano.hpp"
 #include "common/logger.hpp"
+#include "common/utils/template_utils.hpp"
 
 namespace mg {
 namespace common {
@@ -69,20 +68,22 @@ class MergeHeap {
  *
  * Note: this method blocks until all the data was successfully merged.
  */
-template <typename T>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     std::function<void(const T &)> on_new_item,
-                     bool cleanup = true) {
+template <typename T, typename INT>
+uint64_t merge_files(
+        const std::vector<std::string> &sources,
+        std::function<void(const T &)> on_new_item,
+        bool cleanup = true,
+        std::function<T(const INT &v)> to_T = [](const INT &v) { return T(v); }) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     std::vector<std::ifstream> chunk_files(sources.size());
     uint64_t num_elements_read = 0;
 
     MergeHeap<T> merge_heap;
-    std::optional<T> data_item;
+    std::optional<INT> data_item;
     // profiling indicates that setting a larger buffer slightly increases performance
     std::unique_ptr<char[]> buffer(new char[sources.size() * 1024 * 1024]);
-    std::vector<std::unique_ptr<EliasFanoDecoder<T>>> decoders(sources.size());
+    std::vector<std::unique_ptr<EliasFanoDecoder<INT>>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
         chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
@@ -90,10 +91,10 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             logger->error("Unable to open chunk file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
-        decoders[i] = std::make_unique<EliasFanoDecoder<T>>(chunk_files[i]);
+        decoders[i] = std::make_unique<EliasFanoDecoder<INT>>(chunk_files[i]);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
-            merge_heap.emplace(data_item.value(), i);
+            merge_heap.emplace(to_T(data_item.value()), i);
             num_elements_read++;
         }
     }
@@ -120,7 +121,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
         if (chunk_files[chunk_index]
             && (data_item = decoders[chunk_index]->next())
             .has_value()) {
-            merge_heap.emplace(data_item.value(), chunk_index);
+            merge_heap.emplace(to_T(data_item.value()), chunk_index);
             num_elements_read++;
         }
     }
@@ -146,28 +147,39 @@ uint64_t merge_files(const std::vector<std::string> &sources,
  *
  * Note: this method blocks until all the data was successfully merged.
  */
-template <typename T, typename C>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     std::function<void(const std::pair<T, C> &)> on_new_item,
-                     bool cleanup = true) {
+template <typename T, typename INT, typename C>
+uint64_t merge_files(
+        const std::vector<std::string> &sources,
+        std::function<void(const std::pair<T, C> &)> on_new_item,
+        bool cleanup = true,
+        std::function<T(const INT &v)> to_T = [](const INT &v) { return T(v); }) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     std::vector<std::ifstream> chunk_files(sources.size());
+    std::vector<std::ifstream> count_files(sources.size());
     uint64_t num_elements = 0;
 
     MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
-    std::pair<T, C> data_item;
+    std::optional<INT> data_item;
+    C data_item_count;
     std::unique_ptr<char[]> buffer(new char[sources.size() * 1024 * 1024]);
+    std::unique_ptr<char[]> buffer_count(new char[sources.size() * 1024 * 1024]);
+    std::vector<std::unique_ptr<EliasFanoDecoder<INT>>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
         chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
         chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
-        if (!chunk_files[i].good()) {
-            logger->error("Unable to open chunk file '{}'", sources[i]);
+        count_files[i].rdbuf()->pubsetbuf((buffer_count.get() + i * 1024 * 1024),
+                                          1024 * 1024);
+        count_files[i].open(sources[i] + ".count", std::ios::in | std::ios::binary);
+        if (!chunk_files[i].good() || !count_files[i].good()) {
+            logger->error("Unable to open chunk/count file '{}'", sources[i]);
             std::exit(EXIT_FAILURE);
         }
-        if (chunk_files[i].read(reinterpret_cast<char *>(&data_item),
-                                sizeof(std::pair<T, C>))) {
-            merge_heap.emplace(data_item, i);
+        decoders[i] = std::make_unique<EliasFanoDecoder<INT>>(chunk_files[i]);
+        data_item = decoders[i]->next();
+        if (count_files[i].read(reinterpret_cast<char *>(&data_item_count), sizeof(C))) {
+            assert(data_item.has_value());
+            merge_heap.emplace({ to_T(data_item.value()), data_item_count }, i);
             num_elements++;
         }
     }
@@ -197,10 +209,12 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             }
         }
 
-        if (chunk_files[chunk_index]
-            && chunk_files[chunk_index].read(reinterpret_cast<char *>(&data_item),
-                                             sizeof(std::pair<T, C>))) {
-            merge_heap.emplace(data_item, chunk_index);
+        if (count_files[chunk_index]
+            && count_files[chunk_index].read(reinterpret_cast<char *>(&data_item_count),
+                                             sizeof(C))) {
+            data_item = decoders[chunk_index]->next();
+            assert(data_item.has_value());
+            merge_heap.emplace({ to_T(data_item.value()), data_item_count }, chunk_index);
             num_elements++;
         }
     }
