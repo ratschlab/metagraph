@@ -1,5 +1,6 @@
 #include "gtest/gtest.h"
 
+#include <cmath>
 #include <cstdlib>
 
 #include "test_helpers.hpp"
@@ -367,6 +368,31 @@ TEST(bit_vector_dyn, Serialization) {
         ASSERT_TRUE(vector->load(instream));
 
         reference_based_test(*vector, numbers);
+    }
+}
+
+template <class bit_vector_type>
+uint64_t space_taken(const bit_vector_type &vec) {
+    std::ofstream outstream(test_dump_basename, std::ios::binary);
+    vec.serialize(outstream);
+    outstream.close();
+    std::ifstream instream(test_dump_basename, std::ios::binary | std::ifstream::ate);
+    return instream.tellg();
+}
+
+TEST(bit_vector_rrr, SpacePredicted) {
+    double tolerance = 0.05;
+
+    DataGenerator gen;
+    for (uint64_t size : { 10'000, 1'000'000, 10'000'000 }) {
+        for (double density : { 0.1, 0.3, 0.5, 0.7, .9 }) {
+            sdsl::bit_vector bv = gen.generate_random_column(size, density);
+            uint64_t footprint = space_taken(bit_vector_rrr<63>(bv));
+            EXPECT_GE(predict_size<bit_vector_rrr<63>>(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * 8. * (1 - tolerance));
+            EXPECT_LE(predict_size<bit_vector_rrr<63>>(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * 8. * (1 + tolerance));
+        }
     }
 }
 
