@@ -1544,10 +1544,9 @@ double entropy(double q) {
     return q * log2(q) + (1 - q) * log2(1 - q);
 }
 
-// TODO: write unit tests for these. Check if approximately equals to the serialized dumps
 uint64_t bv_space_taken_rrr(uint64_t size, uint64_t num_set_bits, uint8_t block_size) {
     return std::ceil(logbinomial(size, num_set_bits))
-            + (size + block_size - 1) / block_size * std::ceil(log2(block_size + 1));
+            + (size + block_size) / block_size * (sdsl::bits::hi(block_size) + 1);
 }
 
 uint64_t bv_space_taken_sd(uint64_t size, uint64_t num_set_bits) {
@@ -1570,6 +1569,7 @@ uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
     if constexpr(std::is_base_of<bit_vector_sd, VectorType>::value)
         return bv_space_taken_sd(size, num_set_bits);
 
+    // TODO: correct the formula for bit_vector_rrr<15>
     if constexpr(std::is_base_of<bit_vector_rrr<15>, VectorType>::value)
         return bv_space_taken_rrr(size, num_set_bits, 15);
 
