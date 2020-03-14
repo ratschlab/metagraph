@@ -69,37 +69,34 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
         labels_out_enc.emplace(label_encoder.encode(label_out));
     }
 
-    return annotated_graph_algorithm::mask_nodes_by_unitig(
-        dbg,
-        [&](const auto &, const auto &path) {
-            VectorOrderedMap<row_index, size_t> index_counts;
-            for (const auto i : path) {
-                index_counts[anno_graph.graph_to_anno_index(i)]++;
-            }
-
-            size_t other_count = 0;
-            size_t in_count = 0;
-            size_t out_count = 0;
-            const size_t out_count_cutoff = label_out_factor * path.size();
-
-            for (const auto &pair : annotation.count_labels(index_counts.values_container())) {
-                if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
-                    in_count += pair.second;
-
-                } else if (labels_out_enc.find(pair.first) != labels_out_enc.end()) {
-                    // early cutoff
-                    if ((out_count += pair.second) > out_count_cutoff)
-                        return false;
-
-                } else {
-                    other_count += pair.second;
-                }
-            }
-
-            return (in_count >= label_in_factor * path.size())
-                && (other_count <= label_other_fraction * (in_count + out_count + other_count));
+    return mask_nodes_by_unitig(dbg, [&](const auto &, const auto &path) {
+        VectorOrderedMap<row_index, size_t> index_counts;
+        for (const auto i : path) {
+            index_counts[anno_graph.graph_to_anno_index(i)]++;
         }
-    );
+
+        size_t other_count = 0;
+        size_t in_count = 0;
+        size_t out_count = 0;
+        const size_t out_count_cutoff = label_out_factor * path.size();
+
+        for (const auto &pair : annotation.count_labels(index_counts.values_container())) {
+            if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
+                in_count += pair.second;
+
+            } else if (labels_out_enc.find(pair.first) != labels_out_enc.end()) {
+                // early cutoff
+                if ((out_count += pair.second) > out_count_cutoff)
+                    return false;
+
+            } else {
+                other_count += pair.second;
+            }
+        }
+
+        return (in_count >= label_in_factor * path.size())
+            && (other_count <= label_other_fraction * (in_count + out_count + other_count));
+    });
 }
 
 sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
@@ -204,14 +201,12 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
             if (labels_in_frequent.empty() && labels_out_frequent.empty()) {
                 sdsl::bit_vector mask(anno_graph.get_graph().max_index() + 1, false);
 
-                call_nonzeros(counts,
-                    [&](auto i, auto count) {
-                        if (i != DeBruijnGraph::npos
-                                && is_node_in_mask(i, [&]() { return count & int_mask; },
-                                                      [&]() { return count >> width; }))
-                            mask[i] = true;
-                    }
-                );
+                call_nonzeros(counts, [&](auto i, auto count) {
+                    if (i != DeBruijnGraph::npos
+                            && is_node_in_mask(i, [&]() { return count & int_mask; },
+                                                  [&]() { return count >> width; }))
+                        mask[i] = true;
+                });
 
                 return std::make_unique<bitmap_vector>(std::move(mask));
             }
@@ -222,13 +217,12 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                                                 labels_in_frequent);
             auto count_frequent_out_labels = build_label_counter(anno_graph,
                                                                  labels_out_frequent);
-            return std::make_unique<bitmap_lazy>(
-                [=](uint64_t i) {
-                    auto count = counts[i];
-                    return i != DeBruijnGraph::npos
-                        && is_node_in_mask(i,
-                                [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
-                                [&]() { return (count >> width) + count_frequent_out_labels(i); });
+            return std::make_unique<bitmap_lazy>([=](uint64_t i) {
+                auto count = counts[i];
+                return i != DeBruijnGraph::npos
+                    && is_node_in_mask(i,
+                            [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
+                            [&]() { return (count >> width) + count_frequent_out_labels(i); });
             }, counts.size());
         }
     }
@@ -238,12 +232,10 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     auto count_frequent_in_labels = build_label_counter(anno_graph, labels_in);
     auto count_frequent_out_labels = build_label_counter(anno_graph, labels_out);
 
-    return std::make_unique<bitmap_lazy>(
-        [=](uint64_t i) {
-            return i != DeBruijnGraph::npos
-                && is_node_in_mask(i,
-                        [&]() { return count_frequent_in_labels(i); },
-                        [&]() { return count_frequent_out_labels(i); });
+    return std::make_unique<bitmap_lazy>([=](uint64_t i) {
+        return i != DeBruijnGraph::npos
+            && is_node_in_mask(i, [&]() { return count_frequent_in_labels(i); },
+                                  [&]() { return count_frequent_out_labels(i); });
     }, anno_graph.get_graph().max_index() + 1);
 }
 
