@@ -390,8 +390,7 @@ class QueryAlignment {
   public:
     typedef Alignment<NodeType> value_type;
 
-    explicit QueryAlignment(const std::string &query);
-
+    QueryAlignment(const std::string_view query);
     QueryAlignment(const QueryAlignment &other);
     QueryAlignment(QueryAlignment&& other) noexcept;
 
