@@ -30,8 +30,7 @@ void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientati
 }
 
 template <typename NodeType>
-void ExactSeeder<NodeType>
-::call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const {
+void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
     size_t k = this->get_graph().get_k();
     const auto &config = this->get_config();
     const auto &query_nodes = this->get_query_nodes();
@@ -53,12 +52,12 @@ void ExactSeeder<NodeType>
         if (match_score <= config.min_cell_score)
             continue;
 
-        callback(Alignment<NodeType>(std::string_view(query.data() + i, seed_length),
-                                     { query_nodes[i] },
-                                     match_score,
-                                     i,
-                                     orientation,
-                                     offsets[i]));
+        callback(Seed(std::string_view(query.data() + i, seed_length),
+                      { query_nodes[i] },
+                      match_score,
+                      i,
+                      orientation,
+                      offsets[i]));
     }
 }
 
@@ -139,8 +138,7 @@ void SuffixSeeder<NodeType>
 }
 
 template <typename NodeType>
-void SuffixSeeder<NodeType>
-::call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const {
+void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
     auto query = get_query();
     base_seeder_->call_seeds([&](auto&& alignment) {
         size_t i = alignment.get_query().data() - query.data();
@@ -174,8 +172,7 @@ void MEMSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
 }
 
 template <typename NodeType>
-void MEMSeeder<NodeType>
-::call_seeds(std::function<void(Alignment<NodeType>&&)> callback) const {
+void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
     size_t k = this->get_graph().get_k();
     auto query = this->get_query();
     const auto &query_nodes = this->get_query_nodes();
@@ -215,12 +212,12 @@ void MEMSeeder<NodeType>
         assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
         if (match_score > config.min_cell_score) {
-            callback(Alignment<NodeType>(std::string_view(begin_it, end_it - begin_it),
-                                         std::vector<NodeType>(node_begin_it, node_end_it),
-                                         match_score,
-                                         begin_it - query.data(),
-                                         orientation,
-                                         offsets.at(i)));
+            callback(Seed(std::string_view(begin_it, end_it - begin_it),
+                          std::vector<NodeType>(node_begin_it, node_end_it),
+                          match_score,
+                          begin_it - query.data(),
+                          orientation,
+                          offsets.at(i)));
         }
 
         it = std::find_if(next, query_node_flags_.end(),
