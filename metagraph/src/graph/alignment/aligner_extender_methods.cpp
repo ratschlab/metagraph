@@ -395,6 +395,7 @@ void DefaultColumnExtender<NodeType>
              std::function<void(DBGAlignment&&, NodeType)> callback,
              bool orientation,
              score_t min_path_score) {
+    assert(graph_);
     size_t start_index = path.get_query_end() - 1 - query.data();
     const score_t *match_score_begin = partial_sums_.data() + start_index;
 
@@ -431,8 +432,8 @@ void DefaultColumnExtender<NodeType>
         }
     }
 
-    dp_table.clear();
-    if (!dp_table.add_seed(graph_,
+    reset();
+    if (!dp_table.add_seed(*graph_,
                            path.back(),
                            *(align_start - 1),
                            path.get_score(),
@@ -475,7 +476,7 @@ void DefaultColumnExtender<NodeType>
             continue;
 
         // get next columns
-        auto out_columns = get_outgoing_columns(graph_,
+        auto out_columns = get_outgoing_columns(*graph_,
                                                 dp_table,
                                                 next_pair.first,
                                                 size,
@@ -513,7 +514,7 @@ void DefaultColumnExtender<NodeType>
 
 #ifndef NDEBUG
                 bool found = false;
-                graph_.call_outgoing_kmers(prev_node_it->first, [&](auto node, char) {
+                graph_->call_outgoing_kmers(prev_node_it->first, [&](auto node, char) {
                     if (node == next_node)
                         found = true;
                 });
@@ -627,7 +628,7 @@ void DefaultColumnExtender<NodeType>
     // assert(start_node->second.best_op() == Cigar::Operator::MATCH);
 
     // get all alignments
-    dp_table.extract_alignments(graph_,
+    dp_table.extract_alignments(*graph_,
                                 config_,
                                 std::string_view(align_start, query.data() + query.size() - align_start),
                                 callback,
