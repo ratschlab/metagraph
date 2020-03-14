@@ -71,13 +71,13 @@ class DBGAligner : public IDBGAligner {
 
         seeder.initialize(query_alignment, orientation);
 
-        align(query_alignment,
-              [&](DBGAlignment&& path) {
-                  paths.emplace_back(std::move(path));
-              },
-              orientation,
-              config_.min_path_score,
-              seeder);
+        align_aggregate(query_alignment,
+                        [&](DBGAlignment&& path) {
+                            paths.emplace_back(std::move(path));
+                        },
+                        orientation,
+                        config_.min_path_score,
+                        seeder);
 
         return paths;
     }
@@ -92,27 +92,27 @@ class DBGAligner : public IDBGAligner {
 
         seeder.initialize(forward, false);
 
-        align(forward,
-              [&](DBGAlignment&& alignment) {
-                  all_paths.emplace_back(std::move(alignment));
-              },
-              false,
-              config_.min_path_score,
-              seeder);
+        align_aggregate(forward,
+                        [&](DBGAlignment&& alignment) {
+                            all_paths.emplace_back(std::move(alignment));
+                        },
+                        false,
+                        config_.min_path_score,
+                        seeder);
 
         auto size = all_paths.size();
 
         seeder.initialize(rev_comp, true);
 
-        align(rev_comp,
-              [&](DBGAlignment&& alignment) {
-                  all_paths.emplace_back(std::move(alignment));
-              },
-              true,
-              size >= config_.num_alternative_paths
-                  ? all_paths[config_.num_alternative_paths - 1].get_score() - 1
-                  : config_.min_path_score,
-              seeder);
+        align_aggregate(rev_comp,
+                        [&](DBGAlignment&& alignment) {
+                            all_paths.emplace_back(std::move(alignment));
+                        },
+                        true,
+                        size >= config_.num_alternative_paths
+                            ? all_paths[config_.num_alternative_paths - 1].get_score() - 1
+                            : config_.min_path_score,
+                        seeder);
 
         size_t max_left = std::min(size, config_.num_alternative_paths);
         size_t max_right = std::min(all_paths.size() - size, config_.num_alternative_paths);
@@ -130,6 +130,26 @@ class DBGAligner : public IDBGAligner {
         return final_paths;
     }
 
+    virtual void align_aggregate(std::string_view query,
+                                 const std::function<void(DBGAlignment&&)> &callback,
+                                 bool orientation,
+                                 score_t min_path_score,
+                                 const Seeder &seeder) const {
+        AlignmentQueue path_queue(config_.num_alternative_paths);
+
+        align(query,
+              [&](DBGAlignment&& alignment) { path_queue.emplace(std::move(alignment)); },
+              orientation,
+              min_path_score,
+              seeder);
+
+        while (path_queue.size()) {
+            auto path = path_queue.pop_top();
+            assert(path.is_valid(graph_, &config_));
+            callback(std::move(path));
+        }
+    }
+
     // Align a sequence to the graph
     void align(std::string_view query,
                const std::function<void(DBGAlignment&&)> &callback,
@@ -138,8 +158,6 @@ class DBGAligner : public IDBGAligner {
                const Seeder &seeder) const {
         assert(config_.check_config_scores());
         min_path_score = std::max(min_path_score, config_.min_cell_score);
-
-        AlignmentQueue path_queue(config_.num_alternative_paths);
 
         Extender extend(graph_, config_);
         extend.initialize_query(query);
@@ -152,7 +170,7 @@ class DBGAligner : public IDBGAligner {
             assert(seed.is_valid(graph_, &config_));
 
             if (seed.get_query_end() == query.data() + query.size()) {
-                path_queue.emplace(std::move(seed));
+                callback(std::move(seed));
                 return;
             }
 
@@ -166,7 +184,7 @@ class DBGAligner : public IDBGAligner {
                     // if the extension starts at a different position
                     // from the seed end, then it's a new alignment
                     extension.extend_query_begin(query.data());
-                    path_queue.emplace(std::move(extension));
+                    callback(std::move(extension));
                     return;
                 }
 
@@ -176,21 +194,15 @@ class DBGAligner : public IDBGAligner {
                 next_path.append(std::move(extension));
                 assert(next_path.is_valid(graph_, &config_));
 
-                path_queue.emplace(std::move(next_path));
+                callback(std::move(next_path));
             }, orientation, min_path_score);
 
             if (!extended) {
                 seed.extend_query_end(query.data() + query.size());
                 assert(seed.is_valid(graph_, &config_));
-                path_queue.emplace(std::move(seed));
+                callback(std::move(seed));
             }
         });
-
-        while (path_queue.size()) {
-            auto path = path_queue.pop_top();
-            assert(path.is_valid(graph_, &config_));
-            callback(std::move(path));
-        }
     }
 
     const DeBruijnGraph& graph_;
