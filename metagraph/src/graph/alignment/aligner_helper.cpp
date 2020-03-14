@@ -709,7 +709,7 @@ QueryAlignment<NodeType>::QueryAlignment(QueryAlignment&& other) noexcept
 }
 
 template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(const std::string &query)
+QueryAlignment<NodeType>::QueryAlignment(const std::string_view query)
       : query_(query),
         query_rc_(query) {
     // TODO: remove const_cast
