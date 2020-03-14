@@ -25,8 +25,8 @@ const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 using mg::common::logger;
 
 
-void execute_query(const std::string &seq_name_in,
-                   const std::string &sequence_in,
+void execute_query(const std::string &seq_name,
+                   const std::string &sequence,
                    bool count_labels,
                    bool print_signature,
                    bool suppress_unlabeled,
@@ -39,60 +39,61 @@ void execute_query(const std::string &seq_name_in,
     std::string output;
     output.reserve(1'000);
 
+    std::unique_ptr<IDBGAligner> aligner;
     std::unique_ptr<IDBGAligner::DBGQueryAlignment> alignments;
-    std::string align_header, align_match;
-    std::unique_ptr<Cigar> cigar;
     if (align_config) {
-        auto aligner = build_aligner(anno_graph.get_graph(), *align_config);
+        aligner = build_masked_aligner(anno_graph, *align_config);
         alignments = std::make_unique<IDBGAligner::DBGQueryAlignment>(
-            aligner->align(sequence_in)
+            aligner->align(sequence)
         );
-        if (alignments->size()) {
-            align_match = alignments->front().get_sequence();
-            cigar = std::make_unique<Cigar>(alignments->front().get_cigar());
-            align_header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
-                                       seq_name_in,
-                                       align_match,
-                                       alignments->front().get_score(),
-                                       alignments->front().get_cigar().to_string());
-        } else {
-            align_header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
-                                       seq_name_in,
-                                       sequence_in,
-                                       0,
-                                       fmt::format("{}S", sequence_in.length()));
-        }
     }
 
-    const auto &sequence = align_config && align_match.size() ? align_match : sequence_in;
-    const auto &seq_name = align_config ? align_header : seq_name_in;
-
     if (print_signature) {
-        auto top_labels
-            = anno_graph.get_top_label_signatures(sequence,
-                                                  num_top_labels,
-                                                  discovery_fraction);
+        if (alignments) {
+            auto top_labels = alignments->get_top_label_cigars(num_top_labels,
+                                                               discovery_fraction);
 
-        if (!top_labels.size() && suppress_unlabeled)
-            return;
+            if (!top_labels.size() && suppress_unlabeled)
+                return;
 
-        output += seq_name;
+            output += seq_name;
 
-        for (const auto &[label, kmer_presence_mask] : top_labels) {
-            output += fmt::format("\t<{}>:{}:{}:{}",
-                label,
-                sdsl::util::cnt_one_bits(kmer_presence_mask),
-                sdsl::util::to_string(kmer_presence_mask),
-                anno_graph.score_kmer_presence_mask(kmer_presence_mask, cigar.get())
-            );
+            for (const auto &[label, cigar, score] : top_labels) {
+                output += fmt::format("\t<{}>:{}:{}:{}",
+                    label,
+                    cigar.get_num_matches(),
+                    cigar.to_string(),
+                    score
+                );
+            }
+
+        } else {
+            auto top_labels
+                = anno_graph.get_top_label_signatures(sequence,
+                                                      num_top_labels,
+                                                      discovery_fraction);
+
+            if (!top_labels.size() && suppress_unlabeled)
+                return;
+
+            output += seq_name;
+
+            for (const auto &[label, kmer_presence_mask] : top_labels) {
+                output += fmt::format("\t<{}>:{}:{}:{}",
+                    label,
+                    sdsl::util::cnt_one_bits(kmer_presence_mask),
+                    sdsl::util::to_string(kmer_presence_mask),
+                    anno_graph.score_kmer_presence_mask(kmer_presence_mask)
+                );
+            }
         }
 
         output += '\n';
 
     } else if (count_labels) {
-        auto top_labels = anno_graph.get_top_labels(sequence,
-                                                    num_top_labels,
-                                                    discovery_fraction);
+        auto top_labels = alignments
+            ? alignments->get_top_labels(num_top_labels, discovery_fraction)
+            : anno_graph.get_top_labels(sequence, num_top_labels, discovery_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return;
@@ -109,7 +110,9 @@ void execute_query(const std::string &seq_name_in,
         output += '\n';
 
     } else {
-        auto labels_discovered = anno_graph.get_labels(sequence, discovery_fraction);
+        auto labels_discovered = alignments
+            ? alignments->get_labels(discovery_fraction)
+            : anno_graph.get_labels(sequence, discovery_fraction);
 
         if (!labels_discovered.size() && suppress_unlabeled)
             return;
