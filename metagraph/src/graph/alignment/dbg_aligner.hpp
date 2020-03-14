@@ -41,7 +41,7 @@ class DBGAligner : public IDBGAligner {
     }
 
     DBGQueryAlignment align(const std::string &query) const {
-        Seeder seeder(graph_, config_);
+        auto seeder = build_seeder();
         return config_.forward_and_reverse_complement
             ? align_forward_and_reverse_complement(query, seeder)
             : align_one_direction(query, false, seeder);
@@ -54,6 +54,9 @@ class DBGAligner : public IDBGAligner {
     typedef BoundedPriorityQueue<DBGAlignment,
                                  std::vector<DBGAlignment>,
                                  AlignmentCompare> AlignmentQueue;
+
+    virtual Seeder build_seeder() const { return Seeder(graph_, config_); }
+    virtual Extender build_extender() const { return Extender(graph_, config_); }
 
     DBGQueryAlignment align_one_direction(const std::string &query,
                                           bool orientation,
@@ -159,7 +162,7 @@ class DBGAligner : public IDBGAligner {
         assert(config_.check_config_scores());
         min_path_score = std::max(min_path_score, config_.min_cell_score);
 
-        Extender extend(graph_, config_);
+        auto extend = build_extender();
         extend.initialize_query(query);
 
         seeder.call_seeds([&](DBGAlignment&& seed) {
