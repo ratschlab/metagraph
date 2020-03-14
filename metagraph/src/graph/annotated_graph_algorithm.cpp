@@ -34,7 +34,7 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
 
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
-            for (const auto node : path) {
+            for (DeBruijnGraph::node_index node : path) {
                 unitig_mask[node] = true;
             }
         }
@@ -69,37 +69,34 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
         labels_out_enc.emplace(label_encoder.encode(label_out));
     }
 
-    return annotated_graph_algorithm::mask_nodes_by_unitig(
-        dbg,
-        [&](const auto &, const auto &path) {
-            VectorOrderedMap<row_index, size_t> index_counts;
-            for (const auto i : path) {
-                index_counts[anno_graph.graph_to_anno_index(i)]++;
-            }
-
-            size_t other_count = 0;
-            size_t in_count = 0;
-            size_t out_count = 0;
-            const size_t out_count_cutoff = label_out_factor * path.size();
-
-            for (const auto &pair : annotation.count_labels(index_counts.values_container())) {
-                if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
-                    in_count += pair.second;
-
-                } else if (labels_out_enc.find(pair.first) != labels_out_enc.end()) {
-                    // early cutoff
-                    if ((out_count += pair.second) > out_count_cutoff)
-                        return false;
-
-                } else {
-                    other_count += pair.second;
-                }
-            }
-
-            return (in_count >= label_in_factor * path.size())
-                && (other_count <= label_other_fraction * (in_count + out_count + other_count));
+    return mask_nodes_by_unitig(dbg, [&](const auto &, const auto &path) {
+        VectorOrderedMap<row_index, size_t> index_counts;
+        for (node_index i : path) {
+            index_counts[anno_graph.graph_to_anno_index(i)]++;
         }
-    );
+
+        size_t other_count = 0;
+        size_t in_count = 0;
+        size_t out_count = 0;
+        const size_t out_count_cutoff = label_out_factor * path.size();
+
+        for (const auto &pair : annotation.count_labels(index_counts.values_container())) {
+            if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
+                in_count += pair.second;
+
+            } else if (labels_out_enc.find(pair.first) != labels_out_enc.end()) {
+                // early cutoff
+                if ((out_count += pair.second) > out_count_cutoff)
+                    return false;
+
+            } else {
+                other_count += pair.second;
+            }
+        }
+
+        return (in_count >= label_in_factor * path.size())
+            && (other_count <= label_other_fraction * (in_count + out_count + other_count));
+    });
 }
 
 sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
@@ -111,8 +108,9 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::int_vector<> counts(anno_graph.get_graph().max_index() + 1, 0, width << 1);
 
-    for (const auto &label_in : labels_in) {
-        anno_graph.call_annotated_nodes(label_in, [&](auto i) { counts[i]++; });
+    for (const std::string &label_in : labels_in) {
+        anno_graph.call_annotated_nodes(label_in,
+                                        [&](DeBruijnGraph::node_index i) { counts[i]++; });
     }
 
     // correct the width of counts, making it single-width
@@ -121,7 +119,7 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
     for (const auto &label_out : labels_out) {
         anno_graph.call_annotated_nodes(
             label_out,
-            [&](auto i) { counts[(i << 1) + 1]++; }
+            [&](DeBruijnGraph::node_index i) { counts[(i << 1) + 1]++; }
         );
     }
 
@@ -134,7 +132,7 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
 std::function<uint64_t(SequenceGraph::node_index)>
 build_label_counter(const AnnotatedDBG &anno_graph,
                     const std::vector<Label> &labels_to_check) {
-    return [&anno_graph, labels_to_check](auto i) {
+    return [&anno_graph, labels_to_check](SequenceGraph::node_index i) {
         assert(i != SequenceGraph::npos);
         return std::count_if(labels_to_check.begin(), labels_to_check.end(),
             [&](const auto &label) { return anno_graph.has_label(i, label); }
@@ -197,21 +195,19 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                                           labels_out_infrequent);
 
             // the width of counts is double, since it's both in and out counts interleaved
-            auto width = counts.width() >> 1;
-            size_t int_mask = (size_t(1) << width) - 1;
+            uint32_t width = counts.width() >> 1;
+            uint64_t int_mask = (uint64_t(1) << width) - 1;
 
             // Flatten count vector to bitmap if all labels were infrequent
             if (labels_in_frequent.empty() && labels_out_frequent.empty()) {
                 sdsl::bit_vector mask(anno_graph.get_graph().max_index() + 1, false);
 
-                call_nonzeros(counts,
-                    [&](auto i, auto count) {
-                        if (i != DeBruijnGraph::npos
-                                && is_node_in_mask(i, [&]() { return count & int_mask; },
-                                                      [&]() { return count >> width; }))
-                            mask[i] = true;
-                    }
-                );
+                call_nonzeros(counts, [&](DeBruijnGraph::node_index i, size_t count) {
+                    if (i != DeBruijnGraph::npos
+                            && is_node_in_mask(i, [&]() { return count & int_mask; },
+                                                  [&]() { return count >> width; }))
+                        mask[i] = true;
+                });
 
                 return std::make_unique<bitmap_vector>(std::move(mask));
             }
@@ -222,13 +218,12 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                                                 labels_in_frequent);
             auto count_frequent_out_labels = build_label_counter(anno_graph,
                                                                  labels_out_frequent);
-            return std::make_unique<bitmap_lazy>(
-                [=](uint64_t i) {
-                    auto count = counts[i];
-                    return i != DeBruijnGraph::npos
-                        && is_node_in_mask(i,
-                                [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
-                                [&]() { return (count >> width) + count_frequent_out_labels(i); });
+            return std::make_unique<bitmap_lazy>([=](uint64_t i) {
+                auto count = counts[i];
+                return i != DeBruijnGraph::npos
+                    && is_node_in_mask(i,
+                            [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
+                            [&]() { return (count >> width) + count_frequent_out_labels(i); });
             }, counts.size());
         }
     }
@@ -238,12 +233,10 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     auto count_frequent_in_labels = build_label_counter(anno_graph, labels_in);
     auto count_frequent_out_labels = build_label_counter(anno_graph, labels_out);
 
-    return std::make_unique<bitmap_lazy>(
-        [=](uint64_t i) {
-            return i != DeBruijnGraph::npos
-                && is_node_in_mask(i,
-                        [&]() { return count_frequent_in_labels(i); },
-                        [&]() { return count_frequent_out_labels(i); });
+    return std::make_unique<bitmap_lazy>([=](DeBruijnGraph::node_index i) {
+        return i != DeBruijnGraph::npos
+            && is_node_in_mask(i, [&]() { return count_frequent_in_labels(i); },
+                                  [&]() { return count_frequent_out_labels(i); });
     }, anno_graph.get_graph().max_index() + 1);
 }
 
