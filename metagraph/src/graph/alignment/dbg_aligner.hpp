@@ -77,8 +77,7 @@ class DBGAligner : public IDBGAligner {
               },
               orientation,
               config_.min_path_score,
-              seeder
-        );
+              seeder);
 
         return paths;
     }
@@ -159,30 +158,26 @@ class DBGAligner : public IDBGAligner {
 
             extend.initialize(seed);
             bool extended = false;
-            extend(seed,
-                   query,
-                   [&](DBGAlignment&& extension, auto start_node) {
-                       assert(extension.is_valid(graph_, &config_));
-                       extension.extend_query_end(query.data() + query.size());
+            extend(seed, query, [&](DBGAlignment&& extension, auto start_node) {
+                assert(extension.is_valid(graph_, &config_));
+                extension.extend_query_end(query.data() + query.size());
 
-                       if (extension.get_clipping() || start_node != seed.back()) {
-                           // if the extension starts at a different position
-                           // from the seed end, then it's a new alignment
-                           extension.extend_query_begin(query.data());
-                           path_queue.emplace(std::move(extension));
-                           return;
-                       }
+                if (extension.get_clipping() || start_node != seed.back()) {
+                    // if the extension starts at a different position
+                    // from the seed end, then it's a new alignment
+                    extension.extend_query_begin(query.data());
+                    path_queue.emplace(std::move(extension));
+                    return;
+                }
 
-                       extended = true;
+                extended = true;
 
-                       auto next_path = seed;
-                       next_path.append(std::move(extension));
-                       assert(next_path.is_valid(graph_, &config_));
+                auto next_path = seed;
+                next_path.append(std::move(extension));
+                assert(next_path.is_valid(graph_, &config_));
 
-                       path_queue.emplace(std::move(next_path));
-                   },
-                   orientation,
-                   min_path_score);
+                path_queue.emplace(std::move(next_path));
+            }, orientation, min_path_score);
 
             if (!extended) {
                 seed.extend_query_end(query.data() + query.size());
