@@ -163,7 +163,6 @@ Alignment<NodeType>::Alignment(const std::string_view query,
         query_end_(query.data() + query.size()),
         nodes_(std::move(nodes)),
         sequence_(std::move(sequence)),
-        num_matches_(0),
         score_(score),
         orientation_(orientation),
         offset_(offset) {
@@ -179,7 +178,6 @@ Alignment<NodeType>::Alignment(const std::string_view query,
         sequence_.c_str(),
         Cigar(Cigar::Operator::CLIPPED, clipping),
         [&](Cigar &cigar, bool equal) -> Cigar& {
-            num_matches_ += equal;
             cigar.append(equal
                   ? Cigar::Operator::MATCH
                   : Cigar::Operator::MISMATCH
@@ -204,7 +202,6 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
                                NodeType *start_node)
       : query_begin_(NULL),
         query_end_(NULL),
-        num_matches_(0),
         score_(column->second.scores.at(start_pos)),
         orientation_(orientation),
         offset_(offset) {
@@ -226,9 +223,6 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
 
         if (*op != Cigar::Operator::INSERTION)
             --i;
-
-        if (*op == Cigar::Operator::MATCH)
-            ++num_matches_;
 
         column = dp_table.find(*prev_node);
         op = &column->second.ops.at(i);
@@ -275,7 +269,6 @@ void Alignment<NodeType>::append(Alignment&& other) {
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
     sequence_ += std::move(other.sequence_);
     score_ += other.score_;
-    num_matches_ += other.num_matches_;
 
     cigar_.append(std::move(other.cigar_));
     query_end_ = other.query_end_;
@@ -492,7 +485,7 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
         alignment["is_secondary"] = is_secondary;
 
     alignment["identity"] = query_end_ != query_begin_
-        ? static_cast<double>(num_matches_) / (query_end_ - query_begin_)
+        ? static_cast<double>(get_num_matches()) / (query_end_ - query_begin_)
         : 0;
 
     alignment["read_mapped"] = (query_end_ != query_begin_);
@@ -538,7 +531,6 @@ std::shared_ptr<const std::string> Alignment<NodeType>
                  const DeBruijnGraph &graph) {
     cigar_.clear();
     nodes_.clear();
-    num_matches_ = 0;
     sequence_.clear();
 
     auto query_sequence = std::make_shared<const std::string>(
@@ -587,7 +579,6 @@ std::shared_ptr<const std::string> Alignment<NodeType>
                 } else {
                     cigar_.append(Cigar::Operator::MATCH,
                                   edits[j]["from_length"].asUInt64());
-                    num_matches_ += edits[j]["from_length"].asUInt64();
                 }
 
                 path_steps += edits[j]["from_length"].asUInt64();
