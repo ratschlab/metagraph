@@ -111,6 +111,10 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
                                    uint64_t reference_num_set_bits,
                                    ThreadPool &thread_pool);
 
+// indexes are distinct and sorted
+sdsl::bit_vector subvector(const bit_vector &col,
+                           const std::vector<uint64_t> &indexes);
+
 // Apply the bitwise AND of vector with right-shifts of itself. Only works for
 // values of offset < 64
 sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset);

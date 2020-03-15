@@ -385,6 +385,57 @@ void compute_subindex(const bit_vector &column,
 #endif
 }
 
+// TODO: merge with compute_subindex
+// indexes are distinct and sorted
+sdsl::bit_vector subvector(const bit_vector &col,
+                           const std::vector<uint64_t> &indexes) {
+    assert(indexes.size() <= col.size());
+
+    sdsl::bit_vector shrinked(indexes.size(), 0);
+
+    uint64_t max_rank = col.num_set_bits();
+    if (!max_rank)
+        return shrinked;
+
+    // the case of uncompressed vector
+    if (dynamic_cast<const bit_vector_stat *>(&col)) {
+        for (size_t j = 0; j < indexes.size(); ++j) {
+            if (col[indexes[j]])
+                shrinked[j] = true;
+        }
+        return shrinked;
+    }
+
+    uint64_t cur_rank = 1;
+    uint64_t next_pos = col.select1(1);
+
+    for (size_t j = 0; j < indexes.size(); ++j) {
+        if (indexes[j] < next_pos)
+            continue;
+
+        if (indexes[j] == next_pos) {
+            shrinked[j] = true;
+            continue;
+        }
+
+        // indexes[j] > next_pos
+        if (col[indexes[j]]) {
+            shrinked[j] = true;
+            continue;
+        }
+
+        // we found a zero, update next_pos
+        cur_rank = col.rank1(indexes[j]) + 1;
+        if (cur_rank > max_rank)
+            return shrinked;
+
+        next_pos = col.select1(cur_rank);
+    }
+
+    return shrinked;
+}
+
+
 inline uint128_t pushback_epi64(const uint128_t &v, const uint128_t &a) {
     return (v >> 64) | (a << 64);
 }
