@@ -50,11 +50,66 @@ class DBGAligner : public IDBGAligner {
     const DeBruijnGraph& get_graph() const { return graph_; }
     const DBGAlignerConfig& get_config() const { return config_; }
 
-  private:
+  protected:
     typedef BoundedPriorityQueue<DBGAlignment,
                                  std::vector<DBGAlignment>,
                                  AlignmentCompare> AlignmentQueue;
 
+    void align(std::string_view query,
+               const std::function<void(DBGAlignment&&)> &callback,
+               bool orientation,
+               score_t min_path_score,
+               const Seeder &seeder) const {
+        assert(config_.check_config_scores());
+        min_path_score = std::max(min_path_score, config_.min_cell_score);
+
+        auto extend = build_extender();
+        extend.initialize_query(query);
+
+        seeder.call_seeds([&](DBGAlignment&& seed) {
+            assert(seed.get_query().data() >= query.data());
+            assert(seed.get_query_end() <= query.data() + query.size());
+            assert(seed.get_query_end() > seed.get_query().data());
+            assert(seed.get_clipping() == seed.get_query().data() - query.data());
+            assert(seed.is_valid(graph_, &config_));
+
+            if (seed.get_query_end() == query.data() + query.size()) {
+                callback(std::move(seed));
+                return;
+            }
+
+            extend.initialize(seed);
+            bool extended = false;
+            extend(seed, query, [&](DBGAlignment&& extension, auto start_node) {
+                assert(extension.is_valid(graph_, &config_));
+                extension.extend_query_end(query.data() + query.size());
+
+                if (extension.get_clipping() || start_node != seed.back()) {
+                    // if the extension starts at a different position
+                    // from the seed end, then it's a new alignment
+                    extension.extend_query_begin(query.data());
+                    callback(std::move(extension));
+                    return;
+                }
+
+                extended = true;
+
+                auto next_path = seed;
+                next_path.append(std::move(extension));
+                assert(next_path.is_valid(graph_, &config_));
+
+                callback(std::move(next_path));
+            }, orientation, min_path_score);
+
+            if (!extended) {
+                seed.extend_query_end(query.data() + query.size());
+                assert(seed.is_valid(graph_, &config_));
+                callback(std::move(seed));
+            }
+        });
+    }
+
+  private:
     virtual Seeder build_seeder() const { return Seeder(graph_, config_); }
     virtual Extender build_extender() const { return Extender(graph_, config_); }
 
@@ -151,61 +206,6 @@ class DBGAligner : public IDBGAligner {
             assert(path.is_valid(graph_, &config_));
             callback(std::move(path));
         }
-    }
-
-    // Align a sequence to the graph
-    void align(std::string_view query,
-               const std::function<void(DBGAlignment&&)> &callback,
-               bool orientation,
-               score_t min_path_score,
-               const Seeder &seeder) const {
-        assert(config_.check_config_scores());
-        min_path_score = std::max(min_path_score, config_.min_cell_score);
-
-        auto extend = build_extender();
-        extend.initialize_query(query);
-
-        seeder.call_seeds([&](DBGAlignment&& seed) {
-            assert(seed.get_query().data() >= query.data());
-            assert(seed.get_query_end() <= query.data() + query.size());
-            assert(seed.get_query_end() > seed.get_query().data());
-            assert(seed.get_clipping() == seed.get_query().data() - query.data());
-            assert(seed.is_valid(graph_, &config_));
-
-            if (seed.get_query_end() == query.data() + query.size()) {
-                callback(std::move(seed));
-                return;
-            }
-
-            extend.initialize(seed);
-            bool extended = false;
-            extend(seed, query, [&](DBGAlignment&& extension, auto start_node) {
-                assert(extension.is_valid(graph_, &config_));
-                extension.extend_query_end(query.data() + query.size());
-
-                if (extension.get_clipping() || start_node != seed.back()) {
-                    // if the extension starts at a different position
-                    // from the seed end, then it's a new alignment
-                    extension.extend_query_begin(query.data());
-                    callback(std::move(extension));
-                    return;
-                }
-
-                extended = true;
-
-                auto next_path = seed;
-                next_path.append(std::move(extension));
-                assert(next_path.is_valid(graph_, &config_));
-
-                callback(std::move(next_path));
-            }, orientation, min_path_score);
-
-            if (!extended) {
-                seed.extend_query_end(query.data() + query.size());
-                assert(seed.is_valid(graph_, &config_));
-                callback(std::move(seed));
-            }
-        });
     }
 
     const DeBruijnGraph& graph_;
