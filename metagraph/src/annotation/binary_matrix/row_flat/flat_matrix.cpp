@@ -4,6 +4,8 @@
 #include <functional>
 
 #include "common/serialization.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 
 template <typename BitVector>

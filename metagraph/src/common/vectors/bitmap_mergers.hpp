@@ -9,6 +9,8 @@
 
 #include "bit_vector.hpp"
 
+class bit_vector_stat;
+
 
 namespace utils {
 

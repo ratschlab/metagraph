@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <memory>
 
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/range_partition.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 

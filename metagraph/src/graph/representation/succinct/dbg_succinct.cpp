@@ -10,6 +10,9 @@
 #include "common/serialization.hpp"
 #include "common/algorithms.hpp"
 #include "common/utils/string_utils.hpp"
+#include "common/vectors/bit_vector_stat.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 using utils::remove_suffix;
 

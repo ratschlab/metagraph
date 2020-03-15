@@ -8,6 +8,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "graph/annotated_dbg.hpp"

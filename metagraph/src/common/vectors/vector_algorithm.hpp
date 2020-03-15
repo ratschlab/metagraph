@@ -241,6 +241,55 @@ inline uint64_t prev1(const BitVector &v,
 }
 
 
+// taken from https://github.com/xxsds/sdsl-lite/blob/master/include/sdsl/util.hpp
+// this function has been modified.
+template <class t_int_vec>
+typename t_int_vec::size_type
+next_bit(const t_int_vec &v,
+         uint64_t idx,
+         uint64_t max_steps = std::numeric_limits<uint64_t>::max()) {
+    assert(idx < v.bit_size());
+
+    uint64_t pos  = idx >> 6;
+    uint64_t node = v.data()[pos];
+    node >>= (idx & 0x3F);
+    if (node)
+        return std::min(idx + sdsl::bits::lo(node), v.bit_size());
+
+    uint64_t end = idx + std::min(max_steps, v.bit_size() - idx);
+    for (++pos; (pos << 6) < end; ++pos) {
+        if (v.data()[pos])
+            return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), v.bit_size());
+    }
+    return v.bit_size();
+}
+
+// taken from https://github.com/xxsds/sdsl-lite/blob/master/include/sdsl/util.hpp
+// this function has been modified.
+template <class t_int_vec>
+typename t_int_vec::size_type
+prev_bit(const t_int_vec &v,
+         uint64_t idx,
+         uint64_t max_steps = std::numeric_limits<uint64_t>::max()) {
+    assert(idx < v.bit_size());
+
+    int64_t pos  = idx >> 6;
+    uint64_t node = v.data()[pos];
+    node <<= 63 - (idx & 0x3F);
+    if (node)
+        return idx - (63 - sdsl::bits::hi(node));
+
+    // last position to visit: 0 or (idx + 1 - max_steps)
+    int64_t r_end_word = ((idx + 1 - std::min(idx + 1, max_steps)) >> 6) - 1;
+    assert(r_end_word >= -1);
+    for (--pos; pos > r_end_word; --pos) {
+        if (v.data()[pos])
+            return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
+    }
+    return v.bit_size();
+}
+
+
 namespace sdsl {
 
 // based on sdsl::select_support_scan

@@ -346,18 +346,18 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
         assert(brwt_child->nonzero_rows_->size() <= node.num_rows());
 
         // updated vector
-        delta += predict_size<bit_vector_small>(
+        delta += bit_vector_small::predict_size(
                         node.num_rows(),
                         brwt_child->nonzero_rows_->num_set_bits());
 
         // old index vector
-        delta -= predict_size<bit_vector_small>(
+        delta -= bit_vector_small::predict_size(
                         brwt_child->nonzero_rows_->size(),
                         brwt_child->nonzero_rows_->num_set_bits());
     }
 
     // removed index vector
-    delta -= predict_size<bit_vector_small>(
+    delta -= bit_vector_small::predict_size(
                     node.nonzero_rows_->size(),
                     node.nonzero_rows_->num_set_bits());
 
