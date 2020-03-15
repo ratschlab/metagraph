@@ -298,17 +298,15 @@ int align_to_graph(Config *config) {
                              << std::endl;
                 } else {
                     bool secondary = false;
-                    for (const auto &path : paths) {
+                    for (auto &path : paths) {
                         const auto& path_query = path.get_orientation()
                             ? paths.get_query_reverse_complement()
                             : paths.get_query();
 
+                        path.set_label(header);
                         ostr << Json::writeString(
                                     builder,
-                                    path.to_json(path_query,
-                                                 *graph,
-                                                 secondary,
-                                                 header)
+                                    path.to_json(path_query, *graph, secondary)
                                 )
                              << std::endl;
 
@@ -316,14 +314,12 @@ int align_to_graph(Config *config) {
                     }
 
                     if (paths.empty()) {
-                        ostr << Json::writeString(
-                                    builder,
-                                    DBGAligner<>::DBGAlignment().to_json(
-                                        query,
-                                        *graph,
-                                        secondary,
-                                        header)
-                                )
+                        ostr << Json::writeString(builder,
+                                                  DBGAligner<>::DBGAlignment().to_json(
+                                                      query,
+                                                      *graph,
+                                                      secondary
+                                                  ))
                              << std::endl;
                     }
                 }

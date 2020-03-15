@@ -296,8 +296,7 @@ void Alignment<NodeType>::recompute_score(const DBGAlignerConfig &config) {
 // derived from:
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
 template <typename NodeType>
-Json::Value Alignment<NodeType>::path_json(size_t node_size,
-                                           const std::string &label) const {
+Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
     assert(nodes_.size());
 
     Json::Value path;
@@ -449,8 +448,8 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     path["length"] = Json::Value::UInt64(nodes_.size());
     //path["is_circular"]; // bool
 
-    if (label.size())
-        path["name"] = label;
+    if (label_.size())
+        path["name"] = label_;
 
     return path;
 }
@@ -459,8 +458,7 @@ template <typename NodeType>
 Json::Value Alignment<NodeType>::to_json(const std::string &query,
                                          const DeBruijnGraph &graph,
                                          bool is_secondary,
-                                         const std::string &read_name,
-                                         const std::string &label) const {
+                                         const std::string &read_name) const {
     assert(is_valid(graph));
 
     // encode alignment
@@ -483,7 +481,7 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
 
     // encode path
     if (nodes_.size())
-        alignment["path"] = path_json(graph.get_k(), label);
+        alignment["path"] = path_json(graph.get_k());
 
     alignment["score"] = static_cast<int32_t>(score_);
 
