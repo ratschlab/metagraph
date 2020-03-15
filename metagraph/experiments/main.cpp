@@ -17,7 +17,10 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/wavelet_tree.hpp"
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_stat.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/data_generation.hpp"
 #include "graph/alignment/aligner_helper.hpp"
@@ -189,7 +192,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     if constexpr(!std::is_base_of_v<bit_vector_dyn, BitVector>
                     && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
                     && !std::is_base_of_v<bit_vector_il<>, BitVector>) {
-        predicted_size = predict_size<BitVector>(another.size(), another.num_set_bits());
+        predicted_size = BitVector::predict_size(another.size(), another.num_set_bits());
     }
 
     std::cout << prefix

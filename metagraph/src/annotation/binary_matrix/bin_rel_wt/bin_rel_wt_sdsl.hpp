@@ -3,7 +3,7 @@
 
 #include <sdsl/wt_int.hpp>
 
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 

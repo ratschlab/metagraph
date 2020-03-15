@@ -5,7 +5,11 @@
 
 #include "test_helpers.hpp"
 
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_stat.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/threads/threading.hpp"
 #include "common/data_generation.hpp"
@@ -388,9 +392,9 @@ TEST(bit_vector_rrr, SpacePredicted) {
         for (double density : { 0.1, 0.3, 0.5, 0.7, .9 }) {
             sdsl::bit_vector bv = gen.generate_random_column(size, density);
             uint64_t footprint = space_taken(bit_vector_rrr<63>(bv));
-            EXPECT_GE(predict_size<bit_vector_rrr<63>>(bv.size(), sdsl::util::cnt_one_bits(bv)),
+            EXPECT_GE(bit_vector_rrr<63>::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
                       footprint * 8. * (1 - tolerance));
-            EXPECT_LE(predict_size<bit_vector_rrr<63>>(bv.size(), sdsl::util::cnt_one_bits(bv)),
+            EXPECT_LE(bit_vector_rrr<63>::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
                       footprint * 8. * (1 + tolerance));
         }
     }

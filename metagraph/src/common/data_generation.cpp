@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include "common/data_generation.hpp"
+#include "common/vectors/bit_vector_stat.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
 std::vector<uint64_t>
@@ -140,12 +141,12 @@ DataGenerator
     assert(row_frequencies.size() == n_distinct);
 
     auto replicated_rows = replicate_shuffle(
-        utils::transpose(
+        utils::transpose<bit_vector_stat>(
             generate_random_columns(n_distinct, m, column_densities)
         ),
         row_frequencies
     );
-    return utils::transpose(replicated_rows);
+    return utils::transpose<bit_vector_stat>(replicated_rows);
 }
 
 std::vector<std::unique_ptr<bit_vector>>

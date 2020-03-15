@@ -5,7 +5,7 @@
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "kmer/kmer_extractor.hpp"
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 namespace mg {
 namespace bitmap_graph {

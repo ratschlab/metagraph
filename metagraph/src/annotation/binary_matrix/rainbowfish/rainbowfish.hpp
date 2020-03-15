@@ -3,7 +3,8 @@
 
 #include <vector>
 
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/row_flat/flat_matrix.hpp"
 

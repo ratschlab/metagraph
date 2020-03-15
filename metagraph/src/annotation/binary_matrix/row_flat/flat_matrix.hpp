@@ -3,8 +3,9 @@
 
 #include <vector>
 
-#include "common/vectors/bit_vector.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+
+class bit_vector_sd;
 
 
 template <typename BitVector = bit_vector_sd>

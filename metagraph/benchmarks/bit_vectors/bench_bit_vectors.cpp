@@ -1,6 +1,6 @@
 #include "benchmark/benchmark.h"
 
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/data_generation.hpp"
 
 

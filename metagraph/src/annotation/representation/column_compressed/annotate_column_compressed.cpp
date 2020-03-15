@@ -9,6 +9,7 @@
 #include "common/algorithms.hpp"
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/threads/threading.hpp"
 
 using utils::remove_suffix;

@@ -7,7 +7,11 @@
 
 #define private public
 #include "common/vectors/bitmap.hpp"
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_stat.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
 const std::string test_data_dir = "../tests/data";
