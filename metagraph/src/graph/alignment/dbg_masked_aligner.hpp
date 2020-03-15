@@ -29,12 +29,23 @@ class LabeledSeeder : public BaseSeeder {
         const auto &label_encoder = anno_graph_->get_annotation().get_label_encoder();
         const auto &matrix = anno_graph_->get_annotation().get_matrix();
         const auto &config = BaseSeeder::get_config();
+        const auto &graph = anno_graph_->get_graph();
 
         BaseSeeder::call_seeds([&](Seed&& seed) {
             std::vector<uint64_t> row_indices(seed.size());
-            std::transform(seed.begin(), seed.end(), row_indices.begin(), [&](auto node) {
-                return AnnotatedDBG::graph_to_anno_index(node);
-            });
+            if (!graph.is_canonical_mode()) {
+                std::transform(seed.begin(), seed.end(), row_indices.begin(), [&](auto node) {
+                    return AnnotatedDBG::graph_to_anno_index(node);
+                });
+            } else {
+                auto it = row_indices.begin();
+                graph.map_to_nodes(seed.get_sequence(), [&](auto node) {
+                    assert(it != row_indices.end());
+                    *it = AnnotatedDBG::graph_to_anno_index(node);
+                    ++it;
+                });
+                assert(it == row_indices.end());
+            }
 
             auto rows = matrix.get_rows(row_indices);
             assert(rows.size() == row_indices.size());
@@ -111,12 +122,22 @@ class MaskedColumnExtender : public BaseExtender {
 
         assert(graph);
 
-        masked_graph_ = std::make_unique<MaskedDeBruijnGraph>(
-            graph,
-            [&](const node_index &node) {
-                return anno_graph_->has_label(node, path.get_label());
-            }
-        );
+        std::function<bool(const node_index&)> check_node = [&](const node_index &node) {
+            return anno_graph_->has_label(node, path.get_label());
+        };
+
+        if (graph->is_canonical_mode()) {
+            check_node = [&](const node_index &node) {
+                node_index canon_node;
+                graph->map_to_nodes(graph->get_node_sequence(node), [&](auto i) {
+                    canon_node = i;
+                });
+
+                return anno_graph_->has_label(canon_node, path.get_label());
+            };
+        }
+
+        masked_graph_ = std::make_unique<MaskedDeBruijnGraph>(graph, std::move(check_node));
 
         assert(std::all_of(path.begin(), path.end(),
                            [&](auto node) { return masked_graph_->in_subgraph(node); }));
@@ -148,6 +169,7 @@ class MaskedDBGAligner : public DBGAligner<LabeledSeeder<Seeder>,
     typedef DBGAligner<LabeledSeeder<Seeder>,
                        MaskedExtender<Extender>,
                        AlignmentCompare> Aligner;
+    typedef typename Aligner::node_index node_index;
     typedef typename Aligner::DBGAlignment DBGAlignment;
 
     MaskedDBGAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
@@ -184,7 +206,16 @@ class MaskedDBGAligner : public DBGAligner<LabeledSeeder<Seeder>,
                 auto path = it.value().pop_top();
                 assert(path.is_valid(Aligner::get_graph(), &Aligner::get_config()));
                 assert(std::all_of(path.begin(), path.end(), [&](auto node) {
-                    return anno_graph_.has_label(node, path.get_label());
+                    if (!anno_graph_.get_graph().is_canonical_mode())
+                        return anno_graph_.has_label(node, path.get_label());
+
+                    const auto &graph = anno_graph_.get_graph();
+                    node_index canon_node;
+                    graph.map_to_nodes(graph.get_node_sequence(node), [&](auto i) {
+                        canon_node = i;
+                    });
+
+                    return anno_graph_.has_label(canon_node, path.get_label());
                 }));
                 callback(std::move(path));
             }
