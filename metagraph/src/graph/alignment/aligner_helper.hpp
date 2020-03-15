@@ -453,6 +453,7 @@ class QueryAlignment {
     get_top_labels(size_t num_top_labels, double presence_ratio = 0.0) {
         std::vector<std::pair<std::string, size_t>> top_labels;
         top_labels.reserve(size());
+
         for (const auto &path : *this) {
             size_t num_matches = path.get_num_matches();
             if (num_matches >= presence_ratio * path.get_query().size())
@@ -475,6 +476,7 @@ class QueryAlignment {
     get_top_label_cigars(size_t num_top_labels, double presence_ratio = 0.0) {
         std::vector<std::tuple<std::string, Cigar, score_t>> top_labels;
         top_labels.reserve(size());
+
         for (const auto &path : *this) {
             size_t num_matches = path.get_num_matches();
             if (num_matches >= presence_ratio * path.get_query().size())
@@ -494,13 +496,15 @@ class QueryAlignment {
     }
 
     std::vector<std::string> get_labels(double presence_ratio = 0.0) {
-        return std::accumulate(begin(), end(), std::vector<std::string>{},
-                               [&](std::vector<std::string> old, const value_type &path) {
-            if (path.get_num_matches() >= presence_ratio * path.get_query().size())
-                old.push_back(path.get_label());
+        std::vector<std::string> labels;
+        labels.reserve(size());
 
-            return old;
-        });
+        for (const auto &path : *this) {
+            if (path.get_num_matches() >= presence_ratio * path.get_query().size())
+                labels.push_back(path.get_label());
+        }
+
+        return labels;
     }
 
   private:
