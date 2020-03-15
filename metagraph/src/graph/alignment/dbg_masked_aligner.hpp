@@ -10,6 +10,35 @@
 #include "graph/annotated_graph_algorithm.hpp"
 
 
+namespace sdsl {
+namespace util {
+
+template <class t_int_vec>
+typename t_int_vec::size_type next_zero(const t_int_vec& v, uint64_t idx)
+{
+    uint64_t pos = idx>>6;
+    uint64_t node = ~v.data()[pos];
+    node >>= (idx&0x3F);
+    if (node) {
+        return idx+bits::lo(node);
+    } else {
+        ++pos;
+        while ((pos<<6) < v.bit_size()) {
+            node = ~v.data()[pos];
+            if (node) {
+                return (pos<<6)|bits::lo(node);
+            }
+            ++pos;
+        }
+        return v.bit_size();
+    }
+
+}
+
+} // namespace util
+} // namespace sdsl
+
+
 template <class BaseSeeder = ExactSeeder<>>
 class LabeledSeeder : public BaseSeeder {
   public:
@@ -26,63 +55,35 @@ class LabeledSeeder : public BaseSeeder {
 
     void call_seeds(std::function<void(Seed&&)> callback) const {
         assert(anno_graph_);
-        const auto &label_encoder = anno_graph_->get_annotation().get_label_encoder();
-        const auto &matrix = anno_graph_->get_annotation().get_matrix();
         const auto &config = BaseSeeder::get_config();
-        const auto &graph = anno_graph_->get_graph();
 
         BaseSeeder::call_seeds([&](Seed&& seed) {
-            std::vector<uint64_t> row_indices(seed.size());
-            if (!graph.is_canonical_mode()) {
-                std::transform(seed.begin(), seed.end(), row_indices.begin(), [&](auto node) {
-                    return AnnotatedDBG::graph_to_anno_index(node);
-                });
-            } else {
-                auto it = row_indices.begin();
-                graph.map_to_nodes(seed.get_sequence(), [&](auto node) {
-                    assert(it != row_indices.end());
-                    *it = AnnotatedDBG::graph_to_anno_index(node);
-                    ++it;
-                });
-                assert(it == row_indices.end());
-            }
+            const auto label_signatures = anno_graph_->get_top_label_signatures(
+                seed.get_sequence(),
+                anno_graph_->get_annotation().num_labels()
+            );
 
-            auto rows = matrix.get_rows(row_indices);
-            assert(rows.size() == row_indices.size());
+            for (const auto &[label, signature] : label_signatures) {
+                size_t i = sdsl::util::next_bit(signature, 0);
+                while (i < signature.size()) {
+                    size_t next = sdsl::util::next_zero(signature, i + 1);
 
-            auto it = std::find_if(rows.begin(), rows.end(),
-                                   [](const auto &row) { return row.size(); });
+                    const char *begin = seed.get_query().data() + i;
+                    size_t size = seed.get_query().size() - seed.size() + (next - i);
 
-            std::vector<std::string> cur_labels;
-            while (it != rows.end()) {
-                auto next = std::find_if(it + 1, rows.end(),
-                                         [&it](const auto &row) { return row != *it; });
+                    Seed cur_seed(std::string_view(begin, size),
+                                  std::vector<node_index>(seed.begin() + i,
+                                                          seed.begin() + next),
+                                  config.match_score(std::string_view(begin, size)),
+                                  seed.get_clipping() + i,
+                                  seed.get_orientation(),
+                                  i <= seed.get_offset() ? seed.get_offset() - i : 0);
 
-                size_t begin_pos = it - rows.begin();
-                size_t end_pos = next - rows.begin();
-                const char *begin = seed.get_query().data() + begin_pos;
-                size_t size = seed.get_query().size() - seed.size() + (next - it);
+                    cur_seed.set_label(label);
+                    callback(std::move(cur_seed));
 
-                Seed cur_seed(std::string_view(begin, size),
-                              std::vector<node_index>(seed.begin() + begin_pos,
-                                                      seed.begin() + end_pos),
-                              config.match_score(std::string_view(begin, size)),
-                              seed.get_clipping() + begin_pos,
-                              seed.get_orientation(),
-                              begin_pos <= seed.get_offset() ? seed.get_offset() - begin_pos : 0);
-
-                cur_labels.resize(it->size());
-                std::transform(it->begin(), it->end(), cur_labels.begin(),
-                               [&](auto i) { return label_encoder.decode(i); });
-
-                for (auto&& label : cur_labels) {
-                    auto labeled_seed = cur_seed;
-                    labeled_seed.set_label(std::move(label));
-                    callback(std::move(labeled_seed));
+                    i = sdsl::util::next_bit(signature, next + 1);
                 }
-
-                it = std::find_if(next, rows.end(),
-                                  [](const auto &row) { return row.size(); });
             }
         });
     }
