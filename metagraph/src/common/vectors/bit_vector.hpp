@@ -80,8 +80,4 @@ class bit_vector : public bitmap {
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
 
-// indexes are distinct and sorted
-sdsl::bit_vector subvector(const bit_vector &col,
-                           const std::vector<uint64_t> &indexes);
-
 #endif // __BIT_VECTOR_HPP__
