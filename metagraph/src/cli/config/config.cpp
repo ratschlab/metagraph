@@ -208,6 +208,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_min_cell_score = atol(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-path-score")) {
             alignment_min_path_score = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-xdrop")) {
+            alignment_xdrop = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-seed-length")) {
             alignment_min_seed_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-seed-length")) {
@@ -801,6 +803,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-both-strands \t\treturn best alignments for either input sequence or its reverse complement [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\tthe minimum score that a reported path can have [0]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\tthe maximum allowed score difference from the current best score [20]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-queue-size [INT]\t\tmaximum size of the priority queue for alignment [20]\n");
             fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\tmaximum width of a window to consider in alignment step [17]\n");
@@ -1000,6 +1003,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-both-strands \t\treturn best alignments for either input sequence or its reverse complement [off]\n");
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\tthe minimum score that a reported path can have [0]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\tthe maximum allowed score difference from the current best score [20]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-queue-size [INT]\t\tmaximum size of the priority queue for alignment [20]\n");
             fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\tmaximum width of a window to consider in alignment step [17]\n");
