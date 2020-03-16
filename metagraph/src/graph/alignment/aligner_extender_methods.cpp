@@ -8,8 +8,11 @@
 
 #include "common/algorithms.hpp"
 #include "common/bounded_priority_queue.hpp"
+#include "common/logger.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/utils/template_utils.hpp"
+
+using mg::common::logger;
 
 
 template <typename T>
@@ -612,7 +615,8 @@ void DefaultColumnExtender<NodeType>
                                 return a.second < b.second;
                             })->second.best_score());
 
-    // assert(start_node->second.best_op() == Cigar::Operator::MATCH);
+    if (dp_table.find(start_node)->second.best_op() != Cigar::Operator::MATCH)
+        logger->trace("best alignment does not end with a MATCH");
 
     // get all alignments
     dp_table.extract_alignments(graph_,
