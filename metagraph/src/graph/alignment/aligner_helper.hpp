@@ -55,6 +55,11 @@ class Cigar {
         cigar_.erase(cigar_.begin(), cigar_.begin() + 1);
     }
 
+    void pop_back() {
+        assert(cigar_.size());
+        cigar_.pop_back();
+    }
+
     typedef typename std::vector<value_type>::iterator iterator;
     typedef typename std::vector<value_type>::const_iterator const_iterator;
 
@@ -289,6 +294,44 @@ class Alignment {
             return;
 
         cigar_.append(Cigar::Operator::CLIPPED, end - query_end_ - end_clipping);
+    }
+
+    void trim_clipping() {
+        if (get_clipping())
+            cigar_.pop_front();
+    }
+
+    void trim_end_clipping() {
+        if (get_end_clipping())
+            cigar_.pop_back();
+    }
+
+    void reverse_complement(const DeBruijnGraph &graph,
+                            const std::string_view query_rev_comp) {
+        assert(query_end_ + get_end_clipping()
+            == query_begin_ - get_clipping() + query_rev_comp.size());
+
+        if (offset_) {
+            assert(false);
+            return;
+        }
+
+        std::reverse(cigar_.begin(), cigar_.end());
+        ::reverse_complement(sequence_.begin(), sequence_.end());
+        auto it = nodes_.begin();
+        graph.map_to_nodes_sequentially(sequence_, [&](auto i) {
+            assert(it != nodes_.end());
+            assert(*it != DeBruijnGraph::npos);
+            *it = i;
+            ++it;
+        });
+
+        orientation_ = !orientation_;
+
+        query_begin_ = query_rev_comp.data() + get_clipping();
+        query_end_ = query_rev_comp.data() + (query_rev_comp.size() - get_end_clipping());
+
+        assert(query_end_ >= query_begin_);
     }
 
     const std::string& get_sequence() const { return sequence_; }
