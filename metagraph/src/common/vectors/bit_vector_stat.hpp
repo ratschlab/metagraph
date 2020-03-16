@@ -22,13 +22,9 @@ class bit_vector_stat : public bit_vector {
 
   public:
     inline explicit bit_vector_stat(uint64_t size = 0, bool value = 0);
-    inline explicit bit_vector_stat(const sdsl::bit_vector &vector) noexcept;
-    inline bit_vector_stat(const sdsl::bit_vector &vector, uint64_t num_set_bits);
+    inline explicit bit_vector_stat(const sdsl::bit_vector &vector);
     inline explicit bit_vector_stat(const bit_vector_stat &other);
-    inline bit_vector_stat(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
-                           uint64_t size);
-    inline bit_vector_stat(sdsl::bit_vector&& vector) noexcept;
-    inline bit_vector_stat(sdsl::bit_vector&& vector, uint64_t num_set_bits);
+    inline bit_vector_stat(sdsl::bit_vector&& vector);
     inline bit_vector_stat(bit_vector_stat&& other) noexcept;
     inline bit_vector_stat(std::initializer_list<bool> init);
 
@@ -71,8 +67,6 @@ class bit_vector_stat : public bit_vector {
     }
 
   private:
-    inline void init_rs();
-
     sdsl::bit_vector vector_;
     uint64_t num_set_bits_ = 0;
 
@@ -84,44 +78,22 @@ class bit_vector_stat : public bit_vector {
 
 
 bit_vector_stat::bit_vector_stat(uint64_t size, bool value)
-      : vector_(size, value) {
-    if (value)
-        num_set_bits_ = size;
+      : bit_vector_stat(sdsl::bit_vector(size, value)) {}
 
-    init_rs();
-}
-
-bit_vector_stat::bit_vector_stat(const sdsl::bit_vector &vector) noexcept
+bit_vector_stat::bit_vector_stat(const sdsl::bit_vector &vector)
       : bit_vector_stat(sdsl::bit_vector(vector)) {}
-
-bit_vector_stat::bit_vector_stat(const sdsl::bit_vector &vector, uint64_t num_set_bits)
-      : bit_vector_stat(sdsl::bit_vector(vector), num_set_bits) {}
 
 bit_vector_stat::bit_vector_stat(const bit_vector_stat &other) {
     *this = other;
 }
 
-bit_vector_stat
-::bit_vector_stat(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
-                  uint64_t size)
-      : vector_(size, false),
-        num_set_bits_(0) {
-    call_ones([&](uint64_t pos) {
-        assert(pos < size);
-        vector_[pos] = true;
-        num_set_bits_++;
-    });
-    init_rs();
-}
-
-bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector) noexcept
-      : bit_vector_stat(std::move(vector), sdsl::util::cnt_one_bits(vector)) {}
-
-bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector, uint64_t num_set_bits)
-      : vector_(std::move(vector)),
-        num_set_bits_(num_set_bits) {
-    assert(num_set_bits_ == sdsl::util::cnt_one_bits(vector_));
-    init_rs();
+bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector)
+      : vector_(std::move(vector)) {
+    rk_ = sdsl::rank_support_v5<1>(&vector_);
+    slct_ = sdsl::select_support_mcl<1>(&vector_);
+    slct_zero_ = sdsl::select_support_scan<0>(&vector_);
+    num_set_bits_ = rk_(vector_.size());
+    assert(num_set_bits_ == num_set_bits());
 }
 
 bit_vector_stat::bit_vector_stat(bit_vector_stat&& other) noexcept {
@@ -169,16 +141,12 @@ uint64_t bit_vector_stat::rank1(uint64_t id) const {
 }
 
 uint64_t bit_vector_stat::select1(uint64_t id) const {
-    assert(id > 0 && size() > 0);
-
-    assert(id <= num_set_bits_);
+    assert(id > 0 && id <= num_set_bits_);
     return slct_(id);
 }
 
 uint64_t bit_vector_stat::select0(uint64_t id) const {
-    assert(id > 0 && size() > 0);
-
-    assert(id <= size() - num_set_bits_);
+    assert(id > 0 && id + num_set_bits_ <= size());
     return slct_zero_(id);
 }
 
@@ -259,15 +227,6 @@ void bit_vector_stat::call_ones_in_range(uint64_t begin, uint64_t end,
     assert(begin <= end);
     assert(end <= size());
     ::call_ones(vector_, begin, end, callback);
-}
-
-void bit_vector_stat::init_rs() {
-    rk_ = sdsl::rank_support_v5<1>(&vector_);
-    slct_ = sdsl::select_support_mcl<1>(&vector_);
-    slct_zero_ = sdsl::select_support_scan<0>(&vector_);
-
-    assert(num_set_bits_ == (size() ? rank1(size() - 1) : 0));
-    assert(num_set_bits_ == num_set_bits());
 }
 
 #endif // __BIT_VECTOR_STAT_HPP__
