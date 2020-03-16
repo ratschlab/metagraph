@@ -9,8 +9,7 @@ using mg::common::logger;
 
 
 template <typename NodeType>
-bool DPTable<NodeType>::add_seed(const SequenceGraph &graph,
-                                 NodeType start_node,
+bool DPTable<NodeType>::add_seed(NodeType start_node,
                                  char start_char,
                                  score_t initial_score,
                                  score_t min_score,
@@ -24,13 +23,10 @@ bool DPTable<NodeType>::add_seed(const SequenceGraph &graph,
     query_offset_ = query_offset;
     start_node_ = start_node;
 
+    // Initialize first column
     auto &table_init = dp_table_[start_node];
-    if (!table_init.size()) {
-        // Initialize first column
-        std::vector<NodeType> in_nodes;
-        graph.adjacent_incoming_nodes(start_node, [&](auto i) { in_nodes.push_back(i); });
-        table_init = Column(size, min_score, start_char, std::move(in_nodes), start_pos);
-    }
+    if (!table_init.size())
+        table_init = Column(size, min_score, start_char, start_pos);
 
     bool update = false;
 
