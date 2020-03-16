@@ -27,11 +27,15 @@ typedef LabelEncoder<std::string> LEncoder;
 
 template <class RowCallback>
 void call_rows(const BinaryMatrix &row_major_matrix,
-               const RowCallback &callback) {
+               const RowCallback &callback,
+               bool sort = false) {
     const auto num_rows = row_major_matrix.num_rows();
 
     for (size_t i = 0; i < num_rows; ++i) {
-        callback(row_major_matrix.get_row(i));
+        auto row = row_major_matrix.get_row(i);
+        if (sort)
+            std::sort(row.begin(), row.end());
+        callback(row);
     }
 }
 
@@ -75,7 +79,7 @@ convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotato
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        call_rows(annotator.get_matrix(), callback);
+        call_rows(annotator.get_matrix(), callback, true);
     }, num_columns);
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
