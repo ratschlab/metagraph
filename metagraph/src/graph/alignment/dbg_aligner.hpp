@@ -131,18 +131,13 @@ class DBGAligner : public IDBGAligner {
 
         seeder.initialize(query_alignment, orientation);
 
-        align_aggregate(
-            [&](const auto &alignment_callback) {
-                align(query_alignment,
-                      [&](const auto &callback) { seeder.call_seeds(callback); },
-                      alignment_callback,
-                      orientation,
-                      config_.min_path_score);
-            },
-            [&](DBGAlignment&& path) {
-                paths.emplace_back(std::move(path));
-            }
-        );
+        align_aggregate([&](const auto &alignment_callback) {
+            align(query_alignment,
+                  [&](const auto &callback) { seeder.call_seeds(callback); },
+                  alignment_callback,
+                  orientation,
+                  config_.min_path_score);
+        }, [&](DBGAlignment&& path) { paths.emplace_back(std::move(path)); });
 
         return paths;
     }
@@ -157,37 +152,27 @@ class DBGAligner : public IDBGAligner {
 
         seeder.initialize(forward, false);
 
-        align_aggregate(
-            [&](const auto &alignment_callback) {
-                align(forward,
-                      [&](const auto &callback) { seeder.call_seeds(callback); },
-                      alignment_callback,
-                      false,
-                      config_.min_path_score);
-            },
-            [&](DBGAlignment&& path) {
-                all_paths.emplace_back(std::move(path));
-            }
-        );
+        align_aggregate([&](const auto &alignment_callback) {
+            align(forward,
+                  [&](const auto &callback) { seeder.call_seeds(callback); },
+                  alignment_callback,
+                  false,
+                  config_.min_path_score);
+        }, [&](DBGAlignment&& path) { all_paths.emplace_back(std::move(path)); } );
 
         auto size = all_paths.size();
 
         seeder.initialize(rev_comp, true);
 
-        align_aggregate(
-            [&](const auto &alignment_callback) {
-                align(rev_comp,
-                      [&](const auto &callback) { seeder.call_seeds(callback); },
-                      alignment_callback,
-                      true,
-                      size >= config_.num_alternative_paths
-                          ? all_paths[config_.num_alternative_paths - 1].get_score() - 1
-                          : config_.min_path_score);
-            },
-            [&](DBGAlignment&& path) {
-                all_paths.emplace_back(std::move(path));
-            }
-        );
+        align_aggregate([&](const auto &alignment_callback) {
+            align(rev_comp,
+                  [&](const auto &callback) { seeder.call_seeds(callback); },
+                  alignment_callback,
+                  true,
+                  size >= config_.num_alternative_paths
+                      ? all_paths[config_.num_alternative_paths - 1].get_score() - 1
+                      : config_.min_path_score);
+        }, [&](DBGAlignment&& path) { all_paths.emplace_back(std::move(path)); });
 
         size_t max_left = std::min(size, config_.num_alternative_paths);
         size_t max_right = std::min(all_paths.size() - size, config_.num_alternative_paths);
