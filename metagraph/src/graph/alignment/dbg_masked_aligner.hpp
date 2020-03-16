@@ -172,6 +172,7 @@ class MaskedDBGAligner : public DBGAligner<LabeledSeeder<Seeder>,
                        AlignmentCompare> Aligner;
     typedef typename Aligner::node_index node_index;
     typedef typename Aligner::DBGAlignment DBGAlignment;
+    typedef typename Aligner::AlignmentGenerator AlignmentGenerator;
 
     MaskedDBGAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
           : Aligner(anno_graph.get_graph(), config), anno_graph_(anno_graph) {}
@@ -185,22 +186,15 @@ class MaskedDBGAligner : public DBGAligner<LabeledSeeder<Seeder>,
         return MaskedExtender<Extender>(anno_graph_, Aligner::get_config());
     }
 
-    virtual void align_aggregate(std::string_view query,
-                                 const std::function<void(DBGAlignment&&)> &callback,
-                                 bool orientation,
-                                 score_t min_path_score,
-                                 const LabeledSeeder<Seeder> &seeder) const override {
+    virtual void align_aggregate(const AlignmentGenerator &alignment_generator,
+                                 const std::function<void(DBGAlignment&&)> &callback) const override {
         tsl::hopscotch_map<std::string, typename Aligner::AlignmentQueue> path_queues;
         size_t num_alternative_paths = Aligner::get_config().num_alternative_paths;
 
-        Aligner::align(query,
-                       [&](DBGAlignment&& alignment) {
-                           path_queues.emplace(alignment.get_label(), num_alternative_paths);
-                           path_queues[alignment.get_label()].emplace(std::move(alignment));
-                       },
-                       orientation,
-                       min_path_score,
-                       seeder);
+        alignment_generator([&](DBGAlignment&& alignment) {
+            path_queues.emplace(alignment.get_label(), num_alternative_paths);
+            path_queues[alignment.get_label()].emplace(std::move(alignment));
+        });
 
         for (auto it = path_queues.begin(); it != path_queues.end(); ++it) {
             while (it->second.size()) {
