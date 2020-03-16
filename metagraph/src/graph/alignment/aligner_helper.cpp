@@ -3,6 +3,9 @@
 #include <tsl/hopscotch_set.h>
 
 #include "common/algorithms.hpp"
+#include "common/logger.hpp"
+
+using mg::common::logger;
 
 
 template <typename NodeType>
@@ -283,10 +286,8 @@ template <typename NodeType>
 void Alignment<NodeType>::recompute_score(const DBGAlignerConfig &config) {
     auto new_score = config.score_cigar(sequence_, get_query(), cigar_);
 
-    if (utils::get_verbose() && score_ != new_score) {
-        std::cerr << "WARNING: changing score from "
-                  << score_ << " to " << new_score << std::endl;
-    }
+    if (utils::get_verbose() && score_ != new_score)
+        logger->trace("changing score from {}, to {}", score_, new_score);
 
     score_ = new_score;
 }
