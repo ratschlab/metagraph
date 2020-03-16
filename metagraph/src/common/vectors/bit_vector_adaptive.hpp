@@ -16,6 +16,7 @@ class bit_vector_adaptive : public bit_vector {
 
     virtual uint64_t rank1(uint64_t id) const override final { return vector_->rank1(id); }
     virtual uint64_t select1(uint64_t id) const override final { return vector_->select1(id); }
+    virtual uint64_t select0(uint64_t id) const override final { return vector_->select0(id); }
     virtual std::pair<bool, uint64_t> inverse_select(uint64_t id) const override final {
         return vector_->inverse_select(id);
     }

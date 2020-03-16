@@ -39,6 +39,7 @@ class bit_vector_stat : public bit_vector {
 
     inline uint64_t rank1(uint64_t id) const override;
     inline uint64_t select1(uint64_t id) const override;
+    inline uint64_t select0(uint64_t id) const override;
 
     inline uint64_t next1(uint64_t id) const override;
     inline uint64_t prev1(uint64_t id) const override;
@@ -76,8 +77,9 @@ class bit_vector_stat : public bit_vector {
     uint64_t num_set_bits_ = 0;
 
     // maintain rank/select operations
-    sdsl::rank_support_v5<> rk_;
-    sdsl::select_support_mcl<> slct_;
+    sdsl::rank_support_v5<1> rk_;
+    sdsl::select_support_mcl<1> slct_;
+    sdsl::select_support_scan<0> slct_zero_;
 };
 
 
@@ -137,6 +139,8 @@ bit_vector_stat& bit_vector_stat::operator=(const bit_vector_stat &other) {
     rk_.set_vector(&vector_);
     slct_ = other.slct_;
     slct_.set_vector(&vector_);
+    slct_zero_ = other.slct_zero_;
+    slct_zero_.set_vector(&vector_);
 
     return *this;
 }
@@ -149,6 +153,8 @@ bit_vector_stat& bit_vector_stat::operator=(bit_vector_stat&& other) noexcept {
     rk_.set_vector(&vector_);
     slct_ = std::move(other.slct_);
     slct_.set_vector(&vector_);
+    slct_zero_ = std::move(other.slct_zero_);
+    slct_zero_.set_vector(&vector_);
 
     return *this;
 }
@@ -167,6 +173,13 @@ uint64_t bit_vector_stat::select1(uint64_t id) const {
 
     assert(id <= num_set_bits_);
     return slct_(id);
+}
+
+uint64_t bit_vector_stat::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0);
+
+    assert(id <= size() - num_set_bits_);
+    return slct_zero_(id);
 }
 
 uint64_t bit_vector_stat::next1(uint64_t pos) const {
@@ -212,6 +225,7 @@ void bit_vector_stat::serialize(std::ostream &out) const {
     serialize_number(out, num_set_bits_);
     rk_.serialize(out);
     slct_.serialize(out);
+    slct_zero_.serialize(out);
 }
 
 bool bit_vector_stat::load(std::istream &in) {
@@ -224,6 +238,7 @@ bool bit_vector_stat::load(std::istream &in) {
         num_set_bits_ = load_number(in);
         rk_.load(in, &vector_);
         slct_.load(in, &vector_);
+        slct_zero_.load(in, &vector_);
         return true;
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load bit_vector_stat." << std::endl;
@@ -247,8 +262,9 @@ void bit_vector_stat::call_ones_in_range(uint64_t begin, uint64_t end,
 }
 
 void bit_vector_stat::init_rs() {
-    rk_ = sdsl::rank_support_v5<>(&vector_);
-    slct_ = sdsl::select_support_mcl<>(&vector_);
+    rk_ = sdsl::rank_support_v5<1>(&vector_);
+    slct_ = sdsl::select_support_mcl<1>(&vector_);
+    slct_zero_ = sdsl::select_support_scan<0>(&vector_);
 
     assert(num_set_bits_ == (size() ? rank1(size() - 1) : 0));
     assert(num_set_bits_ == num_set_bits());

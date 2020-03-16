@@ -20,6 +20,8 @@ class bit_vector : public bitmap {
     }
     // Returns the i-th set bit, starting from 1
     virtual uint64_t select1(uint64_t i) const = 0;
+    // Returns the i-th unset bit, starting from 1
+    virtual uint64_t select0(uint64_t i) const = 0;
     // Query bit and rank
     virtual std::pair<bool, uint64_t> inverse_select(uint64_t id) const {
         return std::make_pair(operator[](id), rank1(id));
