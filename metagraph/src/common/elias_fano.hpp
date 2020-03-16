@@ -88,8 +88,14 @@ class EliasFanoEncoder {
      * Constructs an Elias-Fano encoder of an array with the given size and given max
      * value. The encoded output is written to #sink.
      */
-    EliasFanoEncoder(size_t size, T max_value, std::ofstream &sink)
-        : declared_size_(size), sink_(sink) {
+    EliasFanoEncoder(size_t size, T max_value, const std::string &sink_name)
+        : declared_size_(size) {
+        // open file for appending, as we may encode multiple compressed chunks in the same file
+        sink_ = std::ofstream(sink_name, std::ios::binary | std::ios::app);
+        if (!sink_.good()) {
+            std::cerr << "Unable to write to " << sink_name << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
         init(size, max_value);
     }
 
@@ -97,8 +103,8 @@ class EliasFanoEncoder {
      * Encodes the given vector using Elias-Fano encoding. The encoded output is
      * written to #sink. The vector elements must be non-decreasing.
      */
-    EliasFanoEncoder(const Vector<T> &data, std::ofstream &sink)
-        : EliasFanoEncoder(data.size(), data.back(), sink) {
+    EliasFanoEncoder(const Vector<T> &data, const std::string &sink_name)
+        : EliasFanoEncoder(data.size(), data.back(), sink_name) {
         for (const auto &v : data) {
             add(v);
         }
@@ -268,7 +274,7 @@ class EliasFanoEncoder {
     /**
      * Sink to write the encoded values to.
      */
-    std::ofstream &sink_;
+    std::ofstream sink_;
 
     /**
      * Number of lower bits that were written to disk.
@@ -283,7 +289,14 @@ template <typename T>
 class EliasFanoDecoder {
   public:
     /** Creates a decoder that retrieves data from the given source */
-    EliasFanoDecoder(std::ifstream &source) : source_(source) {
+    EliasFanoDecoder(const std::string &source_name) {
+        source_ = std::ifstream(source_name, std::ios::binary);
+        // profiling indicates that setting a larger buffer slightly increases performance
+        source_.rdbuf()->pubsetbuf(buffer_, 1024 * 1024);
+        if (!source_.good()) {
+            std::cerr << "Unable to read from " << source_name << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
         source_.seekg(0, source_.end);
         file_end_ = source_.tellg();
         source_.seekg(0, source_.beg);
@@ -326,7 +339,7 @@ class EliasFanoDecoder {
 
         const uint8_t *ptr = reinterpret_cast<uint8_t *>(lower_.data()) + (adjusted_pos / 8);
         const uint64_t ptrv = load_unaligned<uint64_t>(ptr);
-        return clear_high_bits(ptrv >> (adjusted_pos % 8), num_lower_bits_);
+        return T(clear_high_bits(ptrv >> (adjusted_pos % 8), num_lower_bits_));
     }
 
     /**
@@ -423,12 +436,102 @@ class EliasFanoDecoder {
     size_t num_upper_bytes_;
 
     /** Stream containing the compressed data. */
-    std::ifstream &source_;
+    std::ifstream source_;
+
+    /* 1MB buffer for reading from #source_ */
+    char buffer_[1024 * 1024];
 
     std::streampos file_end_;
 
     /** True if we read all bytes from source_ */
     bool all_read_ = false;
+};
+
+/**
+ * Encoder specialization for an std::pair. The first member of the pair is assumed to be
+ * in nondecreasing order and is compressed using Elias-Fano encoding, while the second
+ * member of the pair is written to disk as is.
+ */
+template <typename T, typename C>
+class EliasFanoEncoder<std::pair<T, C>> {
+  public:
+    /**
+     * Constructs an Elias-Fano encoder of an array with the given size and given last
+     * value. The encoded output is dumped to #sink_name.
+     */
+    EliasFanoEncoder(size_t size, const std::pair<T,C> &last_value, const std::string &sink_name)
+        : ef_encoder(size, last_value.first, sink_name), sink_second_name_(sink_name + ".count") {
+        // open file for appending, as we may encode multiple compressed chunks in the same file
+        sink_second_ = std::ofstream(sink_second_name_, std::ios::binary | std::ios::app);
+    }
+
+    /**
+     * Encodes the given vector using Elias-Fano encoding. The encoded output is
+     * written to #sink. The vector elements must be non-decreasing.
+     */
+    EliasFanoEncoder(const Vector<std::pair<T, C>> &data, std::string &sink_name)
+        : EliasFanoEncoder(data.size(), data.back().first, sink_name) {
+        for (const auto &v : data) {
+            ef_encoder.add(v.first);
+            sink_second_.write(reinterpret_cast<char *>(&v.second), sizeof(C));
+        }
+    }
+
+    /**
+     * Adds a new value to be encoded.
+     */
+    void add(std::pair<T, C> value) {
+        ef_encoder.add(value.first);
+        sink_second_.write(reinterpret_cast<char *>(&value.second), sizeof(C));
+    }
+
+    size_t finish() {
+        size_t first_size = ef_encoder.finish();
+        sink_second_.close();
+        return first_size + std::filesystem::file_size(sink_second_name_);
+    }
+
+  private:
+    EliasFanoEncoder<T> ef_encoder;
+    std::string sink_second_name_;
+    std::ofstream sink_second_;
+};
+
+template <typename T, typename C>
+class EliasFanoDecoder<std::pair<T, C>> {
+  public:
+    /** Creates a decoder that retrieves data from the given source */
+    EliasFanoDecoder(const std::string &source) : source_first_(source) {
+        std::string source_second_name = source + ".count";
+        source_second_ = std::ifstream(source_second_name, std::ios::binary);
+        // profiling indicates that setting a larger buffer slightly increases performance
+        source_second_.rdbuf()->pubsetbuf(buffer_, 1024 * 1024);
+        if (!source_second_.good()) {
+            std::cerr << "Unable to write to " << source_second_name << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+    /**
+     * Returns the next compressed element or empty if all elements were read.
+     */
+    std::optional<std::pair<T, C>> next() {
+        std::optional<T> first = source_first_.next();
+        C second;
+        if (!first.has_value()) {
+            assert(!source_second_.read(reinterpret_cast<char *>(&second), sizeof(C)));
+            return {};
+        }
+        source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
+        assert(source_second_);
+        return std::make_pair(first.value(), second);
+    }
+
+  private:
+    EliasFanoDecoder<T> source_first_;
+    std::ifstream source_second_;
+    /* 1MB buffer for reading from #source_second_ */
+    char buffer_[1024 * 1024];
 };
 
 /**
@@ -445,15 +548,22 @@ class EliasFanoEncoder<sdsl::uint128_t> {
      */
     EliasFanoEncoder(size_t size,
                      __attribute__((unused)) sdsl::uint128_t max_value,
-                     std::ofstream &sink)
-        : declared_size_(size), sink_(sink) {}
+                     const std::string &sink_name)
+        : declared_size_(size) {
+        // open file for appending, as we may encode multiple compressed chunks in the same file
+        sink_ = std::ofstream(sink_name, std::ios::binary | std::ios::app);
+        if (!sink_.good()) {
+            std::cerr << "Unable to write to " << sink_name << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    }
 
     /**
      * Encodes the given vector using Elias-Fano encoding. The encoded output is
      * written to #sink. The vector elements must be non-decreasing.
      */
-    EliasFanoEncoder(const Vector<sdsl::uint128_t> &data, std::ofstream &sink)
-        : EliasFanoEncoder(data.size(), data.back(), sink) {
+    EliasFanoEncoder(const Vector<sdsl::uint128_t> &data, const std::string &sink_name)
+        : EliasFanoEncoder(data.size(), data.back(), sink_name) {
         for (const auto &v : data) {
             add(v);
         }
@@ -477,7 +587,7 @@ class EliasFanoEncoder<sdsl::uint128_t> {
     /**
      * Sink to write the encoded values to.
      */
-    std::ofstream &sink_;
+    std::ofstream sink_;
 
     size_t total_size_ = 0;
 
@@ -496,15 +606,22 @@ class EliasFanoEncoder<sdsl::uint256_t> {
      */
     EliasFanoEncoder(size_t size,
                      __attribute__((unused)) sdsl::uint256_t max_value,
-                     std::ofstream &sink)
-            : declared_size_(size), sink_(sink) {}
+                     const std::string &sink_name)
+            : declared_size_(size) {
+        // open file for appending, as we may encode multiple compressed chunks in the same file
+        sink_ = std::ofstream(sink_name, std::ios::binary | std::ios::app);
+        if (!sink_.good()) {
+            std::cerr << "Unable to write to " << sink_name << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    }
 
     /**
      * Encodes the given vector using Elias-Fano encoding. The encoded output is
      * written to #sink. The vector elements must be non-decreasing.
      */
-    EliasFanoEncoder(const Vector<sdsl::uint256_t> &data, std::ofstream &sink)
-            : EliasFanoEncoder(data.size(), data.back(), sink) {
+    EliasFanoEncoder(const Vector<sdsl::uint256_t> &data, const std::string &sink_name)
+            : EliasFanoEncoder(data.size(), data.back(), sink_name) {
         for (const auto &v : data) {
             add(v);
         }
@@ -528,11 +645,76 @@ class EliasFanoEncoder<sdsl::uint256_t> {
     /**
      * Sink to write the encoded values to.
      */
-    std::ofstream &sink_;
+    std::ofstream sink_;
 
     size_t total_size_ = 0;
 
     size_t size_ = 0;
 };
+
+/**
+ * Decodes a list of compressed sorted integers stored in a file using #EliasFanoEncoder.
+ */
+template <>
+class EliasFanoDecoder<sdsl::uint128_t> {
+  public:
+    /** Creates a decoder that retrieves data from the given source */
+    EliasFanoDecoder(const std::string &source_name)  {
+        source_ = std::ifstream(source_name, std::ios::binary);
+        if (!source_.good()) {
+            std::cerr << "Unable to read from " << source_name << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+    /**
+     * Returns the next compressed element or empty if all elements were read.
+     */
+    std::optional<sdsl::uint128_t> next() {
+        sdsl::uint128_t result;
+        if (source_.read(reinterpret_cast<char *>(&result), sizeof(sdsl::uint128_t))) {
+            return result;
+        }
+        return {};
+    }
+
+
+  private:
+    /** Stream containing the compressed data. */
+    std::ifstream source_;
+};
+
+/**
+ * Decodes a list of compressed sorted integers stored in a file using #EliasFanoEncoder.
+ */
+template <>
+class EliasFanoDecoder<sdsl::uint256_t> {
+  public:
+    /** Creates a decoder that retrieves data from the given source */
+    EliasFanoDecoder(const std::string &source_name)  {
+        source_ = std::ifstream(source_name, std::ios::binary);
+        if (!source_.good()) {
+            std::cerr << "Unable to read from " << source_name << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+    /**
+     * Returns the next compressed element or empty if all elements were read.
+     */
+    std::optional<sdsl::uint256_t> next() {
+        sdsl::uint256_t result;
+        if (source_.read(reinterpret_cast<char *>(&result), sizeof(sdsl::uint256_t))) {
+            return result;
+        }
+        return {};
+    }
+
+
+  private:
+    /** Stream containing the compressed data. */
+    std::ifstream source_;
+};
+
 } // namespace common
 } // namespace mg

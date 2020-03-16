@@ -28,6 +28,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
     typedef T key_type;
     typedef C count_type;
     typedef std::pair<T, C> value_type;
+    typedef std::pair<INT, C> int_pair;
     typedef Vector<value_type> storage_type;
     typedef ChunkedWaitQueue<value_type> result_type;
     typedef typename storage_type::iterator Iterator;
@@ -52,16 +53,17 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
             std::function<void(const value_type &)> on_item_pushed
             = [](const value_type &) {},
             size_t num_last_elements_cached = 100,
-            std::function<INT(const T &v)> to_int = [](const T &v) { return INT(v); })
-        : SortedSetDiskBase<std::pair<T, C>, INT>(cleanup,
-                                                  num_threads,
-                                                  reserved_num_elements,
-                                                  tmp_dir,
-                                                  max_disk_space_bytes,
-                                                  on_item_pushed,
-                                                  num_last_elements_cached),
+            std::function<int_pair(const value_type &v)> to_int
+            = [](const value_type &v) { return std::make_pair(INT(v.first), v.second); })
+        : SortedSetDiskBase<value_type, INT>(cleanup,
+                                             num_threads,
+                                             reserved_num_elements,
+                                             tmp_dir,
+                                             max_disk_space_bytes,
+                                             on_item_pushed,
+                                             num_last_elements_cached),
           to_int_(to_int) {
-        merge_buf_.reserve(10e6 / sizeof(std::pair<T, C>));
+        merge_buf_.reserve(10e6 / sizeof(value_type));
     }
 
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
@@ -100,10 +102,10 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
     virtual void start_merging() override {
         const std::vector<std::string> file_names = this->get_file_names();
         this->async_worker_.enqueue([file_names, this]() {
-          std::function<void(const value_type &)> on_new_item
-                  = [this](const value_type &v) { this->merge_queue_.push(v); };
-          merge_files<T, INT, C>(file_names, on_new_item);
-          this->merge_queue_.shutdown();
+            std::function<void(const value_type &)> on_new_item
+                    = [this](const value_type &v) { this->merge_queue_.push(v); };
+            merge_files<T, C, INT>(file_names, on_new_item);
+            this->merge_queue_.shutdown();
         });
     }
 
@@ -139,6 +141,16 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
         this->cleanup_(vector);
     }
 
+    static size_t encode_data(const Vector<value_type> &data,
+                              const std::string &file,
+                              std::function<int_pair(const value_type &v)> to_int) {
+        EliasFanoEncoder<int_pair> encoder(data.size(), to_int(data.back()), file);
+        for (const value_type &v : data) {
+            encoder.add(to_int(v));
+        }
+        return encoder.finish();
+    }
+
     /**
      * Dumps the given data to a file, synchronously. If the maximum allowed disk size
      * is reached, all chunks will be merged into a single chunk in an effort to reduce
@@ -150,32 +162,10 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
 
         std::string file_name
                 = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
-        std::ofstream kmer_file(file_name, std::ios::out | std::ios::binary);
-        if (!kmer_file) {
-            logger->error("Creating chunk file '{}' failed", file_name);
-            std::exit(EXIT_FAILURE);
-        }
-        EliasFanoEncoder<INT> encoder(this->data_.size(),
-                                      to_int_(this->data_.back().first), kmer_file);
-        std::string count_file_name = file_name + ".count";
-        std::fstream counts_file(count_file_name, std::ios::out | std::ios::binary);
-        if (!counts_file) {
-            logger->error("Creating count file '{}' failed", count_file_name);
-            std::exit(EXIT_FAILURE);
-        }
-        for (const auto &v : this->data_) {
-            encoder.add(to_int_(v.first));
-            counts_file.write(reinterpret_cast<const char *>(&v.second), sizeof(C));
-        }
-        size_t first_size = encoder.finish();
-        if (!counts_file) {
-            logger->error("Writing to {}' failed", file_name);
-            std::exit(EXIT_FAILURE);
-        }
-        counts_file.close();
+        std::filesystem::remove(file_name);
+        std::filesystem::remove(file_name + ".count"); // TODO: do this in the encoder
 
-        this->total_chunk_size_bytes_ += (first_size + this->data_.size() * sizeof(C));
-
+        this->total_chunk_size_bytes_ += encode_data(this->data_, file_name, to_int_);
         this->data_.resize(0);
         if (is_done) {
             this->async_merge_l1_.clear();
@@ -206,31 +196,17 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
         this->chunk_count_++;
     }
 
-    static size_t encode_data(const Vector<T> &data,
-                              std::ofstream &file,
-                              std::function<INT(const T &v)> to_int) {
-        EliasFanoEncoder<INT> encoder(data.size(), to_int(data.back()), file);
-        for (const auto &v : data) {
-            encoder.add(to_int(v));
-        }
-        return encoder.finish();
-    }
-
-    static std::function<void(const std::pair<T, C> &)>
-    write_compressed(std::ofstream *out,
+    static std::function<void(const value_type &)>
+    write_compressed(const std::string &sink,
                      std::ofstream *out_count,
-                     Vector<T> *merge_buf,
-                     std::function<INT(const T &v)> to_int) {
-        return [out, out_count, merge_buf, to_int](const std::pair<T, C> &v) {
-            if (!out_count->write(reinterpret_cast<const char *>(&v.second), sizeof(C))) {
-                logger->error("Unable to write to count file. Exiting.");
-                std::exit(EXIT_FAILURE);
-            }
+                     Vector<value_type> *merge_buf,
+                     std::function<int_pair(const value_type &v)> to_int) {
+        return [sink, out_count, merge_buf, to_int](const value_type &v) {
             if (merge_buf->size() < merge_buf->capacity()) {
-                merge_buf->push_back(v.first);
+                merge_buf->push_back(v);
                 return;
             }
-            encode_data(*merge_buf, *out, to_int);
+            encode_data(*merge_buf, sink, to_int);
             merge_buf->clear();
         };
     }
@@ -239,12 +215,11 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
                          uint32_t chunk_count,
                          std::atomic<uint32_t> *l1_chunk_count,
                          std::atomic<size_t> *total_size,
-                         Vector<T> *merge_buf,
-                         std::function<INT(const T &v)> to_int) {
+                         Vector<value_type> *merge_buf,
+                         std::function<int_pair(const value_type &v)> to_int) {
         const std::string &merged_l1_file_name
-                = SortedSetDiskBase<std::pair<T, C>, INT>::merged_l1_name(
+                = SortedSetDiskBase<value_type, INT>::merged_l1_name(
                         chunk_file_prefix, chunk_count / MERGE_L1_COUNT);
-        std::ofstream merged_file(merged_l1_file_name, std::ios::binary | std::ios::out);
         std::vector<std::string> to_merge(MERGE_L1_COUNT);
         for (uint32_t i = 0; i < MERGE_L1_COUNT; ++i) {
             to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
@@ -254,11 +229,11 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
                       merged_l1_file_name);
         std::ofstream merged_count_file(merged_l1_file_name + ".count",
                                         std::ios::binary | std::ios::out);
-        merge_files<T, INT, C>(to_merge,
-                               write_compressed(&merged_file, &merged_count_file,
+        merge_files<T, C, INT>(to_merge,
+                               write_compressed(merged_l1_file_name, &merged_count_file,
                                                 merge_buf, to_int),
                                true /* clean up */);
-        encode_data(*merge_buf, merged_file, to_int);
+        encode_data(*merge_buf, merged_l1_file_name, to_int);
         merge_buf->clear();
 
         (*l1_chunk_count)++;
@@ -269,18 +244,17 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
 
     static void merge_all(const std::string &out_file,
                           const std::vector<std::string> &to_merge,
-                          Vector<T> *merge_buf,
-                          std::function<INT(const T &v)> to_int) {
-        std::ofstream merged_file(out_file, std::ios::binary | std::ios::out);
+                          Vector<value_type> *merge_buf,
+                          std::function<int_pair(const value_type &v)> to_int) {
         std::ofstream merged_count_file(out_file + ".count",
                                         std::ios::binary | std::ios::out);
         logger->trace(
                 "Max allocated disk capacity exceeded. Starting merging all {} chunks "
                 "into {}",
                 to_merge.size(), out_file);
-        merge_files<T, INT, C>(to_merge,
-                               write_compressed(&merged_file, &merged_count_file,
-                                                merge_buf, to_int),
+        merge_files<T, C, INT>(to_merge,
+                               write_compressed(out_file, &merged_count_file, merge_buf,
+                                                to_int),
                                true /* clean up */);
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
@@ -294,9 +268,9 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
      * Memory buffer for the L1 merging. Once the buffer is full the data is
      * compressed and written to disk.
      */
-    Vector<T> merge_buf_;
+    Vector<value_type> merge_buf_;
 
-    std::function<INT(const T &v)> to_int_;
+    std::function<int_pair(const value_type &v)> to_int_;
 };
 
 } // namespace common

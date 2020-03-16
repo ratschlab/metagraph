@@ -81,17 +81,10 @@ uint64_t merge_files(
 
     MergeHeap<T> merge_heap;
     std::optional<INT> data_item;
-    // profiling indicates that setting a larger buffer slightly increases performance
-    std::unique_ptr<char[]> buffer(new char[sources.size() * 1024 * 1024]);
+
     std::vector<std::unique_ptr<EliasFanoDecoder<INT>>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
-        chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
-        if (!chunk_files[i].good()) {
-            logger->error("Unable to open chunk file '{}'", sources[i]);
-            std::exit(EXIT_FAILURE);
-        }
-        decoders[i] = std::make_unique<EliasFanoDecoder<INT>>(chunk_files[i]);
+        decoders[i] = std::make_unique<EliasFanoDecoder<INT>>(sources[i]);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
             merge_heap.emplace(to_T(data_item.value()), i);
@@ -147,7 +140,7 @@ uint64_t merge_files(
  *
  * Note: this method blocks until all the data was successfully merged.
  */
-template <typename T, typename INT, typename C>
+template <typename T, typename C, typename INT>
 uint64_t merge_files(
         const std::vector<std::string> &sources,
         std::function<void(const std::pair<T, C> &)> on_new_item,
@@ -155,31 +148,18 @@ uint64_t merge_files(
         std::function<T(const INT &v)> to_T = [](const INT &v) { return T(v); }) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
-    std::vector<std::ifstream> chunk_files(sources.size());
-    std::vector<std::ifstream> count_files(sources.size());
     uint64_t num_elements = 0;
 
     MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
-    std::optional<INT> data_item;
-    C data_item_count;
-    std::unique_ptr<char[]> buffer(new char[sources.size() * 1024 * 1024]);
-    std::unique_ptr<char[]> buffer_count(new char[sources.size() * 1024 * 1024]);
-    std::vector<std::unique_ptr<EliasFanoDecoder<INT>>> decoders(sources.size());
+    std::optional<std::pair<INT, C>> data_item;
+    std::vector<std::unique_ptr<EliasFanoDecoder<std::pair<INT, C>>>> decoders(
+            sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        chunk_files[i].rdbuf()->pubsetbuf((buffer.get() + i * 1024 * 1024), 1024 * 1024);
-        chunk_files[i].open(sources[i], std::ios::in | std::ios::binary);
-        count_files[i].rdbuf()->pubsetbuf((buffer_count.get() + i * 1024 * 1024),
-                                          1024 * 1024);
-        count_files[i].open(sources[i] + ".count", std::ios::in | std::ios::binary);
-        if (!chunk_files[i].good() || !count_files[i].good()) {
-            logger->error("Unable to open chunk/count file '{}'", sources[i]);
-            std::exit(EXIT_FAILURE);
-        }
-        decoders[i] = std::make_unique<EliasFanoDecoder<INT>>(chunk_files[i]);
+        decoders[i] = std::make_unique<EliasFanoDecoder<std::pair<INT, C>>>(sources[i]);
         data_item = decoders[i]->next();
-        if (count_files[i].read(reinterpret_cast<char *>(&data_item_count), sizeof(C))) {
-            assert(data_item.has_value());
-            merge_heap.emplace({ to_T(data_item.value()), data_item_count }, i);
+        if (data_item.has_value()) {
+            merge_heap.emplace({ to_T(data_item.value().first), data_item.value().second },
+                               i);
             num_elements++;
         }
     }
@@ -209,12 +189,10 @@ uint64_t merge_files(
             }
         }
 
-        if (count_files[chunk_index]
-            && count_files[chunk_index].read(reinterpret_cast<char *>(&data_item_count),
-                                             sizeof(C))) {
-            data_item = decoders[chunk_index]->next();
+        if ((data_item = decoders[chunk_index]->next()).has_value()) {
             assert(data_item.has_value());
-            merge_heap.emplace({ to_T(data_item.value()), data_item_count }, chunk_index);
+            merge_heap.emplace({ to_T(data_item.value().first), data_item.value().second },
+                               chunk_index);
             num_elements++;
         }
     }

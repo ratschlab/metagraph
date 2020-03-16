@@ -114,7 +114,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
     }
 
     static size_t encode_data(const Vector<T> &data,
-                              std::ofstream &file,
+                              const std::string &file,
                               std::function<INT(const T &v)> to_int) {
         EliasFanoEncoder<INT> encoder(data.size(), to_int(data.back()), file);
         for (const auto &v : data) {
@@ -134,13 +134,9 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
 
         std::string file_name
                 = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
-        std::ofstream kmer_file(file_name, std::ios::out | std::ios::binary);
-        if (!kmer_file) {
-            logger->error("Creating chunk file '{}' failed", file_name);
-            std::exit(EXIT_FAILURE);
-        }
+        std::filesystem::remove(file_name);
 
-        this->total_chunk_size_bytes_ += encode_data(this->data_, kmer_file, to_int_);
+        this->total_chunk_size_bytes_ += encode_data(this->data_, file_name, to_int_);
         this->data_.resize(0);
         if (is_done) {
             this->async_merge_l1_.clear();
@@ -172,15 +168,15 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
     }
 
     static std::function<void(const T &)>
-    write_compressed(std::ofstream *out,
+    write_compressed(const std::string &sink_name,
                      Vector<T> *merge_buf_,
                      std::function<INT(const T &v)> to_int) {
-        return [out, merge_buf_, to_int](const T &v) {
+        return [sink_name, merge_buf_, to_int](const T &v) {
             if (merge_buf_->size() < merge_buf_->capacity()) {
                 merge_buf_->push_back(v);
                 return;
             }
-            encode_data(*merge_buf_, *out, to_int);
+            encode_data(*merge_buf_, sink_name, to_int);
             merge_buf_->clear();
         };
     }
@@ -194,7 +190,6 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
         const std::string &merged_l1_file_name
                 = SortedSetDiskBase<T, INT>::merged_l1_name(chunk_file_prefix,
                                                        chunk_count / MERGE_L1_COUNT);
-        std::ofstream merged_file(merged_l1_file_name, std::ios::binary | std::ios::out);
         std::vector<std::string> to_merge(MERGE_L1_COUNT);
         for (uint32_t i = 0; i < MERGE_L1_COUNT; ++i) {
             to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
@@ -203,9 +198,8 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
         logger->trace("Starting merging last {} chunks into {}", MERGE_L1_COUNT,
                       merged_l1_file_name);
 
-        merge_files<T, INT>(to_merge, write_compressed(&merged_file, merge_buf, to_int),
-                            true /* clean up */);
-        encode_data(*merge_buf, merged_file, to_int);
+        merge_files<T, INT>(to_merge, write_compressed(merged_l1_file_name, merge_buf, to_int));
+        encode_data(*merge_buf, merged_l1_file_name, to_int);
         merge_buf->clear();
 
         (*l1_chunk_count)++;
@@ -218,12 +212,11 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
                           const std::vector<std::string> &to_merge,
                           Vector<T> *merge_buf,
                           std::function<INT(const T &v)> to_int) {
-        std::ofstream merged_file(out_file, std::ios::binary | std::ios::out);
         logger->trace(
                 "Max allocated disk capacity exceeded. Starting merging all {} chunks "
                 "into {}",
                 to_merge.size(), out_file);
-        merge_files<T, INT>(to_merge, write_compressed(&merged_file, merge_buf, to_int),
+        merge_files<T, INT>(to_merge, write_compressed(out_file, merge_buf, to_int),
                             true /* clean up */);
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);

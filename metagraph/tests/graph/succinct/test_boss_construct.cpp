@@ -139,6 +139,7 @@ TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
+    common::logger->set_level(spdlog::level::trace);
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
@@ -661,7 +662,7 @@ TYPED_TEST(CountKmers, CountKmers32bits) {
 }
 
 TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
-    using Container = common::SortedMultisetDisk<TypeParam, uint8_t>;
+    using Container = common::SortedMultisetDisk<TypeParam, typename TypeParam::WordType, uint8_t>;
     std::function<void(typename Container::storage_type *)> cleanup
             = [](typename Container::storage_type *) {};
     Container result(cleanup, 1, 100'000);
@@ -673,7 +674,7 @@ TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
 }
 
 TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
-    using Container = common::SortedMultisetDisk<TypeParam, uint32_t>;
+    using Container = common::SortedMultisetDisk<TypeParam, typename TypeParam::WordType, uint32_t>;
     std::function<void(typename Container::storage_type *)> cleanup
             = [](typename Container::storage_type *) {};
     Container result(cleanup, 1, 100'000);

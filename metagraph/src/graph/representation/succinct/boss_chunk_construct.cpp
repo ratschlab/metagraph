@@ -187,12 +187,12 @@ void write_or_die(std::ofstream *f, const T &v) {
  * at the front is a (not-redundant) dummy k-mer it also writes its corresponding dummy
  * k-mer of prefix length 2 into #sorted_dummy_kmers.
  */
-template <typename T>
+template <typename T, typename INT>
 uint8_t write_kmer(size_t k,
                    Vector<T> *dummy_kmers,
                    utils::BufferedAsyncWriter<T> *writer,
                    RecentKmers<T> *buffer,
-                   common::SortedSetDisk<T> *sorted_dummy_kmers) {
+                   common::SortedSetDisk<T, INT> *sorted_dummy_kmers) {
     const Kmer<T> to_write = buffer->pop_front();
     if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
@@ -216,6 +216,17 @@ uint8_t write_kmer(size_t k,
     push_back(*dummy_kmers, kmer_to_write).to_prev(k + 1, BOSS::kSentinelCode);
     return 1;
 }
+
+template <typename T, typename INT>
+static INT to_int(T v, INT __attribute__((unused))) {
+    return v.data();
+}
+
+template <typename T, typename C, typename INT>
+static std::pair<INT, C> to_int(std::pair<T, C> v, INT __attribute__((unused))) {
+    return { v.first.data(), v.second };
+}
+
 
 /**
  * Specialization of recover_dummy_nodes for a disk-based container, such as
@@ -264,11 +275,14 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     const filesystem::path tmp_path2 = tmp_dir / "dummy_source2";
 
+    T kmer = *(kmers->begin());
+    using int_type = decltype(to_int((kmer), utils::get_first(kmer).data()));
+    std::function<int_type(const T &v)> to_intf
+            = [](const T &v) { return to_int(v, utils::get_first(v).data()); };
     // this will contain dummy k-mers of prefix length 2
-    common::SortedSetDisk<T> sorted_dummy_kmers(no_cleanup, kmer_collector.num_threads(),
-                                                kmer_collector.buffer_size(), tmp_path2,
-                                                kmer_collector.max_disk_space(),
-                                                [](const T &) {});
+    common::SortedSetDisk<T, int_type> sorted_dummy_kmers(
+            no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
+            tmp_path2, kmer_collector.max_disk_space(), [](const T &) {}, 100, to_intf);
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
@@ -358,7 +372,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     kmers->reset();
     async_worker.enqueue([=]() {
-        common::merge_files<T>(file_names, [&](const T &v) { kmers->push(v); });
+        std::function<void(const T &)> on_new_item
+                = [&kmers](const T &v) { kmers->push(v); };
+        common::merge_files(file_names, on_new_item);
         kmers->shutdown();
     });
 }
@@ -504,20 +520,28 @@ using KmerMultsetVector32
 
 template <typename KMER>
 using KmerSetDisk
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
-                              common::SortedSetDisk<KMER>>;
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedSetDisk<KMER, typename KMER::WordType>>;
 
+template <typename KMER>
+using SortedMultisetDisk8
+        = common::SortedMultisetDisk<KMER, typename KMER::WordType, uint8_t>;
 template <typename KMER>
 using KmerMultsetDiskVector8
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultisetDisk<KMER, uint8_t>>;
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, SortedMultisetDisk8<KMER>>;
 
+template <typename KMER>
+using SortedMultisetDisk16
+        = common::SortedMultisetDisk<KMER, typename KMER::WordType, uint16_t>;
 template <typename KMER>
 using KmerMultsetDiskVector16
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultisetDisk<KMER, uint16_t>>;
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, SortedMultisetDisk16<KMER>>;
 
 template <typename KMER>
+using SortedMultisetDisk32
+        = common::SortedMultisetDisk<KMER, typename KMER::WordType, uint32_t>;
+template <typename KMER>
 using KmerMultsetDiskVector32
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedMultisetDisk<KMER, uint32_t>>;
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, SortedMultisetDisk32<KMER>>;
 
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor::initialize(size_t k,
