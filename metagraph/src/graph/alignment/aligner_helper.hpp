@@ -581,20 +581,17 @@ class DPTable {
         Column(size_t size,
                score_t min_score,
                char start_char,
-               std::vector<NodeType>&& in_nodes,
                size_t pos = 0)
               : scores(size, min_score),
                 ops(size),
                 prev_nodes(size),
                 last_char(start_char),
-                incoming(std::move(in_nodes)),
                 best_pos(pos) {}
 
         std::vector<score_t> scores;
         std::vector<Cigar::Operator> ops;
         std::vector<NodeType> prev_nodes;
         char last_char;
-        std::vector<NodeType> incoming;
         size_t best_pos;
 
         const score_t& best_score() const { return scores.at(best_pos); }
@@ -610,8 +607,7 @@ class DPTable {
 
     DPTable() {}
 
-    bool add_seed(const SequenceGraph &graph,
-                  NodeType start_node,
+    bool add_seed(NodeType start_node,
                   char start_char,
                   score_t initial_score,
                   score_t min_score,

@@ -44,18 +44,11 @@ get_outgoing_columns(const DeBruijnGraph &graph,
         [&](auto next_node, char c) {
             auto find = dp_table.find(next_node);
             if (find == dp_table.end()) {
-                std::vector<NodeType> in_nodes;
-                graph.adjacent_incoming_nodes(
-                    next_node,
-                    [&](auto i) { in_nodes.emplace_back(i); }
-                );
-
                 find = dp_table.emplace(
                     next_node,
                     Column(size,
                            min_cell_score,
                            c,
-                           std::move(in_nodes),
                            best_pos + 1 != size ? best_pos + 1 : best_pos)
                 ).first;
             }
@@ -66,66 +59,6 @@ get_outgoing_columns(const DeBruijnGraph &graph,
     );
 
     return out_columns;
-}
-
-template <typename NodeType, typename DPTableIt>
-inline std::pair<size_t, size_t>
-get_column_boundaries(const DPTableIt *node_it,
-                      const DPTable<NodeType> &dp_table,
-                      std::vector<const DPTableIt*> &in_nodes,
-                      size_t size,
-                      size_t prev_best_pos,
-                      size_t bandwidth) {
-    in_nodes.clear();
-
-    for (NodeType i : node_it->second.incoming) {
-        auto find = dp_table.find(i);
-
-        if (find != dp_table.end())
-            in_nodes.emplace_back(&*find);
-    }
-
-    size_t overall_begin = size;
-    size_t overall_end = 0;
-
-    // find incoming nodes to check for alignment extension
-    // set boundaries for vertical band
-    for (const auto *prev_node_it : in_nodes) {
-        size_t best_pos = prev_node_it->second.best_pos;
-
-        if (overall_begin) {
-            overall_begin = std::min(
-                overall_begin,
-                best_pos >= bandwidth ? best_pos - bandwidth : 0
-            );
-        }
-
-        if (overall_end < size) {
-            overall_end = std::max(
-                overall_end,
-                bandwidth <= size - best_pos ? best_pos + bandwidth : size
-            );
-        }
-    }
-
-    if (overall_begin) {
-        overall_begin = std::min(
-            overall_begin,
-            prev_best_pos >= bandwidth ? prev_best_pos - bandwidth : 0
-        );
-    }
-
-    if (overall_end < size) {
-        overall_end = std::max(
-            overall_end,
-            bandwidth <= size - prev_best_pos ? prev_best_pos + bandwidth : size
-        );
-    }
-
-    assert(overall_begin <= prev_best_pos);
-    assert(overall_end > prev_best_pos);
-
-    return std::make_pair(overall_begin, overall_end);
 }
 
 template <typename ScoreType,
@@ -436,8 +369,7 @@ void DefaultColumnExtender<NodeType>
     }
 
     reset();
-    if (!dp_table.add_seed(*graph_,
-                           path.back(),
+    if (!dp_table.add_seed(path.back(),
                            *(align_start - 1),
                            path.get_score(),
                            config_.min_cell_score,
@@ -451,7 +383,6 @@ void DefaultColumnExtender<NodeType>
     // for storage of intermediate values
     std::vector<int8_t> char_scores;
     std::vector<Cigar::Operator> match_ops;
-    std::vector<const typename DPTable<NodeType>::value_type*> in_nodes;
 
     AlignedVector<score_t> update_scores;
     AlignedVector<Cigar::Operator> update_ops;
@@ -493,14 +424,30 @@ void DefaultColumnExtender<NodeType>
                 iter->second
             );
 
-            auto [overall_begin, overall_end] = get_column_boundaries(
-                iter,
-                dp_table,
-                in_nodes,
-                size,
-                next_column.best_pos,
-                config_.bandwidth
+            // the get_outgoing_columns call may have invalidated cur_col, so
+            // get a pointer to the column again
+            const auto &incoming = dp_table.find(next_pair.first)->second;
+
+            // find incoming nodes to check for alignment extension
+            // set boundaries for vertical band
+            size_t best_pos = incoming.best_pos;
+            size_t begin = best_pos >= config_.bandwidth ? best_pos - config_.bandwidth : 0;
+            size_t end = config_.bandwidth <= size - best_pos ? best_pos + config_.bandwidth : size;
+            assert(end > begin);
+
+            size_t next_best = next_column.best_pos;
+            size_t overall_begin = std::min(
+                begin,
+                next_best >= config_.bandwidth ? next_best - config_.bandwidth : 0
             );
+
+            size_t overall_end = std::max(
+                end,
+                config_.bandwidth <= size - next_best ? next_best + config_.bandwidth : size
+            );
+            assert(overall_begin <= best_pos);
+            assert(overall_end > best_pos);
+
 
             update_scores.assign(overall_end - overall_begin, config_.min_cell_score);
             update_prevs.assign(overall_end - overall_begin, SequenceGraph::npos);
@@ -513,39 +460,18 @@ void DefaultColumnExtender<NodeType>
                                  Cigar::get_op_row(next_column.last_char));
 
             // match and deletion scores
-            for (const auto *prev_node_it : in_nodes) {
-
-#ifndef NDEBUG
-                bool found = false;
-                graph_->call_outgoing_kmers(prev_node_it->first, [&](auto node, char) {
-                    if (node == next_node)
-                        found = true;
-                });
-                assert(found);
-#endif
-
-                const auto &incoming = prev_node_it->second;
-
-                size_t begin = incoming.best_pos >= config_.bandwidth
-                    ? incoming.best_pos - config_.bandwidth : 0;
-                size_t end = config_.bandwidth <= size - incoming.best_pos
-                    ? incoming.best_pos + config_.bandwidth : size;
-
-                assert(end > begin);
-
-                compute_match_insert_updates(
-                    config_,
-                    update_scores.data() + (begin - overall_begin),
-                    update_prevs.data() + (begin - overall_begin),
-                    update_ops.data() + (begin - overall_begin),
-                    prev_node_it->first,
-                    incoming.scores.data() + begin,
-                    incoming.ops.data() + begin,
-                    char_scores.data() + (begin - overall_begin),
-                    match_ops.data() + (begin - overall_begin),
-                    end - begin
-                );
-            }
+            compute_match_insert_updates(
+                config_,
+                update_scores.data() + (begin - overall_begin),
+                update_prevs.data() + (begin - overall_begin),
+                update_ops.data() + (begin - overall_begin),
+                next_pair.first,
+                incoming.scores.data() + begin,
+                incoming.ops.data() + begin,
+                char_scores.data() + (begin - overall_begin),
+                match_ops.data() + (begin - overall_begin),
+                end - begin
+            );
 
 
             // compute deletion scores
