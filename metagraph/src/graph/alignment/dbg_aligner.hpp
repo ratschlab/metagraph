@@ -81,13 +81,7 @@ class DBGAligner : public IDBGAligner {
             assert(seed.get_clipping() == seed.get_query().data() - query.data());
             assert(seed.is_valid(graph_, &config_));
 
-            if (seed.get_query_end() == query.data() + query.size()) {
-                callback(std::move(seed));
-                return;
-            }
-
             extend.initialize(seed);
-            bool extended = false;
             extend(seed, query, [&](DBGAlignment&& extension, auto start_node) {
                 assert(extension.is_valid(graph_, &config_));
                 extension.extend_query_end(query.data() + query.size());
@@ -100,20 +94,12 @@ class DBGAligner : public IDBGAligner {
                     return;
                 }
 
-                extended = true;
-
                 auto next_path = seed;
                 next_path.append(std::move(extension));
                 assert(next_path.is_valid(graph_, &config_));
 
                 callback(std::move(next_path));
             }, orientation, min_path_score);
-
-            if (!extended) {
-                seed.extend_query_end(query.data() + query.size());
-                assert(seed.is_valid(graph_, &config_));
-                callback(std::move(seed));
-            }
         });
     }
 
@@ -140,7 +126,12 @@ class DBGAligner : public IDBGAligner {
         align_aggregate([&](const auto &alignment_callback,
                             const auto &get_min_path_score) {
             align(query_alignment,
-                  [&](const auto &callback) { seeder.call_seeds(callback); },
+                  [&](const auto &callback) {
+                      seeder.call_seeds([&](DBGAlignment&& seed) {
+                          alignment_callback(DBGAlignment(seed));
+                          callback(std::move(seed));
+                      });
+                  },
                   alignment_callback,
                   orientation,
                   get_min_path_score);
@@ -159,7 +150,12 @@ class DBGAligner : public IDBGAligner {
                             const auto &get_min_path_score) {
             std::vector<DBGAlignment> forward;
             align(paths.get_query(),
-                  [&](const auto &callback) { seeder.call_seeds(callback); },
+                  [&](const auto &callback) {
+                      seeder.call_seeds([&](DBGAlignment&& seed) {
+                          alignment_callback(DBGAlignment(seed));
+                          callback(std::move(seed));
+                      });
+                  },
                   [&](DBGAlignment&& path) {
                       if (!path.get_clipping()) {
                           alignment_callback(std::move(path));
@@ -203,14 +199,24 @@ class DBGAligner : public IDBGAligner {
                             const auto &get_min_path_score) {
             seeder.initialize(paths.get_query(), false);
             align(paths.get_query(),
-                  [&](const auto &callback) { seeder.call_seeds(callback); },
+                  [&](const auto &callback) {
+                      seeder.call_seeds([&](DBGAlignment&& seed) {
+                          alignment_callback(DBGAlignment(seed));
+                          callback(std::move(seed));
+                      });
+                  },
                   alignment_callback,
                   false,
                   get_min_path_score);
 
             seeder.initialize(paths.get_query_reverse_complement(), true);
             align(paths.get_query_reverse_complement(),
-                  [&](const auto &callback) { seeder.call_seeds(callback); },
+                  [&](const auto &callback) {
+                      seeder.call_seeds([&](DBGAlignment&& seed) {
+                          alignment_callback(DBGAlignment(seed));
+                          callback(std::move(seed));
+                      });
+                  },
                   alignment_callback,
                   true,
                   get_min_path_score);
