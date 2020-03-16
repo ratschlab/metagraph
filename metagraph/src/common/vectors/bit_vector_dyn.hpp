@@ -43,6 +43,8 @@ class bit_vector_dyn : public bit_vector {
     inline void call_ones_in_range(uint64_t begin, uint64_t end,
                                    const VoidCall<uint64_t> &callback) const override;
 
+    inline void add_to(sdsl::bit_vector *other) const override;
+
     inline sdsl::bit_vector to_vector() const override;
 
   private:
@@ -115,6 +117,8 @@ bool bit_vector_dyn::operator[](uint64_t id) const {
 uint64_t bit_vector_dyn::get_int(uint64_t id, uint32_t width) const {
     assert(id + width <= size());
     assert(width);
+    // TODO: implement get_int in dyn::suc_bv and use it here instead of
+    // querying one bit at a time
     uint64_t word = 0;
     for (int64_t pos = id + width - 1; pos >= static_cast<int64_t>(id); --pos) {
         word = (word << 1) + vector_.at(pos);
@@ -157,62 +161,18 @@ void bit_vector_dyn::call_ones_in_range(uint64_t begin, uint64_t end,
     assert(begin <= end);
     assert(end <= size());
 
-    if (2 * num_set_bits() < size()) {
-        // sparse
-        uint64_t num_ones = end ? rank1(end - 1) : 0;
-        for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
-            callback(select1(r));
-        }
-    } else {
-        // dense
-        uint64_t one_pos = 0;
-        uint64_t zero_pos = 0;
-        uint64_t num_zeros = end ? rank0(end - 1) : 0;
-        for (uint64_t r = begin ? rank0(begin - 1) + 1 : 1; r <= num_zeros; ++r) {
-            zero_pos = select0(r);
-            while (one_pos < zero_pos) {
-                callback(one_pos++);
-            }
-            one_pos++;
-        }
-        while (one_pos < end) {
-            callback(one_pos++);
-        }
-    }
+    ::call_ones(*this, begin, end, callback, SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
 }
 
 sdsl::bit_vector bit_vector_dyn::to_vector() const {
-    if (SEQ_ACCESS_VS_SELECT_FACTOR_DYN * num_set_bits() < size()) {
-        // very sparse
-        sdsl::bit_vector result(size(), false);
+    return ::copy_to_bit_vector(*this, SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
+}
 
-        uint64_t num_ones = num_set_bits();
-        for (uint64_t r = 1; r <= num_ones; ++r) {
-            result[select1(r)] = true;
-        }
-        return result;
+void bit_vector_dyn::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
 
-    } else if (SEQ_ACCESS_VS_SELECT_FACTOR_DYN * (size() - num_set_bits()) < size()) {
-        // very dense
-        sdsl::bit_vector result(size(), true);
-
-        uint64_t num_zeros = size() - num_set_bits();
-        for (uint64_t r = 1; r <= num_zeros; ++r) {
-            result[select0(r)] = false;
-        }
-        return result;
-
-    } else {
-        // moderate density
-
-        // TODO: implement get_int in dyn::suc_bv and use it here instead of
-        // querying one bit at a time
-        sdsl::bit_vector result(size());
-        for (uint64_t i = 0; i < vector_.size(); ++i) {
-            result[i] = vector_.at(i);
-        }
-        return result;
-    }
+    ::add_to(*this, other, SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
 }
 
 #endif // __BIT_VECTOR_DYN_HPP__

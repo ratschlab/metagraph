@@ -53,12 +53,12 @@ class bit_vector_stat : public bit_vector {
     inline uint64_t size() const override { return vector_.size(); }
     inline uint64_t num_set_bits() const override { return num_set_bits_; }
 
-    inline sdsl::bit_vector to_vector() const override { return vector_; }
+    inline void call_ones_in_range(uint64_t begin, uint64_t end,
+                                   const VoidCall<uint64_t> &callback) const override;
 
     inline void add_to(sdsl::bit_vector *other) const override;
 
-    inline void call_ones_in_range(uint64_t begin, uint64_t end,
-                                   const VoidCall<uint64_t> &callback) const override;
+    inline sdsl::bit_vector to_vector() const override { return vector_; }
 
     inline const sdsl::bit_vector& data() const { return vector_; }
 

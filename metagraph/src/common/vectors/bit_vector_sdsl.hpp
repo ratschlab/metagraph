@@ -60,10 +60,12 @@ class bit_vector_sdsl : public bit_vector {
 
     inline uint64_t size() const override { return vector_.size(); }
 
-    inline sdsl::bit_vector to_vector() const override;
-
     inline void call_ones_in_range(uint64_t begin, uint64_t end,
                                    const VoidCall<uint64_t> &callback) const override;
+
+    inline void add_to(sdsl::bit_vector *other) const override;
+
+    inline sdsl::bit_vector to_vector() const override;
 
     inline const bv_type& data() const { return vector_; }
 
@@ -236,39 +238,7 @@ template <class bv_type, class rank_1_type, class select_1_type, class select_0_
 sdsl::bit_vector
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::to_vector() const {
-    if (num_set_bits()
-            < size() / bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR) {
-        // sparse
-        sdsl::bit_vector vector(size(), 0);
-        uint64_t max_rank = size() ? rank1(size() - 1) : 0;
-        for (uint64_t i = 1; i <= max_rank; ++i) {
-            vector[slct1_(i)] = 1;
-        }
-        return vector;
-
-    } else if ((size() - num_set_bits())
-            < size() / bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR) {
-        // dense
-        sdsl::bit_vector vector(size(), 1);
-        uint64_t max_rank = size() ? rank0(size() - 1) : 0;
-        for (uint64_t i = 1; i <= max_rank; ++i) {
-            vector[slct0_(i)] = 0;
-        }
-        return vector;
-
-    } else {
-        // moderate density
-        sdsl::bit_vector vector(size());
-
-        uint64_t i;
-        for (i = 0; i + 64 <= vector.size(); i += 64) {
-            vector.set_int(i, vector_.get_int(i));
-        }
-        if (i < vector.size())
-            vector.set_int(i, vector_.get_int(i, vector.size() - i), vector.size() - i);
-
-        return vector;
-    }
+    return ::copy_to_bit_vector(*this, bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR);
 }
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
@@ -279,35 +249,19 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     assert(begin <= end);
     assert(end <= size());
 
-    if (num_set_bits()
-            < size() / bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR) {
-        // sparse
-        uint64_t num_ones = end ? rank1(end - 1) : 0;
-        for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
-            callback(select1(r));
-        }
-    } else if ((size() - num_set_bits())
-                < size() / bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR) {
-        // dense
-        uint64_t one_pos = 0;
-        uint64_t zero_pos = 0;
-        uint64_t num_zeros = end ? rank0(end - 1) : 0;
-        for (uint64_t r = begin ? rank0(begin - 1) + 1 : 1; r <= num_zeros; ++r) {
-            zero_pos = select0(r);
-            while (one_pos < zero_pos) {
-                callback(one_pos++);
-            }
-            one_pos++;
-        }
-        while (one_pos < end) {
-            callback(one_pos++);
-        }
-    } else {
-        // moderate density
-        assert(begin <= end);
-        assert(end <= size());
-        ::call_ones(vector_, begin, end, callback);
-    }
+    ::call_ones(*this, begin, end, callback,
+                bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR);
+}
+
+template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
+void
+bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
+::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
+
+    ::add_to(*this, other,
+             bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR);
 }
 
 
