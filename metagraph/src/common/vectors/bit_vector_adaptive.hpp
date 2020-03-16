@@ -201,7 +201,7 @@ bit_vector_adaptive_stat<optimal_representation>
             vector_.reset(new bit_vector_rrr<>(vector));
             break;
         case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(vector, num_set_bits));
+            vector_.reset(new bit_vector_stat(vector));
             break;
     }
 }
@@ -228,17 +228,22 @@ bit_vector_adaptive_stat<optimal_representation>
                            uint64_t size,
                            uint64_t num_set_bits) {
     switch (optimal_representation(size, num_set_bits)) {
-        case SD_VECTOR:
+        case SD_VECTOR: {
             vector_.reset(new bit_vector_sd(call_ones, size, num_set_bits));
             break;
-        case RRR_VECTOR:
-            vector_.reset(new bit_vector_rrr<>(
-                bit_vector_stat(call_ones, size).convert_to<bit_vector_rrr<>>()
-            ));
+        }
+        case RRR_VECTOR: {
+            sdsl::bit_vector vector(size, false);
+            call_ones([&](uint64_t i) { vector[i] = true; });
+            vector_.reset(new bit_vector_rrr<>(std::move(vector)));
             break;
-        case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(call_ones, size));
+        }
+        case STAT_VECTOR: {
+            sdsl::bit_vector vector(size, false);
+            call_ones([&](uint64_t i) { vector[i] = true; });
+            vector_.reset(new bit_vector_stat(std::move(vector)));
             break;
+        }
     }
 }
 
