@@ -131,14 +131,13 @@ class bit_vector_adaptive_stat : public bit_vector_adaptive {
     friend bit_vector;
 
   public:
-    inline explicit bit_vector_adaptive_stat(uint64_t size = 0, bool value = false);
+    inline bit_vector_adaptive_stat(uint64_t size = 0, bool value = false);
 
     inline explicit bit_vector_adaptive_stat(const bit_vector &vector);
     inline explicit bit_vector_adaptive_stat(const sdsl::bit_vector &vector);
 
     inline bit_vector_adaptive_stat(bit_vector&& vector);
-    bit_vector_adaptive_stat(sdsl::bit_vector&& vector)
-      : bit_vector_adaptive_stat(bit_vector_stat(std::move(vector))) {}
+    inline bit_vector_adaptive_stat(sdsl::bit_vector&& vector);
 
     inline bit_vector_adaptive_stat(const VoidCall<const VoidCall<uint64_t>&> &call_ones,
                                     uint64_t size,
@@ -224,6 +223,24 @@ bit_vector_adaptive_stat<optimal_representation>
 
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 bit_vector_adaptive_stat<optimal_representation>
+::bit_vector_adaptive_stat(sdsl::bit_vector&& vector) {
+    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
+
+    switch (optimal_representation(vector.size(), num_set_bits)) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(std::move(vector), num_set_bits));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(std::move(vector)));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(std::move(vector)));
+            break;
+    }
+}
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+bit_vector_adaptive_stat<optimal_representation>
 ::bit_vector_adaptive_stat(const VoidCall<const VoidCall<uint64_t>&> &call_ones,
                            uint64_t size,
                            uint64_t num_set_bits) {
@@ -249,11 +266,10 @@ bit_vector_adaptive_stat<optimal_representation>
 
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 std::unique_ptr<bit_vector>
-bit_vector_adaptive_stat<optimal_representation>
-::copy() const {
-    auto copy = new bit_vector_adaptive_stat();
+bit_vector_adaptive_stat<optimal_representation>::copy() const {
+    auto copy = std::make_unique<bit_vector_adaptive_stat>();
     copy->vector_ = vector_->copy();
-    return std::unique_ptr<bit_vector> { copy };
+    return copy;
 }
 
 
