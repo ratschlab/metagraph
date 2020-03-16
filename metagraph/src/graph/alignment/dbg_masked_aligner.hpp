@@ -186,6 +186,7 @@ class MaskedDBGAligner : public DBGAligner<LabeledSeeder<Seeder>,
                        AlignmentCompare> Aligner;
     typedef typename Aligner::node_index node_index;
     typedef typename Aligner::DBGAlignment DBGAlignment;
+    typedef typename Aligner::SeedGenerator SeedGenerator;
     typedef typename Aligner::AlignmentGenerator AlignmentGenerator;
 
     MaskedDBGAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
@@ -205,10 +206,17 @@ class MaskedDBGAligner : public DBGAligner<LabeledSeeder<Seeder>,
         tsl::hopscotch_map<std::string, typename Aligner::AlignmentQueue> path_queues;
         size_t num_alternative_paths = Aligner::get_config().num_alternative_paths;
 
-        alignment_generator([&](DBGAlignment&& alignment) {
-            path_queues.emplace(alignment.get_label(), num_alternative_paths);
-            path_queues[alignment.get_label()].emplace(std::move(alignment));
-        });
+        alignment_generator(
+            [&](DBGAlignment&& alignment) {
+                path_queues.emplace(alignment.get_label(), num_alternative_paths);
+                path_queues[alignment.get_label()].emplace(std::move(alignment));
+            },
+            [&](const DBGAlignment &alignment) {
+                return path_queues.count(alignment.get_label())
+                    ? path_queues[alignment.get_label()].bottom().get_score()
+                    : Aligner::get_config().min_path_score;
+            }
+        );
 
         for (auto it = path_queues.begin(); it != path_queues.end(); ++it) {
             while (it->second.size()) {
