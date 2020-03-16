@@ -57,6 +57,8 @@ class LabeledSeeder : public BaseSeeder {
         assert(anno_graph_);
         const auto &config = BaseSeeder::get_config();
 
+        tsl::hopscotch_map<std::string, std::vector<Seed>> seeds;
+
         BaseSeeder::call_seeds([&](Seed&& seed) {
             const auto label_signatures = anno_graph_->get_top_label_signatures(
                 seed.get_sequence(),
@@ -71,21 +73,27 @@ class LabeledSeeder : public BaseSeeder {
                     const char *begin = seed.get_query().data() + i;
                     size_t size = seed.get_query().size() - seed.size() + (next - i);
 
-                    Seed cur_seed(std::string_view(begin, size),
-                                  std::vector<node_index>(seed.begin() + i,
-                                                          seed.begin() + next),
-                                  config.match_score(std::string_view(begin, size)),
-                                  seed.get_clipping() + i,
-                                  seed.get_orientation(),
-                                  i <= seed.get_offset() ? seed.get_offset() - i : 0);
-
-                    cur_seed.set_label(label);
-                    callback(std::move(cur_seed));
+                    seeds[label].emplace_back(
+                        std::string_view(begin, size),
+                        std::vector<node_index>(seed.begin() + i,
+                                                seed.begin() + next),
+                        config.match_score(std::string_view(begin, size)),
+                        seed.get_clipping() + i,
+                        seed.get_orientation(),
+                        i <= seed.get_offset() ? seed.get_offset() - i : 0
+                    );
 
                     i = sdsl::util::next_bit(signature, next + 1);
                 }
             }
         });
+
+        for (auto it = seeds.begin(); it != seeds.end(); ++it) {
+            for (auto&& seed : it.value()) {
+                seed.set_label(it->first);
+                callback(std::move(seed));
+            }
+        }
     }
 
   private:
@@ -117,43 +125,49 @@ class MaskedColumnExtender : public BaseExtender {
         assert(anno_graph_);
         assert(path.get_label().size());
 
-        auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
-            anno_graph_->get_graph_ptr()
-        );
+        if (path.get_label() != last_label_) {
+            last_label_ = path.get_label();
 
-        assert(graph);
+            auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
+                anno_graph_->get_graph_ptr()
+            );
 
-        std::function<bool(const node_index&)> check_node = [&](const node_index &node) {
-            return anno_graph_->has_label(node, path.get_label());
-        };
+            assert(graph);
 
-        if (graph->is_canonical_mode()) {
-            check_node = [&](const node_index &node) {
-                node_index canon_node;
-                graph->map_to_nodes(graph->get_node_sequence(node), [&](auto i) {
-                    canon_node = i;
-                });
-
-                return anno_graph_->has_label(canon_node, path.get_label());
+            std::function<bool(const node_index&)> check_node = [&](const node_index &node) {
+                return anno_graph_->has_label(node, last_label_);
             };
+
+            if (graph->is_canonical_mode()) {
+                check_node = [&,graph](const node_index &node) {
+                    node_index canon_node;
+                    graph->map_to_nodes(graph->get_node_sequence(node), [&](auto i) {
+                        canon_node = i;
+                    });
+
+                    return anno_graph_->has_label(canon_node, last_label_);
+                };
+            }
+
+            masked_graph_ = std::make_unique<MaskedDeBruijnGraph>(graph, std::move(check_node));
+
+            assert(std::all_of(path.begin(), path.end(),
+                               [&](auto node) { return masked_graph_->in_subgraph(node); }));
+
+            BaseExtender::reset();
+            BaseExtender::set_graph(*masked_graph_);
         }
 
-        masked_graph_ = std::make_unique<MaskedDeBruijnGraph>(graph, std::move(check_node));
-
-        assert(std::all_of(path.begin(), path.end(),
-                           [&](auto node) { return masked_graph_->in_subgraph(node); }));
-
-        BaseExtender::reset();
-        BaseExtender::set_graph(*masked_graph_);
         BaseExtender::operator()(path, query,
                                  [&](DBGAlignment&& alignment, node_index node) {
-            alignment.set_label(path.get_label());
+            alignment.set_label(last_label_);
             callback(std::move(alignment), node);
         }, orientation, min_path_score);
     }
 
   private:
     const AnnotatedDBG *anno_graph_ = nullptr;
+    std::string last_label_;
     std::unique_ptr<MaskedDeBruijnGraph> masked_graph_;
 };
 
