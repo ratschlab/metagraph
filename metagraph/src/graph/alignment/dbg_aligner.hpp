@@ -41,10 +41,13 @@ class DBGAligner : public IDBGAligner {
     }
 
     DBGQueryAlignment align(const std::string &query) const {
-        auto seeder = build_seeder();
-        return config_.forward_and_reverse_complement
-            ? align_forward_and_reverse_complement(query, seeder)
-            : align_one_direction(query, false, seeder);
+        if (graph_.is_canonical_mode()) {
+            return align_both_directions(query);
+        } else {
+            return config_.forward_and_reverse_complement
+                ? align_forward_and_reverse_complement(query)
+                : align_one_direction(query, false);
+        }
     }
 
     const DeBruijnGraph& get_graph() const { return graph_; }
@@ -138,6 +141,45 @@ class DBGAligner : public IDBGAligner {
                   orientation,
                   config_.min_path_score);
         }, [&](DBGAlignment&& path) { paths.emplace_back(std::move(path)); });
+
+        return paths;
+    }
+
+    DBGQueryAlignment align_both_directions(const std::string &query) const {
+        auto seeder = build_seeder();
+        DBGQueryAlignment paths(query);
+
+        seeder.initialize(paths.get_query(), false);
+
+        std::vector<DBGAlignment> forward;
+        align(paths.get_query(),
+              [&](const auto &callback) { seeder.call_seeds(callback); },
+              [&](DBGAlignment&& path) { forward.emplace_back(std::move(path)); },
+              false,
+              0);
+
+        align_aggregate([&](const auto &alignment_callback) {
+            align(paths.get_query_reverse_complement(), [&](const auto &seed_callback) {
+                for (auto&& path : forward) {
+                    if (!path.get_clipping() && path.get_score() >= config_.min_path_score) {
+                        alignment_callback(std::move(path));
+                        return;
+                    }
+                    path.reverse_complement(
+                        seeder.get_graph(),
+                        paths.get_query_reverse_complement()
+                    );
+                    assert(path.get_end_clipping());
+                    path.trim_end_clipping();
+                    seed_callback(std::move(path));
+                }
+            }, alignment_callback, true, config_.min_path_score);
+        }, [&](DBGAlignment&& path) {
+            if (path.get_orientation())
+                path.reverse_complement(seeder.get_graph(), paths.get_query());
+
+            paths.emplace_back(std::move(path));
+        });
 
         return paths;
     }
