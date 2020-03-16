@@ -21,25 +21,7 @@ class bit_vector_sdsl : public bit_vector {
     struct is_rrr<sdsl::rrr_vector<t_bs, t_rac, t_k>> : std::true_type {};
 
     template<typename>
-    struct bv_traits {};
-
-    template<uint32_t k_sblock_rate>
-    struct bv_traits<sdsl::hyb_vector<k_sblock_rate>> {
-        // hyb_vector doesn't support select
-        static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
-        static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
-    };
-    template<uint32_t t_bs>
-    struct bv_traits<sdsl::bit_vector_il<t_bs>> {
-        static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
-        static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
-    };
-    template<uint16_t t_bs, class t_rac, uint16_t t_k>
-    struct bv_traits<sdsl::rrr_vector<t_bs, t_rac, t_k>> {
-        static constexpr size_t MAX_ITER_BIT_VECTOR = 1;
-        // sequential word access for bit_vector_rrr per bit is 21 times faster than select
-        static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 21;
-    };
+    struct bv_traits;
 
   public:
     explicit bit_vector_sdsl(uint64_t size = 0, bool value = false)
@@ -88,12 +70,14 @@ class bit_vector_sdsl : public bit_vector {
     /**
      * Predict space taken by the vector with given its parameters in bits.
      */
-    static inline uint64_t predict_size(uint64_t size, uint64_t num_set_bits);
+    static inline uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
+       return bv_traits<bv_type>::predict_size(size, num_set_bits)
+                + bv_traits<rank_1_type>::predict_size(size, num_set_bits)
+                + bv_traits<select_1_type>::predict_size(size, num_set_bits)
+                + bv_traits<select_0_type>::predict_size(size, num_set_bits);
+    }
 
   private:
-    static inline double logbinomial(uint64_t n, uint64_t m);
-    static inline double entropy(double q);
-
     bv_type vector_;
     rank_1_type rk1_;
     select_1_type slct1_;
@@ -326,42 +310,72 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     }
 }
 
+
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-uint64_t
-bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::predict_size(uint64_t size, uint64_t num_set_bits) {
-    if constexpr(is_rrr<bv_type>{}) {
-        uint16_t block_size = bv_type::block_size;
-        // TODO: correct the formula for block_size = 15
-        return std::ceil(logbinomial(size, num_set_bits))
-            + (size + block_size) / block_size * (sdsl::bits::hi(block_size) + 1);
-    } else {
+template<typename type>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
+::bv_traits {
+    static inline uint64_t predict_size(uint64_t /*size*/, uint64_t /*num_set_bits*/) {
+        return sizeof(type) * 8;
+    }
+};
+
+template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
+template<uint32_t k_sblock_rate>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
+::bv_traits<sdsl::hyb_vector<k_sblock_rate>> {
+    // hyb_vector doesn't support select
+    static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
+    static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
+
+    static inline uint64_t predict_size(uint64_t /*size*/, uint64_t /*num_set_bits*/) {
         throw std::runtime_error(std::string("Error: unknown space taken for this bit_vector")
                                     + typeid(bv_type).name());
     }
-}
+};
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-double
-bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::logbinomial(uint64_t n, uint64_t m) {
-    return (lgamma(n + 1)
-                - lgamma(m + 1)
-                - lgamma(n - m + 1)) / log(2);
-}
+template<uint32_t t_bs>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
+::bv_traits<sdsl::bit_vector_il<t_bs>> {
+    static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
+    static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
+
+    static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
+        return size * 1.135;
+    }
+};
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-double
-bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::entropy(double q) {
-    assert(q >= 0);
-    assert(q <= 1);
+template<uint16_t t_bs, class t_rac, uint16_t t_k>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
+::bv_traits<sdsl::rrr_vector<t_bs, t_rac, t_k>> {
+    static constexpr size_t MAX_ITER_BIT_VECTOR = 1;
+    // sequential word access for bit_vector_rrr per bit is 21 times faster than select
+    static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 21;
 
-    if (q == 0 || q == 1)
-        return 0;
+    static inline double logbinomial(uint64_t n, uint64_t m) {
+        return (lgamma(n + 1)
+                    - lgamma(m + 1)
+                    - lgamma(n - m + 1)) / log(2);
+    }
 
-    return q * log2(q) + (1 - q) * log2(1 - q);
-}
+    static inline double entropy(double q) {
+        assert(q >= 0);
+        assert(q <= 1);
+
+        if (q == 0 || q == 1)
+            return 0;
+
+        return q * log2(q) + (1 - q) * log2(1 - q);
+    }
+
+    static inline uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
+        // TODO: correct the formula for block_size = 15
+        return std::ceil(logbinomial(size, num_set_bits))
+            + (size + t_bs) / t_bs * (sdsl::bits::hi(t_bs) + 1);
+    }
+};
 
 
 template <uint32_t k_sblock_rate = 16>
