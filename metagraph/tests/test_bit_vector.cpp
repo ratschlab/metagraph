@@ -33,18 +33,6 @@ typedef ::testing::Types<bit_vector_stat,
 
 TYPED_TEST_SUITE(BitVectorTest, BitVectorTypes);
 
-template <typename Bitmap>
-class BitVectorTestSelect0 : public ::testing::Test { };
-
-typedef ::testing::Types<bit_vector_dyn,
-                         bit_vector_sd,
-                         bit_vector_rrr<>,
-                         bit_vector_il<>,
-                         bit_vector_hyb<>>
-        BitVectorTypesSelect0;
-
-TYPED_TEST_SUITE(BitVectorTestSelect0, BitVectorTypesSelect0);
-
 
 void test_next_subvector(const bit_vector &vector, uint64_t idx) {
     if (vector.size() == 0)
@@ -233,7 +221,7 @@ TYPED_TEST(BitVectorTest, queries) {
 }
 
 TYPED_TEST(BitVectorTest, select1) {
-    for (size_t size : { 1, 2, 3, 4, 5, 50, 51, 52 }) {
+    for (size_t size : { 1, 2, 3, 4, 5, 50, 51, 52, 54, 100, 200, 300, 1000 }) {
         for (size_t i = 0; i < size; ++i) {
             sdsl::bit_vector bv(size, 0);
             bv[i] = 1;
@@ -243,7 +231,7 @@ TYPED_TEST(BitVectorTest, select1) {
     }
 }
 
-TYPED_TEST(BitVectorTestSelect0, select0) {
+TYPED_TEST(BitVectorTest, select0) {
     // Mainly test select0.
     auto vector = std::make_unique<TypeParam>(10, 1);
     ASSERT_TRUE(vector);

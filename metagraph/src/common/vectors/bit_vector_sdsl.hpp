@@ -44,7 +44,7 @@ class bit_vector_sdsl : public bit_vector {
     }
 
     inline uint64_t rank1(uint64_t id) const override;
-    inline uint64_t select0(uint64_t id) const;
+    inline uint64_t select0(uint64_t id) const override;
     inline uint64_t select1(uint64_t id) const override;
     inline std::pair<bool, uint64_t> inverse_select(uint64_t id) const override;
     inline uint64_t conditional_rank1(uint64_t id) const override;
