@@ -44,12 +44,14 @@ class bit_vector_sd : public bit_vector {
 
     inline uint64_t size() const override { return vector_.size(); }
 
-    inline sdsl::bit_vector to_vector() const override;
+    inline bool is_inverted() const { return inverted_; }
 
     inline void call_ones_in_range(uint64_t begin, uint64_t end,
                                    const VoidCall<uint64_t> &callback) const override;
 
-    inline bool is_inverted() const { return inverted_; }
+    inline void add_to(sdsl::bit_vector *other) const override;
+
+    inline sdsl::bit_vector to_vector() const override;
 
     inline const sdsl::sd_vector<>& data() const { return vector_; }
 
@@ -258,28 +260,14 @@ void bit_vector_sd::call_ones_in_range(uint64_t begin, uint64_t end,
     assert(begin <= end);
     assert(end <= size());
 
-    if (!inverted_) {
-        // sparse
-        uint64_t num_ones = rk1_(end);
-        for (uint64_t i = rk1_(begin) + 1; i <= num_ones; ++i) {
-            callback(slct1_(i));
-        }
-    } else {
-        // dense, vector_ keeps positions of zeros
-        uint64_t one_pos = 0;
-        uint64_t zero_pos = 0;
-        uint64_t num_zeros = rk1_(end);
-        for (uint64_t r = rk1_(begin) + 1; r <= num_zeros; ++r) {
-            zero_pos = slct1_(r);
-            while (one_pos < zero_pos) {
-                callback(one_pos++);
-            }
-            one_pos++;
-        }
-        while (one_pos < end) {
-            callback(one_pos++);
-        }
-    }
+    ::call_ones(*this, begin, end, callback, 2);
+}
+
+void bit_vector_sd::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
+
+    ::add_to(*this, other, 2);
 }
 
 #endif // __BIT_VECTOR_SD_HPP__

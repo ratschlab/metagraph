@@ -73,6 +73,7 @@ file(GLOB benchmark_files "*.cpp"
   ../../src/common/vectors/bit_vector.cpp
   ../../src/common/vectors/bitmap.cpp
   ../../src/common/vectors/bitmap_mergers.cpp
+  ../../src/common/vectors/vector_algorithm.cpp
   ../../src/common/serialization.cpp
 )
 
