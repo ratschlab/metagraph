@@ -155,30 +155,36 @@ class DBGAligner : public IDBGAligner {
 
         seeder.initialize(paths.get_query(), false);
 
-        std::vector<DBGAlignment> forward;
-        align(paths.get_query(),
-              [&](const auto &callback) { seeder.call_seeds(callback); },
-              [&](DBGAlignment&& path) { forward.emplace_back(std::move(path)); },
-              false,
-              [&](const auto&) { return config_.min_cell_score; });
-
         align_aggregate([&](const auto &alignment_callback,
                             const auto &get_min_path_score) {
-            align(paths.get_query_reverse_complement(), [&](const auto &seed_callback) {
-                for (auto&& path : forward) {
-                    if (!path.get_clipping() && path.get_score() >= config_.min_path_score) {
-                        alignment_callback(std::move(path));
-                        return;
-                    }
-                    path.reverse_complement(
-                        seeder.get_graph(),
-                        paths.get_query_reverse_complement()
-                    );
-                    assert(path.get_end_clipping());
-                    path.trim_end_clipping();
-                    seed_callback(std::move(path));
-                }
-            }, alignment_callback, true, get_min_path_score);
+            std::vector<DBGAlignment> forward;
+            align(paths.get_query(),
+                  [&](const auto &callback) { seeder.call_seeds(callback); },
+                  [&](DBGAlignment&& path) {
+                      if (!path.get_clipping()) {
+                          alignment_callback(std::move(path));
+                      } else {
+                          path.reverse_complement(
+                              seeder.get_graph(),
+                              paths.get_query_reverse_complement()
+                          );
+                          assert(path.get_end_clipping());
+                          path.trim_end_clipping();
+                          forward.emplace_back(std::move(path));
+                      }
+                  },
+                  false,
+                  get_min_path_score);
+
+            align(paths.get_query_reverse_complement(),
+                  [&](const auto &seed_callback) {
+                      for (auto&& path : forward) {
+                          seed_callback(std::move(path));
+                      }
+                  },
+                  alignment_callback,
+                  true,
+                  get_min_path_score);
         }, [&](DBGAlignment&& path) {
             if (path.get_orientation())
                 path.reverse_complement(seeder.get_graph(), paths.get_query());
