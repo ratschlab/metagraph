@@ -128,7 +128,9 @@ class DBGAligner : public IDBGAligner {
             align(query_alignment,
                   [&](const auto &callback) {
                       seeder.call_seeds([&](DBGAlignment&& seed) {
-                          alignment_callback(DBGAlignment(seed));
+                          if (seed.get_score() >= get_min_path_score(seed))
+                              alignment_callback(DBGAlignment(seed));
+
                           callback(std::move(seed));
                       });
                   },
@@ -152,7 +154,9 @@ class DBGAligner : public IDBGAligner {
             align(paths.get_query(),
                   [&](const auto &callback) {
                       seeder.call_seeds([&](DBGAlignment&& seed) {
-                          alignment_callback(DBGAlignment(seed));
+                          if (seed.get_score() >= get_min_path_score(seed))
+                              alignment_callback(DBGAlignment(seed));
+
                           callback(std::move(seed));
                       });
                   },
@@ -201,7 +205,9 @@ class DBGAligner : public IDBGAligner {
             align(paths.get_query(),
                   [&](const auto &callback) {
                       seeder.call_seeds([&](DBGAlignment&& seed) {
-                          alignment_callback(DBGAlignment(seed));
+                          if (seed.get_score() >= get_min_path_score(seed))
+                              alignment_callback(DBGAlignment(seed));
+
                           callback(std::move(seed));
                       });
                   },
@@ -213,7 +219,9 @@ class DBGAligner : public IDBGAligner {
             align(paths.get_query_reverse_complement(),
                   [&](const auto &callback) {
                       seeder.call_seeds([&](DBGAlignment&& seed) {
-                          alignment_callback(DBGAlignment(seed));
+                          if (seed.get_score() >= get_min_path_score(seed))
+                              alignment_callback(DBGAlignment(seed));
+
                           callback(std::move(seed));
                       });
                   },
