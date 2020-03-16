@@ -325,7 +325,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         async_merge.enqueue([&chunk_files, &source]() {
             std::function<void(const T &)> on_new_item
                     = [&source](const T &v) { source.push(v); };
-            common::merge_files(chunk_files, on_new_item);
+            common::merge_files<T, int_type>(chunk_files, on_new_item);
             source.shutdown();
         });
         sorted_dummy_kmers.clear(tmp_path);
@@ -355,7 +355,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     async_merge.enqueue([&chunk_files, &source]() {
       std::function<void(const T &)> on_new_item
               = [&source](const T &v) { source.push(v); };
-      common::merge_files(chunk_files, on_new_item);
+      common::merge_files<T, int_type>(chunk_files, on_new_item);
       source.shutdown();
     });
     for (auto &it = source.begin(); it != source.end(); ++it, ++num_kmers) {
@@ -374,7 +374,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     async_worker.enqueue([=]() {
         std::function<void(const T &)> on_new_item
                 = [&kmers](const T &v) { kmers->push(v); };
-        common::merge_files(file_names, on_new_item);
+        common::merge_files<T, int_type>(file_names, on_new_item);
         kmers->shutdown();
     });
 }
