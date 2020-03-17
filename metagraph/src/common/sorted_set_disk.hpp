@@ -111,8 +111,8 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
                   = [this](const value_type &v) {
                     std::cout << utils::get_first(v).to_string(2, "$ACGT") << " ";
                     this->merge_queue_.push(v); };
-          std::cout << std::endl;
           merge_files<T, INT>(file_names, on_new_item);
+          std::cout << std::endl;
           this->merge_queue_.shutdown();
         });
     }
