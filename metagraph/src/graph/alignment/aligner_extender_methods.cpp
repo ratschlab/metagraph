@@ -4,19 +4,12 @@
 #include <immintrin.h>
 #endif
 
-#include <Eigen/StdVector>
-
-#include "common/algorithms.hpp"
 #include "common/bounded_priority_queue.hpp"
 #include "common/logger.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/utils/template_utils.hpp"
 
 using mg::common::logger;
-
-
-template <typename T>
-using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
 template <typename NodeType, typename score_t = typename DPTable<NodeType>::score_t>
 using ColumnRef = std::pair<NodeType, score_t>;

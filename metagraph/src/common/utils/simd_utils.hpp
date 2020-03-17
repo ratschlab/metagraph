@@ -9,7 +9,12 @@
 #include <emmintrin.h>
 #endif
 
+#include <Eigen/StdVector>
+
 #include "common/algorithms.hpp"
+
+template <typename T>
+using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
 
 /**
