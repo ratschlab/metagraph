@@ -10,7 +10,6 @@
 #include "bit_vector.hpp"
 
 class ThreadPool;
-class bit_vector_stat;
 
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
@@ -104,17 +103,9 @@ void compute_or(const std::vector<const bit_vector *> &columns,
 
 // assumes that all bits that are set in |column| are set in |reference| too.
 sdsl::bit_vector generate_subindex(const bit_vector &column,
-                                   const bit_vector_stat &reference);
-
-// assumes that all bits that are set in |column| are set in |reference| too.
-sdsl::bit_vector generate_subindex(const bit_vector &column,
                                    const sdsl::bit_vector &reference,
                                    uint64_t reference_num_set_bits,
                                    ThreadPool &thread_pool);
-
-// indexes are distinct and sorted
-sdsl::bit_vector subvector(const bit_vector &col,
-                           const std::vector<uint64_t> &indexes);
 
 // Apply the bitwise AND of vector with right-shifts of itself. Only works for
 // values of offset < 64

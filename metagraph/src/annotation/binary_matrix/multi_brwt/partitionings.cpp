@@ -28,13 +28,18 @@ get_submatrix(const VectorPtrs &columns,
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < columns.size(); ++i) {
-        submatrix[i] = subvector(*columns[i], row_indexes);
+        const bit_vector &col = *columns[i];
+        sdsl::bit_vector &subvector = submatrix[i];
 
-#ifndef NDEBUG
+        assert(row_indexes.size() <= col.size());
+
+        subvector = sdsl::bit_vector(row_indexes.size(), false);
+
         for (size_t j = 0; j < row_indexes.size(); ++j) {
-            assert(submatrix[i][j] == (*columns[i])[row_indexes[j]]);
+            if (col[row_indexes[j]])
+                subvector[j] = true;
         }
-#endif
+
         ++progress_bar;
     }
 
