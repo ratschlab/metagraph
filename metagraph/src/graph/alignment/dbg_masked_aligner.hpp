@@ -50,7 +50,7 @@ class LabeledSeeder : public BaseSeeder {
 
     LabeledSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : BaseSeeder(graph, config), anno_graph_(nullptr) {
-        throw std::runtime_error("Not implemented");
+        throw std::runtime_error("This should not happen. Problem with virtual methods");
     }
 
     void call_seeds(std::function<void(Seed&&)> callback) const {
@@ -113,7 +113,7 @@ class MaskedColumnExtender : public BaseExtender {
 
     MaskedColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : BaseExtender(graph, config), anno_graph_(nullptr) {
-        throw std::runtime_error("Not implemented");
+        throw std::runtime_error("This should not happen. Problem with virtual methods");
     }
 
     virtual
