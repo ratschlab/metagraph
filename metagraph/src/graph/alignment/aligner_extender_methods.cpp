@@ -509,8 +509,7 @@ void DefaultColumnExtender<NodeType>
                 if (!std::equal(match_score_begin + overall_begin,
                                 match_score_begin + overall_end,
                                 next_column.scores.begin() + overall_begin,
-                                [&](auto a, auto b) { return a + b < score_cutoff; })
-                        && score_cutoff - iter->second.best_score() <= config_.xdrop)
+                                [&](auto a, auto b) { return a + b < score_cutoff; }))
                     columns_to_update.emplace(iter->first, iter->second.best_score());
             }
         }

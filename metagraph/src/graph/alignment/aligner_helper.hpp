@@ -162,7 +162,6 @@ class DBGAlignerConfig {
     // thresholds for scores
     score_t min_cell_score = 0;
     score_t min_path_score = 0;
-    score_t xdrop = std::numeric_limits<score_t>::max();
 
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
