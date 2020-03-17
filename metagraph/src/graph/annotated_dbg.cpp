@@ -8,11 +8,11 @@
 
 #include <cstdlib>
 
-#include <Eigen/StdVector>
 #include <tsl/ordered_map.h>
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/utils/simd_utils.hpp"
+#include "common/vectors/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
@@ -23,9 +23,6 @@ using VectorOrderedMap = tsl::ordered_map<Key, T,
                                           std::allocator<std::pair<Key, T>>,
                                           std::vector<std::pair<Key, T>>,
                                           uint64_t>;
-
-template <typename T>
-using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
 
 AnnotatedSequenceGraph
