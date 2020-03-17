@@ -73,6 +73,7 @@ inline bool compute_match_insert_updates_avx2(size_t &i,
     const __m256i ins_packed = _mm256_set1_epi32(Cigar::Operator::INSERTION);
     const __m256i gap_open_packed = _mm256_set1_epi32(gap_opening_penalty);
     const __m256i gap_extend_packed = _mm256_set1_epi32(gap_extension_penalty);
+    const __m256i min_score = _mm256_set1_epi32(std::numeric_limits<int32_t>::min());
 
     for (; i + 8 <= length; i += 8) {
         __m256i incoming_packed = _mm256_loadu_si256((__m256i*)(incoming_scores - 1));
@@ -83,14 +84,20 @@ inline bool compute_match_insert_updates_avx2(size_t &i,
             incoming_packed
         );
 
+        __m256i incoming_ops_packed = _mm256_loadu_si256((__m256i*)incoming_ops);
+        __m256i incoming_is_insert = _mm256_cmpeq_epi32(incoming_ops_packed, ins_packed);
+
+        __m256i incoming_shift = rshiftpushback_epi32(incoming_packed, incoming_scores[7]);
         __m256i insert_scores_packed = _mm256_add_epi32(
-            rshiftpushback_epi32(incoming_packed, incoming_scores[7]),
-            _mm256_blendv_epi8(gap_open_packed,
-                               gap_extend_packed,
-                               _mm256_cmpeq_epi32(
-                                   _mm256_loadu_si256((__m256i*)incoming_ops),
-                                   ins_packed
-                               ))
+            incoming_shift,
+            _mm256_blendv_epi8(gap_open_packed, gap_extend_packed, incoming_is_insert)
+        );
+
+        // disallow insertion after deletion
+        static_assert(Cigar::Operator::DELETION > Cigar::Operator::INSERTION);
+        insert_scores_packed = _mm256_blendv_epi8(
+            insert_scores_packed, min_score,
+            _mm256_cmpgt_epi32(incoming_ops_packed, ins_packed) // incoming is delete
         );
 
         // update scores
@@ -201,6 +208,7 @@ inline bool compute_match_insert_updates(const DBGAlignerConfig &config,
 #endif
 
     // handle the residual
+    // TODO: is there a better way to handle this?
     for (; i < length; ++i) {
         if (*(incoming_scores - 1) + *char_scores_data > *update_scores) {
             updated = true;
@@ -209,15 +217,17 @@ inline bool compute_match_insert_updates(const DBGAlignerConfig &config,
             *update_scores = *(incoming_scores - 1) + *char_scores_data;
         }
 
-        // TODO: enable check for deletion after insertion?
-        gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::INSERTION
-            ? config.gap_extension_penalty : config.gap_opening_penalty);
+        // disallow INSERTION after DELETION?
+        if (*incoming_ops_cast != Cigar::Operator::DELETION) {
+            gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::INSERTION
+                ? config.gap_extension_penalty : config.gap_opening_penalty);
 
-        if (gap_score > *update_scores) {
-            updated = true;
-            *update_ops_cast = Cigar::Operator::INSERTION;
-            *update_prevs_cast = prev_node;
-            *update_scores = gap_score;
+            if (gap_score > *update_scores) {
+                updated = true;
+                *update_ops_cast = Cigar::Operator::INSERTION;
+                *update_prevs_cast = prev_node;
+                *update_scores = gap_score;
+            }
         }
 
         ++incoming_scores;
@@ -395,6 +405,10 @@ void DefaultColumnExtender<NodeType>
             // compute deletion scores
             score_t delete_score;
             for (size_t i = overall_begin + 1; i < overall_end; ++i) {
+                // disallow DELETION after INSERTION
+                if (next_column.ops[i - 1] == Cigar::Operator::INSERTION)
+                    continue;
+
                 delete_score = next_column.scores[i - 1]
                     + (next_column.ops[i - 1] == Cigar::Operator::DELETION
                         ? config_.gap_extension_penalty
