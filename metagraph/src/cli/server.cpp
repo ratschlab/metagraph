@@ -77,6 +77,27 @@ string convert_to_json(const string &ret_str) {
     return Json::writeString(builder, root);
 }
 
+Json::Value parse_json_string(const std::string &msg) {
+    Json::Value json;
+
+    {
+        Json::CharReaderBuilder rbuilder;
+        std::unique_ptr<Json::CharReader> reader { rbuilder.newCharReader() };
+        std::string errors;
+
+        if (!reader->parse(msg.data(),
+                           msg.data() + msg.size(),
+                           &json,
+                           &errors)) {
+            logger->error("Bad json file:\n{}", errors);
+            throw std::domain_error("Bad json received: " + errors);
+        }
+    }
+
+    return json;
+}
+
+
 std::string form_client_reply(const std::string &received_message,
                               const AnnotatedDBG &anno_graph,
                               const Config &config,
@@ -85,21 +106,7 @@ std::string form_client_reply(const std::string &received_message,
     // TODO: fast query
     std::ignore = aligner;
 
-    Json::Value json;
-
-    {
-        Json::CharReaderBuilder rbuilder;
-        std::unique_ptr<Json::CharReader> reader { rbuilder.newCharReader() };
-        std::string errors;
-
-        if (!reader->parse(received_message.data(),
-                           received_message.data() + received_message.size(),
-                           &json,
-                           &errors)) {
-            logger->error("Bad json file:\n{}", errors);
-            throw std::domain_error("Bad json received: " + errors);
-        }
-    }
+    Json::Value json = parse_json_string(received_message);
 
     const auto &fasta = json["FASTA"];
 
@@ -144,6 +151,44 @@ std::string form_client_reply(const std::string &received_message,
 
     return convert_to_json(oss.str());
 }
+
+std::string form_align_reply(const std::string &received_message,
+                              const Config &config,
+                              IDBGAligner *aligner = nullptr) {
+    std::ignore = config;
+
+    Json::Value json = parse_json_string(received_message);
+
+    const auto &fasta = json["FASTA"];
+
+    Json::Value root = Json::Value(Json::arrayValue);
+
+    read_fasta_from_string(fasta.asString(), [&](kseq_t *read_stream) {
+        auto name = read_stream->name.s;
+        auto query = read_stream->seq.s;
+
+        const auto paths = aligner->align(query);
+
+        Json::Value align_entry;
+        align_entry["name"] = name;
+
+        // not supporting reverse complement yet
+        if(!paths.empty()) {
+            auto path = paths.front();
+
+            align_entry["score"] = path.get_score();
+            align_entry["sequence"] = path.get_sequence();
+        } else {
+            align_entry["sequence"] = "";
+        }
+
+        root.append(align_entry);
+    });
+
+    Json::StreamWriterBuilder builder;
+    return Json::writeString(builder, root);
+}
+
 
 std::string form_column_labels_reply(const AnnotatedDBG &anno_graph) {
     auto labels = anno_graph.get_annotation().get_all_labels();
@@ -237,8 +282,7 @@ int run_server(Config *config) {
     logger->info("Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
 
     std::unique_ptr<IDBGAligner> aligner;
-    if (config->align_sequences && !config->fast)
-        aligner.reset(build_aligner(*graph, *config).release());
+    aligner.reset(build_aligner(*graph, *config).release());
 
     const size_t num_threads = std::max(1u, get_num_threads());
 
@@ -259,6 +303,26 @@ int run_server(Config *config) {
 
         try {
             auto ret = form_client_reply(content, *anno_graph, *config, aligner.get());
+            write_compressed_if_possible(SimpleWeb::StatusCode::success_ok, ret, response, request);
+        }  catch(const std::exception &e) {
+            logger->info("Error on request " + string(e.what()));
+            response->write(SimpleWeb::StatusCode::client_error_bad_request, json_str_with_error_msg(e.what()));
+        }
+        catch(...) {
+            logger->info("Error on request ");
+            response->write(SimpleWeb::StatusCode::server_error_internal_server_error, json_str_with_error_msg("Internal server error"));
+        }
+    };
+
+    // TODO: refactor request business in lambda, use switch?
+    server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
+        // Retrieve string:
+        auto content = request->content.string();
+
+        logger->info("Got align request from " + request->remote_endpoint().address().to_string());
+
+        try {
+            auto ret = form_align_reply(content, *config, aligner.get());
             write_compressed_if_possible(SimpleWeb::StatusCode::success_ok, ret, response, request);
         }  catch(const std::exception &e) {
             logger->info("Error on request " + string(e.what()));
