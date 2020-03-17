@@ -126,7 +126,8 @@ bool Cigar::is_valid(const std::string_view reference,
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
 
-    for (const auto &op : cigar_) {
+    for (size_t i = 0; i < cigar_.size(); ++i) {
+        const auto &op = cigar_[i];
         if (!op.second) {
             std::cerr << "Empty operation found in CIGAR" << std::endl
                       << to_string() << std::endl
@@ -178,6 +179,14 @@ bool Cigar::is_valid(const std::string_view reference,
                 alt_it += op.second;
             } break;
             case Operator::DELETION: {
+                if (i && cigar_[i - 1].first == Operator::INSERTION) {
+                    std::cerr << "DELETION after INSERTION" << std::endl
+                              << to_string() << std::endl
+                              << reference << std::endl
+                              << query << std::endl;
+                    return false;
+                }
+
                 if (alt_it > query.end() - op.second) {
                     std::cerr << "Query too short" << std::endl
                               << to_string() << std::endl
@@ -189,6 +198,14 @@ bool Cigar::is_valid(const std::string_view reference,
                 alt_it += op.second;
             } break;
             case Operator::INSERTION: {
+                if (i && cigar_[i - 1].first == Operator::DELETION) {
+                    std::cerr << "INSERTION after DELETION" << std::endl
+                              << to_string() << std::endl
+                              << reference << std::endl
+                              << query << std::endl;
+                    return false;
+                }
+
                 if (ref_it > reference.end() - op.second) {
                     std::cerr << "Reference too short" << std::endl
                               << to_string() << std::endl
