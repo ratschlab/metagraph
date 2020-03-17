@@ -52,7 +52,8 @@ class bit_vector_adaptive : public bit_vector {
     // Otherwise, serialized vectors will be not loadable
         RRR_VECTOR = 0,
         SD_VECTOR,
-        STAT_VECTOR
+        STAT_VECTOR,
+        RANK_VECTOR
     };
 
     typedef VectorCode (*DefineRepresentation)(uint64_t /* size */,
@@ -94,6 +95,9 @@ bit_vector_adaptive::representation_tag() const {
     } else if (dynamic_cast<const bit_vector_stat*>(vector_.get())) {
         return VectorCode::STAT_VECTOR;
 
+    } else if (dynamic_cast<const bit_vector_rank*>(vector_.get())) {
+        return VectorCode::RANK_VECTOR;
+
     } else {
         throw std::runtime_error("Unsupported type");
     }
@@ -109,6 +113,9 @@ bool bit_vector_adaptive::load(std::istream &in) {
             break;
         case VectorCode::STAT_VECTOR:
             vector_.reset(new bit_vector_stat());
+            break;
+        case VectorCode::RANK_VECTOR:
+            vector_.reset(new bit_vector_rank());
             break;
         default:
             return false;
@@ -168,6 +175,9 @@ bit_vector_adaptive_stat<optimal_representation>
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(size, value));
             break;
+        case RANK_VECTOR:
+            vector_.reset(new bit_vector_rank(size, value));
+            break;
     }
 }
 
@@ -183,6 +193,9 @@ bit_vector_adaptive_stat<optimal_representation>
             break;
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(vector.copy_to<bit_vector_stat>()));
+            break;
+        case RANK_VECTOR:
+            vector_.reset(new bit_vector_rank(vector.copy_to<bit_vector_rank>()));
             break;
     }
 }
@@ -202,6 +215,9 @@ bit_vector_adaptive_stat<optimal_representation>
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(vector));
             break;
+        case RANK_VECTOR:
+            vector_.reset(new bit_vector_rank(vector));
+            break;
     }
 }
 
@@ -217,6 +233,9 @@ bit_vector_adaptive_stat<optimal_representation>
             break;
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(vector.convert_to<bit_vector_stat>()));
+            break;
+        case RANK_VECTOR:
+            vector_.reset(new bit_vector_rank(vector.convert_to<bit_vector_rank>()));
             break;
     }
 }
@@ -235,6 +254,9 @@ bit_vector_adaptive_stat<optimal_representation>
             break;
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(std::move(vector)));
+            break;
+        case RANK_VECTOR:
+            vector_.reset(new bit_vector_rank(std::move(vector)));
             break;
     }
 }
@@ -259,6 +281,12 @@ bit_vector_adaptive_stat<optimal_representation>
             sdsl::bit_vector vector(size, false);
             call_ones([&](uint64_t i) { vector[i] = true; });
             vector_.reset(new bit_vector_stat(std::move(vector)));
+            break;
+        }
+        case RANK_VECTOR: {
+            sdsl::bit_vector vector(size, false);
+            call_ones([&](uint64_t i) { vector[i] = true; });
+            vector_.reset(new bit_vector_rank(std::move(vector)));
             break;
         }
     }
@@ -309,21 +337,47 @@ smart_representation(uint64_t size, uint64_t num_set_bits) {
 
 typedef bit_vector_adaptive_stat<smart_representation> bit_vector_smart;
 
+/**
+ * hybrid vector: the smallest bit vector with fast rank support
+ * combines:
+ *    - bit_vector_sd
+ *    - bit_vector_rrr<63>
+ *    - bit_vector_rank
+ */
+inline bit_vector_adaptive::VectorCode
+smallrank_representation(uint64_t size, uint64_t num_set_bits) {
+    assert(num_set_bits <= size);
+
+    // use bit_vector_rank if density is between (0.4, 0.6)
+    if (std::min(num_set_bits, size - num_set_bits) > size * 0.4)
+        return bit_vector_adaptive::VectorCode::RANK_VECTOR;
+
+    return bit_vector_sd::predict_size(size, num_set_bits)
+            < bit_vector_rrr<>::predict_size(size, num_set_bits)
+                  ? bit_vector_adaptive::VectorCode::SD_VECTOR
+                  : bit_vector_adaptive::VectorCode::RRR_VECTOR;
+}
+
+typedef bit_vector_adaptive_stat<smallrank_representation> bit_vector_smallrank;
+
 
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 uint64_t
 bit_vector_adaptive_stat<optimal_representation>
 ::predict_size(uint64_t size, uint64_t num_set_bits) {
-    if (optimal_representation == smallest_representation)
-        return std::min(bit_vector_sd::predict_size(size, num_set_bits),
-                        bit_vector_rrr<>::predict_size(size, num_set_bits));
-
-    if (optimal_representation == smart_representation)
-        return std::min(bit_vector_sd::predict_size(size, num_set_bits),
-                        bit_vector_stat::predict_size(size, num_set_bits));
-
-    throw std::runtime_error(std::string("Error: unknown space taken for this bit_vector")
-                                 + typeid(optimal_representation).name());
+    switch (optimal_representation(size, num_set_bits)) {
+        case SD_VECTOR:
+            return bit_vector_sd::predict_size(size, num_set_bits);
+        case RRR_VECTOR:
+            return bit_vector_rrr<>::predict_size(size, num_set_bits);
+        case STAT_VECTOR:
+            return bit_vector_stat::predict_size(size, num_set_bits);
+        case RANK_VECTOR:
+            return bit_vector_rank::predict_size(size, num_set_bits);
+        default:
+            assert(false);
+            return 0;
+    }
 }
 
 #endif // __BIT_VECTOR_ADAPTIVE_HPP__
