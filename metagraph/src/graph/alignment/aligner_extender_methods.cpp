@@ -305,19 +305,28 @@ void DefaultColumnExtender<NodeType>
              bool orientation,
              score_t min_path_score) {
     assert(graph_);
-    size_t start_index = path.get_query_end() - 1 - query.data();
-    const score_t *match_score_begin = partial_sums_.data() + start_index;
 
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query().data());
+    assert(path.get_query_end() > query.data());
     assert(query.data() + query.size() >= path.get_query_end());
 
+
+    size_t start_index = path.get_query_end() - 1 - query.data();
     const auto *align_start = path.get_query_end();
     size_t size = query.data() + query.size() - align_start + 1;
+    const score_t *match_score_begin = partial_sums_.data() + start_index;
 
     assert(config_.match_score(std::string_view(align_start - 1, size))
         == *match_score_begin);
     assert(config_.get_row(query.back())[query.back()] == match_score_begin[size - 1]);
+
+    // TODO: this cuts off too early (before the scores have converged)
+    //       so path scores have to be recomputed after alignment
+    auto extendable = [&](size_t begin, size_t end, score_t cutoff, const score_t *scores) {
+        return !std::equal(match_score_begin + begin, match_score_begin + end,
+                           scores + begin, [&](auto a, auto b) { return a + b < cutoff; });
+    };
 
     // stop path early if it can't be better than the min_path_score
     if (path.get_score() + match_score_begin[1] < min_path_score)
@@ -325,7 +334,6 @@ void DefaultColumnExtender<NodeType>
 
     // if the nodes from this seed were in the previous alignment and had a
     // better score, don't redo the extension
-    assert(path.get_query_end() > query.data());
     size_t query_offset = path.get_query_end() - query.data() - 1;
     assert(query_offset + size == query.size());
 
@@ -504,12 +512,7 @@ void DefaultColumnExtender<NodeType>
                 }
 
                 // branch and bound
-                // TODO: this cuts off too early (before the scores have converged)
-                //       so the code below has to be used to compute correct scores
-                if (!std::equal(match_score_begin + overall_begin,
-                                match_score_begin + overall_end,
-                                next_column.scores.begin() + overall_begin,
-                                [&](auto a, auto b) { return a + b < score_cutoff; }))
+                if (extendable(overall_begin, overall_end, score_cutoff, next_column.scores.data()))
                     columns_to_update.emplace(iter->first, iter->second.best_score());
             }
         }
