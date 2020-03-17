@@ -56,7 +56,7 @@ get_outgoing_columns(const DeBruijnGraph &graph,
 
 #ifdef __AVX2__
 
-inline void compute_match_insert_updates_avx2(size_t &i,
+inline bool compute_match_insert_updates_avx2(size_t &i,
                                               size_t length,
                                               int64_t prev_node,
                                               int32_t gap_opening_penalty,
@@ -68,6 +68,7 @@ inline void compute_match_insert_updates_avx2(size_t &i,
                                               const int32_t *&incoming_ops,
                                               const int8_t *&char_scores,
                                               const int32_t *&match_ops) {
+    bool updated = false;
     const __m256i prev_packed = _mm256_set1_epi64x(prev_node);
     const __m256i ins_packed = _mm256_set1_epi32(Cigar::Operator::INSERTION);
     const __m256i gap_open_packed = _mm256_set1_epi32(gap_opening_penalty);
@@ -98,6 +99,9 @@ inline void compute_match_insert_updates_avx2(size_t &i,
             max_scores,
             _mm256_loadu_si256((__m256i*)update_scores)
         );
+
+        updated |= static_cast<bool>(_mm256_movemask_epi8(both_cmp));
+
         _mm256_maskstore_epi32(update_scores, both_cmp, max_scores);
 
         // update ops
@@ -130,13 +134,15 @@ inline void compute_match_insert_updates_avx2(size_t &i,
         char_scores += 8;
         match_ops += 8;
     }
+
+    return updated;
 }
 
 #endif
 
 template <typename NodeType,
           typename score_t = typename Alignment<NodeType>::score_t>
-inline void compute_match_insert_updates(const DBGAlignerConfig &config,
+inline bool compute_match_insert_updates(const DBGAlignerConfig &config,
                                          score_t *update_scores,
                                          NodeType *update_prevs,
                                          Cigar::Operator *update_ops,
@@ -146,6 +152,7 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
                                          const AlignedVector<int8_t> &char_scores,
                                          const AlignedVector<Cigar::Operator> &match_ops,
                                          size_t length) {
+    bool updated = false;
     static_assert(sizeof(NodeType) == sizeof(long long int));
     static_assert(sizeof(Cigar::Operator) == sizeof(int32_t));
     auto update_prevs_cast = reinterpret_cast<long long int*>(update_prevs);
@@ -159,6 +166,7 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
         ? config.gap_extension_penalty : config.gap_opening_penalty);
 
     if (gap_score > *update_scores) {
+        updated = true;
         *update_ops_cast = Cigar::Operator::INSERTION;
         *update_prevs_cast = prev_node;
         *update_scores = gap_score;
@@ -176,7 +184,7 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
     static_assert(std::is_same<score_t, int32_t>::value);
 
     // update 8 scores at a time
-    compute_match_insert_updates_avx2(
+    updated |= compute_match_insert_updates_avx2(
         i,
         length,
         prev_node,
@@ -195,6 +203,7 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
     // handle the residual
     for (; i < length; ++i) {
         if (*(incoming_scores - 1) + *char_scores_data > *update_scores) {
+            updated = true;
             *update_ops_cast = *match_ops_cast;
             *update_prevs_cast = prev_node;
             *update_scores = *(incoming_scores - 1) + *char_scores_data;
@@ -205,6 +214,7 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
             ? config.gap_extension_penalty : config.gap_opening_penalty);
 
         if (gap_score > *update_scores) {
+            updated = true;
             *update_ops_cast = Cigar::Operator::INSERTION;
             *update_prevs_cast = prev_node;
             *update_scores = gap_score;
@@ -218,72 +228,9 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
         ++update_prevs_cast;
         ++update_ops_cast;
     }
+
+    return updated;
 }
-
-#ifdef __AVX2__
-
-template <typename NodeType,
-          typename score_t = typename Alignment<NodeType>::score_t,
-          typename Column = typename DPTable<NodeType>::Column>
-inline size_t update_column_avx2(bool &updated,
-                                 AlignedVector<score_t> &update_scores,
-                                 AlignedVector<Cigar::Operator> &update_ops,
-                                 AlignedVector<NodeType> &update_prevs,
-                                 Column &next_column,
-                                 size_t overall_begin) {
-    static_assert(sizeof(Cigar::Operator) == sizeof(int32_t));
-    static_assert(sizeof(NodeType) == sizeof(long long int));
-    static_assert(std::is_same<score_t, int32_t>::value);
-    auto next_column_scores = reinterpret_cast<int32_t*>(
-        &next_column.scores[overall_begin]
-    );
-
-    auto next_column_ops = reinterpret_cast<int32_t*>(
-        &next_column.ops[overall_begin]
-    );
-
-    auto next_column_prev_nodes = reinterpret_cast<long long int*>(
-        &next_column.prev_nodes[overall_begin]
-    );
-
-    size_t i = 0;
-    for (; i + 8 <= update_scores.size(); i += 8) {
-        // load update scores
-        __m256i updates = _mm256_load_si256((__m256i*)&update_scores[i]);
-
-        // compare updates to column
-        __m256i cmp = _mm256_cmpgt_epi32(
-            updates,
-            _mm256_loadu_si256((__m256i*)next_column_scores)
-        );
-
-        updated |= bool(_mm256_movemask_epi8(cmp));
-
-        // store updates in column
-        _mm256_maskstore_epi32(next_column_scores, cmp, updates);
-        _mm256_maskstore_epi32(next_column_ops, cmp,
-                               _mm256_load_si256((__m256i*)&update_ops[i]));
-
-        // TODO: this can be done with one AVX512 instruction
-        __m128i *cmp_array = (__m128i*)&cmp;
-        _mm256_maskstore_epi64(next_column_prev_nodes,
-                               _mm256_cvtepi32_epi64(cmp_array[0]),
-                               _mm256_load_si256((__m256i*)&update_prevs[i]));
-        next_column_prev_nodes += 4;
-
-        _mm256_maskstore_epi64(next_column_prev_nodes,
-                               _mm256_cvtepi32_epi64(cmp_array[1]),
-                               _mm256_load_si256((__m256i*)&update_prevs[i + 4]));
-        next_column_prev_nodes += 4;
-
-        next_column_scores += 8;
-        next_column_ops += 8;
-    }
-
-    return i;
-}
-
-#endif
 
 
 /*
@@ -358,10 +305,6 @@ void DefaultColumnExtender<NodeType>
     AlignedVector<int8_t> char_scores;
     AlignedVector<Cigar::Operator> match_ops;
 
-    AlignedVector<score_t> update_scores;
-    AlignedVector<Cigar::Operator> update_ops;
-    AlignedVector<node_index> update_prevs;
-
     // keep track of which columns to use next
     BoundedPriorityQueue<ColumnRef<NodeType>,
                          std::vector<ColumnRef<NodeType>>,
@@ -423,9 +366,7 @@ void DefaultColumnExtender<NodeType>
             assert(overall_end > best_pos);
 
 
-            update_scores.assign(overall_end - overall_begin, config_.min_cell_score);
-            update_prevs.assign(overall_end - overall_begin, SequenceGraph::npos);
-            update_ops.assign(overall_end - overall_begin, Cigar::Operator::CLIPPED);
+            bool updated = false;
 
             const auto &row = config_.get_row(next_column.last_char);
             const auto &op_row = Cigar::get_op_row(next_column.last_char);
@@ -438,55 +379,34 @@ void DefaultColumnExtender<NodeType>
                            match_ops.begin(),
                            [&op_row](char c) { return op_row[c]; });
 
-            compute_match_insert_updates(config_,
-                                         update_scores.data() + (begin - overall_begin),
-                                         update_prevs.data() + (begin - overall_begin),
-                                         update_ops.data() + (begin - overall_begin),
-                                         next_pair.first,
-                                         incoming.scores.data() + begin,
-                                         incoming.ops.data() + begin,
-                                         char_scores,
-                                         match_ops,
-                                         end - begin);
+            updated |= compute_match_insert_updates(
+                config_,
+                next_column.scores.data() + begin,
+                next_column.prev_nodes.data() + begin,
+                next_column.ops.data() + begin,
+                next_pair.first,
+                incoming.scores.data() + begin,
+                incoming.ops.data() + begin,
+                char_scores,
+                match_ops,
+                end - begin
+            );
 
             // compute deletion scores
             score_t delete_score;
-            for (size_t i = 1; i < update_scores.size(); ++i) {
-                delete_score = update_scores[i - 1]
-                    + (update_ops[i - 1] == Cigar::Operator::DELETION
+            for (size_t i = overall_begin + 1; i < overall_end; ++i) {
+                delete_score = next_column.scores[i - 1]
+                    + (next_column.ops[i - 1] == Cigar::Operator::DELETION
                         ? config_.gap_extension_penalty
                         : config_.gap_opening_penalty);
 
-                if (delete_score > update_scores[i]) {
-                    update_ops[i] = Cigar::Operator::DELETION;
-                    update_prevs[i] = next_node;
-                    update_scores[i] = delete_score;
-                }
-            }
-
-
-            // update column scores
-            bool updated = false;
-            size_t i = 0;
-#ifdef __AVX2__
-            i = update_column_avx2(updated,
-                                   update_scores,
-                                   update_ops,
-                                   update_prevs,
-                                   next_column,
-                                   overall_begin);
-#endif
-            // handle the residual
-            for (; i < update_scores.size(); ++i) {
-                if (update_scores[i] > next_column.scores[overall_begin + i]) {
-                    next_column.ops[overall_begin + i] = update_ops[i];
-                    next_column.prev_nodes[overall_begin + i] = update_prevs[i];
-                    next_column.scores[overall_begin + i] = update_scores[i];
-
+                if (delete_score > next_column.scores[i]) {
                     updated = true;
+                    next_column.ops[i] = Cigar::Operator::DELETION;
+                    next_column.prev_nodes[i] = next_node;
+                    next_column.scores[i] = delete_score;
                 }
             }
-
 
             // put column back in the priority queue if it's updated
             if (updated) {
