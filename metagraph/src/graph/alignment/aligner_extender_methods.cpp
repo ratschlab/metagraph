@@ -11,9 +11,6 @@
 
 using mg::common::logger;
 
-template <typename NodeType, typename score_t = typename DPTable<NodeType>::score_t>
-using ColumnRef = std::pair<NodeType, score_t>;
-
 
 /*
  * Helpers for DefaultColumnExtender::operator()
@@ -23,14 +20,14 @@ using ColumnRef = std::pair<NodeType, score_t>;
 template <typename NodeType,
           typename Column = typename DPTable<NodeType>::Column,
           typename score_t = typename DPTable<NodeType>::score_t>
-inline std::vector<ColumnRef<NodeType>>
+inline std::vector<std::pair<NodeType, score_t>>
 get_outgoing_columns(const DeBruijnGraph &graph,
                      DPTable<NodeType> &dp_table,
                      NodeType cur_node,
                      size_t size,
                      size_t best_pos,
                      score_t min_cell_score) {
-    std::vector<ColumnRef<NodeType>> out_columns;
+    std::vector<std::pair<NodeType, score_t>> out_columns;
 
     graph.call_outgoing_kmers(
         cur_node,
@@ -262,10 +259,9 @@ void DefaultColumnExtender<NodeType>
     assert(query.data() + query.size() >= path.get_query_end());
 
 
-    size_t start_index = path.get_query_end() - 1 - query.data();
     const auto *align_start = path.get_query_end();
     size_t size = query.data() + query.size() - align_start + 1;
-    const score_t *match_score_begin = partial_sums_.data() + start_index;
+    const score_t *match_score_begin = partial_sums_.data() + (align_start - 1 - query.data());
 
     assert(config_.match_score(std::string_view(align_start - 1, size))
         == *match_score_begin);
@@ -315,12 +311,12 @@ void DefaultColumnExtender<NodeType>
     AlignedVector<int8_t> char_scores;
     AlignedVector<Cigar::Operator> match_ops;
 
+    typedef BoundedPriorityQueue<ColumnRef,
+                                 std::vector<ColumnRef>,
+                                 utils::LessSecond> ColumnQueue;
+
     // keep track of which columns to use next
-    BoundedPriorityQueue<ColumnRef<NodeType>,
-                         std::vector<ColumnRef<NodeType>>,
-                         utils::LessSecond> columns_to_update(
-        config_.queue_size
-    );
+    ColumnQueue columns_to_update(config_.queue_size);
 
     NodeType start_node = path.back();
     score_t start_score = dp_table.find(start_node)->second.best_score();
@@ -382,6 +378,8 @@ void DefaultColumnExtender<NodeType>
             const auto &op_row = Cigar::get_op_row(next_column.last_char);
             char_scores.resize(end - begin - 1);
             match_ops.resize(end - begin - 1);
+
+            // TODO: do this with SIMD gather operations?
             std::transform(align_start + begin, align_start + end - 1,
                            char_scores.begin(),
                            [&row](char c) { return row[c]; });
@@ -452,11 +450,10 @@ void DefaultColumnExtender<NodeType>
         return;
 
     // check to make sure that start_node stores the best starting point
-    assert(start_score
-        == std::max_element(dp_table.begin(), dp_table.end(),
-                            [](const auto &a, const auto &b) {
-                                return a.second < b.second;
-                            })->second.best_score());
+    assert(start_score == std::max_element(dp_table.begin(), dp_table.end(),
+                                           [](const auto &a, const auto &b) {
+                                               return a.second < b.second;
+                                           })->second.best_score());
 
     if (dp_table.find(start_node)->second.best_op() != Cigar::Operator::MATCH)
         logger->trace("best alignment does not end with a MATCH");
@@ -464,7 +461,7 @@ void DefaultColumnExtender<NodeType>
     // get all alignments
     dp_table.extract_alignments(*graph_,
                                 config_,
-                                std::string_view(align_start, query.data() + query.size() - align_start),
+                                std::string_view(align_start, size - 1),
                                 callback,
                                 orientation,
                                 min_path_score,

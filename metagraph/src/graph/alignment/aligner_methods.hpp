@@ -212,6 +212,7 @@ class DefaultColumnExtender : public Extender<NodeType> {
     virtual void reset() override { dp_table.clear(); }
 
   private:
+    typedef std::pair<NodeType, score_t> ColumnRef;
     const DeBruijnGraph *graph_;
     const DBGAlignerConfig &config_;
 
