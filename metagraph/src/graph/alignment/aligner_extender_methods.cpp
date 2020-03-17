@@ -61,32 +61,6 @@ get_outgoing_columns(const DeBruijnGraph &graph,
     return out_columns;
 }
 
-template <typename ScoreType,
-          typename OpType,
-          typename ScoreRowType,
-          typename OpRowType>
-inline void compute_match_scores(const char *align_begin,
-                                 const char *align_end,
-                                 std::vector<ScoreType> &char_scores,
-                                 std::vector<OpType> &match_ops,
-                                 const ScoreRowType &row,
-                                 const OpRowType &op_row) {
-    static_assert(std::is_same<ScoreType, typename ScoreRowType::value_type>::value);
-    static_assert(std::is_same<OpType, typename OpRowType::value_type>::value);
-    assert(align_end >= align_begin);
-
-    // compute match scores
-    char_scores.resize(align_end - align_begin + 1);
-    match_ops.resize(align_end - align_begin + 1);
-    std::transform(align_begin, align_end,
-                   char_scores.begin() + 1,
-                   [&row](char c) { return row[c]; });
-
-    std::transform(align_begin, align_end,
-                   match_ops.begin() + 1,
-                   [&op_row](char c) { return op_row[c]; });
-}
-
 #ifdef __AVX2__
 
 inline void compute_match_insert_updates_avx2(size_t &i,
@@ -139,7 +113,7 @@ inline void compute_match_insert_updates_avx2(size_t &i,
         _mm256_maskstore_epi32(
             update_ops,
             both_cmp,
-            _mm256_blendv_epi8(_mm256_loadu_si256((__m256i*)match_ops),
+            _mm256_blendv_epi8(_mm256_load_si256((__m256i*)match_ops),
                                ins_packed,
                                _mm256_cmpgt_epi32(insert_scores_packed,
                                                   match_scores_packed))
@@ -176,15 +150,16 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
                                          const NodeType &prev_node,
                                          const score_t *incoming_scores,
                                          const Cigar::Operator *incoming_ops,
-                                         const int8_t *char_scores,
-                                         const Cigar::Operator *match_ops,
+                                         const AlignedVector<int8_t> &char_scores,
+                                         const AlignedVector<Cigar::Operator> &match_ops,
                                          size_t length) {
     static_assert(sizeof(NodeType) == sizeof(long long int));
     static_assert(sizeof(Cigar::Operator) == sizeof(int32_t));
     auto update_prevs_cast = reinterpret_cast<long long int*>(update_prevs);
     auto update_ops_cast = reinterpret_cast<int32_t*>(update_ops);
     auto incoming_ops_cast = reinterpret_cast<const int32_t*>(incoming_ops);
-    auto match_ops_cast = reinterpret_cast<const int32_t*>(match_ops);
+    auto char_scores_data = char_scores.data();
+    auto match_ops_cast = reinterpret_cast<const int32_t*>(match_ops.data());
 
     // handle first element (i.e., no match update possible)
     score_t gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::INSERTION
@@ -198,8 +173,6 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
 
     ++incoming_scores;
     ++incoming_ops_cast;
-    ++char_scores;
-    ++match_ops_cast;
     ++update_scores;
     ++update_prevs_cast;
     ++update_ops_cast;
@@ -221,17 +194,17 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
         update_ops_cast,
         incoming_scores,
         incoming_ops_cast,
-        char_scores,
+        char_scores_data,
         match_ops_cast
     );
 #endif
 
     // handle the residual
     for (; i < length; ++i) {
-        if (*(incoming_scores - 1) + *char_scores > *update_scores) {
+        if (*(incoming_scores - 1) + *char_scores_data > *update_scores) {
             *update_ops_cast = *match_ops_cast;
             *update_prevs_cast = prev_node;
-            *update_scores = *(incoming_scores - 1) + *char_scores;
+            *update_scores = *(incoming_scores - 1) + *char_scores_data;
         }
 
         // TODO: enable check for deletion after insertion?
@@ -246,7 +219,7 @@ inline void compute_match_insert_updates(const DBGAlignerConfig &config,
 
         ++incoming_scores;
         ++incoming_ops_cast;
-        ++char_scores;
+        ++char_scores_data;
         ++match_ops_cast;
         ++update_scores;
         ++update_prevs_cast;
@@ -381,8 +354,8 @@ void DefaultColumnExtender<NodeType>
         return;
 
     // for storage of intermediate values
-    std::vector<int8_t> char_scores;
-    std::vector<Cigar::Operator> match_ops;
+    AlignedVector<int8_t> char_scores;
+    AlignedVector<Cigar::Operator> match_ops;
 
     AlignedVector<score_t> update_scores;
     AlignedVector<Cigar::Operator> update_ops;
@@ -453,26 +426,27 @@ void DefaultColumnExtender<NodeType>
             update_prevs.assign(overall_end - overall_begin, SequenceGraph::npos);
             update_ops.assign(overall_end - overall_begin, Cigar::Operator::CLIPPED);
 
-            compute_match_scores(align_start + overall_begin,
-                                 align_start + overall_end - 1,
-                                 char_scores, match_ops,
-                                 config_.get_row(next_column.last_char),
-                                 Cigar::get_op_row(next_column.last_char));
+            const auto &row = config_.get_row(next_column.last_char);
+            const auto &op_row = Cigar::get_op_row(next_column.last_char);
+            char_scores.resize(end - begin - 1);
+            match_ops.resize(end - begin - 1);
+            std::transform(align_start + begin, align_start + end - 1,
+                           char_scores.begin(),
+                           [&row](char c) { return row[c]; });
+            std::transform(align_start + begin, align_start + end - 1,
+                           match_ops.begin(),
+                           [&op_row](char c) { return op_row[c]; });
 
-            // match and deletion scores
-            compute_match_insert_updates(
-                config_,
-                update_scores.data() + (begin - overall_begin),
-                update_prevs.data() + (begin - overall_begin),
-                update_ops.data() + (begin - overall_begin),
-                next_pair.first,
-                incoming.scores.data() + begin,
-                incoming.ops.data() + begin,
-                char_scores.data() + (begin - overall_begin),
-                match_ops.data() + (begin - overall_begin),
-                end - begin
-            );
-
+            compute_match_insert_updates(config_,
+                                         update_scores.data() + (begin - overall_begin),
+                                         update_prevs.data() + (begin - overall_begin),
+                                         update_ops.data() + (begin - overall_begin),
+                                         next_pair.first,
+                                         incoming.scores.data() + begin,
+                                         incoming.ops.data() + begin,
+                                         char_scores,
+                                         match_ops,
+                                         end - begin);
 
             // compute deletion scores
             score_t delete_score;
