@@ -189,15 +189,16 @@ void write_or_die(std::ofstream *f, const T &v) {
  */
 template <typename T, typename INT>
 uint8_t write_kmer(size_t k,
+                   std::function<INT(const T &v)> to_int,
                    Vector<T> *dummy_kmers,
-                   utils::BufferedAsyncWriter<T> *writer,
+                   common::EliasFanoEncoderBuffered<INT> *encoder,
                    RecentKmers<T> *buffer,
                    common::SortedSetDisk<T, INT> *sorted_dummy_kmers) {
     const Kmer<T> to_write = buffer->pop_front();
     if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
     }
-    writer->push(to_write.kmer);
+    encoder->add(to_int(to_write.kmer));
     using KMER = std::remove_reference_t<decltype(utils::get_first(to_write.kmer))>;
     using TAlphabet = typename KMER::CharType;
 
@@ -227,6 +228,12 @@ static std::pair<INT, C> to_int(std::pair<T, C> v, INT __attribute__((unused))) 
     return { v.first.data(), v.second };
 }
 
+template <typename T, typename int_type>
+std::function<void(const T &v)>
+compressed_writer(common::EliasFanoEncoderBuffered<int_type> *encoder,
+                  std::function<int_type(const T &v)> to_int) {
+    return [encoder, to_int](const T &v) { encoder->add(to_int(v)); };
+};
 
 /**
  * Specialization of recover_dummy_nodes for a disk-based container, such as
@@ -253,30 +260,21 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     const auto no_cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
 
-    const auto file_writer
-            = [](std::ofstream &f) { return [&f](const T &v) { write_or_die<T>(&f, v); }; };
-
-    std::vector<std::pair<std::string, std::ofstream>> files_to_merge;
-    auto create_stream = [](const std::string &filename) {
-        std::ofstream f(filename, std::ios::out | std::ios::binary);
-        return std::make_pair(filename, std::move(f));
-    };
+    std::vector<std::string> files_to_merge;
 
     const std::string file_name = tmp_dir / "original_and_dummy_l1";
-    files_to_merge.push_back(create_stream(file_name));
+    files_to_merge.push_back(file_name);
     size_t k = kmer_collector.get_k() - 1;
-    files_to_merge.reserve(k + 1); // avoid re-allocations as we keep refs to elements
-    std::ofstream *dummy_l1 = &files_to_merge.back().second;
+    files_to_merge.reserve(k + 1);
 
     RecentKmers<T> recent_buffer((1llu << KMER::kBitsPerChar) * (1llu << KMER::kBitsPerChar));
 
-    const std::string file_name_l2 = get_file_name(2);
-    files_to_merge.push_back(create_stream(file_name_l2));
+    files_to_merge.push_back(get_file_name(2));
 
     const filesystem::path tmp_path2 = tmp_dir / "dummy_source2";
 
-    T kmer = *(kmers->begin());
-    using int_type = decltype(to_int((kmer), utils::get_first(kmer).data()));
+    T kmer;
+    using int_type = decltype(to_int(kmer, utils::get_first(kmer).data()));
     std::function<int_type(const T &v)> to_intf
             = [](const T &v) { return to_int(v, utils::get_first(v).data()); };
     // this will contain dummy k-mers of prefix length 2
@@ -291,23 +289,22 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
-    // asynchronously writes a value of type T to a file stream
-    utils::BufferedAsyncWriter<T> writer(file_name, dummy_l1);
+    common::EliasFanoEncoderBuffered<int_type> original_and_l1(file_name, 1000);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
         recent_buffer.push_back({ el, false });
         remove_redundant_dummy_source<T, KMER>(utils::get_first(el), &recent_buffer);
         if (recent_buffer.full()) {
-            num_dummy_parent_kmers += write_kmer(k, &dummy_kmers, &writer, &recent_buffer,
-                                                 &sorted_dummy_kmers);
+            num_dummy_parent_kmers += write_kmer(k, to_intf, &dummy_kmers, &original_and_l1,
+                                                 &recent_buffer, &sorted_dummy_kmers);
         }
     }
     while (!recent_buffer.empty()) { // empty the buffer
-        num_dummy_parent_kmers += write_kmer(k, &dummy_kmers, &writer, &recent_buffer,
-                                             &sorted_dummy_kmers);
+        num_dummy_parent_kmers += write_kmer(k, to_intf, &dummy_kmers, &original_and_l1,
+                                             &recent_buffer, &sorted_dummy_kmers);
     }
-    writer.flush();
+    original_and_l1.finish();
     // push out the leftover dummy kmers
     sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
 
@@ -320,8 +317,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         const filesystem::path tmp_path
                 = tmp_dir / ("dummy_source" + std::to_string(dummy_pref_len));
         const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
-        common::ChunkedWaitQueue<T> source(10000, 1,
-                                           file_writer(files_to_merge.back().second));
+        common::EliasFanoEncoderBuffered<int_type> encoder(files_to_merge.back(), 1000);
+        common::ChunkedWaitQueue<T> source(10000, 1, compressed_writer(&encoder, to_intf));
         async_merge.enqueue([&chunk_files, &source]() {
             std::function<void(const T &)> on_new_item
                     = [&source](const T &v) { source.push(v); };
@@ -345,18 +342,18 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                       dummy_pref_len - 1, num_kmers);
-        files_to_merge.push_back(create_stream(get_file_name(dummy_pref_len)));
+        files_to_merge.push_back(get_file_name(dummy_pref_len));
     }
     uint32_t num_kmers = 0;
     // iterate to merge the data and write it to disk
     const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
-    common::ChunkedWaitQueue<T> source(10000, 1,
-                                       file_writer(files_to_merge.back().second));
+    common::EliasFanoEncoderBuffered<int_type> encoder(files_to_merge.back(), 1000);
+    common::ChunkedWaitQueue<T> source(10000, 1, compressed_writer(&encoder, to_intf));
     async_merge.enqueue([&chunk_files, &source]() {
-      std::function<void(const T &)> on_new_item
-              = [&source](const T &v) { source.push(v); };
-      common::merge_files<T, int_type>(chunk_files, on_new_item);
-      source.shutdown();
+        std::function<void(const T &)> on_new_item
+                = [&source](const T &v) { source.push(v); };
+        common::merge_files<T, int_type>(chunk_files, on_new_item);
+        source.shutdown();
     });
     for (auto &it = source.begin(); it != source.end(); ++it, ++num_kmers) {
     }
@@ -364,17 +361,13 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
-    std::vector<std::string> file_names;
-    std::for_each(files_to_merge.begin(), files_to_merge.end(), [&file_names](auto &el) {
-        el.second.flush();
-        file_names.push_back(el.first);
-    });
-
     kmers->reset();
     async_worker.enqueue([=]() {
-        std::function<void(const T &)> on_new_item
-                = [&kmers](const T &v) { kmers->push(v); };
-        common::merge_files<T, int_type>(file_names, on_new_item);
+        std::function<void(const T &)> on_new_item = [&kmers, k](const T &v) {
+            std::cout << utils::get_first(v).to_string(k, "$ACGTDEFH") << std::endl;
+            kmers->push(v);
+        };
+        common::merge_files<T, int_type>(files_to_merge, on_new_item);
         kmers->shutdown();
     });
 }
