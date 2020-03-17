@@ -19,7 +19,7 @@ class BRWT : public BinaryMatrix {
     typedef uint32_t Child;
 
   public:
-    BRWT() : nonzero_rows_(new bit_vector_small()) {}
+    BRWT() : nonzero_rows_(new bit_vector_smallrank()) {}
 
     BRWT(const BRWT &other) = delete;
     BRWT& operator=(const BRWT &other) = delete;

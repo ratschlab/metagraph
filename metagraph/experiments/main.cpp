@@ -413,6 +413,8 @@ int main(int argc, char *argv[]) {
                 "rrr63",
                 "rrr127",
                 "rrr255",
+                "rank",
+                "smallrank",
                 "dyn",
             };
             ValuesConstraint<std::string> vector_type_constraint(vector_types);
@@ -460,9 +462,9 @@ int main(int argc, char *argv[]) {
                                                      density_arg.getValue(),
                                                      "rrr31");
             } else if (vector_type == "rrr63") {
-                test_vector_points<bit_vector_rrr<>>(length_arg.getValue(),
+                test_vector_points<bit_vector_rrr<63>>(length_arg.getValue(),
                                                      density_arg.getValue(),
-                                                     "rrr");
+                                                     "rrr63");
             } else if (vector_type == "rrr127") {
                 test_vector_points<bit_vector_rrr<127>>(length_arg.getValue(),
                                                      density_arg.getValue(),
@@ -471,6 +473,14 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_rrr<255>>(length_arg.getValue(),
                                                      density_arg.getValue(),
                                                      "rrr255");
+            } else if (vector_type == "rank") {
+                test_vector_points<bit_vector_rank>(length_arg.getValue(),
+                                                    density_arg.getValue(),
+                                                    "rank");
+            } else if (vector_type == "smallrank") {
+                test_vector_points<bit_vector_smallrank>(length_arg.getValue(),
+                                                         density_arg.getValue(),
+                                                         "smallrank");
             } else if (vector_type == "dyn") {
                 test_vector_points<bit_vector_dyn>(length_arg.getValue(),
                                                    density_arg.getValue(),

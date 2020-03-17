@@ -209,12 +209,11 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 
     try {
         vector_.load(in);
-        if (!in.good())
-            return false;
-        rk1_ = decltype(rk1_)(&vector_);
-        slct1_ = decltype(slct1_)(&vector_);
-        slct0_ = decltype(slct0_)(&vector_);
-        return true;
+        rk1_.load(in, &vector_);
+        slct1_.load(in, &vector_);
+        slct0_.load(in, &vector_);
+        return in.good();
+
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load "
                   << typeid(bv_type).name() << std::endl;
@@ -229,6 +228,9 @@ void
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::serialize(std::ostream &out) const {
     vector_.serialize(out);
+    rk1_.serialize(out);
+    slct1_.serialize(out);
+    slct0_.serialize(out);
 
     if (!out.good())
         throw std::ofstream::failure("Error when dumping bit_vector_rrr");
@@ -238,6 +240,9 @@ template <class bv_type, class rank_1_type, class select_1_type, class select_0_
 sdsl::bit_vector
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::to_vector() const {
+    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+        return vector_;
+    }
     return ::copy_to_bit_vector(*this, bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR);
 }
 
@@ -259,6 +264,11 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::add_to(sdsl::bit_vector *other) const {
     assert(other);
     assert(other->size() == size());
+
+    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+        *other |= vector_;
+        return;
+    }
 
     ::add_to(*this, other,
              bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR);
@@ -331,6 +341,27 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     }
 };
 
+template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
+template<uint8_t t_width>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
+::bv_traits<sdsl::int_vector<t_width>> {
+    static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
+    static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
+
+    static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
+        return size;
+    }
+};
+
+template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
+template<uint8_t t_b, uint8_t t_pat_len>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
+::bv_traits<sdsl::rank_support_v5<t_b, t_pat_len>> {
+    static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
+        return size * 0.062;
+    }
+};
+
 
 template <uint32_t k_sblock_rate = 16>
 using bit_vector_hyb
@@ -352,5 +383,11 @@ using bit_vector_rrr
                       typename sdsl::rrr_vector<block_size>::rank_1_type,
                       typename sdsl::rrr_vector<block_size>::select_1_type,
                       typename sdsl::rrr_vector<block_size>::select_0_type>;
+
+using bit_vector_rank
+    = bit_vector_sdsl<sdsl::bit_vector,
+                      sdsl::rank_support_v5<1>,
+                      sdsl::select_support_scan<1>,
+                      sdsl::select_support_scan<0>>;
 
 #endif // __BIT_VECTOR_SDSL_HPP__

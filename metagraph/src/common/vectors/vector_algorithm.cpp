@@ -249,6 +249,8 @@ bool is_sparser(const bit_vector &bv,
                 return density < threshold_sd;
             case bit_vector_adaptive::RRR_VECTOR:
                 return density < threshold_rrr;
+            case bit_vector_adaptive::RANK_VECTOR:
+                return density < threshold_stat;
         }
     }
 
@@ -257,6 +259,12 @@ bool is_sparser(const bit_vector &bv,
 
     if (dynamic_cast<const bit_vector_sd *>(&bv))
         return density < threshold_sd;
+
+    if (dynamic_cast<const bit_vector_rrr<> *>(&bv))
+        return density < threshold_rrr;
+
+    if (dynamic_cast<const bit_vector_rank *>(&bv))
+        return density < threshold_stat;
 
     return density < threshold_other;
 }
