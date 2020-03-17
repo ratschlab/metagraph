@@ -195,7 +195,9 @@ uint8_t write_kmer(size_t k,
                    RecentKmers<T> *buffer,
                    common::SortedSetDisk<T, INT> *sorted_dummy_kmers) {
     const Kmer<T> to_write = buffer->pop_front();
+    std::cout << utils::get_first(to_write.kmer).to_string(k, "$ACGT") << "\n";
     if (to_write.is_removed) { // redundant dummy k-mer
+        std::cout << " removed\n";
         return 0;
     }
     encoder->add(to_int(to_write.kmer));
@@ -363,11 +365,13 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([=]() {
+        std::cout << "Final merge: ";
         std::function<void(const T &)> on_new_item = [&kmers, k](const T &v) {
-            std::cout << utils::get_first(v).to_string(k, "$ACGTDEFH") << std::endl;
+            std::cout << utils::get_first(v).to_string(k, "$ACGT") << " ";
             kmers->push(v);
         };
         common::merge_files<T, int_type>(files_to_merge, on_new_item);
+        std::cout << "done!\n";
         kmers->shutdown();
     });
 }

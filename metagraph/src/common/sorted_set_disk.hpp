@@ -106,8 +106,12 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
     virtual void start_merging() override {
         const std::vector<std::string> file_names = this->get_file_names();
         this->async_worker_.enqueue([file_names, this]() {
+          std::cout << "Merging: ";
           std::function<void(const value_type &)> on_new_item
-                  = [this](const value_type &v) { this->merge_queue_.push(v); };
+                  = [this](const value_type &v) {
+                    std::cout << utils::get_first(v).to_string(2, "$ACGT") << " ";
+                    this->merge_queue_.push(v); };
+          std::cout << std::endl;
           merge_files<T, INT>(file_names, on_new_item);
           this->merge_queue_.shutdown();
         });

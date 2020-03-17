@@ -285,4 +285,20 @@ TYPED_TEST(EliasFanoBufferedTest, InsertTwoChunks) {
     EXPECT_FALSE(decoder.next().has_value());
 }
 
+TYPED_TEST(EliasFanoBufferedTest, InsertManyChunks) {
+  utils::TempFile file;
+  common::EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 10);
+  for (uint32_t i = 0; i<75;++i) {
+    under_test.add(2*i);
+  }
+  under_test.finish();
+  common::EliasFanoDecoder<TypeParam> decoder(file.name());
+  for (uint32_t i = 0; i<75;++i) {
+    std::optional<TypeParam> decoded = decoder.next();
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(2*i, decoded.value());
+  }
+  EXPECT_FALSE(decoder.next().has_value());
+}
+
 } // namespace

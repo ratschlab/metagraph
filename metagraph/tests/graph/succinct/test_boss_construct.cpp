@@ -140,8 +140,8 @@ TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
     common::logger->set_level(spdlog::level::trace);
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
+    for (auto container : { kmer::ContainerType::VECTOR_DISK }) { //TODO: undo change
+        for (size_t k = 2; k < 3; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
                 "ATATTATAAAAAATTTTAAAAAA",
