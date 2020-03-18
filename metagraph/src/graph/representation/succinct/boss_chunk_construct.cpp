@@ -280,21 +280,28 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     std::function<int_type(const T &v)> to_intf
             = [](const T &v) { return to_int(v, utils::get_first(v).data()); };
     // this will contain dummy k-mers of prefix length 2
+    common::EliasFanoEncoderBuffered<int_type> dummy_l2(files_to_merge.back(), 1000);
     common::SortedSetDisk<T, int_type> sorted_dummy_kmers(
             no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
             tmp_path2, kmer_collector.max_disk_space(), [](const T &) {}, 100, to_intf);
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
-    // remove redundant dummy source k-mers of prefix length 1 and write them to a file
+    // traverse the input kmers and remove redundant dummy source k-mers of prefix length 1
     // While traversing and removing redundant dummy source k-mers of prefix length 1,
     // we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
+    // contains original kmers and non-redundant source dummy k-mers with prefix length 1
     common::EliasFanoEncoderBuffered<int_type> original_and_l1(file_name, 1000);
+    std::cout << "Traversing original";
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
+        if constexpr (sizeof(typename KMER::WordType) == 8) {
+            std::cout << utils::get_first(el).to_string(k + 1, "$ACGT") << " "
+                      << int64_t(utils::get_first(el).data()) << ", ";
+        }
         recent_buffer.push_back({ el, false });
         remove_redundant_dummy_source<T, KMER>(utils::get_first(el), &recent_buffer);
         if (recent_buffer.full()) {
@@ -302,6 +309,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                                  &recent_buffer, &sorted_dummy_kmers);
         }
     }
+    std::cout << std::endl;
     while (!recent_buffer.empty()) { // empty the buffer
         num_dummy_parent_kmers += write_kmer(k, to_intf, &dummy_kmers, &original_and_l1,
                                              &recent_buffer, &sorted_dummy_kmers);
@@ -341,7 +349,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         }
         // push out the leftover dummy kmers
         sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
-
+        encoder.finish();
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                       dummy_pref_len - 1, num_kmers);
         files_to_merge.push_back(get_file_name(dummy_pref_len));
@@ -359,6 +367,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     });
     for (auto &it = source.begin(); it != source.end(); ++it, ++num_kmers) {
     }
+    encoder.finish();
     logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}", k, num_kmers);
 
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix

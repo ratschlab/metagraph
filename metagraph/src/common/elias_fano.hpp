@@ -524,7 +524,7 @@ class EliasFanoDecoder<std::pair<T, C>> {
 /**
  * Template specialization for 128 bit integers that simply writes the integers to file uncompressed.
  * TODO(dd): separate the 128 bit integer into 2 64 bit ones and compress in chunks,
- * taking care that in each cunk the lower 64 bits are in increasing order.
+ * taking care that in each chunk the lower 64 bits are in increasing order.
  */
 template <>
 class EliasFanoEncoder<sdsl::uint128_t> {
@@ -686,7 +686,7 @@ class EliasFanoDecoder<sdsl::uint256_t> {
 
 /**
  * Specialization of #EliasFanoEncoder that can encode sequences of unknown size. It uses
- * a buffer to acummulate data and then dumps it in chunks to an EliasFanoEncoder.
+ * a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
  */
 template <typename T>
 class EliasFanoEncoderBuffered {
@@ -732,7 +732,7 @@ class EliasFanoEncoderBuffered {
 
 /**
  * Specialization of #EliasFanoEncoder that can encode sequences of pairs of unknown size.
- * It uses a buffer to acummulate data and then dumps it in chunks to an EliasFanoEncoder.
+ * It uses a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
  */
 template <typename T, typename C>
 class EliasFanoEncoderBuffered<std::pair<T, C>> {
@@ -741,6 +741,8 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
         : file_name_(file_name) {
         std::ofstream ofs(file_name, std::ofstream::out | std::ofstream::trunc);
         ofs.close();
+        std::ofstream ofsc(file_name + ".count", std::ofstream::out | std::ofstream::trunc);
+        ofsc.close();
         buffer_.reserve(buffer_size);
     }
 
