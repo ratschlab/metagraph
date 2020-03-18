@@ -315,6 +315,8 @@ class EliasFanoEncoderBuffered {
  * Specialization of #EliasFanoEncoder that can encode sequences of pairs of unknown size.
  * It uses a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
  */
+ //TODO: Pack the C count, by passing max count the constructor and then dump it to
+ // sdsl::int_vector_buffer with width = hi(max)+1
 template <typename T, typename C>
 class EliasFanoEncoderBuffered<std::pair<T, C>> {
   public:
