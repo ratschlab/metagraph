@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <filesystem>
 
 #include <sdsl/uint128_t.hpp>
 
@@ -73,7 +74,7 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       const std::string &out_filename,
                                       bool is_append)
     : declared_size_(size) {
-    std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::beg;
+    std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
     sink_ = std::ofstream(out_filename, std::ios::binary | open_flag);
     if (!sink_.good()) {
         std::cerr << "Unable to write to " << out_filename << std::endl;
@@ -298,7 +299,7 @@ EliasFanoEncoder<std::pair<T, C>>::EliasFanoEncoder(size_t size,
                                                     bool is_append)
     : ef_encoder(size, last_value.first, sink_name),
       sink_second_name_(sink_name + ".count") {
-    std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::beg;
+    std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
     sink_second_ = std::ofstream(sink_second_name_, std::ios::binary | open_flag);
 }
 
@@ -357,7 +358,7 @@ class EliasFanoEncoder<sdsl::uint128_t> {
                      sdsl::uint128_t,
                      const std::string &sink_name,
                      bool is_append = false) {
-        std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::beg;
+        std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
         sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
         if (!sink_.good()) {
             std::cerr << "Unable to write to " << sink_name << std::endl;
@@ -400,7 +401,7 @@ class EliasFanoEncoder<sdsl::uint256_t> {
                      sdsl::uint256_t,
                      const std::string &sink_name,
                      bool is_append = false) {
-        std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::beg;
+        std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
         // open file for appending, as we may encode multiple compressed chunks in the same file
         sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
         if (!sink_.good()) {
