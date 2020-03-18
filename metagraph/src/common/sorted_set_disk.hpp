@@ -107,9 +107,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
         this->async_worker_.enqueue([file_names, this]() {
           std::cout << "Merging: ";
           std::function<void(const value_type &)> on_new_item
-                  = [this](const value_type &v) {
-                    std::cout << utils::get_first(v).to_string(2, "$ACGT") << " ";
-                    this->merge_queue_.push(v); };
+                  = [this](const value_type &v) { this->merge_queue_.push(v); };
           merge_files<T, INT>(file_names, on_new_item);
           std::cout << std::endl;
           this->merge_queue_.shutdown();
@@ -127,8 +125,6 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
 
         std::string file_name
                 = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
-        std::filesystem::remove(file_name);
-        std::filesystem::remove(file_name + ".count"); // TODO: do this in the encoder
 
         EliasFanoEncoder<INT> encoder(this->data_.size(), to_int_(this->data_.back()),
                                       file_name);
@@ -170,7 +166,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
                          std::atomic<uint32_t> *l1_chunk_count,
                          std::atomic<size_t> *total_size,
                          std::function<INT(const T &v)> to_int) {
-        const std::string &merged_l1_file_name
+        const std::string merged_l1_file_name
                 = SortedSetDiskBase<T, INT>::merged_l1_name(chunk_file_prefix,
                                                             chunk_count / MERGE_L1_COUNT);
         std::vector<std::string> to_merge(MERGE_L1_COUNT);
@@ -202,6 +198,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
         EliasFanoEncoderBuffered<INT> encoder(out_file, 1000);
         merge_files<T, INT>(to_merge,
                             [&encoder, to_int](const T &v) { encoder.add(to_int(v)); });
+        encoder.finish();
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
     }
