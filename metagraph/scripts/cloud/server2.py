@@ -8,6 +8,9 @@ import http.server
 import json
 import logging
 import os
+import socket
+import subprocess
+import time
 import urllib
 import urllib.parse
 
@@ -36,12 +39,31 @@ preempted_ids = set()
 # set to true when all download ids were read
 download_done = False
 
+start_time = time.time()
+op_time_ms = {}  # time spent for each operation, e.g. download, build, clean, transfer
+total_download_size_MB = 0  # total MB of downloaded (and decompressed) data
+total_build_size_MB = 0  # total MB of built data (excludes downloaded data that wasn't yet built)
+total_clean_size_MB = 0  # total MB of cleaned data
+total_transfer_size_MB = 0  # total MB of transferred data
+sra_to_size = {}  # maps from an SRA id to its size
+
 status_str = f"""
 <html>
 <head>
 <title>Status of metagraph server</title>
 </head>
 <body>
+<h3> Progress </h3>
+<p>Uptime: %s</p>
+<p>MB downloaded: %s</p>
+<p>Download Time: %s (%s MB/s/machine)</p>
+<p>MB built: %s</p>
+<p>Build Time: %s (%s MB/s/machine)</p>
+<p>MB Cleaned: %s</p>
+<p>Clean Time: %s (%s MB/s/clean)</p>
+<p>MB transferred: %s</p>
+<p>Transfer Time: %s (%s MB/s/machine)</p>
+<p>Overall processing speed (for all instances): %s MB/s</p>
 <h3> Pending jobs </h3>
 <p>Pending downloads: %s</p>
 <p>Pending build: %s</p>
@@ -52,10 +74,10 @@ status_str = f"""
 <p>%s</p>
 
 <h3> Jobs completed </h3>
-<p>Completed downloads: %s </p>
-<p>Completed build: %s</p>
-<p>Completed clean: %s</p>
-<p>Completed transfer: %s</p>
+<p>Completed downloads: %s (%s) </p>
+<p>Completed build: %s (%s)</p>
+<p>Completed clean: %s (%s)</p>
+<p>Completed transfer: %s (%s)</p>
 
 <h3> Download status </h3>
 Download done: %s
@@ -65,11 +87,35 @@ Download done: %s
 """
 
 
+def internal_ip():
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except socket.gaierror:
+        return '127.0.0.1'  # this usually happens on dev laptops; cloud machines work fine
+
+
+def publish_ip():
+    with open('/tmp/server', 'w') as fp:
+        fp.write(f'{internal_ip()}:{args.port}')
+    if subprocess.call(['gsutil', 'cp', '/tmp/server', 'gs://metagraph7/server'], stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE) != 0:
+        logging.error("Cannot publish server ip/port on Google Cloud Storage. Sorry, I tried.")
+        exit(1)
+
+
 def get_var(post_vars, var):
     var_list = post_vars.get(var.encode('ascii'))
     if not var_list:
         return None
     return var_list[0].decode('utf-8')
+
+
+def millis_to_human(time_ms):
+    seconds = int(time_ms) % 60
+    minutes = int((time_ms / 60)) % 60
+    hours = int((time_ms / (60 * 60))) % 24
+    days = int((time_ms / (60 * 60 * 24)))
+    return f'{days}d {hours}:{minutes}:{seconds}'
 
 
 class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -103,9 +149,23 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_reply(200, json.dumps(response), {'Content-type': 'application/json'})
 
     def handle_get_status(self):
+        global start_time
+        uptime = millis_to_human(time.time() - start_time)
+        download_time = millis_to_human(op_time_ms.get('download', 0))
+        download_MBps = round(total_download_size_MB / op_time_ms.get('download', 1), 2)
+        build_time = millis_to_human(op_time_ms.get('build', 0))
+        build_MBps = round(total_build_size_MB / op_time_ms.get('build', 1), 2)
+        clean_MBps = round(total_clean_size_MB / op_time_ms.get('clean', 1), 2)
+        transfer_MBps = round(total_transfer_size_MB / op_time_ms.get('transfer', 1), 2)
+        clean_time = millis_to_human(op_time_ms.get('clean', 0))
+        transfer_time = millis_to_human(op_time_ms.get('transfer', 0))
+        total_MBps = round(total_transfer_size_MB / (time.time() - start_time), 2)
         self.send_reply(200, status_str % (
-            pending_downloads, pending_builds, pending_cleans, pending_transfers, preempted_ids, downloaded_sras,
-            built_sras, cleaned_sras, transferred_sras, download_done),
+            uptime, round(total_download_size_MB, 2), download_time, download_MBps, total_build_size_MB, build_time,
+            build_MBps, round(total_clean_size_MB, 2), clean_time, clean_MBps, round(total_transfer_size_MB, 2),
+            transfer_time, transfer_MBps, total_MBps, pending_downloads, pending_builds, pending_cleans,
+            pending_transfers, preempted_ids, len(downloaded_sras), downloaded_sras, len(built_sras), built_sras,
+            len(cleaned_sras), cleaned_sras, len(transferred_sras), transferred_sras, download_done),
                         {'Content-type': 'text/html'})
 
     def handle_ack(self, operation, post_vars, add_sets, pending_operations):
@@ -113,6 +173,7 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         if None in (sra_id,):
             self.send_reply(400, 'id not specified')
             return False
+        op_time_ms[operation] = op_time_ms.get(operation, 0) + int(get_var(post_vars, 'time'))
         filename = os.path.join(args.output_dir, f'succeed_{operation}.id')
         with open(filename, 'a') as fp:
             fp.write(f'{sra_id}\n')
@@ -140,20 +201,44 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             logging.warning(f'Acknowledging nonexistent pending {operation} {sra_id}')
 
     def handle_ack_download(self, post_vars):
-        self.handle_ack('download', post_vars, [downloaded_sras, pending_builds], pending_downloads)
+        if self.handle_ack('download', post_vars, [downloaded_sras, pending_builds], pending_downloads):
+            global total_download_size_MB, sra_to_size
+            size_MB = float(get_var(post_vars, 'size_mb'))
+            total_download_size_MB += size_MB
+            sra_to_size[get_var(post_vars, 'id')] = size_MB
 
     def handle_ack_build(self, post_vars):
-        self.handle_ack('build', post_vars, [built_sras, pending_cleans], pending_builds)
+        if self.handle_ack('build', post_vars, [built_sras, pending_cleans], pending_builds):
+            global total_build_size_MB, sra_to_size
+            sra_id = get_var(post_vars, 'id')
+            if sra_id in sra_to_size:
+                total_build_size_MB += sra_to_size[sra_id]
+            else:
+                logging.warning(f'Sra {sra_id} was built but it\'s size can\'t be found. Server restart?')
 
     def handle_ack_clean(self, post_vars):
         if self.handle_ack('clean', post_vars, [cleaned_sras, pending_transfers], pending_cleans):
             # a transfer is automatically started after a clean operation by the client
             pending_transfers.add(get_var(post_vars, 'id'))
+            global total_clean_size_MB, sra_to_size
+            sra_id = get_var(post_vars, 'id')
+            if sra_id in sra_to_size:
+                total_clean_size_MB += sra_to_size[sra_id]
+            else:
+                logging.warning(f'Sra {sra_id} was cleaned but it\'s size can\'t be found. Server restart?')
 
     def handle_ack_transfer(self, post_vars):
         self.handle_ack('transfer', post_vars, [transferred_sras], pending_transfers)
         sra_id = get_var(post_vars, 'id')
-        del pending_jobs[sra_id]
+        if sra_id in pending_jobs:
+            del pending_jobs[sra_id]
+            global total_transfer_size_MB, sra_to_size
+            if sra_id in sra_to_size:
+                total_transfer_size_MB += sra_to_size[sra_id]
+            else:
+                logging.warning(f'Sra {sra_id} was transferred but it\'s size can\'t be found. Server restart?')
+        else:
+            logging.warning(f'Cannot ack transfer of {sra_id}. Job was not pending. Server restart?')
 
     def handle_nack_download(self, post_vars):
         self.handle_nack('download', post_vars, pending_downloads)
@@ -295,10 +380,19 @@ def init_logging():
         except OSError as exc:  # Guard against race condition
             if exc.errno != errno.EEXIST:
                 raise
-    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
-    file_handler = logging.FileHandler("{0}/{1}.log".format(args.output_dir, 'server'))
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
+    file_handler = logging.FileHandler(f'{args.output_dir}/server.log')
     file_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s %(message)s')
+    file_handler.setFormatter(formatter)
     logging.getLogger().addHandler(file_handler)
+
+
+def check_env():
+    """ Make sure all the necessary software is in place to successfully run the serer """
+    if subprocess.call(['./prereq.sh']) != 0:
+        logging.error("Some prerequisites are missing on this machine. Bailing out.")
+        exit(1)
 
 
 def parse_args():
@@ -324,11 +418,12 @@ def parse_args():
 
 if __name__ == '__main__':
     parse_args()
-
     init_logging()
-
+    check_env()
     init_state()
-
+    logging.info(f'Starting server on port {args.port}...')
     httpd = http.server.HTTPServer(('', args.port), SimpleHTTPRequestHandler)
-    logging.info(f'Starting server on port {args.port}')
+    logging.info(f'Publishing server address {internal_ip()}:{args.port}...')
+    publish_ip()
+
     httpd.serve_forever()
