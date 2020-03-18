@@ -60,6 +60,7 @@ inline void store_unaligned(void *p, T value) {
     new (p) Unaligned<T>(value);
 }
 
+// ------------ EliasFanoEncoder ----------------
 template <typename T>
 EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       T max_value,
@@ -177,6 +178,26 @@ void EliasFanoEncoder<T>::write_bits(uint8_t *data, size_t pos, uint64_t value) 
 
 
 // --------- EliasFanoDecoder ---------------
+
+template <typename T>
+EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name) {
+    if (std::filesystem::file_size(source_name) == 0) {
+        position_ = size_ = 0;
+        all_read_ = true;
+        return;
+    }
+    source_ = std::ifstream(source_name, std::ios::binary);
+    // profiling indicates that setting a larger buffer slightly increases performance
+    source_.rdbuf()->pubsetbuf(buffer_, 1024 * 1024);
+    if (!source_.good()) {
+        std::cerr << "Unable to read from " << source_name << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    source_.seekg(0, source_.end);
+    file_end_ = source_.tellg();
+    source_.seekg(0, source_.beg);
+    init();
+}
 
 template <typename T>
 T EliasFanoDecoder<T>::next_upper() {
