@@ -344,163 +344,94 @@ std::optional<std::pair<T, C>> EliasFanoDecoder<std::pair<T, C>>::next() {
     return std::make_pair(first.value(), second);
 }
 
-/**
- * Template specialization for 128 bit integers that simply writes the integers to file uncompressed.
- * TODO(dd): separate the 128 bit integer into 2 64 bit ones and compress in chunks,
- * taking care that in each chunk the lower 64 bits are in increasing order.
- */
-template <>
-class EliasFanoEncoder<sdsl::uint128_t> {
-  public:
-    EliasFanoEncoder() : EliasFanoEncoder<sdsl::uint128_t>(0, sdsl::uint128_t(0), "") {}
-
-    /**
-     * Constructs an Elias-Fano encoder of an array with the given size and given max
-     * value. The encoded output is written to #sink.
-     */
-    EliasFanoEncoder(size_t,
-                     sdsl::uint128_t,
-                     const std::string &sink_name,
-                     bool is_append = false) {
-        std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
-        sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
-        if (!sink_.good()) {
-            std::cerr << "Unable to write to " << sink_name << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
+// -------- EliasFandEncoder<sdsl::uint128_t> --------------
+EliasFanoEncoder<sdsl::uint128_t>::EliasFanoEncoder(size_t,
+                                                    sdsl::uint128_t,
+                                                    const std::string &sink_name,
+                                                    bool is_append) {
+    std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
+    // open file for appending, as we may encode multiple compressed chunks in the same file
+    sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
+    if (!sink_.good()) {
+        std::cerr << "Unable to write to " << sink_name << std::endl;
+        std::exit(EXIT_FAILURE);
     }
+}
 
-    void add(const sdsl::uint128_t &value) {
-        sink_.write(reinterpret_cast<const char *>(&value), sizeof(sdsl::uint128_t));
-        total_size_ += sizeof(sdsl::uint128_t);
-        size_++;
+void EliasFanoEncoder<sdsl::uint128_t>::add(const sdsl::uint128_t &value) {
+    sink_.write(reinterpret_cast<const char *>(&value), sizeof(sdsl::uint128_t));
+    total_size_ += sizeof(sdsl::uint128_t);
+    size_++;
+}
+
+size_t EliasFanoEncoder<sdsl::uint128_t>::finish() {
+    sink_.close();
+    return total_size_;
+}
+
+// -------- EliasFandEncoder<sdsl::uint256_t> --------------
+EliasFanoEncoder<sdsl::uint256_t>::EliasFanoEncoder(size_t,
+                                                    sdsl::uint256_t,
+                                                    const std::string &sink_name,
+                                                    bool is_append) {
+    std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
+    // open file for appending, as we may encode multiple compressed chunks in the same file
+    sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
+    if (!sink_.good()) {
+        std::cerr << "Unable to write to " << sink_name << std::endl;
+        std::exit(EXIT_FAILURE);
     }
+}
 
-    size_t finish() {
-        sink_.close();
-        return total_size_;
+void EliasFanoEncoder<sdsl::uint256_t>::add(const sdsl::uint256_t &value) {
+    sink_.write(reinterpret_cast<const char *>(&value), sizeof(sdsl::uint256_t));
+    total_size_ += sizeof(sdsl::uint256_t);
+    size_++;
+}
+
+size_t EliasFanoEncoder<sdsl::uint256_t>::finish() {
+    sink_.close();
+    return total_size_;
+}
+
+
+/** Creates a decoder that retrieves data from the given source */
+EliasFanoDecoder<sdsl::uint128_t>::EliasFanoDecoder(const std::string &source_name) {
+    source_ = std::ifstream(source_name, std::ios::binary);
+    if (!source_.good()) {
+        std::cerr << "Unable to read from " << source_name << std::endl;
+        std::exit(EXIT_FAILURE);
     }
+}
 
-  private:
-    /**
-     * Sink to write the encoded values to.
-     */
-    std::ofstream sink_;
-
-    size_t total_size_ = 0;
-
-    size_t size_ = 0;
-};
-
-/**
- * Template specialization for 256 bit integers that simply writes the integers to file uncompressed.
- */
-template <>
-class EliasFanoEncoder<sdsl::uint256_t> {
-  public:
-    EliasFanoEncoder() : EliasFanoEncoder<sdsl::uint256_t>(0, sdsl::uint256_t(0), "") {}
-    /**
-     * Constructs an Elias-Fano encoder of an array with the given size and given max
-     * value. The encoded output is written to #sink.
-     */
-    EliasFanoEncoder(size_t,
-                     sdsl::uint256_t,
-                     const std::string &sink_name,
-                     bool is_append = false) {
-        std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
-        // open file for appending, as we may encode multiple compressed chunks in the same file
-        sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
-        if (!sink_.good()) {
-            std::cerr << "Unable to write to " << sink_name << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
+std::optional<sdsl::uint128_t> EliasFanoDecoder<sdsl::uint128_t>::next() {
+    sdsl::uint128_t result;
+    if (source_.read(reinterpret_cast<char *>(&result), sizeof(sdsl::uint128_t))) {
+        return result;
     }
+    return {};
+}
 
-    void add(const sdsl::uint256_t &value) {
-        sink_.write(reinterpret_cast<const char *>(&value), sizeof(sdsl::uint256_t));
-        total_size_ += sizeof(sdsl::uint256_t);
-        size_++;
+/** Creates a decoder that retrieves data from the given source */
+EliasFanoDecoder<sdsl::uint256_t>::EliasFanoDecoder(const std::string &source_name) {
+    source_ = std::ifstream(source_name, std::ios::binary);
+    if (!source_.good()) {
+        std::cerr << "Unable to read from " << source_name << std::endl;
+        std::exit(EXIT_FAILURE);
     }
-
-    size_t finish() {
-        sink_.close();
-        return total_size_;
-    }
-
-  private:
-    /**
-     * Sink to write the encoded values to.
-     */
-    std::ofstream sink_;
-
-    size_t total_size_ = 0;
-
-    size_t size_ = 0;
-};
+}
 
 /**
- * Template specialization for 128 bit integers that simply reads the integers from a file
+ * Returns the next compressed element or empty if all elements were read.
  */
-template <>
-class EliasFanoDecoder<sdsl::uint128_t> {
-  public:
-    /** Creates a decoder that retrieves data from the given source */
-    EliasFanoDecoder(const std::string &source_name) {
-        source_ = std::ifstream(source_name, std::ios::binary);
-        if (!source_.good()) {
-            std::cerr << "Unable to read from " << source_name << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
+std::optional<sdsl::uint256_t> EliasFanoDecoder<sdsl::uint256_t>::next() {
+    sdsl::uint256_t result;
+    if (source_.read(reinterpret_cast<char *>(&result), sizeof(sdsl::uint256_t))) {
+        return result;
     }
+    return {};
+}
 
-    /**
-     * Returns the next compressed element or empty if all elements were read.
-     */
-    std::optional<sdsl::uint128_t> next() {
-        sdsl::uint128_t result;
-        if (source_.read(reinterpret_cast<char *>(&result), sizeof(sdsl::uint128_t))) {
-            return result;
-        }
-        return {};
-    }
-
-
-  private:
-    /** Stream containing the compressed data. */
-    std::ifstream source_;
-};
-
-/**
- * Template specialization for 256 bit integers that simply reads the integers from a file
- */
-template <>
-class EliasFanoDecoder<sdsl::uint256_t> {
-  public:
-    /** Creates a decoder that retrieves data from the given source */
-    EliasFanoDecoder(const std::string &source_name) {
-        source_ = std::ifstream(source_name, std::ios::binary);
-        if (!source_.good()) {
-            std::cerr << "Unable to read from " << source_name << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
-    }
-
-    /**
-     * Returns the next compressed element or empty if all elements were read.
-     */
-    std::optional<sdsl::uint256_t> next() {
-        sdsl::uint256_t result;
-        if (source_.read(reinterpret_cast<char *>(&result), sizeof(sdsl::uint256_t))) {
-            return result;
-        }
-        return {};
-    }
-
-
-  private:
-    /** Stream containing the compressed data. */
-    std::ifstream source_;
-};
 
 // ----------- EliasFanoEncoderBuffered --------
 template <typename T>
@@ -583,6 +514,13 @@ template class EliasFanoEncoder<std::pair<uint64_t, uint32_t>>;
 template class EliasFanoEncoder<std::pair<uint32_t, uint8_t>>;
 template class EliasFanoEncoder<std::pair<uint32_t, uint16_t>>;
 template class EliasFanoEncoder<std::pair<uint32_t, uint32_t>>;
+template class EliasFanoEncoder<std::pair<sdsl::uint128_t, uint8_t>>;
+template class EliasFanoEncoder<std::pair<sdsl::uint128_t, uint16_t>>;
+template class EliasFanoEncoder<std::pair<sdsl::uint128_t, uint32_t>>;
+template class EliasFanoEncoder<std::pair<sdsl::uint256_t, uint8_t>>;
+template class EliasFanoEncoder<std::pair<sdsl::uint256_t, uint16_t>>;
+template class EliasFanoEncoder<std::pair<sdsl::uint256_t, uint32_t>>;
+
 
 template class EliasFanoDecoder<uint32_t>;
 template class EliasFanoDecoder<uint64_t>;
@@ -592,15 +530,29 @@ template class EliasFanoDecoder<std::pair<uint32_t, uint32_t>>;
 template class EliasFanoDecoder<std::pair<uint64_t, uint8_t>>;
 template class EliasFanoDecoder<std::pair<uint64_t, uint16_t>>;
 template class EliasFanoDecoder<std::pair<uint64_t, uint32_t>>;
+template class EliasFanoDecoder<std::pair<sdsl::uint128_t, uint8_t>>;
+template class EliasFanoDecoder<std::pair<sdsl::uint128_t, uint16_t>>;
+template class EliasFanoDecoder<std::pair<sdsl::uint128_t, uint32_t>>;
+template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint8_t>>;
+template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint16_t>>;
+template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint32_t>>;
 
 template class EliasFanoEncoderBuffered<uint32_t>;
 template class EliasFanoEncoderBuffered<uint64_t>;
+template class EliasFanoEncoderBuffered<sdsl::uint128_t>;
+template class EliasFanoEncoderBuffered<sdsl::uint256_t>;
 template class EliasFanoEncoderBuffered<std::pair<uint32_t, uint8_t>>;
 template class EliasFanoEncoderBuffered<std::pair<uint32_t, uint16_t>>;
 template class EliasFanoEncoderBuffered<std::pair<uint32_t, uint32_t>>;
 template class EliasFanoEncoderBuffered<std::pair<uint64_t, uint8_t>>;
 template class EliasFanoEncoderBuffered<std::pair<uint64_t, uint16_t>>;
 template class EliasFanoEncoderBuffered<std::pair<uint64_t, uint32_t>>;
+template class EliasFanoEncoderBuffered<std::pair<sdsl::uint128_t, uint8_t>>;
+template class EliasFanoEncoderBuffered<std::pair<sdsl::uint128_t, uint16_t>>;
+template class EliasFanoEncoderBuffered<std::pair<sdsl::uint128_t, uint32_t>>;
+template class EliasFanoEncoderBuffered<std::pair<sdsl::uint256_t, uint8_t>>;
+template class EliasFanoEncoderBuffered<std::pair<sdsl::uint256_t, uint16_t>>;
+template class EliasFanoEncoderBuffered<std::pair<sdsl::uint256_t, uint32_t>>;
 
 } // namespace common
 } // namespace mg

@@ -208,6 +208,7 @@ class EliasFanoEncoder<std::pair<T, C>> {
     std::ofstream sink_second_;
 };
 
+/** Decoder specialiation for an std::pair */
 template <typename T, typename C>
 class EliasFanoDecoder<std::pair<T, C>> {
   public:
@@ -222,6 +223,71 @@ class EliasFanoDecoder<std::pair<T, C>> {
     /* 1MB buffer for reading from #source_second_ */
     char buffer_[1024 * 1024];
 };
+
+/**
+ * Template specialization for 128 bit integers that simply writes the integers to file uncompressed.
+ */
+template <>
+class EliasFanoEncoder<sdsl::uint128_t> {
+  public:
+    EliasFanoEncoder() : EliasFanoEncoder<sdsl::uint128_t>(0, sdsl::uint128_t(0), "") {}
+    EliasFanoEncoder(size_t,
+                     sdsl::uint128_t,
+                     const std::string &sink_name,
+                     bool is_append = false);
+
+    void add(const sdsl::uint128_t &value);
+    size_t finish();
+  private:
+    std::ofstream sink_;
+    size_t total_size_ = 0;
+    size_t size_ = 0;
+};
+
+/**
+ * Template specialization for 256 bit integers that simply writes the integers to file uncompressed.
+ */
+template <>
+class EliasFanoEncoder<sdsl::uint256_t> {
+  public:
+    EliasFanoEncoder() : EliasFanoEncoder<sdsl::uint256_t>(0, sdsl::uint256_t(0), "") {}
+    EliasFanoEncoder(size_t,
+                     sdsl::uint256_t,
+                     const std::string &sink_name,
+                     bool is_append = false);
+
+    void add(const sdsl::uint256_t &value);
+    size_t finish();
+  private:
+    std::ofstream sink_;
+    size_t total_size_ = 0;
+    size_t size_ = 0;
+};
+
+/**
+ * Template specialization for 128 bit integers that simply reads the integers from a file
+ */
+template <>
+class EliasFanoDecoder<sdsl::uint128_t> {
+  public:
+    EliasFanoDecoder(const std::string &source_name);
+    std::optional<sdsl::uint128_t> next();
+  private:
+    std::ifstream source_;
+};
+
+/**
+ * Template specialization for 256 bit integers that simply reads the integers from a file
+ */
+template <>
+class EliasFanoDecoder<sdsl::uint256_t> {
+  public:
+    EliasFanoDecoder(const std::string &source_name);
+    std::optional<sdsl::uint256_t> next();
+  private:
+    std::ifstream source_;
+};
+
 
 /**
  * Specialization of #EliasFanoEncoder that can encode sequences of unknown size. It uses
