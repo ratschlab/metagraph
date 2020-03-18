@@ -224,32 +224,6 @@ class EliasFanoDecoder<std::pair<T, C>> {
 };
 
 /**
- * Template specialization for 128 bit integers that simply writes the integers to file uncompressed.
- * TODO(dd): separate the 128 bit integer into 2 64 bit ones and compress in chunks,
- * taking care that in each chunk the lower 64 bits are in increasing order.
- */
-template <>
-class EliasFanoEncoder<sdsl::uint128_t>;
-
-/**
- * Template specialization for 256 bit integers that simply writes the integers to file uncompressed.
- */
-template <>
-class EliasFanoEncoder<sdsl::uint256_t>;
-
-/**
- * Template specialization for 128 bit integers that simply reads the integers from a file
- */
-template <>
-class EliasFanoDecoder<sdsl::uint128_t>;
-
-/**
- * Template specialization for 256 bit integers that simply reads the integers from a file
- */
-template <>
-class EliasFanoDecoder<sdsl::uint256_t>;
-
-/**
  * Specialization of #EliasFanoEncoder that can encode sequences of unknown size. It uses
  * a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
  */
