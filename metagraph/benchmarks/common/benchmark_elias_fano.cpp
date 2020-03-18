@@ -33,6 +33,9 @@ static void BM_write_compressed(benchmark::State &state) {
     for (auto _ : state) {
         utils::TempFile tempfile;
         common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
+        for (const auto& v : sorted) {
+            encoder.add(v);
+        }
         encoder.finish();
     }
 }
@@ -56,6 +59,9 @@ static void BM_read_compressed(benchmark::State &state) {
     }
     utils::TempFile tempfile;
     common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
+    for (const auto& v : sorted) {
+        encoder.add(v);
+    }
     encoder.finish();
     for (auto _ : state) {
         common::EliasFanoDecoder<uint64_t> decoder(tempfile.name());
@@ -87,7 +93,8 @@ static void BM_read_uncompressed(benchmark::State &state) {
         // sanity check
         if (sum_compressed != sum_uncompressed) {
             std::cerr << "Error: Compressed and Non-compressed reads don't match. You "
-                         "have a bug." << std::endl;
+                         "have a bug. "
+                      << sum_compressed << " vs. " << sum_uncompressed << std::endl;
         }
     }
 }
