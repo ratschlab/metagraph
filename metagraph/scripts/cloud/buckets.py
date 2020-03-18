@@ -4,14 +4,14 @@ import os
 import urllib
 
 
-def convert_bucket():
+def convert_bucket(data_dir):
     """ Converts the original gs://... bucket urls in bucket1..bucket9 to sra_id bucket_no pairs for faster parsing """
 
     logging.info('Converting bucket files to a faster to parse format...')
     for i in range(1, 9):
-        fileout = os.path.join(args.data_dir, f'bucket_proc{i}')
+        fileout = os.path.join(data_dir, f'bucket_proc{i}')
         with open(fileout, 'w') as fpout:
-            file = os.path.join(args.data_dir, f'bucket{i}')
+            file = os.path.join(data_dir, f'bucket{i}')
             try:
                 logging.debug(f'Converting {file}')
                 with open(file) as fp:
@@ -20,7 +20,7 @@ def convert_bucket():
                         sra_id = parsed.path[1:-2]
                         fpout.write(f'{sra_id}\n')
             except FileNotFoundError:
-                logging.fatal(f'Could not find {file} in {args.data_dir}. Please copy it there, otherwise I can\'t '
+                logging.fatal(f'Could not find {file} in {data_dir}. Please copy it there, otherwise I can\'t '
                               f'figure out which GCloud bucket each sra id is in. Look, I\'m trying to be helpful.')
                 exit(1)
 
@@ -56,7 +56,7 @@ class Sra:
         for i in range(1, 9):
             bucket_file = os.path.join(self.data_dir, f'bucket_proc{i}')
             if not os.path.exists(bucket_file):
-                convert_bucket()
+                convert_bucket(self.data_dir)
             logging.debug(f'Loading {bucket_file} ...')
             with open(bucket_file) as fp:
                 for line in fp:
