@@ -108,7 +108,7 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
 }
 template <typename T>
 void EliasFanoEncoder<T>::add(T value) {
-#ifdef DEBUG
+#ifndef NDEBUG
     assert(value >= last_value_);
 #endif
 
@@ -133,7 +133,7 @@ void EliasFanoEncoder<T>::add(T value) {
         write_bits(reinterpret_cast<uint8_t *>(lower_), pos_bits % 64, lowerBits);
     }
 
-#ifdef DEBUG
+#ifndef NDEBUG
     last_value_ = value;
 #endif
     ++size_;

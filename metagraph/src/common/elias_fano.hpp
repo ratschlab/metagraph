@@ -91,7 +91,7 @@ class EliasFanoEncoder {
     size_t num_lower_bytes_;
     /** The size in bytes of upper_, without the 7 byte padding */
     size_t num_upper_bytes_;
-#ifdef DEBUG
+#ifndef NDEBUG
     /**
      * The last value that was added to the encoder. Only used to assert that the
      * numbers are added in increasing order.
@@ -316,7 +316,8 @@ class EliasFanoEncoderBuffered {
  * It uses a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
  */
  //TODO: Pack the C count, by passing max count the constructor and then dump it to
- // sdsl::int_vector_buffer with width = hi(max)+1
+ // sdsl::int_vector_buffer with width = hi(max)+1. Add a CompressedInt wrapper that encodes
+ // T with EliasFano and C (if present) with sdsl packing
 template <typename T, typename C>
 class EliasFanoEncoderBuffered<std::pair<T, C>> {
   public:
