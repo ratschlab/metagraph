@@ -353,11 +353,10 @@ class EliasFanoEncoder<sdsl::uint128_t> {
      * Constructs an Elias-Fano encoder of an array with the given size and given max
      * value. The encoded output is written to #sink.
      */
-    EliasFanoEncoder(size_t size,
-                     __attribute__((unused)) sdsl::uint128_t max_value,
+    EliasFanoEncoder(size_t,
+                     sdsl::uint128_t,
                      const std::string &sink_name,
-                     bool is_append = false)
-        : declared_size_(size) {
+                     bool is_append = false) {
         std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::beg;
         sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
         if (!sink_.good()) {
@@ -373,14 +372,11 @@ class EliasFanoEncoder<sdsl::uint128_t> {
     }
 
     size_t finish() {
-        assert(size_ == declared_size_);
         sink_.close();
         return total_size_;
     }
 
   private:
-    size_t declared_size_;
-
     /**
      * Sink to write the encoded values to.
      */
@@ -400,11 +396,10 @@ class EliasFanoEncoder<sdsl::uint256_t> {
      * Constructs an Elias-Fano encoder of an array with the given size and given max
      * value. The encoded output is written to #sink.
      */
-    EliasFanoEncoder(size_t size,
-                     __attribute__((unused)) sdsl::uint256_t max_value,
+    EliasFanoEncoder(size_t,
+                     sdsl::uint256_t,
                      const std::string &sink_name,
-                     bool is_append = false)
-        : declared_size_(size) {
+                     bool is_append = false) {
         std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::beg;
         // open file for appending, as we may encode multiple compressed chunks in the same file
         sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
@@ -421,14 +416,11 @@ class EliasFanoEncoder<sdsl::uint256_t> {
     }
 
     size_t finish() {
-        assert(size_ == declared_size_);
         sink_.close();
         return total_size_;
     }
 
   private:
-    size_t declared_size_;
-
     /**
      * Sink to write the encoded values to.
      */
