@@ -38,9 +38,7 @@ class EliasFanoEncoder {
                      const std::string &out_filename,
                      bool is_append = false);
 
-    /**
-     * Encodes the next number.
-     */
+    /** Encodes the next number */
     void add(T value);
 
     size_t finish();
@@ -137,19 +135,13 @@ class EliasFanoDecoder {
         init();
     }
 
-    /**
-     * Returns the upper part of the next compressed element.
-     */
+    /** Returns the upper part of the next compressed element */
     T next_upper();
 
-    /**
-     * Returns the lower part of the next compressed element.
-     */
+    /** Returns the lower part of the next compressed element */
     T next_lower();
 
-    /**
-     * Returns the next compressed element or empty if all elements were read.
-     */
+    /** Returns the next compressed element or empty if all elements were read */
     std::optional<T> next();
 
   private:
@@ -161,9 +153,8 @@ class EliasFanoDecoder {
   private:
     /** Index of current element */
     size_t position_;
-    /**
-     * Current position in the #upper_ vector.
-     */
+
+    /** Current position in the #upper_ vector */
     size_t upper_pos_ = static_cast<size_t>(-sizeof(size_t));
 
     /** The sequence of 8 upper bytes currently being processed */
@@ -194,13 +185,13 @@ class EliasFanoDecoder {
      */
     uint8_t num_lower_bits_;
 
-    /** The size in bytes of lower_. */
+    /** The size in bytes of lower_ */
     size_t num_lower_bytes_;
 
-    /** The size in bytes of upper_. */
+    /** The size in bytes of upper_ */
     size_t num_upper_bytes_ = 0;
 
-    /** Stream containing the compressed data. */
+    /** Stream containing the compressed data */
     std::ifstream source_;
 
     /* 1MB buffer for reading from #source_ */
@@ -270,19 +261,19 @@ template <>
 class EliasFanoEncoder<sdsl::uint128_t>;
 
 /**
- * Template specialization for 128 bit integers that simply writes the integers to file uncompressed.
+ * Template specialization for 256 bit integers that simply writes the integers to file uncompressed.
  */
 template <>
 class EliasFanoEncoder<sdsl::uint256_t>;
 
 /**
- * Decodes a list of compressed sorted integers stored in a file using #EliasFanoEncoder.
+ * Template specialization for 128 bit integers that simply reads the integers from a file
  */
 template <>
 class EliasFanoDecoder<sdsl::uint128_t>;
 
 /**
- * Decodes a list of compressed sorted integers stored in a file using #EliasFanoEncoder.
+ * Template specialization for 256 bit integers that simply reads the integers from a file
  */
 template <>
 class EliasFanoDecoder<sdsl::uint256_t>;
