@@ -30,8 +30,8 @@ class EliasFanoEncoder {
     EliasFanoEncoder() {}
 
     /**
-     * Constructs an Elias-Fano encoder of an array with the given size and given max
-     * value. The encoded output is written to #out_filename.
+     * Constructs an Elias-Fano encoder of an array with the given #size and given
+     * #max_value. The encoded output is written to #out_filename.
      */
     EliasFanoEncoder(size_t size,
                      T max_value,
@@ -41,6 +41,7 @@ class EliasFanoEncoder {
     /** Encodes the next number */
     void add(T value);
 
+    /** Dumps any pending data to the stream. Must be called exactly once when done #add-ing */
     size_t finish();
 
   private:
@@ -116,24 +117,7 @@ template <typename T>
 class EliasFanoDecoder {
   public:
     /** Creates a decoder that retrieves data from the given source */
-    EliasFanoDecoder(const std::string &source_name) {
-        if (std::filesystem::file_size(source_name) == 0) {
-            position_ = size_ = 0;
-            all_read_ = true;
-            return;
-        }
-        source_ = std::ifstream(source_name, std::ios::binary);
-        // profiling indicates that setting a larger buffer slightly increases performance
-        source_.rdbuf()->pubsetbuf(buffer_, 1024 * 1024);
-        if (!source_.good()) {
-            std::cerr << "Unable to read from " << source_name << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
-        source_.seekg(0, source_.end);
-        file_end_ = source_.tellg();
-        source_.seekg(0, source_.beg);
-        init();
-    }
+    EliasFanoDecoder(const std::string &source_name);
 
     /** Returns the upper part of the next compressed element */
     T next_upper();
@@ -212,18 +196,12 @@ template <typename T, typename C>
 class EliasFanoEncoder<std::pair<T, C>> {
   public:
     EliasFanoEncoder() {}
-    /**
-     * Constructs an Elias-Fano encoder of an array with the given size and given last
-     * value. The encoded output is dumped to #sink_name.
-     */
+
     EliasFanoEncoder(size_t size,
                      const std::pair<T, C> &last_value,
                      const std::string &sink_name,
                      bool is_append = false);
 
-    /**
-     * Encodes the next number.
-     */
     void add(std::pair<T, C> value);
 
     size_t finish();
@@ -237,12 +215,9 @@ class EliasFanoEncoder<std::pair<T, C>> {
 template <typename T, typename C>
 class EliasFanoDecoder<std::pair<T, C>> {
   public:
-    /** Creates a decoder that retrieves data from the given source */
     EliasFanoDecoder(const std::string &source);
 
-    /**
-     * Returns the next compressed element or empty if all elements were read.
-     */
+
     std::optional<std::pair<T, C>> next();
 
   private:
