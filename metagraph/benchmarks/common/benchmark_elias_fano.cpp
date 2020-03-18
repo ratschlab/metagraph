@@ -32,8 +32,7 @@ static void BM_write_compressed(benchmark::State &state) {
 
     for (auto _ : state) {
         utils::TempFile tempfile;
-        std::ofstream &out = tempfile.ofstream();
-        common::EliasFanoEncoder<uint64_t> encoder(sorted, out);
+        common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
         encoder.finish();
     }
 }
@@ -56,11 +55,10 @@ static void BM_read_compressed(benchmark::State &state) {
         init_sorted();
     }
     utils::TempFile tempfile;
-    std::ofstream &out = tempfile.ofstream();
-    common::EliasFanoEncoder<uint64_t> encoder(sorted, out);
+    common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
     encoder.finish();
     for (auto _ : state) {
-        common::EliasFanoDecoder<uint64_t> decoder(tempfile.ifstream());
+        common::EliasFanoDecoder<uint64_t> decoder(tempfile.name());
         std::optional<uint64_t> value;
         sum_compressed = 0;
         while ((value = decoder.next()).has_value()) {

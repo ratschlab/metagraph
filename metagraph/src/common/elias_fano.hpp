@@ -1,14 +1,10 @@
 #pragma once
 
-#include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
-#include <limits>
 #include <optional>
 
-#include <sdsl/bits.hpp>
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
