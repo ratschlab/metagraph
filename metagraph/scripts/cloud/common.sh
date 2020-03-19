@@ -13,7 +13,25 @@ function execute {
     echo "Executing ${cmd[*]}"
 
     # execute the command:
-    "${cmd[@]}" || exit 1
+    if "${cmd[@]}"; then
+      return 0
+    fi
+    return 1
+}
+
+function execute_retry {
+    cmd=("$@")
+    set +e
+    for i in {1..3}; do
+      echo "Executing ${cmd[*]}, attempt #$i"
+      if "${cmd[@]}"; then
+        return 0
+      fi
+      echo_err "attempt #$i of 3 failed"
+      sleep 0.15
+    done
+    set -e
+    return 1
 }
 
 # check that we can find the aspera ssh key

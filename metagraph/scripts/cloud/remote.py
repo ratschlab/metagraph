@@ -127,7 +127,7 @@ def send_create_request(compute, project, zone, name, script_dir, server_host):
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
     # image_response = compute.images().getFromFamily(project='metagraph', family='metagraph2').execute()
-    image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph6').execute()
+    image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph7').execute()
     source_disk_image = image_response['selfLink']
 
     # Configure the machine: 1vCPU, 3.75GB of RAM
