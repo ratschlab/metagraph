@@ -87,6 +87,9 @@ class EliasFanoEncoder {
      */
     uint8_t num_lower_bits_;
 
+    /** Mask to extract the lower bits from a value T. Equal to 2^#num_lower_bits_-1. */
+    T lower_bits_mask_;
+
     /** The size in bytes of lower_, without the 7 byte padding */
     size_t num_lower_bytes_;
     /** The size in bytes of upper_, without the 7 byte padding */
