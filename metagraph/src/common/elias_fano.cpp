@@ -306,9 +306,9 @@ EliasFanoEncoder<std::pair<T, C>>::EliasFanoEncoder(size_t size,
 
 
 template <typename T, typename C>
-void EliasFanoEncoder<std::pair<T, C>>::add(std::pair<T, C> value) {
+void EliasFanoEncoder<std::pair<T, C>>::add(const std::pair<T, C> &value) {
     ef_encoder.add(value.first);
-    sink_second_.write(reinterpret_cast<char *>(&value.second), sizeof(C));
+    sink_second_.write(reinterpret_cast<const char *>(&value.second), sizeof(C));
 }
 
 template <typename T, typename C>
