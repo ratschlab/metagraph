@@ -6,6 +6,9 @@
 #include <memory>
 #include <string>
 
+#include "common/threads/threading.hpp"
+#include "seq_io/sequence_io.hpp"
+
 class AnnotatedDBG;
 class IDBGAligner;
 class Config;
@@ -31,5 +34,29 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       size_t num_threads);
 
 int query_graph(Config *config);
+
+class QueryExecutor {
+public:
+    void process_fasta_file(const std::string &file_path);
+
+    QueryExecutor(const Config *config, const AnnotatedDBG *anno_graph,
+                  const IDBGAligner *aligner, ThreadPool *thread_pool) : config_(config),
+                                                                                    anno_graph_(anno_graph),
+                                                                                    aligner_(aligner),
+                                                                                    thread_pool_(thread_pool) {}
+
+private:
+    const Config *config_;
+    const AnnotatedDBG *anno_graph_;
+    const IDBGAligner *aligner_;
+    ThreadPool *thread_pool_;
+
+    void process_fasta_file_fast(FastaParser &fasta_parser, const std::string &file_name);
+    void forward_query(size_t id, const std::string &name, const std::string &seq, const AnnotatedDBG *graph_to_query);
+};
+
+
+
+
 
 #endif // __QUERY_GRAPH_HPP__
