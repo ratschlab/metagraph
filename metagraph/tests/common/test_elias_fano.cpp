@@ -30,8 +30,8 @@ TYPED_TEST(EliasFanoTest, WriteEmpty) {
     size_t file_size = encoder.finish();
     // 25 = 3*8 + 1; no data is written to the file except number of low/high bytes (8
     // bytes each), number of low bits (1 byte) and number of elements (8 bytes)
-    EXPECT_EQ(0, file_size);
-    EXPECT_EQ(0, std::filesystem::file_size(out.name()));
+    EXPECT_EQ(0U, file_size);
+    EXPECT_EQ(0U, std::filesystem::file_size(out.name()));
 }
 
 TYPED_TEST(EliasFanoTest, ReadEmpty) {
@@ -51,8 +51,8 @@ TYPED_TEST(EliasFanoTest, WriteOne) {
     // 25 = 3*8 + 1; is the overhead, i.e. the number of low/high bytes (8
     // bytes each), number of low bits (1 byte) and number of elements (8 bytes)
     // 1234 is encoded in 3 bytes plus the additional 25 byte header overhead
-    EXPECT_EQ(25 + 3, file_size);
-    EXPECT_EQ(25 + 3, std::filesystem::file_size(out.name()));
+    EXPECT_EQ(25 + 3U, file_size);
+    EXPECT_EQ(25 + 3U, std::filesystem::file_size(out.name()));
 }
 
 TYPED_TEST(EliasFanoTest, ReadOne) {
@@ -75,8 +75,8 @@ TYPED_TEST(EliasFanoTest, WriteTwo) {
     encoder.add(4321);
     size_t file_size = encoder.finish();
     // 1234  and 4321 are encoded in 2 bytes plus the additional 25 byte header overhead
-    EXPECT_EQ(25 + 2 * 2, file_size);
-    EXPECT_EQ(25 + 2 * 2, std::filesystem::file_size(out.name()));
+    EXPECT_EQ(25 + 2 * 2U, file_size);
+    EXPECT_EQ(25 + 2 * 2U, std::filesystem::file_size(out.name()));
 }
 
 TYPED_TEST(EliasFanoTest, ReadTwo) {
@@ -111,7 +111,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementOne) {
     utils::TempFile file;
     size_t file_size = encode(values, file.name());
     // each value is represented in 2 bits, plus 25 bytes overhead for the header
-    EXPECT_EQ(25 + (2 * 100) / 8, file_size);
+    EXPECT_EQ(25 + (2 * 100) / 8U, file_size);
     EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
     common::EliasFanoDecoder<TypeParam> decoder(file.name());
@@ -251,7 +251,7 @@ TYPED_TEST(EliasFanoBufferedTest, InsertOne) {
     common::EliasFanoDecoder<TypeParam> decoder(file.name());
     std::optional<TypeParam> decoded = decoder.next();
     ASSERT_TRUE(decoded.has_value());
-    EXPECT_EQ(43, decoded.value());
+    EXPECT_EQ(43U, decoded.value());
     EXPECT_FALSE(decoder.next().has_value());
 }
 
