@@ -379,7 +379,7 @@ std::string get_alignment_header_and_swap_query(const std::string &name,
 }
 
 
-void QueryExecutor::process_fasta_file_fast(FastaParser &fasta_parser, const string &file_name) {
+void QueryExecutor::process_fasta_file_fast(FastaParser &fasta_parser, const string &file_name, std::ostream &out) {
     auto begin = fasta_parser.begin();
     auto end = fasta_parser.end();
 
@@ -466,7 +466,7 @@ void QueryExecutor::process_fasta_file_fast(FastaParser &fasta_parser, const str
                 assert(begin != end);
 
                 thread_pool_->enqueue([&](QueryExecutor &qe, size_t id, const std::string &name, const std::string &seq) {
-                    qe.forward_query(id, name, seq, graph_to_query);
+                    qe.forward_query(id, name, seq, graph_to_query, out);
                 }, *this, seq_count++,
                                      std::string(begin->name.s),
                                      std::string(begin->seq.s));
@@ -474,7 +474,7 @@ void QueryExecutor::process_fasta_file_fast(FastaParser &fasta_parser, const str
         } else {
             for (auto&&[id, name, seq] : named_alignments) {
                 thread_pool_->enqueue([&](QueryExecutor &qe, size_t id, const std::string &name, const std::string &seq) {
-                    qe.forward_query(id, name, seq, graph_to_query);
+                    qe.forward_query(id, name, seq, graph_to_query, out);
                 }, *this, id, std::move(name), std::move(seq));
             }
         }
@@ -486,7 +486,7 @@ void QueryExecutor::process_fasta_file_fast(FastaParser &fasta_parser, const str
 
 }
 
-void QueryExecutor::forward_query(size_t id, const std::string &name, const std::string &seq, const AnnotatedDBG *graph_to_query) {
+void QueryExecutor::forward_query(size_t id, const std::string &name, const std::string &seq, const AnnotatedDBG *graph_to_query, std::ostream &out_stream) {
     execute_query(fmt::format_int(id).str() + '\t' + name,
                   seq,
                   config_->count_labels,
@@ -496,10 +496,10 @@ void QueryExecutor::forward_query(size_t id, const std::string &name, const std:
                   config_->discovery_fraction,
                   config_->anno_labels_delimiter,
                   std::ref(*graph_to_query),
-                  std::ref(std::cout));
+                  out_stream);
 }
 
-void QueryExecutor::process_fasta_file(const string &file) {
+void QueryExecutor::process_fasta_file(const string &file, std::ostream &out) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     size_t seq_count = 0;
@@ -511,13 +511,13 @@ void QueryExecutor::process_fasta_file(const string &file) {
     // Graph constructed from a batch of queried sequences
     // Used only in fast mode
     if (config_->fast) {
-        process_fasta_file_fast(fasta_parser, file);
+        process_fasta_file_fast(fasta_parser, file, out);
     } else {
         for (const auto &kseq : fasta_parser) {
             thread_pool_->enqueue(
                     [&](size_t id, const std::string &name, std::string &seq) {
                         if (!aligner_) {
-                            forward_query(id, name, seq, graph_to_query);
+                            forward_query(id, name, seq, graph_to_query, out);
                             return;
                         }
 
@@ -527,7 +527,7 @@ void QueryExecutor::process_fasta_file(const string &file) {
                         std::string seq_header
                                 = get_alignment_header_and_swap_query(name, &seq, &matches);
 
-                        forward_query(id, seq_header, seq, graph_to_query);
+                        forward_query(id, seq_header, seq, graph_to_query, out);
                     },
                     seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s)
             );
@@ -565,7 +565,7 @@ int query_graph(Config *config) {
     for (const auto &file : files) {
         Timer curr_timer;
 
-        exec.process_fasta_file(file);
+        exec.process_fasta_file(file, std::ref(std::cout));
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
                       curr_timer.elapsed(), timer.elapsed());
     }

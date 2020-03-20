@@ -37,7 +37,7 @@ int query_graph(Config *config);
 
 class QueryExecutor {
 public:
-    void process_fasta_file(const std::string &file_path);
+    void process_fasta_file(const std::string &file_path, std::ostream &out);
 
     QueryExecutor(const Config *config, const AnnotatedDBG *anno_graph,
                   const IDBGAligner *aligner, ThreadPool *thread_pool) : config_(config),
@@ -51,8 +51,8 @@ private:
     const IDBGAligner *aligner_;
     ThreadPool *thread_pool_;
 
-    void process_fasta_file_fast(FastaParser &fasta_parser, const std::string &file_name);
-    void forward_query(size_t id, const std::string &name, const std::string &seq, const AnnotatedDBG *graph_to_query);
+    void process_fasta_file_fast(FastaParser &fasta_parser, const std::string &file_name, std::ostream &out);
+    void forward_query(size_t id, const std::string &name, const std::string &seq, const AnnotatedDBG *graph_to_query, std::ostream &out);
 };
 
 
