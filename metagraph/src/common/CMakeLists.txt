@@ -32,6 +32,7 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
     ${EXTERNAL_LIB_DIR}/spdlog/include
+    /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
 )
 
 # assume built-in pthreads on MacOS

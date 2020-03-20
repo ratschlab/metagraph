@@ -73,4 +73,8 @@ std::ifstream& TempFile::ifstream() {
     return *tmp_istream_;
 }
 
+const std::string& TempFile::name() const {
+    return tmp_file_name_;
+}
+
 } // namespace utils
