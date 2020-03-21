@@ -233,7 +233,7 @@ class EliasFanoDecoder<std::pair<T, C>> {
 template <>
 class EliasFanoEncoder<sdsl::uint128_t> {
   public:
-    EliasFanoEncoder() : EliasFanoEncoder<sdsl::uint128_t>(0, sdsl::uint128_t(0), "") {}
+    EliasFanoEncoder() {}
     EliasFanoEncoder(size_t,
                      sdsl::uint128_t,
                      const std::string &sink_name,
@@ -253,7 +253,7 @@ class EliasFanoEncoder<sdsl::uint128_t> {
 template <>
 class EliasFanoEncoder<sdsl::uint256_t> {
   public:
-    EliasFanoEncoder() : EliasFanoEncoder<sdsl::uint256_t>(0, sdsl::uint256_t(0), "") {}
+    EliasFanoEncoder() {}
     EliasFanoEncoder(size_t,
                      sdsl::uint256_t,
                      const std::string &sink_name,

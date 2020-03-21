@@ -203,6 +203,32 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly128LowBits) {
     EXPECT_FALSE(decoder.next().has_value());
 }
 
+/**
+ * Tests that the last byte of the encoding is correctly read, even if it's at position
+ * 8*n+1.
+ */
+TYPED_TEST(EliasFanoTest, LastByteRead) {
+    Vector<TypeParam> values
+            = { 0,    585,  587,  588,  601,  604,  609,  612,  650,  651,  658,
+                676,  713,  715,  737,  739,  777,  780,  787,  801,  804,  1105,
+                1169, 1170, 1172, 1178, 1228, 1242, 1297, 1300, 1313, 1316, 1611,
+                1618, 1625, 1634, 1739, 1754, 1755, 1763, 1801, 1812, 1819, 1820,
+                2121, 2124, 2129, 2145, 2147, 2148, 2196, 2201, 2203, 2210, 2275,
+                2313, 2314, 2316, 2324, 2337, 2338, 2340 };
+    utils::TempFile file;
+    size_t file_size = encode(values, file.name());
+    // each value is represented in 2 bits, plus 25 bytes overhead for the header
+    EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+
+    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    for (uint32_t i = 0; i < values.size(); ++i) {
+        std::optional<TypeParam> decoded = decoder.next();
+        EXPECT_TRUE(decoded.has_value());
+        EXPECT_EQ(values[i], decoded.value());
+    }
+    EXPECT_FALSE(decoder.next().has_value());
+}
+
 TYPED_TEST(EliasFanoTest, ReadWriteRandom) {
     for (uint32_t size = 1000; size < 1016; ++size) {
         Vector<TypeParam> values(size);

@@ -10,12 +10,12 @@
 #define protected public
 #define private public
 
-#include "graph/representation/succinct/boss_construct.hpp"
-#include "graph/representation/succinct/boss.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_multiset_disk.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_collector.hpp"
 
 namespace {
@@ -139,9 +139,8 @@ TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
-    common::logger->set_level(spdlog::level::trace);
-    for (auto container : { kmer::ContainerType::VECTOR_DISK }) { //TODO: undo change
-        for (size_t k = 2; k < 3; ++k) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
                 "ATATTATAAAAAATTTTAAAAAA",

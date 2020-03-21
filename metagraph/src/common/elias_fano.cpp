@@ -144,6 +144,7 @@ template <typename T>
 size_t EliasFanoEncoder<T>::finish() {
     assert(size_ == declared_size_);
     if (size_ == 0) {
+        sink_.close();
         return 0;
     }
     // Append the remaining lower bits
@@ -225,14 +226,15 @@ template <typename T>
 T EliasFanoDecoder<T>::next_lower() {
     assert(position_ < size_);
     const size_t pos_bits = position_ * num_lower_bits_;
-    const size_t pos_bytes = (pos_bits + 7) / 8 + 8;
     if (pos_bits - cur_pos_bits_ >= 64) {
+        // +16 because we read 16 bytes in #init()
+        const size_t bytes_read = cur_pos_bits_ / 8 + 16;
         cur_pos_bits_ += 64;
         lower_[0] = lower_[1];
         lower_[1] = 0;
-        if (num_lower_bytes_ > pos_bytes) {
+        if (num_lower_bytes_ > bytes_read) {
             source_.read(reinterpret_cast<char *>(&lower_[1]),
-                         std::min(sizeof(uint64_t), num_lower_bytes_ - pos_bytes));
+                         std::min(sizeof(uint64_t), num_lower_bytes_ - bytes_read));
         }
     }
     const size_t adjusted_pos = pos_bits - cur_pos_bits_;
@@ -494,11 +496,8 @@ size_t EliasFanoEncoderBuffered<std::pair<T, C>>::finish() {
 
 template <typename T, typename C>
 void EliasFanoEncoderBuffered<std::pair<T, C>>::encode_chunk() {
-    if (buffer_.size() == 0) {
-        return;
-    }
-    encoder_ = EliasFanoEncoder<std::pair<T, C>>(buffer_.size(), buffer_.back(),
-                                                 file_name_, true);
+    std::pair<T, C> last_el = buffer_.empty() ? std::make_pair(T(0), C(0)) : buffer_.back();
+    encoder_ = EliasFanoEncoder<std::pair<T, C>>(buffer_.size(), last_el, file_name_, true);
     for (const auto &v : buffer_) {
         encoder_.add(v);
     }

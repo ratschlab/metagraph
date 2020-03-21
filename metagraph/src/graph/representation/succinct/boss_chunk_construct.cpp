@@ -195,9 +195,7 @@ uint8_t write_kmer(size_t k,
                    RecentKmers<T> *buffer,
                    common::SortedSetDisk<T, INT> *sorted_dummy_kmers) {
     const Kmer<T> to_write = buffer->pop_front();
-    std::cout << utils::get_first(to_write.kmer).to_string(k, "$ACGT") << "\n";
     if (to_write.is_removed) { // redundant dummy k-mer
-        std::cout << " removed\n";
         return 0;
     }
     encoder->add(to_int(to_write.kmer));
@@ -294,14 +292,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     size_t num_parent_kmers = 0;
     // contains original kmers and non-redundant source dummy k-mers with prefix length 1
     common::EliasFanoEncoderBuffered<int_type> original_and_l1(file_name, 1000);
-    std::cout << "Traversing original";
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
-        if constexpr (sizeof(typename KMER::WordType) == 8) {
-            std::cout << utils::get_first(el).to_string(k + 1, "$ACGT") << " "
-                      << int64_t(utils::get_first(el).data()) << ", ";
-        }
         recent_buffer.push_back({ el, false });
         remove_redundant_dummy_source<T, KMER>(utils::get_first(el), &recent_buffer);
         if (recent_buffer.full()) {
@@ -309,7 +302,6 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                                  &recent_buffer, &sorted_dummy_kmers);
         }
     }
-    std::cout << std::endl;
     while (!recent_buffer.empty()) { // empty the buffer
         num_dummy_parent_kmers += write_kmer(k, to_intf, &dummy_kmers, &original_and_l1,
                                              &recent_buffer, &sorted_dummy_kmers);
@@ -374,13 +366,10 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([=]() {
-        std::cout << "Final merge: ";
-        std::function<void(const T &)> on_new_item = [&kmers, k](const T &v) {
-            std::cout << utils::get_first(v).to_string(k, "$ACGT") << " ";
+        std::function<void(const T &)> on_new_item = [&kmers](const T &v) {
             kmers->push(v);
         };
         common::merge_files<T, int_type>(files_to_merge, on_new_item);
-        std::cout << "done!\n";
         kmers->shutdown();
     });
 }
