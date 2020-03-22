@@ -300,7 +300,7 @@ EliasFanoEncoder<std::pair<T, C>>::EliasFanoEncoder(size_t size,
                                                     const std::pair<T, C> &last_value,
                                                     const std::string &sink_name,
                                                     bool is_append)
-    : ef_encoder(size, last_value.first, sink_name),
+    : ef_encoder(size, last_value.first, sink_name, is_append),
       sink_second_name_(sink_name + ".count") {
     std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
     sink_second_ = std::ofstream(sink_second_name_, std::ios::binary | open_flag);
