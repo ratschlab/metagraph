@@ -278,7 +278,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     std::function<int_type(const T &v)> to_intf
             = [](const T &v) { return to_int(v, utils::get_first(v).data()); };
     // this will contain dummy k-mers of prefix length 2
-    common::EliasFanoEncoderBuffered<int_type> dummy_l2(files_to_merge.back(), 1000);
+    common::EliasFanoEncoderBuffered<int_type> dummy_l2(files_to_merge.back(), 100'000);
     common::SortedSetDisk<T, int_type> sorted_dummy_kmers(
             no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
             tmp_path2, kmer_collector.max_disk_space(), [](const T &) {}, 100, to_intf);
@@ -291,7 +291,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
     // contains original kmers and non-redundant source dummy k-mers with prefix length 1
-    common::EliasFanoEncoderBuffered<int_type> original_and_l1(file_name, 1000);
+    common::EliasFanoEncoderBuffered<int_type> original_and_l1(file_name, 100'000);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
@@ -319,7 +319,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         const filesystem::path tmp_path
                 = tmp_dir / ("dummy_source" + std::to_string(dummy_pref_len));
         const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
-        common::EliasFanoEncoderBuffered<int_type> encoder(files_to_merge.back(), 1000);
+        common::EliasFanoEncoderBuffered<int_type> encoder(files_to_merge.back(), 100'000);
         common::ChunkedWaitQueue<T> source(10000, 1, compressed_writer(&encoder, to_intf));
         async_merge.enqueue([&chunk_files, &source]() {
             std::function<void(const T &)> on_new_item
@@ -349,7 +349,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     uint32_t num_kmers = 0;
     // iterate to merge the data and write it to disk
     const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
-    common::EliasFanoEncoderBuffered<int_type> encoder(files_to_merge.back(), 1000);
+    common::EliasFanoEncoderBuffered<int_type> encoder(files_to_merge.back(), 100'000);
     common::ChunkedWaitQueue<T> source(10000, 1, compressed_writer(&encoder, to_intf));
     async_merge.enqueue([&chunk_files, &source]() {
         std::function<void(const T &)> on_new_item

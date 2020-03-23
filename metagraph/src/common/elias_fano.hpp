@@ -201,7 +201,7 @@ class EliasFanoEncoder<std::pair<T, C>> {
                      const std::string &sink_name,
                      bool is_append = false);
 
-    void add(std::pair<T, C> value);
+    void add(const std::pair<T, C> &value);
 
     size_t finish();
 

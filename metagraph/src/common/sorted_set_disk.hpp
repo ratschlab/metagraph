@@ -175,7 +175,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
         logger->trace("Starting merging last {} chunks into {}", MERGE_L1_COUNT,
                       merged_l1_file_name);
 
-        EliasFanoEncoderBuffered<INT> encoder(merged_l1_file_name, 1000);
+        EliasFanoEncoderBuffered<INT> encoder(merged_l1_file_name, 100'000);
         merge_files<T, INT>(to_merge,
                             [&encoder, to_int](const T &v) { encoder.add(to_int(v)); });
         encoder.finish();
@@ -193,7 +193,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
                 "Max allocated disk capacity exceeded. Starting merging all {} chunks "
                 "into {}",
                 to_merge.size(), out_file);
-        EliasFanoEncoderBuffered<INT> encoder(out_file, 1000);
+        EliasFanoEncoderBuffered<INT> encoder(out_file, 100'000);
         merge_files<T, INT>(to_merge,
                             [&encoder, to_int](const T &v) { encoder.add(to_int(v)); });
         encoder.finish();
@@ -203,7 +203,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
 
   private:
     /** Number of chunks for "level 1" intermediary merging. */
-    static constexpr uint32_t MERGE_L1_COUNT = 4;
+    static constexpr uint32_t MERGE_L1_COUNT = 4000; //TODO: undo
 
     std::function<INT(const T &v)> to_int_;
 };
