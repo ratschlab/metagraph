@@ -97,7 +97,7 @@ def internal_ip():
 def publish_ip():
     with open('/tmp/server', 'w') as fp:
         fp.write(f'{internal_ip()}:{args.port}')
-    if subprocess.call(['gsutil', 'cp', '/tmp/server', 'gs://metagraph7/server'], stdout=subprocess.PIPE,
+    if subprocess.call(['gsutil', 'cp', '/tmp/server', 'gs://metagraph14/server'], stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE) != 0:
         logging.error("Cannot publish server ip/port on Google Cloud Storage. Sorry, I tried.")
         exit(1)
