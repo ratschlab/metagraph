@@ -20,7 +20,7 @@ static void BM_bv_query_##NAME(benchmark::State& state) { \
  \
     uint64_t i = 0; \
     for (auto _ : state) { \
-        bv.OPERATION(MIN_INDEX + (i++ * 87'178'291'199) % (max_index - MIN_INDEX)); \
+        benchmark::DoNotOptimize(bv.OPERATION(MIN_INDEX + (i++ * 87'178'291'199) % (max_index - MIN_INDEX))); \
     } \
     state.counters["Density"] \
         = static_cast<double>(bv.num_set_bits()) / bv.size(); \
@@ -38,7 +38,7 @@ static void BM_bv_query_sequential_##NAME(benchmark::State& state) { \
  \
     uint64_t i = 0; \
     for (auto _ : state) { \
-        bv.OPERATION(MIN_INDEX + (i++) % (max_index - MIN_INDEX)); \
+        benchmark::DoNotOptimize(bv.OPERATION(MIN_INDEX + (i++) % (max_index - MIN_INDEX))); \
     } \
     state.counters["Density"] \
         = static_cast<double>(bv.num_set_bits()) / bv.size(); \

@@ -38,23 +38,16 @@ using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
 
 
-//TODO
-// THINGS TO REPORT:
-//  - querying time
+// THINGS REPORTED:
+//  - query time
 //  - RAM usage
 //  - disk usage
-//  - construction time
-
 template <class BitVector>
 void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     DataGenerator generator;
     generator.set_seed(42);
 
     BitVector other(generator.generate_random_column(n, d));
-
-    if (static_cast<int64_t>(other.rank1(1)) < -1
-            || static_cast<int64_t>(other.rank0(1)) < -1)
-        throw std::runtime_error("Never happens, just initializing the rank support");
 
     std::filesystem::path path(std::string("test.")
                                 + prefix
@@ -67,37 +60,27 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     const auto serialized_size = std::filesystem::file_size(path);
 
-    std::this_thread::sleep_for(3s);
+    std::this_thread::sleep_for(1s);
 
     auto mem_before = get_curr_RSS();
-
-    std::this_thread::sleep_for(3s);
 
     std::vector<BitVector> vectors(20);
 
     for (auto &another : vectors) {
         std::ifstream in(path, std::ios::binary);
         another.load(in);
-
-        if (static_cast<int64_t>(another.rank1(another.size() / 2)) < -1
-                || static_cast<int64_t>(another.rank0(another.size() / 2)) < -1)
-            throw std::runtime_error("Never happens, just initializing the rank support");
-
-        if (another.num_set_bits()
-                && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
-                && static_cast<int64_t>(another.select1(1)) < -1)
-            throw std::runtime_error("Never happens, just initializing the select support");
     }
 
-    std::this_thread::sleep_for(5s);
+    std::this_thread::sleep_for(3s);
 
     auto RAM = (get_curr_RSS() - mem_before) / vectors.size();
 
     BitVector another = std::move(vectors.back());
     vectors.clear();
+    std::this_thread::sleep_for(3s);
 
     Timer timer;
-    int result = 0;
+    uint64_t result = 0;
     const size_t num_iterations = 10'000'000;
 
     // Random access time
@@ -109,10 +92,10 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     // Random get_int time
     timer.reset();
-    for (uint64_t i = 0, size = another.size() / 64; i < num_iterations; ++i) {
+    for (uint64_t i = 0, size = another.size() / 64; i < num_iterations; i += 64) {
         result += another.get_int(((i * 87'178'291'199) % size) * 64, 64);
     }
-    double random_access_word = timer.elapsed() / num_iterations;
+    double random_access_word = timer.elapsed() / ((num_iterations + 63) / 64);
 
     // Random rank time
     timer.reset();
@@ -131,7 +114,9 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     // Random select time
     timer.reset();
     double random_select = 0.0 / 0.0;
-    if (another.num_set_bits() && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+    if (another.num_set_bits() && !std::is_same_v<BitVector, bit_vector_hyb<>>
+                               && !std::is_same_v<BitVector, bit_vector_rank>
+                               && !std::is_same_v<BitVector, bit_vector_smallrank>) {
         for (uint64_t i = 0, rank = another.num_set_bits(); i < num_iterations; ++i) {
             result += another.select1(1 + (i * 87'178'291'199) % rank);
         }
@@ -149,12 +134,12 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     // Random get_int time
     timer.reset();
-    for (uint64_t i = 0, j = 0, size = another.size() / 64; i < num_iterations; ++i) {
+    for (uint64_t i = 0, j = 0, size = another.size() / 64; i < num_iterations; i += 64) {
         if (j == size)
             j = 0;
         result += another.get_int(64 * j++, 64);
     }
-    double sequential_access_word = timer.elapsed() / num_iterations;
+    double sequential_access_word = timer.elapsed() / ((num_iterations + 63) / 64);
 
     // Sequential rank time
     timer.reset();
@@ -176,10 +161,12 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     // Sequential select time
     double sequential_select = 0.0 / 0.0;
-    if (another.num_set_bits() && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+    if (another.num_set_bits() && !std::is_base_of_v<BitVector, bit_vector_hyb<>>
+                               && !std::is_base_of_v<BitVector, bit_vector_rank>
+                               && !std::is_base_of_v<BitVector, bit_vector_smallrank>) {
         timer.reset();
         for (uint64_t i = 0, j = 1, rank = another.num_set_bits(); i < num_iterations; ++i) {
-            if (j == rank)
+            if (j > rank)
                 j = 1;
             result += another.select1(j++);
         }
@@ -188,10 +175,12 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     std::filesystem::remove(path);
 
+    // Write result to /dev/null so the compiler doesn't optimize it away
+    std::ofstream ofs("/dev/null");
+    ofs << result;
+
     double predicted_size = 0.0 / 0.0;
-    if constexpr(!std::is_base_of_v<bit_vector_dyn, BitVector>
-                    && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
-                    && !std::is_base_of_v<bit_vector_il<>, BitVector>) {
+    if constexpr(!std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
         predicted_size = BitVector::predict_size(another.size(), another.num_set_bits());
     }
 
