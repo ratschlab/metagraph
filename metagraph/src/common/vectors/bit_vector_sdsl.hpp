@@ -306,7 +306,12 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
 
     static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
-        return size * 1.135;
+        uint64_t num_blocks = (size + 64) / 64 + (size + t_bs) / t_bs + 1;
+        return 4 * 64
+            + num_blocks * 64 + 64
+            + (num_blocks > 1024 * 64
+                ? std::min(1024ULL, 1ULL << sdsl::bits::hi((size + t_bs) / t_bs)) * 64 + 64
+                : 64ULL);
     }
 };
 
@@ -318,26 +323,22 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     // sequential word access for bit_vector_rrr per bit is 21 times faster than select
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 21;
 
-    static inline double logbinomial(uint64_t n, uint64_t m) {
+    static inline double logbinomial(double n, double m) {
         return (lgamma(n + 1)
                     - lgamma(m + 1)
                     - lgamma(n - m + 1)) / log(2);
     }
 
-    static inline double entropy(double q) {
-        assert(q >= 0);
-        assert(q <= 1);
-
-        if (q == 0 || q == 1)
-            return 0;
-
-        return q * log2(q) + (1 - q) * log2(1 - q);
-    }
-
     static inline uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
         // TODO: correct the formula for block_size = 15
-        return std::ceil(logbinomial(size, num_set_bits))
-            + (size + t_bs) / t_bs * (sdsl::bits::hi(t_bs) + 1);
+        uint64_t bt = (size + t_bs) / t_bs;
+        uint64_t blocks = bt * logbinomial(t_bs, t_bs * (double)num_set_bits / size);
+        return (bt * (sdsl::bits::hi(t_bs) + 1) + 63) / 64 * 64 + 64 + 8
+            + (blocks + 63) / 64 * 64 + 64
+            + ((bt + t_k - 1) / t_k
+                    * (sdsl::bits::hi(blocks) + 1) + 63) / 64 * 64 + 64 + 8
+            + (((bt + t_k - 1) / t_k + ((size % (t_k * t_bs)) > 0))
+                    * (sdsl::bits::hi(num_set_bits) + 1) + 63) / 64 * 64 + 64 + 8;
     }
 };
 
@@ -349,7 +350,7 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
 
     static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
-        return size;
+        return sizeof(sdsl::int_vector<t_width>) * 8 + (size + 64) / 64 * 64;
     }
 };
 
@@ -358,7 +359,8 @@ template<uint8_t t_b, uint8_t t_pat_len>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::bv_traits<sdsl::rank_support_v5<t_b, t_pat_len>> {
     static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
-        return size * 0.062;
+        return sizeof(sdsl::rank_support_v5<t_b, t_pat_len>) * 8
+            + footprint_rank_support_v5(size);
     }
 };
 

@@ -371,41 +371,43 @@ uint64_t space_taken(const bit_vector_type &vec) {
     vec.serialize(outstream);
     outstream.close();
     std::ifstream instream(test_dump_basename, std::ios::binary | std::ifstream::ate);
-    return instream.tellg();
+    return instream.tellg() * 8;
 }
 
-TEST(bit_vector_rrr, SpacePredicted) {
-    using bv_type = bit_vector_rrr<63>;
+TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
+    double tolerance = 0.01;
+    std::vector<double> densities = { .05, .2, .4, .5, .7, .9, .95 };
 
-    double tolerance = 0.05;
+    if constexpr(std::is_same_v<TypeParam, bit_vector_hyb<>>)
+        return;
 
     DataGenerator gen;
-    for (uint64_t size : { 10'000, 1'000'000, 10'000'000 }) {
-        for (double density : { 0.1, 0.3, 0.5, 0.7, .9 }) {
+    for (uint64_t size : { 1'000'000, 10'000'000 }) {
+        for (double density : densities) {
             sdsl::bit_vector bv = gen.generate_random_column(size, density);
-            uint64_t footprint = space_taken(bv_type(bv));
-            EXPECT_GE(bv_type::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
-                      footprint * 8. * (1 - tolerance));
-            EXPECT_LE(bv_type::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
-                      footprint * 8. * (1 + tolerance));
+            uint64_t footprint = space_taken(TypeParam(bv));
+            EXPECT_GE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * (1 - tolerance)) << "Density: " << density;
+            EXPECT_LE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * (1 + tolerance)) << "Density: " << density;
         }
     }
 }
 
-TEST(bit_vector_il, SpacePredicted) {
-    using bv_type = bit_vector_il<>;
-
-    double tolerance = 0.05;
+TEST(select_support_mcl, PredictedMemoryFootprint) {
+    double tolerance = 0.01;
+    std::vector<double> densities = { .05, .2, .4, .5, .7, .9, .98 };
 
     DataGenerator gen;
-    for (uint64_t size : { 10'000, 1'000'000, 10'000'000 }) {
-        for (double density : { 0.1, 0.3, 0.5, 0.7, .9 }) {
+    for (uint64_t size : { 1'000'000, 10'000'000, 100'000'000 }) {
+        for (double density : densities) {
             sdsl::bit_vector bv = gen.generate_random_column(size, density);
-            uint64_t footprint = space_taken(bv_type(bv));
-            EXPECT_GE(bv_type::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
-                      footprint * 8. * (1 - tolerance));
-            EXPECT_LE(bv_type::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
-                      footprint * 8. * (1 + tolerance));
+
+            uint64_t footprint = space_taken(sdsl::select_support_mcl<1>(&bv));
+            EXPECT_GE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * (1 - tolerance)) << "Size: " << size << "\tDensity: " << density;
+            EXPECT_LE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * (1 + tolerance)) << "Size: " << size << "\tDensity: " << density;
         }
     }
 }

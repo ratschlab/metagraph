@@ -60,7 +60,7 @@ class bit_vector_sd : public bit_vector {
      */
     static uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
         num_set_bits = std::min(num_set_bits, size - num_set_bits);
-        return std::ceil((log2(size + 1) - log2(num_set_bits + 1) + 3) * num_set_bits);
+        return sizeof(bit_vector_sd) * 8 + footprint_sd_vector(size, num_set_bits);
     }
 
   private:

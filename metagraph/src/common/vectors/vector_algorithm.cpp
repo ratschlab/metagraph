@@ -1,5 +1,7 @@
 #include "vector_algorithm.hpp"
 
+#include <cmath>
+
 #include <sdsl/uint128_t.hpp>
 
 #include "common/utils/simd_utils.hpp"
@@ -504,4 +506,40 @@ sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
 #endif
 
     return presence;
+}
+
+
+uint64_t footprint_sd_vector(uint64_t size, uint64_t num_set_bits) {
+    uint8_t logn = sdsl::bits::hi(size) + 1;
+    uint8_t logm = sdsl::bits::hi(num_set_bits) + 1;
+    if (logm == logn)
+        logm--;
+    uint64_t low = num_set_bits * (logn - logm);
+    uint64_t high = num_set_bits + (1ULL << logm);
+    uint64_t high_select1 = footprint_select_support_mcl(high, num_set_bits);
+    uint64_t high_select0 = footprint_select_support_mcl(high, high - num_set_bits);
+    return low + high + high_select1 + high_select0;
+}
+
+uint64_t footprint_select_support_mcl(uint64_t size, uint64_t num_set_bits) {
+    uint64_t sb = (num_set_bits + 4095) / 4096;
+    double avg_diff = 1. * size / sb * 4095 / 4096;
+    uint64_t blocks = ((sdsl::bits::hi((uint64_t)(avg_diff)) + 1) * 64 + 64 + 8)
+                        * (num_set_bits / 4096);
+    uint64_t miniblock_flags = 0;
+    if (num_set_bits % 4096) {
+        // the last block is large
+        blocks += 4096 * (sdsl::bits::hi(size - 1) + 1) + 64 + 8;
+        // bitmap with miniblock flags
+        miniblock_flags += (sb + 63) / 64 * 64 + 64;
+    } else {
+        // empty bitmap with miniblock flags
+        miniblock_flags += 64;
+    }
+    uint64_t offsets = (sb * (sdsl::bits::hi(size) + 1) + 63) / 64 * 64 + 64 + 8;
+    return 64 + offsets + miniblock_flags + blocks;
+}
+
+uint64_t footprint_rank_support_v5(uint64_t size) {
+    return ((((size + 63) >> 11) + 1) << 1) * 64 + 64; // ~0.062n
 }

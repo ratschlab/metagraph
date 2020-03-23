@@ -16,9 +16,6 @@ class bit_vector_stat : public bit_vector {
     friend bit_vector;
 
     static constexpr size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
-    static constexpr double BITS_PER_BIT_IF_SPARSE = 1.07;
-    // FYI: rank support takes 0.0625 bits per bit, the other ~0.31 are taken by select
-    static constexpr double BITS_PER_BIT_IF_DENSE = 1.37;
 
   public:
     inline explicit bit_vector_stat(uint64_t size = 0, bool value = 0);
@@ -62,8 +59,10 @@ class bit_vector_stat : public bit_vector {
      * Predict space taken by the vector with given its parameters in bits.
      */
     static uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
-        return BITS_PER_BIT_IF_SPARSE * size
-                + (BITS_PER_BIT_IF_DENSE - BITS_PER_BIT_IF_SPARSE) * num_set_bits;
+        return sizeof(bit_vector_stat) * 8
+            + (size + 63) / 64 * 64
+            + footprint_rank_support_v5(size)
+            + footprint_select_support_mcl(size, num_set_bits);
     }
 
   private:
