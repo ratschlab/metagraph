@@ -366,7 +366,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([=]() {
-        std::function<void(const T &)> on_new_item = [&kmers](const T &v) {
+        std::function<void(const T &)> on_new_item = [kmers](const T &v) {
             kmers->push(v);
         };
         common::merge_files<T, int_type>(files_to_merge, on_new_item);

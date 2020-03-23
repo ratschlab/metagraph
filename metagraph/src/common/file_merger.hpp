@@ -199,8 +199,10 @@ uint64_t merge_files(
     on_new_item(current);
 
     if (cleanup) {
-        std::for_each(sources.begin(), sources.end(),
-                      [](const std::string &s) { std::filesystem::remove(s); });
+        std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
+            std::filesystem::remove(s);
+            std::filesystem::remove(s + ".count");
+        });
     }
 
     return num_elements;
