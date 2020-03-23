@@ -59,6 +59,17 @@ int clean_graph(Config *config) {
             exit(1);
         }
 
+        if (config->min_unitig_median_kmer_abundance == 0) {
+            // skip zero k-mer counts for dummy k-mers in DBGSuccinct
+            const auto _graph = dynamic_cast<DBGSuccinct*>(graph.get())
+                    ? std::make_shared<MaskedDeBruijnGraph>(graph, [&](auto i) { return (*node_weights)[i] > 0; })
+                    : graph;
+
+            config->min_unitig_median_kmer_abundance
+                = estimate_min_kmer_abundance(*_graph, *node_weights,
+                                              config->fallback_abundance_cutoff);
+        }
+
         if (config->min_count > 1
                 || config->max_count < std::numeric_limits<unsigned int>::max()) {
             const auto &weights = *graph->get_extension<NodeWeights>();
@@ -69,17 +80,6 @@ int clean_graph(Config *config) {
             graph->add_extension(node_weights);
 
             assert(node_weights->is_compatible(*graph));
-        }
-
-        if (config->min_unitig_median_kmer_abundance == 0) {
-            // skip zero k-mer counts for dummy k-mers in DBGSuccinct
-            const auto _graph = dynamic_cast<DBGSuccinct*>(graph.get())
-                    ? std::make_shared<MaskedDeBruijnGraph>(graph, [&](auto i) { return (*node_weights)[i] > 0; })
-                    : graph;
-
-            config->min_unitig_median_kmer_abundance
-                = estimate_min_kmer_abundance(*_graph, *node_weights,
-                                              config->fallback_abundance_cutoff);
         }
     }
 
