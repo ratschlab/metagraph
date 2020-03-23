@@ -373,4 +373,13 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
 
 } // namespace sdsl
 
+// Predict the memory footprint in bits for sdsl::sd_vector<>
+uint64_t footprint_sd_vector(uint64_t size, uint64_t num_set_bits);
+
+// Predict the memory footprint in bits for sdsl::select_support_mcl<>
+uint64_t footprint_select_support_mcl(uint64_t size, uint64_t num_set_bits);
+
+// Predict the memory footprint in bits for sdsl::rank_support_v5<>
+uint64_t footprint_rank_support_v5(uint64_t size);
+
 #endif // __VECTOR_ALGORITHM_HPP__

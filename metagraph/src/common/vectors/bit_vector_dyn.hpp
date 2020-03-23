@@ -47,6 +47,13 @@ class bit_vector_dyn : public bit_vector {
 
     inline sdsl::bit_vector to_vector() const override;
 
+    /**
+     * Predict space taken by the vector with given its parameters in bits.
+     */
+    static uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
+        return size * 1.084;
+    }
+
   private:
     dyn::suc_bv vector_;
 };
