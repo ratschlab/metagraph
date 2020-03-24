@@ -83,7 +83,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Con
         return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
 
     } else if (aligner_config.max_seed_length == graph.get_k()) {
-        assert(config.alignment_min_seed_length == graph.get_k());
+        assert(aligner_config.min_seed_length == graph.get_k());
 
         // seeds are single k-mers
         return std::make_unique<DBGAligner<>>(graph, aligner_config);
