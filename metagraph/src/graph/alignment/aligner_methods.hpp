@@ -2,6 +2,8 @@
 #define __DBG_ALIGNER_METHODS_HPP__
 
 #include "aligner_helper.hpp"
+#include "common/bounded_priority_queue.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap.hpp"
 
 
@@ -123,10 +125,7 @@ class Extender {
     virtual ~Extender() {}
 
     virtual void
-    operator()(const DBGAlignment &path,
-               std::string_view query,
-               std::function<void(DBGAlignment&&, NodeType)> callback,
-               bool orientation,
+    operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
                score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
     virtual void initialize(const DBGAlignment &path) = 0;
@@ -138,6 +137,7 @@ class Extender {
   protected:
     virtual void set_graph(const DeBruijnGraph &graph) = 0;
     virtual void reset() = 0;
+    virtual const DBGAlignment& get_seed() const = 0;
 };
 
 
@@ -147,18 +147,22 @@ class DefaultColumnExtender : public Extender<NodeType> {
     typedef typename Extender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename Extender<NodeType>::node_index node_index;
     typedef typename Extender<NodeType>::score_t score_t;
+    typedef BoundedPriorityQueue<std::pair<NodeType, score_t>,
+                                 std::vector<std::pair<NodeType, score_t>>,
+                                 utils::LessSecond> ColumnQueue;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(&graph), config_(config) { assert(config_.check_config_scores()); }
+          : graph_(&graph), config_(config), columns_to_update(config_.queue_size) {
+        assert(config_.check_config_scores());
+    }
+
+    virtual ~DefaultColumnExtender() {}
 
     virtual void
-    operator()(const DBGAlignment &path,
-               std::string_view query,
-               std::function<void(DBGAlignment&&, NodeType)> callback,
-               bool orientation,
+    operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
                score_t min_path_score = std::numeric_limits<score_t>::min()) override;
 
-    virtual void initialize(const DBGAlignment &) override {}
+    virtual void initialize(const DBGAlignment &path) override;
 
     virtual void initialize_query(const std::string_view query) override;
 
@@ -169,20 +173,59 @@ class DefaultColumnExtender : public Extender<NodeType> {
 
     virtual const DBGAlignerConfig& get_config() const override { return config_; }
 
+    virtual const DPTable<NodeType>& get_dp_table() const { return dp_table; }
+    virtual const ColumnQueue& get_column_queue() const{ return columns_to_update; }
+
   protected:
     virtual void set_graph(const DeBruijnGraph &graph) override { graph_ = &graph; }
     virtual void reset() override { dp_table.clear(); }
 
+    virtual std::pair<typename DPTable<NodeType>::const_iterator, bool>
+    emplace_node(NodeType node, NodeType incoming_node, char c, size_t size, size_t best_pos);
+
+    virtual bool add_seed(size_t clipping);
+
+    virtual const DBGAlignment& get_seed() const override { return *path_; }
+
+    virtual bool extendable(size_t begin, size_t end, const score_t *scores) const;
+
+    void extend_main(std::function<void(DBGAlignment&&, NodeType)> callback,
+                     score_t min_path_score);
+
+    void update_columns(NodeType incoming_node,
+                        const std::vector<std::pair<NodeType, char>> &out_columns,
+                        score_t min_path_score);
+
+    virtual std::vector<std::pair<NodeType, char>>
+    fork_extension(NodeType /* fork after this node */,
+                   std::function<void(DBGAlignment&&, NodeType)>,
+                   score_t);
+
+    virtual DPTable<NodeType>& get_dp_table() { return dp_table; }
+    virtual ColumnQueue& get_column_queue() { return columns_to_update; }
+
   private:
-    typedef std::pair<NodeType, score_t> ColumnRef;
     const DeBruijnGraph *graph_;
     const DBGAlignerConfig &config_;
+
+    // keep track of which columns to use next
+    ColumnQueue columns_to_update;
 
     DPTable<NodeType> dp_table;
 
     // compute perfect match scores for all suffixes
     // used for branch and bound checks
     std::vector<score_t> partial_sums_;
+
+    std::string_view query;
+
+    const DBGAlignment *path_;
+    const char *align_start;
+    size_t size;
+    const score_t *match_score_begin;
+    NodeType start_node;
+    score_t start_score;
+    score_t score_cutoff;
 };
 
 

@@ -13,6 +13,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/utils/template_utils.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
@@ -455,14 +456,6 @@ class DPTable {
     struct Column {
         Column() = default;
 
-        // Prevent the copy constructor from being used
-        Column(const Column&) = delete;
-        Column& operator=(const Column&) = delete;
-
-        // Ensure that the move constructor is still available
-        Column(Column&&) noexcept = default;
-        Column& operator=(Column&&) noexcept = default;
-
         Column(size_t size,
                score_t min_score,
                char start_char,
@@ -535,6 +528,11 @@ class DPTable {
                             bool orientation,
                             score_t min_path_score,
                             NodeType *node = nullptr);
+
+    std::pair<NodeType, score_t> best_score() const {
+        auto mx = std::max_element(begin(), end(), utils::LessSecond());
+        return std::make_pair(mx->first, mx->second.best_score());
+    }
 
     const Storage& data() const { return dp_table_; }
     size_t get_query_offset() const { return query_offset_; }
