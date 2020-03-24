@@ -386,10 +386,4 @@ using bit_vector_rrr
                       typename sdsl::rrr_vector<block_size>::select_1_type,
                       typename sdsl::rrr_vector<block_size>::select_0_type>;
 
-using bit_vector_rank
-    = bit_vector_sdsl<sdsl::bit_vector,
-                      sdsl::rank_support_v5<1>,
-                      sdsl::select_support_scan<1>,
-                      sdsl::select_support_scan<0>>;
-
 #endif // __BIT_VECTOR_SDSL_HPP__

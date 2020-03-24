@@ -110,7 +110,6 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     timer.reset();
     double random_select = 0.0 / 0.0;
     if (another.num_set_bits() && !std::is_same_v<BitVector, bit_vector_hyb<>>
-                               && !std::is_same_v<BitVector, bit_vector_rank>
                                && !std::is_same_v<BitVector, bit_vector_smallrank>) {
         for (uint64_t i = 0, rank = another.num_set_bits(); i < num_iterations; ++i) {
             result += another.select1(1 + (i * 87'178'291'199) % rank);
@@ -157,7 +156,6 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     // Sequential select time
     double sequential_select = 0.0 / 0.0;
     if (another.num_set_bits() && !std::is_base_of_v<BitVector, bit_vector_hyb<>>
-                               && !std::is_base_of_v<BitVector, bit_vector_rank>
                                && !std::is_base_of_v<BitVector, bit_vector_smallrank>) {
         timer.reset();
         for (uint64_t i = 0, j = 1, rank = another.num_set_bits(); i < num_iterations; ++i) {
@@ -457,10 +455,6 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_rrr<255>>(length_arg.getValue(),
                                                      density_arg.getValue(),
                                                      "rrr255");
-            } else if (vector_type == "rank") {
-                test_vector_points<bit_vector_rank>(length_arg.getValue(),
-                                                    density_arg.getValue(),
-                                                    "rank");
             } else if (vector_type == "smallrank") {
                 test_vector_points<bit_vector_smallrank>(length_arg.getValue(),
                                                          density_arg.getValue(),

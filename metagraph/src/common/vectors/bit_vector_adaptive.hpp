@@ -53,7 +53,7 @@ class bit_vector_adaptive : public bit_vector {
         RRR_VECTOR = 0,
         SD_VECTOR,
         STAT_VECTOR,
-        RANK_VECTOR
+        IL4096_VECTOR
     };
 
     typedef VectorCode (*DefineRepresentation)(uint64_t /* size */,
@@ -95,8 +95,8 @@ bit_vector_adaptive::representation_tag() const {
     } else if (dynamic_cast<const bit_vector_stat*>(vector_.get())) {
         return VectorCode::STAT_VECTOR;
 
-    } else if (dynamic_cast<const bit_vector_rank*>(vector_.get())) {
-        return VectorCode::RANK_VECTOR;
+    } else if (dynamic_cast<const bit_vector_il<4096>*>(vector_.get())) {
+        return VectorCode::IL4096_VECTOR;
 
     } else {
         throw std::runtime_error("Unsupported type");
@@ -114,8 +114,8 @@ bool bit_vector_adaptive::load(std::istream &in) {
         case VectorCode::STAT_VECTOR:
             vector_.reset(new bit_vector_stat());
             break;
-        case VectorCode::RANK_VECTOR:
-            vector_.reset(new bit_vector_rank());
+        case VectorCode::IL4096_VECTOR:
+            vector_.reset(new bit_vector_il<4096>());
             break;
         default:
             return false;
@@ -175,8 +175,8 @@ bit_vector_adaptive_stat<optimal_representation>
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(size, value));
             break;
-        case RANK_VECTOR:
-            vector_.reset(new bit_vector_rank(size, value));
+        case IL4096_VECTOR:
+            vector_.reset(new bit_vector_il<4096>(size, value));
             break;
     }
 }
@@ -194,8 +194,8 @@ bit_vector_adaptive_stat<optimal_representation>
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(vector.copy_to<bit_vector_stat>()));
             break;
-        case RANK_VECTOR:
-            vector_.reset(new bit_vector_rank(vector.copy_to<bit_vector_rank>()));
+        case IL4096_VECTOR:
+            vector_.reset(new bit_vector_il<4096>(vector.copy_to<bit_vector_il<4096>>()));
             break;
     }
 }
@@ -215,8 +215,8 @@ bit_vector_adaptive_stat<optimal_representation>
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(vector));
             break;
-        case RANK_VECTOR:
-            vector_.reset(new bit_vector_rank(vector));
+        case IL4096_VECTOR:
+            vector_.reset(new bit_vector_il<4096>(vector));
             break;
     }
 }
@@ -234,8 +234,8 @@ bit_vector_adaptive_stat<optimal_representation>
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(vector.convert_to<bit_vector_stat>()));
             break;
-        case RANK_VECTOR:
-            vector_.reset(new bit_vector_rank(vector.convert_to<bit_vector_rank>()));
+        case IL4096_VECTOR:
+            vector_.reset(new bit_vector_il<4096>(vector.convert_to<bit_vector_il<4096>>()));
             break;
     }
 }
@@ -255,8 +255,8 @@ bit_vector_adaptive_stat<optimal_representation>
         case STAT_VECTOR:
             vector_.reset(new bit_vector_stat(std::move(vector)));
             break;
-        case RANK_VECTOR:
-            vector_.reset(new bit_vector_rank(std::move(vector)));
+        case IL4096_VECTOR:
+            vector_.reset(new bit_vector_il<4096>(std::move(vector)));
             break;
     }
 }
@@ -283,10 +283,10 @@ bit_vector_adaptive_stat<optimal_representation>
             vector_.reset(new bit_vector_stat(std::move(vector)));
             break;
         }
-        case RANK_VECTOR: {
+        case IL4096_VECTOR: {
             sdsl::bit_vector vector(size, false);
             call_ones([&](uint64_t i) { vector[i] = true; });
-            vector_.reset(new bit_vector_rank(std::move(vector)));
+            vector_.reset(new bit_vector_il<4096>(std::move(vector)));
             break;
         }
     }
@@ -342,15 +342,15 @@ typedef bit_vector_adaptive_stat<smart_representation> bit_vector_smart;
  * combines:
  *    - bit_vector_sd
  *    - bit_vector_rrr<63>
- *    - bit_vector_rank
+ *    - bit_vector_il<4096>
  */
 inline bit_vector_adaptive::VectorCode
 smallrank_representation(uint64_t size, uint64_t num_set_bits) {
     assert(num_set_bits <= size);
 
-    // use bit_vector_rank if density is between (0.4, 0.6)
-    if (std::min(num_set_bits, size - num_set_bits) > size * 0.4)
-        return bit_vector_adaptive::VectorCode::RANK_VECTOR;
+    // use bit_vector_il<4096> if density is between (0.3, 0.7)
+    if (std::min(num_set_bits, size - num_set_bits) > size * 0.3)
+        return bit_vector_adaptive::VectorCode::IL4096_VECTOR;
 
     return bit_vector_sd::predict_size(size, num_set_bits)
             < bit_vector_rrr<>::predict_size(size, num_set_bits)
@@ -372,8 +372,8 @@ bit_vector_adaptive_stat<optimal_representation>
             return bit_vector_rrr<>::predict_size(size, num_set_bits);
         case STAT_VECTOR:
             return bit_vector_stat::predict_size(size, num_set_bits);
-        case RANK_VECTOR:
-            return bit_vector_rank::predict_size(size, num_set_bits);
+        case IL4096_VECTOR:
+            return bit_vector_il<4096>::predict_size(size, num_set_bits);
         default:
             assert(false);
             return 0;
