@@ -40,18 +40,16 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
         aligner_config.max_seed_length = graph.get_k();
 
     logger->trace("Alignment settings:");
-    logger->trace("\t Alignments to report: {}", config.alignment_num_alternative_paths);
-    logger->trace("\t Priority queue size: {}", config.alignment_queue_size);
+    logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
+    logger->trace("\t Priority queue size: {}", aligner_config.queue_size);
     logger->trace("\t Min seed length: {}", aligner_config.min_seed_length);
     logger->trace("\t Max seed length: {}", aligner_config.max_seed_length);
-    logger->trace("\t Max num seeds per locus: {}", config.alignment_max_num_seeds_per_locus);
-    logger->trace("\t Gap opening penalty: {}",
-                  int64_t(config.alignment_gap_opening_penalty));
-    logger->trace("\t Gap extension penalty: {}",
-                  int64_t(config.alignment_gap_extension_penalty));
-    logger->trace("\t Min DP table cell score: {}", int64_t(config.alignment_min_cell_score));
-    logger->trace("\t Min alignment score: {}", config.alignment_min_path_score);
-    logger->trace("\t Bandwidth: {}", config.alignment_vertical_bandwidth);
+    logger->trace("\t Max num seeds per locus: {}", aligner_config.max_num_seeds_per_locus);
+    logger->trace("\t Gap opening penalty: {}", int64_t(aligner_config.gap_opening_penalty));
+    logger->trace("\t Gap extension penalty: {}", int64_t(aligner_config.gap_extension_penalty));
+    logger->trace("\t Min DP table cell score: {}", int64_t(aligner_config.min_cell_score));
+    logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
+    logger->trace("\t Bandwidth: {}", aligner_config.bandwidth);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {
