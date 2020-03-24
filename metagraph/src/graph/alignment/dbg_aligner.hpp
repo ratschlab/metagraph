@@ -75,7 +75,6 @@ class DBGAligner : public IDBGAligner {
               [&](DBGAlignment&& path) {
                   paths.emplace_back(std::move(path));
               },
-              orientation,
               config_.min_path_score,
               seeder);
 
@@ -96,7 +95,6 @@ class DBGAligner : public IDBGAligner {
               [&](DBGAlignment&& alignment) {
                   all_paths.emplace_back(std::move(alignment));
               },
-              false,
               config_.min_path_score,
               seeder);
 
@@ -108,7 +106,6 @@ class DBGAligner : public IDBGAligner {
               [&](DBGAlignment&& alignment) {
                   all_paths.emplace_back(std::move(alignment));
               },
-              true,
               size >= config_.num_alternative_paths
                   ? all_paths[config_.num_alternative_paths - 1].get_score() - 1
                   : config_.min_path_score,
@@ -133,7 +130,6 @@ class DBGAligner : public IDBGAligner {
     // Align a sequence to the graph
     void align(std::string_view query,
                const std::function<void(DBGAlignment&&)> &callback,
-               bool orientation,
                score_t min_path_score,
                const Seeder &seeder) const {
         assert(config_.check_config_scores());
@@ -159,7 +155,7 @@ class DBGAligner : public IDBGAligner {
 
             extend.initialize(seed);
             bool extended = false;
-            extend(seed, query, [&](DBGAlignment&& extension, auto start_node) {
+            extend([&](DBGAlignment&& extension, auto start_node) {
                 assert(extension.is_valid(graph_, &config_));
                 extension.extend_query_end(query.data() + query.size());
 
@@ -178,7 +174,7 @@ class DBGAligner : public IDBGAligner {
                 assert(next_path.is_valid(graph_, &config_));
 
                 path_queue.emplace(std::move(next_path));
-            }, orientation, min_path_score);
+            }, min_path_score);
 
             if (!extended && seed.get_score() >= config_.min_path_score) {
                 seed.extend_query_end(query.data() + query.size());
