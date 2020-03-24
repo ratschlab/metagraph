@@ -29,10 +29,6 @@ Vector bit_vector::convert_to() {
         // stat -> anything else
         return Vector(std::move(dynamic_cast<bit_vector_stat*>(this)->vector_));
 
-    } else if (auto *bv = dynamic_cast<bit_vector_rank*>(this)) {
-        // stat -> anything else
-        return Vector(std::move(const_cast<sdsl::bit_vector&>(bv->data())));
-
     } else if (dynamic_cast<bit_vector_adaptive*>(this)) {
         // adaptive(x) -> anything
         return dynamic_cast<bit_vector_adaptive*>(this)->vector_->convert_to<Vector>();
@@ -54,7 +50,6 @@ template bit_vector_rrr<31> bit_vector::convert_to<bit_vector_rrr<31>>();
 template bit_vector_rrr<63> bit_vector::convert_to<bit_vector_rrr<63>>();
 template bit_vector_rrr<127> bit_vector::convert_to<bit_vector_rrr<127>>();
 template bit_vector_rrr<255> bit_vector::convert_to<bit_vector_rrr<255>>();
-template bit_vector_rank bit_vector::convert_to<bit_vector_rank>();
 template sdsl::bit_vector bit_vector::convert_to<sdsl::bit_vector>();
 template<> bit_vector_small bit_vector::convert_to() {
     return bit_vector_small(std::move(*this));
@@ -82,10 +77,6 @@ Vector bit_vector::copy_to() const {
         auto bv = dynamic_cast<const bit_vector_stat*>(this)->vector_;
         return Vector(std::move(bv));
 
-    } else if (dynamic_cast<const bit_vector_rank*>(this)) {
-        // copy stat -> anything else
-        return Vector(dynamic_cast<const bit_vector_rank*>(this)->data());
-
     } else if (dynamic_cast<const bit_vector_adaptive*>(this)) {
         // copy adaptive(x) -> anything
         return dynamic_cast<const bit_vector_adaptive*>(this)->vector_->copy_to<Vector>();
@@ -107,7 +98,6 @@ template bit_vector_rrr<31> bit_vector::copy_to<bit_vector_rrr<31>>() const;
 template bit_vector_rrr<63> bit_vector::copy_to<bit_vector_rrr<63>>() const;
 template bit_vector_rrr<127> bit_vector::copy_to<bit_vector_rrr<127>>() const;
 template bit_vector_rrr<255> bit_vector::copy_to<bit_vector_rrr<255>>() const;
-template bit_vector_rank bit_vector::copy_to<bit_vector_rank>() const;
 template sdsl::bit_vector bit_vector::copy_to<sdsl::bit_vector>() const;
 template<> bit_vector_small bit_vector::copy_to() const {
     return bit_vector_small(*this);
