@@ -58,7 +58,7 @@ std::string form_client_reply(const std::string &received_message,
         // query callback shared by FASTA and sequence modes
         auto execute_server_query = [&](const std::string &name,
                                         const std::string &sequence) {
-            execute_query(name,
+           oss << execute_query(name,
                           sequence,
                           count_labels,
                           print_signature,
@@ -66,8 +66,7 @@ std::string form_client_reply(const std::string &received_message,
                           num_top_labels,
                           discovery_fraction,
                           config.anno_labels_delimiter,
-                          anno_graph,
-                          oss);
+                          anno_graph);
         };
 
         if (!seq.isNull()) {
