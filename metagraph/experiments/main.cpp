@@ -60,8 +60,6 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     const auto serialized_size = std::filesystem::file_size(path);
 
-    std::this_thread::sleep_for(1s);
-
     auto mem_before = get_curr_RSS();
 
     std::vector<BitVector> vectors(20);
@@ -71,13 +69,10 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
         another.load(in);
     }
 
-    std::this_thread::sleep_for(3s);
-
     auto RAM = (get_curr_RSS() - mem_before) / vectors.size();
 
     BitVector another = std::move(vectors.back());
     vectors.clear();
-    std::this_thread::sleep_for(3s);
 
     Timer timer;
     uint64_t result = 0;
