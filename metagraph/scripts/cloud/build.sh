@@ -38,7 +38,7 @@ fi
 exit_code=0
 set +e
 for i in {1..1}; do  # we now know how much memory we need, so retrying is not necessary
-  if execute metagraph build -v -p 4 -k 31 --container vector_disk --canonical --count-kmers -o "${output_dir}/${sra_number}" --mem-cap-gb ${mem_cap_gb} --tmp-dir ${tmp_dir} --disk-cap-gb 400 --count-width 16 ${input_dir}/${sra_number}.kmc.kmc_pre; then
+  if execute metagraph build -v -p 4 -k 31 --container vector_disk --canonical --count-kmers -o "${output_dir}/${sra_number}" --mem-cap-gb ${mem_cap_gb} --tmp-dir ${tmp_dir} --disk-cap-gb 200 --count-width 16 ${input_dir}/${sra_number}.kmc.kmc_pre; then
     exit_code=0
     break
   else

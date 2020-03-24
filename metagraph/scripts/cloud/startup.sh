@@ -4,7 +4,7 @@ chmod a+rx $0
 
 echo "Executing script as: $(whoami)"
 # set up SSD disk
-sudo mdadm --create /dev/md0 --level=0 --raid-devices=2 /dev/nvme0n1 /dev/nvme0n2
+sudo mdadm --create /dev/md0 --level=0 --raid-devices=1 /dev/nvme0n1
 sudo mkfs.ext4 -F /dev/md0
 sudo mkdir -p /mnt/disks/ssd
 sudo mount /dev/md0 /mnt/disks/ssd
