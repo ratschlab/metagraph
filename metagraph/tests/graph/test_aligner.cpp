@@ -785,6 +785,39 @@ TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_drop_seed) {
+    size_t k = 4;
+    std::string reference = "TTTCC" "CT" "GGCGCTCTC";
+    std::string query =     "TTTCC" "GG" "GGCGCTCTC";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -4, -4));
+    config.xdrop = 4;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+
+    EXPECT_EQ(6, path.size());
+    EXPECT_EQ(reference.substr(7), path.get_sequence());
+    EXPECT_EQ(config.match_score(reference.substr(7)), path.get_score());
+    EXPECT_EQ("7S9=", path.get_cigar().to_string());
+    EXPECT_EQ(9u, path.get_num_matches());
+    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_EQ(7u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_end_clipping());
+    EXPECT_EQ(0u, path.get_offset());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph,
+                         path,
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
+
+    // TODO: re-enable this when gap extension is fixed
+    // check_extend(graph, aligner.get_config(), paths, query);
+}
+
 TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     size_t k = 4;
     std::string reference = "TTTC" "CCTTAA" "GGCGCTCTC";

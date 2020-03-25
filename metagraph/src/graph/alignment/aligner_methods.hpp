@@ -225,7 +225,8 @@ class DefaultColumnExtender : public Extender<NodeType> {
 
     virtual const DBGAlignment& get_seed() const override { return *path_; }
 
-    virtual bool extendable(size_t begin, size_t end, const score_t *scores) const;
+    virtual bool extendable(size_t begin, size_t end,
+                            const typename DPTable<NodeType>::Column &column) const;
 
     void extend_main(std::function<void(DBGAlignment&&, NodeType)> callback,
                      score_t min_path_score);
@@ -264,6 +265,7 @@ class DefaultColumnExtender : public Extender<NodeType> {
     NodeType start_node;
     score_t start_score;
     score_t score_cutoff;
+    score_t xdrop_cutoff;
 };
 
 

@@ -70,15 +70,15 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
 
 template <typename NodeType>
 bool DefaultColumnExtender<NodeType>
-::extendable(size_t begin, size_t end, const score_t *scores) const {
+::extendable(size_t begin, size_t end, const typename DPTable<NodeType>::Column &column) const {
+    // Ignore if there is no way it can be extended to an optimal alignment.
     // TODO: this cuts off too early (before the scores have converged)
     //       so path scores have to be recomputed after alignment
-    return !std::equal(
-        match_score_begin + begin, match_score_begin + end,
-        scores + begin,
-        [&](auto a, auto b) { return a + b < score_cutoff; }
-    );
-};
+    return xdrop_cutoff - column.best_score() <= config_.xdrop
+        && !std::equal(match_score_begin + begin, match_score_begin + end,
+                       column.scores.data() + begin,
+                       [&](auto a, auto b) { return a + b < score_cutoff; });
+}
 
 template <typename NodeType>
 std::vector<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
@@ -319,6 +319,7 @@ void DefaultColumnExtender<NodeType>
 
     start_score = dp_table.find(start_node)->second.best_score();
     score_cutoff = std::max(start_score, min_path_score);
+    xdrop_cutoff = start_score;
 
     columns_to_update.emplace(start_node, start_score);
 
@@ -473,11 +474,12 @@ void DefaultColumnExtender<NodeType>
             if (*max_pos > start_score) {
                 start_node = iter->first;
                 start_score = iter->second.best_score();
+                xdrop_cutoff = std::max(start_score, xdrop_cutoff);
                 score_cutoff = std::max(start_score, min_path_score);
             }
 
             // branch and bound
-            if (extendable(overall_begin, overall_end, next_column.scores.data()))
+            if (extendable(overall_begin, overall_end, next_column))
                 columns_to_update.emplace(iter->first, iter->second.best_score());
 
             assert(start_score == dp_table.best_score().second);
