@@ -415,20 +415,23 @@ int query_graph(Config *config) {
     return 0;
 }
 
+inline std::string query_sequence(size_t id,
+                                  const std::string &name,
+                                  const std::string &seq,
+                                  const AnnotatedDBG &anno_graph,
+                                  const Config &config) {
+    return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
+                                        config.count_labels, config.print_signature,
+                                        config.suppress_unlabeled, config.num_top_labels,
+                                        config.discovery_fraction, config.anno_labels_delimiter,
+                                        anno_graph);
+}
 
 void QueryExecutor::query_fasta(const string &file,
                                 const std::function<void(const std::string &)> &callback) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     FastaParser fasta_parser(file, config_.forward_and_reverse);
-
-    auto query_sequence = [&](size_t id, const std::string &name, const std::string &seq) {
-        return execute_query(fmt::format_int(id).str() + '\t' + name, seq,
-                             config_.count_labels, config_.print_signature,
-                             config_.suppress_unlabeled, config_.num_top_labels,
-                             config_.discovery_fraction, config_.anno_labels_delimiter,
-                             anno_graph_);
-    };
 
     if (config_.fast) {
         // Construct a query graph and query against it
@@ -444,7 +447,7 @@ void QueryExecutor::query_fasta(const string &file,
         thread_pool_.enqueue(
             [&](size_t id, const std::string &name, std::string &seq) {
                 if (!aligner_) {
-                    callback(query_sequence(id, name, seq));
+                    callback(query_sequence(id, name, seq, anno_graph_, config_));
                     return;
                 }
 
@@ -454,7 +457,7 @@ void QueryExecutor::query_fasta(const string &file,
                 std::string seq_header
                     = get_alignment_header_and_swap_query(name, &seq, &matches);
 
-                callback(query_sequence(id, seq_header, seq));
+                callback(query_sequence(id, seq_header, seq, anno_graph_, config_));
             },
             seq_count++,
             std::string(kseq.name.s),
@@ -546,21 +549,13 @@ void QueryExecutor
 
         batch_timer.reset();
 
-        auto query_sequence = [&](size_t id, const std::string &name, const std::string &seq) {
-            return execute_query(fmt::format_int(id).str() + '\t' + name, seq,
-                                 config_.count_labels, config_.print_signature,
-                                 config_.suppress_unlabeled, config_.num_top_labels,
-                                 config_.discovery_fraction, config_.anno_labels_delimiter,
-                                 *query_graph);
-        };
-
         if (!aligner_) {
             for ( ; begin != it; ++begin) {
                 assert(begin != end);
 
                 thread_pool_.enqueue(
                     [&](size_t id, const std::string &name, const std::string &seq) {
-                        callback(query_sequence(id, name, seq));
+                        callback(query_sequence(id, name, seq, *query_graph, config_));
                     },
                     seq_count++, std::string(begin->name.s),
                     std::string(begin->seq.s)
@@ -570,7 +565,7 @@ void QueryExecutor
             for (auto&& [id, name, seq] : named_alignments) {
                 thread_pool_.enqueue(
                     [&](size_t id, const std::string &name, const std::string &seq) {
-                        callback(query_sequence(id, name, seq));
+                        callback(query_sequence(id, name, seq, *query_graph, config_));
                     },
                     id, std::move(name), std::move(seq)
                 );
