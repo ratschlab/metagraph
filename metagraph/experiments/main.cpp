@@ -437,8 +437,8 @@ int main(int argc, char *argv[]) {
                                                     "il");
             } else if (vector_type == "rrr15") {
                 test_vector_points<bit_vector_rrr<15>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr15");
+                                                       density_arg.getValue(),
+                                                       "rrr15");
             } else if (vector_type == "rrr31") {
                 test_vector_points<bit_vector_rrr<31>>(length_arg.getValue(),
                                                      density_arg.getValue(),
