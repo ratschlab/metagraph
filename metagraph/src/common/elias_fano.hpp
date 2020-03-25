@@ -26,6 +26,8 @@ class EliasFanoEncoder {
   public:
     EliasFanoEncoder() {}
 
+    EliasFanoEncoder(const EliasFanoEncoder& other) = delete;
+
     /**
      * Constructs an Elias-Fano encoder of an array with the given #size and given
      * #max_value. The encoded output is written to #out_filename.
@@ -149,7 +151,7 @@ class EliasFanoDecoder {
 
   private:
     /** Index of current element */
-    size_t position_;
+    size_t position_ = 0;
 
     /** Current position in the #upper_ vector */
     size_t upper_pos_ = static_cast<size_t>(-sizeof(size_t));
@@ -174,7 +176,7 @@ class EliasFanoDecoder {
     Vector<char> upper_;
 
     /** Total number of elements encoded. */
-    size_t size_;
+    size_t size_ = 0;
 
     /**
      * Each encoded integer is split into a "lower" and an "upper" part. This is the
@@ -332,7 +334,6 @@ class EliasFanoEncoderBuffered {
     void encode_chunk();
 
   private:
-    EliasFanoEncoder<T> encoder_;
     Vector<T> buffer_;
     std::string file_name_;
     size_t total_size_ = 0;
@@ -358,7 +359,6 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
     void encode_chunk();
 
   private:
-    EliasFanoEncoder<std::pair<T, C>> encoder_;
     Vector<std::pair<T, C>> buffer_;
     std::string file_name_;
     size_t total_size_ = 0;

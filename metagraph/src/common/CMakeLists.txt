@@ -4,6 +4,7 @@ project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
@@ -55,7 +56,7 @@ target_link_libraries(metagraph_common
     glog::glog
     spdlog::spdlog
 )
-target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY)
+target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
 
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
