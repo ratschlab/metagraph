@@ -14,53 +14,55 @@ class IDBGAligner;
 class Config;
 
 std::string execute_query(const std::string &seq_name,
-                   const std::string &sequence,
-                   bool count_labels,
-                   bool print_signature,
-                   bool suppress_unlabeled,
-                   size_t num_top_labels,
-                   double discovery_fraction,
-                   std::string anno_labels_delimiter,
-                   const AnnotatedDBG &anno_graph);
+                          const std::string &sequence,
+                          bool count_labels,
+                          bool print_signature,
+                          bool suppress_unlabeled,
+                          size_t num_top_labels,
+                          double discovery_fraction,
+                          std::string anno_labels_delimiter,
+                          const AnnotatedDBG &anno_graph);
 
 
-using StringGenerator = std::function<void(std::function<void(const std::string&)>)>;
+using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
-std::unique_ptr<AnnotatedDBG>
-construct_query_graph(const AnnotatedDBG &anno_graph,
-                      StringGenerator call_sequences,
-                      double discovery_fraction,
-                      size_t num_threads);
+std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_graph,
+                                                    StringGenerator call_sequences,
+                                                    double discovery_fraction,
+                                                    size_t num_threads);
 
 int query_graph(Config *config);
 
 class QueryExecutor {
-public:
+  public:
     void process_fasta_file(const std::string &file_path, std::ostream &out);
 
     QueryExecutor(const Config *config,
                   const AnnotatedDBG *anno_graph,
                   const IDBGAligner *aligner,
                   ThreadPool *thread_pool)
-            : config_(config),
-              anno_graph_(anno_graph),
-              aligner_(aligner),
-              thread_pool_(thread_pool) {}
+        : config_(config),
+          anno_graph_(anno_graph),
+          aligner_(aligner),
+          thread_pool_(thread_pool) {}
 
-private:
+  private:
     const Config *config_;
     const AnnotatedDBG *anno_graph_;
     const IDBGAligner *aligner_;
     ThreadPool *thread_pool_;
 
-    void process_fasta_file_fast(FastaParser &fasta_parser, const std::string &file_name, std::ostream &out);
+    void process_fasta_file_fast(FastaParser &fasta_parser,
+                                 const std::string &file_name,
+                                 std::ostream &out);
 
-    void forward_query(size_t id, const std::string &name, const std::string &seq, const AnnotatedDBG *graph_to_query,
-                       std::ostream &out, std::mutex &stream_mutex);
+    void forward_query(size_t id,
+                       const std::string &name,
+                       const std::string &seq,
+                       const AnnotatedDBG *graph_to_query,
+                       std::ostream &out,
+                       std::mutex &stream_mutex);
 };
-
-
-
 
 
 #endif // __QUERY_GRAPH_HPP__
