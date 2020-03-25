@@ -25,21 +25,23 @@ const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 using mg::common::logger;
 
 
-std::string execute_query(const std::string &seq_name,
-                          const std::string &sequence,
-                          bool count_labels,
-                          bool print_signature,
-                          bool suppress_unlabeled,
-                          size_t num_top_labels,
-                          double discovery_fraction,
-                          std::string anno_labels_delimiter,
-                          const AnnotatedDBG &anno_graph) {
+std::string QueryExecutor::execute_query(const std::string &seq_name,
+                                         const std::string &sequence,
+                                         bool count_labels,
+                                         bool print_signature,
+                                         bool suppress_unlabeled,
+                                         size_t num_top_labels,
+                                         double discovery_fraction,
+                                         std::string anno_labels_delimiter,
+                                         const AnnotatedDBG &anno_graph) {
     std::string output;
     output.reserve(1'000);
 
     if (print_signature) {
-        auto top_labels = anno_graph.get_top_label_signatures(sequence, num_top_labels,
-                                                              discovery_fraction);
+        auto top_labels
+            = anno_graph.get_top_label_signatures(sequence,
+                                                  num_top_labels,
+                                                  discovery_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return "";
@@ -56,8 +58,9 @@ std::string execute_query(const std::string &seq_name,
         output += '\n';
 
     } else if (count_labels) {
-        auto top_labels
-                = anno_graph.get_top_labels(sequence, num_top_labels, discovery_fraction);
+        auto top_labels = anno_graph.get_top_labels(sequence,
+                                                    num_top_labels,
+                                                    discovery_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return "";
@@ -114,10 +117,11 @@ std::string execute_query(const std::string &seq_name,
  *
  * 4. Extract annotation for the nodes of the query graph and return.
  */
-std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_graph,
-                                                    StringGenerator call_sequences,
-                                                    double discovery_fraction,
-                                                    size_t num_threads) {
+std::unique_ptr<AnnotatedDBG>
+construct_query_graph(const AnnotatedDBG &anno_graph,
+                      StringGenerator call_sequences,
+                      double discovery_fraction,
+                      size_t num_threads) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
 
@@ -135,13 +139,15 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
 
         call_sequences([&](const std::string &sequence) {
             // TODO: implement add_sequence with filter for all graph representations
-            graph_init->add_sequence(sequence,
-                                     get_missing_kmer_skipper(dbg_succ->get_bloom_filter(),
-                                                              sequence));
+            graph_init->add_sequence(
+                sequence,
+                get_missing_kmer_skipper(dbg_succ->get_bloom_filter(), sequence)
+            );
         });
     } else {
-        call_sequences(
-                [&](const std::string &sequence) { graph_init->add_sequence(sequence); });
+        call_sequences([&](const std::string &sequence) {
+            graph_init->add_sequence(sequence);
+        });
     }
 
     std::shared_ptr<DeBruijnGraph> graph = std::move(graph_init);
@@ -152,33 +158,30 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
     graph->call_sequences(
-            [&](auto &&... contig_args) {
-                contigs.emplace_back(std::move(contig_args)...);
-            },
-            full_dbg.is_canonical_mode());
+        [&](auto&&... contig_args) { contigs.emplace_back(std::move(contig_args)...); },
+        full_dbg.is_canonical_mode()
+    );
 
-    logger->trace("[Query graph construction] Contig extraction took {} sec",
-                  timer.elapsed());
+    logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
     // map contigs onto the full graph
     std::vector<uint64_t> index_in_full_graph;
 
     if (full_dbg.is_canonical_mode()) {
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
             const std::string &contig = contigs[i].first;
             auto &nodes_in_full = contigs[i].second;
 
             size_t j = 0;
-            full_dbg.map_to_nodes(contig, [&](auto node_in_full) {
-                nodes_in_full[j++] = node_in_full;
-            });
+            full_dbg.map_to_nodes(contig,
+                [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
+            );
             assert(j == nodes_in_full.size());
         }
 
-        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec",
-                      timer.elapsed());
+        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
         timer.reset();
 
         // construct canonical graph storing all k-mers found in the full graph
@@ -193,14 +196,13 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
 
         graph = std::move(graph_init);
 
-        logger->trace(
-                "[Query graph construction] k-mers reindexed in canonical mode in {} sec",
-                timer.elapsed());
+        logger->trace("[Query graph construction] k-mers reindexed in canonical mode in {} sec",
+                      timer.elapsed());
         timer.reset();
 
         index_in_full_graph.assign(graph->max_index() + 1, 0);
 
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
             const std::string &contig = contigs[i].first;
             const auto &nodes_in_full = contigs[i].second;
@@ -212,15 +214,14 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
             assert(j == nodes_in_full.size());
         }
 
-        logger->trace(
-                "[Query graph construction] Mapping between graphs constructed in {} sec",
-                timer.elapsed());
+        logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
+                      timer.elapsed());
         timer.reset();
 
     } else {
         index_in_full_graph.assign(graph->max_index() + 1, 0);
 
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
             const std::string &contig = contigs[i].first;
             const auto &path = contigs[i].second;
@@ -232,8 +233,7 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
             assert(j == path.size());
         }
 
-        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec",
-                      timer.elapsed());
+        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
         timer.reset();
     }
 
@@ -257,20 +257,18 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
             std::vector<DeBruijnGraph::node_index> nodes;
             nodes.reserve(num_kmers);
 
-            graph->map_to_nodes(
-                    sequence,
-                    [&](auto node) {
-                        if (index_in_full_graph[node]) {
-                            num_kmers_discovered++;
-                            nodes.push_back(node);
-                        } else {
-                            num_kmers_missing++;
-                        }
-                    },
-                    [&]() {
-                        return num_kmers_missing > max_kmers_missing
-                                || num_kmers_discovered >= min_kmers_discovered;
-                    });
+            graph->map_to_nodes(sequence,
+                [&](auto node) {
+                    if (index_in_full_graph[node]) {
+                        num_kmers_discovered++;
+                        nodes.push_back(node);
+                    } else {
+                        num_kmers_missing++;
+                    }
+                },
+                [&]() { return num_kmers_missing > max_kmers_missing
+                                || num_kmers_discovered >= min_kmers_discovered; }
+            );
 
             if (num_kmers_missing <= max_kmers_missing) {
                 for (auto node : nodes) {
@@ -283,7 +281,9 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
         call_zeros(mask, [&](auto i) { index_in_full_graph[i] = 0; });
 
         graph = std::make_shared<MaskedDeBruijnGraph>(
-                graph, std::make_unique<bit_vector_stat>(std::move(mask)));
+            graph,
+            std::make_unique<bit_vector_stat>(std::move(mask))
+        );
 
         logger->trace("[Query graph construction] Reduced k-mer dictionary in {} sec",
                       timer.elapsed());
@@ -295,9 +295,10 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
 
     for (uint64_t node = 0; node < index_in_full_graph.size(); ++node) {
         if (index_in_full_graph[node]) {
-            from_full_to_query.emplace_back(AnnotatedDBG::graph_to_anno_index(
-                                                    index_in_full_graph[node]),
-                                            AnnotatedDBG::graph_to_anno_index(node));
+            from_full_to_query.emplace_back(
+                AnnotatedDBG::graph_to_anno_index(index_in_full_graph[node]),
+                AnnotatedDBG::graph_to_anno_index(node)
+            );
         }
     }
 
@@ -312,12 +313,13 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
     // TODO: use SmallVector if it doesn't slow it down too much. Increase the batch size
     std::vector<BinaryMatrix::SetBitPositions> annotation_rows(graph->max_index());
 
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t batch_begin = 0; batch_begin < from_full_to_query.size();
-         batch_begin += kRowBatchSize) {
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t batch_begin = 0;
+                        batch_begin < from_full_to_query.size();
+                                        batch_begin += kRowBatchSize) {
         const uint64_t batch_end
-                = std::min(batch_begin + kRowBatchSize,
-                           static_cast<uint64_t>(from_full_to_query.size()));
+            = std::min(batch_begin + kRowBatchSize,
+                       static_cast<uint64_t>(from_full_to_query.size()));
 
         std::vector<uint64_t> row_indexes;
         row_indexes.reserve(batch_end - batch_begin);
@@ -333,13 +335,16 @@ std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG &anno_gra
         assert(rows.size() == batch_end - batch_begin);
 
         for (uint64_t i = batch_begin; i < batch_end; ++i) {
-            annotation_rows[from_full_to_query[i].second] = std::move(rows[i - batch_begin]);
+            annotation_rows[from_full_to_query[i].second]
+                = std::move(rows[i - batch_begin]);
         }
     }
 
     // copy annotations from the full graph to the query graph
     auto annotation = std::make_unique<annotate::RowCompressed<>>(
-            std::move(annotation_rows), full_annotation.get_label_encoder().get_labels());
+        std::move(annotation_rows),
+        full_annotation.get_label_encoder().get_labels()
+    );
 
     logger->trace("[Query graph construction] Query annotation constructed in {} sec",
                   timer.elapsed());
@@ -357,187 +362,22 @@ std::string get_alignment_header_and_swap_query(const std::string &name,
 
     if (matches->size()) {
         // sequence for querying -- the best alignment
-        *query_seq = const_cast<std::string &&>((*matches)[0].get_sequence());
-        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, *query_seq,
-                             (*matches)[0].get_score(),
+        *query_seq = const_cast<std::string&&>((*matches)[0].get_sequence());
+        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
+                             name, *query_seq, (*matches)[0].get_score(),
                              (*matches)[0].get_cigar().to_string());
 
     } else {
         // no alignment was found
         // the original sequence `query_seq` will be queried
-        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, *query_seq, 0,
+        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
+                             name, *query_seq, 0,
                              fmt::format("{}S", query_seq->length()));
     }
 
     return header;
 }
 
-
-void QueryExecutor::process_fasta_file_fast(FastaParser &fasta_parser,
-                                            const string &file_name,
-                                            std::ostream &out) {
-    auto begin = fasta_parser.begin();
-    auto end = fasta_parser.end();
-
-    const uint64_t batch_size = config_->query_batch_size_in_bytes;
-    FastaParser::iterator it;
-
-    const auto *graph_to_query = anno_graph_;
-
-    size_t seq_count = 0;
-    while (begin != end) {
-        Timer batch_timer;
-
-        std::vector<std::tuple<size_t, std::string, std::string>> named_alignments;
-        uint64_t num_bytes_read = 0;
-        auto query_graph = construct_query_graph(
-                *anno_graph_,
-                [&](auto call_sequence) {
-                    num_bytes_read = 0;
-
-                    if (!aligner_) {
-                        // basic query regime
-                        // the query graph is constructed directly from the input sequences
-                        for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
-                            call_sequence(it->seq.s);
-                            num_bytes_read += it->seq.l;
-                        }
-                        return;
-                    }
-                    // Query with alignment to graph
-
-                    // Check if the sequences have already been aligned and
-                    // if the results are stored in |named_alignments|.
-                    if (named_alignments.size()) {
-                        for (const auto &[id, name, seq] : named_alignments) {
-                            call_sequence(seq);
-                        }
-                        return;
-                    }
-
-                    std::mutex sequence_mutex;
-                    for (; begin != end && num_bytes_read <= batch_size; ++begin) {
-                        // Align the sequence, then add the best match
-                        // in the graph to the query graph.
-                        thread_pool_->enqueue(
-                                [&](size_t id, const std::string &name, std::string &seq) {
-                                    auto matches = aligner_->align(seq);
-
-                                    std::string seq_header
-                                            = get_alignment_header_and_swap_query(name, &seq,
-                                                                                  &matches);
-
-                                    std::lock_guard<std::mutex> lock(sequence_mutex);
-
-                                    named_alignments.emplace_back(id, std::move(seq_header),
-                                                                  std::move(seq));
-
-                                    call_sequence(std::get<2>(named_alignments.back()));
-                                },
-                                seq_count++, std::string(begin->name.s),
-                                std::string(begin->seq.s));
-
-                        num_bytes_read += begin->seq.l;
-                    }
-                    thread_pool_->join();
-                },
-                config_->count_labels ? 0 : config_->discovery_fraction, get_num_threads());
-
-        graph_to_query = query_graph.get();
-
-        logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",
-                      num_bytes_read, file_name, batch_timer.elapsed());
-
-        batch_timer.reset();
-
-        std::mutex stream_mutex;
-
-        if (!aligner_) {
-            for (; begin != it; ++begin) {
-                assert(begin != end);
-
-                thread_pool_->enqueue(
-                        [&](QueryExecutor &qe, size_t id, const std::string &name,
-                            const std::string &seq) {
-                            qe.forward_query(id, name, seq, graph_to_query, out,
-                                             stream_mutex);
-                        },
-                        *this, seq_count++, std::string(begin->name.s),
-                        std::string(begin->seq.s));
-            }
-        } else {
-            for (auto &&[id, name, seq] : named_alignments) {
-                thread_pool_->enqueue(
-                        [&](QueryExecutor &qe, size_t id, const std::string &name,
-                            const std::string &seq) {
-                            qe.forward_query(id, name, seq, graph_to_query, out,
-                                             stream_mutex);
-                        },
-                        *this, id, std::move(name), std::move(seq));
-            }
-        }
-
-        thread_pool_->join();
-        logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
-                      file_name, batch_timer.elapsed());
-    }
-}
-
-void QueryExecutor::forward_query(size_t id,
-                                  const std::string &name,
-                                  const std::string &seq,
-                                  const AnnotatedDBG *graph_to_query,
-                                  std::ostream &out_stream,
-                                  std::mutex &stream_mutex) {
-    std::string ret
-            = execute_query(fmt::format_int(id).str() + '\t' + name, seq,
-                            config_->count_labels, config_->print_signature,
-                            config_->suppress_unlabeled, config_->num_top_labels,
-                            config_->discovery_fraction, config_->anno_labels_delimiter,
-                            std::ref(*graph_to_query));
-
-    std::lock_guard<std::mutex> guard(stream_mutex);
-    out_stream << ret;
-}
-
-void QueryExecutor::process_fasta_file(const string &file, std::ostream &out) {
-    logger->trace("Parsing sequences from file '{}'", file);
-
-    size_t seq_count = 0;
-
-    const auto *graph_to_query = anno_graph_;
-
-    FastaParser fasta_parser(file, config_->forward_and_reverse);
-
-    // Graph constructed from a batch of queried sequences
-    // Used only in fast mode
-    if (config_->fast) {
-        process_fasta_file_fast(fasta_parser, file, out);
-    } else {
-        std::mutex stream_mutex;
-        for (const auto &kseq : fasta_parser) {
-            thread_pool_->enqueue(
-                    [&](size_t id, const std::string &name, std::string &seq) {
-                        if (!aligner_) {
-                            forward_query(id, name, seq, graph_to_query, out, stream_mutex);
-                            return;
-                        }
-
-                        // query the alignment matches against the annotator
-                        auto matches = aligner_->align(seq);
-
-                        std::string seq_header
-                                = get_alignment_header_and_swap_query(name, &seq, &matches);
-
-                        forward_query(id, seq_header, seq, graph_to_query, out, stream_mutex);
-                    },
-                    seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
-        }
-
-        // wait while all threads finish processing the current file
-        thread_pool_->join();
-    }
-}
 
 int query_graph(Config *config) {
     assert(config);
@@ -556,21 +396,189 @@ int query_graph(Config *config) {
     std::unique_ptr<IDBGAligner> aligner;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
-               && "only the best alignment is used in query");
+                && "only the best alignment is used in query");
 
         aligner = build_aligner(*graph, *config);
     }
 
-    QueryExecutor exec
-            = QueryExecutor(config, anno_graph.get(), aligner.get(), &thread_pool);
+    QueryExecutor executor(*config, *anno_graph, aligner.get(), thread_pool);
+
     // iterate over input files
     for (const auto &file : files) {
         Timer curr_timer;
 
-        exec.process_fasta_file(file, std::ref(std::cout));
+        executor.query_fasta(file, [](const std::string &result) { std::cout << result; });
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
                       curr_timer.elapsed(), timer.elapsed());
     }
 
     return 0;
+}
+
+
+void QueryExecutor::query_fasta(const string &file,
+                                const std::function<void(const std::string &)> &callback) {
+    logger->trace("Parsing sequences from file '{}'", file);
+
+    FastaParser fasta_parser(file, config_.forward_and_reverse);
+
+    auto query_sequence = [&](size_t id, const std::string &name, const std::string &seq) {
+        return execute_query(fmt::format_int(id).str() + '\t' + name, seq,
+                             config_.count_labels, config_.print_signature,
+                             config_.suppress_unlabeled, config_.num_top_labels,
+                             config_.discovery_fraction, config_.anno_labels_delimiter,
+                             anno_graph_);
+    };
+
+    if (config_.fast) {
+        // Construct a query graph and query against it
+        batched_query_fasta(fasta_parser, callback);
+        return;
+    }
+
+    // Query sequences independently
+
+    size_t seq_count = 0;
+
+    for (const auto &kseq : fasta_parser) {
+        thread_pool_.enqueue(
+            [&](size_t id, const std::string &name, std::string &seq) {
+                if (!aligner_) {
+                    callback(query_sequence(id, name, seq));
+                    return;
+                }
+
+                // query the alignment matches against the annotator
+                auto matches = aligner_->align(seq);
+
+                std::string seq_header
+                    = get_alignment_header_and_swap_query(name, &seq, &matches);
+
+                callback(query_sequence(id, seq_header, seq));
+            },
+            seq_count++,
+            std::string(kseq.name.s),
+            std::string(kseq.seq.s)
+        );
+    }
+
+    // wait while all threads finish processing the current file
+    thread_pool_.join();
+}
+
+void QueryExecutor
+::batched_query_fasta(FastaParser &fasta_parser,
+                      const std::function<void(const std::string &)> &callback) {
+    auto begin = fasta_parser.begin();
+    auto end = fasta_parser.end();
+
+    const uint64_t batch_size = config_.query_batch_size_in_bytes;
+    FastaParser::iterator it;
+
+    size_t seq_count = 0;
+    while (begin != end) {
+        Timer batch_timer;
+
+        std::vector<std::tuple<size_t, std::string, std::string>> named_alignments;
+        uint64_t num_bytes_read = 0;
+
+        StringGenerator generate_batch = [&](auto call_sequence) {
+            num_bytes_read = 0;
+
+            if (!aligner_) {
+                // basic query regime
+                // the query graph is constructed directly from the input sequences
+                for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
+                    call_sequence(it->seq.s);
+                    num_bytes_read += it->seq.l;
+                }
+                return;
+            }
+            // Query with alignment to graph
+
+            // Check if this isn't the first invocation,
+            // if the sequences have already been aligned and
+            // if the results are stored in |named_alignments|.
+            if (named_alignments.size()) {
+                for (const auto &[id, name, seq] : named_alignments) {
+                    call_sequence(seq);
+                }
+                return;
+            }
+
+            std::mutex sequence_mutex;
+            for ( ; begin != end && num_bytes_read <= batch_size; ++begin) {
+                thread_pool_.enqueue(
+                    [&](size_t id, const std::string &name, std::string &seq) {
+                        // Align the sequence, then add the best match
+                        // in the graph to the query graph.
+                        auto matches = aligner_->align(seq);
+
+                        std::string seq_header
+                            = get_alignment_header_and_swap_query(name, &seq, &matches);
+
+                        std::lock_guard<std::mutex> lock(sequence_mutex);
+
+                        named_alignments.emplace_back(id, std::move(seq_header),
+                                                      std::move(seq));
+
+                        call_sequence(std::get<2>(named_alignments.back()));
+                    },
+                    seq_count++,
+                    std::string(begin->name.s),
+                    std::string(begin->seq.s)
+                );
+
+                num_bytes_read += begin->seq.l;
+            }
+            thread_pool_.join();
+        };
+
+        auto query_graph = construct_query_graph(
+            anno_graph_,
+            generate_batch,
+            config_.count_labels ? 0 : config_.discovery_fraction,
+            get_num_threads()
+        );
+
+        logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",
+                      num_bytes_read, fasta_parser.get_filename(), batch_timer.elapsed());
+
+        batch_timer.reset();
+
+        auto query_sequence = [&](size_t id, const std::string &name, const std::string &seq) {
+            return execute_query(fmt::format_int(id).str() + '\t' + name, seq,
+                                 config_.count_labels, config_.print_signature,
+                                 config_.suppress_unlabeled, config_.num_top_labels,
+                                 config_.discovery_fraction, config_.anno_labels_delimiter,
+                                 *query_graph);
+        };
+
+        if (!aligner_) {
+            for ( ; begin != it; ++begin) {
+                assert(begin != end);
+
+                thread_pool_.enqueue(
+                    [&](size_t id, const std::string &name, const std::string &seq) {
+                        callback(query_sequence(id, name, seq));
+                    },
+                    seq_count++, std::string(begin->name.s),
+                    std::string(begin->seq.s)
+                );
+            }
+        } else {
+            for (auto&& [id, name, seq] : named_alignments) {
+                thread_pool_.enqueue(
+                    [&](size_t id, const std::string &name, const std::string &seq) {
+                        callback(query_sequence(id, name, seq));
+                    },
+                    id, std::move(name), std::move(seq)
+                );
+            }
+        }
+
+        thread_pool_.join();
+        logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
+                      fasta_parser.get_filename(), batch_timer.elapsed());
+    }
 }
