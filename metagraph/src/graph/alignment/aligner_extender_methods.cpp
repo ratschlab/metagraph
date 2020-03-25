@@ -122,14 +122,16 @@ inline bool compute_match_insert_updates_avx2(size_t &i,
                                               int64_t prev_node,
                                               int32_t gap_opening_penalty,
                                               int32_t gap_extension_penalty,
-                                              int32_t *&update_scores,
-                                              long long int *&update_prevs,
-                                              int32_t *&update_ops,
-                                              const int32_t *&incoming_scores,
-                                              const int32_t *&incoming_ops,
-                                              const int32_t *&char_scores,
-                                              const int32_t *&match_ops,
-                                              int32_t *&updated_mask) {
+                                              int32_t *update_scores,
+                                              long long int *update_prevs,
+                                              int32_t *update_ops,
+                                              const int32_t *incoming_scores,
+                                              const int32_t *incoming_ops,
+                                              const int32_t *char_scores,
+                                              const int32_t *match_ops,
+                                              int32_t *updated_mask) {
+    // Note: the char_scores and match_ops arrays are missing the first cell
+    // (so the indices are shifted down one) to ensure byte alignment
     bool updated = false;
     const __m256i prev_packed = _mm256_set1_epi64x(prev_node);
     const __m256i ins_packed = _mm256_set1_epi32(Cigar::Operator::INSERTION);
@@ -138,18 +140,19 @@ inline bool compute_match_insert_updates_avx2(size_t &i,
     const __m256i min_score = _mm256_set1_epi32(std::numeric_limits<int32_t>::min());
 
     for (; i + 8 <= length; i += 8) {
-        __m256i incoming_packed = _mm256_loadu_si256((__m256i*)(incoming_scores - 1));
+        __m256i incoming_packed = _mm256_loadu_si256((__m256i*)&incoming_scores[i - 1]);
 
-        // compute match and delete scores
+        // compute match scores
         __m256i match_scores_packed = _mm256_add_epi32(
-            _mm256_load_si256((__m256i*)char_scores),
+            _mm256_load_si256((__m256i*)&char_scores[i - 1]),
             incoming_packed
         );
 
-        __m256i incoming_ops_packed = _mm256_loadu_si256((__m256i*)incoming_ops);
+        // compute insertion scores
+        __m256i incoming_ops_packed = _mm256_loadu_si256((__m256i*)&incoming_ops[i]);
         __m256i incoming_is_insert = _mm256_cmpeq_epi32(incoming_ops_packed, ins_packed);
 
-        __m256i incoming_shift = rshiftpushback_epi32(incoming_packed, incoming_scores[7]);
+        __m256i incoming_shift = rshiftpushback_epi32(incoming_packed, incoming_scores[i + 7]);
         __m256i insert_scores_packed = _mm256_add_epi32(
             incoming_shift,
             _mm256_blendv_epi8(gap_open_packed, gap_extend_packed, incoming_is_insert)
@@ -166,46 +169,37 @@ inline bool compute_match_insert_updates_avx2(size_t &i,
         __m256i max_scores = _mm256_max_epi32(match_scores_packed, insert_scores_packed);
         __m256i both_cmp = _mm256_cmpgt_epi32(
             max_scores,
-            _mm256_loadu_si256((__m256i*)update_scores)
+            _mm256_loadu_si256((__m256i*)&update_scores[i])
         );
+        _mm256_maskstore_epi32(&update_scores[i], both_cmp, max_scores);
 
-
-        __m256i mask = _mm256_or_si256(_mm256_loadu_si256((__m256i*)updated_mask), both_cmp);
-        _mm256_storeu_si256((__m256i*)updated_mask, mask);
+        // set mask indicating which scores were updated
+        __m256i mask = _mm256_or_si256(_mm256_loadu_si256((__m256i*)&updated_mask[i]), both_cmp);
+        _mm256_storeu_si256((__m256i*)&updated_mask[i], mask);
         updated |= static_cast<bool>(_mm256_movemask_epi8(both_cmp));
-
-        _mm256_maskstore_epi32(update_scores, both_cmp, max_scores);
 
         // update ops
         // pick match operation if match score >= gap score
         // pick delete operation if gap score > match score
         _mm256_maskstore_epi32(
-            update_ops,
+            &update_ops[i],
             both_cmp,
-            _mm256_blendv_epi8(_mm256_load_si256((__m256i*)match_ops),
-                               ins_packed,
-                               _mm256_cmpgt_epi32(insert_scores_packed,
-                                                  match_scores_packed))
+            _mm256_blendv_epi8(
+                _mm256_load_si256((__m256i*)&match_ops[i - 1]),
+                ins_packed,
+                _mm256_cmpgt_epi32(insert_scores_packed, match_scores_packed)
+            )
         );
 
         // update prev nodes
         // TODO: this can be done with one AVX512 instruction
         __m128i *cmp_array = (__m128i*)&both_cmp;
-        _mm256_maskstore_epi64(update_prevs,
+        _mm256_maskstore_epi64(&update_prevs[i],
                                _mm256_cvtepi32_epi64(cmp_array[0]),
                                prev_packed);
-        _mm256_maskstore_epi64(update_prevs + 4,
+        _mm256_maskstore_epi64(&update_prevs[i + 4],
                                _mm256_cvtepi32_epi64(cmp_array[1]),
                                prev_packed);
-
-        update_scores += 8;
-        update_prevs += 8;
-        update_ops += 8;
-        incoming_scores += 8;
-        incoming_ops += 8;
-        char_scores += 8;
-        match_ops += 8;
-        updated_mask += 8;
     }
 
     return updated;
@@ -225,93 +219,73 @@ inline bool compute_match_insert_updates(const DBGAlignerConfig &config,
                                          const AlignedVector<int32_t> &char_scores,
                                          const AlignedVector<Cigar::Operator> &match_ops,
                                          AlignedVector<int32_t> &updated_mask) {
+    // Note: the char_scores and match_ops arrays are missing the first cell
+    // (so the indices are shifted down one) to ensure byte alignment
     size_t length = updated_mask.size();
     bool updated = false;
 
-    static_assert(sizeof(NodeType) == sizeof(long long int));
-    static_assert(sizeof(Cigar::Operator) == sizeof(int32_t));
-    auto update_prevs_cast = reinterpret_cast<long long int*>(update_prevs);
-    auto update_ops_cast = reinterpret_cast<int32_t*>(update_ops);
-    auto incoming_ops_cast = reinterpret_cast<const int32_t*>(incoming_ops);
-    auto char_scores_data = char_scores.data();
-    auto match_ops_cast = reinterpret_cast<const int32_t*>(match_ops.data());
-    auto updated_mask_data = updated_mask.data();
-
     // handle first element (i.e., no match update possible)
-    score_t gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::INSERTION
+    score_t gap_score = incoming_scores[0] + (incoming_ops[0] == Cigar::Operator::INSERTION
         ? config.gap_extension_penalty : config.gap_opening_penalty);
 
-    if (gap_score > *update_scores) {
-        *updated_mask_data = 0xFFFFFFFF;
+    if (gap_score > update_scores[0]) {
+        updated_mask[0] = 0xFFFFFFFF;
         updated = true;
-        *update_ops_cast = Cigar::Operator::INSERTION;
-        *update_prevs_cast = prev_node;
-        *update_scores = gap_score;
+        update_ops[0] = Cigar::Operator::INSERTION;
+        update_prevs[0] = prev_node;
+        update_scores[0] = gap_score;
     }
-
-    ++incoming_scores;
-    ++incoming_ops_cast;
-    ++update_scores;
-    ++update_prevs_cast;
-    ++update_ops_cast;
-    ++updated_mask_data;
 
     size_t i = 1;
 
 #ifdef __AVX2__
-    static_assert(std::is_same<score_t, int32_t>::value);
+    // ensure sizes are the same before casting for AVX2 instructions
+    static_assert(sizeof(NodeType) == sizeof(long long int));
+    static_assert(sizeof(Cigar::Operator) == sizeof(int32_t));
 
     // update 8 scores at a time
-    updated |= compute_match_insert_updates_avx2(
-        i,
-        length,
-        prev_node,
-        config.gap_opening_penalty,
-        config.gap_extension_penalty,
-        update_scores,
-        update_prevs_cast,
-        update_ops_cast,
-        incoming_scores,
-        incoming_ops_cast,
-        char_scores_data,
-        match_ops_cast,
-        updated_mask_data
-    );
+    if (i + 8 <= length) {
+        updated |= compute_match_insert_updates_avx2(
+            i, length,
+            prev_node,
+            config.gap_opening_penalty, config.gap_extension_penalty,
+            update_scores,
+            reinterpret_cast<long long int*>(update_prevs),
+            reinterpret_cast<int32_t*>(update_ops),
+            incoming_scores,
+            reinterpret_cast<const int32_t*>(incoming_ops),
+            char_scores.data(),
+            reinterpret_cast<const int32_t*>(match_ops.data()),
+            updated_mask.data()
+        );
+    }
+
 #endif
 
     // handle the residual
     // TODO: is there a better way to handle this?
     for (; i < length; ++i) {
-        if (*(incoming_scores - 1) + *char_scores_data > *update_scores) {
-            *updated_mask_data = 0xFFFFFFFF;
+        if (incoming_scores[i - 1] + char_scores[i - 1] > update_scores[i]) {
+            updated_mask[i] = 0xFFFFFFFF;
             updated = true;
-            *update_ops_cast = *match_ops_cast;
-            *update_prevs_cast = prev_node;
-            *update_scores = *(incoming_scores - 1) + *char_scores_data;
+            update_ops[i] = match_ops[i - 1];
+            update_prevs[i] = prev_node;
+            update_scores[i] = incoming_scores[i - 1] + char_scores[i - 1];
         }
 
         // disallow INSERTION after DELETION?
-        if (*incoming_ops_cast != Cigar::Operator::DELETION) {
-            gap_score = *incoming_scores + (*incoming_ops_cast == Cigar::Operator::INSERTION
+        if (incoming_ops[i] != Cigar::Operator::DELETION) {
+            gap_score = incoming_scores[i] + (incoming_ops[i] == Cigar::Operator::INSERTION
                 ? config.gap_extension_penalty : config.gap_opening_penalty);
 
-            if (gap_score > *update_scores) {
-                *updated_mask_data = 0xFFFFFFFF;
+            if (gap_score > update_scores[i]) {
+                updated_mask[i] = 0xFFFFFFFF;
                 updated = true;
-                *update_ops_cast = Cigar::Operator::INSERTION;
-                *update_prevs_cast = prev_node;
-                *update_scores = gap_score;
+                update_ops[i] = Cigar::Operator::INSERTION;
+                update_prevs[i] = prev_node;
+                update_scores[i] = gap_score;
             }
         }
-
-        ++incoming_scores;
-        ++incoming_ops_cast;
-        ++char_scores_data;
-        ++match_ops_cast;
-        ++update_scores;
-        ++update_prevs_cast;
-        ++update_ops_cast;
-        ++updated_mask_data;
     }
 
     return updated;
@@ -442,8 +416,12 @@ void DefaultColumnExtender<NodeType>
         const auto &op_row = Cigar::get_op_row(next_column.last_char);
 
         // for storage of intermediate values
+        // Note: the char_scores and match_ops arrays are missing the first cell
+        // (so the indices are shifted down one) to ensure byte alignment
         AlignedVector<score_t> char_scores(end - begin - 1);
         AlignedVector<Cigar::Operator> match_ops(end - begin - 1);
+
+        // store the mask indicating which cells were updated
         AlignedVector<int32_t> updated_mask(end - begin, false);
 
         // TODO: do this with SIMD gather operations?
