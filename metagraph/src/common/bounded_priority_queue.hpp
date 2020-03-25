@@ -18,19 +18,45 @@ class BoundedPriorityQueue {
   public:
     typedef typename MinMaxHeap::const_iterator const_iterator;
 
+    enum Decision {
+        ADD,
+        IGNORE,
+        REPLACE_BOTTOM
+    };
+
+    typedef std::function<Decision(const T&, const BoundedPriorityQueue&)> DecisionFunction;
+
+    BoundedPriorityQueue(DecisionFunction&& decision)
+          : decision_(std::move(decision)) {}
+
     BoundedPriorityQueue(size_t size = std::numeric_limits<size_t>::max())
-          : max_size_(size), minmaxheap_() { }
+          : decision_([size](const T &obj, const BoundedPriorityQueue &queue) {
+                          if (queue.size() < size)
+                              return Decision::ADD;
+
+                          return queue.compare(queue.bottom(), obj)
+                              ? Decision::REPLACE_BOTTOM
+                              : Decision::IGNORE;
+                      }) {
+        if (!size)
+            throw std::runtime_error("BoundedPriorityQueue size must be positive.");
+    }
 
     template <typename... Args>
     void emplace(Args&&... args) {
-        if (minmaxheap_.size() < max_size_) {
-            minmaxheap_.emplace(std::forward<Args>(args)...);
-            return;
-        }
-
         T value(std::forward<Args>(args)...);
-        if (compare_(minmaxheap_.minimum(), value))
-            minmaxheap_.update(minmaxheap_.begin(), value);
+
+        switch (decision_(value, *this)) {
+            case Decision::ADD: {
+                minmaxheap_.emplace(std::move(value));
+            } break;
+            case Decision::IGNORE: {
+                // no nothing
+            } break;
+            case Decision::REPLACE_BOTTOM: {
+                minmaxheap_.update(minmaxheap_.begin(), std::move(value));
+            }
+        }
     }
 
     void push(const T &value) { emplace(value); }
@@ -63,10 +89,11 @@ class BoundedPriorityQueue {
     bool empty() const { return minmaxheap_.empty(); }
     void clear() { minmaxheap_.clear(); }
 
+    static constexpr Compare compare = Compare();
+
   private:
-    size_t max_size_;
+    DecisionFunction decision_;
     MinMaxHeap minmaxheap_;
-    static constexpr Compare compare_ = Compare();
 };
 
 #endif //  __BOUNDED_PRIORITY_QUEUE_HPP__
