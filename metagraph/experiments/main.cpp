@@ -1,6 +1,8 @@
 #include <filesystem>
 #include <thread>
 #include <chrono>
+#include <cmath>
+
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
 #include <ips4o.hpp>
@@ -69,7 +71,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
         another.load(in);
     }
 
-    auto RAM = (get_curr_RSS() - mem_before) / vectors.size();
+    auto RAM_per_vector = (get_curr_RSS() - mem_before) / vectors.size();
 
     BitVector another = std::move(vectors.back());
     vectors.clear();
@@ -108,7 +110,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     // Random select time
     timer.reset();
-    double random_select = 0.0 / 0.0;
+    double random_select = NAN;
     if (another.num_set_bits() && !std::is_same_v<BitVector, bit_vector_hyb<>>
                                && !std::is_same_v<BitVector, bit_vector_smallrank>) {
         for (uint64_t i = 0, rank = another.num_set_bits(); i < num_iterations; ++i) {
@@ -154,7 +156,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     double sequential_cond_rank = timer.elapsed() / num_iterations;
 
     // Sequential select time
-    double sequential_select = 0.0 / 0.0;
+    double sequential_select = NAN;
     if (another.num_set_bits() && !std::is_base_of_v<BitVector, bit_vector_hyb<>>
                                && !std::is_base_of_v<BitVector, bit_vector_smallrank>) {
         timer.reset();
@@ -172,7 +174,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     std::ofstream ofs("/dev/null");
     ofs << result;
 
-    double predicted_size = 0.0 / 0.0;
+    double predicted_size = NAN;
     if constexpr(!std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
         predicted_size = BitVector::predict_size(another.size(), another.num_set_bits());
     }
@@ -182,7 +184,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
               << "\t" << d
               << "\t" << 1. * another.num_set_bits() / another.size()
               << "\t" << 1. * serialized_size * 8 / n
-              << "\t" << RAM
+              << "\t" << RAM_per_vector
               << "\t" << 1. * predicted_size / another.size()
               << "\t" << random_access      << "\t" << sequential_access
               << "\t" << random_access_word << "\t" << sequential_access_word
@@ -441,20 +443,20 @@ int main(int argc, char *argv[]) {
                                                        "rrr15");
             } else if (vector_type == "rrr31") {
                 test_vector_points<bit_vector_rrr<31>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr31");
+                                                       density_arg.getValue(),
+                                                       "rrr31");
             } else if (vector_type == "rrr63") {
                 test_vector_points<bit_vector_rrr<63>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr63");
+                                                       density_arg.getValue(),
+                                                       "rrr63");
             } else if (vector_type == "rrr127") {
                 test_vector_points<bit_vector_rrr<127>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr127");
+                                                        density_arg.getValue(),
+                                                        "rrr127");
             } else if (vector_type == "rrr255") {
                 test_vector_points<bit_vector_rrr<255>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr255");
+                                                        density_arg.getValue(),
+                                                        "rrr255");
             } else if (vector_type == "smallrank") {
                 test_vector_points<bit_vector_smallrank>(length_arg.getValue(),
                                                          density_arg.getValue(),
