@@ -7,9 +7,7 @@
 #include <memory>
 #include <functional>
 
-#include "bit_vector.hpp"
-
-class bit_vector_stat;
+#include "bit_vector_sdsl.hpp"
 
 
 namespace utils {

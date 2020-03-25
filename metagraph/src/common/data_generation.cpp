@@ -2,7 +2,7 @@
 #include <algorithm>
 
 #include "common/data_generation.hpp"
-#include "common/vectors/bit_vector_stat.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
 std::vector<uint64_t>

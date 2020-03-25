@@ -3,7 +3,7 @@
 #include <cassert>
 
 #include "common/vector.hpp"
-#include "common/vectors/bit_vector_stat.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 

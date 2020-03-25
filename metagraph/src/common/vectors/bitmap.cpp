@@ -1,7 +1,7 @@
 #include "bitmap.hpp"
 
 #include "common/algorithms.hpp"
-#include "bit_vector_stat.hpp"
+#include "bit_vector_sdsl.hpp"
 #include "bit_vector_adaptive.hpp"
 #include "vector_algorithm.hpp"
 

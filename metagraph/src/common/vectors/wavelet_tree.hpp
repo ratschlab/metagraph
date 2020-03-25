@@ -8,7 +8,7 @@
 #include <sdsl/wt_huff.hpp>
 #include <dynamic.hpp>
 
-#include "bit_vector_stat.hpp"
+#include "bit_vector_sdsl.hpp"
 
 
 class wavelet_tree {
