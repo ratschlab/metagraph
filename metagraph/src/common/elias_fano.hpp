@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <optional>
 
 #include <sdsl/uint128_t.hpp>
@@ -34,6 +35,11 @@ class EliasFanoEncoder {
                      const std::string &out_filename,
                      bool is_append = false);
 
+    EliasFanoEncoder(const Vector<T>& data,
+                     std::ofstream *sink);
+
+    ~EliasFanoEncoder();
+
     /** Encodes the next number */
     void add(T value);
 
@@ -51,6 +57,7 @@ class EliasFanoEncoder {
     static void write_bits(uint8_t *data,
                            size_t pos,
                            uint64_t value);
+    void init(size_t size, T max_value);
 
   private:
     /**
@@ -103,7 +110,10 @@ class EliasFanoEncoder {
 #endif
 
     /** Sink to write the encoded values to */
-    std::ofstream sink_;
+    std::ofstream *sink_;
+
+    /** True if the class owns the sink_ pointer */
+    bool owns_sink_;
 
     /** Number of lower bits that were written to disk */
     size_t cur_pos_lbits_ = 0;
@@ -115,8 +125,12 @@ class EliasFanoEncoder {
 template <typename T>
 class EliasFanoDecoder {
   public:
+    EliasFanoDecoder() {}
+
     /** Creates a decoder that retrieves data from the given source */
     EliasFanoDecoder(const std::string &source_name);
+
+    EliasFanoDecoder(std::ifstream &source, std::streampos file_end);
 
     /** Returns the upper part of the next compressed element */
     T next_upper();
@@ -126,6 +140,9 @@ class EliasFanoDecoder {
 
     /** Returns the next compressed element or empty if all elements were read */
     std::optional<T> next();
+
+    /** Returns true if the current position is at the end of a chunk. */
+    bool end_of_chunk();
 
   private:
     void init();
@@ -184,6 +201,8 @@ class EliasFanoDecoder {
 
     /** True if we read all bytes from source_ */
     bool all_read_ = false;
+
+    std::function<void(char *data, size_t size)> reader_;
 };
 
 /**
@@ -242,6 +261,8 @@ class EliasFanoEncoder<sdsl::uint128_t> {
     void add(const sdsl::uint128_t &value);
     size_t finish();
   private:
+    Vector<uint64_t> buffer_;
+    uint64_t last_hi_ = 0;
     std::ofstream sink_;
     size_t total_size_ = 0;
     size_t size_ = 0;
@@ -277,6 +298,9 @@ class EliasFanoDecoder<sdsl::uint128_t> {
     std::optional<sdsl::uint128_t> next();
   private:
     std::ifstream source_;
+    uint64_t last_hi_ = 0;
+    EliasFanoDecoder<uint64_t> decoder64_;
+    bool new_chunk_ = true;
 };
 
 /**
