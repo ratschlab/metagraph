@@ -6,7 +6,7 @@
 
 #include "common/utils/simd_utils.hpp"
 #include "common/threads/threading.hpp"
-#include "common/vectors/bit_vector_stat.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
 using sdsl::uint128_t;

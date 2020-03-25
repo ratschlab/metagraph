@@ -19,7 +19,6 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/wavelet_tree.hpp"
-#include "common/vectors/bit_vector_stat.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_sd.hpp"

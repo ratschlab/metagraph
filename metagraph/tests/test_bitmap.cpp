@@ -7,7 +7,6 @@
 
 #define private public
 #include "common/vectors/bitmap.hpp"
-#include "common/vectors/bit_vector_stat.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_sd.hpp"

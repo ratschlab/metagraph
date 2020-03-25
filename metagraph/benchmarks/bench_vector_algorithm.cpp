@@ -1,6 +1,5 @@
 #include "benchmark/benchmark.h"
 
-#include "common/vectors/bit_vector_stat.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 #include "common/vectors/vector_algorithm.hpp"
