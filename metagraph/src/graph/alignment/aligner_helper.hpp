@@ -464,20 +464,24 @@ class DPTable {
         Column(size_t size,
                score_t min_score,
                char start_char,
-               size_t pos = 0)
+               size_t pos = 0,
+               size_t priority_pos = 0)
               : scores(size, min_score),
                 ops(size),
                 prev_nodes(size),
                 last_char(start_char),
-                best_pos(pos) {}
+                best_pos(pos),
+                last_priority_pos(priority_pos) {}
 
         std::vector<score_t> scores;
         std::vector<Cigar::Operator> ops;
         std::vector<NodeType> prev_nodes;
         char last_char;
         size_t best_pos;
+        size_t last_priority_pos;
 
         const score_t& best_score() const { return scores.at(best_pos); }
+        const score_t& last_priority_value() const { return scores.at(last_priority_pos); }
         const Cigar::Operator& best_op() const { return ops.at(best_pos); }
         const NodeType& best_prev_node() const { return prev_nodes.at(best_pos); }
 

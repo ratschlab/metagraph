@@ -185,12 +185,14 @@ class DefaultColumnExtender : public Extender<NodeType> {
     typedef typename Extender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename Extender<NodeType>::node_index node_index;
     typedef typename Extender<NodeType>::score_t score_t;
-    typedef BoundedPriorityQueue<std::pair<NodeType, score_t>,
-                                 std::vector<std::pair<NodeType, score_t>>,
+    typedef std::pair<NodeType, score_t> ColumnRef;
+    typedef BoundedPriorityQueue<ColumnRef,
+                                 std::vector<ColumnRef>,
                                  utils::LessSecond> ColumnQueue;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(&graph), config_(config), columns_to_update(config_.queue_size) {
+          : graph_(&graph), config_(config),
+            columns_to_update([&](const auto &obj, const auto &) { return extendable(obj); }) {
         assert(config_.check_config_scores());
     }
 
@@ -219,14 +221,13 @@ class DefaultColumnExtender : public Extender<NodeType> {
     virtual void reset() override { dp_table.clear(); }
 
     virtual std::pair<typename DPTable<NodeType>::const_iterator, bool>
-    emplace_node(NodeType node, NodeType incoming_node, char c, size_t size, size_t best_pos);
+    emplace_node(NodeType node, NodeType incoming_node, char c, size_t size, size_t best_pos, size_t last_priority_pos);
 
     virtual bool add_seed(size_t clipping);
 
     virtual const DBGAlignment& get_seed() const override { return *path_; }
 
-    virtual bool extendable(size_t begin, size_t end,
-                            const typename DPTable<NodeType>::Column &column) const;
+    virtual typename ColumnQueue::Decision extendable(const ColumnRef &next_column) const;
 
     void extend_main(std::function<void(DBGAlignment&&, NodeType)> callback,
                      score_t min_path_score);
@@ -265,6 +266,8 @@ class DefaultColumnExtender : public Extender<NodeType> {
     NodeType start_node;
     score_t start_score;
     score_t score_cutoff;
+    size_t begin;
+    size_t end;
     score_t xdrop_cutoff;
 };
 
