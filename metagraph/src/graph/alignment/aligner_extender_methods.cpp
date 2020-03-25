@@ -110,7 +110,7 @@ inline bool compute_match_insert_updates_avx2(size_t &i,
                                               int32_t *&update_ops,
                                               const int32_t *&incoming_scores,
                                               const int32_t *&incoming_ops,
-                                              const int8_t *&char_scores,
+                                              const int32_t *&char_scores,
                                               const int32_t *&match_ops) {
     bool updated = false;
     const __m256i prev_packed = _mm256_set1_epi64x(prev_node);
@@ -124,7 +124,7 @@ inline bool compute_match_insert_updates_avx2(size_t &i,
 
         // compute match and delete scores
         __m256i match_scores_packed = _mm256_add_epi32(
-            expandepi8_epi64(*(uint64_t*)char_scores),
+            _mm256_load_si256((__m256i*)char_scores),
             incoming_packed
         );
 
@@ -200,7 +200,7 @@ inline bool compute_match_insert_updates(const DBGAlignerConfig &config,
                                          const NodeType &prev_node,
                                          const score_t *incoming_scores,
                                          const Cigar::Operator *incoming_ops,
-                                         const AlignedVector<int8_t> &char_scores,
+                                         const AlignedVector<int32_t> &char_scores,
                                          const AlignedVector<Cigar::Operator> &match_ops,
                                          size_t length) {
     bool updated = false;
@@ -416,7 +416,7 @@ void DefaultColumnExtender<NodeType>
         const auto &op_row = Cigar::get_op_row(next_column.last_char);
 
         // for storage of intermediate values
-        AlignedVector<int8_t> char_scores(end - begin - 1);
+        AlignedVector<score_t> char_scores(end - begin - 1);
         AlignedVector<Cigar::Operator> match_ops(end - begin - 1);
 
         // TODO: do this with SIMD gather operations?
