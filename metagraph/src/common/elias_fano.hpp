@@ -35,10 +35,7 @@ class EliasFanoEncoder {
                      const std::string &out_filename,
                      bool is_append = false);
 
-    EliasFanoEncoder(const Vector<T>& data,
-                     std::ofstream *sink);
-
-    ~EliasFanoEncoder();
+    EliasFanoEncoder(const Vector<T> &data, std::ofstream &sink);
 
     /** Encodes the next number */
     void add(T value);
@@ -109,11 +106,11 @@ class EliasFanoEncoder {
     T last_value_ = T(0);
 #endif
 
-    /** Sink to write the encoded values to */
+    /** Sink to write the encoded values to. Points to either #sink_internal or to an externally provided sink */
     std::ofstream *sink_;
 
     /** True if the class owns the sink_ pointer */
-    bool owns_sink_;
+    std::ofstream sink_internal_;
 
     /** Number of lower bits that were written to disk */
     size_t cur_pos_lbits_ = 0;
@@ -191,8 +188,13 @@ class EliasFanoDecoder {
     /** The size in bytes of upper_ */
     size_t num_upper_bytes_ = 0;
 
-    /** Stream containing the compressed data */
-    std::ifstream source_;
+    /**
+     * Stream containing the compressed data. Points to either #source_internal_ or to
+     * a stream provided in the constructor
+     */
+    std::ifstream *source_;
+
+    std::ifstream source_internal_;
 
     /* 1MB buffer for reading from #source_ */
     char buffer_[1024 * 1024];
@@ -201,8 +203,6 @@ class EliasFanoDecoder {
 
     /** True if we read all bytes from source_ */
     bool all_read_ = false;
-
-    std::function<void(char *data, size_t size)> reader_;
 };
 
 /**
