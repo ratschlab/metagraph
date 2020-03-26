@@ -204,7 +204,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
 
   private:
     /** Number of chunks for "level 1" intermediary merging. */
-    static constexpr uint32_t MERGE_L1_COUNT = 4000; // TODO: undo
+    static constexpr uint32_t MERGE_L1_COUNT = 4;
 
     std::function<INT(const T &v)> to_int_;
 };

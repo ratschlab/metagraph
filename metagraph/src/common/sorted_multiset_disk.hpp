@@ -234,7 +234,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
 
   private:
     /** Number of chunks for "level 1" intermediary merging. */
-    static constexpr uint32_t MERGE_L1_COUNT = 4000;
+    static constexpr uint32_t MERGE_L1_COUNT = 4;
 
     std::function<int_pair(const value_type &v)> to_int_;
 };

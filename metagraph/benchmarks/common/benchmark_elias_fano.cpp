@@ -47,8 +47,8 @@ static void BM_write_compressed(benchmark::State &state) {
 
     for (auto _ : state) {
         utils::TempFile tempfile;
-        common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(),
-                                                   tempfile.name());
+        common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.front(),
+                                                   sorted.back(), tempfile.name());
         for (const auto &v : sorted) {
             encoder.add(v);
         }
@@ -63,8 +63,8 @@ static void BM_write_compressed128(benchmark::State &state) {
 
     for (auto _ : state) {
         utils::TempFile tempfile;
-        common::EliasFanoEncoder<sdsl::uint128_t> encoder(sorted128.size(), sorted128.back(),
-                                                          tempfile.name());
+        common::EliasFanoEncoder<sdsl::uint128_t> encoder(
+                sorted128.size(), sorted128.front(), sorted128.back(), tempfile.name());
         for (const auto &v : sorted128) {
             encoder.add(v);
         }
@@ -105,7 +105,8 @@ static void BM_read_compressed(benchmark::State &state) {
         init_sorted();
     }
     utils::TempFile tempfile;
-    common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
+    common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.front(),
+                                               sorted.back(), tempfile.name());
     for (const auto &v : sorted) {
         encoder.add(v);
     }
