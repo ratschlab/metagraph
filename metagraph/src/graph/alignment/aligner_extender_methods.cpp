@@ -26,7 +26,7 @@ void DefaultColumnExtender<NodeType>
 }
 
 template <typename NodeType>
-std::pair<typename DPTable<NodeType>::const_iterator, bool> DefaultColumnExtender<NodeType>
+std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<NodeType>
 ::emplace_node(NodeType node, NodeType, char c, size_t size,
                size_t best_pos, size_t last_priority_pos) {
     auto find = dp_table.find(node);
@@ -388,29 +388,25 @@ void DefaultColumnExtender<NodeType>
 ::update_columns(NodeType incoming_node,
                  const std::vector<std::pair<NodeType, char>> &out_columns,
                  score_t min_path_score) {
+    // set boundaries for vertical band
+    auto *incoming = &dp_table.find(incoming_node).value();
+    size_t best_pos = incoming->best_pos;
+    assert(best_pos < size);
+    begin = best_pos >= config_.bandwidth ? best_pos - config_.bandwidth : 0;
+    end = config_.bandwidth <= size - best_pos ? best_pos + config_.bandwidth : size;
+
+    assert(begin <= best_pos);
+    assert(end > best_pos);
+    assert(begin < end);
+
     for (const auto &[next_node, c] : out_columns) {
-        const auto &cur_col = dp_table.find(incoming_node)->second;
-        auto iter = &*emplace_node(next_node, incoming_node,
-                                   c, size,
-                                   cur_col.best_pos, cur_col.last_priority_pos).first;
-        auto &next_column = const_cast<typename DPTable<NodeType>::Column&>(
-            iter->second
-        );
+        auto emplace = emplace_node(next_node, incoming_node, c, size);
 
-        // the get_outgoing_columns call may have invalidated cur_col, so
-        // get a pointer to the column again
-        const auto &incoming = dp_table.find(incoming_node)->second;
+        // emplace_node may have invalidated incoming, so update the pointer
+        if (emplace.second)
+            incoming = &dp_table.find(incoming_node).value();
 
-        // find incoming nodes to check for alignment extension
-        // set boundaries for vertical band
-        assert(incoming.best_pos < incoming.scores.size());
-        size_t best_pos = incoming.best_pos;
-        begin = best_pos >= config_.bandwidth ? best_pos - config_.bandwidth : 0;
-        end = config_.bandwidth <= size - best_pos ? best_pos + config_.bandwidth : size;
-
-        assert(begin <= best_pos);
-        assert(end > best_pos);
-        assert(begin < end);
+        auto &next_column = emplace.first.value();
 
         const auto &row = config_.get_row(next_column.last_char);
         const auto &op_row = Cigar::get_op_row(next_column.last_char);
@@ -438,8 +434,8 @@ void DefaultColumnExtender<NodeType>
             next_column.prev_nodes.data() + begin,
             next_column.ops.data() + begin,
             incoming_node,
-            incoming.scores.data() + begin,
-            incoming.ops.data() + begin,
+            incoming->scores.data() + begin,
+            incoming->ops.data() + begin,
             char_scores,
             match_ops,
             updated_mask
@@ -465,6 +461,7 @@ void DefaultColumnExtender<NodeType>
             }
         }
 
+        // Find the maximum changed value
         const score_t *best_update = nullptr;
         for (size_t i = begin, j = 0; i < end; ++i, ++j) {
             if (updated_mask[j] && (!best_update || next_column.scores[i] > *best_update))
@@ -481,6 +478,7 @@ void DefaultColumnExtender<NodeType>
 
             if (*best_update > next_column.best_score()) {
                 next_column.best_pos = best_update - next_column.scores.data();
+
                 assert(next_column.best_pos >= begin);
                 assert(next_column.best_pos < end);
                 assert(next_column.best_pos < next_column.scores.size());
@@ -493,15 +491,16 @@ void DefaultColumnExtender<NodeType>
                 || next_column.best_pos >= end
                 || !updated_mask[next_column.best_pos - begin]);
 
+            // update global max score
             if (*best_update > start_score) {
-                start_node = iter->first;
+                start_node = next_node;
                 start_score = *best_update;
                 xdrop_cutoff = std::max(start_score, xdrop_cutoff);
                 assert(start_score == dp_table.best_score().second);
                 score_cutoff = std::max(start_score, min_path_score);
             }
 
-            columns_to_update.emplace(iter->first, *best_update);
+            columns_to_update.emplace(next_node, *best_update);
         }
     }
 }
