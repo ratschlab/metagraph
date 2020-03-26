@@ -123,8 +123,10 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
         std::string file_name
                 = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
 
-        EliasFanoEncoder<INT> encoder(this->data_.size(), to_int_(this->data_.front()),
-                                      to_int_(this->data_.back()), file_name);
+        EliasFanoEncoder<INT> encoder(this->data_.size(),
+                                      utils::get_first(to_int_(this->data_.front())),
+                                      utils::get_first(to_int_(this->data_.back())),
+                                      file_name);
         for (const auto &v : this->data_) {
             encoder.add(to_int_(v));
         }
