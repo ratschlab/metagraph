@@ -252,8 +252,8 @@ inline __m256i rshiftpushback_epi32(__m256i v, uint32_t a) {
     );
 }
 
-inline __m256i expandepi8_epi64(uint64_t a) {
-    return _mm256_cvtepi8_epi32(_mm256_castsi256_si128(_mm256_insert_epi64(
+inline __m256i expandepu8_epi32(uint64_t a) {
+    return _mm256_cvtepu8_epi32(_mm256_castsi256_si128(_mm256_insert_epi64(
         _mm256_undefined_si256(), a, 0
     )));
 }
