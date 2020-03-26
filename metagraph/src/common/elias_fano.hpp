@@ -303,6 +303,8 @@ class EliasFanoDecoder<sdsl::uint128_t> {
     uint64_t last_hi_ = 0;
     EliasFanoDecoder<uint64_t> decoder64_;
     bool new_chunk_ = true;
+    /* 1MB buffer for reading from #source_ */
+    char buffer_[1024 * 1024];
 };
 
 /**

@@ -457,6 +457,7 @@ size_t EliasFanoEncoder<sdsl::uint256_t>::finish() {
 
 EliasFanoDecoder<sdsl::uint128_t>::EliasFanoDecoder(const std::string &source_name) {
     source_ = std::ifstream(source_name, std::ios::binary);
+    source_.rdbuf()->pubsetbuf(buffer_, 1024 * 1024);
     if (!source_.good()) {
         std::cerr << "Unable to read from " << source_name << std::endl;
         std::exit(EXIT_FAILURE);
