@@ -21,8 +21,8 @@ class Cigar {
   public:
     enum Operator : int32_t {
         CLIPPED,
-        MATCH,
         MISMATCH,
+        MATCH,
         INSERTION,
         DELETION
     };
@@ -116,7 +116,7 @@ typedef int32_t score_t;
 class DBGAlignerConfig {
   public:
     typedef ::score_t score_t;
-    typedef std::array<int8_t, 128> ScoreMatrixRow;
+    typedef std::array<score_t, 128> ScoreMatrixRow;
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
     // Set parameters manually and call `set_scoring_matrix()`
@@ -466,13 +466,15 @@ class DPTable {
                char start_char,
                size_t pos = 0,
                size_t priority_pos = 0)
-              : scores(size, min_score),
-                ops(size),
-                prev_nodes(size),
+              : size_(size),
+                scores(size + 8, min_score),
+                ops(scores.size()),
+                prev_nodes(scores.size()),
                 last_char(start_char),
                 best_pos(pos),
                 last_priority_pos(priority_pos) {}
 
+        size_t size_;
         std::vector<score_t> scores;
         std::vector<Cigar::Operator> ops;
         std::vector<NodeType> prev_nodes;
@@ -489,7 +491,7 @@ class DPTable {
             return best_score() < other.best_score();
         }
 
-        size_t size() const { return scores.size(); }
+        size_t size() const { return size_; }
     };
 
     DPTable() {}

@@ -713,8 +713,16 @@ QueryAlignment<NodeType>::QueryAlignment(const std::string_view query)
       : query_(query),
         query_rc_(query) {
     // TODO: remove const_cast
-    reverse_complement(const_cast<char*>(query_rc_.data()),
-                       const_cast<char*>(query_rc_.data() + query_rc_.size()));
+    auto &qu = const_cast<std::string&>(query_);
+    auto &qu_rc = const_cast<std::string&>(query_rc_);
+
+    qu.reserve(qu.size() + 8);
+    qu_rc.reserve(qu.capacity());
+    memset(qu.data() + qu.size(), '\0', qu.capacity() - qu.size());
+    memset(qu_rc.data() + qu_rc.size(), '\0', qu_rc.capacity() - qu_rc.size());
+    assert(qu.capacity() >= qu.size() + 8);
+
+    reverse_complement(qu_rc.begin(), qu_rc.end());
 }
 
 
