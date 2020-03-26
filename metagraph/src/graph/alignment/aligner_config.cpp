@@ -5,7 +5,7 @@
 
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
-    auto min_penalty_score = std::min(gap_opening_penalty, gap_extension_penalty);
+    score_t min_penalty_score = std::min(gap_opening_penalty, gap_extension_penalty);
     for (const auto &row : score_matrix_) {
         min_penalty_score = std::min(min_penalty_score, *std::min_element(row.begin(), row.end()));
     }
