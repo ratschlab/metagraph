@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.6.1)
 project(test_common)
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -41,7 +40,7 @@ target_link_libraries(tests
     ${SDSL_LIBRARY}
     ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
-target_compile_definitions(tests PUBLIC _USE_FOLLY)
+target_compile_definitions(tests PUBLIC _USE_FOLLY MODE_TI)
 
 add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark
     EXCLUDE_FROM_ALL benchmark

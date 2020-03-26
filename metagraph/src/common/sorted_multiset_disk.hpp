@@ -62,8 +62,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
                                              max_disk_space_bytes,
                                              on_item_pushed,
                                              num_last_elements_cached),
-          to_int_(to_int) {
-    }
+          to_int_(to_int) {}
 
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 
@@ -140,16 +139,6 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
         this->cleanup_(vector);
     }
 
-    static size_t encode_data(const Vector<value_type> &data,
-                              const std::string &file,
-                              std::function<int_pair(const value_type &v)> to_int) {
-        EliasFanoEncoder<int_pair> encoder(data.size(), to_int(data.back()), file);
-        for (const value_type &v : data) {
-            encoder.add(to_int(v));
-        }
-        return encoder.finish();
-    }
-
     /**
      * Dumps the given data to a file, synchronously. If the maximum allowed disk size
      * is reached, all chunks will be merged into a single chunk in an effort to reduce
@@ -162,7 +151,8 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
         std::string file_name
                 = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
 
-        EliasFanoEncoder<int_pair> encoder(this->data_.size(), to_int_(this->data_.back()), file_name);
+        EliasFanoEncoder<int_pair> encoder(this->data_.size(), to_int_(this->data_.front()).first,
+                                           to_int_(this->data_.back()).first, file_name);
         for (const auto &v : this->data_) {
             encoder.add(to_int_(v));
         }
@@ -192,8 +182,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
         } else if ((this->chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
             this->async_merge_l1_.enqueue(merge_l1, this->chunk_file_prefix_,
                                           this->chunk_count_, &this->l1_chunk_count_,
-                                          &this->total_chunk_size_bytes_,
-                                          to_int_);
+                                          &this->total_chunk_size_bytes_, to_int_);
         }
         this->chunk_count_++;
     }
@@ -214,8 +203,9 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
         logger->trace("Starting merging last {} chunks into {}", MERGE_L1_COUNT,
                       merged_l1_file_name);
         EliasFanoEncoderBuffered<int_pair> encoder(merged_l1_file_name, 1000);
-        merge_files<T, C, INT>(to_merge,
-                            [&encoder, to_int](const std::pair<T, C> &v) { encoder.add(to_int(v)); });
+        merge_files<T, C, INT>(to_merge, [&encoder, to_int](const std::pair<T, C> &v) {
+            encoder.add(to_int(v));
+        });
         encoder.finish();
 
         (*l1_chunk_count)++;
@@ -234,8 +224,9 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
                 "into {}",
                 to_merge.size(), out_file);
         EliasFanoEncoderBuffered<int_pair> encoder(out_file, 1000);
-        merge_files<T, C, INT>(to_merge,
-                            [&encoder, to_int](const std::pair<T, C> &v) { encoder.add(to_int(v)); });
+        merge_files<T, C, INT>(to_merge, [&encoder, to_int](const std::pair<T, C> &v) {
+            encoder.add(to_int(v));
+        });
         encoder.finish();
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
@@ -243,7 +234,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
 
   private:
     /** Number of chunks for "level 1" intermediary merging. */
-    static constexpr uint32_t MERGE_L1_COUNT = 4000;
+    static constexpr uint32_t MERGE_L1_COUNT = 4;
 
     std::function<int_pair(const value_type &v)> to_int_;
 };

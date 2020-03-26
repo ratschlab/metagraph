@@ -13,14 +13,29 @@ namespace {
 using namespace mg;
 constexpr size_t ITEM_COUNT = 1e9 / 8; // test on 1GB worth of data
 Vector<uint64_t> sorted(ITEM_COUNT);
+Vector<sdsl::uint128_t> sorted128(ITEM_COUNT / 2);
 
 static void init_sorted() {
     std::mt19937 rng(123457);
-    std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
+    std::uniform_int_distribution<std::mt19937::result_type> dist10000(0, 10000);
 
     uint64_t i = 0;
     std::for_each(sorted.begin(), sorted.end(), [&](uint64_t &v) {
-        i += dist10(rng);
+        i += dist10000(rng);
+        v = i;
+    });
+}
+
+static void init_sorted128() {
+    std::mt19937 rng(123457);
+    std::uniform_int_distribution<std::mt19937::result_type> dist30(0, 30);
+    std::uniform_int_distribution<std::mt19937::result_type> dist10000(0, 10000);
+    sdsl::uint128_t i = 0;
+    std::for_each(sorted.begin(), sorted.end(), [&](uint64_t &v) {
+        i += dist10000(rng);
+        if (dist30(rng) < 1) { // increase the hi 64 bits every ~10th element
+            i = ((sdsl::uint128_t)((uint64_t)(i >> 64) + 1) << 64) + (uint64_t)i;
+        }
         v = i;
     });
 }
@@ -32,8 +47,25 @@ static void BM_write_compressed(benchmark::State &state) {
 
     for (auto _ : state) {
         utils::TempFile tempfile;
-        common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
-        for (const auto& v : sorted) {
+        common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.front(),
+                                                   sorted.back(), tempfile.name());
+        for (const auto &v : sorted) {
+            encoder.add(v);
+        }
+        encoder.finish();
+    }
+}
+
+static void BM_write_compressed128(benchmark::State &state) {
+    if (state.thread_index == 0) {
+        init_sorted128();
+    }
+
+    for (auto _ : state) {
+        utils::TempFile tempfile;
+        common::EliasFanoEncoder<sdsl::uint128_t> encoder(
+                sorted128.size(), sorted128.front(), sorted128.back(), tempfile.name());
+        for (const auto &v : sorted128) {
             encoder.add(v);
         }
         encoder.finish();
@@ -52,14 +84,30 @@ static void BM_write_uncompressed(benchmark::State &state) {
         out.close();
     }
 }
+
+static void BM_write_uncompressed128(benchmark::State &state) {
+    if (state.thread_index == 0) {
+        init_sorted128();
+    }
+
+    for (auto _ : state) {
+        utils::TempFile tempfile;
+        std::ofstream &out = tempfile.ofstream();
+        out.write(reinterpret_cast<char *>(sorted128.data()),
+                  sorted128.size() * sizeof(sdsl::uint128_t));
+        out.close();
+    }
+}
+
 uint64_t sum_compressed;
 static void BM_read_compressed(benchmark::State &state) {
     if (state.thread_index == 0) {
         init_sorted();
     }
     utils::TempFile tempfile;
-    common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
-    for (const auto& v : sorted) {
+    common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.front(),
+                                               sorted.back(), tempfile.name());
+    for (const auto &v : sorted) {
         encoder.add(v);
     }
     encoder.finish();
@@ -101,6 +149,8 @@ static void BM_read_uncompressed(benchmark::State &state) {
 
 BENCHMARK(BM_write_compressed);
 BENCHMARK(BM_write_uncompressed);
+BENCHMARK(BM_write_compressed128);
+BENCHMARK(BM_write_uncompressed128);
 BENCHMARK(BM_read_compressed);
 BENCHMARK(BM_read_uncompressed);
 } // namespace
