@@ -275,7 +275,7 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     slct0_.serialize(out);
 
     if (!out.good())
-        throw std::ofstream::failure("Error when dumping bit_vector_rrr");
+        throw std::ofstream::failure("Error when dumping bit_vector");
 }
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
