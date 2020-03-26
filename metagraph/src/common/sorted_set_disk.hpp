@@ -62,8 +62,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
                                     max_disk_space_bytes,
                                     on_item_pushed,
                                     num_last_elements_cached),
-          to_int_(to_int) {
-    }
+          to_int_(to_int) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is
@@ -105,10 +104,10 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
     virtual void start_merging() override {
         const std::vector<std::string> file_names = this->get_file_names();
         this->async_worker_.enqueue([file_names, this]() {
-          std::function<void(const value_type &)> on_new_item
-                  = [this](const value_type &v) { this->merge_queue_.push(v); };
-          merge_files<T, INT>(file_names, on_new_item);
-          this->merge_queue_.shutdown();
+            std::function<void(const value_type &)> on_new_item
+                    = [this](const value_type &v) { this->merge_queue_.push(v); };
+            merge_files<T, INT>(file_names, on_new_item);
+            this->merge_queue_.shutdown();
         });
     }
 
@@ -124,8 +123,8 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
         std::string file_name
                 = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
 
-        EliasFanoEncoder<INT> encoder(this->data_.size(), to_int_(this->data_.back()),
-                                      file_name);
+        EliasFanoEncoder<INT> encoder(this->data_.size(), to_int_(this->data_.front()),
+                                      to_int_(this->data_.back()), file_name);
         for (const auto &v : this->data_) {
             encoder.add(to_int_(v));
         }
@@ -203,7 +202,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
 
   private:
     /** Number of chunks for "level 1" intermediary merging. */
-    static constexpr uint32_t MERGE_L1_COUNT = 4000; //TODO: undo
+    static constexpr uint32_t MERGE_L1_COUNT = 4000; // TODO: undo
 
     std::function<INT(const T &v)> to_int_;
 };

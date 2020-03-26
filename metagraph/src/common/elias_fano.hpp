@@ -33,6 +33,7 @@ class EliasFanoEncoder {
      * #max_value. The encoded output is written to #out_filename.
      */
     EliasFanoEncoder(size_t size,
+                     T min_value,
                      T max_value,
                      const std::string &out_filename,
                      bool is_append = false);
@@ -116,6 +117,9 @@ class EliasFanoEncoder {
 
     /** Number of lower bits that were written to disk */
     size_t cur_pos_lbits_ = 0;
+
+    /** Offset to add to each element when decoding. */
+    T offset_ = 0;
 };
 
 /**
@@ -205,6 +209,9 @@ class EliasFanoDecoder {
 
     /** True if we read all bytes from source_ */
     bool all_read_ = false;
+
+    /** Value to add to each decoded element */
+    T offset_;
 };
 
 /**
@@ -218,7 +225,8 @@ class EliasFanoEncoder<std::pair<T, C>> {
     EliasFanoEncoder() {}
 
     EliasFanoEncoder(size_t size,
-                     const std::pair<T, C> &last_value,
+                     const T &first_value,
+                     const T &last_value,
                      const std::string &sink_name,
                      bool is_append = false);
 
@@ -256,7 +264,8 @@ class EliasFanoEncoder<sdsl::uint128_t> {
   public:
     EliasFanoEncoder() {}
     EliasFanoEncoder(size_t,
-                     sdsl::uint128_t,
+                     sdsl::uint128_t, // min value
+                     sdsl::uint128_t, // max value
                      const std::string &sink_name,
                      bool is_append = false);
 
@@ -278,7 +287,8 @@ class EliasFanoEncoder<sdsl::uint256_t> {
   public:
     EliasFanoEncoder() {}
     EliasFanoEncoder(size_t,
-                     sdsl::uint256_t,
+                     sdsl::uint256_t, // min value
+                     sdsl::uint256_t, // max value
                      const std::string &sink_name,
                      bool is_append = false);
 
@@ -345,7 +355,7 @@ class EliasFanoEncoderBuffered {
  * Specialization of #EliasFanoEncoder that can encode sequences of pairs of unknown size.
  * It uses a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
  */
- //TODO: Pack the C count, by passing max count the constructor and then dump it to
+ //TODO: Pack the C count, by passing max count to the constructor and then dump it to
  // sdsl::int_vector_buffer with width = hi(max)+1. Add a CompressedInt wrapper that encodes
  // T with EliasFano and C (if present) with sdsl packing
 template <typename T, typename C>
