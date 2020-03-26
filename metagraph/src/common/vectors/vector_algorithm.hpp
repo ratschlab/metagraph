@@ -7,9 +7,8 @@
 #include <sdsl/int_vector.hpp>
 #include <sdsl/select_support_scan.hpp>
 
-#include "bit_vector.hpp"
-
 class ThreadPool;
+class bit_vector;
 
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
@@ -175,50 +174,6 @@ template <class Callback>
 void call_nonzeros(const sdsl::int_vector<> &vector, Callback callback) {
     return call_nonzeros(vector, 0, vector.size(), callback);
 }
-
-template <class Callback>
-void call_ones(const bit_vector &vector,
-               uint64_t begin, uint64_t end,
-               const Callback &callback,
-               double WORD_ACCESS_VS_SELECT_FACTOR) {
-    assert(begin <= end);
-    assert(end <= vector.size());
-
-    if (vector.num_set_bits() <= vector.size() / WORD_ACCESS_VS_SELECT_FACTOR) {
-        // sparse
-        uint64_t num_ones = end ? vector.rank1(end - 1) : 0;
-        for (uint64_t r = begin ? vector.rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
-            callback(vector.select1(r));
-        }
-    } else if ((vector.size() - vector.num_set_bits())
-                <= vector.size() / WORD_ACCESS_VS_SELECT_FACTOR) {
-        // dense
-        uint64_t one_pos = 0;
-        uint64_t zero_pos = 0;
-        uint64_t num_zeros = end ? vector.rank0(end - 1) : 0;
-        for (uint64_t r = begin ? vector.rank0(begin - 1) + 1 : 1; r <= num_zeros; ++r) {
-            zero_pos = vector.select0(r);
-            while (one_pos < zero_pos) {
-                callback(one_pos++);
-            }
-            one_pos++;
-        }
-        while (one_pos < end) {
-            callback(one_pos++);
-        }
-    } else {
-        // moderate density
-        call_ones(vector, begin, end, callback);
-    }
-}
-
-void add_to(const bit_vector &vector,
-            sdsl::bit_vector *other,
-            double WORD_ACCESS_VS_SELECT_FACTOR);
-
-sdsl::bit_vector copy_to_bit_vector(const bit_vector &vector,
-                                    double WORD_ACCESS_VS_SELECT_FACTOR);
-
 
 template <typename BitVector>
 inline uint64_t next1(const BitVector &v,
