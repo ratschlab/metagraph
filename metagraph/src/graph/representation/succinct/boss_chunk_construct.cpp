@@ -188,8 +188,8 @@ void write_or_die(std::ofstream *f, const T &v) {
  * k-mer of prefix length 2 into #sorted_dummy_kmers.
  */
 template <typename T, typename INT>
-uint8_t write_kmer(size_t k,
-                   std::function<INT(const T &v)> to_int,
+inline uint8_t write_kmer(size_t k,
+                   const std::function<INT(const T &v)> &to_int,
                    Vector<T> *dummy_kmers,
                    common::EliasFanoEncoderBuffered<INT> *encoder,
                    RecentKmers<T> *buffer,
@@ -231,7 +231,7 @@ static std::pair<INT, C> to_int(std::pair<T, C> v, INT __attribute__((unused))) 
 template <typename T, typename int_type>
 std::function<void(const T &v)>
 compressed_writer(common::EliasFanoEncoderBuffered<int_type> *encoder,
-                  std::function<int_type(const T &v)> to_int) {
+                  const std::function<int_type(const T &v)> &to_int) {
     return [encoder, to_int](const T &v) { encoder->add(to_int(v)); };
 };
 
