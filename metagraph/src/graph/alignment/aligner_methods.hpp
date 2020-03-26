@@ -220,8 +220,9 @@ class DefaultColumnExtender : public Extender<NodeType> {
     virtual void set_graph(const DeBruijnGraph &graph) override { graph_ = &graph; }
     virtual void reset() override { dp_table.clear(); }
 
-    virtual std::pair<typename DPTable<NodeType>::const_iterator, bool>
-    emplace_node(NodeType node, NodeType incoming_node, char c, size_t size, size_t best_pos, size_t last_priority_pos);
+    virtual std::pair<typename DPTable<NodeType>::iterator, bool>
+    emplace_node(NodeType node, NodeType incoming_node, char c, size_t size,
+                 size_t best_pos = 0, size_t last_priority_pos = 0);
 
     virtual bool add_seed(size_t clipping);
 
