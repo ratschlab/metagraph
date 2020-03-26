@@ -155,6 +155,7 @@ std::pair<bool, uint64_t>
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::inverse_select(uint64_t id) const {
     if constexpr(is_rrr<bv_type>{}) {
+        // TODO: implement inverse_select for sdsl::rrr_vector<15>
         if constexpr(bv_type::block_size != 15) {
             std::pair<bool, uint64_t> pair = vector_.inverse_select(id);
             pair.second += pair.first;
@@ -170,6 +171,7 @@ uint64_t
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::conditional_rank1(uint64_t id) const {
     if constexpr(is_rrr<bv_type>{}) {
+        // TODO: implement conditional_rank for sdsl::rrr_vector<15>
         if constexpr(bv_type::block_size != 15) {
             return vector_.conditional_rank(id);
         }
@@ -285,7 +287,9 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
         return vector_;
     } else {
-        return ::copy_to_bit_vector(*this, bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR);
+        return bit_vector::to_vector_adaptive(
+            bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR
+        );
     }
 }
 
@@ -300,8 +304,9 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
         ::call_ones(vector_, begin, end, callback);
     } else {
-        ::call_ones(*this, begin, end, callback,
-                    bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR);
+        bit_vector::call_ones_adaptive(begin, end, callback,
+            bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR
+        );
     }
 }
 
@@ -315,8 +320,9 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
         *other |= vector_;
     } else {
-        ::add_to(*this, other,
-                 bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR);
+        bit_vector::add_to_adaptive(other,
+            bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR
+        );
     }
 }
 

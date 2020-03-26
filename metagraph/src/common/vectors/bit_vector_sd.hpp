@@ -260,14 +260,14 @@ void bit_vector_sd::call_ones_in_range(uint64_t begin, uint64_t end,
     assert(begin <= end);
     assert(end <= size());
 
-    ::call_ones(*this, begin, end, callback, 2);
+    bit_vector::call_ones_adaptive(begin, end, callback, 2);
 }
 
 void bit_vector_sd::add_to(sdsl::bit_vector *other) const {
     assert(other);
     assert(other->size() == size());
 
-    ::add_to(*this, other, 2);
+    bit_vector::add_to_adaptive(other, 2);
 }
 
 #endif // __BIT_VECTOR_SD_HPP__

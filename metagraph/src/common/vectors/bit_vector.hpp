@@ -76,6 +76,17 @@ class bit_vector : public bitmap {
     virtual std::unique_ptr<bit_vector> copy() const = 0;
 
     virtual sdsl::bit_vector to_vector() const = 0;
+
+  protected:
+    // routines using density-based adaptive iteration with select and access
+    void call_ones_adaptive(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback,
+                            double WORD_ACCESS_VS_SELECT_FACTOR) const;
+
+    void add_to_adaptive(sdsl::bit_vector *other,
+                         double WORD_ACCESS_VS_SELECT_FACTOR) const;
+
+    sdsl::bit_vector to_vector_adaptive(double WORD_ACCESS_VS_SELECT_FACTOR) const;
 };
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv);

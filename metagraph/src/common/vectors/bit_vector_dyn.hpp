@@ -168,18 +168,18 @@ void bit_vector_dyn::call_ones_in_range(uint64_t begin, uint64_t end,
     assert(begin <= end);
     assert(end <= size());
 
-    ::call_ones(*this, begin, end, callback, SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
+    bit_vector::call_ones_adaptive(begin, end, callback, SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
 }
 
 sdsl::bit_vector bit_vector_dyn::to_vector() const {
-    return ::copy_to_bit_vector(*this, SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
+    return bit_vector::to_vector_adaptive(SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
 }
 
 void bit_vector_dyn::add_to(sdsl::bit_vector *other) const {
     assert(other);
     assert(other->size() == size());
 
-    ::add_to(*this, other, SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
+    bit_vector::add_to_adaptive(other, SEQ_ACCESS_VS_SELECT_FACTOR_DYN);
 }
 
 #endif // __BIT_VECTOR_DYN_HPP__
