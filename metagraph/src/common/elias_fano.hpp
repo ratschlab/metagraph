@@ -38,7 +38,7 @@ class EliasFanoEncoder {
                      const std::string &out_filename,
                      bool is_append = false);
 
-    EliasFanoEncoder(const Vector<T> &data, std::ofstream &sink);
+    EliasFanoEncoder(const Vector<T> &data, std::ofstream *sink);
 
     /** Encodes the next number */
     void add(T value);
@@ -266,7 +266,7 @@ class EliasFanoEncoder<sdsl::uint128_t> {
                      sdsl::uint128_t, // max value
                      const std::string &sink_name,
                      bool is_append = false);
-    EliasFanoEncoder(const Vector<sdsl::uint128_t> &data, std::ofstream &sink);
+    EliasFanoEncoder(const Vector<sdsl::uint128_t> &data, std::ofstream *sink);
 
     void add(const sdsl::uint128_t &value);
     size_t finish();
@@ -293,7 +293,7 @@ class EliasFanoEncoder<sdsl::uint256_t> {
                      const std::string &sink_name,
                      bool is_append = false);
 
-    EliasFanoEncoder(const Vector<sdsl::uint256_t> &data, std::ofstream &sink);
+    EliasFanoEncoder(const Vector<sdsl::uint256_t> &data, std::ofstream *sink);
 
     void add(const sdsl::uint256_t &value);
     size_t finish();
