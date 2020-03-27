@@ -118,10 +118,12 @@ MultiLabelEncoded<LabelType>
 ::count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
                size_t min_count,
                size_t count_cap) const {
+    assert(count_cap >= min_count);
+
+    if (!count_cap)
+        return {};
 
     min_count = std::max(min_count, size_t(1));
-
-    assert(count_cap >= min_count);
 
     size_t total_sum_count = 0;
     for (const auto &pair : index_counts) {
