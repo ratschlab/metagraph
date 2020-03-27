@@ -113,7 +113,7 @@ class EliasFanoEncoder {
     /** Sink to write the encoded values to. Points to either #sink_internal or to an externally provided sink */
     std::ofstream *sink_;
 
-    /** True if the class owns the sink_ pointer */
+        /** True if the class owns the sink_ pointer */
     std::ofstream sink_internal_;
 
     /** Number of lower bits that were written to disk */

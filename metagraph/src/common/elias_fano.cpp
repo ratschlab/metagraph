@@ -441,7 +441,9 @@ size_t EliasFanoEncoder<sdsl::uint128_t>::finish() {
         EliasFanoEncoder<uint64_t> encoder64_ = EliasFanoEncoder<uint64_t>(buffer_, sink_);
         total_size_ += (sizeof(uint64_t) + encoder64_.finish());
     }
-    sink_->close();
+    if (sink_internal_.is_open()) {
+        sink_internal_.close();
+    }
     return total_size_;
 }
 
