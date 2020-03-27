@@ -27,6 +27,9 @@ class EliasFanoEncoder {
     EliasFanoEncoder() {}
 
     EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
+    EliasFanoEncoder(EliasFanoEncoder &&other) = delete;
+    EliasFanoEncoder operator=(const EliasFanoEncoder& other) = delete;
+    EliasFanoEncoder operator=(EliasFanoEncoder&& other) = delete;
 
     /**
      * Constructs an Elias-Fano encoder of an array with the given #size and given
@@ -268,6 +271,9 @@ class EliasFanoEncoder<sdsl::uint128_t> {
                      bool is_append = false);
     EliasFanoEncoder(const Vector<sdsl::uint128_t> &data, std::ofstream *sink);
     EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
+    EliasFanoEncoder(EliasFanoEncoder &&other) = delete;
+    EliasFanoEncoder operator=(const EliasFanoEncoder& other) = delete;
+    EliasFanoEncoder operator=(EliasFanoEncoder&& other) = delete;
 
     void add(const sdsl::uint128_t &value);
     size_t finish();

@@ -322,6 +322,7 @@ void EliasFanoDecoder<T>::init() {
     // into memory;
     source_->seekg(num_lower_bytes_ - low_bytes_read, std::ios::cur);
     upper_.reserve(num_upper_bytes_ + 7);
+    memset(upper_.data(), 0, num_upper_bytes_+7); //TODO: remove
     upper_.resize(num_upper_bytes_);
     source_->read(upper_.data(), num_upper_bytes_);
     assert(static_cast<uint32_t>(source_->gcount()) == num_upper_bytes_);
