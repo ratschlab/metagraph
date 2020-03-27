@@ -709,19 +709,25 @@ QueryAlignment<NodeType>::QueryAlignment(QueryAlignment&& other) noexcept
 }
 
 template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(const std::string_view query)
-      : query_(query),
-        query_rc_(query) {
+QueryAlignment<NodeType>::QueryAlignment(const std::string_view query) {
     // TODO: remove const_cast
     auto &qu = const_cast<std::string&>(query_);
     auto &qu_rc = const_cast<std::string&>(query_rc_);
 
-    qu.reserve(qu.size() + 8);
-    qu_rc.reserve(qu.capacity());
-    memset(qu.data() + qu.size(), '\0', qu.capacity() - qu.size());
-    memset(qu_rc.data() + qu_rc.size(), '\0', qu_rc.capacity() - qu_rc.size());
-    assert(qu.capacity() >= qu.size() + 8);
+    // pad sequences for easier access in 64-bit blocks
+    qu.reserve(query.size() + 8);
+    qu.resize(query.size());
 
+    // TODO: use alphabet encoder
+    // transform to upper and fix weird characters
+    std::transform(query.begin(), query.end(), qu.begin(), [](char c) {
+        return c >= 0 ? toupper(c) : 127;
+    });
+    memset(qu.data() + qu.size(), '\0', qu.capacity() - qu.size());
+
+    qu_rc.reserve(query.size() + 8);
+    qu_rc.resize(query.size());
+    memcpy(qu_rc.data(), qu.data(), qu.capacity());
     reverse_complement(qu_rc.begin(), qu_rc.end());
 }
 
