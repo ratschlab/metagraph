@@ -41,6 +41,61 @@ TYPED_TEST(AnnotatorPresetTest, GetLabels) {
               convert_to_set(this->annotation->get(4)));
 }
 
+TYPED_TEST(AnnotatorPresetTest, CountLabels) {
+    EXPECT_EQ(
+        convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
+            {0, 1}, {3, 2}, {1, 4}, {2, 2}
+        })),
+        convert_to_set(this->annotation->count_labels(
+            std::vector<std::pair<uint64_t, size_t>>({
+                {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
+            })
+        ))
+    );
+
+    EXPECT_EQ(
+        convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
+            {0, 1}, {3, 2}, {1, 4}, {2, 2}
+        })),
+        convert_to_set(this->annotation->count_labels(
+            std::vector<std::pair<uint64_t, size_t>>({
+                {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
+            }), 0
+        ))
+    );
+
+    EXPECT_EQ(
+        convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
+            {0, 1}, {3, 2}, {1, 2}, {2, 2}
+        })),
+        convert_to_set(this->annotation->count_labels(
+            std::vector<std::pair<uint64_t, size_t>>({
+                {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
+            }), 0, 2
+        ))
+    );
+
+    EXPECT_EQ(
+        convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
+            {3, 2}, {1, 2}, {2, 2}
+        })),
+        convert_to_set(this->annotation->count_labels(
+            std::vector<std::pair<uint64_t, size_t>>({
+                {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
+            }), 2, 2
+        ))
+    );
+
+    EXPECT_EQ(
+        convert_to_set(std::vector<std::pair<uint64_t, size_t>>({})),
+        convert_to_set(this->annotation->count_labels(
+            std::vector<std::pair<uint64_t, size_t>>({
+                {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
+            }), 0, 0
+        ))
+    );
+}
+
 TYPED_TEST(AnnotatorTest, GetLabelsOneRow) {
     annotate::ColumnCompressed<> column_annotator(5);
     column_annotator.add_labels({ 0 }, {"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"});
