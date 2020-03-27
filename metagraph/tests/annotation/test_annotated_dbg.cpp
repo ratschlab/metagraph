@@ -1085,6 +1085,24 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_labels) {
         EXPECT_EQ(std::vector<std::string> { "Third" },
                   anno_graph->get_labels(seq_third, 1));
 #endif
+
+        EXPECT_EQ(std::vector<std::string>({ "First", "Third" }),
+                  anno_graph->get_labels(seq_first, 0));
+#if _DNA_GRAPH
+        EXPECT_EQ(k == 1 ? std::vector<std::string>({ "Second", "Third" })
+                         : std::vector<std::string> { "Second" },
+                  anno_graph->get_labels(seq_second, 0));
+        EXPECT_EQ(k == 1 ? std::vector<std::string>({ "First", "Second", "Third" })
+                         : std::vector<std::string>({ "First", "Third" }),
+                  anno_graph->get_labels(seq_third, 0));
+#else
+        EXPECT_EQ(k <= 3 ? std::vector<std::string>({ "Second", "Third" })
+                         : std::vector<std::string> { "Second" },
+                  anno_graph->get_labels(seq_second, 0));
+        EXPECT_EQ(k <= 3 ? std::vector<std::string>({ "First", "Second", "Third" })
+                         : std::vector<std::string>({ "First", "Third" }),
+                  anno_graph->get_labels(seq_third, 0));
+#endif
     }
 }
 

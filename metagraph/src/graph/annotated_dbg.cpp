@@ -111,7 +111,11 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
                          size_t min_count) const {
     assert(check_compatibility());
 
-    auto code_counts = annotator_->count_labels(index_counts, min_count, min_count);
+    auto code_counts = annotator_->count_labels(
+        index_counts,
+        min_count,
+        std::max(min_count, size_t(1))
+    );
 
     std::vector<std::string> labels;
     labels.reserve(code_counts.size());
