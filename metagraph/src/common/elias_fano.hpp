@@ -267,6 +267,7 @@ class EliasFanoEncoder<sdsl::uint128_t> {
                      const std::string &sink_name,
                      bool is_append = false);
     EliasFanoEncoder(const Vector<sdsl::uint128_t> &data, std::ofstream *sink);
+    EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
 
     void add(const sdsl::uint128_t &value);
     size_t finish();
