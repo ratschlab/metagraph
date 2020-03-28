@@ -1303,13 +1303,12 @@ void BOSS::edge_DFT(edge_index start,
     do {
         // traverse until the last dummy source edge in a path
         while (!end_branch(path.back())) {
-            // TODO: eliminate pred_last and iterate edges in reverse order
-            path.push_back(pred_last(fwd(path.back(), get_W(path.back()) % alph_size) - 1) + 1);
+            path.push_back(fwd(path.back(), get_W(path.back()) % alph_size));
             pre_visit(path.back());
         }
 
         // traverse the path backwards to the next branching node
-        while (path.size() > 1 && get_last(path.back())) {
+        while (path.size() > 1 && get_last(path.back() - 1)) {
             post_visit(path.back());
             path.pop_back();
         }
@@ -1317,7 +1316,7 @@ void BOSS::edge_DFT(edge_index start,
         // explore the next edge outgoing from the current branching node
         if (path.size() > 1) {
             post_visit(path.back());
-            path.back()++;
+            path.back()--;
             pre_visit(path.back());
         }
     } while (path.size() > 1);
