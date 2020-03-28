@@ -134,7 +134,7 @@ class EliasFanoDecoder {
     /** Creates a decoder that retrieves data from the given source */
     EliasFanoDecoder(const std::string &source_name);
 
-    EliasFanoDecoder(std::ifstream &source, std::streampos file_end);
+    EliasFanoDecoder(std::ifstream *source, std::streampos file_end);
 
     /** Returns the upper part of the next compressed element */
     T next_upper();

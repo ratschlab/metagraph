@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <filesystem>
 
 #include <sdsl/uint128_t.hpp>
@@ -238,8 +239,8 @@ EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name) {
 
 
 template <typename T>
-EliasFanoDecoder<T>::EliasFanoDecoder(std::ifstream &source, std::streampos file_end)
-    : source_(&source), file_end_(file_end) {}
+EliasFanoDecoder<T>::EliasFanoDecoder(std::ifstream *source, std::streampos file_end)
+    : source_(source), file_end_(file_end) {}
 
 template <typename T>
 T EliasFanoDecoder<T>::next_upper() {
@@ -322,7 +323,9 @@ void EliasFanoDecoder<T>::init() {
     // into memory;
     source_->seekg(num_lower_bytes_ - low_bytes_read, std::ios::cur);
     upper_.reserve(num_upper_bytes_ + 7);
+#ifndef NDEBUG // silence Valgrind uninitialized warnings, as we read (and ignore) from uninitilized memory
     memset(upper_.data(), 0, num_upper_bytes_+7); //TODO: remove
+#endif
     upper_.resize(num_upper_bytes_);
     source_->read(upper_.data(), num_upper_bytes_);
     assert(static_cast<uint32_t>(source_->gcount()) == num_upper_bytes_);
@@ -416,22 +419,19 @@ EliasFanoEncoder<sdsl::uint128_t>::EliasFanoEncoder(const Vector<sdsl::uint128_t
     }
 }
 
-
 void EliasFanoEncoder<sdsl::uint128_t>::add(const sdsl::uint128_t &value) {
     uint64_t current_hi = static_cast<uint64_t>(value >> 64);
     if (buffer_.empty()) {
         last_hi_ = current_hi;
     }
-    if (current_hi == last_hi_) {
-        buffer_.push_back((uint64_t)value);
-    } else {
+    if (current_hi != last_hi_) { // prefix changed, time to dump the chunk
         sink_->write(reinterpret_cast<const char *>(&last_hi_), sizeof(uint64_t));
         EliasFanoEncoder<uint64_t> encoder64_ = EliasFanoEncoder<uint64_t>(buffer_, sink_);
         total_size_ += (sizeof(uint64_t) + encoder64_.finish());
         buffer_.resize(0);
-        buffer_.push_back(value);
         last_hi_ = current_hi;
     }
+    buffer_.push_back(static_cast<uint64_t>(value));
     size_++;
 }
 
@@ -491,7 +491,7 @@ EliasFanoDecoder<sdsl::uint128_t>::EliasFanoDecoder(const std::string &source_na
     source_.seekg(0, source_.end);
     std::streampos file_end = source_.tellg();
     source_.seekg(0, source_.beg);
-    decoder64_ = EliasFanoDecoder<uint64_t>(source_, file_end);
+    decoder64_ = EliasFanoDecoder<uint64_t>(&source_, file_end);
 }
 
 std::optional<sdsl::uint128_t> EliasFanoDecoder<sdsl::uint128_t>::next() {
@@ -504,10 +504,11 @@ std::optional<sdsl::uint128_t> EliasFanoDecoder<sdsl::uint128_t>::next() {
     std::optional<uint64_t> next_lo_ = decoder64_.next();
     assert(next_lo_.has_value());
     new_chunk_ = decoder64_.end_of_chunk();
-    return ((sdsl::uint128_t)last_hi_ << 64) + next_lo_.value();
+    return (static_cast<sdsl::uint128_t>(last_hi_) << 64) + next_lo_.value();
 }
 
-/** Creates a decoder that retrieves data from the given source */
+// ---------------------- EliasFanoDecoder<sdsl::uint256_t> -----------------------------
+
 EliasFanoDecoder<sdsl::uint256_t>::EliasFanoDecoder(const std::string &source_name) {
     source_ = std::ifstream(source_name, std::ios::binary);
     if (!source_.good()) {
@@ -516,9 +517,6 @@ EliasFanoDecoder<sdsl::uint256_t>::EliasFanoDecoder(const std::string &source_na
     }
 }
 
-/**
- * Returns the next compressed element or empty if all elements were read.
- */
 std::optional<sdsl::uint256_t> EliasFanoDecoder<sdsl::uint256_t>::next() {
     sdsl::uint256_t result;
     if (source_.read(reinterpret_cast<char *>(&result), sizeof(sdsl::uint256_t))) {
