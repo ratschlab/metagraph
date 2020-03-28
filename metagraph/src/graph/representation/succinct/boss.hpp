@@ -362,7 +362,7 @@ class BOSS {
      * This functions gets a position i reflecting the r-th occurence of the corresponding
      * character c in W and returns the position of the r-th occurence of c in last.
      */
-    uint64_t fwd(uint64_t i) const;
+    uint64_t fwd(uint64_t i, TAlphabet c) const;
 
     /**
      * This function gets a position i that reflects the i-th node and returns the
