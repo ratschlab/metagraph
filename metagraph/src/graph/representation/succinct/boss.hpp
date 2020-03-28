@@ -517,6 +517,10 @@ class BOSS {
     edge_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
         assert(begin + k_ + 1 == end);
 
+        // return npos if invalid characters are found
+        if (std::find(begin, end, alph_size) != end)
+            return npos;
+
         uint64_t edge = index(begin, end - 1);
 
         return edge ? pick_edge(edge, *(end - 1)) : npos;

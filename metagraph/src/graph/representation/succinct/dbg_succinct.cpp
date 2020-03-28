@@ -71,6 +71,10 @@ bool DBGSuccinct::find(std::string_view sequence,
 node_index DBGSuccinct::traverse(node_index node, char next_char) const {
     assert(node > 0 && node <= num_nodes());
 
+    // return npos if the character is invalid
+    if (boss_graph_->encode(next_char) == boss_graph_->alph_size)
+        return npos;
+
     // dbg node is a boss edge
     BOSS::edge_index boss_edge = kmer_to_boss_index(node);
     boss_edge = boss_graph_->fwd(boss_edge, boss_graph_->get_W(boss_edge)
@@ -266,6 +270,14 @@ void DBGSuccinct
         return;
 
     auto encoded = boss_graph_->encode(str);
+
+    // nothing to call if the suffix contains invalid characters
+    if (std::find(encoded.begin(),
+                  encoded.end(),
+                  boss_graph_->alph_size) != encoded.end()) {
+        return;
+    }
+
     auto index_range = boss_graph_->index_range(
         encoded.begin(),
         std::min(encoded.begin() + get_k() - 1, encoded.end())
@@ -357,6 +369,10 @@ void DBGSuccinct::traverse(node_index start,
 
     BOSS::TAlphabet w;
     for (; begin != end && !terminate() && (w = boss_graph_->get_W(edge)); ++begin) {
+        // stop traversal if the character is invalid
+        if (boss_graph_->encode(*begin) == boss_graph_->alph_size)
+            return;
+
         edge = boss_graph_->fwd(edge, w % boss_graph_->alph_size);
         edge = boss_graph_->pick_edge(edge, boss_graph_->encode(*begin));
 
