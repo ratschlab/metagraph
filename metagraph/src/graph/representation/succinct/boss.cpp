@@ -349,9 +349,8 @@ uint64_t BOSS::pred_W(uint64_t i, TAlphabet first, TAlphabet second) const {
                     : 0;
 
     while (i > end) {
-        if (get_W(i) == first)
-            return i;
-        if (get_W(i) == second)
+        TAlphabet w = get_W(i);
+        if (w == first || w == second)
             return i;
         i--;
     }
@@ -422,9 +421,10 @@ BOSS::succ_W(uint64_t i, TAlphabet first, TAlphabet second) const {
     uint64_t end = std::min(W_->size(), i + max_iter);
 
     while (i < end) {
-        if (get_W(i) == first)
+        TAlphabet w = get_W(i);
+        if (w == first)
             return std::make_pair(i, first);
-        if (get_W(i) == second)
+        if (w == second)
             return std::make_pair(i, second);
         i++;
     }
@@ -513,11 +513,11 @@ uint64_t BOSS::bwd(uint64_t i) const {
  * This functions gets a position i reflecting the r-th occurence of the corresponding
  * character c in W and returns the position of the r-th occurence of c in last.
  */
-uint64_t BOSS::fwd(uint64_t i) const {
+uint64_t BOSS::fwd(uint64_t i, TAlphabet c) const {
     CHECK_INDEX(i);
 
-    // get value of W at position i
-    TAlphabet c = get_W(i) % alph_size;
+    // |c| must be the value in W at position i
+    assert(c == get_W(i) % alph_size);
     assert(i == 1 || c != kSentinelCode);
     // get the offset for position c
     uint64_t o = F_[c];
@@ -567,6 +567,7 @@ edge_index BOSS::pick_edge(edge_index edge, TAlphabet c) const {
     assert(get_last(edge) && "must be the last outgoing edge");
     assert(c <= alph_size);
 
+    // TODO: eliminate this check
     if (c == alph_size)
         return npos;
 
@@ -734,7 +735,7 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
         if (last_target > 0) {
             if (rank_last(last_target - 1) < rank_last(last_ - 1))
                 shift = 0;
-            last_ = fwd(last_target);
+            last_ = fwd(last_target, s);
             continue;
         }
         assert(s > 0);
@@ -742,7 +743,7 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
         last_target = succ_W(last_, s, s + alph_size).first;
 
         if (last_target < W_->size()) {
-            last_ = fwd(last_target);
+            last_ = fwd(last_target, s);
             shift = 1;
         } else {
             last_ = F_[s];
@@ -869,7 +870,7 @@ void BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded,
                 break;
             }
 
-            edge = fwd(edge);
+            edge = fwd(edge, seq_encoded[i + k_ - 1]);
             edge = pick_edge(edge, seq_encoded[i + k_]);
 
             callback(edge);
@@ -1014,7 +1015,7 @@ void BOSS::print(std::ostream &os) const {
 
 void BOSS::print_adj_list(std::ostream &os) const {
     for (uint64_t edge = 1; edge < W_->size(); ++edge) {
-        os << 1 + rank_last(fwd(edge) - 1)
+        os << 1 + rank_last(fwd(edge, get_W(edge) % alph_size) - 1)
            << " ";
         if (get_last(edge))
             os << "\n";
@@ -1098,7 +1099,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     uint64_t prev_c_pos = pred_W(end - 1, c, c + alph_size);
     // if the edge already exists, traverse it and return the index
     if (prev_c_pos >= begin)
-        return fwd(prev_c_pos);
+        return fwd(prev_c_pos, c);
 
     /**
      * We found that c does not exist in the current range yet and now have to
@@ -1116,7 +1117,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
         if (edges_inserted && inserted)
             edges_inserted->push_back(inserted);
 
-        return fwd(prev_c_pos);
+        return fwd(prev_c_pos, c);
     }
 
     // The new edge will be the first incoming for its target node,
@@ -1144,7 +1145,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
 
     // Add sentinel if the target node is the new dead-end
     if (!the_only_incoming)
-        return fwd(first_c + (inserted > 0));
+        return fwd(first_c + (inserted > 0), c);
 
     uint64_t sentinel_pos = select_last(rank_last(F_[c]) + rank_W(begin - 1, c)) + 1;
 
@@ -1306,7 +1307,8 @@ void BOSS::edge_DFT(edge_index start,
     do {
         // traverse until the last dummy source edge in a path
         while (!end_branch(path.back())) {
-            path.push_back(pred_last(fwd(path.back()) - 1) + 1);
+            // TODO: eliminate pred_last and iterate edges in reverse order
+            path.push_back(pred_last(fwd(path.back(), get_W(path.back()) % alph_size) - 1) + 1);
             pre_visit(path.back());
         }
 
@@ -1849,26 +1851,26 @@ void call_paths(const BOSS &boss,
             assert(!subgraph_mask || (*subgraph_mask)[edge]);
 
             // visit the edge
-            sequence.push_back(boss.get_W(edge) % boss.alph_size);
+            TAlphabet w = boss.get_W(edge);
+            TAlphabet d = w % boss.alph_size;
+            sequence.push_back(d);
             path.push_back(edge);
             visited[edge] = true;
             ++progress_bar;
 
             // stop traversing if the next node is a dummy sink
-            if (!sequence.back())
+            if (!d)
                 break;
 
+            auto j = (w == d) ? edge : boss.pred_W(edge, d, d);
             // stop traversing if we call unitigs and this
             // is not the only incoming edge
-            auto d = boss.get_W(edge) % boss.alph_size;
-            auto j = boss.pred_W(edge, d, d);
             bool continue_traversal = !split_to_unitigs
                 || masked_pick_single_incoming(boss, &j, subgraph_mask);
             assert(j);
 
             // make one traversal step
-            assert(boss.get_W(edge));
-            edge = boss.fwd(edge);
+            edge = boss.fwd(edge, d);
 
             // traverse if there is only one outgoing edge
             auto is_single = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
@@ -2084,7 +2086,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
         // it is clearly neither a sink tip nor a source tip.
         if (path.back() != kSentinelCode
                 && !masked_pick_single_outgoing(*this,
-                                                &(last_fwd = fwd(last_edge)),
+                                                &(last_fwd = fwd(last_edge, path.back())),
                                                 subgraph_mask)
                 && last_fwd) {
             callback(std::move(sequence), std::move(edges));
@@ -2163,13 +2165,15 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
 
                 visited[edge] = true;
 
+                TAlphabet d = get_W(edge) % alph_size;
+
                 // stop traversing if it's a sink
-                if (!get_W(edge))
+                if (!d)
                     break;
 
                 // traverse if there is only one outgoing edge
                 if (is_single_outgoing(edge)) {
-                    auto next_edge = fwd(edge);
+                    auto next_edge = fwd(edge, d);
 
                     kmer.back() = decode(get_node_last_value(next_edge));
                     if (kmer.front() != BOSS::kSentinel)
@@ -2183,7 +2187,7 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
                     do {
                         assert(get_W(edge));
 
-                        auto next_edge = fwd(edge);
+                        auto next_edge = fwd(edge, d);
 
                         kmer.back() = decode(get_node_last_value(next_edge));
                         if (kmer.front() != BOSS::kSentinel)
@@ -2192,7 +2196,7 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
                         if (!visited[next_edge])
                             branchnodes.push({ next_edge, kmer.substr(1) + '\0' });
 
-                    } while (--edge > 1 && !get_last(edge));
+                    } while (--edge > 1 && !get_last(edge) && (d = get_W(edge) % alph_size));
 
                     break;
                 }
