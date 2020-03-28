@@ -26,7 +26,10 @@ class EliasFanoEncoder {
   public:
     EliasFanoEncoder() {}
 
-    EliasFanoEncoder(const EliasFanoEncoder& other) = delete;
+    EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
+    EliasFanoEncoder(EliasFanoEncoder &&other) = delete;
+    EliasFanoEncoder operator=(const EliasFanoEncoder& other) = delete;
+    EliasFanoEncoder operator=(EliasFanoEncoder&& other) = delete;
 
     /**
      * Constructs an Elias-Fano encoder of an array with the given #size and given
@@ -38,7 +41,7 @@ class EliasFanoEncoder {
                      const std::string &out_filename,
                      bool is_append = false);
 
-    EliasFanoEncoder(const Vector<T> &data, std::ofstream &sink);
+    EliasFanoEncoder(const Vector<T> &data, std::ofstream *sink);
 
     /** Encodes the next number */
     void add(T value);
@@ -54,9 +57,7 @@ class EliasFanoEncoder {
     static uint8_t get_num_lower_bits(T max_value, size_t size);
 
     /** Writes #value (with len up to 56 bits) to #data starting at the #pos-th bit. */
-    static void write_bits(uint8_t *data,
-                           size_t pos,
-                           uint64_t value);
+    static void write_bits(uint8_t *data, size_t pos, uint64_t value);
     void init(size_t size, T max_value);
 
   private:
@@ -112,7 +113,7 @@ class EliasFanoEncoder {
     /** Sink to write the encoded values to. Points to either #sink_internal or to an externally provided sink */
     std::ofstream *sink_;
 
-    /** True if the class owns the sink_ pointer */
+        /** True if the class owns the sink_ pointer */
     std::ofstream sink_internal_;
 
     /** Number of lower bits that were written to disk */
@@ -133,7 +134,7 @@ class EliasFanoDecoder {
     /** Creates a decoder that retrieves data from the given source */
     EliasFanoDecoder(const std::string &source_name);
 
-    EliasFanoDecoder(std::ifstream &source, std::streampos file_end);
+    EliasFanoDecoder(std::ifstream *source, std::streampos file_end);
 
     /** Returns the upper part of the next compressed element */
     T next_upper();
@@ -268,13 +269,20 @@ class EliasFanoEncoder<sdsl::uint128_t> {
                      sdsl::uint128_t, // max value
                      const std::string &sink_name,
                      bool is_append = false);
+    EliasFanoEncoder(const Vector<sdsl::uint128_t> &data, std::ofstream *sink);
+    EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
+    EliasFanoEncoder(EliasFanoEncoder &&other) = delete;
+    EliasFanoEncoder operator=(const EliasFanoEncoder& other) = delete;
+    EliasFanoEncoder operator=(EliasFanoEncoder&& other) = delete;
 
     void add(const sdsl::uint128_t &value);
     size_t finish();
+
   private:
     Vector<uint64_t> buffer_;
     uint64_t last_hi_ = 0;
-    std::ofstream sink_;
+    std::ofstream *sink_;
+    std::ofstream sink_internal_;
     size_t total_size_ = 0;
     size_t size_ = 0;
 };
@@ -292,8 +300,11 @@ class EliasFanoEncoder<sdsl::uint256_t> {
                      const std::string &sink_name,
                      bool is_append = false);
 
+    EliasFanoEncoder(const Vector<sdsl::uint256_t> &data, std::ofstream *sink);
+
     void add(const sdsl::uint256_t &value);
     size_t finish();
+
   private:
     std::ofstream sink_;
     size_t total_size_ = 0;
@@ -308,6 +319,7 @@ class EliasFanoDecoder<sdsl::uint128_t> {
   public:
     EliasFanoDecoder(const std::string &source_name);
     std::optional<sdsl::uint128_t> next();
+
   private:
     std::ifstream source_;
     uint64_t last_hi_ = 0;
@@ -325,6 +337,7 @@ class EliasFanoDecoder<sdsl::uint256_t> {
   public:
     EliasFanoDecoder(const std::string &source_name);
     std::optional<sdsl::uint256_t> next();
+
   private:
     std::ifstream source_;
 };
@@ -342,6 +355,7 @@ class EliasFanoEncoderBuffered {
     void add(const T &value);
 
     size_t finish();
+
   private:
     void encode_chunk();
 
@@ -355,9 +369,9 @@ class EliasFanoEncoderBuffered {
  * Specialization of #EliasFanoEncoder that can encode sequences of pairs of unknown size.
  * It uses a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
  */
- //TODO: Pack the C count, by passing max count to the constructor and then dump it to
- // sdsl::int_vector_buffer with width = hi(max)+1. Add a CompressedInt wrapper that encodes
- // T with EliasFano and C (if present) with sdsl packing
+// TODO: Pack the C count, by passing max count to the constructor and then dump it to
+// sdsl::int_vector_buffer with width = hi(max)+1. Add a CompressedInt wrapper that
+// encodes T with EliasFano and C (if present) with sdsl packing
 template <typename T, typename C>
 class EliasFanoEncoderBuffered<std::pair<T, C>> {
   public:
@@ -371,7 +385,10 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
     void encode_chunk();
 
   private:
-    Vector<std::pair<T, C>> buffer_;
+    Vector<T> buffer_;
+    Vector<C> buffer_second_;
+    std::ofstream sink_;
+    std::ofstream sink_second_;
     std::string file_name_;
     size_t total_size_ = 0;
 };

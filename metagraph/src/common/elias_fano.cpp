@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <filesystem>
 
 #include <sdsl/uint128_t.hpp>
@@ -87,8 +88,8 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
 }
 
 template <typename T>
-EliasFanoEncoder<T>::EliasFanoEncoder(const Vector<T> &data, std::ofstream &sink)
-    : declared_size_(data.size()), sink_(&sink) {
+EliasFanoEncoder<T>::EliasFanoEncoder(const Vector<T> &data, std::ofstream *sink)
+    : declared_size_(data.size()), sink_(sink) {
     if (data.size() == 0) {
         return;
     }
@@ -238,8 +239,8 @@ EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name) {
 
 
 template <typename T>
-EliasFanoDecoder<T>::EliasFanoDecoder(std::ifstream &source, std::streampos file_end)
-    : source_(&source), file_end_(file_end) {}
+EliasFanoDecoder<T>::EliasFanoDecoder(std::ifstream *source, std::streampos file_end)
+    : source_(source), file_end_(file_end) {}
 
 template <typename T>
 T EliasFanoDecoder<T>::next_upper() {
@@ -322,6 +323,9 @@ void EliasFanoDecoder<T>::init() {
     // into memory;
     source_->seekg(num_lower_bytes_ - low_bytes_read, std::ios::cur);
     upper_.reserve(num_upper_bytes_ + 7);
+#ifndef NDEBUG // silence Valgrind uninitialized warnings, as we read (and ignore) from uninitilized memory
+    memset(upper_.data(), 0, num_upper_bytes_+7); //TODO: remove
+#endif
     upper_.resize(num_upper_bytes_);
     source_->read(upper_.data(), num_upper_bytes_);
     assert(static_cast<uint32_t>(source_->gcount()) == num_upper_bytes_);
@@ -399,10 +403,19 @@ EliasFanoEncoder<sdsl::uint128_t>::EliasFanoEncoder(size_t,
                                                     bool is_append) {
     std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
     // open file for appending, as we may encode multiple compressed chunks in the same file
-    sink_ = std::ofstream(sink_name, std::ios::binary | open_flag);
-    if (!sink_.good()) {
+    sink_internal_ = std::ofstream(sink_name, std::ios::binary | open_flag);
+    sink_ = &sink_internal_;
+    if (!sink_->good()) {
         std::cerr << "Unable to write to " << sink_name << std::endl;
         std::exit(EXIT_FAILURE);
+    }
+
+}
+
+EliasFanoEncoder<sdsl::uint128_t>::EliasFanoEncoder(const Vector<sdsl::uint128_t> &data,
+                                                    std::ofstream *sink) : sink_(sink) {
+    for (const auto &v : data) {
+        add(v);
     }
 }
 
@@ -411,26 +424,26 @@ void EliasFanoEncoder<sdsl::uint128_t>::add(const sdsl::uint128_t &value) {
     if (buffer_.empty()) {
         last_hi_ = current_hi;
     }
-    if (current_hi == last_hi_) {
-        buffer_.push_back((uint64_t)value);
-    } else {
-        sink_.write(reinterpret_cast<const char *>(&last_hi_), sizeof(uint64_t));
+    if (current_hi != last_hi_) { // prefix changed, time to dump the chunk
+        sink_->write(reinterpret_cast<const char *>(&last_hi_), sizeof(uint64_t));
         EliasFanoEncoder<uint64_t> encoder64_ = EliasFanoEncoder<uint64_t>(buffer_, sink_);
         total_size_ += (sizeof(uint64_t) + encoder64_.finish());
         buffer_.resize(0);
-        buffer_.push_back(value);
         last_hi_ = current_hi;
     }
+    buffer_.push_back(static_cast<uint64_t>(value));
     size_++;
 }
 
 size_t EliasFanoEncoder<sdsl::uint128_t>::finish() {
     if (!buffer_.empty()) {
-        sink_.write(reinterpret_cast<const char *>(&last_hi_), sizeof(uint64_t));
+        sink_->write(reinterpret_cast<const char *>(&last_hi_), sizeof(uint64_t));
         EliasFanoEncoder<uint64_t> encoder64_ = EliasFanoEncoder<uint64_t>(buffer_, sink_);
         total_size_ += (sizeof(uint64_t) + encoder64_.finish());
     }
-    sink_.close();
+    if (sink_internal_.is_open()) {
+        sink_internal_.close();
+    }
     return total_size_;
 }
 
@@ -447,6 +460,13 @@ EliasFanoEncoder<sdsl::uint256_t>::EliasFanoEncoder(size_t,
         std::cerr << "Unable to write to " << sink_name << std::endl;
         std::exit(EXIT_FAILURE);
     }
+}
+
+EliasFanoEncoder<sdsl::uint256_t>::EliasFanoEncoder(const Vector<sdsl::uint256_t> &data,
+                                                    std::ofstream *sink) {
+    sink->write(reinterpret_cast<const char *>(data.data()),
+               data.size() * sizeof(sdsl::uint256_t));
+    total_size_ += data.size() * sizeof(sdsl::uint256_t);
 }
 
 void EliasFanoEncoder<sdsl::uint256_t>::add(const sdsl::uint256_t &value) {
@@ -471,7 +491,7 @@ EliasFanoDecoder<sdsl::uint128_t>::EliasFanoDecoder(const std::string &source_na
     source_.seekg(0, source_.end);
     std::streampos file_end = source_.tellg();
     source_.seekg(0, source_.beg);
-    decoder64_ = EliasFanoDecoder<uint64_t>(source_, file_end);
+    decoder64_ = EliasFanoDecoder<uint64_t>(&source_, file_end);
 }
 
 std::optional<sdsl::uint128_t> EliasFanoDecoder<sdsl::uint128_t>::next() {
@@ -484,10 +504,11 @@ std::optional<sdsl::uint128_t> EliasFanoDecoder<sdsl::uint128_t>::next() {
     std::optional<uint64_t> next_lo_ = decoder64_.next();
     assert(next_lo_.has_value());
     new_chunk_ = decoder64_.end_of_chunk();
-    return ((sdsl::uint128_t)last_hi_ << 64) + next_lo_.value();
+    return (static_cast<sdsl::uint128_t>(last_hi_) << 64) + next_lo_.value();
 }
 
-/** Creates a decoder that retrieves data from the given source */
+// ---------------------- EliasFanoDecoder<sdsl::uint256_t> -----------------------------
+
 EliasFanoDecoder<sdsl::uint256_t>::EliasFanoDecoder(const std::string &source_name) {
     source_ = std::ifstream(source_name, std::ios::binary);
     if (!source_.good()) {
@@ -496,9 +517,6 @@ EliasFanoDecoder<sdsl::uint256_t>::EliasFanoDecoder(const std::string &source_na
     }
 }
 
-/**
- * Returns the next compressed element or empty if all elements were read.
- */
 std::optional<sdsl::uint256_t> EliasFanoDecoder<sdsl::uint256_t>::next() {
     sdsl::uint256_t result;
     if (source_.read(reinterpret_cast<char *>(&result), sizeof(sdsl::uint256_t))) {
@@ -508,7 +526,7 @@ std::optional<sdsl::uint256_t> EliasFanoDecoder<sdsl::uint256_t>::next() {
 }
 
 
-// ----------- EliasFanoEncoderBuffered --------
+// ------------------------------ EliasFanoEncoderBuffered ----------------------------
 template <typename T>
 EliasFanoEncoderBuffered<T>::EliasFanoEncoderBuffered(const std::string &file_name,
                                                       size_t buffer_size)
@@ -543,19 +561,22 @@ void EliasFanoEncoderBuffered<T>::encode_chunk() {
     buffer_.resize(0);
 }
 
-// ----------- EliasFanoDecoder<sdsl::uint128_t> --------
+// ----------------------- EliasFanoEncoderBuffered<std::pair> --------------------------
 template <typename T, typename C>
 EliasFanoEncoderBuffered<std::pair<T, C>>::EliasFanoEncoderBuffered(const std::string &file_name,
                                                                     size_t buffer_size)
     : file_name_(file_name) {
     std::filesystem::remove(file_name);
-    std::filesystem::remove(file_name + ".count");
+    sink_ = std::ofstream(file_name, std::ios::binary | std::ios::out);
+    sink_second_ = std::ofstream(file_name + ".count", std::ios::binary | std::ios::out);
     buffer_.reserve(buffer_size);
+    buffer_second_.reserve(buffer_size);
 }
 
 template <typename T, typename C>
 void EliasFanoEncoderBuffered<std::pair<T, C>>::add(const std::pair<T, C> &value) {
-    buffer_.push_back(value);
+    buffer_.push_back(value.first);
+    buffer_second_.push_back(value.second);
     if (buffer_.size() == buffer_.capacity()) {
         encode_chunk();
     }
@@ -564,21 +585,20 @@ void EliasFanoEncoderBuffered<std::pair<T, C>>::add(const std::pair<T, C> &value
 template <typename T, typename C>
 size_t EliasFanoEncoderBuffered<std::pair<T, C>>::finish() {
     encode_chunk();
+    sink_.close();
+    sink_second_.close();
     return total_size_;
 }
 
 template <typename T, typename C>
 void EliasFanoEncoderBuffered<std::pair<T, C>>::encode_chunk() {
-    T last_el = buffer_.empty() ? T(0) : buffer_.back().first;
-    T first_el = buffer_.empty() ? T(0) : buffer_.front().first;
-    EliasFanoEncoder<std::pair<T, C>> encoder_
-            = EliasFanoEncoder<std::pair<T, C>>(buffer_.size(), first_el, last_el,
-                                                file_name_, true);
-    for (const auto &v : buffer_) {
-        encoder_.add(v);
-    }
-    total_size_ += encoder_.finish();
+    EliasFanoEncoder<T> encoder_ = EliasFanoEncoder<T>(buffer_, &sink_);
+
+    sink_second_.write(reinterpret_cast<char *>(buffer_second_.data()),
+                       buffer_second_.size() * sizeof(C));
+    total_size_ += (encoder_.finish() + buffer_second_.size() * sizeof(C));
     buffer_.resize(0);
+    buffer_second_.resize(0);
 }
 
 // instantiate used templates
