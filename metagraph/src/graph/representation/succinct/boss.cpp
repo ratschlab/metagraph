@@ -565,11 +565,7 @@ BOSS::get_minus_k_value(edge_index i, size_t k) const {
 edge_index BOSS::pick_edge(edge_index edge, TAlphabet c) const {
     CHECK_INDEX(edge);
     assert(get_last(edge) && "must be the last outgoing edge");
-    assert(c <= alph_size);
-
-    // TODO: eliminate this check
-    if (c == alph_size)
-        return npos;
+    assert(c < alph_size);
 
     do {
         TAlphabet w = get_W(edge);
