@@ -287,9 +287,8 @@ bool BOSS::load(std::ifstream &instream) {
 //
 
 /**
- * Uses the object's array W, a given position i in W and a character c
- * from the alphabet and returns the number of occurences of c in W up to
- * position i.
+ * For the given position i in W and a character c from the alphabet,
+ * return the number of occurences of c in W up to (including) position i.
  */
 uint64_t BOSS::rank_W(uint64_t i, TAlphabet c) const {
     assert(i < W_->size());
@@ -298,8 +297,8 @@ uint64_t BOSS::rank_W(uint64_t i, TAlphabet c) const {
 }
 
 /**
- * Uses the array W and gets a count i and a character c from
- * the alphabet and returns the position of the i-th occurrence of c in W.
+ * For a character |c| from the alphabet and a count |i|,
+ * return the position of the i-th occurence of |c| in W.
  */
 uint64_t BOSS::select_W(uint64_t i, TAlphabet c) const {
     assert(i + (c == 0) <= W_->rank(c, W_->size() - 1));
@@ -620,7 +619,7 @@ edge_index BOSS::pick_incoming_edge(edge_index x, TAlphabet c) const {
 }
 
 void BOSS::call_incoming_to_target(edge_index edge, TAlphabet d,
-                                   const std::function<void(edge_index)> &callback) const {
+                                   const Call<edge_index> &callback) const {
     CHECK_INDEX(edge);
     assert(get_W(edge) < alph_size && "must be the first incoming edge");
     assert(d == get_W(edge));
@@ -2125,8 +2124,8 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
 }
 
 /**
- * Traverse boss graph and call all its edges
- * except for the dummy source of sink ones
+ * Traverse the boss graph and call all its edges
+ * except for the dummy source nodes and the dummy sink nodes
  */
 void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
     sdsl::bit_vector visited(W_->size(), false);
