@@ -348,6 +348,7 @@ uint64_t BOSS::pred_W(uint64_t i, TAlphabet first, TAlphabet second) const {
                     ? i - max_iter
                     : 0;
 
+    // TODO: add a cap -- iterate alph_size^2 elements at maximum
     while (i > end) {
         TAlphabet w = get_W(i);
         if (w == first || w == second)
@@ -618,14 +619,13 @@ edge_index BOSS::pick_incoming_edge(edge_index x, TAlphabet c) const {
     return npos;
 }
 
-void BOSS::call_incoming_to_target(edge_index edge,
-                                   std::function<void(edge_index)> callback) const {
+void BOSS::call_incoming_to_target(edge_index edge, TAlphabet d,
+                                   const std::function<void(edge_index)> &callback) const {
     CHECK_INDEX(edge);
     assert(get_W(edge) < alph_size && "must be the first incoming edge");
+    assert(d == get_W(edge));
 
     callback(edge);
-
-    const TAlphabet d = get_W(edge);
 
     // iterate through all indices with edge label d + alph_size
     // which are less than the next index with edge label d
@@ -652,46 +652,43 @@ bool BOSS::is_single_outgoing(edge_index i) const {
 }
 
 /**
- * Given an edge index i, this function returns true if that is
- * the only edge incoming to its target node.
+ * Given an edge index i and label w, this function returns
+ * true if that is the only edge incoming to its target node.
  */
-bool BOSS::is_single_incoming(edge_index i) const {
+bool BOSS::is_single_incoming(edge_index i, TAlphabet w) const {
     CHECK_INDEX(i);
+    assert(w == get_W(i));
+    assert(w != alph_size);
 
-    TAlphabet c = get_W(i);
-
-    assert(c != alph_size);
-
-    if (c > alph_size)
+    if (w > alph_size)
         return false;
 
     // start from the next edge
     i++;
 
     return i == W_->size()
-            || succ_W(i, c, c + alph_size).second != c + alph_size;
+            || succ_W(i, w, w + alph_size).second != w + alph_size;
 }
 
 /**
- * Given an edge index i (first incoming), this function returns
+ * Given an edge index i (first incoming) and label d, this function returns
  * the number of edges incoming to its target node.
  */
-size_t BOSS::num_incoming_to_target(edge_index x) const {
+size_t BOSS::num_incoming_to_target(edge_index x, TAlphabet d) const {
     CHECK_INDEX(x);
-
     assert(get_W(x) < alph_size && "must be the first incoming edge");
+    assert(d == get_W(x));
 
     if (x + 1 == W_->size())
         return 1;
 
     if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
-        TAlphabet d = get_W(x);
         uint64_t y = succ_W(x + 1, d);
         return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
 
     } else {
         size_t indeg = 0;
-        call_incoming_to_target(x, [&indeg](auto) { indeg++; });
+        call_incoming_to_target(x, d, [&indeg](auto) { indeg++; });
         assert(indeg && "there is always at least one incoming edge");
         return indeg;
     }
@@ -998,13 +995,12 @@ void BOSS::print(std::ostream &os) const {
                   << "\t" << "W" << std::endl;
 
     for (uint64_t i = 1; i < W_->size(); i++) {
-        assert(get_W(i) != alph_size);
+        TAlphabet w = get_W(i);
+        assert(w != alph_size);
         os << i << "\t" << get_last(i)
                 << "\t" << get_node_str(i)
-                << "\t" << decode(get_W(i) % alph_size)
-                        << (get_W(i) > alph_size
-                                ? "-"
-                                : "")
+                << "\t" << decode(w % alph_size)
+                        << (w > alph_size ? "-" : "")
                         << std::endl;
     }
 }
@@ -1366,14 +1362,14 @@ void traverse_dummy_edges(const BOSS &graph,
             if (redundant_path.size() == check_depth) {
                 if (!redundant_mask
                         || (!(*redundant_mask)[edge]
-                                && graph.is_single_incoming(edge))) {
+                                && graph.is_single_incoming(edge, graph.get_W(edge)))) {
                     // the last dummy edge is not redundant and hence the
                     // entire path has to remain in the graph
                     redundant_path.assign(redundant_path.size(), false);
                 }
                 return true;
             } else {
-                assert(graph.is_single_incoming(edge));
+                assert(graph.is_single_incoming(edge, graph.get_W(edge)));
                 return false;
             }
         }
@@ -1619,7 +1615,7 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
                     return false;
 
                 if (depth == k_)
-                    return !is_single_incoming(edge);
+                    return !is_single_incoming(edge, get_W(edge));
 
                 callback(edge);
                 return true;
@@ -1673,17 +1669,17 @@ bool masked_pick_single_outgoing(const BOSS &boss,
 // If no incoming edges are found, set |*i| to 0 and return false.
 // If multiple incoming edges are found, set |*i| to the first and return false.
 bool masked_pick_single_incoming(const BOSS &boss,
-                                 uint64_t *i,
+                                 uint64_t *i, TAlphabet d,
                                  const bitmap *subgraph_mask) {
     assert(i && *i);
-    assert(boss.get_W(*i) < boss.alph_size);
+    assert(boss.get_W(*i) < boss.alph_size && "must be the first incoming edge");
+    assert(d == boss.get_W(*i));
     assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
     // in boss, at least one incoming edge always exists
     if (!subgraph_mask)
-        return boss.is_single_incoming(*i);
+        return boss.is_single_incoming(*i, d);
 
-    auto d = boss.get_W(*i);
     auto j = *i;
 
     TAlphabet d_next;
@@ -1772,7 +1768,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             // check if |i| has incoming edges
             auto j = bwd(i);
             // check if =1 or >1
-            if (masked_pick_single_incoming(*this, &j, subgraph_mask) || j)
+            if (masked_pick_single_incoming(*this, &j, get_node_last_value(i), subgraph_mask) || j)
                 return;
 
             do {
@@ -1861,7 +1857,7 @@ void call_paths(const BOSS &boss,
             // stop traversing if we call unitigs and this
             // is not the only incoming edge
             bool continue_traversal = !split_to_unitigs
-                || masked_pick_single_incoming(boss, &j, subgraph_mask);
+                || masked_pick_single_incoming(boss, &j, d, subgraph_mask);
             assert(j);
 
             // make one traversal step
@@ -2098,6 +2094,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
         if (path.front() != kSentinelCode
                 && !masked_pick_single_incoming(*this,
                                                 &(first_bwd = bwd(first_edge)),
+                                                get_node_last_value(first_edge),
                                                 subgraph_mask)
                 && first_bwd) {
             callback(std::move(sequence), std::move(edges));
