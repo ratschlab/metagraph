@@ -38,8 +38,8 @@ void initialize_chunk(uint64_t alph_size,
                       std::vector<bool> *last,
                       std::vector<uint64_t> *F,
                       sdsl::int_vector<> *weights = nullptr) {
-    using T = std::remove_const_t<std::remove_reference_t<decltype(*begin)>>;
-    using KMER = std::remove_reference_t<decltype(get_kmer(*begin))>;
+    using T = std::decay_t<decltype(*begin)>;
+    using KMER = std::decay_t<decltype(get_kmer(*begin))>;
 
     static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
 

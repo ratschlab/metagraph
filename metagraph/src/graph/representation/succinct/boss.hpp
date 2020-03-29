@@ -10,8 +10,6 @@
 
 class BOSSConstructor;
 
-auto ALWAYS_FALSE = []() { return false; };
-
 /**
  * This class implements the BOSS table, a succinct representation
  * of the de Bruijn graph following ideas and suggestions presented here:
@@ -34,6 +32,8 @@ class BOSS {
 
     typedef uint8_t TAlphabet;
 
+    static constexpr auto ALWAYS_FALSE = []() { return false; };
+
     /**
      * Construct a BOSS table with the given node (k-mer) size.
      */
@@ -45,9 +45,8 @@ class BOSS {
     bool operator=(const BOSS &other) = delete;
 
     /**
-     * Check whether BOSS tables store the same data.
-     * FYI: this function reconstructs all the kmers, and
-     * the complexity is at least O(k x n).
+     * Check whether the BOSS tables store identical k-mer sets.
+     * FYI: this function reconstructs all the k-mers in O(k x n) time.
      */
     bool operator==(const BOSS &other) const;
 
@@ -93,8 +92,8 @@ class BOSS {
     using Call = typename std::function<void(T...)>;
 
     /**
-     * Traverse boss graph and call all its edges
-     * except for the dummy source of sink ones
+     * Traverse the boss graph and call all its edges
+     * except for the dummy source nodes and the dummy sink nodes
      */
     void call_kmers(Call<edge_index, const std::string&> callback) const;
 
@@ -120,7 +119,7 @@ class BOSS {
 
     // |edge| must be the first incoming edge
     void call_incoming_to_target(edge_index edge, TAlphabet w,
-                                 const std::function<void(edge_index)> &callback) const;
+                                 const Call<edge_index> &callback) const;
 
     /**
      * Add a full sequence to the graph.
@@ -322,15 +321,14 @@ class BOSS {
     const wavelet_tree& get_W() const { return *W_; }
 
     /**
-     * Uses the object's array W, a given position i in W and a character c
-     * from the alphabet and returns the number of occurences of c in W up to
-     * position i.
+     * For the given position i in W and a character c from the alphabet,
+     * return the number of occurences of c in W up to (including) position i.
      */
     uint64_t rank_W(uint64_t i, TAlphabet c) const;
 
     /**
-     * Uses the array W and gets a count i and a character c from
-     * the alphabet and returns the positions of the i-th occurence of c in W.
+     * For a character |c| from the alphabet and a count |i|,
+     * return the position of the i-th occurence of |c| in W.
      */
     uint64_t select_W(uint64_t i, TAlphabet c) const;
 
@@ -349,7 +347,8 @@ class BOSS {
      * For characters |first| and |second|, return the first occurrence
      * of them in W[i..N], i.e. min(succ_W(i, first), succ_W(i, second)).
      */
-    std::pair<uint64_t, TAlphabet> succ_W(uint64_t i, TAlphabet first, TAlphabet second) const;
+    std::pair<uint64_t, TAlphabet>
+    succ_W(uint64_t i, TAlphabet first, TAlphabet second) const;
 
     /**
      * Return value of F vector at index k.
@@ -387,8 +386,7 @@ class BOSS {
     template <typename RandomAccessIt>
     std::tuple<edge_index, edge_index, RandomAccessIt>
     index_range(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
-                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
+        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
                       "Only encoded sequences can be queried");
 
         assert(end >= begin);
@@ -532,8 +530,7 @@ class BOSS {
      */
     template <typename RandomAccessIt>
     uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
-                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
+        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
                       "Only encoded sequences can be queried");
         assert(begin + k_ == end);
 
