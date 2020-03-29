@@ -1,9 +1,12 @@
 #ifndef __DBG_ALIGNER_METHODS_HPP__
 #define __DBG_ALIGNER_METHODS_HPP__
 
+#include <queue>
+
 #include "aligner_helper.hpp"
 #include "common/bounded_priority_queue.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/vectors/aligned_vector.hpp"
 #include "common/vectors/bitmap.hpp"
 
 
@@ -185,7 +188,9 @@ class DefaultColumnExtender : public Extender<NodeType> {
     typedef typename Extender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename Extender<NodeType>::node_index node_index;
     typedef typename Extender<NodeType>::score_t score_t;
-    typedef std::pair<NodeType, score_t> ColumnRef;
+    typedef std::tuple<NodeType,
+                       score_t,
+                       bool /* converged */> ColumnRef;
     typedef BoundedPriorityQueue<ColumnRef,
                                  std::vector<ColumnRef>,
                                  utils::LessSecond> ColumnQueue;
@@ -234,10 +239,10 @@ class DefaultColumnExtender : public Extender<NodeType> {
                      score_t min_path_score);
 
     void update_columns(NodeType incoming_node,
-                        const std::vector<std::pair<NodeType, char>> &out_columns,
+                        const std::deque<std::pair<NodeType, char>> &out_columns,
                         score_t min_path_score);
 
-    virtual std::vector<std::pair<NodeType, char>>
+    virtual std::deque<std::pair<NodeType, char>>
     fork_extension(NodeType /* fork after this node */,
                    std::function<void(DBGAlignment&&, NodeType)>,
                    score_t);
@@ -258,6 +263,9 @@ class DefaultColumnExtender : public Extender<NodeType> {
     // used for branch and bound checks
     std::vector<score_t> partial_sums_;
 
+    tsl::hopscotch_map<char, AlignedVector<score_t>> profile_score;
+    tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op;
+
     std::string_view query;
 
     const DBGAlignment *path_;
@@ -270,6 +278,7 @@ class DefaultColumnExtender : public Extender<NodeType> {
     size_t begin;
     size_t end;
     score_t xdrop_cutoff;
+    bool overlapping_range_;
 };
 
 

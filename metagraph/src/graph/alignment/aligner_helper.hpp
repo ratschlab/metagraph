@@ -123,12 +123,12 @@ class DBGAlignerConfig {
     DBGAlignerConfig() {}
 
     explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
-                              int8_t gap_opening = -3,
-                              int8_t gap_extension = -1);
+                              int8_t gap_opening = -5,
+                              int8_t gap_extension = -2);
 
     DBGAlignerConfig(ScoreMatrix&& score_matrix,
-                     int8_t gap_opening = -3,
-                     int8_t gap_extension = -1);
+                     int8_t gap_opening = -5,
+                     int8_t gap_extension = -2);
 
     score_t score_sequences(const std::string_view a, const std::string_view b) const {
         return std::inner_product(
@@ -236,12 +236,13 @@ class Alignment {
 
     // TODO: construct multiple alignments from the same starting point
     Alignment(const DPTable &dp_table,
+              const DBGAlignerConfig &config,
               const std::string_view query_view,
               typename DPTable::const_iterator column,
               size_t start_pos,
-              bool orientation,
               size_t offset,
-              NodeType *start_node);
+              NodeType *start_node,
+              const Alignment &seed);
 
     void append(Alignment&& other);
 
@@ -253,8 +254,6 @@ class Alignment {
 
     score_t get_score() const { return score_; }
     uint64_t get_num_matches() const { return cigar_.get_num_matches(); }
-
-    void recompute_score(const DBGAlignerConfig &config);
 
     const std::string_view get_query() const {
         return std::string_view(query_begin_, query_end_ - query_begin_);
@@ -468,6 +467,7 @@ class DPTable {
                size_t priority_pos = 0)
               : size_(size),
                 scores(size + 8, min_score),
+                gap_scores(size + 8, min_score),
                 ops(scores.size()),
                 prev_nodes(scores.size()),
                 last_char(start_char),
@@ -476,6 +476,7 @@ class DPTable {
 
         size_t size_;
         std::vector<score_t> scores;
+        std::vector<score_t> gap_scores;
         std::vector<Cigar::Operator> ops;
         std::vector<NodeType> prev_nodes;
         char last_char;
@@ -498,6 +499,7 @@ class DPTable {
 
     bool add_seed(NodeType start_node,
                   char start_char,
+                  score_t last_char_score,
                   score_t initial_score,
                   score_t min_score,
                   size_t size,
@@ -536,8 +538,8 @@ class DPTable {
                             const DBGAlignerConfig &config,
                             const std::string_view query_view,
                             std::function<void(Alignment<NodeType>&&, NodeType)> callback,
-                            bool orientation,
                             score_t min_path_score,
+                            const Alignment<NodeType> &seed,
                             NodeType *node = nullptr);
 
     std::pair<NodeType, score_t> best_score() const {

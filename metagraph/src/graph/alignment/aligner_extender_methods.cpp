@@ -23,6 +23,54 @@ void DefaultColumnExtender<NodeType>
     std::partial_sum(partial_sums_.rbegin(), partial_sums_.rend(), partial_sums_.rbegin());
     assert(config_.match_score(query) == partial_sums_.front());
     assert(config_.get_row(query.back())[query.back()] == partial_sums_.back());
+
+    profile_score.clear();
+    profile_op.clear();
+    for (char c : graph_->alphabet()) {
+        auto &profile_score_row = profile_score.emplace(c, query.size() + 8).first.value();
+        auto &profile_op_row = profile_op.emplace(c, query.size() + 8).first.value();
+
+        const auto &row = config_.get_row(c);
+        const auto &op_row = Cigar::get_op_row(c);
+
+#ifdef __AVX2__
+
+        __m256i *score_cast = (__m256i*)profile_score_row.data();
+        __m256i *op_cast = (__m256i*)profile_op_row.data();
+        for (size_t i = 0; i < query.size(); i += 8) {
+            __m256i str_p = expandepu8_epi32(*(uint64_t*)&query[i]);
+            _mm256_store_si256(score_cast++, _mm256_i32gather_epi32(row.data(), str_p, 4));
+            _mm256_store_si256(op_cast++, _mm256_i32gather_epi32((int*)op_row.data(), str_p, 4));
+        }
+
+#else
+
+        std::transform(query.begin(), query.end(), profile_score_row.begin(),
+                       [&row](char q) { return row[q]; });
+        std::transform(query.begin(), query.end(), profile_op_row.begin(),
+                       [&op_row](char q) { return op_row[q]; });
+
+#endif
+
+    }
+}
+
+std::pair<size_t, size_t> get_band(size_t size, size_t best_pos, size_t bandwidth) {
+    assert(best_pos < size);
+    auto begin = best_pos >= bandwidth ? best_pos - bandwidth : 0;
+
+    // align begin + 1 to 32-byte boundary
+    if (begin > 7)
+        begin = (begin & 0xFFFFFFFFFFFFFFF8) - 1;
+
+    auto end = bandwidth <= size - best_pos ? best_pos + bandwidth : size;
+    end = std::min(begin + ((end - begin + 7) / 8) * 8, size);
+
+    assert(begin <= best_pos);
+    assert(end > best_pos);
+    assert(begin < end);
+
+    return std::make_pair(begin, end);
 }
 
 template <typename NodeType>
@@ -37,6 +85,13 @@ std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<Node
                                     best_pos + 1 != size ? best_pos + 1 : best_pos,
                                     last_priority_pos
                                 ));
+    } else {
+        auto [node_begin, node_end] = get_band(size,
+                                               find->second.best_pos,
+                                               config_.bandwidth);
+
+        overlapping_range_ |= ((begin <= node_begin && end > node_begin)
+            || (begin < node_end && end >= node_end));
     }
 
     return std::make_pair(find, false);
@@ -45,8 +100,12 @@ std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<Node
 template <typename NodeType>
 bool DefaultColumnExtender<NodeType>
 ::add_seed(size_t clipping) {
-    return dp_table.add_seed(start_node, *(align_start - 1), path_->get_score(),
-                             config_.min_cell_score, size, 0,
+    assert(path_->get_cigar().back().first == Cigar::Operator::MATCH
+        || path_->get_cigar().back().first == Cigar::Operator::MISMATCH);
+
+    return dp_table.add_seed(start_node, *(align_start - 1),
+                             config_.get_row(*(align_start - 1))[path_->get_sequence().back()],
+                             path_->get_score(), config_.min_cell_score, size, 0,
                              config_.gap_opening_penalty, config_.gap_extension_penalty,
                              clipping);
 }
@@ -56,7 +115,7 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query().data());
     assert(path.get_query_end() > query.data());
-    assert(query.data() + query.size() >= path.get_query_end());
+    assert(query.data() + query.size() > path.get_query_end());
 
     align_start = path.get_query_end();
     size = query.data() + query.size() - align_start + 1;
@@ -73,13 +132,18 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
 template <typename NodeType>
 auto DefaultColumnExtender<NodeType>
 ::extendable(const ColumnRef &next_column) const -> typename ColumnQueue::Decision {
-    assert(dp_table.find(next_column.first) != dp_table.end());
+    const auto &[next_node, best_score_update, converged] = next_column;
 
-    const auto &column = dp_table.find(next_column.first)->second;
+    if (!converged)
+        return ColumnQueue::Decision::ADD;
+
+    assert(dp_table.find(next_node) != dp_table.end());
+
+    // TODO: does the procedure below provably ensure that non-converged columns
+    // are not dropped?
+    const auto &column = dp_table.find(next_node)->second;
 
     // Ignore if there is no way it can be extended to an optimal alignment.
-    // TODO: this cuts off too early (before the scores have converged)
-    //       so path scores have to be recomputed after alignment
     if (xdrop_cutoff - column.best_score() > config_.xdrop
             || std::equal(match_score_begin + begin,
                           match_score_begin + end,
@@ -91,23 +155,15 @@ auto DefaultColumnExtender<NodeType>
     if (columns_to_update.size() < config_.queue_size)
         return ColumnQueue::Decision::ADD;
 
-    return columns_to_update.compare(columns_to_update.bottom(), next_column)
-        ? ColumnQueue::Decision::REPLACE_BOTTOM
+    const auto &bottom = columns_to_update.bottom();
+
+    return columns_to_update.compare(bottom, next_column)
+        ? (std::get<2>(bottom)
+            || std::get<1>(bottom)
+                != dp_table.find(std::get<0>(bottom))->second.last_priority_value()
+            ? ColumnQueue::Decision::REPLACE_BOTTOM
+            : ColumnQueue::Decision::ADD)
         : ColumnQueue::Decision::IGNORE;
-}
-
-
-template <typename NodeType>
-std::vector<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
-::fork_extension(NodeType node,
-                 std::function<void(DBGAlignment&&, NodeType)>,
-                 score_t) {
-    std::vector<std::pair<DeBruijnGraph::node_index, char>> out_columns;
-    graph_->call_outgoing_kmers(node, [&](auto next_node, char c) {
-        out_columns.emplace_back(next_node, c);
-    });
-
-    return out_columns;
 }
 
 
@@ -117,166 +173,145 @@ std::vector<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
 
 #ifdef __AVX2__
 
-template <class ScoreRow, class OpRow>
-inline bool compute_updates_avx2(size_t length,
-                                 int64_t prev_node,
-                                 int64_t node,
-                                 int32_t gap_opening_penalty,
-                                 int32_t gap_extension_penalty,
-                                 int32_t *update_scores,
-                                 long long int *update_prevs,
-                                 int32_t *update_ops,
-                                 const int32_t *incoming_scores,
-                                 const int32_t *incoming_ops,
-                                 const ScoreRow &row,
-                                 const OpRow &op_row,
-                                 const char *align_start,
-                                 int32_t *updated_mask) {
-    // Note: the char_scores and match_ops arrays are missing the first cell
-    // (so the indices are shifted down one) to ensure byte alignment
-    bool updated = false;
+inline void compute_HE_avx2(size_t length,
+                            __m256i prev_node,
+                            __m256i gap_opening_penalty,
+                            __m256i gap_extension_penalty,
+                            int32_t *update_scores,
+                            int32_t *update_gap_scores,
+                            long long int *update_prevs,
+                            int32_t *update_ops,
+                            const int32_t *incoming_scores,
+                            const int32_t *incoming_gap_scores,
+                            const int32_t *incoming_ops,
+                            const int32_t *profile_scores,
+                            const int32_t *profile_ops,
+                            int32_t *updated_mask,
+                            __m256i min_cell_score) {
+    assert(update_scores != incoming_scores);
+    assert(update_gap_scores != incoming_gap_scores);
+    assert(update_ops != incoming_ops);
 
+    __m256i insert_p = _mm256_set1_epi32(Cigar::Operator::INSERTION);
     for (size_t i = 1; i < length; i += 8) {
-        // load characters of input string into 32-bit cells
-        __m256i str_packed = expandepu8_epi32(*(long long int*)&align_start[i - 1]);
+        __m256i H_orig = _mm256_loadu_si256((__m256i*)&update_scores[i]);
 
-        // load scores from incoming column
-        __m256i incoming_packed = _mm256_loadu_si256((__m256i*)&incoming_scores[i - 1]);
-
-        // TODO: use encoded sequences so the gather can be replaced with a shuffle
-        // compute match scores
-        __m256i match_scores_packed = _mm256_add_epi32(
-            _mm256_i32gather_epi32(row.data(), str_packed, 4), // gather match scores
-            incoming_packed
+        // check match
+        __m256i incoming_p = _mm256_loadu_si256((__m256i*)&incoming_scores[i - 1]);
+        __m256i match_score = _mm256_add_epi32(
+            incoming_p,
+            _mm256_loadu_si256((__m256i*)&profile_scores[i])
         );
 
-        // compute insertion scores
-        __m256i ins_packed = _mm256_set1_epi32(Cigar::Operator::INSERTION);
-        __m256i incoming_ops_packed = _mm256_loadu_si256((__m256i*)&incoming_ops[i]);
-        __m256i incoming_is_insert = _mm256_cmpeq_epi32(incoming_ops_packed, ins_packed);
-        __m256i incoming_is_delete = _mm256_cmpgt_epi32(incoming_ops_packed, ins_packed);
+        __m256i H = _mm256_max_epi32(H_orig, match_score);
 
-        __m256i incoming_shift = rshiftpushback_epi32(incoming_packed, incoming_scores[i + 7]);
-        __m256i insert_scores_packed = _mm256_add_epi32(
-            incoming_shift,
-            _mm256_blendv_epi8(_mm256_set1_epi32(gap_opening_penalty),
-                               _mm256_set1_epi32(gap_extension_penalty),
-                               incoming_is_insert)
-        );
+        // check insert
+        __m256i update_score = _mm256_max_epi32(min_cell_score, _mm256_max_epi32(
+            _mm256_add_epi32(rshiftpushback_epi32(incoming_p, incoming_scores[i + 7]),
+                             gap_opening_penalty),
+            _mm256_blendv_epi8(
+                min_cell_score,
+                _mm256_add_epi32(_mm256_loadu_si256((__m256i*)&incoming_gap_scores[i]),
+                                 gap_extension_penalty),
+                _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i*)&incoming_ops[i]),
+                                   insert_p)
+            )
+        ));
 
-        // disallow insertion after deletion
-        static_assert(Cigar::Operator::DELETION > Cigar::Operator::INSERTION);
-        insert_scores_packed = _mm256_blendv_epi8(
-            insert_scores_packed,
-            _mm256_set1_epi32(std::numeric_limits<int32_t>::min()),
-            incoming_is_delete
-        );
+        __m256i update_cmp = _mm256_cmpgt_epi32(update_score, H);
+        H = _mm256_max_epi32(H, update_score);
 
         // update scores
-        __m256i max_scores = _mm256_max_epi32(match_scores_packed, insert_scores_packed);
+        _mm256_storeu_si256((__m256i*)&update_scores[i], H);
+        _mm256_storeu_si256((__m256i*)&update_gap_scores[i], update_score);
 
-
-        // mark which indices are valid
-        __m256i idx = _mm256_cmpgt_epi32(
-            _mm256_set1_epi32(length),
-            _mm256_add_epi32(_mm256_set1_epi32(i),
-                             _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7))
+        __m256i both_cmp = _mm256_cmpgt_epi32(H, H_orig);
+        _mm256_maskstore_epi32(&update_ops[i], both_cmp,
+            _mm256_blendv_epi8(_mm256_loadu_si256((__m256i*)&profile_ops[i]),
+                               insert_p,
+                               update_cmp)
         );
-        // mark which indices should be updated
-        __m256i both_cmp = _mm256_and_si256(
-            _mm256_cmpgt_epi32(max_scores, _mm256_loadu_si256((__m256i*)&update_scores[i])),
-            idx
-        );
-        _mm256_maskstore_epi32(&update_scores[i], both_cmp, max_scores);
 
-        // set mask indicating which scores were updated
         _mm256_maskstore_epi32(&updated_mask[i], both_cmp, both_cmp);
-        updated |= static_cast<bool>(_mm256_movemask_epi8(both_cmp));
 
-        // TODO: use encoded sequences so the gather can be replaced with a shuffle
-        // update ops
-        // pick match operation if match score >= gap score
-        // pick delete operation if gap score > match score
-        _mm256_maskstore_epi32(
-            &update_ops[i],
-            both_cmp,
-            _mm256_blendv_epi8(_mm256_i32gather_epi32((int*)op_row.data(), str_packed, 4),
-                               ins_packed,
-                               _mm256_cmpgt_epi32(insert_scores_packed, match_scores_packed))
-        );
-
-        // update prev nodes
-        // TODO: this can be done with one AVX512 instruction
-        __m256i prev_packed = _mm256_set1_epi64x(prev_node);
-        __m128i *cmp_array = (__m128i*)&both_cmp;
-        _mm256_maskstore_epi64(&update_prevs[i],
-                               _mm256_cvtepi32_epi64(cmp_array[0]),
-                               prev_packed);
-        _mm256_maskstore_epi64(&update_prevs[i + 4],
-                               _mm256_cvtepi32_epi64(cmp_array[1]),
-                               prev_packed);
+        __m128i *cmp = (__m128i*)&both_cmp;
+        _mm256_maskstore_epi64(&update_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
+        _mm256_maskstore_epi64(&update_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
     }
-
-    for (size_t i = 1; i < length; ++i) {
-        // disallow DELETION after INSERTION
-        if (update_ops[i - 1] != Cigar::Operator::INSERTION) {
-            score_t gap_score = update_scores[i - 1]
-                + (update_ops[i - 1] == Cigar::Operator::DELETION
-                    ? gap_extension_penalty
-                    : gap_opening_penalty);
-
-            if (gap_score > update_scores[i]) {
-                while (i < length && gap_score > update_scores[i]) {
-                    updated_mask[i] = 0xFFFFFFFF;
-                    updated = true;
-                    update_ops[i] = Cigar::Operator::DELETION;
-                    update_prevs[i] = node;
-                    update_scores[i] = gap_score;
-                    ++i;
-                    gap_score += gap_extension_penalty;
-                }
-                --i;
-            }
-        }
-    }
-
-    return updated;
 }
 
 #endif
 
 template <typename NodeType,
-          typename score_t = typename Alignment<NodeType>::score_t,
-          class ScoreRow,
-          class OpRow>
-inline bool compute_updates(const DBGAlignerConfig &config,
+          typename score_t = typename Alignment<NodeType>::score_t>
+inline void update_del_scores(const DBGAlignerConfig &config,
+                              score_t *update_scores,
+                              NodeType *update_prevs,
+                              Cigar::Operator *update_ops,
+                              const NodeType &node,
+                              int32_t *updated_mask,
+                              size_t length) {
+    for (size_t i = 1; i < length; ++i) {
+        score_t del_score = std::max(config.min_cell_score,
+            update_scores[i - 1] + (update_ops[i - 1] == Cigar::Operator::DELETION
+                ? config.gap_extension_penalty
+                : config.gap_opening_penalty
+        ));
+
+        if (del_score > update_scores[i]) {
+            while (i < length && del_score > update_scores[i]) {
+                update_scores[i] = del_score;
+                update_ops[i] = Cigar::Operator::DELETION;
+                update_prevs[i] = node;
+
+                if (updated_mask)
+                    updated_mask[i] = 0xFFFFFFFF;
+
+                del_score += config.gap_extension_penalty;
+                ++i;
+            }
+            --i;
+        }
+    }
+}
+
+template <typename NodeType,
+          typename score_t = typename Alignment<NodeType>::score_t>
+inline void compute_updates(const DBGAlignerConfig &config,
                             score_t *update_scores,
+                            score_t *update_gap_scores,
                             NodeType *update_prevs,
                             Cigar::Operator *update_ops,
                             const NodeType &prev_node,
                             const NodeType &node,
                             const score_t *incoming_scores,
+                            const score_t *incoming_gap_scores,
                             const Cigar::Operator *incoming_ops,
-                            const ScoreRow &row,
-                            const OpRow &op_row,
-                            const char *align_start,
+                            const score_t *profile_scores,
+                            const Cigar::Operator *profile_ops,
                             AlignedVector<int32_t> &updated_mask,
                             size_t length) {
-    // Note: the char_scores and match_ops arrays are missing the first cell
-    // (so the indices are shifted down one) to ensure byte alignment
-    bool updated = false;
+    assert(length);
+    score_t min_cell_score = config.min_cell_score;
 
     // handle first element (i.e., no match update possible)
-    score_t gap_score = incoming_scores[0] + (incoming_ops[0] == Cigar::Operator::INSERTION
-        ? config.gap_extension_penalty : config.gap_opening_penalty);
+    score_t update_score = std::max(min_cell_score, std::max(
+        incoming_scores[0] + config.gap_opening_penalty,
+        incoming_ops[0] == Cigar::Operator::INSERTION
+            ? incoming_gap_scores[0] + config.gap_extension_penalty
+            : min_cell_score
+    ));
 
-    if (gap_score > update_scores[0]) {
-        updated_mask[0] = 0xFFFFFFFF;
-        updated = true;
+    if (update_score > update_scores[0]) {
+        update_scores[0] = update_score;
         update_ops[0] = Cigar::Operator::INSERTION;
         update_prevs[0] = prev_node;
-        update_scores[0] = gap_score;
+        updated_mask[0] = 0xFFFFFFFF;
     }
+
+    update_gap_scores[0] = update_score;
+
+    size_t i = 1;
 
 #ifdef __AVX2__
 
@@ -284,68 +319,74 @@ inline bool compute_updates(const DBGAlignerConfig &config,
     static_assert(sizeof(NodeType) == sizeof(long long int));
     static_assert(sizeof(Cigar::Operator) == sizeof(int32_t));
 
-    // update 8 scores at a time
-    updated |= compute_updates_avx2(length,
-                                    prev_node,
-                                    node,
-                                    config.gap_opening_penalty,
-                                    config.gap_extension_penalty,
-                                    update_scores,
-                                    reinterpret_cast<long long int*>(update_prevs),
-                                    reinterpret_cast<int32_t*>(update_ops),
-                                    incoming_scores,
-                                    reinterpret_cast<const int32_t*>(incoming_ops),
-                                    row,
-                                    op_row,
-                                    align_start,
-                                    updated_mask.data());
-
-#else
-
-    for (size_t i = 1; i < length; ++i) {
-        if (incoming_scores[i - 1] + row[align_start[i - 1]] > update_scores[i]) {
-            updated_mask[i] = 0xFFFFFFFF;
-            updated = true;
-            update_ops[i] = op_row[align_start[i - 1]];
-            update_prevs[i] = prev_node;
-            update_scores[i] = incoming_scores[i - 1] + row[align_start[i - 1]];
-        }
-
-        // disallow INSERTION after DELETION?
-        if (incoming_ops[i] != Cigar::Operator::DELETION) {
-            gap_score = incoming_scores[i] + (incoming_ops[i] == Cigar::Operator::INSERTION
-                ? config.gap_extension_penalty
-                : config.gap_opening_penalty);
-
-            if (gap_score > update_scores[i]) {
-                updated_mask[i] = 0xFFFFFFFF;
-                updated = true;
-                update_ops[i] = Cigar::Operator::INSERTION;
-                update_prevs[i] = prev_node;
-                update_scores[i] = gap_score;
-            }
-        }
-
-        // disallow DELETION after INSERTION
-        if (update_ops[i - 1] != Cigar::Operator::INSERTION) {
-            gap_score = update_scores[i - 1]
-                + (update_ops[i - 1] == Cigar::Operator::DELETION
-                    ? config_.gap_extension_penalty
-                    : config_.gap_opening_penalty);
-
-            if (gap_score > update_scores[i]) {
-                updated_mask[i] = 0xFFFFFFFF;
-                updated = true;
-                update_ops[i] = Cigar::Operator::DELETION;
-                update_prevs[i] = node;
-                update_scores[i] = gap_score;
-            }
-        }
+    if (prev_node != node) {
+        // update 8 scores at a time
+        compute_HE_avx2(length,
+                        _mm256_set1_epi64x(prev_node),
+                        _mm256_set1_epi32(config.gap_opening_penalty),
+                        _mm256_set1_epi32(config.gap_extension_penalty),
+                        update_scores,
+                        update_gap_scores,
+                        reinterpret_cast<long long int*>(update_prevs),
+                        reinterpret_cast<int32_t*>(update_ops),
+                        incoming_scores,
+                        incoming_gap_scores,
+                        reinterpret_cast<const int32_t*>(incoming_ops),
+                        reinterpret_cast<const int32_t*>(profile_scores),
+                        reinterpret_cast<const int32_t*>(profile_ops),
+                        updated_mask.data(),
+                        _mm256_set1_epi32(min_cell_score));
+        i = length;
     }
 
 #endif
 
-    return updated;
+    for (; i < length; ++i) {
+        // store score updates
+        score_t H = update_scores[i];
+        Cigar::Operator H_op;
+        NodeType H_prev = DeBruijnGraph::npos;
+
+        // check match
+        score_t match_score = incoming_scores[i - 1] + profile_scores[i];
+        if (match_score > H) {
+            H = match_score;
+            H_op = profile_ops[i];
+            H_prev = prev_node;
+        }
+
+        // check insert
+        score_t update_score = std::max(min_cell_score, std::max(
+            incoming_scores[i] + config.gap_opening_penalty,
+            incoming_ops[i] == Cigar::Operator::INSERTION
+                ? incoming_gap_scores[i] + config.gap_extension_penalty
+                : min_cell_score
+        ));
+
+        if (update_score > H) {
+            H = update_score;
+            H_op = Cigar::Operator::INSERTION;
+            H_prev = prev_node;
+        }
+
+        update_gap_scores[i] = update_score;
+
+        // update scores
+        if (H_prev != DeBruijnGraph::npos) {
+            update_scores[i] = H;
+            update_ops[i] = H_op;
+            update_prevs[i] = H_prev;
+            updated_mask[i] = 0xFFFFFFFF;
+        }
+    }
+
+    update_del_scores(config,
+                      update_scores,
+                      update_prevs,
+                      update_ops,
+                      node,
+                      updated_mask.data(),
+                      length);
 }
 
 
@@ -382,15 +423,35 @@ void DefaultColumnExtender<NodeType>
     start_score = dp_table.find(start_node)->second.best_score();
     score_cutoff = std::max(start_score, min_path_score);
     begin = 0;
-    end = partial_sums_.size();
+    end = size;
     xdrop_cutoff = start_score;
 
-    columns_to_update.emplace(start_node, start_score);
+    columns_to_update.emplace(start_node, start_score, false);
 
     if (columns_to_update.empty())
         return;
 
     extend_main(callback, min_path_score);
+}
+
+template <typename NodeType>
+std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
+::fork_extension(NodeType node,
+                 std::function<void(DBGAlignment&&, NodeType)>,
+                 score_t) {
+    overlapping_range_ = false;
+    std::deque<std::pair<DeBruijnGraph::node_index, char>> out_columns;
+    graph_->call_outgoing_kmers(node, [&](auto next_node, char c) {
+        if (c != '$') {
+            if (next_node == node) {
+                out_columns.emplace_front(next_node, c);
+            } else {
+                out_columns.emplace_back(next_node, c);
+            }
+        }
+    });
+
+    return out_columns;
 }
 
 template <typename NodeType>
@@ -400,20 +461,25 @@ void DefaultColumnExtender<NodeType>
     assert(start_score == dp_table.best_score().second);
 
     while (columns_to_update.size()) {
-        const auto next_pair = columns_to_update.top();
-        const auto &cur_col = dp_table.find(next_pair.first)->second;
+        const auto [node, best_score_update, converged] = columns_to_update.top();
+        const auto &cur_col = dp_table.find(node)->second;
 
         // if this happens, then it means that the column was in the priority
         // queue multiple times, so we don't need to consider it again
-        if (next_pair.second != cur_col.last_priority_value()) {
+        if (best_score_update != cur_col.last_priority_value()) {
             columns_to_update.pop();
             continue;
         }
 
-        auto out_columns = fork_extension(next_pair.first, callback, min_path_score);
+        auto out_columns = fork_extension(node, callback, min_path_score);
+
+        assert(std::all_of(out_columns.begin(), out_columns.end(), [&](const auto &pair) {
+            return graph_->traverse(node, pair.second) == pair.first;
+        }));
+
         columns_to_update.pop();
 
-        update_columns(next_pair.first, out_columns, min_path_score);
+        update_columns(node, out_columns, min_path_score);
     }
 
     assert(start_score > config_.min_cell_score);
@@ -435,31 +501,30 @@ void DefaultColumnExtender<NodeType>
                                 config_,
                                 std::string_view(align_start, size - 1),
                                 callback,
-                                get_seed().get_orientation(),
                                 min_path_score,
+                                get_seed(),
                                 &start_node);
 }
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::update_columns(NodeType incoming_node,
-                 const std::vector<std::pair<NodeType, char>> &out_columns,
+                 const std::deque<std::pair<NodeType, char>> &out_columns,
                  score_t min_path_score) {
     // set boundaries for vertical band
     auto *incoming = &dp_table.find(incoming_node).value();
-    size_t best_pos = incoming->best_pos;
-    assert(best_pos < size);
-    begin = best_pos >= config_.bandwidth ? best_pos - config_.bandwidth : 0;
 
-    // align begin + 1 to 32-byte boundary
-    if (begin > 7)
-        begin = (begin & 0xFFFFFFFFFFFFFFF8) - 1;
+    if (dp_table.size() == 1 && out_columns.size() && out_columns.front().first != incoming_node) {
+        update_del_scores(config_,
+                          incoming->scores.data(),
+                          incoming->prev_nodes.data(),
+                          incoming->ops.data(),
+                          incoming_node,
+                          nullptr,
+                          size);
+    }
 
-    end = config_.bandwidth <= size - best_pos ? best_pos + config_.bandwidth : size;
-
-    assert(begin <= best_pos);
-    assert(end > best_pos);
-    assert(begin < end);
+    std::tie(begin, end) = get_band(size, incoming->best_pos, config_.bandwidth);
 
     for (const auto &[next_node, c] : out_columns) {
         auto emplace = emplace_node(next_node, incoming_node, c, size);
@@ -471,21 +536,28 @@ void DefaultColumnExtender<NodeType>
         auto &next_column = emplace.first.value();
 
         // store the mask indicating which cells were updated
+        // this is padded to ensure that the vectorized code doesn't access
+        // out of bounds
         AlignedVector<int32_t> updated_mask(end - begin + 8, false);
 
-        bool updated = compute_updates(config_,
-                                       next_column.scores.data() + begin,
-                                       next_column.prev_nodes.data() + begin,
-                                       next_column.ops.data() + begin,
-                                       incoming_node,
-                                       next_node,
-                                       incoming->scores.data() + begin,
-                                       incoming->ops.data() + begin,
-                                       config_.get_row(next_column.last_char),
-                                       Cigar::get_op_row(next_column.last_char),
-                                       align_start + begin,
-                                       updated_mask,
-                                       end - begin);
+        assert(next_column.scores.size() == next_column.gap_scores.size());
+        assert(incoming->scores.size() == incoming->gap_scores.size());
+        compute_updates(
+            config_,
+            next_column.scores.data() + begin,
+            next_column.gap_scores.data() + begin,
+            next_column.prev_nodes.data() + begin,
+            next_column.ops.data() + begin,
+            incoming_node,
+            next_node,
+            incoming->scores.data() + begin,
+            incoming->gap_scores.data() + begin,
+            incoming->ops.data() + begin,
+            profile_score[next_column.last_char].data() + query.size() - size + begin,
+            profile_op[next_column.last_char].data() + query.size() - size + begin,
+            updated_mask,
+            end - begin
+        );
 
         // Find the maximum changed value
         const score_t *best_update = nullptr;
@@ -494,10 +566,8 @@ void DefaultColumnExtender<NodeType>
                 best_update = &next_column.scores[i];
         }
 
-        assert(updated == static_cast<bool>(best_update));
-
         // put column back in the priority queue if it's updated
-        if (updated) {
+        if (best_update) {
             assert(updated_mask[best_update - &next_column.scores[begin]]);
 
             next_column.last_priority_pos = best_update - next_column.scores.data();
@@ -507,9 +577,7 @@ void DefaultColumnExtender<NodeType>
 
                 assert(next_column.best_pos >= begin);
                 assert(next_column.best_pos < end);
-                assert(next_column.best_pos < next_column.size());
-                assert(next_column.best_score()
-                    == *std::max_element(next_column.scores.begin(), next_column.scores.end()));
+                assert(next_column.best_pos < size);
             }
 
             assert(*best_update == next_column.best_score()
@@ -526,7 +594,7 @@ void DefaultColumnExtender<NodeType>
                 score_cutoff = std::max(start_score, min_path_score);
             }
 
-            columns_to_update.emplace(next_node, *best_update);
+            columns_to_update.emplace(next_node, *best_update, !overlapping_range_);
         }
     }
 }
