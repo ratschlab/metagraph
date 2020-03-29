@@ -119,8 +119,8 @@ class BOSS {
                       const bitmap *subgraph_mask = NULL) const;
 
     // |edge| must be the first incoming edge
-    void call_incoming_to_target(edge_index edge,
-                                 std::function<void(edge_index)> callback) const;
+    void call_incoming_to_target(edge_index edge, TAlphabet w,
+                                 const std::function<void(edge_index)> &callback) const;
 
     /**
      * Add a full sequence to the graph.
@@ -255,16 +255,16 @@ class BOSS {
     bool is_single_outgoing(edge_index i) const;
 
     /**
-     * Given an edge index i (first incoming), this function returns
+     * Given an edge index i (first incoming) and label d, this function returns
      * the number of edges incoming to its target node.
      */
-    size_t num_incoming_to_target(edge_index i) const;
+    size_t num_incoming_to_target(edge_index i, TAlphabet d) const;
 
     /**
-     * Given an edge index i, this function returns true if that is
-     * the only edge incoming to its target node.
+     * Given an edge index i and label w, this function returns
+     * true if that is the only edge incoming to its target node.
      */
-    bool is_single_incoming(edge_index i) const;
+    bool is_single_incoming(edge_index i, TAlphabet w) const;
 
     /**
      * Given an edge index |i| and a character |c|, get the index of an adjacent
