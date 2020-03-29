@@ -223,7 +223,7 @@ class TestQuery(unittest.TestCase):
             )
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(len(res.stdout), 20178)
+            self.assertEqual(len(res.stdout), 19635)
 
             query_command = '{exe} query --fwd-and-reverse --align --count-labels -i {graph} -a {annotation} -p {num_theads} {input}'.format(
                 exe=METAGRAPH,
@@ -234,7 +234,7 @@ class TestQuery(unittest.TestCase):
             )
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(len(res.stdout), 20248)
+            self.assertEqual(len(res.stdout), 19711)
 
     @parameterized.expand(['succinct'])
     def test_query_graphs_bloom(self, graph_repr):
@@ -533,7 +533,7 @@ class TestQuery(unittest.TestCase):
             )
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(len(res.stdout), 20178)
+            self.assertEqual(len(res.stdout), 19635)
 
             query_command = '{exe} query --fast --fwd-and-reverse --align --count-labels -i {graph} -a {annotation} -p {num_theads} {input}'.format(
                 exe=METAGRAPH,
@@ -544,7 +544,7 @@ class TestQuery(unittest.TestCase):
             )
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(len(res.stdout), 20248)
+            self.assertEqual(len(res.stdout), 19711)
 
     @parameterized.expand(GRAPH_TYPES)
     def test_query_all_graphs_tiny_batch(self, graph_repr):
