@@ -34,7 +34,7 @@ class TestBuild(unittest.TestCase):
 
     def __get_stats(self, graph_filename):
         stats_command = METAGRAPH + ' stats ' + graph_filename
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         return res
 
     @parameterized.expand(BUILDS)
