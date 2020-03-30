@@ -20,8 +20,6 @@
 #include "boss_construct.hpp"
 
 using utils::remove_suffix;
-using TAlphabet = BOSS::TAlphabet;
-
 
 #define CHECK_INDEX(idx) \
     assert(idx < W_->size()); \
@@ -32,6 +30,7 @@ using TAlphabet = BOSS::TAlphabet;
 
 typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
+typedef BOSS::TAlphabet TAlphabet;
 
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
@@ -106,7 +105,7 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
         return all_equal;
 
     // compare last
-    for (uint64_t i = 0; i < W_->size(); ++i) {
+    for (edge_index i = 0; i < W_->size(); ++i) {
         if (get_last(i) != other.get_last(i)) {
             if (verbose)
                 std::cout << "last differs at position " << i
@@ -118,7 +117,7 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     }
 
     // compare W
-    for (uint64_t i = 0; i < W_->size(); ++i) {
+    for (edge_index i = 0; i < W_->size(); ++i) {
         if (get_W(i) != other.get_W(i)) {
             if (verbose)
                 std::cout << "W differs at position " << i
@@ -130,12 +129,12 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     }
 
     // compare F
-    for (uint64_t i = 0; i < F_.size(); ++i) {
-        if (get_F(i) != other.get_F(i)) {
+    for (size_t c = 0; c < F_.size(); ++c) {
+        if (get_F(c) != other.get_F(c)) {
             if (verbose)
-                std::cout << "F differs at position " << i
-                          << "\n1: F[" << i << "] = " << get_F(i)
-                          << "\n2: F[" << i << "] = " << other.get_F(i)
+                std::cout << "F differs at position " << c
+                          << "\n1: F[" << c << "] = " << get_F(c)
+                          << "\n2: F[" << c << "] = " << other.get_F(c)
                           << std::endl;
             return false;
         }
@@ -151,8 +150,8 @@ bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
  * the complexity is at least O(k x n).
  */
 bool BOSS::operator==(const BOSS &other) const {
-    uint64_t i = 1;
-    uint64_t j = 1;
+    edge_index i = 1;
+    edge_index j = 1;
 
     while (i < W_->size() && j < other.W_->size()) {
 
@@ -233,7 +232,7 @@ bool BOSS::load(std::ifstream &instream) {
 
     try {
         // load F, k, and state
-        F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
+        F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<edge_index>(instream);
         k_ = load_number(instream);
         state = static_cast<State>(load_number(instream));
 
@@ -294,14 +293,14 @@ bool BOSS::load(std::ifstream &instream) {
  * For the given position i in W and a character c from the alphabet,
  * return the number of occurrences of c in W up to (including) position i.
  */
-uint64_t BOSS::rank_W(uint64_t i, TAlphabet c) const {
+uint64_t BOSS::rank_W(edge_index i, TAlphabet c) const {
     assert(i < W_->size());
 
     return i == 0 ? 0 : W_->rank(c, i) - (c == 0);
 }
 
 // get prev character without optimizations (via rank/select calls)
-inline uint64_t get_prev(const wavelet_tree &W, uint64_t i, TAlphabet c) {
+inline edge_index get_prev(const wavelet_tree &W, edge_index i, TAlphabet c) {
     assert(i);
 
     if (W[i] == c)
@@ -315,11 +314,11 @@ inline uint64_t get_prev(const wavelet_tree &W, uint64_t i, TAlphabet c) {
  * For characters |first| and |second|, return the last occurrence
  * of them in W[1..i], i.e. max(pred_W(i, first), pred_W(i, second)).
  */
-uint64_t BOSS::pred_W(uint64_t i, TAlphabet first, TAlphabet second) const {
+edge_index BOSS::pred_W(edge_index i, TAlphabet first, TAlphabet second) const {
     CHECK_INDEX(i);
 
     if (first == second) {
-        uint64_t prev = W_->prev(i, first);
+        edge_index prev = W_->prev(i, first);
         return prev < W_->size() ? prev : 0;
     }
 
@@ -337,7 +336,7 @@ uint64_t BOSS::pred_W(uint64_t i, TAlphabet first, TAlphabet second) const {
         max_iter = 0;
     }
 
-    uint64_t end = i > max_iter
+    edge_index end = i > max_iter
                     ? i - max_iter
                     : 0;
 
@@ -352,8 +351,8 @@ uint64_t BOSS::pred_W(uint64_t i, TAlphabet first, TAlphabet second) const {
     if (!i)
         return 0;
 
-    uint64_t select_first = get_prev(*W_, i, first);
-    uint64_t select_second = get_prev(*W_, i, second);
+    edge_index select_first = get_prev(*W_, i, first);
+    edge_index select_second = get_prev(*W_, i, second);
 
     if (select_second == select_first) {
         return 0;
@@ -367,14 +366,14 @@ uint64_t BOSS::pred_W(uint64_t i, TAlphabet first, TAlphabet second) const {
 /**
  * Return the position of the first occurrence of |c| in W[i..N].
  */
-uint64_t BOSS::succ_W(uint64_t i, TAlphabet c) const {
+edge_index BOSS::succ_W(edge_index i, TAlphabet c) const {
     CHECK_INDEX(i);
 
     return W_->next(i, c);
 }
 
 // get next character without optimizations (via rank/select calls)
-inline uint64_t get_next(const wavelet_tree &W, uint64_t i, TAlphabet c) {
+inline edge_index get_next(const wavelet_tree &W, edge_index i, TAlphabet c) {
     assert(i);
 
     uint64_t r = W.rank(c, i - 1) + 1;
@@ -389,8 +388,8 @@ inline uint64_t get_next(const wavelet_tree &W, uint64_t i, TAlphabet c) {
  * For characters |first| and |second|, return the first occurrence
  * of them in W[i..N], i.e. min(succ_W(i, first), succ_W(i, second)).
  */
-std::pair<uint64_t, TAlphabet>
-BOSS::succ_W(uint64_t i, TAlphabet first, TAlphabet second) const {
+std::pair<edge_index, TAlphabet>
+BOSS::succ_W(edge_index i, TAlphabet first, TAlphabet second) const {
     CHECK_INDEX(i);
 
     if (first == second) {
@@ -412,7 +411,7 @@ BOSS::succ_W(uint64_t i, TAlphabet first, TAlphabet second) const {
         max_iter = 0;
     }
 
-    uint64_t end = std::min(W_->size(), i + max_iter);
+    edge_index end = std::min(W_->size(), i + max_iter);
 
     while (i < end) {
         TAlphabet w = get_W(i);
@@ -426,8 +425,8 @@ BOSS::succ_W(uint64_t i, TAlphabet first, TAlphabet second) const {
     if (i == W_->size())
         return std::make_pair(W_->size(), 0);
 
-    uint64_t select_first = get_next(*W_, i, first);
-    uint64_t select_second = get_next(*W_, i, second);
+    edge_index select_first = get_next(*W_, i, first);
+    edge_index select_second = get_next(*W_, i, second);
 
     if (select_second == select_first) {
         return std::make_pair(W_->size(), 0);
@@ -439,20 +438,22 @@ BOSS::succ_W(uint64_t i, TAlphabet first, TAlphabet second) const {
 }
 
 /**
+ * Transforms a boss edge index to the index of its source node.
  * Uses the object's array last and a position and
  * returns the number of set bits up to that postion.
  */
-uint64_t BOSS::rank_last(uint64_t i) const {
+node_index BOSS::rank_last(edge_index i) const {
     assert(i < last_->size());
 
     return i == 0 ? 0 : last_->rank1(i);
 }
 
 /**
+ * Transforms a boss node index to the index of its last outgoing edge.
  * Uses the object's array last and a given position i and
  * returns the position of the i-th set bit in last[1..i].
  */
-uint64_t BOSS::select_last(uint64_t i) const {
+edge_index BOSS::select_last(node_index i) const {
     assert(i <= last_->num_set_bits());
 
     return i == 0 ? 0 : last_->select1(i);
@@ -462,13 +463,13 @@ uint64_t BOSS::select_last(uint64_t i) const {
  * This is a convenience function that returns for the object's array last
  * and a given position i the position of the last set bit in last[1..i].
  */
-uint64_t BOSS::pred_last(uint64_t i) const {
+edge_index BOSS::pred_last(edge_index i) const {
     if (!i)
         return 0;
 
     CHECK_INDEX(i);
 
-    uint64_t prev = last_->prev1(i);
+    edge_index prev = last_->prev1(i);
 
     return prev < last_->size() ? prev : 0;
 }
@@ -477,7 +478,7 @@ uint64_t BOSS::pred_last(uint64_t i) const {
  * This is a convenience function that returns for the object's array last
  * and a given position i the position of the first set bit in last[i..N].
  */
-uint64_t BOSS::succ_last(uint64_t i) const {
+edge_index BOSS::succ_last(edge_index i) const {
     CHECK_INDEX(i);
 
     return last_->next1(i);
@@ -487,7 +488,7 @@ uint64_t BOSS::succ_last(uint64_t i) const {
  * This function gets a position i that reflects the i-th node and returns the
  * position in W that corresponds to the i-th node's last character.
  */
-uint64_t BOSS::bwd(uint64_t i) const {
+edge_index BOSS::bwd(edge_index i) const {
     CHECK_INDEX(i);
 
     node_index target_node = rank_last(i - 1) + 1;
@@ -506,7 +507,7 @@ uint64_t BOSS::bwd(uint64_t i) const {
  * This functions gets a position i reflecting the r-th occurrence of the corresponding
  * character c in W and returns the position of the r-th occurrence of c in last.
  */
-uint64_t BOSS::fwd(uint64_t i, TAlphabet c) const {
+edge_index BOSS::fwd(edge_index i, TAlphabet c) const {
     CHECK_INDEX(i);
 
     // |c| must be the value in W at position i
@@ -597,7 +598,7 @@ edge_index BOSS::pick_incoming_edge(edge_index x, TAlphabet c) const {
 
     // TODO: could be improved. implement without succ_W.
     TAlphabet d = get_W(x);
-    uint64_t y = succ_W(x + 1, d);
+    edge_index y = succ_W(x + 1, d);
 
     // iterate over the rest of the incoming edges
     while (x + 1 < y) {
@@ -673,7 +674,7 @@ size_t BOSS::num_incoming_to_target(edge_index x, TAlphabet d) const {
         return 1;
 
     if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
-        uint64_t y = succ_W(x + 1, d);
+        edge_index y = succ_W(x + 1, d);
         return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
 
     } else {
@@ -696,9 +697,9 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
     // get first
     auto kmer_it = kmer.begin();
 
-    uint64_t last_ = *kmer_it + 1 < alph_size
-                     ? F_[*kmer_it + 1]
-                     : W_->size() - 1;
+    edge_index last_ = *kmer_it + 1 < alph_size
+                        ? F_[*kmer_it + 1]
+                        : W_->size() - 1;
     uint64_t shift = 0;
 
     // update range iteratively while scanning through s
@@ -714,7 +715,7 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
             continue;
         }
 
-        uint64_t last_target = pred_W(last_, s, s + alph_size);
+        edge_index last_target = pred_W(last_, s, s + alph_size);
         if (last_target > 0) {
             if (rank_last(last_target - 1) < rank_last(last_ - 1))
                 shift = 0;
@@ -981,8 +982,8 @@ void BOSS::print_internal_representation(std::ostream &os) const {
     }
     os << "\nL: " << *last_;
     os << "\nW:";
-    for (uint64_t i = 0; i < W_->size(); ++i) {
-        os << " " << static_cast<uint64_t>(get_W(i));
+    for (edge_index i = 0; i < W_->size(); ++i) {
+        os << " " << static_cast<int>(get_W(i));
     }
     os << std::endl;
 }
@@ -997,7 +998,7 @@ void BOSS::print(std::ostream &os) const {
                   << "\t" << vertex_header
                   << "\t" << "W" << std::endl;
 
-    for (uint64_t i = 1; i < W_->size(); i++) {
+    for (edge_index i = 1; i < W_->size(); i++) {
         TAlphabet w = get_W(i);
         assert(w != alph_size);
         os << i << "\t" << get_last(i)
@@ -1009,7 +1010,7 @@ void BOSS::print(std::ostream &os) const {
 }
 
 void BOSS::print_adj_list(std::ostream &os) const {
-    for (uint64_t edge = 1; edge < W_->size(); ++edge) {
+    for (edge_index edge = 1; edge < W_->size(); ++edge) {
         os << 1 + rank_last(fwd(edge, get_W(edge) % alph_size) - 1)
            << " ";
         if (get_last(edge))
@@ -1024,7 +1025,7 @@ void BOSS::print_adj_list(std::ostream &os) const {
 // add a full sequence to the graph
 void BOSS::add_sequence(std::string_view seq,
                         bool try_extend,
-                        std::vector<uint64_t> *edges_inserted) {
+                        std::vector<edge_index> *edges_inserted) {
     if (seq.size() < k_ + 1)
         return;
 
@@ -1050,7 +1051,7 @@ void BOSS::add_sequence(std::string_view seq,
 
         if (begin_segm + k_ < end_segm) {
 
-            uint64_t source;
+            edge_index source;
 
             if (!try_extend || !(source = index(begin_segm, begin_segm + k_))) {
                 // start insertion from the main dummy source node
@@ -1078,7 +1079,7 @@ void BOSS::add_sequence(std::string_view seq,
  */
 edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
                             const TAlphabet *source_node_kmer,
-                            std::vector<uint64_t> *edges_inserted) {
+                            std::vector<edge_index> *edges_inserted) {
     CHECK_INDEX(source_node);
     assert(source_node_kmer);
     assert(std::vector<TAlphabet>(source_node_kmer, source_node_kmer + k_)
@@ -1087,11 +1088,11 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     assert(get_state() == State::DYN);
 
     // get range of identical nodes (without W) pos current end position
-    uint64_t begin = pred_last(source_node - 1) + 1;
-    uint64_t end = succ_last(source_node) + 1;
+    edge_index begin = pred_last(source_node - 1) + 1;
+    edge_index end = succ_last(source_node) + 1;
 
     // get position of the first occurrence of c or c- in W after p
-    uint64_t prev_c_pos = pred_W(end - 1, c, c + alph_size);
+    edge_index prev_c_pos = pred_W(end - 1, c, c + alph_size);
     // if the edge already exists, traverse it and return the index
     if (prev_c_pos >= begin)
         return fwd(prev_c_pos, c);
@@ -1108,7 +1109,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     if (prev_c_pos > 0 && compare_node_suffix(prev_c_pos, source_node_kmer)) {
         // the new edge will not be the first incoming for its target node
         // insert the edge
-        uint64_t inserted = insert_edge(c + alph_size, begin, end);
+        edge_index inserted = insert_edge(c + alph_size, begin, end);
         if (edges_inserted && inserted)
             edges_inserted->push_back(inserted);
 
@@ -1120,9 +1121,9 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
 
     // The inserted node may share its k-1 suffix with one of the next nodes
     // Get the position of the first occurrence of c after p (including p + 1)
-    uint64_t first_c = end < W_->size()
-                       ? succ_W(end, c)
-                       : W_->size();
+    edge_index first_c = end < W_->size()
+                            ? succ_W(end, c)
+                            : W_->size();
 
     bool the_only_incoming = true;
     if (first_c < W_->size()
@@ -1134,7 +1135,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     }
 
     // insert the edge
-    uint64_t inserted = insert_edge(c, begin, end);
+    edge_index inserted = insert_edge(c, begin, end);
     if (edges_inserted && inserted)
         edges_inserted->push_back(inserted);
 
@@ -1142,7 +1143,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
         return fwd(first_c + (inserted > 0), c);
 
     // The inserted node forms a dead-end, thus a sentinel must be added
-    uint64_t sentinel_pos = select_last(NF_[c] + rank_W(begin - 1, c)) + 1;
+    edge_index sentinel_pos = select_last(NF_[c] + rank_W(begin - 1, c)) + 1;
 
     update_F(c, +1, true);
     dynamic_cast<wavelet_tree_dyn&>(*W_).insert(sentinel_pos, kSentinelCode);
@@ -1157,7 +1158,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
 }
 
 
-uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
+edge_index BOSS::insert_edge(TAlphabet c, edge_index begin, edge_index end) {
     assert(c != alph_size);
     assert(c < 2 * alph_size);
     assert(get_state() == State::DYN);
@@ -1171,7 +1172,7 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
         // the source node already has some outgoing edges
 
         // find the exact position of the new edge
-        uint64_t pos = begin;
+        edge_index pos = begin;
         while (pos < end && get_W(pos) % alph_size < c % alph_size) {
             pos++;
         }
@@ -1197,9 +1198,9 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
 
     for (edge_index edge : edges) {
         assert(edge >= shift);
-        uint64_t edge_id = edge - shift;
+        edge_index edge_id = edge - shift;
 
-        uint64_t d = get_W(edge_id);
+        TAlphabet d = get_W(edge_id);
         if (d < alph_size && edge_id + 1 < W_->size()) {
             //fix W array
             auto [next, d_next] = succ_W(edge_id + 1, d, d + alph_size);
@@ -1234,7 +1235,7 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
     // update last
     sdsl::bit_vector new_last(last_->size() - num_edges_to_remove, false);
 
-    for (uint64_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
+    for (edge_index i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
         if (!edges_to_remove_mask[i]) {
             new_last[new_i++] = get_last(i);
         } else {
@@ -1249,7 +1250,7 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
     sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, bits_per_char_W_);
     sdsl::bit_vector first_removed(alph_size, false);
 
-    for (uint64_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
+    for (edge_index i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
         TAlphabet c = get_W(i);
         if (edges_to_remove_mask[i]) {
             if (c < alph_size)
@@ -1270,7 +1271,7 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
     // update F
     TAlphabet c = 0;
     uint64_t count = 0;
-    for (uint64_t i = 1; i <= F_.back(); ++i) {
+    for (edge_index i = 1; i <= F_.back(); ++i) {
         while (i > F_[c] && c < alph_size) {
             F_[c++] = count;
         }
@@ -1410,7 +1411,7 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
         // assume the main dummy source node already traversed
         uint64_t num_dummy_traversed = 1;
         // start traversal in the main dummy source node
-        uint64_t root = 2;
+        edge_index root = 2;
         do {
             traverse_dummy_edges(graph, root, graph.get_k(),
                                  redundant_mask,
@@ -1434,7 +1435,7 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
     const size_t tree_split_depth = std::min(size_t(6), graph.get_k() / 2);
 
     // run traversal for subtree at depth |tree_split_depth| in parallel
-    uint64_t root = 2;
+    edge_index root = 2;
     size_t depth = 0;
     do {
         graph.edge_DFT(root,
@@ -1466,7 +1467,7 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
     }
 
     if (edges_threadsafe.get()) {
-        for (uint64_t i = 0; i < edges_threadsafe->size(); ++i) {
+        for (edge_index i = 0; i < edges_threadsafe->size(); ++i) {
             if ((*edges_threadsafe)[i] && traversed_mask)
                 (*traversed_mask)[i] = true;
             if ((*edges_threadsafe)[i] == 2 && redundant_mask)
@@ -1475,7 +1476,7 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
         edges_threadsafe.reset();
     }
 
-    // propogate the results from the subtrees
+    // propagate the results from the subtrees
     root = 2;
     do {
         traverse_dummy_edges(graph, root, tree_split_depth,
@@ -1553,7 +1554,7 @@ uint64_t BOSS::mark_sink_dummy_edges(sdsl::bit_vector *mask) const {
     uint64_t num_dummy_sink_edges = 0;
 
     // skip the main dummy source
-    for (uint64_t i = 2; i < W_->size(); ++i) {
+    for (edge_index i = 2; i < W_->size(); ++i) {
         assert(get_W(i) != alph_size);
         if (!get_W(i)) {
             (*mask)[i] = true;
@@ -1610,7 +1611,7 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
         return;
 
     // run traversal for subtree
-    uint64_t root = 2;
+    edge_index root = 2;
     size_t depth = 0;
     do {
         edge_DFT(root,
@@ -1638,7 +1639,7 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
 // If no outgoing edges are found, set |*i| to 0 and return false.
 // If multiple outgoing edges are found, set |*i| to the first and return false.
 bool masked_pick_single_outgoing(const BOSS &boss,
-                                 uint64_t *i,
+                                 edge_index *i,
                                  const bitmap *subgraph_mask) {
     assert(i && *i);
     assert(boss.get_last(*i));
@@ -1649,7 +1650,7 @@ bool masked_pick_single_outgoing(const BOSS &boss,
         return boss.is_single_outgoing(*i);
 
     bool edge_detected = false;
-    uint64_t j = *i;
+    edge_index j = *i;
     do {
         if ((*subgraph_mask)[j]) {
             // there are multiple outgoing edges
@@ -1675,7 +1676,7 @@ bool masked_pick_single_outgoing(const BOSS &boss,
 // If no incoming edges are found, set |*i| to 0 and return false.
 // If multiple incoming edges are found, set |*i| to the first and return false.
 bool masked_pick_single_incoming(const BOSS &boss,
-                                 uint64_t *i, TAlphabet d,
+                                 edge_index *i, TAlphabet d,
                                  const bitmap *subgraph_mask) {
     assert(i && *i);
     assert(boss.get_W(*i) < boss.alph_size && "must be the first incoming edge");
@@ -1741,33 +1742,33 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                       const bitmap *subgraph_mask) const {
     assert(!subgraph_mask || subgraph_mask->size() == W_->size());
 
-    // keep track of reached edges
+    // keep track of the edges that have been reached
     sdsl::bit_vector discovered(W_->size(), false);
     if (subgraph_mask) {
         subgraph_mask->add_to(&discovered);
         discovered.flip();
     }
     discovered[0] = true;
-    // keep track of edges that are already included in covering paths
+    // keep track of the edges that have already been fetched in paths
     sdsl::bit_vector visited = discovered;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse BOSS",
                              std::cerr, !utils::get_verbose());
 
-    // process source dummy edges first
+    // start traversal from the source dummy edges first
     //
     //  .____
     //
     if (!subgraph_mask) {
-        for (uint64_t i = succ_last(1); i >= 1; --i) {
+        for (edge_index i = succ_last(1); i >= 1; --i) {
             if (!visited[i])
                 ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                              &discovered, &visited, progress_bar, nullptr);
         }
 
     } else {
-        call_zeros(visited, [&](uint64_t i) {
+        call_zeros(visited, [&](edge_index i) {
             if (!get_last(i))
                 return;
 
@@ -1789,7 +1790,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //  ____.____
     //       \___
     //
-    call_zeros(visited, [&](uint64_t i) {
+    call_zeros(visited, [&](edge_index i) {
         if (!get_last(i))
             return;
 
@@ -1803,15 +1804,15 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         } while (--i > 0 && !get_last(i));
     });
 
-    // process all the cycles left that have not been traversed
-    call_zeros(visited, [&](uint64_t i) {
+    // process all the remaining cycles that have not been traversed
+    call_zeros(visited, [&](edge_index i) {
         ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
                      &discovered, &visited, progress_bar, subgraph_mask);
     });
 }
 
 struct Edge {
-    BOSS::edge_index id;
+    edge_index id;
     std::vector<TAlphabet> source_kmer;
 };
 
@@ -1832,12 +1833,12 @@ void call_paths(const BOSS &boss,
     // store all branch nodes on the way
     std::vector<TAlphabet> kmer;
     discovered[starting_kmer] = true;
-    std::deque<Edge> edges { { starting_kmer, boss.get_node_seq(starting_kmer) } };
+    std::vector<Edge> edges { { starting_kmer, boss.get_node_seq(starting_kmer) } };
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
-        std::vector<uint64_t> path;
-        uint64_t edge = edges.back().id;
+        std::vector<edge_index> path;
+        edge_index edge = edges.back().id;
         auto sequence = std::move(edges.back().source_kmer);
         edges.pop_back();
 
@@ -1984,7 +1985,7 @@ void call_paths(const BOSS &boss,
     }
 }
 
-void BOSS::call_sequences(Call<std::string&&, std::vector<uint64_t>&&> callback,
+void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                           bool kmers_in_single_form,
                           const bitmap *subgraph_mask) const {
 
@@ -2077,7 +2078,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
          *          2 ..._._./
          */
 
-        uint64_t last_fwd = 0;
+        edge_index last_fwd = 0;
 
         // if the last node has multiple outgoing edges,
         // it is clearly neither a sink tip nor a source tip.
@@ -2090,7 +2091,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
             return;
         }
 
-        uint64_t first_bwd = 0;
+        edge_index first_bwd = 0;
 
         // if the first node has multiple incoming edges,
         // it is clearly neither a source tip nor a sink tip.
@@ -2141,7 +2142,7 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
     std::queue<std::pair<edge_index, std::string>> branchnodes;
 
     // start from the second edge (skip dummy main source)
-    for (uint64_t i = 2; i < W_->size(); ++i) {
+    for (edge_index i = 2; i < W_->size(); ++i) {
         if (visited[i] || !get_last(i))
             continue;
 
@@ -2209,7 +2210,7 @@ bool BOSS::is_valid() const {
     assert(get_node_str(1) == std::string(k_, kSentinel) && "First kmer must be dummy");
     assert(get_W(1) == kSentinelCode && "First kmer must be dummy");
 
-    for (uint64_t i = 1; i < W_->size(); i++) {
+    for (edge_index i = 1; i < W_->size(); i++) {
         if (get_node_last_value(i) >= alph_size
                 || get_W(i) == alph_size
                 || get_W(i) >= 2 * alph_size)
