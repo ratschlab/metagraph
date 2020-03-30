@@ -21,9 +21,9 @@ inline const KMER& get_kmer(const KMER &kmer) {
     return kmer;
 }
 
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64,uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128,uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer256,uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer64>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer128>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer256>::value);
