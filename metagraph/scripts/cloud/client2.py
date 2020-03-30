@@ -174,7 +174,8 @@ def start_clean(sra_id, wait_time):
     logging.info(f'Starting clean with {input_file} {output_file}')
     clean_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
     clean_processes[sra_id] = (
-        subprocess.Popen(f'./clean.sh {sra_id} {input_file} {output_file} 2>&1 | grep -v "%," > {clean_file_name}', shell=True),
+        subprocess.Popen(f'./clean.sh {sra_id} {input_file} {output_file} 2>&1 | grep -v "%," > {clean_file_name}',
+                         shell=True),
         time.time(), wait_time)
     return True
 
@@ -275,7 +276,8 @@ def check_status():
                     with open(stats_file) as stats:
                         json_resp = json.loads(stats.read())
                     if 'Stats' in json_resp and '#Unique_counted_k-mers' in json_resp['Stats']:
-                        kmer_count = int(json_resp['Stats']['#Unique_counted_k-mers'])
+                        kmer_count_unique = int(json_resp['Stats']['#Unique_counted_k-mers'])
+                        kmer_count_total = int(json_resp['Stats']['#Total no. of k-mers'])
                     else:
                         logging.warning('KMC returned no stats, assuming failure')
                         success = False
@@ -286,8 +288,9 @@ def check_status():
                 success = False
             if success:
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
-                          'kmc_size_mb': kmc_size_mb, 'kmer_count': kmer_count}
-                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count)
+                          'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
+                          'kmer_count_total': kmer_count_total}
+                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count_unique)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
