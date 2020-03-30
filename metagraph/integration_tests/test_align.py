@@ -44,7 +44,7 @@ class TestAlign(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -56,7 +56,7 @@ class TestAlign(unittest.TestCase):
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')
         self.assertEqual(params_str[0], 'MT-10/1\tAACAGAGAATAGTTTAAATTAGAATCTTAGCTTTGGGTGCTAATGGTGGAGTTAAAGACTTTTTCTCTGATTTGTCCTTGGAAAAAGGTTTTCATCTCCGGTTTACAAGACTGGTGTATTAGTTTATACTACAAGGACAGGCCCATTTGA\t+\tCCAATGATATGAAAAACCATTTCATAACTTTGTCAAAGTTAAATTATAGGCTTTCGCTCTAAGATTAAAAATGCCCTAGCCCACTTCTTACCACAAGGCACACCTA\t54\t70\t39S1=1X4=1X1=2D1=1D1=1X3=1X2=2X4=1D1X1=1X1=1I6=3I1X2=2D3=2I1=1I3=1X4=1X1D3=1X1I1X1=1X3=1D2=1X1=1D2=3X2=2I2X1=1X2=2X3=1X6=1I3=2D2=1X1=5S\t10')
@@ -84,7 +84,7 @@ class TestAlign(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -96,7 +96,7 @@ class TestAlign(unittest.TestCase):
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')
         self.assertEqual(params_str[0], 'MT-10/1\tAACAGAGAATAGTTTAAATTAGAATCTTAGCTTTGGGTGCTAATGGTGGAGTTAAAGACTTTTTCTCTGATTTGTCCTTGGAAAAAGGTTTTCATCTCCGGTTTACAAGACTGGTGTATTAGTTTATACTACAAGGACAGGCCCATTTGA\t+\tTAGAATCTTAGTTACCGCTAACAATCAATACTCATCATTAATAATCATAATAGCTATCCTCTTCAACAATATACTCTCCGGACAATGAACCATAACCAATACTACCAATCAATACTAAACCCCATT\t46\t81\t19S11=2D2=1D3X5=5D1X1=1X1=1X1D2=1X3=2I1=2I2=2I1=1I1X2=1I1=1X2=2I1X1=1X4=1I1=2X2=1X2=2D1=1X1=1X1=1D7=3D4=3D2=4X1=1D2=4X6=1I3=3I2X2=2I1=2X6=3S\t0')
@@ -122,7 +122,7 @@ class TestAlign(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -134,7 +134,7 @@ class TestAlign(unittest.TestCase):
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')
 
@@ -155,7 +155,7 @@ class TestAlign(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -167,7 +167,7 @@ class TestAlign(unittest.TestCase):
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')
         self.assertEqual(params_str[0], 'MT-10/1\tTCAAATGGGCCTGTCCTTGTAGTATAAACTAATACACCAGTCTTGTAAACCGGAGATGAAAACCTTTTTCCAAGGACAAATCAGAGAAAAAGTCTTTAACTCCACCATTAGCACCCAAAGCTAAGATTCTAATTTAAACTATTCTCTGTT\t-\tTCAAATGGGCCTGTCCTTGTAGTATAAACTAATACACCAGTCTTGTAAACCGGAGATGAAAACCTTTTTCCAAGGACAAATCAGAGAAAAAGTCTTTAACTCCACCATTAGCACCCAAAGCTAAGATTCTAATTTAAACTATTCTCTGTT\t300\t150\t150=\t0')
@@ -193,7 +193,7 @@ class TestAlign(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -206,7 +206,7 @@ class TestAlign(unittest.TestCase):
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
             output=self.tempdir.name + '/genome.MT' + graph_file_extension[representation] + '.align.json',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = open(self.tempdir.name + '/genome.MT' + graph_file_extension[representation] + '.align.json', 'r').readlines()
         ref_align_str = open(TEST_DATA_DIR + '/genome_MT1.align.json', 'r').readlines()
@@ -230,7 +230,7 @@ class TestAlign(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -243,7 +243,7 @@ class TestAlign(unittest.TestCase):
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
             output=self.tempdir.name + '/genome.MT' + graph_file_extension[representation] + '.align.json',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = open(self.tempdir.name + '/genome.MT' + graph_file_extension[representation] + '.align.json', 'r').readlines()
         ref_align_str = open(TEST_DATA_DIR + '/genome_MT1.align.edit.json', 'r').readlines()
