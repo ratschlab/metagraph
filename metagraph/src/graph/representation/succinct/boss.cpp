@@ -296,16 +296,6 @@ uint64_t BOSS::rank_W(uint64_t i, TAlphabet c) const {
     return i == 0 ? 0 : W_->rank(c, i) - (c == 0);
 }
 
-/**
- * For a character |c| from the alphabet and a count |i|,
- * return the position of the i-th occurence of |c| in W.
- */
-uint64_t BOSS::select_W(uint64_t i, TAlphabet c) const {
-    assert(i + (c == 0) <= W_->rank(c, W_->size() - 1));
-
-    return i == 0 ? 0 : W_->select(c, i + (c == 0));
-}
-
 // get prev character without optimizations (via rank/select calls)
 inline uint64_t get_prev(const wavelet_tree &W, uint64_t i, TAlphabet c) {
     assert(i);
@@ -496,17 +486,18 @@ uint64_t BOSS::succ_last(uint64_t i) const {
 uint64_t BOSS::bwd(uint64_t i) const {
     CHECK_INDEX(i);
 
-    if (i == 1)
-        return 1;
-
     uint64_t node_rank = rank_last(i - 1) + 1;
+
+    if (node_rank == 1)
+        return 1;
 
     // get value of last position in node i
     TAlphabet c = get_node_last_value(i);
+    assert(c && "there must be no edges of type ***$* except for the main dummy");
     // get the offset for the last position in node i
     uint64_t offset = F_[c];
     // compute the offset for this position in W and select it
-    return select_W(node_rank - rank_last(offset), c);
+    return W_->select(c, node_rank - rank_last(offset));
 }
 
 /**
@@ -1114,8 +1105,8 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     // The new edge will be the first incoming for its target node,
     // and therefore the new edge will be marked by c (not c-)
 
-    // adding a new node can influence one of the following nodes sharing the k-1 suffix
-    // get position of the first occurence of c after p (including p + 1)
+    // The inserted node may share its k-1 suffix with one of the next nodes
+    // Get the position of the first occurence of c after p (including p + 1)
     uint64_t first_c = end < W_->size()
                        ? succ_W(end, c)
                        : W_->size();
@@ -1134,10 +1125,10 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     if (edges_inserted && inserted)
         edges_inserted->push_back(inserted);
 
-    // Add sentinel if the target node is the new dead-end
     if (!the_only_incoming)
         return fwd(first_c + (inserted > 0), c);
 
+    // The inserted node forms a dead-end, thus a sentinel must be added
     uint64_t sentinel_pos = select_last(rank_last(F_[c]) + rank_W(begin - 1, c)) + 1;
 
     update_F(c, +1);

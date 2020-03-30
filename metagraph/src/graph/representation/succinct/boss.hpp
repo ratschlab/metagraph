@@ -327,12 +327,6 @@ class BOSS {
     uint64_t rank_W(uint64_t i, TAlphabet c) const;
 
     /**
-     * For a character |c| from the alphabet and a count |i|,
-     * return the position of the i-th occurence of |c| in W.
-     */
-    uint64_t select_W(uint64_t i, TAlphabet c) const;
-
-    /**
      * For characters |first| and |second|, return the last occurrence
      * of them in W[1..i], i.e. max(pred_W(i, first), pred_W(i, second)).
      */
