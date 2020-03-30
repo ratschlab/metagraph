@@ -57,7 +57,6 @@ target_link_libraries(metagraph_common
     spdlog::spdlog
 )
 target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
-
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"

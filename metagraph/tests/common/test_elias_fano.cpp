@@ -31,7 +31,7 @@ TYPED_TEST(EliasFanoTest, WriteEmpty) {
     // 25 = 3*8 + 1; no data is written to the file except number of low/high bytes (8
     // bytes each), number of low bits (1 byte) and number of elements (8 bytes)
     EXPECT_EQ(0U, file_size);
-    EXPECT_EQ(0U, std::filesystem::file_size(out.name()));
+    EXPECT_EQ(0U, std::filesystem::file_size(out.name())+ std::filesystem::file_size(out.name()+".up"));
 }
 
 TYPED_TEST(EliasFanoTest, ReadEmpty) {
@@ -53,7 +53,7 @@ TYPED_TEST(EliasFanoTest, WriteOne) {
     // offset (sizeof(T)).
     // 1234 is encoded in 1 byte plus the additional header overhead
     EXPECT_EQ(25 + sizeof(TypeParam)+ 1U, file_size);
-    EXPECT_EQ(25 + sizeof(TypeParam)+ 1U, std::filesystem::file_size(out.name()));
+    EXPECT_EQ(25 + sizeof(TypeParam)+ 1U, std::filesystem::file_size(out.name())+ std::filesystem::file_size(out.name()+".up"));
 }
 
 TYPED_TEST(EliasFanoTest, ReadOne) {
@@ -77,7 +77,7 @@ TYPED_TEST(EliasFanoTest, WriteTwo) {
     size_t file_size = encoder.finish();
     // 1234  and 4321 are encoded in 4 bytes plus the additional 25 byte header overhead
     EXPECT_EQ(25 + sizeof(TypeParam) + 4U, file_size);
-    EXPECT_EQ(25 + sizeof(TypeParam)+ 4U, std::filesystem::file_size(out.name()));
+    EXPECT_EQ(25 + sizeof(TypeParam)+ 4U, std::filesystem::file_size(out.name())+ std::filesystem::file_size(out.name()+".up"));
 }
 
 TYPED_TEST(EliasFanoTest, ReadTwo) {
@@ -113,7 +113,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementOne) {
     size_t file_size = encode(values, file.name());
     // each value is represented in 2 bits, plus 25 bytes overhead for the header
     EXPECT_EQ(25 + sizeof(TypeParam) + (2 * 100) / 8U, file_size);
-    EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+    EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
     common::EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < 100; ++i) {
@@ -130,7 +130,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementTwo) {
     std::for_each(values.begin(), values.end(), [&i](TypeParam &v) { v = 2 * i++; });
     utils::TempFile file;
     size_t file_size = encode(values, file.name());
-    EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+    EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
     common::EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < 100; ++i) {
@@ -148,7 +148,7 @@ TYPED_TEST(EliasFanoTest, VariousSizes) {
         utils::TempFile file;
         size_t file_size = encode(values, file.name());
         // each value is represented in 2 bits, plus 25 bytes overhead for the header
-        EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+        EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
         common::EliasFanoDecoder<TypeParam> decoder(file.name());
         for (uint32_t i = 0; i < size; ++i) {
@@ -172,7 +172,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly64LowBits) {
     utils::TempFile file;
     size_t file_size = encode(values, file.name());
     // each value is represented in 2 bits, plus 25 bytes overhead for the header
-    EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+    EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
     common::EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < values.size(); ++i) {
@@ -193,7 +193,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly128LowBits) {
     utils::TempFile file;
     size_t file_size = encode(values, file.name());
     // each value is represented in 2 bits, plus 25 bytes overhead for the header
-    EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+    EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
     common::EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < values.size(); ++i) {
@@ -219,7 +219,7 @@ TYPED_TEST(EliasFanoTest, LastByteRead) {
     utils::TempFile file;
     size_t file_size = encode(values, file.name());
     // each value is represented in 2 bits, plus 25 bytes overhead for the header
-    EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+    EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
     common::EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < values.size(); ++i) {
@@ -245,7 +245,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteRandom) {
             utils::TempFile file;
             size_t file_size = encode(values, file.name());
             // each value is represented in 2 bits, plus 25 bytes overhead for the header
-            EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+            EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
             common::EliasFanoDecoder<TypeParam> decoder(file.name());
             for (uint32_t i = 0; i < size; ++i) {
@@ -345,7 +345,7 @@ TEST(EliasFanoTest128, ReadWriteRandom) {
             utils::TempFile file;
             size_t file_size = encode(values, file.name());
             // each value is represented in 2 bits, plus 25 bytes overhead for the header
-            EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+            EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
             common::EliasFanoDecoder<sdsl::uint128_t> decoder(file.name());
             for (uint32_t i = 0; i < size; ++i) {
@@ -376,7 +376,7 @@ TEST(EliasFanoTest128, ReadWriteRandomLarge) {
             utils::TempFile file;
             size_t file_size = encode(values, file.name());
             // each value is represented in 2 bits, plus 25 bytes overhead for the header
-            EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
+            EXPECT_EQ(file_size, std::filesystem::file_size(file.name())+std::filesystem::file_size(file.name()+".up"));
 
             common::EliasFanoDecoder<sdsl::uint128_t> decoder(file.name());
             for (uint32_t i = 0; i < size; ++i) {
