@@ -28,8 +28,8 @@ class EliasFanoEncoder {
 
     EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
     EliasFanoEncoder(EliasFanoEncoder &&other) = delete;
-    EliasFanoEncoder operator=(const EliasFanoEncoder& other) = delete;
-    EliasFanoEncoder operator=(EliasFanoEncoder&& other) = delete;
+    EliasFanoEncoder operator=(const EliasFanoEncoder &other) = delete;
+    EliasFanoEncoder operator=(EliasFanoEncoder &&other) = delete;
 
     /**
      * Constructs an Elias-Fano encoder of an array with the given #size and given
@@ -41,7 +41,7 @@ class EliasFanoEncoder {
                      const std::string &out_filename,
                      bool is_append = false);
 
-    EliasFanoEncoder(const Vector<T> &data, std::ofstream *sink);
+    EliasFanoEncoder(const Vector<T> &data, std::ofstream *sink, std::ofstream *sink_upper);
 
     /** Encodes the next number */
     void add(T value);
@@ -110,11 +110,25 @@ class EliasFanoEncoder {
     T last_value_ = T(0);
 #endif
 
-    /** Sink to write the encoded values to. Points to either #sink_internal or to an externally provided sink */
+    /**
+     * Sink to write the encoded values to. Points to either #sink_internal or to an
+     * externally provided sink
+     * */
     std::ofstream *sink_;
+    /**
+     * Sink to write the upper bytes to. Points to either #sink_internal_upper_ or to
+     * an externally provided sink
+     * */
+    std::ofstream *sink_upper_;
 
-        /** True if the class owns the sink_ pointer */
+    /** Internal sink for EF encoding except the upper bytes */
     std::ofstream sink_internal_;
+
+    /**
+     * Internal sink for the upper_ bytes, which are saved in a separate file to avoid
+     * costly seekg/tellg opreations.
+     */
+    std::ofstream sink_internal_upper_;
 
     /** Number of lower bits that were written to disk */
     size_t cur_pos_lbits_ = 0;
@@ -134,13 +148,9 @@ class EliasFanoDecoder {
     /** Creates a decoder that retrieves data from the given source */
     EliasFanoDecoder(const std::string &source_name);
 
-    EliasFanoDecoder(std::ifstream *source, std::streampos file_end);
-
-    /** Returns the upper part of the next compressed element */
-    T next_upper();
-
-    /** Returns the lower part of the next compressed element */
-    T next_lower();
+    EliasFanoDecoder(std::ifstream *source,
+                     std::ifstream *source_upper,
+                     std::streampos file_end_upper);
 
     /** Returns the next compressed element or empty if all elements were read */
     std::optional<T> next();
@@ -149,7 +159,13 @@ class EliasFanoDecoder {
     bool end_of_chunk();
 
   private:
-    void init();
+    bool init();
+
+    /** Returns the upper part of the next compressed element */
+    T next_upper();
+
+    /** Returns the lower part of the next compressed element */
+    T next_lower();
 
     /** Clear the high bits of #value starting at position #index. */
     static uint64_t clear_high_bits(uint64_t value, uint32_t index);
@@ -200,16 +216,19 @@ class EliasFanoDecoder {
      * a stream provided in the constructor
      */
     std::ifstream *source_;
+    /**
+     * Stream containing the upper bytes of the compressed data (saved separately to avoid
+     * costly tellg/seekg operations in the file.
+     */
+    std::ifstream *source_upper_;
 
     std::ifstream source_internal_;
+    std::ifstream source_internal_upper_;
 
     /* 1MB buffer for reading from #source_ */
     char buffer_[1024 * 1024];
 
     std::streampos file_end_;
-
-    /** True if we read all bytes from source_ */
-    bool all_read_ = false;
 
     /** Value to add to each decoded element */
     T offset_;
@@ -269,20 +288,25 @@ class EliasFanoEncoder<sdsl::uint128_t> {
                      sdsl::uint128_t, // max value
                      const std::string &sink_name,
                      bool is_append = false);
-    EliasFanoEncoder(const Vector<sdsl::uint128_t> &data, std::ofstream *sink);
+    EliasFanoEncoder(const Vector<sdsl::uint128_t> &data,            std::ofstream *sink, std::ofstream *sink_upper);
     EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
     EliasFanoEncoder(EliasFanoEncoder &&other) = delete;
-    EliasFanoEncoder operator=(const EliasFanoEncoder& other) = delete;
-    EliasFanoEncoder operator=(EliasFanoEncoder&& other) = delete;
+    EliasFanoEncoder operator=(const EliasFanoEncoder &other) = delete;
+    EliasFanoEncoder operator=(EliasFanoEncoder &&other) = delete;
 
     void add(const sdsl::uint128_t &value);
     size_t finish();
+
+  private:
+    void dump_chunk();
 
   private:
     Vector<uint64_t> buffer_;
     uint64_t last_hi_ = 0;
     std::ofstream *sink_;
     std::ofstream sink_internal_;
+  std::ofstream *sink_upper_;
+  std::ofstream sink_internal_upper_;
     size_t total_size_ = 0;
     size_t size_ = 0;
 };
@@ -300,7 +324,7 @@ class EliasFanoEncoder<sdsl::uint256_t> {
                      const std::string &sink_name,
                      bool is_append = false);
 
-    EliasFanoEncoder(const Vector<sdsl::uint256_t> &data, std::ofstream *sink);
+    EliasFanoEncoder(const Vector<sdsl::uint256_t> &data, std::ofstream *sink, std::ofstream *);
 
     void add(const sdsl::uint256_t &value);
     size_t finish();
@@ -319,14 +343,74 @@ class EliasFanoDecoder<sdsl::uint128_t> {
   public:
     EliasFanoDecoder(const std::string &source_name);
     std::optional<sdsl::uint128_t> next();
+    std::optional<uint64_t> next64();
+
+
+    /** Returns true if the current position is at the end of a chunk. */
+    bool end_of_chunk();
+
+  private:
+    bool init();
+
+    /** Clear the high bits of #value starting at position #index. */
+    static uint64_t clear_high_bits(uint64_t value, uint32_t index);
+    /** Returns the upper part of the next compressed element */
+    uint64_t next_upper();
+
+    /** Returns the lower part of the next compressed element */
+    uint64_t next_lower();
+
 
   private:
     std::ifstream source_;
+    std::ifstream source_upper_;
     uint64_t last_hi_ = 0;
-    EliasFanoDecoder<uint64_t> decoder64_;
     bool new_chunk_ = true;
-    /* 1MB buffer for reading from #source_ */
-    char buffer_[1024 * 1024];
+
+    /** Index of current element */
+    size_t position_ = 0;
+
+    /** Current position in the #upper_ vector */
+    size_t upper_pos_ = static_cast<size_t>(-sizeof(size_t));
+
+    /** The sequence of 8 upper bytes currently being processed */
+    uint64_t upper_block_;
+
+    /** Number of lower bits that were read from disk. */
+    size_t cur_pos_bits_;
+
+    /**
+     * The lower bits of the encoded number, obtained by simply concatenating the
+     * binary representation of the lower bits of each number. To save memory, only the
+     * currently needed window of 16 bytes is read from the file.
+     */
+    uint64_t lower_[2];
+
+    /**
+     * Upper bits of the encoded numbers. Upper bits are stored using unary delta
+     * encoding, with a 1 followed by as many zeros as the value to encode.
+     */
+    Vector<char> upper_;
+
+    /** Total number of elements encoded. */
+    size_t size_ = 0;
+
+    /**
+     * Each encoded integer is split into a "lower" and an "upper" part. This is the
+     * number of bits used for the "lower" part of the Elias-Fano encoding.
+     */
+    uint8_t num_lower_bits_;
+
+    /** The size in bytes of lower_ */
+    size_t num_lower_bytes_;
+
+    /** The size in bytes of upper_ */
+    size_t num_upper_bytes_ = 0;
+
+    std::streampos file_end_;
+
+    /** Value to add to each decoded element */
+    uint64_t offset_;
 };
 
 /**
@@ -388,6 +472,7 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
     Vector<T> buffer_;
     Vector<C> buffer_second_;
     std::ofstream sink_;
+  std::ofstream sink_upper_;
     std::ofstream sink_second_;
     std::string file_name_;
     size_t total_size_ = 0;
