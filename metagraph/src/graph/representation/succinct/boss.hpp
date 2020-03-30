@@ -349,7 +349,6 @@ class BOSS {
      * The index is over the alphabet!
      */
     uint64_t get_F(TAlphabet k) const { return F_.at(k); }
-    const std::vector<uint64_t>& get_F() const { return F_; }
 
     /**
      * This functions gets a position i reflecting the r-th occurrence of the corresponding
@@ -400,8 +399,8 @@ class BOSS {
         edge_index rl = F_.at(s) + 1 < W_->size()
                         ? succ_last(F_.at(s) + 1)
                         : W_->size(); // lower bound
-        edge_index ru = s < F_.size() - 1
-                        ? F_.at(s + 1)
+        edge_index ru = s + 1 < alph_size
+                        ? F_[s + 1]
                         : W_->size() - 1; // upper bound
         if (rl > ru)
             return std::make_tuple(edge_index(0), edge_index(0), begin);
@@ -422,11 +421,9 @@ class BOSS {
             if (rk_rl > rk_ru)
                 return std::make_tuple(rl, ru, it);
 
-            uint64_t offset = rank_last(F_[s]);
-
             // select the index of the position in last that is rank many positions after offset
-            ru = select_last(offset + rk_ru);
-            rl = select_last(offset + rk_rl);
+            ru = select_last(NF_[s] + rk_ru);
+            rl = select_last(NF_[s] + rk_rl);
         }
         assert(rl <= ru);
         return std::make_tuple(rl, ru, it);
@@ -456,18 +453,27 @@ class BOSS {
     size_t k_;
     // the bit array indicating the last outgoing edge of a node
     bit_vector *last_;
-    // the offset array to mark the offsets for the last column in the implicit node list
+    // offsets for the boss edges with a given penultimate character
+    // F_[c] points to the last boss edge with its penultimate character < c
     std::vector<uint64_t> F_;
+    // node offsets: NF_[c] = rank_last(F_[c]), a helper array
+    std::vector<uint64_t> NF_;
     // the array containing the edge labels
     wavelet_tree *W_;
 
     State state = State::DYN;
 
     /**
-     * This function gets a value of the alphabet c and updates the offset of
-     * all following values by adding |value|.
+     * This function gets a character c and updates the edge offsets F_
+     * by incrementing them with +1 (for edge insertion) or decrementing
+     * (for edge delition) and updates the node offsets NF_ accordingly.
      */
-    void update_F(TAlphabet c, int value);
+    void update_F(TAlphabet c, int delta, bool is_representative);
+
+    /**
+     * Recompute the node offsets NF_ from F_. Call after changes in F_.
+     */
+    void recompute_NF();
 
     /**
      * Given a character c and an edge index, this function

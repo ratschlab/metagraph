@@ -55,8 +55,8 @@ void test_graph(BOSS *graph, const std::string &last,
     ostr.clear();
     ostr.str("");
 
-    for (size_t i = 0; i < graph->get_F().size(); ++i) {
-        ostr << graph->get_F()[i] << " ";
+    for (size_t c = 0; c < graph->alph_size; ++c) {
+        ostr << graph->get_F(c) << " ";
     }
     EXPECT_EQ(F, ostr.str()) << "state: " << state
                              << ", old state: " << old_state;
