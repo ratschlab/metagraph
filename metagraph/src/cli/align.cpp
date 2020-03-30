@@ -169,9 +169,7 @@ void map_sequences_in_file(const std::string &file,
         }
 
         if (config.count_kmers) {
-            std::cout << "Kmers matched (discovered/total): "
-                      << num_discovered << "/"
-                      << num_kmers << "\n";
+            std::cout << num_discovered << "/" << num_kmers << "\n";
             return;
         }
 
