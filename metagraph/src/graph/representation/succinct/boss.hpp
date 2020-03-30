@@ -322,7 +322,7 @@ class BOSS {
 
     /**
      * For the given position i in W and a character c from the alphabet,
-     * return the number of occurences of c in W up to (including) position i.
+     * return the number of occurrences of c in W up to (including) position i.
      */
     uint64_t rank_W(uint64_t i, TAlphabet c) const;
 
@@ -352,8 +352,8 @@ class BOSS {
     const std::vector<uint64_t>& get_F() const { return F_; }
 
     /**
-     * This functions gets a position i reflecting the r-th occurence of the corresponding
-     * character c in W and returns the position of the r-th occurence of c in last.
+     * This functions gets a position i reflecting the r-th occurrence of the corresponding
+     * character c in W and returns the position of the r-th occurrence of c in last.
      */
     uint64_t fwd(uint64_t i, TAlphabet c) const;
 

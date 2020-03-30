@@ -288,7 +288,7 @@ bool BOSS::load(std::ifstream &instream) {
 
 /**
  * For the given position i in W and a character c from the alphabet,
- * return the number of occurences of c in W up to (including) position i.
+ * return the number of occurrences of c in W up to (including) position i.
  */
 uint64_t BOSS::rank_W(uint64_t i, TAlphabet c) const {
     assert(i < W_->size());
@@ -501,8 +501,8 @@ uint64_t BOSS::bwd(uint64_t i) const {
 }
 
 /**
- * This functions gets a position i reflecting the r-th occurence of the corresponding
- * character c in W and returns the position of the r-th occurence of c in last.
+ * This functions gets a position i reflecting the r-th occurrence of the corresponding
+ * character c in W and returns the position of the r-th occurrence of c in last.
  */
 uint64_t BOSS::fwd(uint64_t i, TAlphabet c) const {
     CHECK_INDEX(i);
@@ -1077,7 +1077,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     uint64_t begin = pred_last(source_node - 1) + 1;
     uint64_t end = succ_last(source_node) + 1;
 
-    // get position of the first occurence of c or c- in W after p
+    // get position of the first occurrence of c or c- in W after p
     uint64_t prev_c_pos = pred_W(end - 1, c, c + alph_size);
     // if the edge already exists, traverse it and return the index
     if (prev_c_pos >= begin)
@@ -1106,7 +1106,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     // and therefore the new edge will be marked by c (not c-)
 
     // The inserted node may share its k-1 suffix with one of the next nodes
-    // Get the position of the first occurence of c after p (including p + 1)
+    // Get the position of the first occurrence of c after p (including p + 1)
     uint64_t first_c = end < W_->size()
                        ? succ_W(end, c)
                        : W_->size();
