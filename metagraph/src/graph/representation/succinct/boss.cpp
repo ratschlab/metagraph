@@ -46,6 +46,7 @@ BOSS::BOSS(size_t k)
         k_(k),
         last_(new bit_vector_dyn()),
         F_(alph_size, 0),
+        NF_(alph_size, 0),
         W_(new wavelet_tree_dyn(bits_per_char_W_)) {
 
     assert(bits_per_char_W_ <= sizeof(TAlphabet) * 8
@@ -61,6 +62,7 @@ BOSS::BOSS(size_t k)
     dynamic_cast<wavelet_tree_dyn&>(*W_).insert(0, 0);
     for (size_t j = 1; j < alph_size; j++) {
         F_[j] = 1;
+        NF_[j] = 1;
     }
     assert(is_valid());
 }
@@ -270,6 +272,8 @@ bool BOSS::load(std::ifstream &instream) {
             std::cerr << "ERROR: failed to load L vector" << std::endl;
             return false;
         }
+
+        recompute_NF();
 
         return true;
     } catch (const std::bad_alloc &exception) {
@@ -486,18 +490,16 @@ uint64_t BOSS::succ_last(uint64_t i) const {
 uint64_t BOSS::bwd(uint64_t i) const {
     CHECK_INDEX(i);
 
-    uint64_t node_rank = rank_last(i - 1) + 1;
+    node_index target_node = rank_last(i - 1) + 1;
 
-    if (node_rank == 1)
+    if (target_node == 1)
         return 1;
 
     // get value of last position in node i
     TAlphabet c = get_node_last_value(i);
     assert(c && "there must be no edges of type ***$* except for the main dummy");
-    // get the offset for the last position in node i
-    uint64_t offset = F_[c];
-    // compute the offset for this position in W and select it
-    return W_->select(c, node_rank - rank_last(offset));
+    // get the offset among the representative edges ending with |c| and select
+    return W_->select(c, target_node - NF_[c]);
 }
 
 /**
@@ -510,12 +512,10 @@ uint64_t BOSS::fwd(uint64_t i, TAlphabet c) const {
     // |c| must be the value in W at position i
     assert(c == get_W(i) % alph_size);
     assert(i == 1 || c != kSentinelCode);
-    // get the offset for position c
-    uint64_t o = F_[c];
-    // get the rank of c in W at position i
-    uint64_t r = rank_W(i, c);
-    // select the index of the position in last that is rank many positions after offset
-    return select_last(rank_last(o) + r);
+    // get the index of the target node
+    node_index target_node = NF_[c] + rank_W(i, c);
+    // get the index of the representative edge with that target node
+    return select_last(target_node);
 }
 
 /**
@@ -697,7 +697,7 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
     auto kmer_it = kmer.begin();
 
     uint64_t last_ = *kmer_it + 1 < alph_size
-                     ? F_.at(*kmer_it + 1)
+                     ? F_[*kmer_it + 1]
                      : W_->size() - 1;
     uint64_t shift = 0;
 
@@ -885,15 +885,28 @@ uint64_t BOSS::num_edges() const {
 }
 
 /**
- * This function gets a value of the alphabet c and updates the offset of
- * all following values by +1 is positive is true and by -1 otherwise.
+ * This function gets a character c and updates the edge offsets F_
+ * by incrementing them with +1 (for edge insertion) or decrementing
+ * (for edge delition) and updates the node offsets NF_ accordingly.
  */
-void BOSS::update_F(TAlphabet c, int value) {
+void BOSS::update_F(TAlphabet c, int delta, bool is_representative) {
     assert(c < alph_size);
-    assert(std::abs(value) == 1);
+    assert(std::abs(delta) == 1);
 
     for (TAlphabet i = c + 1; i < alph_size; i++) {
-        F_[i] += value;
+        F_[i] += delta;
+        NF_[i] += delta * is_representative;
+    }
+}
+
+/**
+ * Recompute the node offsets NF_ from F_. Call after changes in F_.
+ */
+void BOSS::recompute_NF() {
+    // precompute the node offsets
+    NF_.resize(F_.size());
+    for (size_t c = 0; c < F_.size(); ++c) {
+        NF_[c] = rank_last(F_[c]);
     }
 }
 
@@ -1129,9 +1142,9 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
         return fwd(first_c + (inserted > 0), c);
 
     // The inserted node forms a dead-end, thus a sentinel must be added
-    uint64_t sentinel_pos = select_last(rank_last(F_[c]) + rank_W(begin - 1, c)) + 1;
+    uint64_t sentinel_pos = select_last(NF_[c] + rank_W(begin - 1, c)) + 1;
 
-    update_F(c, +1);
+    update_F(c, +1, true);
     dynamic_cast<wavelet_tree_dyn&>(*W_).insert(sentinel_pos, kSentinelCode);
     dynamic_cast<bit_vector_dyn&>(*last_).insert_bit(sentinel_pos, true);
 
@@ -1164,7 +1177,7 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
         }
 
         // insert the new edge
-        update_F(get_node_last_value(begin), +1);
+        update_F(get_node_last_value(begin), +1, false);
         dynamic_cast<bit_vector_dyn&>(*last_).insert_bit(begin, false);
         dynamic_cast<wavelet_tree_dyn&>(*W_).insert(pos, c);
 
@@ -1194,13 +1207,14 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
                 dynamic_cast<wavelet_tree_dyn&>(*W_).set(next, d);
         }
         dynamic_cast<wavelet_tree_dyn&>(*W_).remove(edge_id);
-        update_F(get_node_last_value(edge_id), -1);
         // If the current node has multiple outgoing edges,
         // remove one of the 0s from last instead of 1.
-        if (get_last(edge_id) && (edge >= shift + 1)
-                              && !get_last(edge_id - 1)) {
+        bool last = get_last(edge_id);
+        if (last && (edge >= shift + 1) && !get_last(edge_id - 1)) {
+            update_F(get_node_last_value(edge_id), -1, false);
             dynamic_cast<bit_vector_dyn&>(*last_).delete_bit(edge_id - 1);
         } else {
+            update_F(get_node_last_value(edge_id), -1, last);
             dynamic_cast<bit_vector_dyn&>(*last_).delete_bit(edge_id);
         }
         shift++;
@@ -1266,6 +1280,8 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
     while (c < alph_size) {
         F_[c++] = count;
     }
+
+    recompute_NF();
 
     state = State::STAT;
 

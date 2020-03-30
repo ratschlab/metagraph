@@ -410,6 +410,7 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     graph->last_ = new bit_vector_stat(std::move(last_bv));
 
     graph->F_ = F_;
+    graph->recompute_NF();
 
     graph->k_ = k_;
 
@@ -552,6 +553,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     last = decltype(last)();
 
     graph->F_ = std::move(F);
+    graph->recompute_NF();
 
     graph->state = BOSS::State::STAT;
 
