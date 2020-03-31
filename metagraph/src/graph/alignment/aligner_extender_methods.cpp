@@ -450,6 +450,11 @@ void DefaultColumnExtender<NodeType>
     size_t best_pos = incoming->best_pos;
     assert(best_pos < size);
     begin = best_pos >= config_.bandwidth ? best_pos - config_.bandwidth : 0;
+
+    // align begin + 1 to 32-byte boundary
+    if (begin > 7)
+        begin = (begin & 0xFFFFFFFFFFFFFFF8) - 1;
+
     end = config_.bandwidth <= size - best_pos ? best_pos + config_.bandwidth : size;
 
     assert(begin <= best_pos);
