@@ -68,34 +68,33 @@ template <class WaveletTree>
 WaveletTree wavelet_tree::convert_to() {
     if (dynamic_cast<WaveletTree*>(this)) {
         return WaveletTree(dynamic_cast<WaveletTree&&>(*this));
+
     } else if (dynamic_cast<wavelet_tree_small*>(this)
-                && typeid(WaveletTree) == typeid(wavelet_tree_stat)) {
+                && std::is_same_v<WaveletTree, wavelet_tree_stat>) {
         return WaveletTree(
             logsigma(),
             std::move(dynamic_cast<wavelet_tree_small*>(this)->wwt_)
         );
+
     } else if (dynamic_cast<wavelet_tree_stat*>(this)
-                && !dynamic_cast<wavelet_tree_stat*>(this)->requires_update_
-                && typeid(WaveletTree) == typeid(wavelet_tree_small)) {
+                && std::is_same_v<WaveletTree, wavelet_tree_small>) {
         return WaveletTree(
             logsigma(),
             std::move(dynamic_cast<wavelet_tree_stat*>(this)->wwt_)
         );
-    } else {
-        uint8_t bits_per_number = logsigma();
 
+    } else {
         sdsl::int_vector<> vector;
-        if (dynamic_cast<wavelet_tree_stat*>(this)) {
-            vector = std::move(dynamic_cast<wavelet_tree_stat*>(this)->int_vector_);
-            vector.resize(dynamic_cast<wavelet_tree_stat*>(this)->n_);
-        } else if (dynamic_cast<wavelet_tree_fast*>(this)) {
-            vector = std::move(dynamic_cast<wavelet_tree_fast*>(this)->int_vector_);
+        if (auto *wt_stat = dynamic_cast<wavelet_tree_stat*>(this)) {
+            vector = std::move(wt_stat->int_vector_);
+        } else if (auto *wt_fast = dynamic_cast<wavelet_tree_fast*>(this)) {
+            vector = std::move(wt_fast->int_vector_);
         } else {
             vector = to_vector();
         }
         clear();
 
-        return WaveletTree(bits_per_number, std::move(vector));
+        return WaveletTree(vector.width(), std::move(vector));
     }
 }
 
@@ -121,7 +120,7 @@ inline uint64_t next(const Vector &v,
     }
 
     uint64_t rk = v.rank(value, pos) + 1;
-    return rk <= v.rank(value, v.size() - 1)
+    return rk <= v.count(value)
             ? v.select(value, rk)
             : v.size();
 }
@@ -152,11 +151,21 @@ inline uint64_t prev(const Vector &v,
 
 wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma,
                                      uint64_t size, uint64_t value)
-      : int_vector_(size, value, logsigma), n_(size) {}
+      : int_vector_(size, value, logsigma),
+        wwt_(int_vector_),
+        count_(1 << logsigma, 0) {
+    count_[value] = size;
+}
 
 template <class Vector>
 wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma, const Vector &vector)
-      : int_vector_(pack_vector(vector, logsigma)), n_(int_vector_.size()) {}
+      : int_vector_(pack_vector(vector, logsigma)),
+        wwt_(int_vector_),
+        count_(1 << logsigma) {
+    for (uint64_t value = 0; value < count_.size(); ++value) {
+        count_[value] = rank(value, size());
+    }
+}
 
 template
 wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma,
@@ -178,14 +187,22 @@ wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma,
     } else {
         int_vector_ = pack_vector(vector, logsigma);
     }
-    n_ = int_vector_.size();
+    wwt_ = decltype(wwt_)(int_vector_),
+
+    count_.resize(1 << this->logsigma());
+    for (uint64_t value = 0; value < count_.size(); ++value) {
+        count_[value] = rank(value, size());
+    }
 }
 
 wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma, sdsl::wt_huff<>&& wwt)
       : int_vector_(pack_vector(wwt, logsigma)),
         wwt_(std::move(wwt)),
-        requires_update_(false),
-        n_(wwt_.size()) {}
+        count_(1 << logsigma) {
+    for (uint64_t value = 0; value < count_.size(); ++value) {
+        count_[value] = rank(value, size());
+    }
+}
 
 wavelet_tree_stat::wavelet_tree_stat(const wavelet_tree_stat &other) {
     *this = other;
@@ -197,21 +214,15 @@ wavelet_tree_stat::wavelet_tree_stat(wavelet_tree_stat&& other) noexcept {
 
 wavelet_tree_stat& wavelet_tree_stat::operator=(const wavelet_tree_stat &other) {
     int_vector_ = other.int_vector_;
-    n_ = other.n_;
-    if (!other.requires_update_) {
-        requires_update_ = false;
-        wwt_ = other.wwt_;
-    }
+    wwt_ = other.wwt_;
+    count_ = other.count_;
     return *this;
 }
 
 wavelet_tree_stat& wavelet_tree_stat::operator=(wavelet_tree_stat&& other) noexcept {
     int_vector_ = std::move(other.int_vector_);
-    n_ = other.n_;
-    if (!other.requires_update_) {
-        requires_update_ = false;
-        wwt_ = std::move(other.wwt_);
-    }
+    wwt_ = std::move(other.wwt_);
+    count_ = std::move(other.count_);
     return *this;
 }
 
@@ -222,10 +233,14 @@ bool wavelet_tree_stat::load(std::istream &in) {
     try {
         int_vector_.load(in);
         wwt_.load(in);
-        n_ = int_vector_.size();
-        // we assume the wwt_ has been build before serialization
-        requires_update_ = false;
+
+        count_.resize(1 << logsigma());
+        for (uint64_t value = 0; value < count_.size(); ++value) {
+            count_[value] = rank(value, size());
+        }
+
         return true;
+
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load wavelet_tree_stat." << std::endl;
         return false;
@@ -235,27 +250,19 @@ bool wavelet_tree_stat::load(std::istream &in) {
 }
 
 void wavelet_tree_stat::serialize(std::ostream &out) const {
-    if (requires_update_)
-        init_wt();
-
     int_vector_.serialize(out);
     wwt_.serialize(out);
 }
 
 uint64_t wavelet_tree_stat::rank(uint64_t c, uint64_t i) const {
-    if (requires_update_)
-        init_wt();
-
+    assert(c < (1llu << logsigma()));
     return wwt_.rank(std::min(i + 1, size()), c);
 }
 
 uint64_t wavelet_tree_stat::select(uint64_t c, uint64_t i) const {
     assert(i > 0 && size() > 0);
-
-    if (requires_update_)
-        init_wt();
-
     assert(i <= rank(c, size() - 1));
+    assert(c < (1llu << logsigma()));
     return wwt_.select(i, c);
 }
 
@@ -266,12 +273,14 @@ uint64_t wavelet_tree_stat::operator[](uint64_t id) const {
 
 uint64_t wavelet_tree_stat::next(uint64_t pos, uint64_t value) const {
     assert(pos < size());
+    assert(value < (1llu << logsigma()));
 
     return ::next(*this, pos, value, MAX_ITER_WAVELET_TREE_STAT);
 }
 
 uint64_t wavelet_tree_stat::prev(uint64_t pos, uint64_t value) const {
     assert(pos < size());
+    assert(value < (1llu << logsigma()));
 
     return ::prev(*this, pos, value, MAX_ITER_WAVELET_TREE_STAT);
 }
@@ -279,26 +288,6 @@ uint64_t wavelet_tree_stat::prev(uint64_t pos, uint64_t value) const {
 void wavelet_tree_stat::clear() {
     int_vector_ = decltype(int_vector_)(0, 0, int_vector_.width());
     wwt_ = decltype(wwt_)();
-    requires_update_ = false;
-    n_ = 0;
-}
-
-sdsl::int_vector<> wavelet_tree_stat::to_vector() const {
-    sdsl::int_vector<> vector = int_vector_;
-    vector.resize(n_);
-    return vector;
-}
-
-void wavelet_tree_stat::init_wt() const {
-    std::unique_lock<std::mutex> lock(mu_);
-
-    if (!requires_update_)
-        return;
-
-    int_vector_.resize(n_);
-    wwt_ = decltype(wwt_)(int_vector_);
-
-    requires_update_ = false;
 }
 
 
@@ -321,6 +310,7 @@ template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<int> &);
 template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint64_t> &);
 
 uint64_t wavelet_tree_dyn::rank(uint64_t c, uint64_t i) const {
+    assert(c < (1llu << logsigma()));
     return size() > 0
             ? dwt_.rank(std::min(i + 1, size()), c)
             : 0;
@@ -328,6 +318,7 @@ uint64_t wavelet_tree_dyn::rank(uint64_t c, uint64_t i) const {
 
 uint64_t wavelet_tree_dyn::select(uint64_t c, uint64_t i) const {
     assert(i > 0 && size() > 0 && i <= rank(c, size() - 1));
+    assert(c < (1llu << logsigma()));
     return dwt_.select(i - 1, c);
 }
 
@@ -338,12 +329,14 @@ uint64_t wavelet_tree_dyn::operator[](uint64_t id) const {
 
 uint64_t wavelet_tree_dyn::next(uint64_t pos, uint64_t value) const {
     assert(pos < size());
+    assert(value < (1llu << logsigma()));
 
     return ::next(*this, pos, value, MAX_ITER_WAVELET_TREE_DYN);
 }
 
 uint64_t wavelet_tree_dyn::prev(uint64_t pos, uint64_t value) const {
     assert(pos < size());
+    assert(value < (1llu << logsigma()));
 
     return ::prev(*this, pos, value, MAX_ITER_WAVELET_TREE_DYN);
 }
@@ -399,7 +392,11 @@ sdsl::int_vector<> wavelet_tree_dyn::to_vector() const {
 
 template <class Vector>
 wavelet_tree_small::wavelet_tree_small(uint8_t logsigma, const Vector &vector)
-      : wwt_(pack_vector(vector, logsigma)), logsigma_(logsigma) {}
+      : wwt_(pack_vector(vector, logsigma)), logsigma_(logsigma), count_(1 << logsigma) {
+    for (uint64_t value = 0; value < count_.size(); ++value) {
+        count_[value] = rank(value, size());
+    }
+}
 
 template
 wavelet_tree_small::wavelet_tree_small(uint8_t logsigma,
@@ -415,18 +412,28 @@ wavelet_tree_small::wavelet_tree_small(uint8_t logsigma,
                                        const std::vector<int> &vector);
 
 wavelet_tree_small::wavelet_tree_small(uint8_t logsigma, const sdsl::wt_huff<> &wwt)
-      : wwt_(wwt), logsigma_(logsigma) {}
+      : wwt_(wwt), logsigma_(logsigma), count_(1 << logsigma) {
+    for (uint64_t value = 0; value < count_.size(); ++value) {
+        count_[value] = rank(value, size());
+    }
+}
 
 wavelet_tree_small::wavelet_tree_small(uint8_t logsigma, sdsl::wt_huff<>&& wwt)
-      : wwt_(std::move(wwt)), logsigma_(logsigma) {}
+      : wwt_(std::move(wwt)), logsigma_(logsigma), count_(1 << logsigma) {
+    for (uint64_t value = 0; value < count_.size(); ++value) {
+        count_[value] = rank(value, size());
+    }
+}
 
 uint64_t wavelet_tree_small::rank(uint64_t c, uint64_t i) const {
+    assert(c < (1llu << logsigma()));
     return wwt_.rank(std::min(i + 1, size()), c);
 }
 
 uint64_t wavelet_tree_small::select(uint64_t c, uint64_t i) const {
     assert(i > 0 && size() > 0);
     assert(i <= rank(c, size() - 1));
+    assert(c < (1llu << logsigma()));
     return wwt_.select(i, c);
 }
 
@@ -437,12 +444,14 @@ uint64_t wavelet_tree_small::operator[](uint64_t id) const {
 
 uint64_t wavelet_tree_small::next(uint64_t pos, uint64_t value) const {
     assert(pos < size());
+    assert(value < (1llu << logsigma()));
 
     return ::next(*this, pos, value, MAX_ITER_WAVELET_TREE_SMALL);
 }
 
 uint64_t wavelet_tree_small::prev(uint64_t pos, uint64_t value) const {
     assert(pos < size());
+    assert(value < (1llu << logsigma()));
 
     return ::prev(*this, pos, value, MAX_ITER_WAVELET_TREE_SMALL);
 }
@@ -457,7 +466,14 @@ bool wavelet_tree_small::load(std::istream &in) {
 
     try {
         wwt_.load(in);
+
+        count_.resize(1 << logsigma());
+        for (uint64_t value = 0; value < count_.size(); ++value) {
+            count_[value] = rank(value, size());
+        }
+
         return true;
+
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load wavelet_tree_small" << std::endl;
         return false;
@@ -529,12 +545,14 @@ uint64_t wavelet_tree_fast::operator[](uint64_t id) const {
 
 uint64_t wavelet_tree_fast::next(uint64_t pos, uint64_t value) const {
     assert(pos < size());
+    assert(value < (1llu << logsigma()));
 
     return ::next(*this, pos, value, MAX_ITER_WAVELET_TREE_STAT);
 }
 
 uint64_t wavelet_tree_fast::prev(uint64_t pos, uint64_t value) const {
     assert(pos < size());
+    assert(value < (1llu << logsigma()));
 
     return ::prev(*this, pos, value, MAX_ITER_WAVELET_TREE_STAT);
 }
