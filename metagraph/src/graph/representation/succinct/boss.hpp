@@ -329,6 +329,12 @@ class BOSS {
     uint64_t rank_W(edge_index i, TAlphabet c) const;
 
     /**
+     * Return the position of the last occurrence of |c| in W[1..i] or zero
+     * if such does not exist.
+     */
+    edge_index pred_W(edge_index i, TAlphabet c) const;
+
+    /**
      * For characters |first| and |second|, return the last occurrence
      * of them in W[1..i], i.e. max(pred_W(i, first), pred_W(i, second)).
      */
