@@ -47,21 +47,18 @@ class wavelet_tree {
 };
 
 
-class wavelet_tree_stat : public wavelet_tree {
+template <class t_wt_sdsl = sdsl::wt_huff<>>
+class wavelet_tree_sdsl_fast : public wavelet_tree {
     friend wavelet_tree;
 
   public:
-    explicit wavelet_tree_stat(uint8_t logsigma,
-                               uint64_t size = 0, TAlphabet c = 0);
+    explicit wavelet_tree_sdsl_fast(uint8_t logsigma,
+                                    uint64_t size = 0, TAlphabet c = 0);
     template <class Vector>
-    wavelet_tree_stat(uint8_t logsigma, const Vector &vector);
-    wavelet_tree_stat(uint8_t logsigma, sdsl::int_vector<>&& vector);
-    wavelet_tree_stat(uint8_t logsigma, sdsl::wt_huff<>&& wwt);
-
-    wavelet_tree_stat(const wavelet_tree_stat &other);
-    wavelet_tree_stat(wavelet_tree_stat&& other) noexcept;
-    wavelet_tree_stat& operator=(const wavelet_tree_stat &other);
-    wavelet_tree_stat& operator=(wavelet_tree_stat&& other) noexcept;
+    wavelet_tree_sdsl_fast(uint8_t logsigma, const Vector &vector)
+      : wavelet_tree_sdsl_fast(logsigma, pack_vector(vector, logsigma)) {}
+    wavelet_tree_sdsl_fast(uint8_t logsigma, sdsl::int_vector<>&& vector);
+    wavelet_tree_sdsl_fast(uint8_t logsigma, t_wt_sdsl&& wwt);
 
     uint64_t rank(TAlphabet c, uint64_t i) const;
     uint64_t select(TAlphabet c, uint64_t i) const;
@@ -84,12 +81,12 @@ class wavelet_tree_stat : public wavelet_tree {
 
   private:
     sdsl::int_vector<> int_vector_;
-    sdsl::wt_huff<> wwt_;
+    t_wt_sdsl wwt_;
     std::vector<uint64_t> count_;
 };
 
 
-// FYI: this, in fact, isn't a wavelet tree
+// FYI: in fact, not a wavelet tree
 class wavelet_tree_fast : public wavelet_tree {
     friend wavelet_tree;
 
@@ -158,18 +155,20 @@ class wavelet_tree_dyn : public wavelet_tree {
 };
 
 
-class wavelet_tree_small : public wavelet_tree {
+template <class t_wt_sdsl = sdsl::wt_huff<>>
+class wavelet_tree_sdsl : public wavelet_tree {
     friend wavelet_tree;
 
   public:
-    explicit wavelet_tree_small(uint8_t logsigma)
-        : logsigma_(logsigma), count_(1 << logsigma, 0) {}
+    explicit wavelet_tree_sdsl(uint8_t logsigma)
+      : logsigma_(logsigma), count_(1 << logsigma, 0) {}
 
     template <class Vector>
-    wavelet_tree_small(uint8_t logsigma, const Vector &vector);
+    wavelet_tree_sdsl(uint8_t logsigma, const Vector &vector)
+      : wavelet_tree_sdsl(logsigma, t_wt_sdsl(pack_vector(vector, logsigma))) {}
 
-    wavelet_tree_small(uint8_t logsigma, const sdsl::wt_huff<> &wwt);
-    wavelet_tree_small(uint8_t logsigma, sdsl::wt_huff<>&& wwt);
+    wavelet_tree_sdsl(uint8_t logsigma, const t_wt_sdsl &wwt);
+    wavelet_tree_sdsl(uint8_t logsigma, t_wt_sdsl&& wwt);
 
     uint64_t rank(TAlphabet c, uint64_t i) const;
     uint64_t select(TAlphabet c, uint64_t i) const;
@@ -185,14 +184,17 @@ class wavelet_tree_small : public wavelet_tree {
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
-    void clear() { wwt_ = sdsl::wt_huff<>(); }
+    void clear() { wwt_ = t_wt_sdsl(); }
 
     sdsl::int_vector<> to_vector() const;
 
   private:
-    sdsl::wt_huff<> wwt_;
+    t_wt_sdsl wwt_;
     uint8_t logsigma_;
     std::vector<uint64_t> count_;
 };
+
+typedef wavelet_tree_sdsl_fast<> wavelet_tree_stat;
+typedef wavelet_tree_sdsl<> wavelet_tree_small;
 
 #endif // __WAVELET_TREE_HPP__
