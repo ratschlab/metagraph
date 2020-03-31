@@ -78,23 +78,38 @@ inline void store_unaligned(void *p, T value) {
     new (p) Unaligned<T>(value);
 }
 
+/** Returns the rank of the highest non-null bit */
 template <typename T>
-inline uint32_t count_leading_zeros(T x) {
+inline uint32_t log2_floor(T x) {
     return sdsl::bits::hi(x);
 }
 
 template <>
-inline uint32_t count_leading_zeros(sdsl::uint128_t x) {
-    if (x == 0) {
+inline uint32_t log2_floor(sdsl::uint128_t x) {
+    if (x == 0U) {
         return 0;
     }
 
     uint64_t hi = static_cast<uint64_t>(x >> 64);
-    if (hi == 0) {
+    if (hi == 0U) {
         uint64_t lo = static_cast<uint64_t>(x);
         return 63 - __builtin_clzll(lo);
     } else {
         return 127 - __builtin_clzll(hi);
+    }
+}
+
+template <>
+inline uint32_t log2_floor(sdsl::uint256_t x) {
+    if (x == 0U) {
+        return 0;
+    }
+
+    sdsl::uint128_t hi = static_cast<sdsl::uint128_t>(x >> 128);
+    if (hi == 0U) {
+        return log2_floor(static_cast<sdsl::uint128_t>(x));
+    } else {
+        return 128 + log2_floor(hi);
     }
 }
 
@@ -160,7 +175,7 @@ EliasFanoEncoder<T>::EliasFanoEncoder(const Vector<T> &data,
                                       std::ofstream *sink,
                                       std::ofstream *sink_upper)
         : declared_size_(data.size()), sink_(sink), sink_upper_(sink_upper) {
-    if (data.size() == 0) {
+    if (data.size() == 0U) {
         return;
     }
     offset_ = data.front();
@@ -209,7 +224,7 @@ void EliasFanoEncoder<T>::add(T value) {
 template <typename T>
 size_t EliasFanoEncoder<T>::finish() {
     assert(size_ == declared_size_);
-    if (size_ == 0) {
+    if (size_ == 0U) {
         if (sink_internal_.is_open()) {
             sink_internal_.close();
         }
@@ -231,11 +246,11 @@ size_t EliasFanoEncoder<T>::finish() {
 
 template <typename T>
 void EliasFanoEncoder<T>::init(size_t size, T max_value) {
-    if (size == 0) {
+    if (size == 0U) {
         return;
     }
     max_value -= offset_;
-    // #write_bits supports a max of sizeof(T)-8 bits
+    // #write_bits supports a max of sizeof(T)-1 bytes
     num_lower_bits_ = std::min(get_num_lower_bits(max_value, size),
                                static_cast<uint8_t>(8 * sizeof(T) - 8));
     lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
@@ -269,7 +284,7 @@ uint8_t EliasFanoEncoder<T>::get_num_lower_bits(T max_value, size_t size) {
     // "floor(a) - floor(b) - 1 <= floor(a - b) <= floor(a) - floor(b)".
     // Assuming "candidate = floor(log(upperBound)) - floor(log(upperBound))",
     // then result is either "candidate - 1" or "candidate".
-    size_t candidate = count_leading_zeros(max_value) - count_leading_zeros(size);
+    size_t candidate = log2_floor(max_value) - log2_floor(size);
 
     return (size > static_cast<uint64_t>(max_value >> candidate)) ? candidate - 1 : candidate;
 }
