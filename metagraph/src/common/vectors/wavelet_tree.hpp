@@ -13,24 +13,26 @@
 
 class wavelet_tree {
   public:
-    virtual ~wavelet_tree() {};
+    typedef uint64_t TAlphabet;
+
+    virtual ~wavelet_tree() {}
 
     virtual bool operator==(const wavelet_tree &other) const final;
     virtual bool operator!=(const wavelet_tree &other) const final { return !(*this == other); }
 
-    virtual uint64_t rank(uint64_t c, uint64_t i) const = 0;
-    virtual uint64_t select(uint64_t c, uint64_t i) const = 0;
-    virtual uint64_t operator[](uint64_t id) const = 0;
+    virtual uint64_t rank(TAlphabet c, uint64_t i) const = 0;
+    virtual uint64_t select(TAlphabet c, uint64_t i) const = 0;
+    virtual TAlphabet operator[](uint64_t i) const = 0;
 
-    // get the position of the next value |val| in subvector [id, ...]
-    virtual uint64_t next(uint64_t id, uint64_t val) const = 0;
-    // get the position of the previous value |val| in subvector [..., id]
+    // get the position of the next value |c| in subvector [i, ...]
+    virtual uint64_t next(uint64_t i, TAlphabet c) const = 0;
+    // get the position of the previous value |c| in subvector [..., i]
     // if doesn't exist, return size()
-    virtual uint64_t prev(uint64_t id, uint64_t val) const = 0;
+    virtual uint64_t prev(uint64_t i, TAlphabet c) const = 0;
 
     virtual uint64_t size() const = 0;
     virtual uint8_t logsigma() const = 0;
-    virtual uint64_t count(uint64_t val) const = 0;
+    virtual uint64_t count(TAlphabet c) const = 0;
 
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;
@@ -50,7 +52,7 @@ class wavelet_tree_stat : public wavelet_tree {
 
   public:
     explicit wavelet_tree_stat(uint8_t logsigma,
-                               uint64_t size = 0, uint64_t value = 0);
+                               uint64_t size = 0, TAlphabet c = 0);
     template <class Vector>
     wavelet_tree_stat(uint8_t logsigma, const Vector &vector);
     wavelet_tree_stat(uint8_t logsigma, sdsl::int_vector<>&& vector);
@@ -61,16 +63,16 @@ class wavelet_tree_stat : public wavelet_tree {
     wavelet_tree_stat& operator=(const wavelet_tree_stat &other);
     wavelet_tree_stat& operator=(wavelet_tree_stat&& other) noexcept;
 
-    uint64_t rank(uint64_t c, uint64_t i) const;
-    uint64_t select(uint64_t c, uint64_t i) const;
-    uint64_t operator[](uint64_t id) const;
+    uint64_t rank(TAlphabet c, uint64_t i) const;
+    uint64_t select(TAlphabet c, uint64_t i) const;
+    TAlphabet operator[](uint64_t i) const;
 
-    uint64_t next(uint64_t id, uint64_t val) const;
-    uint64_t prev(uint64_t id, uint64_t val) const;
+    uint64_t next(uint64_t i, TAlphabet c) const;
+    uint64_t prev(uint64_t i, TAlphabet c) const;
 
     uint64_t size() const { return int_vector_.size(); }
     uint8_t logsigma() const { return int_vector_.width(); }
-    uint64_t count(uint64_t val) const { return count_[val]; }
+    uint64_t count(TAlphabet c) const { return count_[c]; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -93,20 +95,20 @@ class wavelet_tree_fast : public wavelet_tree {
 
   public:
     explicit wavelet_tree_fast(uint8_t logsigma,
-                               uint64_t size = 0, uint64_t value = 0);
+                               uint64_t size = 0, TAlphabet c = 0);
     template <class Vector>
     wavelet_tree_fast(uint8_t logsigma, const Vector &vector);
 
-    uint64_t rank(uint64_t c, uint64_t i) const;
-    uint64_t select(uint64_t c, uint64_t i) const;
-    uint64_t operator[](uint64_t id) const;
+    uint64_t rank(TAlphabet c, uint64_t i) const;
+    uint64_t select(TAlphabet c, uint64_t i) const;
+    TAlphabet operator[](uint64_t i) const;
 
-    uint64_t next(uint64_t id, uint64_t val) const;
-    uint64_t prev(uint64_t id, uint64_t val) const;
+    uint64_t next(uint64_t i, TAlphabet c) const;
+    uint64_t prev(uint64_t i, TAlphabet c) const;
 
     uint64_t size() const { return int_vector_.size(); }
     uint8_t logsigma() const { return int_vector_.width(); }
-    uint64_t count(uint64_t val) const { return bitmaps_[val].num_set_bits(); }
+    uint64_t count(TAlphabet c) const { return bitmaps_[c].num_set_bits(); }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -129,20 +131,20 @@ class wavelet_tree_dyn : public wavelet_tree {
     template <class Vector>
     wavelet_tree_dyn(uint8_t logsigma, const Vector &vector);
 
-    uint64_t rank(uint64_t c, uint64_t i) const;
-    uint64_t select(uint64_t c, uint64_t i) const;
-    uint64_t operator[](uint64_t id) const;
+    uint64_t rank(TAlphabet c, uint64_t i) const;
+    uint64_t select(TAlphabet c, uint64_t i) const;
+    TAlphabet operator[](uint64_t i) const;
 
-    uint64_t next(uint64_t id, uint64_t val) const;
-    uint64_t prev(uint64_t id, uint64_t val) const;
+    uint64_t next(uint64_t i, TAlphabet c) const;
+    uint64_t prev(uint64_t i, TAlphabet c) const;
 
-    void set(uint64_t id, uint64_t val);
-    void insert(uint64_t id, uint64_t val);
-    void remove(uint64_t id);
+    void set(uint64_t i, TAlphabet c);
+    void insert(uint64_t i, TAlphabet c);
+    void remove(uint64_t i);
 
     uint64_t size() const { return dwt_.size(); }
     uint8_t logsigma() const;
-    uint64_t count(uint64_t val) const { return rank(val, size()); }
+    uint64_t count(TAlphabet c) const { return rank(c, size()); }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -169,16 +171,16 @@ class wavelet_tree_small : public wavelet_tree {
     wavelet_tree_small(uint8_t logsigma, const sdsl::wt_huff<> &wwt);
     wavelet_tree_small(uint8_t logsigma, sdsl::wt_huff<>&& wwt);
 
-    uint64_t rank(uint64_t c, uint64_t i) const;
-    uint64_t select(uint64_t c, uint64_t i) const;
-    uint64_t operator[](uint64_t id) const;
+    uint64_t rank(TAlphabet c, uint64_t i) const;
+    uint64_t select(TAlphabet c, uint64_t i) const;
+    TAlphabet operator[](uint64_t i) const;
 
-    uint64_t next(uint64_t id, uint64_t val) const;
-    uint64_t prev(uint64_t id, uint64_t val) const;
+    uint64_t next(uint64_t i, TAlphabet c) const;
+    uint64_t prev(uint64_t i, TAlphabet c) const;
 
     uint64_t size() const { return wwt_.size(); }
     uint8_t logsigma() const { return logsigma_; }
-    uint64_t count(uint64_t val) const { return count_[val]; }
+    uint64_t count(TAlphabet c) const { return count_[c]; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
