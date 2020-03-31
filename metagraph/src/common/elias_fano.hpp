@@ -15,7 +15,6 @@
 namespace mg {
 namespace common {
 
-
 /**
  * Elias-Fano encoder that streams the encoded result into a file.
  * Loosely inspired  by
@@ -57,18 +56,19 @@ class EliasFanoEncoder {
     static uint8_t get_num_lower_bits(T max_value, size_t size);
 
     /** Writes #value (with len up to 56 bits) to #data starting at the #pos-th bit. */
-    static void write_bits(uint8_t *data, size_t pos, uint64_t value);
+    static void write_bits(uint8_t *data, size_t pos, T value);
+
     void init(size_t size, T max_value);
 
   private:
     /**
      * The lower bits of the encoded number, obtained by simply concatenating the
      * binary representation of the lower bits of each number.
-     * To save memory, only the last 16 bytes are kept in memory. As soon as a chunk of 8
-     * bytes is ready to be written, we flush it to #sink_ and shift the data in
-     * #lower_ to the left by 8 bytes.
+     * To save memory, only the last 2*sizeof(T) bytes are kept in memory. As soon as a
+     * chunk of 8 bytes is ready to be written, we flush it to #sink_ and shift the data
+     * in #lower_ to the left by sizeof(T) bytes.
      */
-    uint64_t lower_[2] = { 0, 0 };
+    T lower_[2] = { 0, 0 };
 
     /**
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
@@ -168,17 +168,17 @@ class EliasFanoDecoder {
     T next_lower();
 
     /** Clear the high bits of #value starting at position #index. */
-    static uint64_t clear_high_bits(uint64_t value, uint32_t index);
+    static T clear_high_bits(T value, uint32_t index);
 
   private:
     /** Index of current element */
     size_t position_ = 0;
 
     /** Current position in the #upper_ vector */
-    size_t upper_pos_ = static_cast<size_t>(-sizeof(size_t));
+    uint64_t upper_pos_;
 
     /** The sequence of 8 upper bytes currently being processed */
-    uint64_t upper_block_;
+    T upper_block_;
 
     /** Number of lower bits that were read from disk. */
     size_t cur_pos_bits_;
@@ -188,7 +188,7 @@ class EliasFanoDecoder {
      * binary representation of the lower bits of each number. To save memory, only the
      * currently needed window of 16 bytes is read from the file.
      */
-    uint64_t lower_[2];
+    T lower_[2];
 
     /**
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
@@ -225,9 +225,6 @@ class EliasFanoDecoder {
     std::ifstream source_internal_;
     std::ifstream source_internal_upper_;
 
-    /* 1MB buffer for reading from #source_ */
-    char buffer_[1024 * 1024];
-
     std::streampos file_end_;
 
     /** Value to add to each decoded element */
@@ -260,7 +257,7 @@ class EliasFanoEncoder<std::pair<T, C>> {
     std::ofstream sink_second_;
 };
 
-/** Decoder specialiation for an std::pair */
+/** Decoder specialization for an std::pair */
 template <typename T, typename C>
 class EliasFanoDecoder<std::pair<T, C>> {
   public:
@@ -272,160 +269,7 @@ class EliasFanoDecoder<std::pair<T, C>> {
   private:
     EliasFanoDecoder<T> source_first_;
     std::ifstream source_second_;
-    /* 1MB buffer for reading from #source_second_ */
-    char buffer_[1024 * 1024];
 };
-
-/**
- * Template specialization for 128 bit integers that simply writes the integers to file uncompressed.
- */
-template <>
-class EliasFanoEncoder<sdsl::uint128_t> {
-  public:
-    EliasFanoEncoder() {}
-    EliasFanoEncoder(size_t,
-                     sdsl::uint128_t, // min value
-                     sdsl::uint128_t, // max value
-                     const std::string &sink_name,
-                     bool is_append = false);
-    EliasFanoEncoder(const Vector<sdsl::uint128_t> &data,            std::ofstream *sink, std::ofstream *sink_upper);
-    EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
-    EliasFanoEncoder(EliasFanoEncoder &&other) = delete;
-    EliasFanoEncoder operator=(const EliasFanoEncoder &other) = delete;
-    EliasFanoEncoder operator=(EliasFanoEncoder &&other) = delete;
-
-    void add(const sdsl::uint128_t &value);
-    size_t finish();
-
-  private:
-    void dump_chunk();
-
-  private:
-    Vector<uint64_t> buffer_;
-    uint64_t last_hi_ = 0;
-    std::ofstream *sink_;
-    std::ofstream sink_internal_;
-  std::ofstream *sink_upper_;
-  std::ofstream sink_internal_upper_;
-    size_t total_size_ = 0;
-    size_t size_ = 0;
-};
-
-/**
- * Template specialization for 256 bit integers that simply writes the integers to file uncompressed.
- */
-template <>
-class EliasFanoEncoder<sdsl::uint256_t> {
-  public:
-    EliasFanoEncoder() {}
-    EliasFanoEncoder(size_t,
-                     sdsl::uint256_t, // min value
-                     sdsl::uint256_t, // max value
-                     const std::string &sink_name,
-                     bool is_append = false);
-
-    EliasFanoEncoder(const Vector<sdsl::uint256_t> &data, std::ofstream *sink, std::ofstream *);
-
-    void add(const sdsl::uint256_t &value);
-    size_t finish();
-
-  private:
-    std::ofstream sink_;
-    size_t total_size_ = 0;
-    size_t size_ = 0;
-};
-
-/**
- * Template specialization for 128 bit integers that simply reads the integers from a file
- */
-template <>
-class EliasFanoDecoder<sdsl::uint128_t> {
-  public:
-    EliasFanoDecoder(const std::string &source_name);
-    std::optional<sdsl::uint128_t> next();
-    std::optional<uint64_t> next64();
-
-
-    /** Returns true if the current position is at the end of a chunk. */
-    bool end_of_chunk();
-
-  private:
-    bool init();
-
-    /** Clear the high bits of #value starting at position #index. */
-    static uint64_t clear_high_bits(uint64_t value, uint32_t index);
-    /** Returns the upper part of the next compressed element */
-    uint64_t next_upper();
-
-    /** Returns the lower part of the next compressed element */
-    uint64_t next_lower();
-
-
-  private:
-    std::ifstream source_;
-    std::ifstream source_upper_;
-    uint64_t last_hi_ = 0;
-    bool new_chunk_ = true;
-
-    /** Index of current element */
-    size_t position_ = 0;
-
-    /** Current position in the #upper_ vector */
-    size_t upper_pos_ = static_cast<size_t>(-sizeof(size_t));
-
-    /** The sequence of 8 upper bytes currently being processed */
-    uint64_t upper_block_;
-
-    /** Number of lower bits that were read from disk. */
-    size_t cur_pos_bits_;
-
-    /**
-     * The lower bits of the encoded number, obtained by simply concatenating the
-     * binary representation of the lower bits of each number. To save memory, only the
-     * currently needed window of 16 bytes is read from the file.
-     */
-    uint64_t lower_[2];
-
-    /**
-     * Upper bits of the encoded numbers. Upper bits are stored using unary delta
-     * encoding, with a 1 followed by as many zeros as the value to encode.
-     */
-    Vector<char> upper_;
-
-    /** Total number of elements encoded. */
-    size_t size_ = 0;
-
-    /**
-     * Each encoded integer is split into a "lower" and an "upper" part. This is the
-     * number of bits used for the "lower" part of the Elias-Fano encoding.
-     */
-    uint8_t num_lower_bits_;
-
-    /** The size in bytes of lower_ */
-    size_t num_lower_bytes_;
-
-    /** The size in bytes of upper_ */
-    size_t num_upper_bytes_ = 0;
-
-    std::streampos file_end_;
-
-    /** Value to add to each decoded element */
-    uint64_t offset_;
-};
-
-/**
- * Template specialization for 256 bit integers that simply reads the integers from a file
- */
-template <>
-class EliasFanoDecoder<sdsl::uint256_t> {
-  public:
-    EliasFanoDecoder(const std::string &source_name);
-    std::optional<sdsl::uint256_t> next();
-
-  private:
-    std::ifstream source_;
-};
-
 
 /**
  * Specialization of #EliasFanoEncoder that can encode sequences of unknown size. It uses
@@ -472,7 +316,7 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
     Vector<T> buffer_;
     Vector<C> buffer_second_;
     std::ofstream sink_;
-  std::ofstream sink_upper_;
+    std::ofstream sink_upper_;
     std::ofstream sink_second_;
     std::string file_name_;
     size_t total_size_ = 0;

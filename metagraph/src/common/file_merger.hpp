@@ -41,7 +41,7 @@ class MergeHeap {
         els.emplace(it, el, idx);
     }
 
-    const value_type& top() const { return els.back(); }
+    const value_type &top() const { return els.back(); }
 
     value_type pop() {
         value_type result = els.back();
@@ -94,8 +94,10 @@ uint64_t merge_files(
 
     if (merge_heap.empty()) {
         if (cleanup) {
-            std::for_each(sources.begin(), sources.end(),
-                          [](const std::string &s) { std::filesystem::remove(s); });
+            std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
+                std::filesystem::remove(s);
+                std::filesystem::remove(s + ".up");
+            });
         }
         return num_elements_read;
     }
@@ -112,16 +114,17 @@ uint64_t merge_files(
         }
 
         if (chunk_files[chunk_index]
-            && (data_item = decoders[chunk_index]->next())
-            .has_value()) {
+            && (data_item = decoders[chunk_index]->next()).has_value()) {
             merge_heap.emplace(to_T(data_item.value()), chunk_index);
             num_elements_read++;
         }
     }
 
     if (cleanup) {
-        std::for_each(sources.begin(), sources.end(),
-                      [](const std::string &s) { std::filesystem::remove(s); });
+        std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
+            std::filesystem::remove(s);
+            std::filesystem::remove(s + ".up");
+        });
     }
 
     return num_elements_read;
@@ -166,8 +169,11 @@ uint64_t merge_files(
 
     if (merge_heap.empty()) {
         if (cleanup) {
-            std::for_each(sources.begin(), sources.end(),
-                          [](const std::string &s) { std::filesystem::remove(s); });
+            std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
+                std::filesystem::remove(s);
+                std::filesystem::remove(s + ".count");
+                std::filesystem::remove(s + ".up");
+            });
         }
         return num_elements;
     }
@@ -202,6 +208,7 @@ uint64_t merge_files(
         std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
             std::filesystem::remove(s);
             std::filesystem::remove(s + ".count");
+            std::filesystem::remove(s + ".up");
         });
     }
 
