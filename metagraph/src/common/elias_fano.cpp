@@ -29,8 +29,9 @@ struct Unaligned<T, typename std::enable_if<std::is_pod<T>::value>::type> {
 template <>
 struct Unaligned<sdsl::uint256_t> {
     Unaligned() = default; // uninitialized
-    /* implicit */ Unaligned(sdsl::uint256_t v) : value(v) {}
-    sdsl::uint256_t value;
+    /* implicit */ Unaligned(sdsl::uint256_t v) : lo(v), hi(v >> 128) {}
+    sdsl::uint128_t lo;
+    sdsl::uint128_t hi;
 } __attribute__((__packed__));
 
 /**
@@ -41,6 +42,13 @@ inline T load_unaligned(const void *p) {
     static_assert(sizeof(Unaligned<T>) == sizeof(T), "Invalid unaligned size");
     static_assert(alignof(Unaligned<T>) == 1, "Invalid alignment");
     return static_cast<const Unaligned<T> *>(p)->value;
+}
+
+template <>
+inline sdsl::uint256_t load_unaligned(const void *p) {
+    static_assert(sizeof(Unaligned<sdsl::uint256_t>) == sizeof(sdsl::uint256_t), "Invalid unaligned size");
+    static_assert(alignof(Unaligned<sdsl::uint256_t>) == 1, "Invalid alignment");
+    return static_cast<const Unaligned<sdsl::uint256_t> *>(p)->lo;
 }
 
 /**
@@ -139,7 +147,7 @@ inline uint32_t count_trailing_zeros(sdsl::uint256_t v) {
     if (lo != 0) {
         return count_trailing_zeros(lo);
     } else {
-        sdsl::uint128_t hi = static_cast<sdsl::uint128_t >(v >> 128);
+        sdsl::uint128_t hi = static_cast<sdsl::uint128_t>(v >> 128);
         return 128 + count_trailing_zeros(hi);
     }
 }
@@ -157,7 +165,7 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       T max_value,
                                       const std::string &out_filename,
                                       bool is_append)
-        : declared_size_(size), offset_(min_value) {
+    : declared_size_(size), offset_(min_value) {
     std::ios_base::openmode open_flag = is_append ? std::ios::app : std::ios::out;
     sink_internal_ = std::ofstream(out_filename, std::ios::binary | open_flag);
     sink_ = &sink_internal_;
@@ -174,7 +182,7 @@ template <typename T>
 EliasFanoEncoder<T>::EliasFanoEncoder(const Vector<T> &data,
                                       std::ofstream *sink,
                                       std::ofstream *sink_upper)
-        : declared_size_(data.size()), sink_(sink), sink_upper_(sink_upper) {
+    : declared_size_(data.size()), sink_(sink), sink_upper_(sink_upper) {
     if (data.size() == 0U) {
         return;
     }
@@ -198,14 +206,14 @@ void EliasFanoEncoder<T>::add(T value) {
     // understand, so spend some time thinking about why this is correct
     const T pos = upper_bits + size_;
     // using ">> 3" for /8 and "&7" for %8 because sdsl::uint256_t doesn't define / and %
-    upper_[(uint64_t)(pos >> 3)] |= 1U << (uint64_t )(pos & 7);
+    upper_[(uint64_t)(pos >> 3)] |= 1U << (uint64_t)(pos & 7);
 
     // Append the #num_lower_bits_ bits of #value to #lower_
     if (num_lower_bits_ != 0) {
         const T lowerBits = value & lower_bits_mask_;
         size_t pos_bits = size_ * num_lower_bits_;
         if (pos_bits - cur_pos_lbits_
-                >= 8 * sizeof(T)) { // first sizeof(T)*8 bits are ready to be written
+            >= 8 * sizeof(T)) { // first sizeof(T)*8 bits are ready to be written
             cur_pos_lbits_ += 8 * sizeof(T);
             sink_->write(reinterpret_cast<char *>(lower_), sizeof(T));
             lower_[0] = lower_[1];
@@ -255,7 +263,8 @@ void EliasFanoEncoder<T>::init(size_t size, T max_value) {
                                static_cast<uint8_t>(8 * sizeof(T) - 8));
     lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
     // Number of 0-bits to be stored + 1-bits
-    const uint64_t upper_size_bits = static_cast<uint64_t >(max_value >> num_lower_bits_) + size;
+    const uint64_t upper_size_bits
+            = static_cast<uint64_t>(max_value >> num_lower_bits_) + size;
     num_upper_bytes_ = (upper_size_bits + 7) / 8;
     num_lower_bytes_ = (num_lower_bits_ * size + 7) / 8;
 
@@ -334,7 +343,7 @@ template <typename T>
 EliasFanoDecoder<T>::EliasFanoDecoder(std::ifstream *source,
                                       std::ifstream *source_upper,
                                       std::streampos file_end_upper)
-        : source_(source), source_upper_(source_upper), file_end_(file_end_upper) {}
+    : source_(source), source_upper_(source_upper), file_end_(file_end_upper) {}
 
 template <typename T>
 T EliasFanoDecoder<T>::next_upper() {
@@ -398,7 +407,7 @@ bool EliasFanoDecoder<T>::init() {
     lower_[0] = lower_[1] = 0;
     // Initialized to a negative number to save on decrement instruction in
     // #next_upper.
-    upper_pos_ = static_cast<uint64_t>(- sizeof(T));
+    upper_pos_ = static_cast<uint64_t>(-sizeof(T));
     if (!source_->read(reinterpret_cast<char *>(&size_), sizeof(size_t))) {
         assert(!source_upper_->read(upper_.data(), 1));
         return false;
@@ -521,7 +530,7 @@ EliasFanoEncoderBuffered<std::pair<T, C>>::EliasFanoEncoderBuffered(const std::s
     : file_name_(file_name) {
     std::filesystem::remove(file_name);
     sink_ = std::ofstream(file_name, std::ios::binary | std::ios::out);
-    sink_upper_ = std::ofstream(file_name+".up", std::ios::binary | std::ios::out);
+    sink_upper_ = std::ofstream(file_name + ".up", std::ios::binary | std::ios::out);
     sink_second_ = std::ofstream(file_name + ".count", std::ios::binary | std::ios::out);
     buffer_.reserve(buffer_size);
     buffer_second_.reserve(buffer_size);
