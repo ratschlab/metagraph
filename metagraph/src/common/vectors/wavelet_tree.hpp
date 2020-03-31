@@ -30,6 +30,7 @@ class wavelet_tree {
 
     virtual uint64_t size() const = 0;
     virtual uint8_t logsigma() const = 0;
+    virtual uint64_t count(uint64_t val) const = 0;
 
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;
@@ -67,25 +68,22 @@ class wavelet_tree_stat : public wavelet_tree {
     uint64_t next(uint64_t id, uint64_t val) const;
     uint64_t prev(uint64_t id, uint64_t val) const;
 
-    uint64_t size() const { return n_; }
+    uint64_t size() const { return int_vector_.size(); }
     uint8_t logsigma() const { return int_vector_.width(); }
+    uint64_t count(uint64_t val) const { return count_[val]; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
     void clear();
 
-    sdsl::int_vector<> to_vector() const;
+    sdsl::int_vector<> to_vector() const { return int_vector_; }
     const sdsl::int_vector<>& data() const { return int_vector_; }
 
   private:
-    void init_wt() const;
-
-    mutable sdsl::int_vector<> int_vector_;
-    mutable sdsl::wt_huff<> wwt_;
-    mutable std::atomic_bool requires_update_ { true };
-    mutable std::mutex mu_;
-    uint64_t n_;
+    sdsl::int_vector<> int_vector_;
+    sdsl::wt_huff<> wwt_;
+    std::vector<uint64_t> count_;
 };
 
 
@@ -108,6 +106,7 @@ class wavelet_tree_fast : public wavelet_tree {
 
     uint64_t size() const { return int_vector_.size(); }
     uint8_t logsigma() const { return int_vector_.width(); }
+    uint64_t count(uint64_t val) const { return bitmaps_[val].num_set_bits(); }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -143,6 +142,7 @@ class wavelet_tree_dyn : public wavelet_tree {
 
     uint64_t size() const { return dwt_.size(); }
     uint8_t logsigma() const;
+    uint64_t count(uint64_t val) const { return rank(val, size()); }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -152,8 +152,7 @@ class wavelet_tree_dyn : public wavelet_tree {
     sdsl::int_vector<> to_vector() const;
 
   private:
-    using dwt_type = dyn::wt_str;
-    dwt_type dwt_;
+    dyn::wt_str dwt_;
 };
 
 
@@ -161,7 +160,8 @@ class wavelet_tree_small : public wavelet_tree {
     friend wavelet_tree;
 
   public:
-    explicit wavelet_tree_small(uint8_t logsigma) : logsigma_(logsigma) {}
+    explicit wavelet_tree_small(uint8_t logsigma)
+        : logsigma_(logsigma), count_(1 << logsigma, 0) {}
 
     template <class Vector>
     wavelet_tree_small(uint8_t logsigma, const Vector &vector);
@@ -178,6 +178,7 @@ class wavelet_tree_small : public wavelet_tree {
 
     uint64_t size() const { return wwt_.size(); }
     uint8_t logsigma() const { return logsigma_; }
+    uint64_t count(uint64_t val) const { return count_[val]; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -189,6 +190,7 @@ class wavelet_tree_small : public wavelet_tree {
   private:
     sdsl::wt_huff<> wwt_;
     uint8_t logsigma_;
+    std::vector<uint64_t> count_;
 };
 
 #endif // __WAVELET_TREE_HPP__
