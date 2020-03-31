@@ -32,10 +32,9 @@ typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
 typedef BOSS::TAlphabet TAlphabet;
 
-// TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
-const size_t MAX_ITER_WAVELET_TREE_DYN = 0;
-const size_t MAX_ITER_WAVELET_TREE_SMALL = 10;
+const size_t MAX_ITER_WAVELET_TREE_DYN = 6;
+const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
 
 
 BOSS::BOSS(size_t k)
@@ -299,51 +298,48 @@ uint64_t BOSS::rank_W(edge_index i, TAlphabet c) const {
     return i == 0 ? 0 : W_->rank(c, i) - (c == 0);
 }
 
-// get prev character without optimizations (via rank/select calls)
-inline edge_index get_prev(const wavelet_tree &W, edge_index i, TAlphabet c) {
-    assert(i);
+/**
+ * Return the position of the last occurrence of |c| in W[1..i] or zero
+ * if such does not exist.
+ */
+edge_index BOSS::pred_W(edge_index i, TAlphabet c) const {
+    CHECK_INDEX(i);
 
-    if (W[i] == c)
-        return i;
-
-    uint64_t r = W.rank(c, i);
-    return r ? W.select(c, r) : 0;
+    edge_index prev = W_->prev(i, c);
+    return prev < W_->size() ? prev : 0;
 }
 
 /**
  * For characters |first| and |second|, return the last occurrence
  * of them in W[1..i], i.e. max(pred_W(i, first), pred_W(i, second)).
  */
-edge_index BOSS::pred_W(edge_index i, TAlphabet first, TAlphabet second) const {
+edge_index BOSS::pred_W(edge_index i, TAlphabet c_first, TAlphabet c_second) const {
     CHECK_INDEX(i);
+    assert(c_first != c_second);
 
-    if (first == second) {
-        edge_index prev = W_->prev(i, first);
-        return prev < W_->size() ? prev : 0;
+    // trying to avoid calls of W_->prev
+    uint64_t max_iter = 0;
+    switch (state) {
+        case STAT:
+            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            break;
+        case DYN:
+            max_iter = MAX_ITER_WAVELET_TREE_DYN;
+            break;
+        case SMALL:
+            max_iter = MAX_ITER_WAVELET_TREE_SMALL;
+            break;
+        case FAST:
+            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            break;
     }
 
-    // trying to avoid calls of succ_W
-    uint64_t max_iter;
-    if (dynamic_cast<const wavelet_tree_stat*>(W_)
-            || dynamic_cast<const wavelet_tree_fast*>(W_)) {
-        max_iter = MAX_ITER_WAVELET_TREE_STAT;
-    } else if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
-        max_iter = MAX_ITER_WAVELET_TREE_DYN;
-    } else if (dynamic_cast<const wavelet_tree_small*>(W_)) {
-        max_iter = MAX_ITER_WAVELET_TREE_SMALL;
-    } else {
-        assert(false);
-        max_iter = 0;
-    }
-
-    edge_index end = i > max_iter
-                    ? i - max_iter
-                    : 0;
+    edge_index end = i - std::min(i, max_iter);
 
     // TODO: add a cap -- iterate alph_size^2 elements at maximum
     while (i > end) {
         TAlphabet w = get_W(i);
-        if (w == first || w == second)
+        if (w == c_first || w == c_second)
             return i;
         i--;
     }
@@ -351,16 +347,14 @@ edge_index BOSS::pred_W(edge_index i, TAlphabet first, TAlphabet second) const {
     if (!i)
         return 0;
 
-    edge_index select_first = get_prev(*W_, i, first);
-    edge_index select_second = get_prev(*W_, i, second);
+    // get the previous position via rank + select calls
+    uint64_t r_first = W_->rank(c_first, i);
+    edge_index select_first = r_first ? W_->select(c_first, r_first) : 0;
 
-    if (select_second == select_first) {
-        return 0;
-    } else if (select_first > select_second) {
-        return select_first;
-    } else {
-        return select_second;
-    }
+    uint64_t r_second = W_->rank(c_second, i);
+    edge_index select_second = r_second ? W_->select(c_second, r_second) : 0;
+
+    return std::max(select_first, select_second);
 }
 
 /**
@@ -372,68 +366,64 @@ edge_index BOSS::succ_W(edge_index i, TAlphabet c) const {
     return W_->next(i, c);
 }
 
-// get next character without optimizations (via rank/select calls)
-inline edge_index get_next(const wavelet_tree &W, edge_index i, TAlphabet c) {
-    assert(i);
-
-    uint64_t r = W.rank(c, i - 1) + 1;
-    if (r <= W.rank(c, W.size() - 1)) {
-        return W.select(c, r);
-    } else {
-        return W.size();
-    }
-}
-
 /**
  * For characters |first| and |second|, return the first occurrence
  * of them in W[i..N], i.e. min(succ_W(i, first), succ_W(i, second)).
  */
 std::pair<edge_index, TAlphabet>
-BOSS::succ_W(edge_index i, TAlphabet first, TAlphabet second) const {
+BOSS::succ_W(edge_index i, TAlphabet c_first, TAlphabet c_second) const {
     CHECK_INDEX(i);
+    assert(c_first != c_second);
 
-    if (first == second) {
-        auto next = succ_W(i, first);
-        return std::make_pair(next, next < W_->size() ? first : 0);
+    // trying to avoid calls of W_->next
+    uint64_t max_iter = 0;
+    switch (state) {
+        case STAT:
+            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            break;
+        case DYN:
+            max_iter = MAX_ITER_WAVELET_TREE_DYN;
+            break;
+        case SMALL:
+            max_iter = MAX_ITER_WAVELET_TREE_SMALL;
+            break;
+        case FAST:
+            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            break;
     }
 
-    // trying to avoid calls of succ_W
-    uint64_t max_iter;
-    if (dynamic_cast<const wavelet_tree_stat*>(W_)
-            || dynamic_cast<const wavelet_tree_fast*>(W_)) {
-        max_iter = MAX_ITER_WAVELET_TREE_STAT;
-    } else if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
-        max_iter = MAX_ITER_WAVELET_TREE_DYN;
-    } else if (dynamic_cast<const wavelet_tree_small*>(W_)) {
-        max_iter = MAX_ITER_WAVELET_TREE_SMALL;
-    } else {
-        assert(false);
-        max_iter = 0;
-    }
-
-    edge_index end = std::min(W_->size(), i + max_iter);
+    edge_index end = i + std::min(W_->size() - i, max_iter);
 
     while (i < end) {
         TAlphabet w = get_W(i);
-        if (w == first)
-            return std::make_pair(i, first);
-        if (w == second)
-            return std::make_pair(i, second);
+        if (w == c_first)
+            return std::make_pair(i, c_first);
+        if (w == c_second)
+            return std::make_pair(i, c_second);
         i++;
     }
 
     if (i == W_->size())
         return std::make_pair(W_->size(), 0);
 
-    edge_index select_first = get_next(*W_, i, first);
-    edge_index select_second = get_next(*W_, i, second);
+    // get the next position via rank + select calls
+    uint64_t r_first = W_->rank(c_first, i - 1) + 1;
+    edge_index select_first = r_first <= W_->count(c_first)
+                                ? W_->select(c_first, r_first)
+                                : W_->size();
+    uint64_t r_second = W_->rank(c_second, i - 1) + 1;
+    edge_index select_second = r_second <= W_->count(c_second)
+                                ? W_->select(c_second, r_second)
+                                : W_->size();
 
-    if (select_second == select_first) {
-        return std::make_pair(W_->size(), 0);
-    } else if (select_first < select_second) {
-        return std::make_pair(select_first, first);
+    if (select_first < select_second) {
+        return std::make_pair(select_first, c_first);
+    } else if (select_second < select_first) {
+        return std::make_pair(select_second, c_second);
     } else {
-        return std::make_pair(select_second, second);
+        assert(select_first == W_->size());
+        assert(select_second == W_->size());
+        return std::make_pair(W_->size(), 0);
     }
 }
 
@@ -673,16 +663,15 @@ size_t BOSS::num_incoming_to_target(edge_index x, TAlphabet d) const {
     if (x + 1 == W_->size())
         return 1;
 
-    if (dynamic_cast<const wavelet_tree_dyn*>(W_)) {
-        edge_index y = succ_W(x + 1, d);
-        return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
-
-    } else {
-        size_t indeg = 0;
-        call_incoming_to_target(x, d, [&indeg](auto) { indeg++; });
-        assert(indeg && "there is always at least one incoming edge");
-        return indeg;
-    }
+#if 0 // the second section is faster for all existing graph states
+    edge_index y = succ_W(x + 1, d);
+    return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
+#else
+    size_t indeg = 0;
+    call_incoming_to_target(x, d, [&indeg](auto) { indeg++; });
+    assert(indeg && "there is always at least one incoming edge");
+    return indeg;
+#endif
 }
 
 
@@ -1637,10 +1626,10 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
 
 // If a single outgoing edge is found, write it to |*i| and return true.
 // If no outgoing edges are found, set |*i| to 0 and return false.
-// If multiple outgoing edges are found, set |*i| to the first and return false.
-bool masked_pick_single_outgoing(const BOSS &boss,
-                                 edge_index *i,
-                                 const bitmap *subgraph_mask) {
+// If multiple outgoing edges are found, set |*i| to the last and return false.
+inline bool masked_pick_single_outgoing(const BOSS &boss,
+                                        edge_index *i,
+                                        const bitmap *subgraph_mask) {
     assert(i && *i);
     assert(boss.get_last(*i));
     assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
@@ -1649,11 +1638,13 @@ bool masked_pick_single_outgoing(const BOSS &boss,
     if (!subgraph_mask)
         return boss.is_single_outgoing(*i);
 
-    bool edge_detected = false;
     edge_index j = *i;
-    do {
+
+    bool edge_detected = (*subgraph_mask)[j];
+
+    while (--j > 0 && !boss.get_last(j)) {
         if ((*subgraph_mask)[j]) {
-            // there are multiple outgoing edges
+            // stop if there are multiple outgoing edges detected
             if (edge_detected)
                 return false;
 
@@ -1661,7 +1652,7 @@ bool masked_pick_single_outgoing(const BOSS &boss,
             edge_detected = true;
             *i = j;
         }
-    } while (--j > 0 && !boss.get_last(j));
+    }
 
     // return true of there is exactly one outgoing edge
     if (edge_detected)
@@ -1675,9 +1666,9 @@ bool masked_pick_single_outgoing(const BOSS &boss,
 // If a single incoming edge is found, write it to |*i| and return true.
 // If no incoming edges are found, set |*i| to 0 and return false.
 // If multiple incoming edges are found, set |*i| to the first and return false.
-bool masked_pick_single_incoming(const BOSS &boss,
-                                 edge_index *i, TAlphabet d,
-                                 const bitmap *subgraph_mask) {
+inline bool masked_pick_single_incoming(const BOSS &boss,
+                                        edge_index *i, TAlphabet d,
+                                        const bitmap *subgraph_mask) {
     assert(i && *i);
     assert(boss.get_W(*i) < boss.alph_size && "must be the first incoming edge");
     assert(d == boss.get_W(*i));
@@ -1693,7 +1684,7 @@ bool masked_pick_single_incoming(const BOSS &boss,
     bool edge_detected = false;
     do {
         if ((*subgraph_mask)[j]) {
-            // there are multiple incoming edges
+            // stop if there are multiple incoming edges detected
             if (edge_detected)
                 return false;
 
@@ -1856,37 +1847,51 @@ void call_paths(const BOSS &boss,
             visited[edge] = true;
             ++progress_bar;
 
-            // stop traversing if the next node is a dummy sink
+            // stop the traversal if the next node is a dummy sink
             if (!d)
                 break;
 
-            auto j = (w == d) ? edge : boss.pred_W(edge, d, d);
-            // stop traversing if we call unitigs and this
-            // is not the only incoming edge
-            bool continue_traversal = !split_to_unitigs
-                || masked_pick_single_incoming(boss, &j, d, subgraph_mask);
-            assert(j);
+            bool single_incoming;
+            // If the entire graph is selected and the edge is marked
+            // with '-', we know for sure this is not the only edge
+            // incoming into its target node.
+            // Otherwise, we must check all edges by iteration.
+            if (!subgraph_mask && w != d) {
+                single_incoming = false;
+            } else {
+                // shift to the first incoming edge
+                if (w != d)
+                    edge = boss.pred_W(edge, d);
+                // check if there are multiple incoming edges
+                single_incoming = masked_pick_single_incoming(boss, &edge, d, subgraph_mask);
+                assert(edge);
+            }
 
             // make one traversal step
             edge = boss.fwd(edge, d);
 
-            // traverse if there is only one outgoing edge
-            auto is_single = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
+            auto single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
+            // stop the traversal if there are no edges outgoing from the target
+            if (!edge)
+                break;
 
-            if (continue_traversal && is_single) {
+            // continue the non-branching traversal further if
+            //      1. there is only one edge outgoing from the target
+            // and at least one of the following conditions is met:
+            //      2. there is only one edge incoming to the target node
+            //      3. we call contigs (the unitigs may be concatenated)
+            if (single_outgoing && (single_incoming || !split_to_unitigs)) {
                 discovered[edge] = true;
                 continue;
-            } else if (!edge) {
-                break;
             }
 
             kmer.assign(sequence.end() - boss.get_k(), sequence.end());
             edge_index next_edge = 0;
 
-            // loop over outgoing edges
+            // loop over the outgoing edges
             do {
                 if (!next_edge && !split_to_unitigs && !visited[edge]) {
-                    // save the edge for visiting if we extract arbitrary paths
+                    // save the edge for visiting if we extract contigs
                     discovered[edge] = true;
                     next_edge = edge;
                 } else if (!discovered[edge]) {

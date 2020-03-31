@@ -7,7 +7,7 @@
 
 const std::string filename = "./benchmark_graph.dbg";
 
-constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 24;
+constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;
 
 
 namespace mg {
@@ -56,8 +56,11 @@ DEFINE_BOSS_BENCHMARK(rank_W_A,            rank_W,              get_W,    size, 
 DEFINE_BOSS_BENCHMARK(rank_W_C,            rank_W,              get_W,    size, 2);
 DEFINE_BOSS_BENCHMARK(rank_W_G,            rank_W,              get_W,    size, 3);
 DEFINE_BOSS_BENCHMARK(rank_W_T,            rank_W,              get_W,    size, 4);
+DEFINE_BOSS_BENCHMARK(get_last,            get_last,            get_last, size);
 DEFINE_BOSS_BENCHMARK(rank_last,           rank_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(select_last,         select_last,         get_last, num_set_bits);
+DEFINE_BOSS_BENCHMARK(pred_last,           pred_last,           get_last, size);
+DEFINE_BOSS_BENCHMARK(succ_last,           succ_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 
 
@@ -166,6 +169,50 @@ BENCHMARK_TEMPLATE(BM_BOSS_fwd_and_pick_edge, 1) -> Unit(benchmark::kMicrosecond
 BENCHMARK_TEMPLATE(BM_BOSS_fwd_and_pick_edge, 2) -> Unit(benchmark::kMicrosecond);
 BENCHMARK_TEMPLATE(BM_BOSS_fwd_and_pick_edge, 3) -> Unit(benchmark::kMicrosecond);
 BENCHMARK_TEMPLATE(BM_BOSS_fwd_and_pick_edge, 4) -> Unit(benchmark::kMicrosecond);
+
+
+DEFINE_BOSS_BENCHMARK(pred_W_$,            pred_W,              get_W,    size, 0);
+DEFINE_BOSS_BENCHMARK(pred_W_A,            pred_W,              get_W,    size, 1);
+DEFINE_BOSS_BENCHMARK(pred_W_C,            pred_W,              get_W,    size, 2);
+DEFINE_BOSS_BENCHMARK(pred_W_G,            pred_W,              get_W,    size, 3);
+DEFINE_BOSS_BENCHMARK(pred_W_T,            pred_W,              get_W,    size, 4);
+DEFINE_BOSS_BENCHMARK(pred_W_AAm,          pred_W,              get_W,    size, 1, 6);
+DEFINE_BOSS_BENCHMARK(pred_W_CCm,          pred_W,              get_W,    size, 2, 7);
+DEFINE_BOSS_BENCHMARK(pred_W_GGm,          pred_W,              get_W,    size, 3, 8);
+DEFINE_BOSS_BENCHMARK(pred_W_TTm,          pred_W,              get_W,    size, 4, 9);
+
+DEFINE_BOSS_BENCHMARK(succ_W_$,            succ_W,              get_W,    size, 0);
+DEFINE_BOSS_BENCHMARK(succ_W_A,            succ_W,              get_W,    size, 1);
+DEFINE_BOSS_BENCHMARK(succ_W_C,            succ_W,              get_W,    size, 2);
+DEFINE_BOSS_BENCHMARK(succ_W_G,            succ_W,              get_W,    size, 3);
+DEFINE_BOSS_BENCHMARK(succ_W_T,            succ_W,              get_W,    size, 4);
+DEFINE_BOSS_BENCHMARK(succ_W_AAm,          succ_W,              get_W,    size, 1, 6);
+DEFINE_BOSS_BENCHMARK(succ_W_CCm,          succ_W,              get_W,    size, 2, 7);
+DEFINE_BOSS_BENCHMARK(succ_W_GGm,          succ_W,              get_W,    size, 3, 8);
+DEFINE_BOSS_BENCHMARK(succ_W_TTm,          succ_W,              get_W,    size, 4, 9);
+
+
+static void BM_BOSS_num_incoming_to_target(benchmark::State &state) {
+    BOSS boss;
+    load_graph(state, &boss);
+
+    std::mt19937 gen(32);
+    std::uniform_int_distribution<uint64_t> dis(1, boss.get_W().size() - 1);
+
+    std::vector<std::pair<uint64_t, BOSS::TAlphabet>> edges;
+    edges.reserve(NUM_DISTINCT_INDEXES);
+    while (edges.size() < NUM_DISTINCT_INDEXES) {
+        uint64_t edge = boss.bwd(dis(gen));
+        edges.emplace_back(edge, boss.get_W(edge));
+    }
+
+    size_t i = 0;
+    for (auto _ : state) {
+        auto edge = edges[i++ % NUM_DISTINCT_INDEXES];
+        benchmark::DoNotOptimize(boss.num_incoming_to_target(edge.first, edge.second));
+    }
+}
+BENCHMARK(BM_BOSS_num_incoming_to_target) -> Unit(benchmark::kMicrosecond);
 
 
 } // namespace bm
