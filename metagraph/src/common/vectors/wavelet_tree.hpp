@@ -86,15 +86,18 @@ class wavelet_tree_sdsl_fast : public wavelet_tree {
 };
 
 
-// FYI: in fact, not a wavelet tree
-class wavelet_tree_fast : public wavelet_tree {
+// A straightforward and fast implementation of the wavelet tree interface
+template <class t_bv = bit_vector_stat>
+class partite_vector : public wavelet_tree {
     friend wavelet_tree;
 
   public:
-    explicit wavelet_tree_fast(uint8_t logsigma,
-                               uint64_t size = 0, TAlphabet c = 0);
+    explicit partite_vector(uint8_t logsigma,
+                            uint64_t size = 0, TAlphabet c = 0);
     template <class Vector>
-    wavelet_tree_fast(uint8_t logsigma, const Vector &vector);
+    partite_vector(uint8_t logsigma, const Vector &vector)
+      : partite_vector(logsigma, pack_vector(vector, logsigma)) {}
+    partite_vector(uint8_t logsigma, sdsl::int_vector<>&& vector);
 
     uint64_t rank(TAlphabet c, uint64_t i) const;
     uint64_t select(TAlphabet c, uint64_t i) const;
@@ -117,7 +120,7 @@ class wavelet_tree_fast : public wavelet_tree {
 
   private:
     sdsl::int_vector<> int_vector_;
-    std::vector<bit_vector_stat> bitmaps_;
+    std::vector<t_bv> bitmaps_;
 };
 
 
@@ -196,5 +199,6 @@ class wavelet_tree_sdsl : public wavelet_tree {
 
 typedef wavelet_tree_sdsl_fast<> wavelet_tree_stat;
 typedef wavelet_tree_sdsl<> wavelet_tree_small;
+typedef partite_vector<> wavelet_tree_fast;
 
 #endif // __WAVELET_TREE_HPP__
