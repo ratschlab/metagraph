@@ -10,16 +10,8 @@
 
 #include "common/elias_fano.hpp"
 #include "common/utils/file_utils.hpp"
+#include "gtest_patch.hpp"
 
-// Google Test doesn't define typeinfo for sdsl::uint128_t, so we do it for them
-namespace testing {
-namespace internal {
-template <>
-std::string GetTypeName<unsigned __int128>() {
-    return "uint128_t";
-}
-} // namespace internal
-} // namespace testing
 namespace {
 
 using namespace mg;
@@ -358,36 +350,7 @@ TYPED_TEST(EliasFanoBufferedTest, InsertManyChunks) {
     EXPECT_FALSE(decoder.next().has_value());
 }
 
-TEST(EliasFanoTest128, ReadWriteRandom) {
-    std::mt19937 rng(123457);
-    std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
-
-    for (uint32_t size = 1000; size < 1016; ++size) {
-        Vector<sdsl::uint128_t> values(size);
-        for (uint32_t trial = 0; trial < 16; ++trial) {
-            uint32_t i = 0;
-            std::for_each(values.begin(), values.end(), [&](sdsl::uint128_t &v) {
-                i += dist10(rng);
-                v = i;
-            });
-            utils::TempFile file;
-            size_t file_size = encode(values, file.name());
-            // each value is represented in 2 bits, plus 25 bytes overhead for the header
-            EXPECT_EQ(file_size,
-                      std::filesystem::file_size(file.name())
-                              + std::filesystem::file_size(file.name() + ".up"));
-
-            common::EliasFanoDecoder<sdsl::uint128_t> decoder(file.name());
-            for (uint32_t i = 0; i < size; ++i) {
-                std::optional<sdsl::uint128_t> decoded = decoder.next();
-                EXPECT_TRUE(decoded.has_value());
-                EXPECT_EQ(values[i], decoded.value());
-            }
-            EXPECT_FALSE(decoder.next().has_value());
-        }
-    }
-}
-
+// Make sure that large (>64bit) 128-bit numbers are correctly compressed
 TEST(EliasFanoTest128, ReadWriteRandomLarge) {
     std::mt19937 rng(123457);
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
@@ -413,6 +376,40 @@ TEST(EliasFanoTest128, ReadWriteRandomLarge) {
             common::EliasFanoDecoder<sdsl::uint128_t> decoder(file.name());
             for (uint32_t i = 0; i < size; ++i) {
                 std::optional<sdsl::uint128_t> decoded = decoder.next();
+                EXPECT_TRUE(decoded.has_value());
+                EXPECT_EQ(values[i], decoded.value());
+            }
+            EXPECT_FALSE(decoder.next().has_value());
+        }
+    }
+}
+
+// Make sure that large (>128bit) 256-bit numbers are correctly compressed
+TEST(EliasFanoTest256, ReadWriteRandomLarge) {
+    std::mt19937 rng(123457);
+    std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
+
+    for (uint32_t size = 1000; size < 1016; ++size) {
+        Vector<sdsl::uint256_t> values(size);
+        for (uint32_t trial = 0; trial < 16; ++trial) {
+            sdsl::uint256_t i = 0;
+            std::for_each(values.begin(), values.end(), [&](sdsl::uint256_t &v) {
+              i += dist10(rng);
+              if (dist10(rng) < 1) { // increase the hi 128 bits every ~10th element
+                  i = ((sdsl::uint256_t)((sdsl::uint128_t)(i >> 128) + 1) << 128) + (uint64_t)i;
+              }
+              v = i;
+            });
+            utils::TempFile file;
+            size_t file_size = encode(values, file.name());
+            // each value is represented in 2 bits, plus 25 bytes overhead for the header
+            EXPECT_EQ(file_size,
+                      std::filesystem::file_size(file.name())
+                              + std::filesystem::file_size(file.name() + ".up"));
+
+            common::EliasFanoDecoder<sdsl::uint256_t> decoder(file.name());
+            for (uint32_t i = 0; i < size; ++i) {
+                std::optional<sdsl::uint256_t> decoded = decoder.next();
                 EXPECT_TRUE(decoded.has_value());
                 EXPECT_EQ(values[i], decoded.value());
             }

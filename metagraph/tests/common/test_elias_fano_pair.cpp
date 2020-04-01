@@ -11,6 +11,7 @@
 #include "common/elias_fano.hpp"
 
 #include "common/utils/file_utils.hpp"
+#include "gtest_patch.hpp"
 
 namespace {
 
@@ -19,8 +20,7 @@ using namespace mg;
 template <typename T>
 class EliasFanoTestPair : public ::testing::Test {};
 
-// clang doesn't define typeinfo for sdsl::uint128_t, so can't use it here
-typedef ::testing::Types<uint32_t, uint64_t> ValueTypes;
+typedef ::testing::Types<uint32_t, uint64_t, sdsl::uint128_t, sdsl::uint256_t> ValueTypes;
 
 TYPED_TEST_SUITE(EliasFanoTestPair, ValueTypes);
 
