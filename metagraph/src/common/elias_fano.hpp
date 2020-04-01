@@ -139,6 +139,7 @@ class EliasFanoEncoder {
  */
 template <typename T>
 class EliasFanoDecoder {
+    static constexpr uint32_t READ_BUF_SIZE = 1024;
   public:
     EliasFanoDecoder() {}
 
@@ -192,7 +193,10 @@ class EliasFanoDecoder {
      * binary representation of the lower bits of each number. To save memory, only the
      * currently needed window of 16 bytes is read from the file.
      */
-    T lower_[2];
+    T lower_[READ_BUF_SIZE];
+
+    /** Points to current element in #lower_ */
+    uint32_t lower_idx_ = 0;
 
     /**
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
