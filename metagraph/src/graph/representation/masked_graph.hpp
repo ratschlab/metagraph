@@ -12,12 +12,13 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
   public:
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
-                        bool only_valid_nodes_in_mask = false);
+                        bool only_valid_nodes_in_mask = false,
+                        bool canonical = false);
 
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
-                        std::function<bool(const DeBruijnGraph::node_index&)>&& callback,
-                        size_t num_set_bits = -1,
-                        bool only_valid_nodes_in_mask = false);
+                        std::function<bool(node_index)>&& callback,
+                        bool only_valid_nodes_in_mask = false,
+                        bool canonical = false);
 
     virtual ~MaskedDeBruijnGraph() {}
 
@@ -81,6 +82,8 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
 
     virtual size_t get_k() const override { return graph_->get_k(); }
 
+    virtual bool is_canonical_mode() const override { return is_canonical_; }
+
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const override;
     // Traverse the incoming edge
@@ -113,6 +116,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     std::shared_ptr<const DeBruijnGraph> graph_;
     std::unique_ptr<bitmap> kmers_in_graph_;
     bool only_valid_nodes_in_mask_;
+    bool is_canonical_;
 };
 
 
