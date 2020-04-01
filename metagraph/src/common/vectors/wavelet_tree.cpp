@@ -426,28 +426,34 @@ template class wavelet_tree_sdsl<sdsl::wt_huff<>>;
 
 
 ////////////////////////////////////////////////////
-// wavelet_tree_fast based on bit_vectors, static //
+// partite_vector based on bit_vectors, immutable //
 ////////////////////////////////////////////////////
 
-wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, uint64_t size, TAlphabet c)
+template <class t_bv>
+partite_vector<t_bv>::partite_vector(uint8_t logsigma, uint64_t size, TAlphabet c)
       : int_vector_(size, c, logsigma), bitmaps_(1 << logsigma) {
-    bitmaps_.at(c) = bit_vector_stat(size, 1);
+    bitmaps_.at(c) = t_bv(size, 1);
 }
 
-template <class Vector>
-wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const Vector &vector)
-      : int_vector_(pack_vector(vector, logsigma)) {
+template <class t_bv>
+partite_vector<t_bv>::partite_vector(uint8_t logsigma,
+                                     sdsl::int_vector<>&& vector) {
+    if (vector.width() == logsigma) {
+        int_vector_ = std::move(vector);
+    } else {
+        int_vector_ = pack_vector(vector, logsigma);
+    }
 
     std::vector<sdsl::bit_vector> bitmaps(1 << logsigma);
 
-    for (size_t i = 0; i < vector.size(); ++i) {
+    for (size_t i = 0; i < int_vector_.size(); ++i) {
 
-        TAlphabet c = vector[i];
+        TAlphabet c = int_vector_[i];
 
         assert(c < static_cast<uint64_t>(bitmaps.size()));
 
         if (!bitmaps[c].size())
-            bitmaps[c] = sdsl::bit_vector(vector.size(), 0);
+            bitmaps[c] = sdsl::bit_vector(int_vector_.size(), 0);
 
         bitmaps[c][i] = 1;
     }
@@ -457,50 +463,52 @@ wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const Vector &vector)
     }
 }
 
-template wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const sdsl::int_vector<> &vector);
-template wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const std::vector<uint8_t> &vector);
-template wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const std::vector<uint64_t> &vector);
-template wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const std::vector<int> &vector);
-
-uint64_t wavelet_tree_fast::rank(TAlphabet c, uint64_t i) const {
+template <class t_bv>
+uint64_t partite_vector<t_bv>::rank(TAlphabet c, uint64_t i) const {
     assert(c < bitmaps_.size());
     return bitmaps_[c].size() ? bitmaps_[c].rank1(i) : 0;
 }
 
-uint64_t wavelet_tree_fast::select(TAlphabet c, uint64_t i) const {
+template <class t_bv>
+uint64_t partite_vector<t_bv>::select(TAlphabet c, uint64_t i) const {
     assert(i > 0 && size() > 0);
     assert(c < bitmaps_.size());
     assert(i <= rank(c, size() - 1));
     return bitmaps_[c].select1(i);
 }
 
-TAlphabet wavelet_tree_fast::operator[](uint64_t i) const {
+template <class t_bv>
+TAlphabet partite_vector<t_bv>::operator[](uint64_t i) const {
     assert(i < size());
     return int_vector_[i];
 }
 
-uint64_t wavelet_tree_fast::next(uint64_t i, TAlphabet c) const {
+template <class t_bv>
+uint64_t partite_vector<t_bv>::next(uint64_t i, TAlphabet c) const {
     assert(i < size());
     assert(c < (1llu << logsigma()));
 
     return bitmaps_[c].size() ? bitmaps_[c].next1(i) : size();
 }
 
-uint64_t wavelet_tree_fast::prev(uint64_t i, TAlphabet c) const {
+template <class t_bv>
+uint64_t partite_vector<t_bv>::prev(uint64_t i, TAlphabet c) const {
     assert(i < size());
     assert(c < (1llu << logsigma()));
 
     return bitmaps_[c].size() ? bitmaps_[c].prev1(i) : size();
 }
 
-void wavelet_tree_fast::serialize(std::ostream &out) const {
+template <class t_bv>
+void partite_vector<t_bv>::serialize(std::ostream &out) const {
     int_vector_.serialize(out);
     for (const auto &v : bitmaps_) {
         v.serialize(out);
     }
 }
 
-bool wavelet_tree_fast::load(std::istream &in) {
+template <class t_bv>
+bool partite_vector<t_bv>::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -517,14 +525,17 @@ bool wavelet_tree_fast::load(std::istream &in) {
         return true;
 
     } catch (const std::bad_alloc &exception) {
-        std::cerr << "ERROR: Not enough memory to load wavelet_tree_fast" << std::endl;
+        std::cerr << "ERROR: Not enough memory to load partite_vector" << std::endl;
         return false;
     } catch (...) {
         return false;
     }
 }
 
-void wavelet_tree_fast::clear() {
+template <class t_bv>
+void partite_vector<t_bv>::clear() {
     int_vector_.resize(0);
-    bitmaps_.assign(bitmaps_.size(), bit_vector_stat());
+    bitmaps_.assign(bitmaps_.size(), t_bv());
 }
+
+template class partite_vector<bit_vector_stat>;
