@@ -45,7 +45,7 @@ inline T load_unaligned(const void *p) {
     static_assert(alignof(Unaligned<T>) == 1, "Invalid alignment");
     return static_cast<const Unaligned<T> *>(p)->value;
 }
-
+//TODO(ddanciu): define load_unaligned when MODE_TI is not present
 template <>
 inline sdsl::uint256_t load_unaligned(const void *p) {
     static_assert(sizeof(Unaligned<sdsl::uint256_t>) == sizeof(sdsl::uint256_t),
