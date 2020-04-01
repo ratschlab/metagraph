@@ -100,18 +100,32 @@ class BOSS {
     // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;
 
-    // call contigs (or unitigs if |unitigs| is true) that cover
-    // exactly all edges in graph (or subgraph, if |subgraph_mask| is passed)
+    /**
+     * Call contigs (or unitigs if |unitigs| is true) covering
+     * all the edges of the BOSS graph (or its subgraph, if
+     * |subgraph_mask| is specified), including the dummy ones.
+     * Fetch only the primary sequences if |kmers_in_single_form|
+     * is true. All the sentinel characters are omitted in this case.
+     * If |kmers_in_single_form| is false, set |trim_dummy| to true
+     * to fetch paths without sentinels.
+     */
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
-                    const bitmap *subgraph_mask = NULL) const;
+                    const bitmap *subgraph_mask = NULL,
+                    bool trim_sentinels = false) const;
 
+    /**
+     * Call contigs (dummy edges are skipped).
+     */
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                         bool kmers_in_single_form = false,
                         const bitmap *subgraph_mask = NULL) const;
 
+    /**
+     * Call unitigs (dummy edges are skipped).
+     */
     void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                       size_t max_pruned_dead_end_size = 0,
                       bool kmers_in_single_form = false,
