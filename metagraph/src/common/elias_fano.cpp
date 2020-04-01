@@ -30,7 +30,7 @@ template <>
 struct Unaligned<sdsl::uint256_t> {
     Unaligned() = default; // uninitialized
     /* implicit */ Unaligned(sdsl::uint256_t v) : lo(v), hi(v >> 128) {}
-    sdsl::uint128_t lo;
+    sdsl::uint128_t lo; // sdsl::uint256 is not a POD, so needs to be stored as 2 uint128_t's
     sdsl::uint128_t hi;
 } __attribute__((__packed__));
 
@@ -46,9 +46,10 @@ inline T load_unaligned(const void *p) {
 
 template <>
 inline sdsl::uint256_t load_unaligned(const void *p) {
-    static_assert(sizeof(Unaligned<sdsl::uint256_t>) == sizeof(sdsl::uint256_t), "Invalid unaligned size");
+    static_assert(sizeof(Unaligned<sdsl::uint256_t>) == sizeof(sdsl::uint256_t),
+                  "Invalid unaligned size");
     static_assert(alignof(Unaligned<sdsl::uint256_t>) == 1, "Invalid alignment");
-    return static_cast<const Unaligned<sdsl::uint256_t> *>(p)->lo;
+    return sdsl::uint256_t(static_cast<const Unaligned<sdsl::uint256_t> *>(p)->lo, static_cast<const Unaligned<sdsl::uint256_t> *>(p)->hi);
 }
 
 /**
