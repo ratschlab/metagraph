@@ -47,11 +47,20 @@ class wavelet_tree {
 };
 
 
+class wavelet_tree_sdsl_augmented : public wavelet_tree {
+  public:
+    virtual ~wavelet_tree_sdsl_augmented() {}
+    virtual const sdsl::int_vector<>& data() const = 0;
+};
+
+
 template <class t_wt_sdsl = sdsl::wt_huff<>>
-class wavelet_tree_sdsl_fast : public wavelet_tree {
+class wavelet_tree_sdsl_fast : public wavelet_tree_sdsl_augmented {
     friend wavelet_tree;
 
   public:
+    typedef t_wt_sdsl wt_type;
+
     explicit wavelet_tree_sdsl_fast(uint8_t logsigma,
                                     uint64_t size = 0, TAlphabet c = 0);
     template <class Vector>
@@ -88,10 +97,12 @@ class wavelet_tree_sdsl_fast : public wavelet_tree {
 
 // A straightforward and fast implementation of the wavelet tree interface
 template <class t_bv = bit_vector_stat>
-class partite_vector : public wavelet_tree {
+class partite_vector : public wavelet_tree_sdsl_augmented {
     friend wavelet_tree;
 
   public:
+    typedef t_bv bv_type;
+
     explicit partite_vector(uint8_t logsigma,
                             uint64_t size = 0, TAlphabet c = 0);
     template <class Vector>
@@ -163,6 +174,8 @@ class wavelet_tree_sdsl : public wavelet_tree {
     friend wavelet_tree;
 
   public:
+    typedef t_wt_sdsl wt_type;
+
     explicit wavelet_tree_sdsl(uint8_t logsigma)
       : logsigma_(logsigma), count_(1 << logsigma, 0) {}
 
@@ -197,8 +210,11 @@ class wavelet_tree_sdsl : public wavelet_tree {
     std::vector<uint64_t> count_;
 };
 
+
 typedef wavelet_tree_sdsl_fast<> wavelet_tree_stat;
+
 typedef wavelet_tree_sdsl<> wavelet_tree_small;
+
 typedef partite_vector<> wavelet_tree_fast;
 
 #endif // __WAVELET_TREE_HPP__
