@@ -4,11 +4,13 @@ project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 findFolly()
+find_package(glog REQUIRED)
 checkFileSystem() # check for std::filesystem::temp_directory_path
 
 file(GLOB src_files "*.cpp" "*/*.cpp")
@@ -51,9 +53,10 @@ target_link_libraries(metagraph_common
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
+    glog::glog
     spdlog::spdlog
 )
-
+target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
