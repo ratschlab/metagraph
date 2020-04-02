@@ -160,9 +160,6 @@ class EliasFanoDecoder {
     /** Returns the next compressed element or empty if all elements were read */
     std::optional<T> next();
 
-    /** Returns true if the current position is at the end of a chunk. */
-    bool end_of_chunk();
-
   private:
     bool init();
 
