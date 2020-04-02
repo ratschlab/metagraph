@@ -45,7 +45,26 @@ inline T load_unaligned(const void *p) {
     static_assert(alignof(Unaligned<T>) == 1, "Invalid alignment");
     return static_cast<const Unaligned<T> *>(p)->value;
 }
-// TODO(ddanciu): define load_unaligned when MODE_TI is not present
+#ifndef MODE_TI
+// need to specialize for sdsl::uint128_t which is not a POD if MODE_TI is not available
+template <>
+struct Unaligned<sdsl::uint128_t> {
+    Unaligned() = default; // uninitialized
+    /* implicit */ Unaligned(sdsl::uint128_t v) : lo(v), hi(v >> 64) {}
+    uint64_t lo; // sdsl::uint128 is not a POD, so needs to be stored as 2 uint64_t's
+    uint64_t hi;
+} __attribute__((__packed__));
+
+template <>
+inline sdsl::uint128_t load_unaligned(const void *p) {
+    static_assert(sizeof(Unaligned<sdsl::uint128_t>) == sizeof(sdsl::uint128_t),
+                  "Invalid unaligned size");
+    static_assert(alignof(Unaligned<sdsl::uint128_t>) == 1, "Invalid alignment");
+    return sdsl::uint128_t(static_cast<const Unaligned<sdsl::uint128_t> *>(p)->lo,
+                           static_cast<const Unaligned<sdsl::uint128_t> *>(p)->hi);
+}
+#endif
+
 template <>
 inline sdsl::uint256_t load_unaligned(const void *p) {
     static_assert(sizeof(Unaligned<sdsl::uint256_t>) == sizeof(sdsl::uint256_t),
@@ -92,12 +111,12 @@ inline void store_unaligned(void *p, T value) {
 
 /** Returns the rank of the highest non-null bit */
 template <typename T>
-inline uint32_t log2_floor(T x) {
+inline uint32_t log2_floor(const T& x) {
     return sdsl::bits::hi(x);
 }
 
 template <>
-inline uint32_t log2_floor(sdsl::uint128_t x) {
+inline uint32_t log2_floor(const sdsl::uint128_t &x) {
 #ifdef MODE_TI
     if (x == 0U) {
         return 0;
@@ -105,10 +124,9 @@ inline uint32_t log2_floor(sdsl::uint128_t x) {
 
     uint64_t hi = static_cast<uint64_t>(x >> 64);
     if (hi == 0U) {
-        uint64_t lo = static_cast<uint64_t>(x);
-        return 63 - __builtin_clzll(lo);
+        return sdsl::bits::hi(static_cast<uint64_t>(x));
     } else {
-        return 127 - __builtin_clzll(hi);
+        return sdsl::bits::hi(hi) + 64;
     }
 #else
     return x.hi();
@@ -124,7 +142,7 @@ inline uint32_t log2_floor(const sdsl::uint256_t &x) {
 template <typename T>
 inline uint32_t count_trailing_zeros(T v) {
     assert(v != 0U);
-    return __builtin_ctzll(v);
+    return sdsl::bits::lo(v);
 }
 
 
@@ -133,10 +151,10 @@ inline uint32_t count_trailing_zeros(sdsl::uint128_t v) {
     assert(v != 0U);
     uint64_t lo = static_cast<uint64_t>(v);
     if (lo != 0) {
-        return __builtin_ctzll(lo);
+        return count_trailing_zeros(lo);
     } else {
         uint64_t hi = static_cast<uint64_t>(v >> 64);
-        return 64 + __builtin_ctzll(hi);
+        return 64 + count_trailing_zeros(hi);
     }
 }
 
@@ -359,9 +377,8 @@ T EliasFanoDecoder<T>::next_lower() {
     if (pos_bits - cur_pos_bits_ >= 8 * sizeof(T)) {
         cur_pos_bits_ += 8 * sizeof(T);
         lower_idx_++;
-        if (lower_idx_ == READ_BUF_SIZE-1 && num_lower_bytes_ > 0) {
-            const uint32_t to_read
-                    = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
+        if (lower_idx_ == READ_BUF_SIZE - 1 && num_lower_bytes_ > 0) {
+            const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
             lower_[0] = lower_[lower_idx_];
             source_->read(reinterpret_cast<char *>(&lower_[1]), to_read);
             num_lower_bytes_ -= to_read;
