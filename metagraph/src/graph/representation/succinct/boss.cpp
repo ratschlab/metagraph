@@ -1871,19 +1871,28 @@ void call_paths(const BOSS &boss,
             if (!d)
                 break;
 
-            bool single_incoming;
-            // If the entire graph is selected and the edge is marked
-            // with '-', we know for sure this is not the only edge
-            // incoming into its target node.
-            // Otherwise, we must check all edges by iteration.
-            if (!subgraph_mask && w != d) {
-                single_incoming = false;
+            bool stop_even_if_single_outgoing;
+
+            if (!split_to_unitigs) {
+                // we always continue traversal of a contig if there is
+                // only a single outgoing edge
+                stop_even_if_single_outgoing = false;
+
+            } else if (!subgraph_mask && w != d) {
+                // For unitigs, we must terminate the traversal if there
+                // are more than one edges incoming to the target node.
+                // If the entire graph is selected and the edge is marked
+                // with '-', we know for sure this is not the only edge
+                // incoming into its target node.
+                stop_even_if_single_outgoing = true;
             } else {
+                // Otherwise, we must check all edges by iteration.
                 // shift to the first incoming edge
                 if (w != d)
                     edge = boss.pred_W(edge, d);
                 // check if there are multiple incoming edges
-                single_incoming = masked_pick_single_incoming(boss, &edge, d, subgraph_mask);
+                stop_even_if_single_outgoing
+                    = !masked_pick_single_incoming(boss, &edge, d, subgraph_mask);
                 assert(edge);
             }
 
@@ -1900,7 +1909,7 @@ void call_paths(const BOSS &boss,
             // and at least one of the following conditions is met:
             //      2. there is only one edge incoming to the target node
             //      3. we call contigs (the unitigs may be concatenated)
-            if (single_outgoing && (single_incoming || !split_to_unitigs)) {
+            if (single_outgoing && !stop_even_if_single_outgoing) {
                 discovered[edge] = true;
                 continue;
             }
