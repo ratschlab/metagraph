@@ -1809,6 +1809,17 @@ struct Edge {
     std::vector<TAlphabet> source_kmer;
 };
 
+void fetch_path(const BOSS &boss,
+                const BOSS::Call<std::vector<edge_index>&&,
+                                 std::vector<TAlphabet>&&> &callback,
+                std::vector<edge_index> &path,
+                std::vector<TAlphabet> &sequence,
+                bool kmers_in_single_form,
+                bool trim_sentinels,
+                sdsl::bit_vector &discovered,
+                sdsl::bit_vector &visited,
+                ProgressBar &progress_bar);
+
 void call_paths(const BOSS &boss,
                 edge_index starting_kmer,
                 const BOSS::Call<std::vector<edge_index>&&,
@@ -1919,91 +1930,106 @@ void call_paths(const BOSS &boss,
             edge = next_edge;
         }
 
-        if (!trim_sentinels && !kmers_in_single_form) {
-            callback(std::move(path), std::move(sequence));
+        fetch_path(boss, callback, path, sequence,
+                   kmers_in_single_form, trim_sentinels,
+                   discovered, visited, progress_bar);
+    }
+}
+
+void fetch_path(const BOSS &boss,
+                const BOSS::Call<std::vector<edge_index>&&,
+                                 std::vector<TAlphabet>&&> &callback,
+                std::vector<edge_index> &path,
+                std::vector<TAlphabet> &sequence,
+                bool kmers_in_single_form,
+                bool trim_sentinels,
+                sdsl::bit_vector &discovered,
+                sdsl::bit_vector &visited,
+                ProgressBar &progress_bar) {
+    if (!trim_sentinels && !kmers_in_single_form) {
+        callback(std::move(path), std::move(sequence));
+        return;
+    }
+
+    // trim trailing sentinels '$'
+    if (sequence.back() == boss.kSentinelCode) {
+        sequence.pop_back();
+        path.pop_back();
+    }
+
+    auto first_valid_it
+        = std::find_if(sequence.begin(), sequence.end(),
+                       [&boss](auto c) { return c != boss.kSentinelCode; });
+
+    if (first_valid_it + boss.get_k() >= sequence.end())
+        return;
+
+    sequence.erase(sequence.begin(), first_valid_it);
+    path.erase(path.begin(),
+               path.begin() + (first_valid_it - sequence.begin()));
+
+    if (!kmers_in_single_form) {
+        callback(std::move(path), std::move(sequence));
+        return;
+    }
+
+    // get dual path (mapping of the reverse complement sequence)
+    auto rev_comp_seq = sequence;
+    KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
+
+    auto dual_path = boss.map_to_edges(rev_comp_seq);
+    std::reverse(dual_path.begin(), dual_path.end());
+
+    assert(std::all_of(path.begin(), path.end(),
+                       [&](auto i) { return visited[i]; }));
+
+    progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
+                                  [&](auto node) { return node && !visited[node]; });
+
+    // Mark all nodes in path as unvisited and re-visit them while
+    // traversing the path (iterating through all nodes).
+    std::for_each(path.begin(), path.end(),
+                  [&](auto i) { visited[i] = false; });
+
+    // traverse the path with its dual and visit the nodes
+    size_t begin = 0;
+    for (size_t i = 0; i < path.size(); ++i) {
+        assert(path[i]);
+        visited[path[i]] = true;
+
+        // traverse further if the reverse-complement
+        // k-mer does not belong to the graph or if it
+        // matches the current k-mer
+        if (!dual_path[i] || dual_path[i] == path[i])
+            continue;
+
+        // Check if the reverse-complement k-mer has not been traversed
+        // and hence if the current k-mer is the first one to be traversed,
+        // that is, the primary one).
+        // Note that this also covers the case where the reverse-complement
+        // k-mer does not belong to the selected subgraph, as it cannot be
+        // marked as visited in that case.
+        if (!visited[dual_path[i]]) {
+            visited[dual_path[i]] = discovered[dual_path[i]] = true;
             continue;
         }
 
-        // trim trailing sentinels '$'
-        if (sequence.back() == boss.kSentinelCode) {
-            sequence.pop_back();
-            path.pop_back();
-        }
+        // The reverse-complement k-mer had been visited
+        // -> Skip this k-mer and call the traversed path segment.
+        if (begin < i)
+            callback({ path.begin() + begin, path.begin() + i },
+                     { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
 
-        auto first_valid_it
-            = std::find_if(sequence.begin(), sequence.end(),
-                           [&boss](auto c) { return c != boss.kSentinelCode; });
+        begin = i + 1;
+    }
 
-        if (first_valid_it + boss.get_k() >= sequence.end())
-            continue;
+    // Call the path traversed
+    if (!begin) {
+        callback(std::move(path), std::move(sequence));
 
-        sequence.erase(sequence.begin(), first_valid_it);
-        path.erase(path.begin(),
-                   path.begin() + (first_valid_it - sequence.begin()));
-
-        if (!kmers_in_single_form) {
-            callback(std::move(path), std::move(sequence));
-            continue;
-        }
-
-        // get dual path (mapping of the reverse complement sequence)
-        auto rev_comp_seq = sequence;
-        KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
-
-        auto dual_path = boss.map_to_edges(rev_comp_seq);
-        std::reverse(dual_path.begin(), dual_path.end());
-
-        assert(std::all_of(path.begin(), path.end(),
-                           [&](auto i) { return visited[i]; }));
-
-        progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
-                                      [&](auto node) { return node && !visited[node]; });
-
-        // Mark all nodes in path as unvisited and re-visit them while
-        // traversing the path (iterating through all nodes).
-        std::for_each(path.begin(), path.end(),
-                      [&](auto i) { visited[i] = false; });
-
-        // traverse the path with its dual and visit the nodes
-        size_t begin = 0;
-        for (size_t i = 0; i < path.size(); ++i) {
-            assert(path[i]);
-            visited[path[i]] = true;
-
-            // traverse further if the reverse-complement
-            // k-mer does not belong to the graph or if it
-            // matches the current k-mer
-            if (!dual_path[i] || dual_path[i] == path[i])
-                continue;
-
-            // Check if the reverse-complement k-mer has not been traversed
-            // and hence if the current k-mer is the first one to be traversed,
-            // that is, the primary one).
-            // Note that this also covers the case where the reverse-complement
-            // k-mer does not belong to the selected subgraph, as it cannot be
-            // marked as visited in that case.
-            if (!visited[dual_path[i]]) {
-                visited[dual_path[i]] = discovered[dual_path[i]] = true;
-                continue;
-            }
-
-            // The reverse-complement k-mer had been visited
-            // -> Skip this k-mer and call the traversed path segment.
-            if (begin < i)
-                callback({ path.begin() + begin, path.begin() + i },
-                         { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-
-            begin = i + 1;
-        }
-
-        // Call the path traversed
-        if (!begin) {
-            callback(std::move(path), std::move(sequence));
-
-        } else if (begin < path.size()) {
-            callback({ path.begin() + begin, path.end() },
-                     { sequence.begin() + begin, sequence.end() });
-        }
+    } else if (begin < path.size()) {
+        callback({ path.begin() + begin, path.end() },
+                 { sequence.begin() + begin, sequence.end() });
     }
 }
 
