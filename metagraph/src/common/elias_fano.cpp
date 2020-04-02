@@ -142,7 +142,7 @@ inline uint32_t log2_floor(const sdsl::uint256_t &x) {
 template <typename T>
 inline uint32_t count_trailing_zeros(T v) {
     assert(v != 0U);
-    return __builtin_ctzll(v);
+    return sdsl::bits::lo(v);
 }
 
 
@@ -151,10 +151,10 @@ inline uint32_t count_trailing_zeros(sdsl::uint128_t v) {
     assert(v != 0U);
     uint64_t lo = static_cast<uint64_t>(v);
     if (lo != 0) {
-        return __builtin_ctzll(lo);
+        return count_trailing_zeros(lo);
     } else {
         uint64_t hi = static_cast<uint64_t>(v >> 64);
-        return 64 + __builtin_ctzll(hi);
+        return 64 + count_trailing_zeros(hi);
     }
 }
 
