@@ -173,7 +173,7 @@ class EliasFanoDecoder {
     T next_lower();
 
     /** Clear the high bits of #value starting at position #index. */
-    static T clear_high_bits(T value, uint32_t index);
+    static T clear_high_bits(T value, uint8_t index);
 
   private:
     /** Index of current element */
@@ -196,7 +196,7 @@ class EliasFanoDecoder {
     T lower_[READ_BUF_SIZE];
 
     /** Points to current element in #lower_ */
-    uint32_t lower_idx_ = 0;
+    uint32_t lower_idx_;
 
     /**
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta

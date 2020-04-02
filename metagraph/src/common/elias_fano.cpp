@@ -98,6 +98,7 @@ inline uint32_t log2_floor(T x) {
 
 template <>
 inline uint32_t log2_floor(sdsl::uint128_t x) {
+#ifdef MODE_TI
     if (x == 0U) {
         return 0;
     }
@@ -109,20 +110,14 @@ inline uint32_t log2_floor(sdsl::uint128_t x) {
     } else {
         return 127 - __builtin_clzll(hi);
     }
+#else
+    return x.hi();
+#endif
 }
 
 template <>
-inline uint32_t log2_floor(sdsl::uint256_t x) {
-    if (x == 0U) {
-        return 0;
-    }
-
-    sdsl::uint128_t hi = static_cast<sdsl::uint128_t>(x >> 128);
-    if (hi == 0U) {
-        return log2_floor(static_cast<sdsl::uint128_t>(x));
-    } else {
-        return 128 + log2_floor(hi);
-    }
+inline uint32_t log2_floor(const sdsl::uint256_t &x) {
+    return x.hi();
 }
 
 /** Returns the trailing zeros in the binary representation of a number */
@@ -351,6 +346,7 @@ T EliasFanoDecoder<T>::next_upper() {
     }
 
     size_t trailing_zeros = count_trailing_zeros(upper_block_);
+
     upper_block_ = upper_block_ & (upper_block_ - 1UL); // reset the lowest 1 bit
 
     return static_cast<T>(8 * upper_pos_ + trailing_zeros - position_);
@@ -403,6 +399,7 @@ bool EliasFanoDecoder<T>::init() {
     position_ = 0;
     cur_pos_bits_ = 0;
     upper_block_ = 0;
+    lower_idx_ = 0;
     memset(lower_, 0, sizeof(lower_));
     // Initialized to a negative number to save on decrement instruction in
     // #next_upper.
@@ -433,7 +430,7 @@ bool EliasFanoDecoder<T>::init() {
 }
 
 template <typename T>
-T EliasFanoDecoder<T>::clear_high_bits(T value, uint32_t index) {
+T EliasFanoDecoder<T>::clear_high_bits(T value, uint8_t index) {
     assert(index < 8 * sizeof(T));
     return value & ((T(1) << index) - 1UL);
 }
