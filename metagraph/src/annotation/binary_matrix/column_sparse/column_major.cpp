@@ -1,5 +1,6 @@
 #include "column_major.hpp"
 
+#include "common/vectors/bit_vector_sd.hpp"
 #include "common/serialization.hpp"
 
 

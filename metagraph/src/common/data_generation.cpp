@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include "common/data_generation.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
 std::vector<uint64_t>
@@ -19,12 +20,24 @@ DataGenerator::generate_random_ints(uint64_t n, uint64_t begin, uint64_t end) {
 
 sdsl::bit_vector
 generate_random_column_uncompressed(std::mt19937 &gen, uint64_t n, double d) {
+    assert(d >= 0. && d <= 1.);
+
+    bool invert = false;
+    if (d > 0.5) {
+        d = 1 - d;
+        invert = true;
+    }
+
     sdsl::bit_vector builder(n, false);
     std::bernoulli_distribution dis(d);
     for (size_t i = 0; i < builder.size(); ++i) {
         if (dis(gen))
             builder[i] = true;
     }
+
+    if (invert)
+        builder.flip();
+
     return builder;
 }
 
@@ -39,11 +52,8 @@ generate_random_noise(sdsl::bit_vector *vector, std::mt19937 &gen, double d) {
     }
 }
 
-std::unique_ptr<bit_vector>
-DataGenerator::generate_random_column(uint64_t n, double d) {
-    return std::make_unique<bit_vector_stat>(
-        generate_random_column_uncompressed(gen, n, d)
-    );
+sdsl::bit_vector DataGenerator::generate_random_column(uint64_t n, double d) {
+    return generate_random_column_uncompressed(gen, n, d);
 }
 
 std::unique_ptr<bit_vector>
@@ -95,7 +105,7 @@ DataGenerator
     std::vector<std::unique_ptr<bit_vector>> columns;
     columns.reserve(m);
     for (double density : column_densities) {
-        columns.emplace_back(generate_random_column(n, density));
+        columns.emplace_back(new bit_vector_stat(generate_random_column(n, density)));
     }
     return columns;
 }
@@ -105,7 +115,7 @@ DataGenerator
 ::generate_random_columns(uint64_t n, uint64_t m, double d) {
     std::vector<std::unique_ptr<bit_vector>> columns(m);
     for (size_t i = 0; i < m; ++i) {
-        columns[i] = generate_random_column(n, d);
+        columns[i] = std::make_unique<bit_vector_stat>(generate_random_column(n, d));
     }
     return columns;
 }
@@ -131,12 +141,12 @@ DataGenerator
     assert(row_frequencies.size() == n_distinct);
 
     auto replicated_rows = replicate_shuffle(
-        utils::transpose(
+        utils::transpose<bit_vector_stat>(
             generate_random_columns(n_distinct, m, column_densities)
         ),
         row_frequencies
     );
-    return utils::transpose(replicated_rows);
+    return utils::transpose<bit_vector_stat>(replicated_rows);
 }
 
 std::vector<std::unique_ptr<bit_vector>>
