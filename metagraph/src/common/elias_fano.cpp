@@ -111,12 +111,12 @@ inline void store_unaligned(void *p, T value) {
 
 /** Returns the rank of the highest non-null bit */
 template <typename T>
-inline uint32_t log2_floor(T x) {
+inline uint32_t log2_floor(const T& x) {
     return sdsl::bits::hi(x);
 }
 
 template <>
-inline uint32_t log2_floor(sdsl::uint128_t x) {
+inline uint32_t log2_floor(const sdsl::uint128_t &x) {
 #ifdef MODE_TI
     if (x == 0U) {
         return 0;
