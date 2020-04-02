@@ -405,11 +405,6 @@ std::optional<T> EliasFanoDecoder<T>::next() {
     return result + offset_;
 }
 
-template <typename T>
-bool EliasFanoDecoder<T>::end_of_chunk() {
-    return position_ == size_;
-}
-
 // TODO: make this public and avoid reconstruction
 template <typename T>
 bool EliasFanoDecoder<T>::init() {
