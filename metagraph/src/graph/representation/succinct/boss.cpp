@@ -1970,11 +1970,19 @@ void call_paths(const BOSS &boss,
             assert(path[i]);
             visited[path[i]] = true;
 
-            if (!dual_path[i])
+            // traverse further if the reverse-complement
+            // k-mer does not belong to the graph or if it
+            // matches the current k-mer
+            if (!dual_path[i] || dual_path[i] == path[i])
                 continue;
 
-            // check if reverse-complement k-mer has been traversed
-            if (!visited[dual_path[i]] || dual_path[i] == path[i]) {
+            // Check if the reverse-complement k-mer has not been traversed
+            // and hence if the current k-mer is the first one to be traversed,
+            // that is, the primary one).
+            // Note that this also covers the case where the reverse-complement
+            // k-mer does not belong to the selected subgraph, as it cannot be
+            // marked as visited in that case.
+            if (!visited[dual_path[i]]) {
                 visited[dual_path[i]] = discovered[dual_path[i]] = true;
                 continue;
             }
