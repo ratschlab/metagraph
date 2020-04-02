@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include <sdsl/uint128_t.hpp>
+
 #include <common/utils/template_utils.hpp>
 
 
@@ -26,6 +27,7 @@ struct Unaligned<T, typename std::enable_if<std::is_pod<T>::value>::type> {
     T value;
 } __attribute__((__packed__));
 
+/** Template specialization for an unaligned sdsl::uint256_t, which is not a POD */
 template <>
 struct Unaligned<sdsl::uint256_t> {
     Unaligned() = default; // uninitialized
@@ -43,13 +45,33 @@ inline T load_unaligned(const void *p) {
     static_assert(alignof(Unaligned<T>) == 1, "Invalid alignment");
     return static_cast<const Unaligned<T> *>(p)->value;
 }
+#ifndef MODE_TI
+// need to specialize for sdsl::uint128_t which is not a POD if MODE_TI is not available
+template <>
+struct Unaligned<sdsl::uint128_t> {
+    Unaligned() = default; // uninitialized
+    /* implicit */ Unaligned(sdsl::uint128_t v) : lo(v), hi(v >> 64) {}
+    uint64_t lo; // sdsl::uint128 is not a POD, so needs to be stored as 2 uint64_t's
+    uint64_t hi;
+} __attribute__((__packed__));
+
+template <>
+inline sdsl::uint128_t load_unaligned(const void *p) {
+    static_assert(sizeof(Unaligned<sdsl::uint128_t>) == sizeof(sdsl::uint128_t),
+                  "Invalid unaligned size");
+    static_assert(alignof(Unaligned<sdsl::uint128_t>) == 1, "Invalid alignment");
+    return sdsl::uint128_t(static_cast<const Unaligned<sdsl::uint128_t> *>(p)->lo,
+                           static_cast<const Unaligned<sdsl::uint128_t> *>(p)->hi);
+}
+#endif
 
 template <>
 inline sdsl::uint256_t load_unaligned(const void *p) {
     static_assert(sizeof(Unaligned<sdsl::uint256_t>) == sizeof(sdsl::uint256_t),
                   "Invalid unaligned size");
     static_assert(alignof(Unaligned<sdsl::uint256_t>) == 1, "Invalid alignment");
-    return sdsl::uint256_t(static_cast<const Unaligned<sdsl::uint256_t> *>(p)->lo, static_cast<const Unaligned<sdsl::uint256_t> *>(p)->hi);
+    return sdsl::uint256_t(static_cast<const Unaligned<sdsl::uint256_t> *>(p)->lo,
+                           static_cast<const Unaligned<sdsl::uint256_t> *>(p)->hi);
 }
 
 /**
@@ -89,43 +111,38 @@ inline void store_unaligned(void *p, T value) {
 
 /** Returns the rank of the highest non-null bit */
 template <typename T>
-inline uint32_t log2_floor(T x) {
+inline uint32_t log2_floor(const T& x) {
     return sdsl::bits::hi(x);
 }
 
 template <>
-inline uint32_t log2_floor(sdsl::uint128_t x) {
+inline uint32_t log2_floor(const sdsl::uint128_t &x) {
+#ifdef MODE_TI
     if (x == 0U) {
         return 0;
     }
 
     uint64_t hi = static_cast<uint64_t>(x >> 64);
     if (hi == 0U) {
-        uint64_t lo = static_cast<uint64_t>(x);
-        return 63 - __builtin_clzll(lo);
+        return sdsl::bits::hi(static_cast<uint64_t>(x));
     } else {
-        return 127 - __builtin_clzll(hi);
+        return sdsl::bits::hi(hi) + 64;
     }
+#else
+    return x.hi();
+#endif
 }
 
 template <>
-inline uint32_t log2_floor(sdsl::uint256_t x) {
-    if (x == 0U) {
-        return 0;
-    }
-
-    sdsl::uint128_t hi = static_cast<sdsl::uint128_t>(x >> 128);
-    if (hi == 0U) {
-        return log2_floor(static_cast<sdsl::uint128_t>(x));
-    } else {
-        return 128 + log2_floor(hi);
-    }
+inline uint32_t log2_floor(const sdsl::uint256_t &x) {
+    return x.hi();
 }
 
+/** Returns the trailing zeros in the binary representation of a number */
 template <typename T>
 inline uint32_t count_trailing_zeros(T v) {
     assert(v != 0U);
-    return __builtin_ctzll(v);
+    return sdsl::bits::lo(v);
 }
 
 
@@ -134,10 +151,10 @@ inline uint32_t count_trailing_zeros(sdsl::uint128_t v) {
     assert(v != 0U);
     uint64_t lo = static_cast<uint64_t>(v);
     if (lo != 0) {
-        return __builtin_ctzll(lo);
+        return count_trailing_zeros(lo);
     } else {
         uint64_t hi = static_cast<uint64_t>(v >> 64);
-        return 64 + __builtin_ctzll(hi);
+        return 64 + count_trailing_zeros(hi);
     }
 }
 
@@ -145,7 +162,7 @@ template <>
 inline uint32_t count_trailing_zeros(sdsl::uint256_t v) {
     assert(v != 0U);
     sdsl::uint128_t lo = static_cast<sdsl::uint128_t>(v);
-    if (lo != 0) {
+    if (lo != 0U) {
         return count_trailing_zeros(lo);
     } else {
         sdsl::uint128_t hi = static_cast<sdsl::uint128_t>(v >> 128);
@@ -213,8 +230,8 @@ void EliasFanoEncoder<T>::add(T value) {
     if (num_lower_bits_ != 0) {
         const T lowerBits = value & lower_bits_mask_;
         size_t pos_bits = size_ * num_lower_bits_;
-        if (pos_bits - cur_pos_lbits_
-            >= 8 * sizeof(T)) { // first sizeof(T)*8 bits are ready to be written
+        if (pos_bits - cur_pos_lbits_ >= 8 * sizeof(T)) {
+            // first sizeof(T)*8 bits are ready to be written
             cur_pos_lbits_ += 8 * sizeof(T);
             sink_->write(reinterpret_cast<char *>(lower_), sizeof(T));
             lower_[0] = lower_[1];
@@ -234,9 +251,8 @@ template <typename T>
 size_t EliasFanoEncoder<T>::finish() {
     assert(size_ == declared_size_);
     if (size_ == 0U) {
-        if (sink_internal_.is_open()) {
-            sink_internal_.close();
-        }
+        safe_close(sink_internal_);
+        safe_close(sink_internal_upper_);
         return 0;
     }
     // Append the remaining lower bits
@@ -301,21 +317,14 @@ uint8_t EliasFanoEncoder<T>::get_num_lower_bits(T max_value, size_t size) {
 
 template <typename T>
 void EliasFanoEncoder<T>::write_bits(uint8_t *data, size_t pos, T value) {
-    if constexpr (sizeof(T) == 32) {
-        assert(sdsl::bits::hi(value) < 248);
-        unsigned char *const ptr = data + (pos / 8);
-        sdsl::uint256_t ptrv = load_unaligned<sdsl::uint256_t>(ptr);
+    unsigned char *const ptr = data + (pos / 8);
+    if constexpr (sizeof(T) >= 16) {
+        assert(log2_floor(value) < 8 * (sizeof(T) - 1));
+        T ptrv = load_unaligned<T>(ptr);
         ptrv |= value << (pos % 8);
-        store_unaligned<sdsl::uint256_t>(ptr, ptrv);
-    } else if constexpr (sizeof(T) == 16) {
-        assert(sdsl::bits::hi(value) < 120);
-        unsigned char *const ptr = data + (pos / 8);
-        sdsl::uint128_t ptrv = load_unaligned<sdsl::uint128_t>(ptr);
-        ptrv |= value << (pos % 8);
-        store_unaligned<sdsl::uint128_t>(ptr, ptrv);
-    } else {
-        assert(sdsl::bits::hi(value) < 56);
-        unsigned char *const ptr = data + (pos / 8);
+        store_unaligned<T>(ptr, ptrv);
+    } else { // all types <=64 bits are stored in 64-bit chunks
+        assert(log2_floor(value) < 56);
         uint64_t ptrv = load_unaligned<uint64_t>(ptr);
         ptrv |= value << (pos % 8);
         store_unaligned<uint64_t>(ptr, ptrv);
@@ -354,7 +363,8 @@ T EliasFanoDecoder<T>::next_upper() {
         upper_block_ = load_unaligned<T>(upper_.data() + upper_pos_);
     }
 
-    size_t trailing_zeros = count_trailing_zeros(upper_block_); // count trailing zeros
+    size_t trailing_zeros = count_trailing_zeros(upper_block_);
+
     upper_block_ = upper_block_ & (upper_block_ - 1UL); // reset the lowest 1 bit
 
     return static_cast<T>(8 * upper_pos_ + trailing_zeros - position_);
@@ -365,19 +375,20 @@ T EliasFanoDecoder<T>::next_lower() {
     assert(position_ < size_);
     const size_t pos_bits = position_ * num_lower_bits_;
     if (pos_bits - cur_pos_bits_ >= 8 * sizeof(T)) {
-        // +2*sizeof(T) because we read that many bytes in #init()
-        const size_t bytes_read = cur_pos_bits_ / 8 + 2 * sizeof(T);
         cur_pos_bits_ += 8 * sizeof(T);
-        lower_[0] = lower_[1];
-        lower_[1] = 0;
-        if (num_lower_bytes_ > bytes_read) {
-            source_->read(reinterpret_cast<char *>(&lower_[1]),
-                          std::min(sizeof(T), num_lower_bytes_ - bytes_read));
+        lower_idx_++;
+        if (lower_idx_ == READ_BUF_SIZE - 1 && num_lower_bytes_ > 0) {
+            const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
+            lower_[0] = lower_[lower_idx_];
+            source_->read(reinterpret_cast<char *>(&lower_[1]), to_read);
+            num_lower_bytes_ -= to_read;
+            lower_idx_ = 0;
         }
     }
     const size_t adjusted_pos = pos_bits - cur_pos_bits_;
 
-    const uint8_t *ptr = reinterpret_cast<uint8_t *>(lower_) + (adjusted_pos / 8);
+    const uint8_t *ptr
+            = reinterpret_cast<uint8_t *>(&lower_[lower_idx_]) + (adjusted_pos / 8);
     const T ptrv = load_unaligned<T>(ptr);
     return T(clear_high_bits(ptrv >> (adjusted_pos % 8), num_lower_bits_));
 }
@@ -394,18 +405,14 @@ std::optional<T> EliasFanoDecoder<T>::next() {
     return result + offset_;
 }
 
-template <typename T>
-bool EliasFanoDecoder<T>::end_of_chunk() {
-    return position_ == size_;
-}
-
 // TODO: make this public and avoid reconstruction
 template <typename T>
 bool EliasFanoDecoder<T>::init() {
     position_ = 0;
     cur_pos_bits_ = 0;
     upper_block_ = 0;
-    lower_[0] = lower_[1] = 0;
+    lower_idx_ = 0;
+    memset(lower_, 0, sizeof(lower_));
     // Initialized to a negative number to save on decrement instruction in
     // #next_upper.
     upper_pos_ = static_cast<uint64_t>(-sizeof(T));
@@ -417,11 +424,14 @@ bool EliasFanoDecoder<T>::init() {
     source_->read(reinterpret_cast<char *>(&num_lower_bits_), 1);
     source_->read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
     source_->read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
-    size_t low_bytes_read = std::min(2 * sizeof(T), num_lower_bytes_);
+    size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
     source_->read(reinterpret_cast<char *>(lower_), low_bytes_read);
+    num_lower_bytes_ -= low_bytes_read;
 
     upper_.reserve(num_upper_bytes_ + sizeof(T) - 1);
-#ifndef NDEBUG // silence Valgrind uninitialized warnings, as we read (and ignore) from uninitilized memory
+#ifndef NDEBUG
+    // silence Valgrind uninitialized warnings. Because our reads are unaligned, we read
+    // (and correctly ignore) from uninitilized memory
     memset(upper_.data(), 0, num_upper_bytes_ + sizeof(T) - 1);
 #endif
     upper_.resize(num_upper_bytes_);
@@ -432,7 +442,7 @@ bool EliasFanoDecoder<T>::init() {
 }
 
 template <typename T>
-T EliasFanoDecoder<T>::clear_high_bits(T value, uint32_t index) {
+T EliasFanoDecoder<T>::clear_high_bits(T value, uint8_t index) {
     assert(index < 8 * sizeof(T));
     return value & ((T(1) << index) - 1UL);
 }

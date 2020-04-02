@@ -25,11 +25,6 @@ class EliasFanoEncoder {
   public:
     EliasFanoEncoder() {}
 
-    EliasFanoEncoder(const EliasFanoEncoder &other) = delete;
-    EliasFanoEncoder(EliasFanoEncoder &&other) = delete;
-    EliasFanoEncoder operator=(const EliasFanoEncoder &other) = delete;
-    EliasFanoEncoder operator=(EliasFanoEncoder &&other) = delete;
-
     /**
      * Constructs an Elias-Fano encoder of an array with the given #size and given
      * #max_value. The encoded output is written to #out_filename.
@@ -40,6 +35,7 @@ class EliasFanoEncoder {
                      const std::string &out_filename,
                      bool is_append = false);
 
+    /** Constructs an encoder that encodes the #data array */
     EliasFanoEncoder(const Vector<T> &data, std::ofstream *sink, std::ofstream *sink_upper);
 
     /** Encodes the next number */
@@ -111,13 +107,14 @@ class EliasFanoEncoder {
 #endif
 
     /**
-     * Sink to write the encoded values to. Points to either #sink_internal or to an
-     * externally provided sink
+     * Sink to write the encoded values to (except the upper bytes). Points to either
+     * #sink_internal or to an externally provided sink
      * */
     std::ofstream *sink_;
     /**
      * Sink to write the upper bytes to. Points to either #sink_internal_upper_ or to
-     * an externally provided sink
+     * an externally provided sink. Upper bytes are written to a different sink in order
+     * to avoid costly seek operations within the file
      * */
     std::ofstream *sink_upper_;
 
@@ -133,7 +130,7 @@ class EliasFanoEncoder {
     /** Number of lower bits that were written to disk */
     size_t cur_pos_lbits_ = 0;
 
-    /** Offset to add to each element when decoding. */
+    /** Offset to add to each element when decoding (used for minimizing the range). */
     T offset_ = 0;
 };
 
@@ -142,21 +139,26 @@ class EliasFanoEncoder {
  */
 template <typename T>
 class EliasFanoDecoder {
+    static constexpr uint32_t READ_BUF_SIZE = 1024;
   public:
     EliasFanoDecoder() {}
 
-    /** Creates a decoder that retrieves data from the given source */
+    /** Creates a decoder that retrieves data from the given file */
     EliasFanoDecoder(const std::string &source_name);
 
+    /**
+     * Create a decoder that reads the data from the provided streams.
+     * @param source the stream containing all encoded data, except the upper bytes
+     * @param source_upper the stream containing the upper bytes
+     * @param file_end_upper the position where the algorithm should stop reading. Note
+     * that this is not necessarily the end of the file, see #EliasFanoEncoderBuffered.
+     */
     EliasFanoDecoder(std::ifstream *source,
                      std::ifstream *source_upper,
                      std::streampos file_end_upper);
 
     /** Returns the next compressed element or empty if all elements were read */
     std::optional<T> next();
-
-    /** Returns true if the current position is at the end of a chunk. */
-    bool end_of_chunk();
 
   private:
     bool init();
@@ -168,7 +170,7 @@ class EliasFanoDecoder {
     T next_lower();
 
     /** Clear the high bits of #value starting at position #index. */
-    static T clear_high_bits(T value, uint32_t index);
+    static T clear_high_bits(T value, uint8_t index);
 
   private:
     /** Index of current element */
@@ -188,7 +190,10 @@ class EliasFanoDecoder {
      * binary representation of the lower bits of each number. To save memory, only the
      * currently needed window of 16 bytes is read from the file.
      */
-    T lower_[2];
+    T lower_[READ_BUF_SIZE];
+
+    /** Points to current element in #lower_ */
+    uint32_t lower_idx_;
 
     /**
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
@@ -272,7 +277,7 @@ class EliasFanoDecoder<std::pair<T, C>> {
 };
 
 /**
- * Specialization of #EliasFanoEncoder that can encode sequences of unknown size. It uses
+ * Specialization of #EliasFanoEncoder that can encode sequences of unknown range. It uses
  * a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
  */
 template <typename T>
@@ -283,10 +288,8 @@ class EliasFanoEncoderBuffered {
     void add(const T &value);
 
     size_t finish();
-
   private:
     void encode_chunk();
-
   private:
     Vector<T> buffer_;
     std::string file_name_;
