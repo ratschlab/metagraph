@@ -45,7 +45,7 @@ inline T load_unaligned(const void *p) {
     static_assert(alignof(Unaligned<T>) == 1, "Invalid alignment");
     return static_cast<const Unaligned<T> *>(p)->value;
 }
-//TODO(ddanciu): define load_unaligned when MODE_TI is not present
+// TODO(ddanciu): define load_unaligned when MODE_TI is not present
 template <>
 inline sdsl::uint256_t load_unaligned(const void *p) {
     static_assert(sizeof(Unaligned<sdsl::uint256_t>) == sizeof(sdsl::uint256_t),
@@ -361,19 +361,21 @@ T EliasFanoDecoder<T>::next_lower() {
     assert(position_ < size_);
     const size_t pos_bits = position_ * num_lower_bits_;
     if (pos_bits - cur_pos_bits_ >= 8 * sizeof(T)) {
-        // +2*sizeof(T) because we read that many bytes in #init()
-        const size_t bytes_read = cur_pos_bits_ / 8 + 2 * sizeof(T);
         cur_pos_bits_ += 8 * sizeof(T);
-        lower_[0] = lower_[1];
-        lower_[1] = 0;
-        if (num_lower_bytes_ > bytes_read) {
-            source_->read(reinterpret_cast<char *>(&lower_[1]),
-                          std::min(sizeof(T), num_lower_bytes_ - bytes_read));
+        lower_idx_++;
+        if (lower_idx_ == READ_BUF_SIZE-1 && num_lower_bytes_ > 0) {
+            const uint32_t to_read
+                    = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
+            lower_[0] = lower_[lower_idx_];
+            source_->read(reinterpret_cast<char *>(&lower_[1]), to_read);
+            num_lower_bytes_ -= to_read;
+            lower_idx_ = 0;
         }
     }
     const size_t adjusted_pos = pos_bits - cur_pos_bits_;
 
-    const uint8_t *ptr = reinterpret_cast<uint8_t *>(lower_) + (adjusted_pos / 8);
+    const uint8_t *ptr
+            = reinterpret_cast<uint8_t *>(&lower_[lower_idx_]) + (adjusted_pos / 8);
     const T ptrv = load_unaligned<T>(ptr);
     return T(clear_high_bits(ptrv >> (adjusted_pos % 8), num_lower_bits_));
 }
@@ -401,7 +403,7 @@ bool EliasFanoDecoder<T>::init() {
     position_ = 0;
     cur_pos_bits_ = 0;
     upper_block_ = 0;
-    lower_[0] = lower_[1] = 0;
+    memset(lower_, 0, sizeof(lower_));
     // Initialized to a negative number to save on decrement instruction in
     // #next_upper.
     upper_pos_ = static_cast<uint64_t>(-sizeof(T));
@@ -413,8 +415,9 @@ bool EliasFanoDecoder<T>::init() {
     source_->read(reinterpret_cast<char *>(&num_lower_bits_), 1);
     source_->read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
     source_->read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
-    size_t low_bytes_read = std::min(2 * sizeof(T), num_lower_bytes_);
+    size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
     source_->read(reinterpret_cast<char *>(lower_), low_bytes_read);
+    num_lower_bytes_ -= low_bytes_read;
 
     upper_.reserve(num_upper_bytes_ + sizeof(T) - 1);
 #ifndef NDEBUG

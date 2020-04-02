@@ -108,6 +108,30 @@ class EliasFanoFixture : public benchmark::Fixture {
             }
         }
     }
+
+    void read_uncompressed1024(benchmark::State &state) {
+        utils::TempFile tempfile;
+        std::ofstream &out = tempfile.ofstream();
+        out.write(reinterpret_cast<char *>(sorted.data()), sorted.size() * sizeof(T));
+        out.close();
+        uint64_t res[128];
+        for (auto _ : state) {
+            std::ifstream in = std::ifstream(tempfile.name(), std::ios::binary);
+            sum_uncompressed = 0;
+            while (in.read(reinterpret_cast<char *>(res), 256)) {
+                for (uint32_t i = 0; i < std::min(32L, in.gcount()/8); ++i) {
+                    sum_uncompressed += res[i];
+                }
+            }
+            // making sure the compiler doesn't optimized away the reading and doing some
+            // sanity check
+            if (sum_compressed != sum_uncompressed) {
+                std::cerr << "Error: Compressed and Non-compressed reads don't match. "
+                          << " for " << sizeof(T) << " bytes. You have a bug. "
+                          << std::endl;
+            }
+        }
+    }
 };
 
 template <typename T>
@@ -132,6 +156,10 @@ BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_compressed64, uint64_t)
 BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_uncompressed64, uint64_t)
 (benchmark::State &state) {
     read_uncompressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_uncompressed1024, uint64_t)
+(benchmark::State &state) {
+    read_uncompressed1024(state);
 }
 
 
