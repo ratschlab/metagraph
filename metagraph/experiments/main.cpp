@@ -1,6 +1,8 @@
 #include <filesystem>
 #include <thread>
 #include <chrono>
+#include <cmath>
+
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
 #include <ips4o.hpp>
@@ -17,7 +19,9 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/wavelet_tree.hpp"
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/data_generation.hpp"
 #include "graph/alignment/aligner_helper.hpp"
@@ -35,23 +39,16 @@ using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
 
 
-//TODO
-// THINGS TO REPORT:
-//  - querying time
+// THINGS REPORTED:
+//  - query time
 //  - RAM usage
 //  - disk usage
-//  - construction time
-
 template <class BitVector>
 void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     DataGenerator generator;
     generator.set_seed(42);
 
-    auto other = generator.generate_random_column(n, d)->convert_to<BitVector>();
-
-    if (static_cast<int>(other.rank1(1)) < -1
-            || static_cast<int>(other.rank0(1)) < -1)
-        throw std::runtime_error("Never happens, just initializing the rank support");
+    BitVector other(generator.generate_random_column(n, d));
 
     std::filesystem::path path(std::string("test.")
                                 + prefix
@@ -66,27 +63,20 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     auto mem_before = get_curr_RSS();
 
-    BitVector another;
+    std::vector<BitVector> vectors(20);
 
-    std::this_thread::sleep_for(5s);
+    for (auto &another : vectors) {
+        std::ifstream in(path, std::ios::binary);
+        another.load(in);
+    }
 
-    std::ifstream in(path, std::ios::binary);
-    another.load(in);
-    in.close();
+    auto RAM_per_vector = (get_curr_RSS() - mem_before) / vectors.size();
 
-    if (static_cast<int>(another.rank1(another.size() / 2)) < -1
-            || static_cast<int>(another.rank0(another.size() / 2)) < -1)
-        throw std::runtime_error("Never happens, just initializing the rank support");
-
-    if (another.num_set_bits()
-            && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
-            && static_cast<int>(another.select1(1)) < -1)
-        throw std::runtime_error("Never happens, just initializing the select support");
-
-    auto RAM = get_curr_RSS() - mem_before;
+    BitVector another = std::move(vectors.back());
+    vectors.clear();
 
     Timer timer;
-    int result = 0;
+    uint64_t result = 0;
     const size_t num_iterations = 10'000'000;
 
     // Random access time
@@ -98,10 +88,10 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     // Random get_int time
     timer.reset();
-    for (uint64_t i = 0, size = another.size() / 64; i < num_iterations; ++i) {
+    for (uint64_t i = 0, size = another.size() / 64; i < num_iterations; i += 64) {
         result += another.get_int(((i * 87'178'291'199) % size) * 64, 64);
     }
-    double random_access_word = timer.elapsed() / num_iterations;
+    double random_access_word = timer.elapsed() / ((num_iterations + 63) / 64);
 
     // Random rank time
     timer.reset();
@@ -110,10 +100,18 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     }
     double random_rank = timer.elapsed() / num_iterations;
 
+    // Random conditional rank time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size(); i < num_iterations; ++i) {
+        result += another.conditional_rank1((i * 87'178'291'199) % size);
+    }
+    double random_cond_rank = timer.elapsed() / num_iterations;
+
     // Random select time
     timer.reset();
-    double random_select = 0.0 / 0.0;
-    if (another.num_set_bits() && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+    double random_select = NAN;
+    if (another.num_set_bits() && !std::is_same_v<BitVector, bit_vector_hyb<>>
+                               && !std::is_same_v<BitVector, bit_vector_smallrank>) {
         for (uint64_t i = 0, rank = another.num_set_bits(); i < num_iterations; ++i) {
             result += another.select1(1 + (i * 87'178'291'199) % rank);
         }
@@ -131,12 +129,12 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     // Random get_int time
     timer.reset();
-    for (uint64_t i = 0, j = 0, size = another.size() / 64; i < num_iterations; ++i) {
+    for (uint64_t i = 0, j = 0, size = another.size() / 64; i < num_iterations; i += 64) {
         if (j == size)
             j = 0;
         result += another.get_int(64 * j++, 64);
     }
-    double sequential_access_word = timer.elapsed() / num_iterations;
+    double sequential_access_word = timer.elapsed() / ((num_iterations + 63) / 64);
 
     // Sequential rank time
     timer.reset();
@@ -147,12 +145,22 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     }
     double sequential_rank = timer.elapsed() / num_iterations;
 
+    // Sequential conditional rank time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size(); i < num_iterations; ++i) {
+        if (j == size)
+            j = 0;
+        result += another.conditional_rank1(j++);
+    }
+    double sequential_cond_rank = timer.elapsed() / num_iterations;
+
     // Sequential select time
-    double sequential_select = 0.0 / 0.0;
-    if (another.num_set_bits() && !std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+    double sequential_select = NAN;
+    if (another.num_set_bits() && !std::is_base_of_v<BitVector, bit_vector_hyb<>>
+                               && !std::is_base_of_v<BitVector, bit_vector_smallrank>) {
         timer.reset();
         for (uint64_t i = 0, j = 1, rank = another.num_set_bits(); i < num_iterations; ++i) {
-            if (j == rank)
+            if (j > rank)
                 j = 1;
             result += another.select1(j++);
         }
@@ -161,11 +169,13 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     std::filesystem::remove(path);
 
-    double predicted_size = 0.0 / 0.0;
-    if constexpr(!std::is_base_of_v<bit_vector_dyn, BitVector>
-                    && !std::is_base_of_v<bit_vector_hyb<>, BitVector>
-                    && !std::is_base_of_v<bit_vector_il<>, BitVector>) {
-        predicted_size = predict_size<BitVector>(another.size(), another.num_set_bits());
+    // Write result to /dev/null so the compiler doesn't optimize it away
+    std::ofstream ofs("/dev/null");
+    ofs << result;
+
+    double predicted_size = NAN;
+    if constexpr(!std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+        predicted_size = BitVector::predict_size(another.size(), another.num_set_bits());
     }
 
     std::cout << prefix
@@ -173,16 +183,13 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
               << "\t" << d
               << "\t" << 1. * another.num_set_bits() / another.size()
               << "\t" << 1. * serialized_size * 8 / n
-              << "\t" << RAM
+              << "\t" << RAM_per_vector
               << "\t" << 1. * predicted_size / another.size()
-              << "\t" << random_access
-              << "\t" << random_access_word
-              << "\t" << random_rank
-              << "\t" << random_select
-              << "\t" << sequential_access
-              << "\t" << sequential_access_word
-              << "\t" << sequential_rank
-              << "\t" << sequential_select
+              << "\t" << random_access      << "\t" << sequential_access
+              << "\t" << random_access_word << "\t" << sequential_access_word
+              << "\t" << random_rank        << "\t" << sequential_rank
+              << "\t" << random_select      << "\t" << sequential_select
+              << "\t" << random_cond_rank   << "\t" << sequential_cond_rank
               << std::endl;
 }
 
@@ -384,9 +391,13 @@ int main(int argc, char *argv[]) {
                 "sd",
                 "hyb",
                 "il",
+                "rrr15",
+                "rrr31",
                 "rrr63",
                 "rrr127",
                 "rrr255",
+                "rank",
+                "smallrank",
                 "dyn",
             };
             ValuesConstraint<std::string> vector_type_constraint(vector_types);
@@ -425,18 +436,30 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_il<>>(length_arg.getValue(),
                                                     density_arg.getValue(),
                                                     "il");
+            } else if (vector_type == "rrr15") {
+                test_vector_points<bit_vector_rrr<15>>(length_arg.getValue(),
+                                                       density_arg.getValue(),
+                                                       "rrr15");
+            } else if (vector_type == "rrr31") {
+                test_vector_points<bit_vector_rrr<31>>(length_arg.getValue(),
+                                                       density_arg.getValue(),
+                                                       "rrr31");
             } else if (vector_type == "rrr63") {
-                test_vector_points<bit_vector_rrr<>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr");
+                test_vector_points<bit_vector_rrr<63>>(length_arg.getValue(),
+                                                       density_arg.getValue(),
+                                                       "rrr63");
             } else if (vector_type == "rrr127") {
                 test_vector_points<bit_vector_rrr<127>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr127");
+                                                        density_arg.getValue(),
+                                                        "rrr127");
             } else if (vector_type == "rrr255") {
                 test_vector_points<bit_vector_rrr<255>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr255");
+                                                        density_arg.getValue(),
+                                                        "rrr255");
+            } else if (vector_type == "smallrank") {
+                test_vector_points<bit_vector_smallrank>(length_arg.getValue(),
+                                                         density_arg.getValue(),
+                                                         "smallrank");
             } else if (vector_type == "dyn") {
                 test_vector_points<bit_vector_dyn>(length_arg.getValue(),
                                                    density_arg.getValue(),

@@ -10,8 +10,7 @@ class DataGenerator {
 
     void set_seed(int seed) { gen.seed(seed); }
 
-    std::unique_ptr<bit_vector>
-    generate_random_column(uint64_t n, double d);
+    sdsl::bit_vector generate_random_column(uint64_t n, double d);
 
     std::vector<uint64_t>
     generate_random_ints(uint64_t n, uint64_t begin, uint64_t end);

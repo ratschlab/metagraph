@@ -117,6 +117,8 @@ class FastaParser {
     inline iterator begin() const;
     inline iterator end() const;
 
+    const std::string& get_filename() const { return filename_; }
+
   private:
     std::string filename_;
     bool with_reverse_complement_;

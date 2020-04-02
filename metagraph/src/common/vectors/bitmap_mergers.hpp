@@ -7,7 +7,7 @@
 #include <memory>
 #include <functional>
 
-#include "bit_vector.hpp"
+#include "bit_vector_sdsl.hpp"
 
 
 namespace utils {

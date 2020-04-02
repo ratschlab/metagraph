@@ -85,10 +85,10 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
     if (!child_nodes_.size()) {
         assert(assignments_.size() == 1);
 
-        for (size_t i = 0; i < row_ids.size(); ++i) {
-            assert(row_ids[i] < num_rows());
+        for (Row i : row_ids) {
+            assert(i < num_rows());
 
-            if ((*nonzero_rows_)[row_ids[i]]) {
+            if ((*nonzero_rows_)[i]) {
                 // only a single column is stored in leafs
                 slice.push_back(0);
             }
@@ -139,9 +139,9 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
 
         } else {
             // check index
-            if ((*nonzero_rows_)[global_offset]) {
+            if (uint64_t rank = nonzero_rows_->conditional_rank1(global_offset)) {
                 // map index from parent's to children's coordinate system
-                child_row_ids.push_back(nonzero_rows_->rank1(global_offset) - 1);
+                child_row_ids.push_back(rank - 1);
                 skip_row[i] = false;
             }
         }
@@ -149,6 +149,10 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
 
     if (!child_row_ids.size())
         return std::vector<Column>(row_ids.size(), delim);
+
+    // TODO: query by columns and merge them in the very end to avoid remapping
+    //       the same column indexes many times when propagating to the root.
+    // TODO: implement a cache efficient method for merging the columns.
 
     // query all children subtrees and get relations from them
     std::vector<std::vector<Column>> child_slices(child_nodes_.size());
@@ -167,15 +171,12 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
     }
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        if (skip_row[i]) {
-            slice.push_back(delim);
-            continue;
-        }
-
-        // merge rows from child submatrices
-        for (auto &p : pos) {
-            while (*(++p) != delim) {
-                slice.push_back(*p);
+        if (!skip_row[i]) {
+            // merge rows from child submatrices
+            for (auto &p : pos) {
+                while (*(++p) != delim) {
+                    slice.push_back(*p);
+                }
             }
         }
         slice.push_back(delim);

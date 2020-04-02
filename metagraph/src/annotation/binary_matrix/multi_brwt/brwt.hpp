@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <memory>
 
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/range_partition.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
@@ -19,7 +19,7 @@ class BRWT : public BinaryMatrix {
     typedef uint32_t Child;
 
   public:
-    BRWT() : nonzero_rows_(new bit_vector_small()) {}
+    BRWT() : nonzero_rows_(new bit_vector_smallrank()) {}
 
     BRWT(const BRWT &other) = delete;
     BRWT& operator=(const BRWT &other) = delete;

@@ -1,10 +1,14 @@
 #include "gtest/gtest.h"
 
+#include <cmath>
 #include <cstdlib>
 
 #include "test_helpers.hpp"
 
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/threads/threading.hpp"
 #include "common/data_generation.hpp"
@@ -21,24 +25,14 @@ typedef ::testing::Types<bit_vector_stat,
                          bit_vector_sd,
                          bit_vector_rrr<>,
                          bit_vector_il<>,
+                         bit_vector_il<4096>,
                          bit_vector_hyb<>,
                          bit_vector_small,
+                         bit_vector_smallrank,
                          bit_vector_smart>
         BitVectorTypes;
 
 TYPED_TEST_SUITE(BitVectorTest, BitVectorTypes);
-
-template <typename Bitmap>
-class BitVectorTestSelect0 : public ::testing::Test { };
-
-typedef ::testing::Types<bit_vector_dyn,
-                         bit_vector_sd,
-                         bit_vector_rrr<>,
-                         bit_vector_il<>,
-                         bit_vector_hyb<>>
-        BitVectorTypesSelect0;
-
-TYPED_TEST_SUITE(BitVectorTestSelect0, BitVectorTypesSelect0);
 
 
 void test_next_subvector(const bit_vector &vector, uint64_t idx) {
@@ -228,7 +222,7 @@ TYPED_TEST(BitVectorTest, queries) {
 }
 
 TYPED_TEST(BitVectorTest, select1) {
-    for (size_t size : { 1, 2, 3, 4, 5, 50, 51, 52 }) {
+    for (size_t size : { 1, 2, 3, 4, 5, 50, 51, 52, 54, 100, 200, 300, 1000 }) {
         for (size_t i = 0; i < size; ++i) {
             sdsl::bit_vector bv(size, 0);
             bv[i] = 1;
@@ -238,7 +232,7 @@ TYPED_TEST(BitVectorTest, select1) {
     }
 }
 
-TYPED_TEST(BitVectorTestSelect0, select0) {
+TYPED_TEST(BitVectorTest, select0) {
     // Mainly test select0.
     auto vector = std::make_unique<TypeParam>(10, 1);
     ASSERT_TRUE(vector);
@@ -370,6 +364,53 @@ TEST(bit_vector_dyn, Serialization) {
     }
 }
 
+template <class bit_vector_type>
+uint64_t space_taken(const bit_vector_type &vec) {
+    std::ofstream outstream(test_dump_basename, std::ios::binary);
+    vec.serialize(outstream);
+    outstream.close();
+    std::ifstream instream(test_dump_basename, std::ios::binary | std::ifstream::ate);
+    return instream.tellg() * 8;
+}
+
+TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
+    double tolerance = 0.01;
+    std::vector<double> densities = { .05, .2, .4, .5, .7, .9, .95 };
+
+    if constexpr(std::is_same_v<TypeParam, bit_vector_hyb<>>)
+        return;
+
+    DataGenerator gen;
+    for (uint64_t size : { 1'000'000, 10'000'000 }) {
+        for (double density : densities) {
+            sdsl::bit_vector bv = gen.generate_random_column(size, density);
+            uint64_t footprint = space_taken(TypeParam(bv));
+            EXPECT_GE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * (1 - tolerance)) << "Density: " << density;
+            EXPECT_LE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * (1 + tolerance)) << "Density: " << density;
+        }
+    }
+}
+
+TEST(select_support_mcl, PredictedMemoryFootprint) {
+    double tolerance = 0.01;
+    std::vector<double> densities = { .05, .2, .4, .5, .7, .9, .98 };
+
+    DataGenerator gen;
+    for (uint64_t size : { 1'000'000, 10'000'000, 100'000'000 }) {
+        for (double density : densities) {
+            sdsl::bit_vector bv = gen.generate_random_column(size, density);
+
+            uint64_t footprint = space_taken(sdsl::select_support_mcl<1>(&bv));
+            EXPECT_GE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * (1 - tolerance)) << "Size: " << size << "\tDensity: " << density;
+            EXPECT_LE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                      footprint * (1 + tolerance)) << "Size: " << size << "\tDensity: " << density;
+        }
+    }
+}
+
 TYPED_TEST(BitVectorTest, Serialization) {
     std::vector<std::initializer_list<bool>> init_lists = {
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -470,40 +511,6 @@ TEST(bit_vector_sd, MoveAssignmentDense) {
     reference_based_test(second, numbers);
 }
 
-TEST(bit_vector_stat, InitializeByBitsSparse) {
-    std::vector<uint64_t> set_bits = { 3, 6, 9, 14, 15 };
-    std::initializer_list<bool> init_list = { 0, 0, 0, 1, 0, 0, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_stat first(numbers);
-    bit_vector_stat second(
-        [&](const auto &callback) {
-            for (uint64_t pos : set_bits) {
-                callback(pos);
-            }
-        },
-        first.size()
-    );
-    reference_based_test(second, numbers);
-}
-
-TEST(bit_vector_stat, InitializeByBitsDense) {
-    std::vector<uint64_t> set_bits = { 0, 1, 3, 6, 8, 9, 11, 12, 13, 14, 15 };
-    std::initializer_list<bool> init_list = { 1, 1, 0, 1, 0, 0, 1, 0,
-                                              1, 1, 0, 1, 1, 1, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
-    bit_vector_stat first(numbers);
-    bit_vector_stat second(
-        [&](const auto &callback) {
-            for (uint64_t pos : set_bits) {
-                callback(pos);
-            }
-        },
-        first.size()
-    );
-    reference_based_test(second, numbers);
-}
-
 TEST(bit_vector_sd, InitializeByBitsSparse) {
     std::vector<uint64_t> set_bits = { 3, 6, 9, 14, 15 };
     std::initializer_list<bool> init_list = { 0, 0, 0, 1, 0, 0, 1, 0,
@@ -561,7 +568,7 @@ TYPED_TEST(BitVectorTest, add_to_all_zero) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
             sdsl::bit_vector vector(size, false);
-            TypeParam bvs(gen.generate_random_column(size, density)->to_vector());
+            TypeParam bvs(gen.generate_random_column(size, density));
             bvs.add_to(&vector);
             EXPECT_EQ(bvs.to_vector(), vector);
         }
@@ -573,7 +580,7 @@ TYPED_TEST(BitVectorTest, add_to_all_one) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
             sdsl::bit_vector vector(size, true);
-            TypeParam bvs(gen.generate_random_column(size, density)->to_vector());
+            TypeParam bvs(gen.generate_random_column(size, density));
             bvs.add_to(&vector);
             EXPECT_EQ(sdsl::bit_vector(size, true), vector);
         }
@@ -584,8 +591,7 @@ TYPED_TEST(BitVectorTest, add_to_same) {
     for (uint64_t size : { 0, 10, 100, 1000000 }) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
-            auto bv = gen.generate_random_column(size, density);
-            sdsl::bit_vector vector = bv->to_vector();
+            sdsl::bit_vector vector = gen.generate_random_column(size, density);
             TypeParam bvs(vector);
             bvs.add_to(&vector);
             EXPECT_EQ(bvs.to_vector(), vector);
@@ -597,11 +603,11 @@ TYPED_TEST(BitVectorTest, add_all_zero) {
     for (uint64_t size : { 0, 10, 100, 1000000 }) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
-            auto bv = gen.generate_random_column(size, density);
-            sdsl::bit_vector vector = bv->to_vector();
+            sdsl::bit_vector bv = gen.generate_random_column(size, density);
+            sdsl::bit_vector vector = bv;
             TypeParam bvs(sdsl::bit_vector(size, false));
             bvs.add_to(&vector);
-            EXPECT_EQ(bv->to_vector(), vector);
+            EXPECT_EQ(bv, vector);
         }
     }
 }
@@ -610,8 +616,7 @@ TYPED_TEST(BitVectorTest, add_all_ones) {
     for (uint64_t size : { 0, 10, 100, 1000000 }) {
         DataGenerator gen;
         for (double density : { 0.0, 0.5, 1.0 }) {
-            auto bv = gen.generate_random_column(size, density);
-            sdsl::bit_vector vector = bv->to_vector();
+            sdsl::bit_vector vector = gen.generate_random_column(size, density);
             TypeParam bvs(sdsl::bit_vector(size, true));
             bvs.add_to(&vector);
             EXPECT_EQ(sdsl::bit_vector(size, true), vector);

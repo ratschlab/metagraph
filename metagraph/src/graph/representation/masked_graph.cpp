@@ -8,24 +8,27 @@
 MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                       std::unique_ptr<bitmap>&& kmers_in_graph,
-                      bool only_valid_nodes_in_mask)
+                      bool only_valid_nodes_in_mask,
+                      bool canonical)
       : graph_(graph),
         kmers_in_graph_(std::move(kmers_in_graph)),
-        only_valid_nodes_in_mask_(only_valid_nodes_in_mask) {
+        only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
+        is_canonical_(canonical) {
     assert(kmers_in_graph_.get());
     assert(kmers_in_graph_->size() == graph->max_index() + 1);
+    assert(!is_canonical_ || graph_->is_canonical_mode());
 }
 
 MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
-                      std::function<bool(const DeBruijnGraph::node_index&)>&& callback,
-                      size_t num_set_bits,
-                      bool only_valid_nodes_in_mask)
+                      std::function<bool(node_index)>&& callback,
+                      bool only_valid_nodes_in_mask,
+                      bool canonical)
       : MaskedDeBruijnGraph(graph,
                             std::make_unique<bitmap_lazy>(std::move(callback),
-                                                          graph->max_index() + 1,
-                                                          num_set_bits),
-                            only_valid_nodes_in_mask) {}
+                                                          graph->max_index() + 1),
+                            only_valid_nodes_in_mask,
+                            canonical) {}
 
 // Traverse the outgoing edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph

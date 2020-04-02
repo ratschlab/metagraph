@@ -78,7 +78,7 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
                 // compress the subindex vector and set it to the child node
                 // all in a single thread
                 submatrices[i].nonzero_rows_
-                    = std::make_unique<bit_vector_small>(std::move(subindex));
+                    = std::make_unique<bit_vector_smallrank>(std::move(subindex));
                 parent.child_nodes_[i].reset(new BRWT(std::move(submatrices[i])));
             }
         ));
@@ -191,8 +191,8 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
     // get the root node in Multi-BRWT
     BRWT root = std::move(nodes.at(0));
     // compress the index vector
-    root.nonzero_rows_ = std::make_unique<bit_vector_small>(
-        root.nonzero_rows_->convert_to<bit_vector_small>()
+    root.nonzero_rows_ = std::make_unique<bit_vector_smallrank>(
+        root.nonzero_rows_->convert_to<bit_vector_smallrank>()
     );
     // update the column arrangement to be consistent with the initial
     // order 1,2,...,m
@@ -326,7 +326,7 @@ void BRWTOptimizer::reassign(size_t node_rank, BRWT *parent, size_t num_threads)
         });
 
         grand_child->nonzero_rows_
-            = std::make_unique<bit_vector_small>(std::move(subindex));
+            = std::make_unique<bit_vector_smallrank>(std::move(subindex));
 
         parent->child_nodes_[parent->child_nodes_.size()
                         - children_reassigned.size() + t] = std::move(grand_child);
@@ -346,18 +346,18 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
         assert(brwt_child->nonzero_rows_->size() <= node.num_rows());
 
         // updated vector
-        delta += predict_size<bit_vector_small>(
+        delta += bit_vector_smallrank::predict_size(
                         node.num_rows(),
                         brwt_child->nonzero_rows_->num_set_bits());
 
         // old index vector
-        delta -= predict_size<bit_vector_small>(
+        delta -= bit_vector_smallrank::predict_size(
                         brwt_child->nonzero_rows_->size(),
                         brwt_child->nonzero_rows_->num_set_bits());
     }
 
     // removed index vector
-    delta -= predict_size<bit_vector_small>(
+    delta -= bit_vector_smallrank::predict_size(
                     node.nonzero_rows_->size(),
                     node.nonzero_rows_->num_set_bits());
 

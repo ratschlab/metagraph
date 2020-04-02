@@ -14,6 +14,9 @@
 #include "common/serialization.hpp"
 #include "common/algorithms.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "boss_construct.hpp"
 
 using utils::remove_suffix;
