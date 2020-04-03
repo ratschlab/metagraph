@@ -23,5 +23,5 @@ sra_number=$1
 input_file=$2
 output_file=$3
 # --prune-unitigs 0 --fallback 3
-execute metagraph clean -v -p 1 --min-count 2  --prune-unitigs 0 --fallback 5 --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
+execute metagraph clean -v -p 1 --min-count 1  --prune-unitigs 0 --fallback 5 --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
 rm -rf $(dirname "${input_file}")
