@@ -1765,10 +1765,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             if (!get_last(i))
                 return;
 
-            // check if |i| has incoming edges
-            auto j = bwd(i);
-            // check if =1 or >1
-            if (masked_pick_single_incoming(*this, &j, get_node_last_value(i), subgraph_mask) || j)
+            // skip |i| if it has at least one incoming edge
+            edge_index j = bwd(i);
+            masked_pick_single_incoming(*this, &j, get_node_last_value(i), subgraph_mask);
+            if (j)
                 return;
 
             do {
