@@ -1809,17 +1809,17 @@ struct Edge {
     std::vector<TAlphabet> source_kmer;
 };
 
-void fetch_path(const BOSS &boss,
-                const BOSS::Call<std::vector<edge_index>&&,
-                                 std::vector<TAlphabet>&&> &callback,
-                std::vector<edge_index> &path,
-                std::vector<TAlphabet> &sequence,
-                bool kmers_in_single_form,
-                bool trim_sentinels,
-                sdsl::bit_vector &discovered,
-                sdsl::bit_vector &visited,
-                ProgressBar &progress_bar,
-                const bitmap *subgraph_mask);
+void call_path(const BOSS &boss,
+               const BOSS::Call<std::vector<edge_index>&&,
+                                std::vector<TAlphabet>&&> &callback,
+               std::vector<edge_index> &path,
+               std::vector<TAlphabet> &sequence,
+               bool kmers_in_single_form,
+               bool trim_sentinels,
+               sdsl::bit_vector &discovered,
+               sdsl::bit_vector &visited,
+               ProgressBar &progress_bar,
+               const bitmap *subgraph_mask);
 
 void call_paths(const BOSS &boss,
                 edge_index starting_kmer,
@@ -1943,23 +1943,26 @@ void call_paths(const BOSS &boss,
             edge = next_edge;
         }
 
-        fetch_path(boss, callback, path, sequence,
-                   kmers_in_single_form, trim_sentinels,
-                   discovered, visited, progress_bar, subgraph_mask);
+        call_path(boss, callback, path, sequence,
+                  kmers_in_single_form, trim_sentinels,
+                  discovered, visited, progress_bar, subgraph_mask);
     }
 }
 
-void fetch_path(const BOSS &boss,
-                const BOSS::Call<std::vector<edge_index>&&,
-                                 std::vector<TAlphabet>&&> &callback,
-                std::vector<edge_index> &path,
-                std::vector<TAlphabet> &sequence,
-                bool kmers_in_single_form,
-                bool trim_sentinels,
-                sdsl::bit_vector &discovered,
-                sdsl::bit_vector &visited,
-                ProgressBar &progress_bar,
-                const bitmap *subgraph_mask) {
+// Call the path or all primary paths extracted from it.
+// The primary paths are the longest subsequences without any
+// k-mers with their reverse-complement pairs already traversed.
+void call_path(const BOSS &boss,
+               const BOSS::Call<std::vector<edge_index>&&,
+                                std::vector<TAlphabet>&&> &callback,
+               std::vector<edge_index> &path,
+               std::vector<TAlphabet> &sequence,
+               bool kmers_in_single_form,
+               bool trim_sentinels,
+               sdsl::bit_vector &discovered,
+               sdsl::bit_vector &visited,
+               ProgressBar &progress_bar,
+               const bitmap *subgraph_mask) {
     if (!trim_sentinels && !kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
         return;
