@@ -1818,7 +1818,8 @@ void fetch_path(const BOSS &boss,
                 bool trim_sentinels,
                 sdsl::bit_vector &discovered,
                 sdsl::bit_vector &visited,
-                ProgressBar &progress_bar);
+                ProgressBar &progress_bar,
+                const bitmap *subgraph_mask);
 
 void call_paths(const BOSS &boss,
                 edge_index starting_kmer,
@@ -1919,6 +1920,9 @@ void call_paths(const BOSS &boss,
 
             // loop over the outgoing edges
             do {
+                assert((!subgraph_mask || (*subgraph_mask)[edge] || visited[edge])
+                        && "k-mers not from subgraph are marked visited");
+
                 if (!next_edge && !split_to_unitigs && !visited[edge]) {
                     // save the edge for visiting if we extract contigs
                     discovered[edge] = true;
@@ -1941,7 +1945,7 @@ void call_paths(const BOSS &boss,
 
         fetch_path(boss, callback, path, sequence,
                    kmers_in_single_form, trim_sentinels,
-                   discovered, visited, progress_bar);
+                   discovered, visited, progress_bar, subgraph_mask);
     }
 }
 
@@ -1954,7 +1958,8 @@ void fetch_path(const BOSS &boss,
                 bool trim_sentinels,
                 sdsl::bit_vector &discovered,
                 sdsl::bit_vector &visited,
-                ProgressBar &progress_bar) {
+                ProgressBar &progress_bar,
+                const bitmap *subgraph_mask) {
     if (!trim_sentinels && !kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
         return;
@@ -2006,18 +2011,15 @@ void fetch_path(const BOSS &boss,
         assert(path[i]);
         visited[path[i]] = true;
 
-        // traverse further if the reverse-complement
-        // k-mer does not belong to the graph or if it
-        // matches the current k-mer
-        if (!dual_path[i] || dual_path[i] == path[i])
+        // Extend the path if the reverse-complement k-mer does not belong
+        // to the graph (subgraph) or if it matches the current k-mer and
+        // hence the edge path[i] is going to be traversed first.
+        if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
+                || dual_path[i] == path[i])
             continue;
 
         // Check if the reverse-complement k-mer has not been traversed
-        // and hence if the current k-mer is the first one to be traversed,
-        // that is, the primary one).
-        // Note that this also covers the case where the reverse-complement
-        // k-mer does not belong to the selected subgraph, as it cannot be
-        // marked as visited in that case.
+        // and thus, if the current edge path[i] is to be traversed first.
         if (!visited[dual_path[i]]) {
             visited[dual_path[i]] = discovered[dual_path[i]] = true;
             continue;
