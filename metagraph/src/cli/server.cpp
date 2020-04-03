@@ -5,6 +5,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -36,17 +37,17 @@ Json::Value adjust_for_types(const string &v) {
 string convert_to_json(const string &ret_str) {
     vector<string> queries = utils::split_string(ret_str, "\n");
 
-    Json::Value root = Json::Value(Json::arrayValue);
+    std::map<int, Json::Value> query_results;
 
     for (auto qit = queries.begin(); qit != queries.end(); ++qit) {
         vector<string> parts = utils::split_string(*qit, "\t");
 
         Json::Value res_obj;
-        res_obj["query"] =  parts[0];
+        res_obj["query"] =  parts[1];
 
         res_obj["results"] = Json::Value(Json::arrayValue);
 
-        for (auto it = ++parts.begin(); it != parts.end(); ++it) {
+        for (auto it = ++(++parts.begin()); it != parts.end(); ++it) {
             Json::Value sampleEntry;
 
             vector<string> entries = utils::split_string(*it, ":");
@@ -70,7 +71,13 @@ string convert_to_json(const string &ret_str) {
             res_obj["results"].append(sampleEntry);
         }
 
-        root.append(res_obj);
+        query_results[(int) atoi(parts[0].c_str())] = res_obj;
+    }
+
+    Json::Value root = Json::Value(Json::arrayValue);
+    // output by query id
+    for(const auto it : query_results) {
+        root.append(it.second);
     }
 
     Json::StreamWriterBuilder builder;
@@ -100,51 +107,46 @@ Json::Value parse_json_string(const std::string &msg) {
 
 std::string form_client_reply(const std::string &received_message,
                               const AnnotatedDBG &anno_graph,
-                              const Config &config,
-                              IDBGAligner *aligner = nullptr) {
+                              const Config &config_orig,
+                              IDBGAligner *aligner,
+                              ThreadPool &thread_pool) {
     // TODO: query with alignment to graph
-    // TODO: fast query
     std::ignore = aligner;
-
     Json::Value json = parse_json_string(received_message);
 
     const auto &fasta = json["FASTA"];
 
+    Config config(config_orig);
+
     // discovery_fraction a proxy of 1 - %similarity
-    auto discovery_fraction = json.get("discovery_fraction",
-                                       config.discovery_fraction).asDouble();
-    auto count_labels = json.get("count_labels", config.count_labels).asBool();
-    auto print_signature = json.get("print_signature", config.print_signature).asBool();
-    auto num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
+    config.discovery_fraction = json.get("discovery_fraction", config.discovery_fraction).asDouble();
+
+    config.count_labels = json.get("count_labels", config.count_labels).asBool();
+    config.print_signature = json.get("print_signature", config.print_signature).asBool();
+    config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
+
+    config.fast = json.get("fast", config.fast).asBool();
 
     std::ostringstream oss;
 
-    // query callback shared by FASTA and sequence modes
-    auto execute_server_query = [&](const std::string &name, const std::string &sequence) {
-        oss << QueryExecutor::execute_query(name, sequence, count_labels, print_signature,
-                                            config.suppress_unlabeled, num_top_labels,
-                                            discovery_fraction,
-                                            config.anno_labels_delimiter, anno_graph);
-    };
-
     if (!fasta.isNull()) {
-        // input is a FASTA sequence
-        read_fasta_from_string(
-            fasta.asString(),
-            [&](kseq_t *read_stream) {
-                execute_query(read_stream->name.s,
-                              read_stream->seq.s,
-                              count_labels,
-                              print_signature,
-                              config.suppress_unlabeled,
-                              num_top_labels,
-                              discovery_fraction,
-                              config.anno_labels_delimiter,
-                              anno_graph,
-                              oss);
-            }
-        );
-    } else {
+        // writing to temporary file in order to reuse query code. This is not optimal and
+        // may turn out to be an issue in production. However, adapting FastaParser to work
+        // on strings seems non-trivial. An alternative would be to use read_fasta_from_string
+        // for non fast queries.
+        utils::TempFile tf(config.tmp_dir);
+        tf.ofstream() << fasta.asString();
+        tf.ofstream().close();
+
+        std::mutex oss_mutex;
+
+        QueryExecutor qe(config, anno_graph, nullptr, thread_pool);
+        qe.query_fasta(tf.name(), [&](const std::string res){
+          std::lock_guard<std::mutex> lock(oss_mutex);
+          oss << res;
+        });
+    }
+    else {
         logger->error("No input sequences received from client");
         throw std::domain_error("No input sequences received from client");
     }
@@ -295,6 +297,7 @@ int run_server(Config *config) {
 
     server.config.port = config->port;
 
+    ThreadPool query_thread_pool(num_threads);
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
         // Retrieve string:
         auto content = request->content.string();
@@ -302,7 +305,7 @@ int run_server(Config *config) {
         logger->info("Got search request from " + request->remote_endpoint().address().to_string());
 
         try {
-            auto ret = form_client_reply(content, *anno_graph, *config, aligner.get());
+            auto ret = form_client_reply(content, *anno_graph, *config, aligner.get(), query_thread_pool);
             write_compressed_if_possible(SimpleWeb::StatusCode::success_ok, ret, response, request);
         }  catch(const std::exception &e) {
             logger->info("Error on request " + string(e.what()));
