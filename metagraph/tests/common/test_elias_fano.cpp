@@ -105,7 +105,7 @@ TYPED_TEST(EliasFanoTest, ReadTwo) {
 template <typename T>
 size_t encode(const Vector<T> &values, const std::string &file_name) {
     common::EliasFanoEncoder<T> encoder(values.size(), values.front(), values.back(),
-                                           file_name);
+                                        file_name);
     for (const auto &v : values) {
         encoder.add(v);
     }
@@ -152,7 +152,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementTwo) {
 }
 
 TYPED_TEST(EliasFanoTest, VariousSizes) {
-    for (uint32_t size = 100; size < 116; ++size) {
+    for (uint32_t size = 1012; size < 1036; ++size) {
         Vector<TypeParam> values(size);
         std::iota(values.begin(), values.end(), 0);
         utils::TempFile file;
@@ -251,30 +251,62 @@ TYPED_TEST(EliasFanoTest, LastByteRead) {
 TYPED_TEST(EliasFanoTest, ReadWriteRandom) {
     for (uint32_t size = 1000; size < 1016; ++size) {
         Vector<TypeParam> values(size);
-        for (uint32_t trial = 0; trial < 16; ++trial) {
-            std::mt19937 rng(123457);
-            std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
+        std::mt19937 rng(123457);
+        std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
-            uint32_t i = 0;
-            std::for_each(values.begin(), values.end(), [&](TypeParam &v) {
-                i += dist10(rng);
-                v = i;
-            });
-            utils::TempFile file;
-            size_t file_size = encode(values, file.name());
-            // each value is represented in 2 bits, plus 25 bytes overhead for the header
-            EXPECT_EQ(file_size,
-                      std::filesystem::file_size(file.name())
-                              + std::filesystem::file_size(file.name() + ".up"));
+        uint32_t i = 0;
+        std::for_each(values.begin(), values.end(), [&](TypeParam &v) {
+            i += dist10(rng);
+            v = i;
+        });
+        utils::TempFile file;
+        size_t file_size = encode(values, file.name());
+        // each value is represented in 2 bits, plus 25 bytes overhead for the header
+        EXPECT_EQ(file_size,
+                  std::filesystem::file_size(file.name())
+                          + std::filesystem::file_size(file.name() + ".up"));
 
-            common::EliasFanoDecoder<TypeParam> decoder(file.name());
-            for (uint32_t i = 0; i < size; ++i) {
-                std::optional<TypeParam> decoded = decoder.next();
-                EXPECT_TRUE(decoded.has_value());
-                EXPECT_EQ(values[i], decoded.value());
-            }
-            EXPECT_FALSE(decoder.next().has_value());
+        common::EliasFanoDecoder<TypeParam> decoder(file.name());
+        for (uint32_t i = 0; i < size; ++i) {
+            std::optional<TypeParam> decoded = decoder.next();
+            EXPECT_TRUE(decoded.has_value());
+            EXPECT_EQ(values[i], decoded.value());
         }
+        EXPECT_FALSE(decoder.next().has_value());
+    }
+}
+
+/** The values are selected such that the 1024 element buffer for lower_ needs to be flushed*/
+TYPED_TEST(EliasFanoTest, ReadWriteRandomLargerThanBuffer) {
+    for (uint32_t size = 10000; size < 10016; ++size) {
+        // select an upper bound such that #lower_bits_ don't fit in WRITE_BUF_SIZE*sizeof(T) bytes
+        const uint64_t buf_size_bits = common::EliasFanoEncoder<uint32_t>::WRITE_BUF_SIZE
+                * sizeof(TypeParam) * 8;
+        uint64_t upper_bound = 1ULL << (buf_size_bits / size + sdsl::bits::hi(size) + 2);
+        Vector<TypeParam> values(size);
+        std::mt19937 rng(123457);
+        std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
+
+        uint32_t i = 0;
+        std::for_each(values.begin(), values.end(), [&](TypeParam &v) {
+            i += dist10(rng);
+            v = i;
+        });
+        values.back() = upper_bound;
+        utils::TempFile file;
+        size_t file_size = encode(values, file.name());
+        // each value is represented in 2 bits, plus 25 bytes overhead for the header
+        EXPECT_EQ(file_size,
+                  std::filesystem::file_size(file.name())
+                          + std::filesystem::file_size(file.name() + ".up"));
+
+        common::EliasFanoDecoder<TypeParam> decoder(file.name());
+        for (uint32_t i = 0; i < size; ++i) {
+            std::optional<TypeParam> decoded = decoder.next();
+            EXPECT_TRUE(decoded.has_value());
+            EXPECT_EQ(values[i], decoded.value());
+        }
+        EXPECT_FALSE(decoder.next().has_value());
     }
 }
 
@@ -394,11 +426,12 @@ TEST(EliasFanoTest256, ReadWriteRandomLarge) {
         for (uint32_t trial = 0; trial < 16; ++trial) {
             sdsl::uint256_t i = 0;
             std::for_each(values.begin(), values.end(), [&](sdsl::uint256_t &v) {
-              i += dist10(rng);
-              if (dist10(rng) < 1) { // increase the hi 128 bits every ~10th element
-                  i = ((sdsl::uint256_t)((sdsl::uint128_t)(i >> 128) + 1) << 128) + (uint64_t)i;
-              }
-              v = i;
+                i += dist10(rng);
+                if (dist10(rng) < 1) { // increase the hi 128 bits every ~10th element
+                    i = ((sdsl::uint256_t)((sdsl::uint128_t)(i >> 128) + 1) << 128)
+                            + (uint64_t)i;
+                }
+                v = i;
             });
             utils::TempFile file;
             size_t file_size = encode(values, file.name());
