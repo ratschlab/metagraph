@@ -258,7 +258,7 @@ bool BOSS::load(std::ifstream &instream) {
                 break;
             case State::SMALL:
                 W_ = new wavelet_tree_small(bits_per_char_W_);
-                last_ = new bit_vector_small();
+                last_ = new bit_vector_stat();
                 break;
         }
         if (!W_->load(instream)) {
@@ -949,7 +949,7 @@ void BOSS::switch_state(State new_state) {
             break;
         }
         case State::SMALL: {
-            convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
+            convert<wavelet_tree_small, bit_vector_stat>(&W_, &last_);
             break;
         }
         case State::FAST: {
