@@ -41,6 +41,7 @@ target_link_libraries(tests
     ${SDSL_LIBRARY}
     ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
+target_compile_definitions(tests PUBLIC _USE_FOLLY MODE_TI)
 
 add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark
     EXCLUDE_FROM_ALL benchmark

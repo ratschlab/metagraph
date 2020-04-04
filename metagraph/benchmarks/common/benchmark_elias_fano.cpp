@@ -11,96 +11,189 @@
 
 namespace {
 using namespace mg;
-constexpr size_t ITEM_COUNT = 1e9 / 8; // test on 1GB worth of data
-Vector<uint64_t> sorted(ITEM_COUNT);
 
-static void init_sorted() {
-    std::mt19937 rng(123457);
-    std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
+template <typename T>
+class EliasFanoFixture : public benchmark::Fixture {
+  public:
+    Vector<T> sorted;
+    static T sum_compressed;
+    static T sum_uncompressed;
+    size_t size;
 
-    uint64_t i = 0;
-    std::for_each(sorted.begin(), sorted.end(), [&](uint64_t &v) {
-        i += dist10(rng);
-        v = i;
-    });
-}
+    EliasFanoFixture() { init_sorted(); }
 
-static void BM_write_compressed(benchmark::State &state) {
-    if (state.thread_index == 0) {
-        init_sorted();
+    void init_sorted() {
+        if (!sorted.empty()) {
+            return;
+        }
+        sorted.resize(1e8 / sizeof(T)); // test on 100MB worth of data
+        std::mt19937 rng(123457);
+        std::uniform_int_distribution<std::mt19937::result_type> dist30(0, 30);
+        std::uniform_int_distribution<std::mt19937::result_type> dist10000(0, 10000);
+        T i = 0;
+        uint32_t half_size_bits = sizeof(T) * 4;
+        std::for_each(sorted.begin(), sorted.end(), [&](T &v) {
+            i += dist10000(rng);
+            if (dist30(rng) < 1) { // increase the hi bits every ~30th element
+                i = ((i >> half_size_bits) + 1) << half_size_bits;
+            }
+            v = i;
+        });
+        std::ifstream f;
     }
 
-    for (auto _ : state) {
+    void encode() {
         utils::TempFile tempfile;
-        common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
-        for (const auto& v : sorted) {
+        common::EliasFanoEncoder<T> encoder(sorted.size(), sorted.front(), sorted.back(),
+                                            tempfile.name());
+        for (const auto &v : sorted) {
+            encoder.add(v);
+        }
+        size = encoder.finish();
+    }
+
+    void write_compressed(benchmark::State &state) {
+        for (auto _ : state) {
+            encode();
+        }
+        std::cout << "Write compressed: compression factor for : " << sizeof(T)
+                  << "-byte integers" << (double)sorted.size() * sizeof(T) / size
+                  << std::endl;
+    }
+
+    void write_uncompressed(benchmark::State &state) {
+        for (auto _ : state) {
+            utils::TempFile tempfile;
+            std::ofstream &out = tempfile.ofstream();
+            out.write(reinterpret_cast<char *>(sorted.data()), sorted.size() * sizeof(T));
+            out.close();
+        }
+    }
+
+    void read_compressed(benchmark::State &state) {
+        utils::TempFile tempfile;
+        common::EliasFanoEncoder<T> encoder(sorted.size(), sorted.front(), sorted.back(),
+                                            tempfile.name());
+        for (const auto &v : sorted) {
             encoder.add(v);
         }
         encoder.finish();
+        for (auto _ : state) {
+            common::EliasFanoDecoder<T> decoder(tempfile.name());
+            std::optional<T> value;
+            sum_compressed = 0;
+            while ((value = decoder.next()).has_value()) {
+                sum_compressed += value.value();
+            }
+        }
     }
-}
 
-static void BM_write_uncompressed(benchmark::State &state) {
-    if (state.thread_index == 0) {
-        init_sorted();
-    }
-
-    for (auto _ : state) {
+    void read_uncompressed(benchmark::State &state) {
         utils::TempFile tempfile;
         std::ofstream &out = tempfile.ofstream();
-        out.write(reinterpret_cast<char *>(sorted.data()), sorted.size() * sizeof(uint64_t));
+        out.write(reinterpret_cast<char *>(sorted.data()), sorted.size() * sizeof(T));
         out.close();
-    }
-}
-uint64_t sum_compressed;
-static void BM_read_compressed(benchmark::State &state) {
-    if (state.thread_index == 0) {
-        init_sorted();
-    }
-    utils::TempFile tempfile;
-    common::EliasFanoEncoder<uint64_t> encoder(sorted.size(), sorted.back(), tempfile.name());
-    for (const auto& v : sorted) {
-        encoder.add(v);
-    }
-    encoder.finish();
-    for (auto _ : state) {
-        common::EliasFanoDecoder<uint64_t> decoder(tempfile.name());
-        std::optional<uint64_t> value;
-        sum_compressed = 0;
-        while ((value = decoder.next()).has_value()) {
-            sum_compressed += value.value();
+        for (auto _ : state) {
+            std::ifstream in = std::ifstream(tempfile.name(), std::ios::binary);
+            T value;
+            sum_uncompressed = 0;
+            while (in.read(reinterpret_cast<char *>(&value), sizeof(T))) {
+                sum_uncompressed += value;
+            }
+            // making sure the compiler doesn't optimized away the reading and doing some
+            // sanity check
+            if (sum_compressed != sum_uncompressed) {
+                std::cerr << "Error: Compressed and Non-compressed reads don't match. "
+                          << " for " << sizeof(T) << " bytes. You have a bug. "
+                          << std::endl;
+            }
         }
     }
+
+    void read_uncompressed1024(benchmark::State &state) {
+        utils::TempFile tempfile;
+        std::ofstream &out = tempfile.ofstream();
+        out.write(reinterpret_cast<char *>(sorted.data()), sorted.size() * sizeof(T));
+        out.close();
+        uint64_t res[128];
+        for (auto _ : state) {
+            std::ifstream in = std::ifstream(tempfile.name(), std::ios::binary);
+            sum_uncompressed = 0;
+            while (in.read(reinterpret_cast<char *>(res), 256)) {
+                for (uint32_t i = 0; i < std::min(32L, in.gcount()/8); ++i) {
+                    sum_uncompressed += res[i];
+                }
+            }
+            // making sure the compiler doesn't optimized away the reading and doing some
+            // sanity check
+            if (sum_compressed != sum_uncompressed) {
+                std::cerr << "Error: Compressed and Non-compressed reads don't match. "
+                          << " for " << sizeof(T) << " bytes. You have a bug. "
+                          << std::endl;
+            }
+        }
+    }
+};
+
+template <typename T>
+T EliasFanoFixture<T>::sum_compressed;
+template <typename T>
+T EliasFanoFixture<T>::sum_uncompressed;
+
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_write_uncompressed64, uint64_t)
+(benchmark::State &state) {
+    write_uncompressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_write_compressed64, uint64_t)
+(benchmark::State &state) {
+    write_compressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_compressed64, uint64_t)
+(benchmark::State &state) {
+    read_compressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_uncompressed64, uint64_t)
+(benchmark::State &state) {
+    read_uncompressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_uncompressed1024, uint64_t)
+(benchmark::State &state) {
+    read_uncompressed1024(state);
 }
 
-uint64_t sum_uncompressed;
-static void BM_read_uncompressed(benchmark::State &state) {
-    if (state.thread_index == 0) {
-        init_sorted();
-    }
-    utils::TempFile tempfile;
-    std::ofstream &out = tempfile.ofstream();
-    out.write(reinterpret_cast<char *>(sorted.data()), sorted.size() * sizeof(uint64_t));
-    out.close();
-    for (auto _ : state) {
-        std::ifstream &in = tempfile.ifstream();
-        uint64_t value;
-        sum_uncompressed = 0;
-        while (in.read(reinterpret_cast<char *>(&value), sizeof(uint64_t))) {
-            sum_uncompressed += value;
-        }
-        // making sure the compiler doesn't optimized away the reading and doing some
-        // sanity check
-        if (sum_compressed != sum_uncompressed) {
-            std::cerr << "Error: Compressed and Non-compressed reads don't match. You "
-                         "have a bug. "
-                      << sum_compressed << " vs. " << sum_uncompressed << std::endl;
-        }
-    }
+
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_write_uncompressed128, sdsl::uint128_t)
+(benchmark::State &state) {
+    write_uncompressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_write_compressed128, sdsl::uint128_t)
+(benchmark::State &state) {
+    write_compressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_compressed128, sdsl::uint128_t)
+(benchmark::State &state) {
+    read_compressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_uncompressed128, sdsl::uint128_t)
+(benchmark::State &state) {
+    read_uncompressed(state);
 }
 
-BENCHMARK(BM_write_compressed);
-BENCHMARK(BM_write_uncompressed);
-BENCHMARK(BM_read_compressed);
-BENCHMARK(BM_read_uncompressed);
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_write_uncompressed256, sdsl::uint256_t)
+(benchmark::State &state) {
+    write_uncompressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_write_compressed256, sdsl::uint256_t)
+(benchmark::State &state) {
+    write_compressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_compressed256, sdsl::uint256_t)
+(benchmark::State &state) {
+    read_compressed(state);
+}
+BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_read_uncompressed256, sdsl::uint256_t)
+(benchmark::State &state) {
+    read_uncompressed(state);
+}
+
 } // namespace
