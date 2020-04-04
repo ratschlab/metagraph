@@ -1006,6 +1006,26 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
+    size_t k = 5;
+    std::string reference = "ATCCCTTTTAAAA";
+    std::string query =     "ATCCCGGGGGGGGGGGGGGGGGTTTTAAAA";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+
+    check_json_dump_load(*graph,
+                         path,
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
+
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
 TEST(DBGAlignerTest, align_dummy) {
     size_t k = 7;
     std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";

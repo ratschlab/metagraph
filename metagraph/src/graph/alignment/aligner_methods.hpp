@@ -37,9 +37,9 @@ class ExactSeeder : public Seeder<NodeType> {
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
     std::string_view query_;
-    std::vector<NodeType> query_nodes_;
     bool orientation_;
     std::vector<score_t> partial_sum;
+    std::vector<NodeType> query_nodes_;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
