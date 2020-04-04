@@ -111,7 +111,7 @@ inline void store_unaligned(void *p, T value) {
 
 /** Returns the rank of the highest non-null bit */
 template <typename T>
-inline uint32_t log2_floor(const T& x) {
+inline uint32_t log2_floor(const T &x) {
     return sdsl::bits::hi(x);
 }
 
@@ -228,17 +228,17 @@ void EliasFanoEncoder<T>::add(T value) {
 
     // Append the #num_lower_bits_ bits of #value to #lower_
     if (num_lower_bits_ != 0) {
-        const T lowerBits = value & lower_bits_mask_;
+        const T lower_bits = value & lower_bits_mask_;
         size_t pos_bits = size_ * num_lower_bits_;
-        if (pos_bits - cur_pos_lbits_ >= 8 * sizeof(T)) {
-            // first sizeof(T)*8 bits are ready to be written
-            cur_pos_lbits_ += 8 * sizeof(T);
-            sink_->write(reinterpret_cast<char *>(lower_), sizeof(T));
-            lower_[0] = lower_[1];
-            lower_[1] = 0;
+        const size_t max_buf_size = sizeof(lower_) - sizeof(T);
+        if (pos_bits - cur_pos_lbits_ >= 8 * max_buf_size) {
+            // first sizeof(T)*8 bits were written
+            cur_pos_lbits_ += 8 * max_buf_size;
+            sink_->write(lower_, max_buf_size);
+            std::memcpy(lower_, lower_ +  max_buf_size, sizeof(T));
+            std::memset(lower_+sizeof(T), 0, max_buf_size);
         }
-        write_bits(reinterpret_cast<uint8_t *>(lower_), pos_bits % (8 * sizeof(T)),
-                   lowerBits);
+        write_bits(lower_ + (pos_bits - cur_pos_lbits_) / 8, pos_bits % 8, lower_bits);
     }
 
 #ifndef NDEBUG
@@ -257,10 +257,10 @@ size_t EliasFanoEncoder<T>::finish() {
     }
     // Append the remaining lower bits
     if (num_lower_bits_ != 0) {
-        size_t cur_pos_bytes = (cur_pos_lbits_ + 7) / 8;
-        assert(cur_pos_bytes <= num_lower_bytes_);
-        assert(num_lower_bytes_ - cur_pos_bytes < 2 * sizeof(T));
-        sink_->write(reinterpret_cast<char *>(lower_), num_lower_bytes_ - cur_pos_bytes);
+        size_t pos_bits = size_ * num_lower_bits_;
+        size_t num_bytes = (pos_bits - cur_pos_lbits_ + 7) / 8;
+        assert(cur_pos_lbits_ / 8 + num_bytes == num_lower_bytes_);
+        sink_->write(lower_, num_bytes);
     }
     sink_upper_->write(upper_.data(), num_upper_bytes_);
     safe_close(sink_internal_);
@@ -275,6 +275,7 @@ void EliasFanoEncoder<T>::init(size_t size, T max_value) {
         return;
     }
     max_value -= offset_;
+    std::memset(lower_, 0, sizeof(lower_));
     // #write_bits supports a max of sizeof(T)-1 bytes
     num_lower_bits_ = std::min(get_num_lower_bits(max_value, size),
                                static_cast<uint8_t>(8 * sizeof(T) - 8));
@@ -316,8 +317,8 @@ uint8_t EliasFanoEncoder<T>::get_num_lower_bits(T max_value, size_t size) {
 }
 
 template <typename T>
-void EliasFanoEncoder<T>::write_bits(uint8_t *data, size_t pos, T value) {
-    unsigned char *const ptr = data + (pos / 8);
+void EliasFanoEncoder<T>::write_bits(char *data, size_t pos, T value) {
+    char *const ptr = data + (pos / 8);
     if constexpr (sizeof(T) >= 16) {
         assert(log2_floor(value) < 8 * (sizeof(T) - 1));
         T ptrv = load_unaligned<T>(ptr);
