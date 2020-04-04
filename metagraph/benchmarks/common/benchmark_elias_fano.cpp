@@ -15,9 +15,10 @@ using namespace mg;
 template <typename T>
 class EliasFanoFixture : public benchmark::Fixture {
   public:
-    static Vector<T> sorted;
+    Vector<T> sorted;
     static T sum_compressed;
     static T sum_uncompressed;
+    size_t size;
 
     EliasFanoFixture() { init_sorted(); }
 
@@ -34,11 +35,13 @@ class EliasFanoFixture : public benchmark::Fixture {
         std::for_each(sorted.begin(), sorted.end(), [&](T &v) {
             i += dist10000(rng);
             if (dist30(rng) < 1) { // increase the hi bits every ~30th element
-                i = ((T)((T)(i >> half_size_bits) + 1) << half_size_bits);
+                i = ((i >> half_size_bits) + 1) << half_size_bits;
             }
             v = i;
         });
+        std::ifstream f;
     }
+
     void encode() {
         utils::TempFile tempfile;
         common::EliasFanoEncoder<T> encoder(sorted.size(), sorted.front(), sorted.back(),
@@ -48,8 +51,6 @@ class EliasFanoFixture : public benchmark::Fixture {
         }
         size = encoder.finish();
     }
-
-    size_t size;
 
     void write_compressed(benchmark::State &state) {
         for (auto _ : state) {
@@ -138,8 +139,6 @@ template <typename T>
 T EliasFanoFixture<T>::sum_compressed;
 template <typename T>
 T EliasFanoFixture<T>::sum_uncompressed;
-template <typename T>
-Vector<T> EliasFanoFixture<T>::sorted;
 
 BENCHMARK_TEMPLATE_F(EliasFanoFixture, BM_write_uncompressed64, uint64_t)
 (benchmark::State &state) {

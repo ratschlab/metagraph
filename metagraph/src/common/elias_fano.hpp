@@ -23,6 +23,7 @@ namespace common {
 template <typename T>
 class EliasFanoEncoder {
   public:
+    static constexpr uint32_t WRITE_BUF_SIZE = 1024;
     EliasFanoEncoder() {}
 
     /**
@@ -52,7 +53,7 @@ class EliasFanoEncoder {
     static uint8_t get_num_lower_bits(T max_value, size_t size);
 
     /** Writes #value (with len up to 56 bits) to #data starting at the #pos-th bit. */
-    static void write_bits(uint8_t *data, size_t pos, T value);
+    static void write_bits(char *data, size_t pos, T value);
 
     void init(size_t size, T max_value);
 
@@ -64,7 +65,7 @@ class EliasFanoEncoder {
      * chunk of 8 bytes is ready to be written, we flush it to #sink_ and shift the data
      * in #lower_ to the left by sizeof(T) bytes.
      */
-    T lower_[2] = { 0, 0 };
+    char lower_[WRITE_BUF_SIZE * sizeof(T)];
 
     /**
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
@@ -140,6 +141,7 @@ class EliasFanoEncoder {
 template <typename T>
 class EliasFanoDecoder {
     static constexpr uint32_t READ_BUF_SIZE = 1024;
+
   public:
     EliasFanoDecoder() {}
 
@@ -288,6 +290,7 @@ class EliasFanoEncoderBuffered {
     void add(const T &value);
 
     size_t finish();
+
   private:
     void encode_chunk();
   private:

@@ -149,10 +149,11 @@ void MEMSeeder<NodeType>
     size_t k = graph_.get_k();
 
     // find start of MEM
-    auto it = std::find_if(query_nodes_.begin(), query_nodes_.end(),
-                           [](NodeType node) { return node != DeBruijnGraph::npos; });
+    auto it = query_nodes_.begin();
 
-    while (it < query_nodes_.end()) {
+    while ((it = std::find_if(it, query_nodes_.end(),
+                              [](NodeType node) { return node != DeBruijnGraph::npos; }))
+            < query_nodes_.end()) {
         // find end of MEM
         auto next = std::find_if(
             it, query_nodes_.end(),
@@ -163,6 +164,7 @@ void MEMSeeder<NodeType>
             ++next;
 
         assert(next > it);
+        assert(next <= query_nodes_.end());
 
         // compute the correct string offsets
         const char *begin_it = query_.data() + (it - query_nodes_.begin());
@@ -181,10 +183,7 @@ void MEMSeeder<NodeType>
                                          orientation_));
         }
 
-        // if this k-mer was matched, then the next one will be accessible
-        // by an extend call, so there's no need to seed from it
-        it = std::find_if(next + 1, query_nodes_.end(),
-                          [](NodeType node) { return node != DeBruijnGraph::npos; });
+        it = next != query_nodes_.end() ? next + 1 : next;
     }
 }
 
