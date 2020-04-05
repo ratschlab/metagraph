@@ -11,8 +11,8 @@
 #  - the location where the graph will be placed
 
 # check the command-line arguments
-if [ "$#" -ne 4 ]; then
-	    echo_err "Usage: build.sh <sra_id> <input_dir> <output_dir> <memory_in_GB>"
+if [ "$#" -ne 5 ]; then
+	    echo_err "Usage: build.sh <sra_id> <input_dir> <output_dir> <memory_in_GB> <container_type"
 	    exit 1
 fi
 
@@ -23,6 +23,7 @@ sra_number=$1
 download_dir=$2
 output_dir=$3
 mem_cap_gb=$4
+container_type=$5
 input_dir="${download_dir}/kmc"
 
 mkdir -p "${output_dir}"
@@ -38,7 +39,7 @@ fi
 exit_code=0
 set +e
 for i in {1..1}; do  # we now know how much memory we need, so retrying is not necessary
-  if execute metagraph build -v -p 4 -k 31 --container vector_disk --canonical --count-kmers -o "${output_dir}/${sra_number}" --mem-cap-gb ${mem_cap_gb} --tmp-dir ${tmp_dir} --disk-cap-gb 200 --count-width 16 ${input_dir}/${sra_number}.kmc.kmc_pre; then
+  if execute metagraph build -v -p 4 -k 31 --container "${container_type}" --canonical --count-kmers --no-shrink -o "${output_dir}/${sra_number}" --mem-cap-gb ${mem_cap_gb} --tmp-dir ${tmp_dir} --disk-cap-gb 200 --count-width 16 ${input_dir}/${sra_number}.kmc.kmc_pre; then
     exit_code=0
     break
   else

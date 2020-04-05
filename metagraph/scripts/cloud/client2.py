@@ -148,14 +148,14 @@ def internal_ip():
         return '127.0.0.1'  # this usually happens on dev laptops; cloud machines work fine
 
 
-def start_build(sra_id, wait_time, buffer_size_gb):
+def start_build(sra_id, wait_time, buffer_size_gb, container_type):
     input_dir = download_dir(sra_id)
     output_dir = build_dir(sra_id)
     logging.info(f'Starting build from {input_dir} to {output_dir}, ram={round(buffer_size_gb, 2)}')
     make_dir_if_needed(build_dir(sra_id))
     log_file_name = os.path.join(build_dir(sra_id), 'build.log')
     build_processes[sra_id] = (subprocess.Popen(
-        f'./build.sh {sra_id} {input_dir} {output_dir} {buffer_size_gb} 2>&1 > {log_file_name}',
+        f'./build.sh {sra_id} {input_dir} {output_dir} {buffer_size_gb} {container_type} 2>&1 > {log_file_name}',
         shell=True), time.time(), wait_time)
     return True
 
@@ -402,8 +402,12 @@ def check_status():
                       'size_mb': build_size, 'required_ram_gb': required_ram_gb}
             nack('build', params)
         elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
+            required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9; # also account for dummy kmers
             buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
-            start_build(sra_id, time.time() - start_time, buffer_size_gb)
+            if (required_ram_all_mem_gb < 2):
+                start_build(sra_id, time.time() - start_time, required_ram_all_mem_gb, 'vector')
+            else:
+                start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk')
         else:
             logging.info(f'Not enough RAM for building. Have {round(available_ram_gb, 2)}GB need {required_ram_gb}GB')
 
@@ -567,9 +571,9 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://metagraph14/clean/',
+    parser.add_argument('--destination', default='gs://metagraph20/clean/',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default='gs://metagraph14/logs',
+    parser.add_argument('--log_destination', default='gs://metagraph20/logs',
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
     args = parser.parse_args()
@@ -581,7 +585,7 @@ if __name__ == '__main__':
 
     if not args.server:
         logging.info('Trying to find server address...')
-        if subprocess.call(['gsutil', 'cp', 'gs://metagraph14/server', '/tmp/server'], stdout=subprocess.PIPE,
+        if subprocess.call(['gsutil', 'cp', 'gs://metagraph20/server', '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
             exit(1)
