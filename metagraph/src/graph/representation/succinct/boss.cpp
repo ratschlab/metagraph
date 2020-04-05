@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <string>
 #include <cstdio>
+#include <cmath>
 
 #include <progress_bar.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
@@ -273,11 +274,48 @@ bool BOSS::load(std::ifstream &instream) {
 
         recompute_NF();
 
-        return true;
+        return instream.good();
+
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load the BOSS table." << std::endl;
         return false;
     } catch (...) {
+        return false;
+    }
+}
+
+void BOSS::serialize_suffix_ranges(std::ofstream &outstream) const {
+    // dump node range index
+    serialize_number(outstream, node_suffix_length_);
+
+    outstream.write(reinterpret_cast<const char *>(node_suffix_ranges_.data()),
+                    node_suffix_ranges_.size()
+                        * sizeof(decltype(node_suffix_ranges_)::value_type));
+}
+
+bool BOSS::load_suffix_ranges(std::ifstream &instream) {
+    // load node suffix range index if exists
+    try {
+        node_suffix_length_ = load_number(instream);
+        if (!node_suffix_length_ || node_suffix_length_ > k_)
+            throw std::ios_base::failure("");
+
+        uint64_t index_size = std::pow(alph_size - 1, node_suffix_length_);
+
+        node_suffix_ranges_.resize(index_size);
+
+        instream.read(reinterpret_cast<char *>(node_suffix_ranges_.data()),
+                      node_suffix_ranges_.size()
+                        * sizeof(decltype(node_suffix_ranges_)::value_type));
+
+        if (!instream.good())
+            throw std::ios_base::failure("");
+
+        return true;
+
+    } catch(...) {
+        node_suffix_length_ = 0;
+        node_suffix_ranges_.clear();
         return false;
     }
 }
@@ -2241,6 +2279,93 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
             }
         }
     }
+}
+
+void BOSS::index_node_suffix_ranges(size_t suffix_length) {
+    assert(suffix_length <= k_);
+
+    node_suffix_length_ = 0;
+    node_suffix_ranges_.clear();
+
+    if (suffix_length == 0u)
+        return;
+
+    // first, index all suffixes and write to a temporary variable
+    // to safely call index() for k-mers in call_paths
+    std::vector<std::pair<edge_index, edge_index>> node_suffix_ranges(
+        std::pow(alph_size - 1, suffix_length),
+        std::make_pair((edge_index)W_->size(), (edge_index)0)
+    );
+
+#if _PROTEIN_GRAPH
+    KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetProtein,
+                                     alphabets::kCharToProtein,
+                                     alphabets::kComplementMapProtein);
+#elif _DNA_CASE_SENSITIVE_GRAPH
+    KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetDNACaseSent,
+                                     alphabets::kCharToDNACaseSent,
+                                     alphabets::kComplementMapDNACaseSent);
+#elif _DNA5_GRAPH
+    KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetDNA5,
+                                     alphabets::kCharToDNA5,
+                                     alphabets::kComplementMapDNA5);
+#elif _DNA_GRAPH
+    KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetDNA,
+                                     alphabets::kCharToDNA,
+                                     alphabets::kComplementMapDNA);
+#else
+    static_assert(false,
+        "Define an alphabet: either "
+        "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+    );
+#endif
+
+    Vector<KmerExtractor2Bit::Kmer64> node_suffixes;
+    std::string sequence;
+
+    call_paths([&](const std::vector<edge_index> &edges,
+                   const std::vector<TAlphabet> &path) {
+            // find the first k-mer with its suffix without
+            // sentinels and start from that edge
+            auto first_real
+                = std::find_if(path.begin(), path.end(),
+                               [](TAlphabet c) { return c != kSentinelCode; });
+
+            size_t offset = std::max(static_cast<size_t>(first_real - path.begin()),
+                                     k_ - suffix_length);
+
+            if (offset + suffix_length + 1 > path.size())
+                return;
+
+            const edge_index *edge_indexes
+                = edges.data() + offset - (k_ - suffix_length);
+
+            // ----**********-
+            sequence.resize(path.size() - offset - 1);
+            std::transform(path.begin() + offset, path.end() - 1,
+                           sequence.begin(),
+                           [&](auto c) { return BOSS::decode(c); });
+
+            node_suffixes.clear();
+            kmer_extractor.sequence_to_kmers(sequence, suffix_length, {},
+                                             &node_suffixes);
+
+            assert(edge_indexes + node_suffixes.size() == edges.data() + edges.size());
+
+            for (size_t i = 0; i < node_suffixes.size(); ++i) {
+                auto &[begin, end] = node_suffix_ranges[node_suffixes[i].data()];
+                begin = std::min(begin, edge_indexes[i]);
+                end = std::max(end, edge_indexes[i] + 1);
+
+                CHECK_INDEX(begin);
+                assert(begin < end);
+                assert(end <= W_->size());
+            }
+        }
+    );
+
+    node_suffix_length_ = suffix_length;
+    std::swap(node_suffix_ranges_, node_suffix_ranges);
 }
 
 bool BOSS::is_valid() const {

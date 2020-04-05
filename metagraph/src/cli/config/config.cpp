@@ -288,6 +288,8 @@ Config::Config(int argc, char *argv[]) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
+        } else if (!strcmp(argv[i], "--index-ranges")) {
+            node_suffix_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--no-postprocessing")) {
             clear_dummy = false;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
@@ -856,6 +858,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --index-ranges [INT] index all node ranges in BOSS for suffixes of given length [0]\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");

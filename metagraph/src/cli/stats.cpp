@@ -61,6 +61,7 @@ void print_boss_stats(const BOSS &boss_graph,
                   << boss_graph.mark_sink_dummy_edges()
                   << std::endl;
     }
+    std::cout << "indexed suffix size: " << boss_graph.get_indexed_suffix_length() << std::endl;
     std::cout << "========================================================" << std::endl;
 }
 

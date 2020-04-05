@@ -68,6 +68,9 @@ class BOSS {
     bool load(std::ifstream &instream);
     void serialize(std::ofstream &outstream) const;
 
+    bool load_suffix_ranges(std::ifstream &instream);
+    void serialize_suffix_ranges(std::ofstream &outstream) const;
+
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
     // Invokes #callback with npos if a k-mer can't be mapped to the graph edges
@@ -231,6 +234,13 @@ class BOSS {
      * returns the k-th last character of the source node for edge i.
      */
     std::pair<TAlphabet, edge_index> get_minus_k_value(edge_index i, size_t k) const;
+
+    /**
+     * Hash ranges of nodes with all possible suffixes (alph_size-1)^t
+     */
+    void index_node_suffix_ranges(size_t suffix_length);
+
+    size_t get_indexed_suffix_length() const { return node_suffix_length_; }
 
     /**
      * Print current representation of the graph to stream.
@@ -427,6 +437,24 @@ class BOSS {
         if (rl > ru)
             return std::make_tuple((edge_index)0, (edge_index)0, begin);
 
+        if (node_suffix_length_
+                && begin + node_suffix_length_ <= end
+                && !std::count(begin, begin + node_suffix_length_, kSentinelCode)) {
+            // search for the prefix and jump to that range if it's found
+            std::vector<TAlphabet> prefix(begin, begin + node_suffix_length_);
+            for (TAlphabet &c : prefix) {
+                assert(c);
+                c--;
+            }
+            auto [range_begin, range_end]
+                = node_suffix_ranges_[KmerExtractor2Bit::Kmer64(prefix).data()];
+            if (range_begin < range_end) {
+                rl = range_begin;
+                ru = range_end - 1;
+                begin += node_suffix_length_ - 1;
+            }
+        }
+
         auto it = begin + 1;
         // update range iteratively while scanning through s
         for (; it != end; ++it) {
@@ -481,6 +509,9 @@ class BOSS {
 
     State state = State::DYN;
 
+    size_t node_suffix_length_ = 0;
+    std::vector<std::pair<edge_index, edge_index>> node_suffix_ranges_;
+
     /**
      * This function gets a character c and updates the edge offsets F_
      * by incrementing them with +1 (for edge insertion) or decrementing
@@ -533,10 +564,6 @@ class BOSS {
     edge_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
         assert(begin + k_ + 1 == end);
 
-        // return npos if invalid characters are found
-        if (std::find(begin, end, alph_size) != end)
-            return npos;
-
         edge_index edge = index(begin, end - 1);
 
         return edge ? pick_edge(edge, *(end - 1)) : npos;
@@ -551,10 +578,66 @@ class BOSS {
         static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
                       "Only encoded sequences can be queried");
         assert(begin + k_ == end);
+        assert(std::all_of(begin, end, [&](TAlphabet c) { return c <= alph_size; }));
 
-        auto match = index_range(begin, end);
+        // return npos if invalid characters are found
+        if (std::find(begin, end, alph_size) != end)
+            return npos;
 
-        return std::get<2>(match) == end ? std::get<1>(match) : 0;
+        // get first
+        TAlphabet s = *begin;
+
+        // initial range
+        edge_index rl, ru;
+
+        if (node_suffix_length_
+                && begin + node_suffix_length_ <= end
+                && !std::count(begin, begin + node_suffix_length_, kSentinelCode)) {
+            // search for the prefix and jump to that range if it's found
+            std::vector<TAlphabet> prefix(begin, begin + node_suffix_length_);
+            for (TAlphabet &c : prefix) {
+                assert(c);
+                c--;
+            }
+            auto [range_begin, range_end]
+                = node_suffix_ranges_[KmerExtractor2Bit::Kmer64(prefix).data()];
+
+            if (range_begin >= range_end)
+                return npos;
+
+            rl = range_begin;
+            ru = range_end - 1;
+            begin += node_suffix_length_ - 1;
+
+        } else {
+            rl = F_.at(s) + 1 < W_->size()
+                 ? F_.at(s) + 1
+                 : W_->size(); // lower bound
+            ru = s + 1 < alph_size
+                 ? F_[s + 1]
+                 : W_->size() - 1; // upper bound
+            if (rl > ru)
+                return npos;
+        }
+
+        auto it = begin + 1;
+        // update range iteratively while scanning through s
+        for (; it != end; ++it) {
+            s = *it;
+
+            // Tighten the range including all edges where
+            // the source nodes have the given suffix.
+            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
+            uint64_t rk_ru = rank_W(ru, s);
+            if (rk_rl > rk_ru)
+                return npos;
+
+            // select the index of the position in last that is rank many positions after offset
+            ru = select_last(NF_[s] + rk_ru);
+            rl = select_last(NF_[s] + rk_rl - 1) + 1;
+        }
+        assert(succ_last(rl) <= ru);
+        return ru;
     }
 
     void verbose_cout() const {}

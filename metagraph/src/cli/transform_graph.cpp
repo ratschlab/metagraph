@@ -76,6 +76,18 @@ int transform_graph(Config *config) {
         return 0;
     }
 
+    if (config->node_suffix_length) {
+        size_t suffix_length = std::min((size_t)config->node_suffix_length,
+                                        dbg_succ->get_boss().get_k());
+        logger->trace("Index all node ranges for suffixes of length {}", suffix_length);
+        timer.reset();
+
+        dbg_succ->get_boss().index_node_suffix_ranges(suffix_length);
+
+        logger->trace("Node suffixes are indexed in {} sec", timer.elapsed());
+        timer.reset();
+    }
+
     if (config->clear_dummy) {
         logger->trace("Traverse the tree of source dummy edges and remove redundant ones...");
         timer.reset();
