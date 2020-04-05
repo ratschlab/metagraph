@@ -405,49 +405,46 @@ class BOSS {
 
         assert(end >= begin);
         assert(end <= begin + k_);
+        assert(std::all_of(begin, end, [&](TAlphabet c) { return c <= alph_size; }));
 
         if (begin == end)
-            return std::make_tuple(edge_index(1), edge_index(1), begin);
+            return std::make_tuple((edge_index)1, (edge_index)1, begin);
 
         // check if all characters belong to the alphabet
-        if (std::any_of(begin, end, [&](TAlphabet c) { return c >= alph_size; }))
-            return std::make_tuple(edge_index(0), edge_index(0), begin);
+        if (std::find(begin, end, alph_size) != end)
+            return std::make_tuple((edge_index)0, (edge_index)0, begin);
 
         // get first
         TAlphabet s = *begin;
 
         // initial range
         edge_index rl = F_.at(s) + 1 < W_->size()
-                        ? succ_last(F_.at(s) + 1)
+                        ? F_.at(s) + 1
                         : W_->size(); // lower bound
         edge_index ru = s + 1 < alph_size
                         ? F_[s + 1]
                         : W_->size() - 1; // upper bound
         if (rl > ru)
-            return std::make_tuple(edge_index(0), edge_index(0), begin);
+            return std::make_tuple((edge_index)0, (edge_index)0, begin);
 
         auto it = begin + 1;
-        edge_index rl_h;
         // update range iteratively while scanning through s
         for (; it != end; ++it) {
             s = *it;
 
-            // Include the head of the first node with the given suffix.
-            rl_h = pred_last(rl - 1) + 1;
-
             // Tighten the range including all edges where
             // the source nodes have the given suffix.
-            uint64_t rk_rl = rank_W(rl_h - 1, s) + 1;
+            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
             uint64_t rk_ru = rank_W(ru, s);
             if (rk_rl > rk_ru)
-                return std::make_tuple(rl, ru, it);
+                return std::make_tuple(succ_last(rl), ru, it);
 
             // select the index of the position in last that is rank many positions after offset
             ru = select_last(NF_[s] + rk_ru);
-            rl = select_last(NF_[s] + rk_rl);
+            rl = select_last(NF_[s] + rk_rl - 1) + 1;
         }
-        assert(rl <= ru);
-        return std::make_tuple(rl, ru, it);
+        assert(succ_last(rl) <= ru);
+        return std::make_tuple(succ_last(rl), ru, it);
     }
 
     /**
