@@ -2,6 +2,7 @@
 
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
+#include "common/batch_accumulator.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -203,6 +204,94 @@ void map_sequences_in_file(const std::string &file,
                   file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
 }
 
+template <class DBGAlignment = DBGAligner<>::DBGAlignment,
+          class DBGQueryAlignment = DBGAligner<>::DBGQueryAlignment>
+class AlignmentWriter {
+  public:
+    AlignmentWriter(std::ostream &outstream,
+                    const DeBruijnGraph &graph,
+                    const Config &config,
+                    size_t batch_size)
+          : outstream_(outstream), graph_(graph), config_(config),
+            write_pool_(get_num_threads() > 1 ? 1 : 0),
+            batch_([&](auto&& buffer) {
+                write_pool_.enqueue([&](auto&& buffer) {
+                    for (const auto &tuple : buffer) {
+                        std::apply(print_, tuple);
+                    }
+                }, std::move(buffer));
+            }, batch_size) {
+        if (!config_.output_json) {
+            print_ = [&](const auto &query, const auto &header, const auto &paths) {
+                for (const auto &path : paths) {
+                    const auto& path_query = path.get_orientation()
+                        ? paths.get_query_reverse_complement()
+                        : paths.get_query();
+
+                    outstream_ << header << "\t"
+                               << path_query << "\t"
+                               << path << "\n";
+                }
+
+                if (paths.empty()) {
+                    outstream_ << header << "\t"
+                               << query << "\t"
+                               << "*\t*\t"
+                               << config_.alignment_min_path_score
+                               << "\t*\t*\t*\n";
+                }
+            };
+        } else {
+            Json::StreamWriterBuilder builder;
+            builder["indentation"] = "";
+            print_ = [&,builder](const auto &query, const auto &header, const auto &paths) {
+                bool secondary = false;
+                for (const auto &path : paths) {
+                    const auto& path_query = path.get_orientation()
+                        ? paths.get_query_reverse_complement()
+                        : paths.get_query();
+
+                    outstream_ << Json::writeString(builder,
+                        path.to_json(path_query, graph, secondary, header)
+                    ) << "\n";
+
+                    secondary = true;
+                }
+
+                if (paths.empty()) {
+                    outstream_ << Json::writeString(builder,
+                        DBGAlignment().to_json(query, graph, secondary, header)
+                    ) << "\n";
+                }
+            };
+        }
+    }
+
+    ~AlignmentWriter() { join(); }
+
+    void write(const std::string query, const std::string header,
+               DBGQueryAlignment&& paths) {
+        std::unique_lock<std::mutex> lock(batch_mutex_);
+        batch_.push(query, header, std::move(paths));
+    }
+
+    void join() {
+        batch_.process_all_buffered();
+        write_pool_.join();
+    }
+
+  private:
+    std::ostream &outstream_;
+    const DeBruijnGraph &graph_;
+    const Config &config_;
+    ThreadPool write_pool_;
+    BatchAccumulator<std::tuple<std::string, std::string, DBGQueryAlignment>> batch_;
+    std::mutex batch_mutex_;
+    std::function<void(const std::string&,
+                       const std::string&,
+                       const DBGQueryAlignment&)> print_;
+};
+
 
 int align_to_graph(Config *config) {
     assert(config);
@@ -221,9 +310,9 @@ int align_to_graph(Config *config) {
 
     Timer timer;
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
-    std::mutex print_mutex;
 
     if (config->map_sequences) {
+        std::mutex print_mutex;
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
@@ -259,97 +348,40 @@ int align_to_graph(Config *config) {
     }
 
     auto aligner = build_aligner(*graph, *config);
+    std::ostream *outstream = config->outfbase.size()
+        ? new std::ofstream(config->outfbase)
+        : &std::cout;
+
+    AlignmentWriter<> writer(*outstream, *graph, *config, 100);
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
 
         Timer data_reading_timer;
 
-        std::ostream *outstream = config->outfbase.size()
-            ? new std::ofstream(config->outfbase)
-            : &std::cout;
-
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
-
         read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-            thread_pool.enqueue([&](const std::string &query,
-                                    const std::string &header) {
-                auto paths = aligner->align(query);
-
-                std::ostringstream ostr;
-                if (!config->output_json) {
-                    for (const auto &path : paths) {
-                        const auto& path_query = path.get_orientation()
-                            ? paths.get_query_reverse_complement()
-                            : paths.get_query();
-
-                        ostr << header << "\t"
-                             << path_query << "\t"
-                             << path
-                             << std::endl;
-                    }
-
-                    if (paths.empty())
-                        ostr << header << "\t"
-                             << query << "\t"
-                             << "*\t*\t"
-                             << config->alignment_min_path_score << "\t*\t*\t*"
-                             << std::endl;
-                } else {
-                    bool secondary = false;
-                    for (const auto &path : paths) {
-                        const auto& path_query = path.get_orientation()
-                            ? paths.get_query_reverse_complement()
-                            : paths.get_query();
-
-                        ostr << Json::writeString(
-                                    builder,
-                                    path.to_json(path_query,
-                                                 *graph,
-                                                 secondary,
-                                                 header)
-                                )
-                             << std::endl;
-
-                        secondary = true;
-                    }
-
-                    if (paths.empty()) {
-                        ostr << Json::writeString(
-                                    builder,
-                                    DBGAligner<>::DBGAlignment().to_json(
-                                        query,
-                                        *graph,
-                                        secondary,
-                                        header)
-                                )
-                             << std::endl;
-                    }
-                }
-
-                auto lock = std::lock_guard<std::mutex>(print_mutex);
-                *outstream << ostr.str();
+            thread_pool.enqueue([&](std::string query, std::string header) {
+                writer.write(query, header, aligner->align(query));
             }, std::string(read_stream->seq.s),
                config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                   && read_stream->comment.l
-                       ? utils::join_strings(
-                           { read_stream->name.s, read_stream->comment.s },
-                           config->fasta_anno_comment_delim,
-                           true)
-                       : std::string(read_stream->name.s));
+                     && read_stream->comment.l
+                   ? utils::join_strings({ read_stream->name.s, read_stream->comment.s },
+                                         config->fasta_anno_comment_delim,
+                                         true)
+                   : std::string(read_stream->name.s));
         });
 
         thread_pool.join();
+        writer.join();
 
         logger->trace("File '{}' processed in {} sec, "
                       "current mem usage: {} MiB, total time {} sec",
                       file, data_reading_timer.elapsed(),
                       get_curr_RSS() >> 20, timer.elapsed());
-
-        if (config->outfbase.size())
-            delete outstream;
     }
+
+    if (config->outfbase.size())
+        delete outstream;
 
     return 0;
 }
