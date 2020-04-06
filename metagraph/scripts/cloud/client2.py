@@ -167,14 +167,14 @@ def make_dir_if_needed(path):
         pass
 
 
-def start_clean(sra_id, wait_time):
+def start_clean(sra_id, wait_time, kmer_count_singletons):
     input_file = build_file(sra_id)
     make_dir_if_needed(clean_dir(sra_id))
     output_file = os.path.join(clean_dir(sra_id), sra_id)
     logging.info(f'Starting clean with {input_file} {output_file}')
     clean_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
     clean_processes[sra_id] = (
-        subprocess.Popen(f'./clean.sh {sra_id} {input_file} {output_file} 2>&1 | grep -v "%," > {clean_file_name}',
+        subprocess.Popen(f'./clean.sh {sra_id} {input_file} {output_file} {kmer_count_singletons} 2>&1 | grep -v "%," > {clean_file_name}',
                          shell=True),
         time.time(), wait_time)
     return True
@@ -278,6 +278,7 @@ def check_status():
                     if 'Stats' in json_resp and '#Unique_counted_k-mers' in json_resp['Stats']:
                         kmer_count_unique = int(json_resp['Stats']['#Unique_counted_k-mers'])
                         kmer_count_total = int(json_resp['Stats']['#Total no. of k-mers'])
+                        kmer_count_singletons = int(json_resp['Stats']['#k-mers_below_min_threshold'])
                     else:
                         logging.warning('KMC returned no stats, assuming failure')
                         success = False
@@ -289,8 +290,8 @@ def check_status():
             if success:
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
                           'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
-                          'kmer_count_total': kmer_count_total}
-                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count_unique)
+                          'kmer_count_total': kmer_count_total, 'kmer_count_singletons': kmer_count_singletons}
+                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
@@ -421,7 +422,8 @@ def check_status():
             required_ram_gb = max(build_size_gb * 1.1, build_size_gb + 1)
 
             if available_ram_gb - required_ram_gb > 0:
-                start_clean(sra_id, time.time() - start_time)
+                kmer_count_singletons = sra_info[sra_id][3]
+                start_clean(sra_id, time.time() - start_time, kmer_count_singletons)
                 del waiting_cleans[sra_id]
                 break
             logging.info(f'Not enough RAM for cleaning {sra_id}. '
@@ -571,9 +573,9 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://metagraph20/clean/',
+    parser.add_argument('--destination', default='gs://mg21/clean/',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default='gs://metagraph20/logs',
+    parser.add_argument('--log_destination', default='gs://mg21/logs',
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
     args = parser.parse_args()
@@ -585,7 +587,7 @@ if __name__ == '__main__':
 
     if not args.server:
         logging.info('Trying to find server address...')
-        if subprocess.call(['gsutil', 'cp', 'gs://metagraph20/server', '/tmp/server'], stdout=subprocess.PIPE,
+        if subprocess.call(['gsutil', 'cp', 'gs://mg21/server', '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
             exit(1)
