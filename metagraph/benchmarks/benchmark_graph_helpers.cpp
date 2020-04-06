@@ -15,6 +15,24 @@
 
 namespace mg {
 
+std::shared_ptr<DeBruijnGraph> bm::build_graph(const std::string &filename) {
+    std::vector<std::string> sequences;
+    read_fasta_file_critical(filename,
+                             [&](kseq_t *stream) {
+                                 sequences.emplace_back(stream->seq.s);
+                             },
+                             true);
+
+    size_t k = 12;
+
+    BOSSConstructor constructor(k - 1);
+    constructor.add_sequences(sequences);
+    std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor)) };
+    dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
+
+    return graph;
+}
+
 template <class Annotation>
 std::unique_ptr<AnnotatedDBG> bm::build_anno_graph(const std::string &filename) {
     std::vector<std::string> sequences;

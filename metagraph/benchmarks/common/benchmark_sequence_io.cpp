@@ -12,11 +12,9 @@ const std::string file_prefix = "/tmp/bm_mg_outfile.fasta.gz";
 
 static void BM_UnitigsWrite(benchmark::State& state) {
     std::string graph_file = "../tests/data/transcripts_1000.fa";
-    auto anno_graph = mg::bm::build_anno_graph<>(graph_file);
+    auto graph = mg::bm::build_graph(graph_file);
     std::vector<std::string> unitigs;
-    anno_graph->get_graph().call_unitigs([&](const auto &unitig, auto&&) {
-        unitigs.push_back(unitig);
-    });
+    graph->call_unitigs([&](const auto &unitig, auto&&) { unitigs.push_back(unitig); });
 
     for (auto _ : state) {
         FastaWriter writer(file_prefix, "", false, std::pow(10, state.range(0)) - 1);
@@ -32,13 +30,11 @@ BENCHMARK(BM_UnitigsWrite)
 
 static void BM_UnitigsExtractAndWrite(benchmark::State& state) {
     std::string graph_file = "../tests/data/transcripts_1000.fa";
-    auto anno_graph = mg::bm::build_anno_graph<>(graph_file);
+    auto graph = mg::bm::build_graph(graph_file);
 
     for (auto _ : state) {
         FastaWriter writer(file_prefix, "", false, std::pow(10, state.range(0)) - 1);
-        anno_graph->get_graph().call_unitigs([&](const auto &unitig, auto&&) {
-            writer.write(unitig);
-        });
+        graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); });
     }
 }
 

@@ -6,6 +6,7 @@
 
 
 // TODO: move these into mg namespace later
+class DeBruijnGraph;
 class AnnotatedDBG;
 
 namespace annotate {
@@ -16,6 +17,8 @@ class ColumnCompressed;
 
 namespace mg {
 namespace bm {
+
+std::shared_ptr<DeBruijnGraph> build_graph(const std::string &filename);
 
 template <class Annotation = annotate::ColumnCompressed<std::string>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename);
