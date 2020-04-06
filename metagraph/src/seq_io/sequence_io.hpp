@@ -8,7 +8,9 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
 
+#include "common/batch_accumulator.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/threads/threading.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -17,17 +19,23 @@ class FastaWriter {
   public:
     FastaWriter(const std::string &filebase,
                 const std::string &header = "",
-                bool enumerate_sequences = false);
+                bool enumerate_sequences = false,
+                size_t buffer_size = 0);
 
     ~FastaWriter();
 
     void write(const std::string &sequence);
+
+    void join();
 
   public:
     gzFile gz_out_;
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;
+    ThreadPool thread_pool_;
+    BatchAccumulator<std::string> seq_batcher_;
+    std::mutex batch_mutex_;
 };
 
 template <typename T = uint32_t>
@@ -47,7 +55,8 @@ class ExtendedFastaWriter {
                         const std::string &feature_name,
                         uint32_t kmer_length,
                         const std::string &header = "",
-                        bool enumerate_sequences = false);
+                        bool enumerate_sequences = false,
+                        size_t buffer_size = 0);
 
     ~ExtendedFastaWriter();
 
@@ -57,6 +66,8 @@ class ExtendedFastaWriter {
     void write(const std::string &sequence,
                const std::vector<feature_type> &kmer_features);
 
+    void join();
+
   public:
     gzFile fasta_gz_out_;
     gzFile feature_gz_out_;
@@ -64,6 +75,9 @@ class ExtendedFastaWriter {
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;
+    ThreadPool thread_pool_;
+    BatchAccumulator<std::pair<std::string, std::vector<feature_type>>> batcher_;
+    std::mutex batch_mutex_;
 };
 
 bool write_fasta(gzFile gz_out, const kseq_t &kseq);
