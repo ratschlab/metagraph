@@ -68,8 +68,14 @@ for i in $(ls -p "${fastq_dir}"); do
 done
 bin_count=$(( $(ulimit -n) - 10))
 kmc_output="${output_dir}/stats"
-execute kmc -k31 -ci2 -m2 -fq -cs65535 -n$bin_count -j$kmc_output @${kmc_input} ${kmc_dir}/${sra_number}.kmc $tmp_dir
-
+execute kmc -k31 -ci1 -m2 -fq -cs65535 -n$bin_count -j$kmc_output @${kmc_input} ${kmc_dir}/${sra_number}.kmc $tmp_dir
+unique_kmers=$(jq -r ' .Stats | ."#Unique_k-mers"' $kmc_output)
+total_kmers=$(jq -r ' .Stats | ."#Total no. of k-mers"' $kmc_output)
+coverage=$((total_kmers/unique_kmers))
+if ((coverage >= 5)); then
+  echo "Coverage is $coverage, eliminating singletons"
+  execute kmc -k31 -ci2 -m2 -fq -cs65535 -n$bin_count -j$kmc_output @${kmc_input} ${kmc_dir}/${sra_number}.kmc $tmp_dir
+fi
 rm -rf "${tmp_dir}" "${fastq_dir}"
 
 exit $exit_code
