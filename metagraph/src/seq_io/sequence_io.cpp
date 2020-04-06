@@ -16,7 +16,7 @@ FastaWriter::FastaWriter(const std::string &filebase,
                          size_t buffer_size)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
-        thread_pool_(1),
+        thread_pool_(buffer_size ? 1 : 0),
         seq_batcher_([&](auto&& buffer) {
             thread_pool_.enqueue([&](auto&& buffer) {
                 for (const std::string &sequence : buffer) {
