@@ -223,8 +223,11 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
     std::cout << "k-mer count histogram:\n";
     for(i = 1; i < arrlen; i++)
     {
-      std::cout << i << ": " << kmer_covg[i] << std::endl;
+        if (kmer_covg[i] != 0) {
+            std::cout << i << ": " << kmer_covg[i] << " ";
+        }
     }
+    std::cout << std::endl;
   }
 
   r1 = (double)kmer_covg[2] / kmer_covg[1];
