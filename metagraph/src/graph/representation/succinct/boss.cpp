@@ -875,9 +875,16 @@ uint64_t BOSS::num_edges() const {
 }
 
 /**
- * This function gets a character c and updates the edge offsets F_
+ * This function gets a character |c| and updates the edge offsets in F_
  * by incrementing them with +1 (for edge insertion) or decrementing
  * (for edge delition) and updates the node offsets NF_ accordingly.
+ * The node offsets are updated in two cases:
+ *  - the edge was inserted (delta = +1) and it is the only edge outgoing
+ *  from its source node,
+ *  - the edge was erased (delta = -1) and its source node has no other
+ *  outgoing edges.
+ * Pass |is_representative| = `true` if one of these two conditions is
+ * satisfied and `false` otherwise.
  */
 void BOSS::update_F(TAlphabet c, int delta, bool is_representative) {
     assert(c < alph_size);
