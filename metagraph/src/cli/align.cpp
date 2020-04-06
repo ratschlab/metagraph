@@ -263,71 +263,61 @@ int align_to_graph(Config *config) {
 
         Timer data_reading_timer;
 
-        std::ostream *outstream = config->outfbase.size()
+        std::ostream *out = config->outfbase.size()
             ? new std::ofstream(config->outfbase)
             : &std::cout;
 
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
-
         read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-            thread_pool.enqueue([&](const std::string &query,
-                                    const std::string &header) {
+            thread_pool.enqueue([&](const std::string &query, const std::string &header) {
                 auto paths = aligner->align(query);
 
-                std::ostringstream ostr;
+                std::unique_lock<std::mutex> lock(print_mutex);
                 if (!config->output_json) {
                     for (const auto &path : paths) {
                         const auto& path_query = path.get_orientation()
                             ? paths.get_query_reverse_complement()
                             : paths.get_query();
 
-                        ostr << header << "\t"
+                        *out << header << "\t"
                              << path_query << "\t"
-                             << path
-                             << std::endl;
+                             << path << "\n";
                     }
 
-                    if (paths.empty())
-                        ostr << header << "\t"
+                    if (paths.empty()) {
+                        *out << header << "\t"
                              << query << "\t"
                              << "*\t*\t"
-                             << config->alignment_min_path_score << "\t*\t*\t*"
-                             << std::endl;
+                             << config->alignment_min_path_score << "\t*\t*\t*\n";
+                    }
                 } else {
+                    Json::StreamWriterBuilder builder;
+                    builder["indentation"] = "";
+
                     bool secondary = false;
                     for (const auto &path : paths) {
                         const auto& path_query = path.get_orientation()
                             ? paths.get_query_reverse_complement()
                             : paths.get_query();
 
-                        ostr << Json::writeString(
-                                    builder,
-                                    path.to_json(path_query,
-                                                 *graph,
-                                                 secondary,
-                                                 header)
-                                )
-                             << std::endl;
+                        *out << Json::writeString(builder,
+                                                  path.to_json(path_query,
+                                                               *graph,
+                                                               secondary,
+                                                               header)) << "\n";
 
                         secondary = true;
                     }
 
                     if (paths.empty()) {
-                        ostr << Json::writeString(
-                                    builder,
-                                    DBGAligner<>::DBGAlignment().to_json(
-                                        query,
-                                        *graph,
-                                        secondary,
-                                        header)
-                                )
-                             << std::endl;
+                        *out << Json::writeString(builder,
+                                                  DBGAligner<>::DBGAlignment().to_json(
+                                                      query,
+                                                      *graph,
+                                                      secondary,
+                                                      header)
+                                                  ) << "\n";
                     }
                 }
-
-                auto lock = std::lock_guard<std::mutex>(print_mutex);
-                *outstream << ostr.str();
             }, std::string(read_stream->seq.s),
                config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
                    && read_stream->comment.l
@@ -346,7 +336,7 @@ int align_to_graph(Config *config) {
                       get_curr_RSS() >> 20, timer.elapsed());
 
         if (config->outfbase.size())
-            delete outstream;
+            delete out;
     }
 
     return 0;
