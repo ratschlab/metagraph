@@ -7,6 +7,7 @@ import http
 import http.server
 import json
 import logging
+import math
 import os
 import psutil
 import signal
@@ -16,6 +17,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+
 
 args = None
 
@@ -148,14 +150,14 @@ def internal_ip():
         return '127.0.0.1'  # this usually happens on dev laptops; cloud machines work fine
 
 
-def start_build(sra_id, wait_time, buffer_size_gb):
+def start_build(sra_id, wait_time, buffer_size_gb, container_type):
     input_dir = download_dir(sra_id)
     output_dir = build_dir(sra_id)
     logging.info(f'Starting build from {input_dir} to {output_dir}, ram={round(buffer_size_gb, 2)}')
     make_dir_if_needed(build_dir(sra_id))
     log_file_name = os.path.join(build_dir(sra_id), 'build.log')
     build_processes[sra_id] = (subprocess.Popen(
-        f'./build.sh {sra_id} {input_dir} {output_dir} {buffer_size_gb} 2>&1 > {log_file_name}',
+        f'./build.sh {sra_id} {input_dir} {output_dir} {buffer_size_gb} {container_type} 2>&1 > {log_file_name}',
         shell=True), time.time(), wait_time)
     return True
 
@@ -167,14 +169,15 @@ def make_dir_if_needed(path):
         pass
 
 
-def start_clean(sra_id, wait_time):
+def start_clean(sra_id, wait_time, kmer_count_singletons):
     input_file = build_file(sra_id)
     make_dir_if_needed(clean_dir(sra_id))
     output_file = os.path.join(clean_dir(sra_id), sra_id)
     logging.info(f'Starting clean with {input_file} {output_file}')
     clean_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
     clean_processes[sra_id] = (
-        subprocess.Popen(f'./clean.sh {sra_id} {input_file} {output_file} 2>&1 | grep -v "%," > {clean_file_name}', shell=True),
+        subprocess.Popen(f'./clean.sh {sra_id} {input_file} {output_file} {kmer_count_singletons} 2>&1 | grep -v "%," > {clean_file_name}',
+                         shell=True),
         time.time(), wait_time)
     return True
 
@@ -275,7 +278,9 @@ def check_status():
                     with open(stats_file) as stats:
                         json_resp = json.loads(stats.read())
                     if 'Stats' in json_resp and '#Unique_counted_k-mers' in json_resp['Stats']:
-                        kmer_count = int(json_resp['Stats']['#Unique_counted_k-mers'])
+                        kmer_count_unique = int(json_resp['Stats']['#Unique_counted_k-mers'])
+                        kmer_count_total = int(json_resp['Stats']['#Total no. of k-mers'])
+                        kmer_count_singletons = int(json_resp['Stats']['#k-mers_below_min_threshold'])
                     else:
                         logging.warning('KMC returned no stats, assuming failure')
                         success = False
@@ -286,8 +291,9 @@ def check_status():
                 success = False
             if success:
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
-                          'kmc_size_mb': kmc_size_mb, 'kmer_count': kmer_count}
-                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count)
+                          'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
+                          'kmer_count_total': kmer_count_total, 'kmer_count_singletons': kmer_count_singletons}
+                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
@@ -388,7 +394,8 @@ def check_status():
     if len(build_processes) == 0 and len(clean_processes) < 2 and waiting_builds and len(waiting_cleans) < 3:
         sra_id, (start_time) = waiting_builds.popitem()
         num_kmers = sra_info[sra_id][2]
-        required_ram_gb = round((num_kmers * 2) / 1e9 + 1, 2)
+        # estimated RAM needed for loading graph in memory; 2 bytes/kmer, 1 byte/kmer-count
+        required_ram_gb = round((num_kmers * 4) / 1e9 + 1, 2)
         total_ram_gb = psutil.virtual_memory().total / 1e9
         if required_ram_gb > total_ram_gb - 3:
             build_path = build_dir(sra_id)
@@ -399,8 +406,12 @@ def check_status():
                       'size_mb': build_size, 'required_ram_gb': required_ram_gb}
             nack('build', params)
         elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
+            required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9; # also account for dummy kmers
             buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
-            start_build(sra_id, time.time() - start_time, buffer_size_gb)
+            if (required_ram_all_mem_gb < 2):
+                start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector')
+            else:
+                start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk')
         else:
             logging.info(f'Not enough RAM for building. Have {round(available_ram_gb, 2)}GB need {required_ram_gb}GB')
 
@@ -414,7 +425,8 @@ def check_status():
             required_ram_gb = max(build_size_gb * 1.1, build_size_gb + 1)
 
             if available_ram_gb - required_ram_gb > 0:
-                start_clean(sra_id, time.time() - start_time)
+                kmer_count_singletons = sra_info[sra_id][3]
+                start_clean(sra_id, time.time() - start_time, kmer_count_singletons)
                 del waiting_cleans[sra_id]
                 break
             logging.info(f'Not enough RAM for cleaning {sra_id}. '
@@ -564,9 +576,9 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://metagraph7/clean/',
+    parser.add_argument('--destination', default='gs://mg21/clean/',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default='gs://metagraph7/logs',
+    parser.add_argument('--log_destination', default='gs://mg21/logs',
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
     args = parser.parse_args()
@@ -578,7 +590,7 @@ if __name__ == '__main__':
 
     if not args.server:
         logging.info('Trying to find server address...')
-        if subprocess.call(['gsutil', 'cp', 'gs://metagraph7/server', '/tmp/server'], stdout=subprocess.PIPE,
+        if subprocess.call(['gsutil', 'cp', 'gs://mg21/server', '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
             exit(1)
