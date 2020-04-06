@@ -224,7 +224,7 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
     for(i = 1; i < arrlen; i++)
     {
         if (kmer_covg[i] != 0) {
-            std::cout << i << ": " << kmer_covg[i] << " ";
+            std::cout << i << ": " << kmer_covg[i] << ", ";
         }
     }
     std::cout << std::endl;
