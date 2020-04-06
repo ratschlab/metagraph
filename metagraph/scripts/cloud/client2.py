@@ -394,7 +394,8 @@ def check_status():
     if len(build_processes) == 0 and len(clean_processes) < 2 and waiting_builds and len(waiting_cleans) < 3:
         sra_id, (start_time) = waiting_builds.popitem()
         num_kmers = sra_info[sra_id][2]
-        required_ram_gb = round((num_kmers * 2) / 1e9 + 1, 2)
+        # estimated RAM needed for loading graph in memory; 2 bytes/kmer, 1 byte/kmer-count
+        required_ram_gb = round((num_kmers * 4) / 1e9 + 1, 2)
         total_ram_gb = psutil.virtual_memory().total / 1e9
         if required_ram_gb > total_ram_gb - 3:
             build_path = build_dir(sra_id)
