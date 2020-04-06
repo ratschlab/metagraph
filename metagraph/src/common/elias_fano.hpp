@@ -146,18 +146,7 @@ class EliasFanoDecoder {
     EliasFanoDecoder() {}
 
     /** Creates a decoder that retrieves data from the given file */
-    EliasFanoDecoder(const std::string &source_name);
-
-    /**
-     * Create a decoder that reads the data from the provided streams.
-     * @param source the stream containing all encoded data, except the upper bytes
-     * @param source_upper the stream containing the upper bytes
-     * @param file_end_upper the position where the algorithm should stop reading. Note
-     * that this is not necessarily the end of the file, see #EliasFanoEncoderBuffered.
-     */
-    EliasFanoDecoder(std::ifstream *source,
-                     std::ifstream *source_upper,
-                     std::streampos file_end_upper);
+    EliasFanoDecoder(const std::string &source_name, bool cleanup = true);
 
     /** Returns the next compressed element or empty if all elements were read */
     std::optional<T> next();
@@ -218,9 +207,12 @@ class EliasFanoDecoder {
     /** The size in bytes of upper_ */
     size_t num_upper_bytes_ = 0;
 
+    /** Name of the source file. Only set if #source_internal_ is set */
+    std::string source_name_;
+
     /**
      * Stream containing the compressed data. Points to either #source_internal_ or to
-     * a stream provided in the constructor
+     * a stream provided in the constructorl
      */
     std::ifstream *source_;
     /**
@@ -232,10 +224,11 @@ class EliasFanoDecoder {
     std::ifstream source_internal_;
     std::ifstream source_internal_upper_;
 
-    std::streampos file_end_;
-
     /** Value to add to each decoded element */
     T offset_;
+
+    /** If true, the source file is removed after decompression */
+    bool cleanup_;
 };
 
 /**
@@ -268,14 +261,16 @@ class EliasFanoEncoder<std::pair<T, C>> {
 template <typename T, typename C>
 class EliasFanoDecoder<std::pair<T, C>> {
   public:
-    EliasFanoDecoder(const std::string &source);
+    EliasFanoDecoder(const std::string &source, bool cleanup = true);
 
 
     std::optional<std::pair<T, C>> next();
 
   private:
     EliasFanoDecoder<T> source_first_;
+    std::string source_second_name_;
     std::ifstream source_second_;
+    bool cleanup_;
 };
 
 /**

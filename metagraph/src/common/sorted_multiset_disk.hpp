@@ -20,6 +20,8 @@ namespace common {
  *
  * @tparam T the type of the elements that are being stored, sorted and counted,
  * typically k-mers
+ * @param INT the integer representation of the element being sorted (this representation
+ * is used for writing to disk, using Elias-Fano compression)
  * @param C the type used to count the multiplicity of each value in the multi-set
  */
 template <typename T, typename INT = T, typename C = uint8_t>
@@ -151,7 +153,8 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, INT> {
         std::string file_name
                 = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
 
-        EliasFanoEncoder<int_pair> encoder(this->data_.size(), to_int_(this->data_.front()).first,
+        EliasFanoEncoder<int_pair> encoder(this->data_.size(),
+                                           to_int_(this->data_.front()).first,
                                            to_int_(this->data_.back()).first, file_name);
         for (const auto &v : this->data_) {
             encoder.add(to_int_(v));

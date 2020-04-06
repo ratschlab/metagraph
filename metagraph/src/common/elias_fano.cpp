@@ -176,7 +176,7 @@ static void safe_close(std::ofstream &sink) {
     }
 }
 
-// ------------ EliasFanoEncoder ----------------
+// ------------ EliasFanoEncoder --------------------------------------------------------
 template <typename T>
 EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       T min_value,
@@ -235,8 +235,8 @@ void EliasFanoEncoder<T>::add(T value) {
             // first sizeof(T)*8 bits were written
             cur_pos_lbits_ += 8 * max_buf_size;
             sink_->write(lower_, max_buf_size);
-            std::memcpy(lower_, lower_ +  max_buf_size, sizeof(T));
-            std::memset(lower_+sizeof(T), 0, max_buf_size);
+            std::memcpy(lower_, lower_ + max_buf_size, sizeof(T));
+            std::memset(lower_ + sizeof(T), 0, max_buf_size);
         }
         write_bits(lower_ + (pos_bits - cur_pos_lbits_) / 8, pos_bits % 8, lower_bits);
     }
@@ -336,7 +336,8 @@ void EliasFanoEncoder<T>::write_bits(char *data, size_t pos, T value) {
 // ------------------------------- EliasFanoDecoder ------------------------------------
 
 template <typename T>
-EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name) {
+EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name, bool cleanup)
+    : source_name_(source_name), cleanup_(cleanup) {
     source_internal_ = std::ifstream(source_name, std::ios::binary);
     source_ = &source_internal_;
     source_internal_upper_ = std::ifstream(source_name + ".up", std::ios::binary);
@@ -345,16 +346,8 @@ EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name) {
         std::cerr << "Unable to read from " << source_name << std::endl;
         std::exit(EXIT_FAILURE);
     }
-    file_end_ = std::filesystem::file_size(source_name + ".up");
     init();
 }
-
-
-template <typename T>
-EliasFanoDecoder<T>::EliasFanoDecoder(std::ifstream *source,
-                                      std::ifstream *source_upper,
-                                      std::streampos file_end_upper)
-    : source_(source), source_upper_(source_upper), file_end_(file_end_upper) {}
 
 template <typename T>
 T EliasFanoDecoder<T>::next_upper() {
@@ -398,6 +391,10 @@ template <typename T>
 std::optional<T> EliasFanoDecoder<T>::next() {
     if (position_ == size_) {
         if (!init()) { // read the next chunk of compressed data
+            if (cleanup_) {
+                std::filesystem::remove(source_name_);
+                std::filesystem::remove(source_name_ + ".up");
+            }
             return {};
         }
     }
@@ -477,12 +474,13 @@ size_t EliasFanoEncoder<std::pair<T, C>>::finish() {
 
 // ------------------------- EliasFandDecoder<std::pair> --------------------------------
 template <typename T, typename C>
-EliasFanoDecoder<std::pair<T, C>>::EliasFanoDecoder(const std::string &source)
-    : source_first_(source) {
-    std::string source_second_name = source + ".count";
-    source_second_ = std::ifstream(source_second_name, std::ios::binary);
+EliasFanoDecoder<std::pair<T, C>>::EliasFanoDecoder(const std::string &source, bool cleanup)
+    : source_first_(source, cleanup),
+      source_second_name_(source + ".count"),
+      cleanup_(cleanup) {
+    source_second_ = std::ifstream(source_second_name_, std::ios::binary);
     if (!source_second_.good()) {
-        std::cerr << "Unable to write to " << source_second_name << std::endl;
+        std::cerr << "Unable to write to " << source_second_name_ << std::endl;
         std::exit(EXIT_FAILURE);
     }
 }
@@ -493,6 +491,9 @@ std::optional<std::pair<T, C>> EliasFanoDecoder<std::pair<T, C>>::next() {
     C second;
     if (!first.has_value()) {
         assert(!source_second_.read(reinterpret_cast<char *>(&second), sizeof(C)));
+        if (cleanup_) {
+            std::filesystem::remove(source_second_name_);
+        }
         return {};
     }
     source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
