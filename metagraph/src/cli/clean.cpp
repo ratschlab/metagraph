@@ -68,7 +68,8 @@ int clean_graph(Config *config) {
 
             config->min_unitig_median_kmer_abundance
                 = estimate_min_kmer_abundance(*_graph, *node_weights,
-                                              config->fallback_abundance_cutoff);
+                                              config->fallback_abundance_cutoff,
+                                              config->num_singleton_kmers);
         }
 
         if (config->min_count > 1

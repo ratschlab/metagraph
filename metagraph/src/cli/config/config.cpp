@@ -280,6 +280,8 @@ Config::Config(int argc, char *argv[]) {
             min_unitig_median_kmer_abundance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fallback")) {
             fallback_abundance_cutoff = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--num-singletons")) {
+            num_singleton_kmers = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--count-dummy")) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
@@ -748,6 +750,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --num-singletons [INT] \treset the number of count 1 k-mers in histogram (0: off) [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
             fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
