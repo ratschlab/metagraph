@@ -23,9 +23,8 @@ sra_number=$1
 input_file=$2
 output_file=$3
 num_singletons=$4
-# --prune-unitigs 0 --fallback 3
-if ((num_singletons > 100)); then # making this 100 instead of 0 just in case we have a few kmers that are errors
-  num_singletons_param="--num-singletons ${num_singletons}"
+if ((num_singletons < 100)); then # just in case we have a few kmers that are errors
+  num_singletons_s=0
 fi
-execute metagraph clean -v -p 1 --min-count 1 "${num_singletons_param}"  --prune-unitigs 0 --fallback 5 --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
+execute metagraph clean -v -p 1 --min-count 1 --num-singletons ${num_singletons}  --prune-unitigs 0 --fallback 5 --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
 rm -rf $(dirname "${input_file}")

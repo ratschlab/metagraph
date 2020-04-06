@@ -7,6 +7,7 @@ import http
 import http.server
 import json
 import logging
+import math
 import os
 import psutil
 import signal
@@ -16,6 +17,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+
 
 args = None
 
@@ -406,7 +408,7 @@ def check_status():
             required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9; # also account for dummy kmers
             buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
             if (required_ram_all_mem_gb < 2):
-                start_build(sra_id, time.time() - start_time, required_ram_all_mem_gb, 'vector')
+                start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector')
             else:
                 start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk')
         else:
