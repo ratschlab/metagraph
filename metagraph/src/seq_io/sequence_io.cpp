@@ -16,9 +16,9 @@ FastaWriter::FastaWriter(const std::string &filebase,
                          size_t buffer_size)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
-        thread_pool_(buffer_size ? 1 : 0),
+        worker_(buffer_size ? 1 : 0),
         seq_batcher_([&](auto&& buffer) {
-            thread_pool_.enqueue([&](auto&& buffer) {
+            worker_.enqueue([&](auto&& buffer) {
                 for (const std::string &sequence : buffer) {
                     if (!write_fasta(gz_out_,
                                      enumerate_sequences_ ? header_ + std::to_string(++count_)
@@ -30,7 +30,7 @@ FastaWriter::FastaWriter(const std::string &filebase,
                 }
             }, std::move(buffer));
         }, std::numeric_limits<size_t>::max(),
-           buffer_size / thread_pool_.get_max_num_tasks()) {
+           buffer_size / worker_.get_max_num_tasks()) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
     gz_out_ = gzopen(filename.c_str(), "w");
@@ -47,11 +47,11 @@ FastaWriter::~FastaWriter() {
 
 void FastaWriter::join() {
     seq_batcher_.process_all_buffered();
-    thread_pool_.join();
+    worker_.join();
 }
 
 void FastaWriter::write(const std::string &sequence) {
-    std::unique_lock<std::mutex> lock(batch_mutex_);
+    std::unique_lock<std::mutex> lock(batcher_mutex_);
     seq_batcher_.push_and_pay(sequence.size(), std::string(sequence));
 }
 
@@ -66,9 +66,9 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
       : kmer_length_(kmer_length),
         header_(header),
         enumerate_sequences_(enumerate_sequences),
-        thread_pool_(1),
+        worker_(1),
         batcher_([&](auto&& buffer) {
-            thread_pool_.enqueue([&](auto&& buffer) {
+            worker_.enqueue([&](auto&& buffer) {
                 for (const auto &[sequence, kmer_features] : buffer) {
                     if (!write_fasta(fasta_gz_out_,
                                      enumerate_sequences_ ? header_ + std::to_string(++count_)
@@ -117,7 +117,7 @@ ExtendedFastaWriter<T>::~ExtendedFastaWriter() {
 template <typename T>
 void ExtendedFastaWriter<T>::join() {
     batcher_.process_all_buffered();
-    thread_pool_.join();
+    worker_.join();
 }
 
 template <typename T>
@@ -125,7 +125,7 @@ void ExtendedFastaWriter<T>::write(const std::string &sequence,
                                    const std::vector<feature_type> &kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
-    std::unique_lock<std::mutex> lock(batch_mutex_);
+    std::unique_lock<std::mutex> lock(batcher_mutex_);
     batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
                           std::make_pair(sequence, kmer_features));
 }

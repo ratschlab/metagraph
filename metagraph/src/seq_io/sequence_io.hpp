@@ -33,9 +33,9 @@ class FastaWriter {
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;
-    ThreadPool thread_pool_;
+    ThreadPool worker_;
     BatchAccumulator<std::string> seq_batcher_;
-    std::mutex batch_mutex_;
+    std::mutex batcher_mutex_;
 };
 
 template <typename T = uint32_t>
@@ -75,9 +75,9 @@ class ExtendedFastaWriter {
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;
-    ThreadPool thread_pool_;
+    ThreadPool worker_;
     BatchAccumulator<std::pair<std::string, std::vector<feature_type>>> batcher_;
-    std::mutex batch_mutex_;
+    std::mutex batcher_mutex_;
 };
 
 bool write_fasta(gzFile gz_out, const kseq_t &kseq);
