@@ -51,8 +51,6 @@ class ThreadPool {
 
     void join();
 
-    size_t get_max_num_tasks() const { return max_num_tasks_; }
-
     ~ThreadPool();
 
   private:
