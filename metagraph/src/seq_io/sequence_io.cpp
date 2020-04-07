@@ -80,14 +80,16 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
         header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(get_num_threads() > 1 ? 1 : 0, kWorkerMaxNumTasks),
-        batcher_([&](std::vector<value_type>&& buffer) {
-            worker_.enqueue([&](const auto &buffer) {
-                for (const auto &value_pair : buffer) {
-                    write_to_disk(value_pair);
-                }
-            }, std::move(buffer));
-        }, std::numeric_limits<size_t>::max(),
-           kBufferSize / kWorkerMaxNumTasks) {
+        batcher_([&](std::vector<value_type> &&buffer) {
+                    worker_.enqueue([&](const auto &buffer) {
+                                        for (const auto &value_pair : buffer) {
+                                            write_to_disk(value_pair);
+                                        }
+                                    },
+                                    std::move(buffer));
+                 },
+                 std::numeric_limits<size_t>::max(),
+                 kBufferSize / kWorkerMaxNumTasks) {
     assert(feature_name.size());
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
