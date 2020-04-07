@@ -52,12 +52,10 @@ void FastaWriter::join() {
 }
 
 void FastaWriter::write(const std::string &sequence) {
-    std::unique_lock<std::mutex> lock(batcher_mutex_);
     seq_batcher_.push_and_pay(sequence.size(), std::string(sequence));
 }
 
 void FastaWriter::write(std::string&& sequence) {
-    std::unique_lock<std::mutex> lock(batcher_mutex_);
     seq_batcher_.push_and_pay(sequence.size(), std::move(sequence));
 }
 
@@ -131,7 +129,6 @@ void ExtendedFastaWriter<T>::write(const std::string &sequence,
                                    const std::vector<feature_type> &kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
-    std::unique_lock<std::mutex> lock(batcher_mutex_);
     batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
                           std::make_pair(sequence, kmer_features));
 }
@@ -141,7 +138,6 @@ void ExtendedFastaWriter<T>::write(std::string&& sequence,
                                    std::vector<feature_type>&& kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
-    std::unique_lock<std::mutex> lock(batcher_mutex_);
     batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
                           std::make_pair(std::move(sequence), std::move(kmer_features)));
 }
