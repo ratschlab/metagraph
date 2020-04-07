@@ -24,13 +24,7 @@ FastaWriter::FastaWriter(const std::string &filebase,
         seq_batcher_([&](std::vector<std::string>&& buffer) {
             worker_.enqueue([&](const auto &buffer) {
                 for (const std::string &sequence : buffer) {
-                    if (!write_fasta(gz_out_,
-                                     enumerate_sequences_ ? header_ + std::to_string(++count_)
-                                                          : header_,
-                                     sequence)) {
-                        std::cerr << "ERROR: FastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
-                        exit(1);
-                    }
+                    write_to_disk(sequence);
                 }
             }, std::move(buffer));
         },
@@ -60,6 +54,21 @@ void FastaWriter::write(const std::string &sequence) {
     seq_batcher_.push_and_pay(sequence.size(), std::string(sequence));
 }
 
+void FastaWriter::write(std::string&& sequence) {
+    std::unique_lock<std::mutex> lock(batcher_mutex_);
+    seq_batcher_.push_and_pay(sequence.size(), std::move(sequence));
+}
+
+void FastaWriter::write_to_disk(const std::string &sequence) {
+    if (!write_fasta(gz_out_,
+                     enumerate_sequences_ ? header_ + std::to_string(++count_)
+                                          : header_,
+                     sequence)) {
+        std::cerr << "ERROR: FastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
+        exit(1);
+    }
+}
+
 
 template <typename T>
 ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
@@ -73,21 +82,8 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
         worker_(get_num_threads() > 1 ? 1 : 0, kWorkerMaxNumTasks),
         batcher_([&](std::vector<value_type>&& buffer) {
             worker_.enqueue([&](const auto &buffer) {
-                for (const auto &[sequence, kmer_features] : buffer) {
-                    if (!write_fasta(fasta_gz_out_,
-                                     enumerate_sequences_ ? header_ + std::to_string(++count_)
-                                                          : header_,
-                                     sequence)) {
-                        std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
-                        exit(1);
-                    }
-
-                    if (gzwrite(feature_gz_out_, kmer_features.data(),
-                                                 kmer_features.size() * sizeof(feature_type))
-                            != static_cast<int>(kmer_features.size() * sizeof(feature_type))) {
-                        std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump k-mer features" << std::endl;
-                        exit(1);
-                    }
+                for (const auto &value_pair : buffer) {
+                    write_to_disk(value_pair);
                 }
             }, std::move(buffer));
         }, std::numeric_limits<size_t>::max(),
@@ -133,6 +129,35 @@ void ExtendedFastaWriter<T>::write(const std::string &sequence,
     std::unique_lock<std::mutex> lock(batcher_mutex_);
     batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
                           std::make_pair(sequence, kmer_features));
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::write(std::string&& sequence,
+                                   std::vector<feature_type>&& kmer_features) {
+    assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
+
+    std::unique_lock<std::mutex> lock(batcher_mutex_);
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
+                          std::make_pair(std::move(sequence), std::move(kmer_features)));
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::write_to_disk(const value_type &value_pair) {
+    const auto &[sequence, kmer_features] = value_pair;
+    if (!write_fasta(fasta_gz_out_,
+                     enumerate_sequences_ ? header_ + std::to_string(++count_)
+                                          : header_,
+                     sequence)) {
+        std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump sequence to fasta" << std::endl;
+        exit(1);
+    }
+
+    if (gzwrite(feature_gz_out_, kmer_features.data(),
+                                 kmer_features.size() * sizeof(feature_type))
+            != static_cast<int>(kmer_features.size() * sizeof(feature_type))) {
+        std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump k-mer features" << std::endl;
+        exit(1);
+    }
 }
 
 template class ExtendedFastaWriter<uint8_t>;

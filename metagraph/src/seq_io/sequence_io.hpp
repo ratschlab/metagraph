@@ -24,10 +24,13 @@ class FastaWriter {
     ~FastaWriter();
 
     void write(const std::string &sequence);
+    void write(std::string&& sequence);
 
     void join();
 
   private:
+    void write_to_disk(const std::string &sequence);
+
     gzFile gz_out_;
     const std::string header_;
     bool enumerate_sequences_;
@@ -64,10 +67,14 @@ class ExtendedFastaWriter {
      */
     void write(const std::string &sequence,
                const std::vector<feature_type> &kmer_features);
+    void write(std::string&& sequence,
+               std::vector<feature_type>&& kmer_features);
 
     void join();
 
   private:
+    void write_to_disk(const value_type &value_pair);
+
     gzFile fasta_gz_out_;
     gzFile feature_gz_out_;
     uint32_t kmer_length_;
