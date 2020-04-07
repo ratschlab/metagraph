@@ -27,7 +27,7 @@ class FastaWriter {
 
     void join();
 
-  public:
+  private:
     gzFile gz_out_;
     const std::string header_;
     bool enumerate_sequences_;
@@ -41,6 +41,7 @@ template <typename T = uint32_t>
 class ExtendedFastaWriter {
   public:
     typedef T feature_type;
+    typedef std::pair<std::string, std::vector<feature_type>> value_type;
 
     /**
      * Write sequences to fasta file `<filebase>.fasta.gz` and dump
@@ -66,7 +67,7 @@ class ExtendedFastaWriter {
 
     void join();
 
-  public:
+  private:
     gzFile fasta_gz_out_;
     gzFile feature_gz_out_;
     uint32_t kmer_length_;
@@ -74,7 +75,7 @@ class ExtendedFastaWriter {
     bool enumerate_sequences_;
     uint64_t count_ = 0;
     ThreadPool worker_;
-    BatchAccumulator<std::pair<std::string, std::vector<feature_type>>> batcher_;
+    BatchAccumulator<value_type> batcher_;
     std::mutex batcher_mutex_;
 };
 

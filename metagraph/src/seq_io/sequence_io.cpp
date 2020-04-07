@@ -21,8 +21,8 @@ FastaWriter::FastaWriter(const std::string &filebase,
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(get_num_threads() > 1 ? 1 : 0, kWorkerMaxNumTasks),
-        seq_batcher_([&](auto&& buffer) {
-            worker_.enqueue([&](auto&& buffer) {
+        seq_batcher_([&](std::vector<std::string>&& buffer) {
+            worker_.enqueue([&](const auto &buffer) {
                 for (const std::string &sequence : buffer) {
                     if (!write_fasta(gz_out_,
                                      enumerate_sequences_ ? header_ + std::to_string(++count_)
@@ -71,8 +71,8 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
         header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(get_num_threads() > 1 ? 1 : 0, kWorkerMaxNumTasks),
-        batcher_([&](auto&& buffer) {
-            worker_.enqueue([&](auto&& buffer) {
+        batcher_([&](std::vector<value_type>&& buffer) {
+            worker_.enqueue([&](const auto &buffer) {
                 for (const auto &[sequence, kmer_features] : buffer) {
                     if (!write_fasta(fasta_gz_out_,
                                      enumerate_sequences_ ? header_ + std::to_string(++count_)
