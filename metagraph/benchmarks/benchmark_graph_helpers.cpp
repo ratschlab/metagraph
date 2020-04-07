@@ -27,7 +27,7 @@ std::shared_ptr<DeBruijnGraph> bm::build_graph(const std::string &filename) {
 
     BOSSConstructor constructor(k - 1);
     constructor.add_sequences(sequences);
-    std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor)) };
+    auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor));
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
 
     return graph;
