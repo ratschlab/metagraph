@@ -169,7 +169,7 @@ def make_dir_if_needed(path):
         pass
 
 
-def start_clean(sra_id, wait_time, kmer_count_singletons):
+def start_clean(sra_id, wait_time, kmer_count_singletons, fallback):
     input_file = build_file(sra_id)
     make_dir_if_needed(clean_dir(sra_id))
     output_file = os.path.join(clean_dir(sra_id), sra_id)
@@ -177,7 +177,7 @@ def start_clean(sra_id, wait_time, kmer_count_singletons):
     clean_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
     clean_processes[sra_id] = (
         subprocess.Popen(
-            f'./clean.sh {sra_id} {input_file} {output_file} {kmer_count_singletons} 2>&1 | grep -v "%," > {clean_file_name}',
+            f'./clean.sh {sra_id} {input_file} {output_file} {kmer_count_singletons} {fallback} 2>&1 | grep -v "%," > {clean_file_name}',
             shell=True),
         time.time(), wait_time)
     return True
@@ -394,7 +394,6 @@ def check_status():
     # for cleaning we allow using all the available RAM
     available_ram_gb = psutil.virtual_memory().available / 1e9 - 1
     if 3 * len(build_processes) + len(clean_processes) + 1 <= CORES and waiting_cleans:
-        available_ram_gb = psutil.virtual_memory().available / 1e9 - 1
         for sra_id, (start_time) in waiting_cleans.items():
             # remove the old clean waiting and append the new one after
             build_path = build_dir(sra_id)
