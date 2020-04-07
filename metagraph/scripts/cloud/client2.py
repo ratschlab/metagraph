@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# TODO: get a valid client id, perhaps from managed cluster
 
 import argparse
 import collections
@@ -18,7 +17,6 @@ import time
 import urllib.parse
 import urllib.request
 
-
 args = None
 
 sra_info = {}  # global information about a processed SRA (for now, time only)
@@ -31,9 +29,10 @@ transfer_processes = {}
 waiting_builds = collections.OrderedDict()
 waiting_cleans = collections.OrderedDict()
 
-MAX_DOWNLOAD_PROCESSES = 1
-MAX_build_PROCESSES = 1
-MAX_CLEAN_PROCESSES = 4
+CORES = 8
+MAX_DOWNLOAD_PROCESSES = CORES / 4
+MAX_BUILD_PROCESSES = CORES / 4
+MAX_CLEAN_PROCESSES = CORES
 
 downloads_done = False
 must_quit = False
@@ -64,7 +63,8 @@ Download done: %s
 
 def get_work():
     global downloads_done
-    if downloads_done or len(download_processes) > 0 or len(waiting_builds) > 1:
+    if downloads_done or len(download_processes) >= MAX_DOWNLOAD_PROCESSES or len(
+            waiting_builds) >= 2 * MAX_BUILD_PROCESSES:
         return None
     url = f'http://{args.server}/jobs'
     for i in range(10):
@@ -176,8 +176,9 @@ def start_clean(sra_id, wait_time, kmer_count_singletons):
     logging.info(f'Starting clean with {input_file} {output_file}')
     clean_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
     clean_processes[sra_id] = (
-        subprocess.Popen(f'./clean.sh {sra_id} {input_file} {output_file} {kmer_count_singletons} 2>&1 | grep -v "%," > {clean_file_name}',
-                         shell=True),
+        subprocess.Popen(
+            f'./clean.sh {sra_id} {input_file} {output_file} {kmer_count_singletons} 2>&1 | grep -v "%," > {clean_file_name}',
+            shell=True),
         time.time(), wait_time)
     return True
 
@@ -390,33 +391,9 @@ def check_status():
                           'size_mb': cleaned_size}
                 nack('transfer', params)
 
+    # for cleaning we allow using all the available RAM
     available_ram_gb = psutil.virtual_memory().available / 1e9 - 1
-    if len(build_processes) == 0 and len(clean_processes) < 2 and waiting_builds and len(waiting_cleans) < 3:
-        sra_id, (start_time) = waiting_builds.popitem()
-        num_kmers = sra_info[sra_id][2]
-        # estimated RAM needed for loading graph in memory; 2 bytes/kmer, 1 byte/kmer-count
-        required_ram_gb = round((num_kmers * 4) / 1e9 + 1, 2)
-        total_ram_gb = psutil.virtual_memory().total / 1e9
-        if required_ram_gb > total_ram_gb - 3:
-            build_path = build_dir(sra_id)
-            logging.warning(f'Building graph for SRA id {sra_id} needs too much RAM '
-                            f'({required_ram_gb}GB). Removing {build_path}.')
-            subprocess.run(['rm', '-rf', build_path])
-            params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
-                      'size_mb': build_size, 'required_ram_gb': required_ram_gb}
-            nack('build', params)
-        elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
-            required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9; # also account for dummy kmers
-            buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
-            if (required_ram_all_mem_gb < 2):
-                start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector')
-            else:
-                start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk')
-        else:
-            logging.info(f'Not enough RAM for building. Have {round(available_ram_gb, 2)}GB need {required_ram_gb}GB')
-
-    # we do max one clean while we have a build, and up to 4 cleans if no build is running
-    if (len(clean_processes) == 0 or (len(clean_processes) < 3 and len(build_processes) == 0)) and waiting_cleans:
+    if 3 * len(build_processes) + len(clean_processes) + 1 <= CORES and waiting_cleans:
         available_ram_gb = psutil.virtual_memory().available / 1e9 - 1
         for sra_id, (start_time) in waiting_cleans.items():
             # remove the old clean waiting and append the new one after
@@ -431,6 +408,33 @@ def check_status():
                 break
             logging.info(f'Not enough RAM for cleaning {sra_id}. '
                          f'Have {round(available_ram_gb, 2)}GB need {round(build_size_gb + 0.5, 2)}GB')
+
+    if 3 * (len(build_processes) + 1) + len(clean_processes) <= CORES and waiting_builds:
+        sra_id, (start_time) = waiting_builds.popitem()
+        num_kmers = sra_info[sra_id][2]
+        # estimated RAM needed for loading graph in memory; 1 bytes/kmer, 2 byte/kmer-count, 1 extra for dummy kmers
+        required_ram_gb = round((num_kmers * 4) / 1e9 + 1, 2)
+        logging.info(f'Estimated {required_ram_gb}GB needed for building')
+        total_ram_gb = psutil.virtual_memory().total / 1e9
+        if required_ram_gb > total_ram_gb - 3:
+            build_path = build_dir(sra_id)
+            logging.warning(f'Building graph for SRA id {sra_id} needs too much RAM '
+                            f'({required_ram_gb}GB). Removing {build_path}.')
+            subprocess.run(['rm', '-rf', build_path])
+            params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
+                      'size_mb': build_size, 'required_ram_gb': required_ram_gb}
+            nack('build', params)
+        elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
+            # how much memory does it take to load all unique kmers into RAM
+            required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9;  # also account for dummy kmers
+            if (required_ram_all_mem_gb < 2):
+                start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector')
+            else:
+                buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
+                start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk')
+        else:
+            logging.info(f'Not enough RAM for building {sra_id}. Have {round(available_ram_gb, 2)}GB need {required_ram_gb}GB')
+            waiting_builds[sra_id] = (start_time)
 
     for d in completed_transfers:
         del transfer_processes[d]
@@ -451,15 +455,19 @@ def do_work():
             start_download(work_response['download'])
         else:
             logging.error(f'Server response invalid. Expected a \'download\' tag: {work_response}')
-        if i % 10 == 0:
-            subprocess.Popen(
-                [f'gsutil rsync -x \'(?!^client.log$)\' {args.output_dir} {args.log_destination}/{internal_ip()}/'],
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE)
+        subprocess.Popen(
+            [f'gsutil rsync -x \'(?!^client.log$)\' {args.output_dir} {args.log_destination}/{internal_ip()}/'],
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
 
         i = i + 1
         time.sleep(5)
+    subprocess.Popen(
+        [f'gsutil rsync -x \'(?!^client.log$)\' {args.output_dir} {args.log_destination}/{internal_ip()}/'],
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
 
 
 def check_env():
@@ -576,9 +584,9 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://mg22/clean/',
+    parser.add_argument('--destination', default='gs://mg23/clean/',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default='gs://mg22/logs',
+    parser.add_argument('--log_destination', default='gs://mg23/logs',
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
     args = parser.parse_args()
@@ -590,7 +598,7 @@ if __name__ == '__main__':
 
     if not args.server:
         logging.info('Trying to find server address...')
-        if subprocess.call(['gsutil', 'cp', 'gs://mg22/server', '/tmp/server'], stdout=subprocess.PIPE,
+        if subprocess.call(['gsutil', 'cp', 'gs://mg23/server', '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
             exit(1)
