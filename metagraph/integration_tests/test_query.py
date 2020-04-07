@@ -704,7 +704,7 @@ class TestQueryCanonical(unittest.TestCase):
             )
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(len(res.stdout), 11483)
+            self.assertEqual(len(res.stdout), 11490)
 
             query_command = '{exe} query --align --count-labels -i {graph} -a {annotation} {input}'.format(
                 exe=METAGRAPH,
@@ -714,7 +714,7 @@ class TestQueryCanonical(unittest.TestCase):
             )
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(len(res.stdout), 11556)
+            self.assertEqual(len(res.stdout), 11563)
 
     @parameterized.expand(['succinct'])  # 'hashstr'
     def test_query_graphs_bloom(self, graph_repr):
@@ -878,7 +878,7 @@ class TestQueryCanonical(unittest.TestCase):
             )
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(len(res.stdout), 11483)
+            self.assertEqual(len(res.stdout), 11490)
 
             query_command = '{exe} query --align --fast --count-labels -i {graph} -a {annotation} {input}'.format(
                 exe=METAGRAPH,
@@ -888,7 +888,7 @@ class TestQueryCanonical(unittest.TestCase):
             )
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(len(res.stdout), 11556)
+            self.assertEqual(len(res.stdout), 11563)
 
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # 'hashstr'
     def test_query_all_graphs_batch_tiny_batch(self, graph_repr):

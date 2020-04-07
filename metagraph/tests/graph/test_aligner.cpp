@@ -1487,6 +1487,37 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_both_directions) {
+    size_t k = 7;
+    std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
+    std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, true);
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.max_seed_length = k;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths.front();
+
+    EXPECT_EQ(12u, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+    EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
+    EXPECT_EQ("5=1X12=", path.get_cigar().to_string());
+    EXPECT_EQ(17u, path.get_num_matches());
+    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_EQ(0u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_end_clipping());
+    EXPECT_EQ(0u, path.get_offset());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph,
+                         path,
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
+
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
 TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
     size_t k = 5;
     std::string reference = "ATCCCTTTTAAAA";
