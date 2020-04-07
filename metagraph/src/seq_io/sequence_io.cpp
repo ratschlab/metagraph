@@ -8,16 +8,19 @@
 #include "vcf_parser.hpp"
 
 const char kDefaultFastQualityChar = 'I';
+
+// TODO: these were set after some simple benchmarking. More extensive testing
+//       may be required to find more optimal values.
 const size_t kWorkerMaxNumTasks = 5;
+const size_t kBufferSize = 1e6;
 
 
 FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
-                         bool enumerate_sequences,
-                         size_t buffer_size)
+                         bool enumerate_sequences)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
-        worker_(buffer_size ? 1 : 0, kWorkerMaxNumTasks),
+        worker_(get_num_threads() > 1 ? 1 : 0, kWorkerMaxNumTasks),
         seq_batcher_([&](auto&& buffer) {
             worker_.enqueue([&](auto&& buffer) {
                 for (const std::string &sequence : buffer) {
@@ -30,8 +33,9 @@ FastaWriter::FastaWriter(const std::string &filebase,
                     }
                 }
             }, std::move(buffer));
-        }, std::numeric_limits<size_t>::max(),
-           buffer_size / kWorkerMaxNumTasks) {
+        },
+        std::numeric_limits<size_t>::max(),
+        kBufferSize / kWorkerMaxNumTasks) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
     gz_out_ = gzopen(filename.c_str(), "w");
@@ -62,12 +66,11 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                                             const std::string &feature_name,
                                             uint32_t kmer_length,
                                             const std::string &header,
-                                            bool enumerate_sequences,
-                                            size_t buffer_size)
+                                            bool enumerate_sequences)
       : kmer_length_(kmer_length),
         header_(header),
         enumerate_sequences_(enumerate_sequences),
-        worker_(buffer_size ? 1 : 0, kWorkerMaxNumTasks),
+        worker_(get_num_threads() > 1 ? 1 : 0, kWorkerMaxNumTasks),
         batcher_([&](auto&& buffer) {
             worker_.enqueue([&](auto&& buffer) {
                 for (const auto &[sequence, kmer_features] : buffer) {
@@ -88,7 +91,7 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                 }
             }, std::move(buffer));
         }, std::numeric_limits<size_t>::max(),
-           buffer_size / kWorkerMaxNumTasks) {
+           kBufferSize / kWorkerMaxNumTasks) {
     assert(feature_name.size());
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";

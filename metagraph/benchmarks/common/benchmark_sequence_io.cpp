@@ -17,7 +17,7 @@ static void BM_UnitigsWrite(benchmark::State& state) {
     graph->call_unitigs([&](const auto &unitig, auto&&) { unitigs.push_back(unitig); });
 
     for (auto _ : state) {
-        FastaWriter writer(file_prefix, "", false, std::pow(10, state.range(0)) - 1);
+        FastaWriter writer(file_prefix, "", false);
         for (const auto &unitig : unitigs) {
             writer.write(unitig);
         }
@@ -33,11 +33,10 @@ static void BM_UnitigsExtractAndWrite(benchmark::State& state) {
     auto graph = mg::bm::build_graph(graph_file);
 
     for (auto _ : state) {
-        FastaWriter writer(file_prefix, "", false, std::pow(10, state.range(0)) - 1);
+        FastaWriter writer(file_prefix, "", false);
         graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); });
     }
 }
 
 BENCHMARK(BM_UnitigsExtractAndWrite)
-    ->Unit(benchmark::kMillisecond)
-    ->DenseRange(0, 10, 2);
+    ->Unit(benchmark::kMillisecond);

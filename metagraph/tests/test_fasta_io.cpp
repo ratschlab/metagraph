@@ -78,34 +78,15 @@ TEST(FastaFile, full_iterator_read_100K) {
     std::filesystem::remove(dump_filename);
 }
 
-TEST(FastaFile, full_iterator_read_100K_multithreaded_nobuffer) {
+TEST(FastaFile, full_iterator_read_100K_multithreaded) {
     {
+        set_num_threads(3);
         FastaWriter writer(dump_filename, "seq", true);
-        #pragma omp parallel for num_threads(3)
+        #pragma omp parallel for num_threads(get_num_threads() - 1)
         for (size_t i = 0; i < 100'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
-    }
-
-    size_t num_records = 0;
-    size_t total_size = 0;
-    for (const auto &record : FastaParser(dump_filename)) {
-        num_records++;
-        total_size += record.seq.l;
-    }
-    EXPECT_EQ(100'000u, num_records);
-    EXPECT_EQ(49'950'000u, total_size);
-
-    std::filesystem::remove(dump_filename);
-}
-
-TEST(FastaFile, full_iterator_read_100K_multithreaded_buffer) {
-    {
-        FastaWriter writer(dump_filename, "seq", true, 1'000'000);
-        #pragma omp parallel for num_threads(3)
-        for (size_t i = 0; i < 100'000; ++i) {
-            writer.write(std::string(i % 1'000, 'A'));
-        }
+        set_num_threads(1);
     }
 
     size_t num_records = 0;
