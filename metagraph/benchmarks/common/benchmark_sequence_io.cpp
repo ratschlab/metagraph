@@ -30,7 +30,7 @@ static void BM_WriteRandomSequences(benchmark::State& state) {
 
     set_num_threads(state.range(0));
     for (auto _ : state) {
-        FastaWriter writer(file_prefix, "", false);
+        FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
         for (const auto &sequence : sequences) {
             writer.write(sequence);
         }
@@ -55,7 +55,7 @@ static void BM_WriteContigs(benchmark::State& state) {
 
     set_num_threads(state.range(0));
     for (auto _ : state) {
-        FastaWriter writer(file_prefix, "", false);
+        FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
         for (const auto &contig : contigs) {
             writer.write(contig);
         }

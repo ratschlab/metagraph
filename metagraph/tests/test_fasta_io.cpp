@@ -81,7 +81,7 @@ TEST(FastaFile, full_iterator_read_100K) {
 TEST(FastaFile, full_iterator_read_100K_multithreaded) {
     {
         set_num_threads(3);
-        FastaWriter writer(dump_filename, "seq", true);
+        FastaWriter writer(dump_filename, "seq", true, true);
         #pragma omp parallel for num_threads(get_num_threads() - 1)
         for (size_t i = 0; i < 100'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));

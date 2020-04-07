@@ -17,16 +17,18 @@ const size_t kBufferSize = 1e6;
 
 FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
-                         bool enumerate_sequences)
+                         bool enumerate_sequences,
+                         bool async)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
-        worker_(get_num_threads() > 1 ? 1 : 0, kWorkerMaxNumTasks),
+        worker_(async, kWorkerMaxNumTasks),
         seq_batcher_([&](std::vector<std::string>&& buffer) {
             worker_.enqueue([&](const auto &buffer) {
-                for (const std::string &sequence : buffer) {
-                    write_to_disk(sequence);
-                }
-            }, std::move(buffer));
+                                for (const std::string &sequence : buffer) {
+                                    write_to_disk(sequence);
+                                }
+                            },
+                            std::move(buffer));
         },
         std::numeric_limits<size_t>::max(),
         kBufferSize / kWorkerMaxNumTasks) {
@@ -75,11 +77,12 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                                             const std::string &feature_name,
                                             uint32_t kmer_length,
                                             const std::string &header,
-                                            bool enumerate_sequences)
+                                            bool enumerate_sequences,
+                                            bool async)
       : kmer_length_(kmer_length),
         header_(header),
         enumerate_sequences_(enumerate_sequences),
-        worker_(get_num_threads() > 1 ? 1 : 0, kWorkerMaxNumTasks),
+        worker_(async, kWorkerMaxNumTasks),
         batcher_([&](std::vector<value_type> &&buffer) {
                     worker_.enqueue([&](const auto &buffer) {
                                         for (const auto &value_pair : buffer) {

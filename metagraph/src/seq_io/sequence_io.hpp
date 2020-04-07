@@ -19,7 +19,8 @@ class FastaWriter {
   public:
     FastaWriter(const std::string &filebase,
                 const std::string &header = "",
-                bool enumerate_sequences = false);
+                bool enumerate_sequences = false,
+                bool async = false);
 
     ~FastaWriter();
 
@@ -58,7 +59,8 @@ class ExtendedFastaWriter {
                         const std::string &feature_name,
                         uint32_t kmer_length,
                         const std::string &header = "",
-                        bool enumerate_sequences = false);
+                        bool enumerate_sequences = false,
+                        bool async = false);
 
     ~ExtendedFastaWriter();
 
