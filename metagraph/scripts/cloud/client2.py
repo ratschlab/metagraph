@@ -294,7 +294,7 @@ def check_status():
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
                           'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
                           'kmer_count_total': kmer_count_total, 'kmer_count_singletons': kmer_count_singletons}
-                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons)
+                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons, kmer_count_total)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
@@ -402,8 +402,12 @@ def check_status():
             required_ram_gb = max(build_size_gb * 1.1, build_size_gb + 1)
 
             if available_ram_gb - required_ram_gb > 0:
+                kmer_count_unique = sra_info[sra_id][2]
                 kmer_count_singletons = sra_info[sra_id][3]
-                start_clean(sra_id, time.time() - start_time, kmer_count_singletons)
+                kmer_count_total = sra_info[sra_id][4]
+                coverage = kmer_count_total/kmer_count_unique
+                fallback = 5 if coverage > 5 else 2 if coverage > 2 else 1
+                start_clean(sra_id, time.time() - start_time, kmer_count_singletons, fallback)
                 del waiting_cleans[sra_id]
                 break
             logging.info(f'Not enough RAM for cleaning {sra_id}. '
