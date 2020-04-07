@@ -155,22 +155,6 @@ class SortedSetDiskBase {
         });
     }
 
-    std::vector<std::string> get_file_names() {
-        async_merge_l1_.join(); // make sure all L1 merges are done
-        std::vector<std::string> file_names;
-        if (merged_all_) {
-            file_names.push_back(merged_all_name(chunk_file_prefix_));
-        }
-
-        for (size_t i = 0; i < l1_chunk_count_; ++i) {
-            file_names.push_back(merged_l1_name(chunk_file_prefix_, i));
-        }
-        for (size_t i = MERGE_L1_COUNT * l1_chunk_count_; i < chunk_count_; ++i) {
-            file_names.push_back(chunk_file_prefix_ + std::to_string(i));
-        }
-        return file_names;
-    }
-
     void shrink_data() {
         logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
@@ -408,6 +392,22 @@ class SortedSetDiskBase {
         encoder.finish();
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
+    }
+
+    std::vector<std::string> get_file_names() {
+        async_merge_l1_.join(); // make sure all L1 merges are done
+        std::vector<std::string> file_names;
+        if (merged_all_) {
+            file_names.push_back(merged_all_name(chunk_file_prefix_));
+        }
+
+        for (size_t i = 0; i < l1_chunk_count_; ++i) {
+            file_names.push_back(merged_l1_name(chunk_file_prefix_, i));
+        }
+        for (size_t i = MERGE_L1_COUNT * l1_chunk_count_; i < chunk_count_; ++i) {
+            file_names.push_back(chunk_file_prefix_ + std::to_string(i));
+        }
+        return file_names;
     }
 };
 
