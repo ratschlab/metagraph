@@ -32,6 +32,8 @@ namespace common {
  *
  * @tparam T the type of the elements that are being stored and sorted,
  * typically #KMerBOSS instances, or <#KmerBOSS, count> pairs.
+ * @tparam INT the corresponding integer representation of T, used for compressed storage
+ * on disk
  */
 template <typename T, typename INT>
 class SortedSetDiskBase {
@@ -115,6 +117,11 @@ class SortedSetDiskBase {
         return get_file_names();
     }
 
+    /**
+     * Clears the set, preparing it to be re-used for another merge. Creating a new
+     * sorted set may be expensive when #data_ is large. In these cases, prefere calling
+     * #clear and re-using the sorted.
+     */
     void clear(const std::filesystem::path &tmp_path = "/tmp/") {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
@@ -132,6 +139,21 @@ class SortedSetDiskBase {
   protected: // TODO: move most of these methods to private before submitting
     virtual void sort_and_remove_duplicates(storage_type *vector,
                                             size_t num_threads) const = 0;
+
+    void start_merging() {
+        const std::vector<std::string> file_names = this->get_file_names();
+        this->async_worker_.enqueue([file_names, this]() {
+          std::function<void(const value_type &)> on_new_item
+                  = [this](const value_type &v) { this->merge_queue_.push(v); };
+          if constexpr (utils::is_pair<T> {}) {
+              merge_files<typename T::first_type, typename T::second_type,
+                          typename INT::first_type>(file_names, on_new_item);
+          } else {
+              merge_files<T, INT>(file_names, on_new_item);
+          }
+          this->merge_queue_.shutdown();
+        });
+    }
 
     std::vector<std::string> get_file_names() {
         async_merge_l1_.join(); // make sure all L1 merges are done
@@ -386,21 +408,6 @@ class SortedSetDiskBase {
         encoder.finish();
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
-    }
-
-    void start_merging() {
-        const std::vector<std::string> file_names = this->get_file_names();
-        this->async_worker_.enqueue([file_names, this]() {
-            std::function<void(const value_type &)> on_new_item
-                    = [this](const value_type &v) { this->merge_queue_.push(v); };
-            if constexpr (utils::is_pair<T> {}) {
-                merge_files<typename T::first_type, typename T::second_type,
-                            typename INT::first_type>(file_names, on_new_item);
-            } else {
-                merge_files<T, INT>(file_names, on_new_item);
-            }
-            this->merge_queue_.shutdown();
-        });
     }
 };
 

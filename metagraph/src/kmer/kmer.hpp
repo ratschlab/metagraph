@@ -7,9 +7,6 @@
 #include <vector>
 #include <cassert>
 
-#include <sdsl/uint128_t.hpp>
-#include <sdsl/uint256_t.hpp>
-
 /**
  * Models a kmer (https://en.wikipedia.org/wiki/K-mer). Each character in the k-mer
  * uses L bits of the internal representation type G (typically a 64, 128 or 256 bit
@@ -57,9 +54,6 @@ class KMer {
     bool operator>=(const KMer &other) const { return seq_ >= other.seq_; }
     bool operator==(const KMer &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMer &other) const { return seq_ != other.seq_; }
-    explicit operator uint64_t () const { static_assert(sizeof(WordType) < 64); return seq_; }
-    explicit operator sdsl::uint128_t () const { static_assert(sizeof(WordType) < 128); return seq_; }
-    explicit operator sdsl::uint256_t () const { static_assert(sizeof(WordType) < 256); return seq_; }
 
     /** Return the character at position #i in the kmer. Undefined behavior if #i is
      * out of range. */

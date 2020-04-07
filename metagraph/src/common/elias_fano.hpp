@@ -212,7 +212,7 @@ class EliasFanoDecoder {
 
     /**
      * Stream containing the compressed data. Points to either #source_internal_ or to
-     * a stream provided in the constructorl
+     * a stream provided in the constructor
      */
     std::ifstream *source_;
     /**

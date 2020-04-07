@@ -87,7 +87,6 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
         }
     }
 
-  private:
     virtual void sort_and_remove_duplicates(storage_type *vector,
                                             size_t num_threads) const override {
         assert(vector);
