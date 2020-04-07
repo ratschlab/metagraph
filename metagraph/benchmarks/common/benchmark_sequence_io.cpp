@@ -2,6 +2,7 @@
 
 #include <benchmark/benchmark.h>
 
+#include "common/threads/threading.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 
@@ -10,33 +11,22 @@
 const std::string file_prefix = "/tmp/bm_mg_outfile.fasta.gz";
 
 
-static void BM_UnitigsWrite(benchmark::State& state) {
+static void BM_ContigsWrite(benchmark::State& state) {
     std::string graph_file = "../tests/data/transcripts_1000.fa";
     auto graph = mg::bm::build_graph(graph_file);
-    std::vector<std::string> unitigs;
-    graph->call_unitigs([&](const auto &unitig, auto&&) { unitigs.push_back(unitig); });
+    std::vector<std::string> contigs;
+    graph->call_sequences([&](const auto &contig, auto&&) { contigs.push_back(contig); });
 
+    set_num_threads(state.range(0));
     for (auto _ : state) {
         FastaWriter writer(file_prefix, "", false);
-        for (const auto &unitig : unitigs) {
-            writer.write(unitig);
+        for (const auto &contig : contigs) {
+            writer.write(contig);
         }
     }
+    set_num_threads(1);
 }
 
-BENCHMARK(BM_UnitigsWrite)
+BENCHMARK(BM_ContigsWrite)
     ->Unit(benchmark::kMillisecond)
-    ->DenseRange(0, 10, 2);
-
-static void BM_UnitigsExtractAndWrite(benchmark::State& state) {
-    std::string graph_file = "../tests/data/transcripts_1000.fa";
-    auto graph = mg::bm::build_graph(graph_file);
-
-    for (auto _ : state) {
-        FastaWriter writer(file_prefix, "", false);
-        graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); });
-    }
-}
-
-BENCHMARK(BM_UnitigsExtractAndWrite)
-    ->Unit(benchmark::kMillisecond);
+    ->DenseRange(1, 2, 1);
