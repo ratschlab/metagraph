@@ -183,7 +183,7 @@ void MEMSeeder<NodeType>
                                          orientation_));
         }
 
-        it = next != query_nodes_.end() ? next + 1 : next;
+        it = next;
     }
 }
 
