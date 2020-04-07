@@ -20,9 +20,10 @@ class EliasFanoFixture : public benchmark::Fixture {
     static T sum_uncompressed;
     size_t size;
 
-    EliasFanoFixture() { init_sorted(); }
+    EliasFanoFixture() { Unit(benchmark::TimeUnit::kMillisecond); init_sorted(); }
 
     void init_sorted() {
+
         if (!sorted.empty()) {
             return;
         }

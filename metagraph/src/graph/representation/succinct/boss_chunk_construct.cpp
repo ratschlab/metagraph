@@ -218,21 +218,34 @@ uint8_t write_kmer(size_t k,
     return 1;
 }
 
-template <typename T, typename INT>
-static INT to_int(T v, INT __attribute__((unused))) {
+// converters from T to its integer representation
+template <typename T>
+static typename T::WordType to_int(T v) {
     return v.data();
 }
 
-template <typename T, typename C, typename INT>
-static std::pair<INT, C> to_int(std::pair<T, C> v, INT __attribute__((unused))) {
+template <typename T, typename C>
+static std::pair<typename T::WordType, C> to_int(std::pair<T, C> v) {
     return { v.first.data(), v.second };
 }
 
+/** Returns a lambda that writes compressed integers into encoder */
 template <typename T, typename int_type>
 std::function<void(const T &v)>
 compressed_writer(common::EliasFanoEncoderBuffered<int_type> *encoder,
                   std::function<int_type(const T &v)> to_int) {
     return [encoder, to_int](const T &v) { encoder->add(to_int(v)); };
+};
+
+// SFINAE structs to construct the integer type corresponding to T
+template <typename T, typename = void>
+struct get_int_type {
+    using type = typename T::WordType;
+};
+
+template <typename T>
+struct get_int_type<T, void_t<typename T::second_type>> {
+    using type = std::pair<typename T::first_type::WordType, typename T::second_type>;
 };
 
 /**
@@ -250,8 +263,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                      ThreadPool &async_worker) {
     std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
     using T = typename KmerCollector::Value;
-
-    using KMER = std::remove_reference_t<decltype(utils::get_first(*(kmers->begin())))>;
+    using T_INT = typename get_int_type<T>::type;
+    using KMER = typename utils::get_first_type<T>::type;
 
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name = [&tmp_dir](uint32_t pref_len) {
@@ -273,25 +286,21 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     const filesystem::path tmp_path2 = tmp_dir / "dummy_source2";
 
-    T kmer;
-    using int_type = decltype(to_int(kmer, utils::get_first(kmer).data()));
-    std::function<int_type(const T &v)> to_intf
-            = [](const T &v) { return to_int(v, utils::get_first(v).data()); };
+    std::function<T_INT(const T &v)> to_intf = [](const T &v) { return to_int(v); };
     // this will contain dummy k-mers of prefix length 2
-    common::EliasFanoEncoderBuffered<int_type> dummy_l2(files_to_merge.back(), 100'000);
-    common::SortedSetDisk<T, int_type> sorted_dummy_kmers(
+    common::EliasFanoEncoderBuffered<T_INT> dummy_l2(files_to_merge.back(), 100'000);
+    common::SortedSetDisk<T, T_INT> sorted_dummy_kmers(
             no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
             tmp_path2, kmer_collector.max_disk_space(), [](const T &) {}, 100, to_intf);
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
-    // traverse the input kmers and remove redundant dummy source k-mers of prefix length 1
-    // While traversing and removing redundant dummy source k-mers of prefix length 1,
-    // we also  generate dummy k-mers of prefix length 2.
+    // traverse the input kmers and remove redundant dummy source k-mers of prefix length
+    // 1. While traversing we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
     // contains original kmers and non-redundant source dummy k-mers with prefix length 1
-    common::EliasFanoEncoderBuffered<int_type> original_and_l1(file_name, 100'000);
+    common::EliasFanoEncoderBuffered<T_INT> original_and_l1(file_name, 100'000);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
@@ -319,12 +328,12 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         const filesystem::path tmp_path
                 = tmp_dir / ("dummy_source" + std::to_string(dummy_pref_len));
         const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
-        common::EliasFanoEncoderBuffered<int_type> encoder(files_to_merge.back(), 100'000);
+        common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(), 100'000);
         common::ChunkedWaitQueue<T> source(10000, 1, compressed_writer(&encoder, to_intf));
         async_merge.enqueue([&chunk_files, &source]() {
             std::function<void(const T &)> on_new_item
                     = [&source](const T &v) { source.push(v); };
-            common::merge_files<T, int_type>(chunk_files, on_new_item);
+            common::merge_files<T, T_INT>(chunk_files, on_new_item);
             source.shutdown();
         });
         sorted_dummy_kmers.clear(tmp_path);
@@ -349,12 +358,12 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     uint32_t num_kmers = 0;
     // iterate to merge the data and write it to disk
     const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
-    common::EliasFanoEncoderBuffered<int_type> encoder(files_to_merge.back(), 100'000);
+    common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(), 100'000);
     common::ChunkedWaitQueue<T> source(10000, 1, compressed_writer(&encoder, to_intf));
     async_merge.enqueue([&chunk_files, &source]() {
         std::function<void(const T &)> on_new_item
                 = [&source](const T &v) { source.push(v); };
-        common::merge_files<T, int_type>(chunk_files, on_new_item);
+        common::merge_files<T, T_INT>(chunk_files, on_new_item);
         source.shutdown();
     });
     for (auto &it = source.begin(); it != source.end(); ++it, ++num_kmers) {
@@ -366,10 +375,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([=]() {
-        std::function<void(const T &)> on_new_item = [kmers](const T &v) {
-            kmers->push(v);
-        };
-        common::merge_files<T, int_type>(files_to_merge, on_new_item);
+        std::function<void(const T &)> on_new_item
+                = [kmers](const T &v) { kmers->push(v); };
+        common::merge_files<T, T_INT>(files_to_merge, on_new_item);
         kmers->shutdown();
     });
 }
@@ -412,8 +420,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           max_disk_space),
           bits_per_count_(bits_per_count) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
-            kmer_collector_.add_kmer(
-                    std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
+            kmer_collector_.add_kmer(std::vector<KmerExtractorBOSS::TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
 
@@ -502,16 +509,16 @@ using KmerMultsetVector8
                                                      Vector<std::pair<KMER, uint8_t>>>>;
 
 template <typename KMER>
-using KmerMultsetVector16
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
-                              common::SortedMultiset<KMER, uint16_t,
-                                                     Vector<std::pair<KMER, uint16_t>>>>;
+using KmerMultsetVector16 = kmer::KmerCollector<
+        KMER,
+        KmerExtractorBOSS,
+        common::SortedMultiset<KMER, uint16_t, Vector<std::pair<KMER, uint16_t>>>>;
 
 template <typename KMER>
-using KmerMultsetVector32
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
-                              common::SortedMultiset<KMER, uint32_t,
-                                                     Vector<std::pair<KMER, uint32_t>>>>;
+using KmerMultsetVector32 = kmer::KmerCollector<
+        KMER,
+        KmerExtractorBOSS,
+        common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>;
 
 template <typename KMER>
 using KmerSetDisk
@@ -548,9 +555,8 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   kmer::ContainerType container_type,
                                   const std::filesystem::path &tmp_dir,
                                   size_t max_disk_space_bytes) {
-#define OTHER_ARGS \
-    k, canonical_mode, bits_per_count, filter_suffix, num_threads, memory_preallocated, \
-            tmp_dir, max_disk_space_bytes
+#define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
+                   num_threads, memory_preallocated, tmp_dir, max_disk_space_bytes
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:

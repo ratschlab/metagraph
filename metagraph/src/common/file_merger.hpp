@@ -59,11 +59,14 @@ class MergeHeap {
 
 
 /**
- * Given a list of n source files, containing ordered elements of type T, merge the n
- * sources into a single (ordered) list and delete the original files.
+ * Given a list of n source files, containing ordered elements of type INT, merge the n
+ * sources into a single (ordered) list of type T and delete the original files.
+ * @tparam T the type of the  elements to be merged (typically a 64/128 or 256-bit k-mer)
+ * @tparam INT the integer representation of the type T
  * @param sources the files containing sorted lists of type T
  * @param on_new_item callback to invoke when a new element was merged
- *
+ * @param cleanup if true, remove source files after merging
+ * @param to_T converts from the integer representation of T (INT) to T
  * @return the total number of elements read from all files
  *
  * Note: this method blocks until all the data was successfully merged.
@@ -84,7 +87,7 @@ uint64_t merge_files(
 
     std::vector<std::unique_ptr<EliasFanoDecoder<INT>>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<EliasFanoDecoder<INT>>(sources[i]);
+        decoders[i] = std::make_unique<EliasFanoDecoder<INT>>(sources[i], cleanup);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
             merge_heap.emplace(to_T(data_item.value()), i);
@@ -93,12 +96,6 @@ uint64_t merge_files(
     }
 
     if (merge_heap.empty()) {
-        if (cleanup) {
-            std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
-                std::filesystem::remove(s);
-                std::filesystem::remove(s + ".up");
-            });
-        }
         return num_elements_read;
     }
 
@@ -120,13 +117,6 @@ uint64_t merge_files(
         }
     }
 
-    if (cleanup) {
-        std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
-            std::filesystem::remove(s);
-            std::filesystem::remove(s + ".up");
-        });
-    }
-
     return num_elements_read;
 }
 
@@ -138,6 +128,8 @@ uint64_t merge_files(
  * If two pairs have the same first element, the counts are added together.
  * @param sources the files containing sorted lists of pairs of type <T, C>
  * @param on_new_item callback to invoke when a new element was merged
+ * @param cleanup if true, remove source files after merging
+ * @param to_T converts from the integer representation of T (INT) to T
  *
  * @return the total number of elements read from all files
  *
@@ -158,7 +150,8 @@ uint64_t merge_files(
     std::vector<std::unique_ptr<EliasFanoDecoder<std::pair<INT, C>>>> decoders(
             sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<EliasFanoDecoder<std::pair<INT, C>>>(sources[i]);
+        decoders[i] = std::make_unique<EliasFanoDecoder<std::pair<INT, C>>>(sources[i],
+                                                                            cleanup);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
             merge_heap.emplace({ to_T(data_item.value().first), data_item.value().second },
@@ -168,13 +161,6 @@ uint64_t merge_files(
     }
 
     if (merge_heap.empty()) {
-        if (cleanup) {
-            std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
-                std::filesystem::remove(s);
-                std::filesystem::remove(s + ".count");
-                std::filesystem::remove(s + ".up");
-            });
-        }
         return num_elements;
     }
 
@@ -203,14 +189,6 @@ uint64_t merge_files(
         }
     }
     on_new_item(current);
-
-    if (cleanup) {
-        std::for_each(sources.begin(), sources.end(), [](const std::string &s) {
-            std::filesystem::remove(s);
-            std::filesystem::remove(s + ".count");
-            std::filesystem::remove(s + ".up");
-        });
-    }
 
     return num_elements;
 }

@@ -47,7 +47,7 @@ class KMerBOSS {
     template <typename T>
     KMerBOSS(const std::vector<T> &arr) : KMerBOSS(arr, arr.size()) {}
 
-    KMerBOSS(WordType &&seq) noexcept : seq_(seq) {}
+    KMerBOSS(WordType&& seq) noexcept : seq_(seq) {}
     explicit KMerBOSS(const WordType &seq) noexcept : seq_(seq) {}
 
     // corresponds to the BOSS (co-lex, one-swapped) order of k-mers
@@ -57,8 +57,6 @@ class KMerBOSS {
     bool operator>=(const KMerBOSS &other) const { return seq_ >= other.seq_; }
     bool operator==(const KMerBOSS &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMerBOSS &other) const { return seq_ != other.seq_; }
-    KMerBOSS<G, L> operator>>(const size_t v) const { return KMerBOSS(seq_ >> v); }
-    KMerBOSS<G, L> operator+(const size_t v) const { return KMerBOSS(seq_ + v); }
     explicit operator uint64_t () const { static_assert(sizeof(WordType) < 64); return seq_; }
     explicit operator sdsl::uint128_t () const { static_assert(sizeof(WordType) < 128); return seq_; }
     explicit operator sdsl::uint256_t () const { static_assert(sizeof(WordType) < 256); return seq_; }
@@ -71,7 +69,8 @@ class KMerBOSS {
      *                  compares s[6]s[5]s[4]s[3]s[2]s[1] if minus = 0.
      * In general, checks if s[minus+1]...s[k-1] are the same for both kmers.
      */
-    static inline bool compare_suffix(const KMerBOSS &k1, const KMerBOSS &k2, size_t minus = 0);
+    static inline bool compare_suffix(const KMerBOSS &k1,
+                                      const KMerBOSS &k2, size_t minus = 0);
 
     std::string to_string(size_t k, const std::string &alphabet) const;
 
