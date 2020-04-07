@@ -50,7 +50,7 @@ std::unique_ptr<AnnotatedDBG> bm::build_anno_graph(const std::string &filename) 
 
     BOSSConstructor constructor(k - 1);
     constructor.add_sequences(sequences);
-    std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor)) };
+    auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor));
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
 
     uint64_t max_index = graph->max_index();
