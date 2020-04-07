@@ -12,13 +12,12 @@
 const std::string file_prefix = "/tmp/bm_mg_outfile.fasta.gz";
 
 
+template <int num_seqs>
 static void BM_WriteRandomSequences(benchmark::State& state) {
     const std::string alphabet = "ATGCN";
     std::mt19937 rng(123457);
     std::uniform_int_distribution<std::mt19937::result_type> dist4(0, 4);
     std::uniform_int_distribution<std::mt19937::result_type> dist1000(10, 1000);
-
-    const size_t num_seqs = 10'000;
 
     std::vector<std::string> sequences;
     sequences.reserve(num_seqs);
@@ -39,7 +38,11 @@ static void BM_WriteRandomSequences(benchmark::State& state) {
     set_num_threads(1);
 }
 
-BENCHMARK(BM_WriteRandomSequences)
+BENCHMARK_TEMPLATE(BM_WriteRandomSequences, 10000)
+    ->Unit(benchmark::kMillisecond)
+    ->DenseRange(1, 2, 1);
+
+BENCHMARK_TEMPLATE(BM_WriteRandomSequences, 100000)
     ->Unit(benchmark::kMillisecond)
     ->DenseRange(1, 2, 1);
 
