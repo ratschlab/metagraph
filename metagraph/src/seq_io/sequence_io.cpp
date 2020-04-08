@@ -9,10 +9,9 @@
 
 const char kDefaultFastQualityChar = 'I';
 
-// TODO: these were set after some simple benchmarking. More extensive testing
-//       may be required to find more optimal values.
-const size_t kWorkerQueueSize = 5;
-const size_t kBufferSize = 1e6;
+// Optimal values found from a grid search with the BM_WriteRandomSequences benchmark
+const size_t kWorkerQueueSize = 1;
+const size_t kBufferSize = 1000000;
 
 
 FastaWriter::FastaWriter(const std::string &filebase,
@@ -24,7 +23,6 @@ FastaWriter::FastaWriter(const std::string &filebase,
         worker_(async, kWorkerQueueSize),
         seq_batcher_([&](std::vector<std::string>&& buffer) {
             worker_.enqueue([&](const auto &buffer) {
-                                ++flush_count_;
                                 for (const std::string &sequence : buffer) {
                                     write_to_disk(sequence);
                                 }
@@ -86,7 +84,6 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
         worker_(async, kWorkerQueueSize),
         batcher_([&](std::vector<value_type> &&buffer) {
                     worker_.enqueue([&](const auto &buffer) {
-                                        ++flush_count_;
                                         for (const auto &value_pair : buffer) {
                                             write_to_disk(value_pair);
                                         }

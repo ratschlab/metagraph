@@ -29,9 +29,6 @@ class FastaWriter {
 
     void join();
 
-    uint64_t get_count() const { return count_; }
-    uint64_t get_flush_count() const { return flush_count_; }
-
   private:
     void write_to_disk(const std::string &sequence);
 
@@ -39,7 +36,6 @@ class FastaWriter {
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;
-    uint64_t flush_count_ = 0;
     ThreadPool worker_;
     BatchAccumulator<std::string> seq_batcher_;
 };
@@ -77,9 +73,6 @@ class ExtendedFastaWriter {
 
     void join();
 
-    uint64_t get_count() const { return count_; }
-    uint64_t get_flush_count() const { return flush_count_; }
-
   private:
     void write_to_disk(const value_type &value_pair);
 
@@ -89,7 +82,6 @@ class ExtendedFastaWriter {
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;
-    uint64_t flush_count_ = 0;
     ThreadPool worker_;
     BatchAccumulator<value_type> batcher_;
 };
