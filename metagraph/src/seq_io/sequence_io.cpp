@@ -11,7 +11,7 @@ const char kDefaultFastQualityChar = 'I';
 
 // TODO: these were set after some simple benchmarking. More extensive testing
 //       may be required to find more optimal values.
-const size_t kWorkerMaxNumTasks = 5;
+const size_t kWorkerQueueSize = 5;
 const size_t kBufferSize = 1e6;
 
 
@@ -21,9 +21,10 @@ FastaWriter::FastaWriter(const std::string &filebase,
                          bool async)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
-        worker_(async, kWorkerMaxNumTasks),
+        worker_(async, kWorkerQueueSize),
         seq_batcher_([&](std::vector<std::string>&& buffer) {
             worker_.enqueue([&](const auto &buffer) {
+                                ++flush_count_;
                                 for (const std::string &sequence : buffer) {
                                     write_to_disk(sequence);
                                 }
@@ -31,7 +32,7 @@ FastaWriter::FastaWriter(const std::string &filebase,
                             std::move(buffer));
         },
         std::numeric_limits<size_t>::max(),
-        kBufferSize / kWorkerMaxNumTasks) {
+        kBufferSize / kWorkerQueueSize) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
     gz_out_ = gzopen(filename.c_str(), "w");
@@ -82,9 +83,10 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
       : kmer_length_(kmer_length),
         header_(header),
         enumerate_sequences_(enumerate_sequences),
-        worker_(async, kWorkerMaxNumTasks),
+        worker_(async, kWorkerQueueSize),
         batcher_([&](std::vector<value_type> &&buffer) {
                     worker_.enqueue([&](const auto &buffer) {
+                                        ++flush_count_;
                                         for (const auto &value_pair : buffer) {
                                             write_to_disk(value_pair);
                                         }
@@ -92,7 +94,7 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                                     std::move(buffer));
                  },
                  std::numeric_limits<size_t>::max(),
-                 kBufferSize / kWorkerMaxNumTasks) {
+                 kBufferSize / kWorkerQueueSize) {
     assert(feature_name.size());
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
@@ -131,7 +133,8 @@ void ExtendedFastaWriter<T>::write(const std::string &sequence,
                                    const std::vector<feature_type> &kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
-    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size()
+                            + sizeof(std::string) + sizeof(std::vector<feature_type>),
                           std::make_pair(sequence, kmer_features));
 }
 
@@ -140,7 +143,8 @@ void ExtendedFastaWriter<T>::write(std::string&& sequence,
                                    std::vector<feature_type>&& kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
-    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size()
+                            + sizeof(std::string) + sizeof(std::vector<feature_type>),
                           std::make_pair(std::move(sequence), std::move(kmer_features)));
 }
 
