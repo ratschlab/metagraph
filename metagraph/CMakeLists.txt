@@ -227,6 +227,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
+  ${CMAKE_BINARY_DIR}/zlib
   ${CMAKE_BINARY_DIR}/lib
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/libmaus2/lib
@@ -250,6 +251,7 @@ include_directories(
   external-libraries/nvbio/contrib/priority-deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
+  external-libraries/zlib
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -267,6 +269,7 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
+add_subdirectory(external-libraries/zlib zlib)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
