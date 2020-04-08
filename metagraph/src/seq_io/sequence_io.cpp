@@ -57,7 +57,8 @@ void FastaWriter::write(const std::string &sequence) {
 }
 
 void FastaWriter::write(std::string&& sequence) {
-    seq_batcher_.push_and_pay(sequence.size(), std::move(sequence));
+    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
+                              std::move(sequence));
 }
 
 void FastaWriter::write_to_disk(const std::string &sequence) {
