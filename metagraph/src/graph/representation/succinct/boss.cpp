@@ -2285,76 +2285,64 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
 void BOSS::cache_node_suffix_ranges(size_t suffix_length) {
     assert(suffix_length <= k_);
 
-    cached_suffix_length_ = 0;
+    cached_suffix_length_ = suffix_length;
     cached_suffix_ranges_.clear();
 
-    if (suffix_length == 0u)
+    if (cached_suffix_length_ == 0u)
         return;
 
-    if (suffix_length * log2(alph_size - 1) >= 64)
+    if (cached_suffix_length_ * log2(alph_size - 1) >= 64)
         throw std::runtime_error("ERROR: Trying to cache too long suffixes");
 
-    // first, index all suffixes and write to a temporary variable
-    // to safely call index() for k-mers in call_paths
-    std::vector<std::pair<edge_index, edge_index>> node_suffix_ranges(
-        std::pow(alph_size - 1, suffix_length),
-        std::make_pair((edge_index)W_->size(), (edge_index)0)
-    );
+    // first, take suffixes of length 1
+    std::vector<std::tuple<uint64_t, edge_index, edge_index>> suffix_ranges;
+    suffix_ranges.emplace_back(0, 1, W_->size() - 1);
 
-    call_paths([&](const std::vector<edge_index> &edges,
-                   const std::vector<TAlphabet> &path) {
-            assert(!std::count(edges.begin(), edges.end(), npos));
+    // grow the suffix length up to |suffix_length - 1|
+    uint64_t msd = 1;
+    for (size_t len = 1; len < cached_suffix_length_; ++len) {
+        std::vector<std::tuple<uint64_t, edge_index, edge_index>> narrowed_ranges;
+        narrowed_ranges.reserve(suffix_ranges.size() * (alph_size - 1));
 
-            // find the first k-mer with its suffix without
-            // sentinels and start from that edge
-            auto first_real
-                = std::find_if(path.begin(), path.end(),
-                               [](TAlphabet c) { return c != kSentinelCode; });
+        for (const auto &[idx, rl, ru] : suffix_ranges) {
+            // prepend the suffix with one of the |alph_size - 1| possible characters
+            for (TAlphabet c = 1; c < alph_size; ++c) {
+                // tighten the range for nodes ending with |c|
+                uint64_t rk_rl = rank_W(rl - 1, c) + 1;
+                uint64_t rk_ru = rank_W(ru, c);
+                if (rk_rl > rk_ru)
+                    continue;
 
-            size_t offset = std::max(static_cast<size_t>(first_real - path.begin()),
-                                     k_ - suffix_length);
-
-            if (offset + suffix_length + 1 > path.size())
-                return;
-
-            const edge_index *edge
-                = edges.data() + offset - (k_ - suffix_length);
-
-            // ----**********-
-            uint64_t index = 0;
-            uint64_t msd = 1;
-            // use the co-lex order to assign close indexes to suffixes of
-            // nodes close in the boss table
-            auto it = path.begin() + offset;
-            for (auto end = path.begin() + offset + suffix_length - 1; it != end; ++it) {
-                assert(*it && *it < alph_size);
-                // shift the alphabet: suffixes with sentinels '$' are not cached
-                msd *= (alph_size - 1);
-                index += msd * (*it - 1);
+                edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
+                edge_index ru_next = select_last(NF_[c] + rk_ru);
+                assert(idx < msd);
+                narrowed_ranges.emplace_back(idx + msd * (c - 1), rl_next, ru_next);
             }
-            assert(msd = std::pow(alph_size - 1, suffix_length - 1));
-            assert(index % (alph_size - 1) == 0ull);
-
-            for (auto end = path.end() - 1; it != end; ++it, edge++) {
-                index = index / (alph_size - 1) + (*it - 1) * msd;
-
-                assert(index < std::pow(alph_size - 1, suffix_length));
-
-                auto &[first, last] = node_suffix_ranges[index];
-
-                first = std::min(first, *edge);
-                last = std::max(last, *edge);
-
-                CHECK_INDEX(first);
-                CHECK_INDEX(last);
-                assert(first <= last);
-            }
-            assert(edge == edges.data() + edges.size());
         }
-    );
+        std::swap(narrowed_ranges, suffix_ranges);
+        msd *= (alph_size - 1);
+    }
 
-    cached_suffix_length_ = suffix_length;
-    std::swap(cached_suffix_ranges_, node_suffix_ranges);
+    // grow the suffix length the last time and build the final cache
+    cached_suffix_ranges_.assign(std::pow(alph_size - 1, cached_suffix_length_),
+                                 std::pair<edge_index, edge_index>(W_->size(), 0));
+
+    for (const auto &[idx, rl, ru] : suffix_ranges) {
+        // prepend the suffix with one of the |alph_size - 1| possible characters
+        for (TAlphabet c = 1; c < alph_size; ++c) {
+            // tighten the range
+            uint64_t rk_rl = rank_W(rl - 1, c) + 1;
+            uint64_t rk_ru = rank_W(ru, c);
+            if (rk_rl > rk_ru)
+                continue;
+
+            edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
+            edge_index ru_next = select_last(NF_[c] + rk_ru);
+            assert(idx < msd);
+            cached_suffix_ranges_[idx + msd * (c - 1)]
+                = std::make_pair(rl_next, ru_next);
+        }
+    }
 }
 
 bool BOSS::is_valid() const {
