@@ -6,9 +6,10 @@
 #include <numeric>
 #include <vector>
 
+#include <priority_deque.hpp>
+
 #include "aligner_helper.hpp"
 #include "aligner_methods.hpp"
-#include "common/bounded_priority_queue.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
@@ -59,10 +60,6 @@ class DBGAligner : public IDBGAligner {
     const DBGAlignerConfig& get_config() const { return config_; }
 
   protected:
-    typedef BoundedPriorityQueue<DBGAlignment,
-                                 std::vector<DBGAlignment>,
-                                 AlignmentCompare> AlignmentQueue;
-
     typedef const std::function<void(const std::function<void(DBGAlignment&&)>&)> SeedGenerator;
     typedef const std::function<void(const std::function<void(DBGAlignment&&)>&,
                                      const std::function<score_t(const DBGAlignment&)>&)> AlignmentGenerator;
@@ -258,20 +255,31 @@ class DBGAligner : public IDBGAligner {
     // and output the top ones.
     virtual void align_aggregate(const AlignmentGenerator &alignment_generator,
                                  const std::function<void(DBGAlignment&&)> &callback) const {
-        AlignmentQueue path_queue(config_.num_alternative_paths);
+        boost::container::priority_deque<DBGAlignment,
+                                         std::vector<DBGAlignment>,
+                                         AlignmentCompare> path_queue;
 
         alignment_generator(
-            [&](DBGAlignment&& alignment) { path_queue.emplace(std::move(alignment)); },
+            [&](DBGAlignment&& alignment) {
+                if (path_queue.size() < config_.num_alternative_paths) {
+                    // add to the queue
+                    path_queue.emplace(std::move(alignment));
+                } else if (alignment.get_score() > path_queue.minimum().get_score()) {
+                    // if the queue is full and the current alignment is better,
+                    // replace the bottom element and bubble it up the heap
+                    path_queue.update(path_queue.begin(), std::move(alignment));
+                }
+            },
             [&](const DBGAlignment &) {
-                return path_queue.size() ? path_queue.bottom().get_score()
+                return path_queue.size() ? path_queue.minimum().get_score()
                                          : config_.min_path_score;
             }
         );
 
         while (path_queue.size()) {
-            auto path = path_queue.pop_top();
-            assert(path.is_valid(graph_, &config_));
-            callback(std::move(path));
+            assert(path_queue.maximum().is_valid(graph_, &config_));
+            callback(DBGAlignment(path_queue.maximum()));
+            path_queue.pop_maximum();
         }
     }
 

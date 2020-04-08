@@ -3,8 +3,9 @@
 
 #include <queue>
 
+#include <priority_deque.hpp>
+
 #include "aligner_helper.hpp"
-#include "common/bounded_priority_queue.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/aligned_vector.hpp"
 #include "common/vectors/bitmap.hpp"
@@ -191,15 +192,12 @@ class DefaultColumnExtender : public Extender<NodeType> {
     typedef std::tuple<NodeType,
                        score_t,
                        bool /* converged */> ColumnRef;
-    typedef BoundedPriorityQueue<ColumnRef,
-                                 std::vector<ColumnRef>,
-                                 utils::LessSecond> ColumnQueue;
+    typedef boost::container::priority_deque<ColumnRef,
+                                             std::vector<ColumnRef>,
+                                             utils::LessSecond> ColumnQueue;
 
     DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(&graph), config_(config),
-            columns_to_update([&](const auto &obj, const auto &) { return extendable(obj); }) {
-        assert(config_.check_config_scores());
-    }
+          : graph_(&graph), config_(config) { assert(config_.check_config_scores()); }
 
     virtual ~DefaultColumnExtender() {}
 
@@ -233,7 +231,7 @@ class DefaultColumnExtender : public Extender<NodeType> {
 
     virtual const DBGAlignment& get_seed() const override { return *path_; }
 
-    virtual typename ColumnQueue::Decision extendable(const ColumnRef &next_column) const;
+    virtual void check_and_push(ColumnRef&& next_column);
 
     void extend_main(std::function<void(DBGAlignment&&, NodeType)> callback,
                      score_t min_path_score);
