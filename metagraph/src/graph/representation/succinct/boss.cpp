@@ -2319,7 +2319,7 @@ void BOSS::index_node_suffix_ranges(size_t suffix_length) {
     // first, index all suffixes and write to a temporary variable
     // to safely call index() for k-mers in call_paths
     std::vector<std::pair<edge_index, edge_index>> node_suffix_ranges(
-        suffix_length * kmer_extractor.bits_per_char,
+        1llu << suffix_length * kmer_extractor.bits_per_char,
         std::make_pair((edge_index)W_->size(), (edge_index)0)
     );
 
@@ -2328,6 +2328,8 @@ void BOSS::index_node_suffix_ranges(size_t suffix_length) {
 
     call_paths([&](const std::vector<edge_index> &edges,
                    const std::vector<TAlphabet> &path) {
+            assert(!std::count(edges.begin(), edges.end(), npos));
+
             // find the first k-mer with its suffix without
             // sentinels and start from that edge
             auto first_real
