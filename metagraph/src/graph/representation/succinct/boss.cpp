@@ -286,27 +286,27 @@ bool BOSS::load(std::ifstream &instream) {
 
 void BOSS::serialize_suffix_ranges(std::ofstream &outstream) const {
     // dump node range index
-    serialize_number(outstream, node_suffix_length_);
+    serialize_number(outstream, cached_suffix_length_);
 
-    outstream.write(reinterpret_cast<const char *>(node_suffix_ranges_.data()),
-                    node_suffix_ranges_.size()
-                        * sizeof(decltype(node_suffix_ranges_)::value_type));
+    outstream.write(reinterpret_cast<const char *>(cached_suffix_ranges_.data()),
+                    cached_suffix_ranges_.size()
+                        * sizeof(decltype(cached_suffix_ranges_)::value_type));
 }
 
 bool BOSS::load_suffix_ranges(std::ifstream &instream) {
     // load node suffix range index if exists
     try {
-        node_suffix_length_ = load_number(instream);
-        if (!node_suffix_length_ || node_suffix_length_ > k_)
+        cached_suffix_length_ = load_number(instream);
+        if (!cached_suffix_length_ || cached_suffix_length_ > k_)
             throw std::ios_base::failure("");
 
-        uint64_t index_size = std::pow(alph_size - 1, node_suffix_length_);
+        uint64_t index_size = std::pow(alph_size - 1, cached_suffix_length_);
 
-        node_suffix_ranges_.resize(index_size);
+        cached_suffix_ranges_.resize(index_size);
 
-        instream.read(reinterpret_cast<char *>(node_suffix_ranges_.data()),
-                      node_suffix_ranges_.size()
-                        * sizeof(decltype(node_suffix_ranges_)::value_type));
+        instream.read(reinterpret_cast<char *>(cached_suffix_ranges_.data()),
+                      cached_suffix_ranges_.size()
+                        * sizeof(decltype(cached_suffix_ranges_)::value_type));
 
         if (!instream.good())
             throw std::ios_base::failure("");
@@ -314,8 +314,8 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
         return true;
 
     } catch(...) {
-        node_suffix_length_ = 0;
-        node_suffix_ranges_.clear();
+        cached_suffix_length_ = 0;
+        cached_suffix_ranges_.clear();
         return false;
     }
 }
@@ -808,6 +808,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index k_node) const {
 
     std::vector<TAlphabet> ret(k_, get_node_last_value(k_node));
 
+    // TODO: binary search in cached_suffix_ranges_ for decoding the prefix fast
     for (int curr_k = k_ - 2; curr_k >= 0; --curr_k) {
         CHECK_INDEX(k_node);
 
@@ -2281,50 +2282,24 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
     }
 }
 
-void BOSS::index_node_suffix_ranges(size_t suffix_length) {
+void BOSS::cache_node_suffix_ranges(size_t suffix_length) {
     assert(suffix_length <= k_);
 
-    node_suffix_length_ = 0;
-    node_suffix_ranges_.clear();
+    cached_suffix_length_ = 0;
+    cached_suffix_ranges_.clear();
 
     if (suffix_length == 0u)
         return;
 
-#if _PROTEIN_GRAPH
-    KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetProtein,
-                                     alphabets::kCharToProtein,
-                                     alphabets::kComplementMapProtein);
-#elif _DNA_CASE_SENSITIVE_GRAPH
-    KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetDNACaseSent,
-                                     alphabets::kCharToDNACaseSent,
-                                     alphabets::kComplementMapDNACaseSent);
-#elif _DNA5_GRAPH
-    KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetDNA5,
-                                     alphabets::kCharToDNA5,
-                                     alphabets::kComplementMapDNA5);
-#elif _DNA_GRAPH
-    KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetDNA,
-                                     alphabets::kCharToDNA,
-                                     alphabets::kComplementMapDNA);
-#else
-    static_assert(false,
-        "Define an alphabet: either "
-        "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
-    );
-#endif
-
-    if (suffix_length * kmer_extractor.bits_per_char > 64)
+    if (suffix_length * log2(alph_size - 1) >= 64)
         throw std::runtime_error("ERROR: Trying to cache too long suffixes");
 
     // first, index all suffixes and write to a temporary variable
     // to safely call index() for k-mers in call_paths
     std::vector<std::pair<edge_index, edge_index>> node_suffix_ranges(
-        1llu << suffix_length * kmer_extractor.bits_per_char,
+        std::pow(alph_size - 1, suffix_length),
         std::make_pair((edge_index)W_->size(), (edge_index)0)
     );
-
-    Vector<KmerExtractor2Bit::Kmer64> node_suffixes;
-    std::string sequence;
 
     call_paths([&](const std::vector<edge_index> &edges,
                    const std::vector<TAlphabet> &path) {
@@ -2342,35 +2317,44 @@ void BOSS::index_node_suffix_ranges(size_t suffix_length) {
             if (offset + suffix_length + 1 > path.size())
                 return;
 
-            const edge_index *edge_indexes
+            const edge_index *edge
                 = edges.data() + offset - (k_ - suffix_length);
 
             // ----**********-
-            sequence.resize(path.size() - offset - 1);
-            std::transform(path.begin() + offset, path.end() - 1,
-                           sequence.begin(),
-                           [&](auto c) { return BOSS::decode(c); });
-
-            node_suffixes.clear();
-            kmer_extractor.sequence_to_kmers(sequence, suffix_length, {},
-                                             &node_suffixes);
-
-            assert(edge_indexes + node_suffixes.size() == edges.data() + edges.size());
-
-            for (size_t i = 0; i < node_suffixes.size(); ++i) {
-                auto &[begin, end] = node_suffix_ranges[node_suffixes[i].data()];
-                begin = std::min(begin, edge_indexes[i]);
-                end = std::max(end, edge_indexes[i] + 1);
-
-                CHECK_INDEX(begin);
-                assert(begin < end);
-                assert(end <= W_->size());
+            uint64_t index = 0;
+            uint64_t msd = 1;
+            // use the co-lex order to assign close indexes to suffixes of
+            // nodes close in the boss table
+            auto it = path.begin() + offset;
+            for (auto end = path.begin() + offset + suffix_length - 1; it != end; ++it) {
+                assert(*it && *it < alph_size);
+                // shift the alphabet: suffixes with sentinels '$' are not cached
+                msd *= (alph_size - 1);
+                index += msd * (*it - 1);
             }
+            assert(msd = std::pow(alph_size - 1, suffix_length - 1));
+            assert(index % (alph_size - 1) == 0ull);
+
+            for (auto end = path.end() - 1; it != end; ++it, edge++) {
+                index = index / (alph_size - 1) + (*it - 1) * msd;
+
+                assert(index < std::pow(alph_size - 1, suffix_length));
+
+                auto &[first, last] = node_suffix_ranges[index];
+
+                first = std::min(first, *edge);
+                last = std::max(last, *edge);
+
+                CHECK_INDEX(first);
+                CHECK_INDEX(last);
+                assert(first <= last);
+            }
+            assert(edge == edges.data() + edges.size());
         }
     );
 
-    node_suffix_length_ = suffix_length;
-    std::swap(node_suffix_ranges_, node_suffix_ranges);
+    cached_suffix_length_ = suffix_length;
+    std::swap(cached_suffix_ranges_, node_suffix_ranges);
 }
 
 bool BOSS::is_valid() const {

@@ -80,19 +80,19 @@ int transform_graph(Config *config) {
         size_t suffix_length = std::min((size_t)config->node_suffix_length,
                                         dbg_succ->get_boss().get_k());
 
-        uint8_t bits_per_char = sdsl::bits::hi(dbg_succ->get_boss().alph_size - 2) + 1;
-
-        if (suffix_length * bits_per_char > 63) {
-            logger->error("Suffix length must not be larger than {}", 63 / bits_per_char);
+        if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
+            logger->error("Suffix length must not be larger than {}",
+                          63 / log2(dbg_succ->get_boss().alph_size - 1));
             exit(1);
         }
 
         logger->trace("Index all node ranges for suffixes of length {} in {:.2f} Mb",
                       suffix_length,
-                      (1llu << (suffix_length * bits_per_char)) * 2 * sizeof(uint64_t) / 1e6);
+                      std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
+                        * 2 * sizeof(uint64_t) / 1e6);
         timer.reset();
 
-        dbg_succ->get_boss().index_node_suffix_ranges(suffix_length);
+        dbg_succ->get_boss().cache_node_suffix_ranges(suffix_length);
 
         logger->trace("Node suffixes are indexed in {} sec", timer.elapsed());
         timer.reset();

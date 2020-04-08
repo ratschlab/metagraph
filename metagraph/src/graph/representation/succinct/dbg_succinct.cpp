@@ -658,7 +658,7 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
         }
 
         if (!boss_graph_->load_suffix_ranges(instream))
-            std::cerr << "Warning: Can't load node range index. Skipped." << std::endl;
+            std::cerr << "Warning: Cache for node suffix ranges not loaded." << std::endl;
     }
 
     return true;
