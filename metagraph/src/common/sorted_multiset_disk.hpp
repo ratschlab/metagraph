@@ -25,7 +25,7 @@ namespace common {
  * @param C the type used to count the multiplicity of each value in the multi-set
  */
 template <typename T, typename INT = T, typename C = uint8_t>
-  class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, std::pair<INT, C>> {
+class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, std::pair<INT, C>> {
   public:
     typedef T key_type;
     typedef C count_type;

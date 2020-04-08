@@ -146,7 +146,7 @@ class EliasFanoDecoder {
     EliasFanoDecoder() {}
 
     /** Creates a decoder that retrieves data from the given file */
-    EliasFanoDecoder(const std::string &source_name, bool cleanup = true);
+    EliasFanoDecoder(const std::string &source_name, bool remove_source = true);
 
     /** Returns the next compressed element or empty if all elements were read */
     std::optional<T> next();
@@ -228,7 +228,7 @@ class EliasFanoDecoder {
     T offset_;
 
     /** If true, the source file is removed after decompression */
-    bool cleanup_;
+    bool remove_source_;
 };
 
 /**
@@ -261,7 +261,7 @@ class EliasFanoEncoder<std::pair<T, C>> {
 template <typename T, typename C>
 class EliasFanoDecoder<std::pair<T, C>> {
   public:
-    EliasFanoDecoder(const std::string &source, bool cleanup = true);
+    EliasFanoDecoder(const std::string &source, bool remove_source = true);
 
 
     std::optional<std::pair<T, C>> next();
@@ -270,7 +270,7 @@ class EliasFanoDecoder<std::pair<T, C>> {
     EliasFanoDecoder<T> source_first_;
     std::string source_second_name_;
     std::ifstream source_second_;
-    bool cleanup_;
+    bool remove_source_;
 };
 
 /**

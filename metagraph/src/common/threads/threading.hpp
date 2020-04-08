@@ -51,7 +51,7 @@ class ThreadPool {
 
     void join();
 
-    void clear();
+    void remove_waiting_tasks();
 
     ~ThreadPool();
 

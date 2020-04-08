@@ -3,7 +3,7 @@
 #include <ips4o.hpp>
 
 #include "common/circular_buffer.hpp"
-#include "common/file_merger.hpp"
+#include "common/elias_fano_file_merger.hpp"
 #include "common/logger.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_multiset_disk.hpp"
@@ -75,11 +75,9 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
 template <typename KmerCollector>
-void recover_source_dummy_nodes(const KmerCollector &kmer_collector,
+void recover_source_dummy_nodes(size_t k,
+                                size_t num_threads,
                                 typename KmerCollector::Data *kmers) {
-    size_t k = kmer_collector.get_k() - 1;
-    size_t num_threads = kmer_collector.num_threads();
-
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
@@ -443,7 +441,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                 recover_source_dummy_nodes_disk(kmer_collector_, &kmers, async_worker_);
             } else {
                 // kmer_collector stores (BOSS::k_ + 1)-mers
-                recover_source_dummy_nodes(kmer_collector_, &kmers);
+                recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
+                                           kmer_collector_.num_threads(), &kmers);
             }
             logger->trace("Dummy source k-mers were reconstructed in {} sec",
                           timer.elapsed());
