@@ -71,13 +71,13 @@ class ExactMapSeeder : public Seeder<NodeType> {
     virtual const DeBruijnGraph& get_graph() const override final { return graph_; }
     virtual const DBGAlignerConfig& get_config() const override final { return config_; }
 
-    const std::string_view get_query() const { return query_; }
+    const std::string_view get_query() const override { return query_; }
     const std::vector<NodeType>& get_query_nodes() const { return query_nodes_; }
     const std::vector<uint8_t>& get_offsets() const { return offsets_; }
     const std::vector<score_t>& get_partial_sums() const { return partial_sum_; }
     bool get_orientation() const { return orientation_; }
 
-    virtual void initialize(std::string_view query, bool orientation);
+    virtual void initialize(std::string_view query, bool orientation) override;
 
   protected:
     std::vector<NodeType>& get_query_nodes() { return query_nodes_; }
