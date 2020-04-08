@@ -130,12 +130,14 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
 }
 
 template <typename NodeType>
-auto DefaultColumnExtender<NodeType>
-::extendable(const ColumnRef &next_column) const -> typename ColumnQueue::Decision {
+void DefaultColumnExtender<NodeType>::check_and_push(ColumnRef&& next_column) {
     const auto &[next_node, best_score_update, converged] = next_column;
 
-    if (!converged)
-        return ColumnQueue::Decision::ADD;
+    // always push the next column if it hasn't converged
+    if (!converged) {
+        columns_to_update.emplace(std::move(next_column));
+        return;
+    }
 
     assert(dp_table.find(next_node) != dp_table.end());
 
@@ -149,21 +151,31 @@ auto DefaultColumnExtender<NodeType>
                           match_score_begin + end,
                           column.scores.data() + begin,
                           [&](auto a, auto b) { return a + b < score_cutoff; })) {
-        return ColumnQueue::Decision::IGNORE;
+        return;
     }
 
-    if (columns_to_update.size() < config_.queue_size)
-        return ColumnQueue::Decision::ADD;
+    // if the queue has space, push the next column
+    if (columns_to_update.size() < config_.queue_size) {
+        columns_to_update.emplace(std::move(next_column));
+        return;
+    }
 
-    const auto &bottom = columns_to_update.bottom();
+    const ColumnRef &bottom = columns_to_update.minimum();
 
-    return columns_to_update.compare(bottom, next_column)
-        ? (std::get<2>(bottom)
-            || std::get<1>(bottom)
-                != dp_table.find(std::get<0>(bottom))->second.last_priority_value()
-            ? ColumnQueue::Decision::REPLACE_BOTTOM
-            : ColumnQueue::Decision::ADD)
-        : ColumnQueue::Decision::IGNORE;
+    if (!utils::LessSecond()(bottom, next_column))
+        return;
+
+    if (std::get<2>(bottom) || std::get<1>(bottom)
+            != dp_table.find(std::get<0>(bottom))->second.last_priority_value()) {
+        // if the bottom has converged, or it is an invalidated reference
+        // (it's last priority value has changed), then replace the bottom element
+        columns_to_update.update(columns_to_update.begin(), std::move(next_column));
+        return;
+    } else {
+        // otherwise, push
+        columns_to_update.emplace(std::move(next_column));
+        return;
+    }
 }
 
 
@@ -427,7 +439,7 @@ void DefaultColumnExtender<NodeType>
     end = size;
     xdrop_cutoff = start_score;
 
-    columns_to_update.emplace(start_node, start_score, false);
+    check_and_push(ColumnRef(start_node, start_score, false));
 
     if (columns_to_update.empty())
         return;
@@ -595,7 +607,7 @@ void DefaultColumnExtender<NodeType>
                 score_cutoff = std::max(start_score, min_path_score);
             }
 
-            columns_to_update.emplace(next_node, *best_update, !overlapping_range_);
+            check_and_push(ColumnRef(next_node, *best_update, !overlapping_range_));
         }
     }
 }
