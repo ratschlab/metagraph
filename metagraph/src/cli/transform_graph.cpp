@@ -82,7 +82,7 @@ int transform_graph(Config *config) {
 
         if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
             logger->error("Suffix length must not be larger than {}",
-                          63 / log2(dbg_succ->get_boss().alph_size - 1));
+                          static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
             exit(1);
         }
 
