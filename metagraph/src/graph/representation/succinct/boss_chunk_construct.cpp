@@ -76,7 +76,7 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  */
 template <typename Data>
 void recover_source_dummy_nodes(size_t k, size_t num_threads, Data *kmers) {
-    using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
+    using KMER = std::decay_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
@@ -195,7 +195,7 @@ uint8_t write_kmer(size_t k,
         return 0;
     }
     encoder->add(to_int(to_write.kmer));
-    using KMER = std::remove_reference_t<decltype(utils::get_first(to_write.kmer))>;
+    using KMER = std::decay_t<decltype(utils::get_first(to_write.kmer))>;
     using TAlphabet = typename KMER::CharType;
 
     const KMER &kmer_to_write = utils::get_first(to_write.kmer);

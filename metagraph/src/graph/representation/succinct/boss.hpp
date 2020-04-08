@@ -10,8 +10,6 @@
 
 class BOSSConstructor;
 
-auto ALWAYS_FALSE = []() { return false; };
-
 /**
  * This class implements the BOSS table, a succinct representation
  * of the de Bruijn graph following ideas and suggestions presented here:
@@ -34,6 +32,8 @@ class BOSS {
 
     typedef uint8_t TAlphabet;
 
+    static constexpr auto ALWAYS_FALSE = []() { return false; };
+
     /**
      * Construct a BOSS table with the given node (k-mer) size.
      */
@@ -45,9 +45,8 @@ class BOSS {
     bool operator=(const BOSS &other) = delete;
 
     /**
-     * Check whether BOSS tables store the same data.
-     * FYI: this function reconstructs all the kmers, and
-     * the complexity is at least O(k x n).
+     * Check whether the BOSS tables store identical k-mer sets.
+     * FYI: this function reconstructs all the k-mers in O(k x n) time.
      */
     bool operator==(const BOSS &other) const;
 
@@ -93,34 +92,48 @@ class BOSS {
     using Call = typename std::function<void(T...)>;
 
     /**
-     * Traverse boss graph and call all its edges
-     * except for the dummy source of sink ones
+     * Traverse the boss graph and call all its edges
+     * except for the dummy source nodes and the dummy sink nodes
      */
     void call_kmers(Call<edge_index, const std::string&> callback) const;
 
     // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;
 
-    // call contigs (or unitigs if |unitigs| is true) that cover
-    // exactly all edges in graph (or subgraph, if |subgraph_mask| is passed)
+    /**
+     * Call contigs (or unitigs if |unitigs| is true) covering
+     * all the edges of the BOSS graph (or its subgraph, if
+     * |subgraph_mask| is specified), including the dummy ones.
+     * Fetch only the primary sequences if |kmers_in_single_form|
+     * is true. All the sentinel characters are omitted in this case.
+     * If |kmers_in_single_form| is false, set |trim_dummy| to true
+     * to fetch paths without sentinels.
+     */
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
-                    const bitmap *subgraph_mask = NULL) const;
+                    const bitmap *subgraph_mask = NULL,
+                    bool trim_sentinels = false) const;
 
+    /**
+     * Call contigs (dummy edges are skipped).
+     */
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                         bool kmers_in_single_form = false,
                         const bitmap *subgraph_mask = NULL) const;
 
+    /**
+     * Call unitigs (dummy edges are skipped).
+     */
     void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                       size_t max_pruned_dead_end_size = 0,
                       bool kmers_in_single_form = false,
                       const bitmap *subgraph_mask = NULL) const;
 
     // |edge| must be the first incoming edge
-    void call_incoming_to_target(edge_index edge,
-                                 std::function<void(edge_index)> callback) const;
+    void call_incoming_to_target(edge_index edge, TAlphabet w,
+                                 const Call<edge_index> &callback) const;
 
     /**
      * Add a full sequence to the graph.
@@ -129,7 +142,7 @@ class BOSS {
      */
     void add_sequence(std::string_view seq,
                       bool try_extend = false,
-                      std::vector<uint64_t> *edges_inserted = NULL);
+                      std::vector<edge_index> *edges_inserted = NULL);
 
     // Given an edge list, remove them from the graph.
     // TODO: fix the implementation (anchoring the isolated nodes)
@@ -255,16 +268,16 @@ class BOSS {
     bool is_single_outgoing(edge_index i) const;
 
     /**
-     * Given an edge index i (first incoming), this function returns
+     * Given an edge index i (first incoming) and label d, this function returns
      * the number of edges incoming to its target node.
      */
-    size_t num_incoming_to_target(edge_index i) const;
+    size_t num_incoming_to_target(edge_index i, TAlphabet d) const;
 
     /**
-     * Given an edge index i, this function returns true if that is
-     * the only edge incoming to its target node.
+     * Given an edge index i and label w, this function returns
+     * true if that is the only edge incoming to its target node.
      */
-    bool is_single_incoming(edge_index i) const;
+    bool is_single_incoming(edge_index i, TAlphabet w) const;
 
     /**
      * Given an edge index |i| and a character |c|, get the index of an adjacent
@@ -288,87 +301,87 @@ class BOSS {
     /**
      * Return value of last at position i.
      */
-    bool get_last(uint64_t i) const { return (*last_)[i]; }
+    bool get_last(edge_index i) const { return (*last_)[i]; }
     const bit_vector& get_last() const { return *last_; }
 
     /**
+     * Transforms a boss edge index to the index of its source node.
      * Uses the object's array last and a position and
      * returns the number of set bits up to that postion.
      */
-    uint64_t rank_last(uint64_t i) const;
+    node_index rank_last(edge_index i) const;
 
     /**
+     * Transforms a boss node index to the index of its last outgoing edge.
      * Uses the object's array last and a given position i and
      * returns the position of the i-th set bit in last[1..i].
      */
-    uint64_t select_last(uint64_t i) const;
+    edge_index select_last(node_index i) const;
 
     /**
      * This is a convenience function that returns for the object's array last
      * and a given position i the position of the last set bit in last[1..i].
      */
-    uint64_t pred_last(uint64_t i) const;
+    edge_index pred_last(edge_index i) const;
 
     /**
      * This is a convenience function that returns for the object's array last
      * and a given position i the position of the first set bit in last[i..N].
      */
-    uint64_t succ_last(uint64_t i) const;
+    edge_index succ_last(edge_index i) const;
 
     /**
      * Return value of W at position i.
      */
-    TAlphabet get_W(uint64_t i) const { return (*W_)[i]; }
+    TAlphabet get_W(edge_index i) const { return (*W_)[i]; }
     const wavelet_tree& get_W() const { return *W_; }
 
     /**
-     * Uses the object's array W, a given position i in W and a character c
-     * from the alphabet and returns the number of occurences of c in W up to
-     * position i.
+     * For the given position i in W and a character c from the alphabet,
+     * return the number of occurrences of c in W up to (including) position i.
      */
-    uint64_t rank_W(uint64_t i, TAlphabet c) const;
+    uint64_t rank_W(edge_index i, TAlphabet c) const;
 
     /**
-     * Uses the array W and gets a count i and a character c from
-     * the alphabet and returns the positions of the i-th occurence of c in W.
+     * Return the position of the last occurrence of |c| in W[1..i] or zero
+     * if such does not exist.
      */
-    uint64_t select_W(uint64_t i, TAlphabet c) const;
+    edge_index pred_W(edge_index i, TAlphabet c) const;
 
     /**
      * For characters |first| and |second|, return the last occurrence
      * of them in W[1..i], i.e. max(pred_W(i, first), pred_W(i, second)).
      */
-    uint64_t pred_W(uint64_t i, TAlphabet first, TAlphabet second) const;
+    edge_index pred_W(edge_index i, TAlphabet first, TAlphabet second) const;
 
     /**
      * Return position of the first occurrence of |c| in W[i..N].
      */
-    uint64_t succ_W(uint64_t i, TAlphabet c) const;
+    edge_index succ_W(edge_index i, TAlphabet c) const;
 
     /**
      * For characters |first| and |second|, return the first occurrence
      * of them in W[i..N], i.e. min(succ_W(i, first), succ_W(i, second)).
      */
-    std::pair<uint64_t, TAlphabet> succ_W(uint64_t i, TAlphabet first, TAlphabet second) const;
+    std::pair<edge_index, TAlphabet>
+    succ_W(edge_index i, TAlphabet first, TAlphabet second) const;
 
     /**
-     * Return value of F vector at index k.
-     * The index is over the alphabet!
+     * Return the offset for the edges with the penultimate character c.
      */
-    uint64_t get_F(TAlphabet k) const { return F_.at(k); }
-    const std::vector<uint64_t>& get_F() const { return F_; }
+    edge_index get_F(TAlphabet c) const { return F_.at(c); }
 
     /**
-     * This functions gets a position i reflecting the r-th occurence of the corresponding
-     * character c in W and returns the position of the r-th occurence of c in last.
+     * This functions gets a position i reflecting the r-th occurrence of the corresponding
+     * character c in W and returns the position of the r-th occurrence of c in last.
      */
-    uint64_t fwd(uint64_t i) const;
+    edge_index fwd(edge_index i, TAlphabet c) const;
 
     /**
      * This function gets a position i that reflects the i-th node and returns the
      * position in W that corresponds to the i-th node's last character.
      */
-    uint64_t bwd(uint64_t i) const;
+    edge_index bwd(edge_index i) const;
 
     // Given the alphabet index return the corresponding symbol
     char decode(TAlphabet s) const;
@@ -387,57 +400,51 @@ class BOSS {
     template <typename RandomAccessIt>
     std::tuple<edge_index, edge_index, RandomAccessIt>
     index_range(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
-                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
+        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
                       "Only encoded sequences can be queried");
 
         assert(end >= begin);
         assert(end <= begin + k_);
+        assert(std::all_of(begin, end, [&](TAlphabet c) { return c <= alph_size; }));
 
         if (begin == end)
-            return std::make_tuple(edge_index(1), edge_index(1), begin);
+            return std::make_tuple((edge_index)1, (edge_index)1, begin);
 
         // check if all characters belong to the alphabet
-        if (std::any_of(begin, end, [&](TAlphabet c) { return c >= alph_size; }))
-            return std::make_tuple(edge_index(0), edge_index(0), begin);
+        if (std::find(begin, end, alph_size) != end)
+            return std::make_tuple((edge_index)0, (edge_index)0, begin);
 
         // get first
         TAlphabet s = *begin;
 
         // initial range
         edge_index rl = F_.at(s) + 1 < W_->size()
-                        ? succ_last(F_.at(s) + 1)
+                        ? F_.at(s) + 1
                         : W_->size(); // lower bound
-        edge_index ru = s < F_.size() - 1
-                        ? F_.at(s + 1)
+        edge_index ru = s + 1 < alph_size
+                        ? F_[s + 1]
                         : W_->size() - 1; // upper bound
         if (rl > ru)
-            return std::make_tuple(edge_index(0), edge_index(0), begin);
+            return std::make_tuple((edge_index)0, (edge_index)0, begin);
 
         auto it = begin + 1;
-        edge_index rl_h;
         // update range iteratively while scanning through s
         for (; it != end; ++it) {
             s = *it;
 
-            // Include the head of the first node with the given suffix.
-            rl_h = pred_last(rl - 1) + 1;
-
             // Tighten the range including all edges where
             // the source nodes have the given suffix.
-            uint64_t rk_rl = rank_W(rl_h - 1, s) + 1;
+            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
             uint64_t rk_ru = rank_W(ru, s);
             if (rk_rl > rk_ru)
-                return std::make_tuple(rl, ru, it);
-
-            uint64_t offset = rank_last(F_[s]);
+                return std::make_tuple(succ_last(rl), ru, it);
 
             // select the index of the position in last that is rank many positions after offset
-            ru = select_last(offset + rk_ru);
-            rl = select_last(offset + rk_rl);
+            ru = select_last(NF_[s] + rk_ru);
+            rl = select_last(NF_[s] + rk_rl - 1) + 1;
         }
-        assert(rl <= ru);
-        return std::make_tuple(rl, ru, it);
+        assert(succ_last(rl) <= ru);
+        return std::make_tuple(succ_last(rl), ru, it);
     }
 
     /**
@@ -464,18 +471,27 @@ class BOSS {
     size_t k_;
     // the bit array indicating the last outgoing edge of a node
     bit_vector *last_;
-    // the offset array to mark the offsets for the last column in the implicit node list
-    std::vector<uint64_t> F_;
+    // offsets for the boss edges with a given penultimate character
+    // F_[c] points to the last boss edge with its penultimate character < c
+    std::vector<edge_index> F_;
+    // node offsets: NF_[c] = rank_last(F_[c]), a helper array
+    std::vector<node_index> NF_;
     // the array containing the edge labels
     wavelet_tree *W_;
 
     State state = State::DYN;
 
     /**
-     * This function gets a value of the alphabet c and updates the offset of
-     * all following values by adding |value|.
+     * This function gets a character c and updates the edge offsets F_
+     * by incrementing them with +1 (for edge insertion) or decrementing
+     * (for edge delition) and updates the node offsets NF_ accordingly.
      */
-    void update_F(TAlphabet c, int value);
+    void update_F(TAlphabet c, int delta, bool is_representative);
+
+    /**
+     * Recompute the node offsets NF_ from F_. Call after changes in F_.
+     */
+    void recompute_NF();
 
     /**
      * Given a character c and an edge index, this function
@@ -484,12 +500,12 @@ class BOSS {
      */
     edge_index append_pos(TAlphabet c, edge_index source_node,
                           const TAlphabet *source_node_kmer,
-                          std::vector<uint64_t> *edges_inserted = NULL);
+                          std::vector<edge_index> *edges_inserted = NULL);
 
     /**
      * Helper function used by the append_pos function
      */
-    uint64_t insert_edge(TAlphabet c, uint64_t begin, uint64_t end);
+    edge_index insert_edge(TAlphabet c, edge_index begin, edge_index end);
 
     /**
      * Erase exactly all the masked edges from the graph,
@@ -517,7 +533,11 @@ class BOSS {
     edge_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
         assert(begin + k_ + 1 == end);
 
-        uint64_t edge = index(begin, end - 1);
+        // return npos if invalid characters are found
+        if (std::find(begin, end, alph_size) != end)
+            return npos;
+
+        edge_index edge = index(begin, end - 1);
 
         return edge ? pick_edge(edge, *(end - 1)) : npos;
     }
@@ -527,9 +547,8 @@ class BOSS {
      * from the k-mer's corresponding node, if such a node exists and 0 otherwise.
      */
     template <typename RandomAccessIt>
-    uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same_v<TAlphabet&, decltype(*begin)>
-                        || std::is_same_v<const TAlphabet&, decltype(*begin)>,
+    edge_index index(RandomAccessIt begin, RandomAccessIt end) const {
+        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
                       "Only encoded sequences can be queried");
         assert(begin + k_ == end);
 

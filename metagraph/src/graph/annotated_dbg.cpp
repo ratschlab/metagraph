@@ -8,11 +8,11 @@
 
 #include <cstdlib>
 
-#include <Eigen/StdVector>
 #include <tsl/ordered_map.h>
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/utils/simd_utils.hpp"
+#include "common/vectors/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
@@ -23,9 +23,6 @@ using VectorOrderedMap = tsl::ordered_map<Key, T,
                                           std::allocator<std::pair<Key, T>>,
                                           std::vector<std::pair<Key, T>>,
                                           uint64_t>;
-
-template <typename T>
-using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
 
 AnnotatedSequenceGraph
@@ -111,7 +108,11 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
                          size_t min_count) const {
     assert(check_compatibility());
 
-    auto code_counts = annotator_->count_labels(index_counts, min_count, min_count);
+    auto code_counts = annotator_->count_labels(
+        index_counts,
+        min_count,
+        std::max(min_count, size_t(1))
+    );
 
     std::vector<std::string> labels;
     labels.reserve(code_counts.size());

@@ -21,9 +21,9 @@ inline const KMER& get_kmer(const KMER &kmer) {
     return kmer;
 }
 
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64,uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128,uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer256,uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer64>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer128>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer256>::value);
@@ -38,8 +38,8 @@ void initialize_chunk(uint64_t alph_size,
                       std::vector<bool> *last,
                       std::vector<uint64_t> *F,
                       sdsl::int_vector<> *weights = nullptr) {
-    using T = std::remove_const_t<std::remove_reference_t<decltype(*begin)>>;
-    using KMER = std::remove_reference_t<decltype(get_kmer(*begin))>;
+    using T = std::decay_t<decltype(*begin)>;
+    using KMER = std::decay_t<decltype(get_kmer(*begin))>;
 
     static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
 
@@ -410,6 +410,7 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     graph->last_ = new bit_vector_stat(std::move(last_bv));
 
     graph->F_ = F_;
+    graph->recompute_NF();
 
     graph->k_ = k_;
 
@@ -552,6 +553,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     last = decltype(last)();
 
     graph->F_ = std::move(F);
+    graph->recompute_NF();
 
     graph->state = BOSS::State::STAT;
 

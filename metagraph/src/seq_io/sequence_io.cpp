@@ -9,11 +9,28 @@
 
 const char kDefaultFastQualityChar = 'I';
 
+// Optimal values found from a grid search with the BM_WriteRandomSequences benchmark
+const size_t kWorkerQueueSize = 1;
+const size_t kBufferSize = 1000000;
+
 
 FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
-                         bool enumerate_sequences)
-      : header_(header), enumerate_sequences_(enumerate_sequences) {
+                         bool enumerate_sequences,
+                         bool async)
+      : header_(header),
+        enumerate_sequences_(enumerate_sequences),
+        worker_(async, kWorkerQueueSize),
+        seq_batcher_([&](std::vector<std::string>&& buffer) {
+            worker_.enqueue([&](const auto &buffer) {
+                                for (const std::string &sequence : buffer) {
+                                    write_to_disk(sequence);
+                                }
+                            },
+                            std::move(buffer));
+        },
+        std::numeric_limits<size_t>::max(),
+        kBufferSize / kWorkerQueueSize) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
     gz_out_ = gzopen(filename.c_str(), "w");
@@ -24,10 +41,26 @@ FastaWriter::FastaWriter(const std::string &filebase,
 }
 
 FastaWriter::~FastaWriter() {
+    join();
     gzclose(gz_out_);
 }
 
+void FastaWriter::join() {
+    seq_batcher_.process_all_buffered();
+    worker_.join();
+}
+
 void FastaWriter::write(const std::string &sequence) {
+    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
+                              std::string(sequence));
+}
+
+void FastaWriter::write(std::string&& sequence) {
+    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
+                              std::move(sequence));
+}
+
+void FastaWriter::write_to_disk(const std::string &sequence) {
     if (!write_fasta(gz_out_,
                      enumerate_sequences_ ? header_ + std::to_string(++count_)
                                           : header_,
@@ -43,10 +76,22 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                                             const std::string &feature_name,
                                             uint32_t kmer_length,
                                             const std::string &header,
-                                            bool enumerate_sequences)
+                                            bool enumerate_sequences,
+                                            bool async)
       : kmer_length_(kmer_length),
         header_(header),
-        enumerate_sequences_(enumerate_sequences) {
+        enumerate_sequences_(enumerate_sequences),
+        worker_(async, kWorkerQueueSize),
+        batcher_([&](std::vector<value_type> &&buffer) {
+                    worker_.enqueue([&](const auto &buffer) {
+                                        for (const auto &value_pair : buffer) {
+                                            write_to_disk(value_pair);
+                                        }
+                                    },
+                                    std::move(buffer));
+                 },
+                 std::numeric_limits<size_t>::max(),
+                 kBufferSize / kWorkerQueueSize) {
     assert(feature_name.size());
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
@@ -69,8 +114,15 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
 
 template <typename T>
 ExtendedFastaWriter<T>::~ExtendedFastaWriter() {
+    join();
     gzclose(fasta_gz_out_);
     gzclose(feature_gz_out_);
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::join() {
+    batcher_.process_all_buffered();
+    worker_.join();
 }
 
 template <typename T>
@@ -78,6 +130,24 @@ void ExtendedFastaWriter<T>::write(const std::string &sequence,
                                    const std::vector<feature_type> &kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size()
+                            + sizeof(std::string) + sizeof(std::vector<feature_type>),
+                          std::make_pair(sequence, kmer_features));
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::write(std::string&& sequence,
+                                   std::vector<feature_type>&& kmer_features) {
+    assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
+
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size()
+                            + sizeof(std::string) + sizeof(std::vector<feature_type>),
+                          std::make_pair(std::move(sequence), std::move(kmer_features)));
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::write_to_disk(const value_type &value_pair) {
+    const auto &[sequence, kmer_features] = value_pair;
     if (!write_fasta(fasta_gz_out_,
                      enumerate_sequences_ ? header_ + std::to_string(++count_)
                                           : header_,

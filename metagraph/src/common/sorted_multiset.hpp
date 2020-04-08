@@ -71,9 +71,7 @@ class SortedMultiset {
 
         resize_lock.unlock();
 
-        if constexpr(std::is_same<T, std::remove_cv_t<
-                                     std::remove_reference_t<
-                                        decltype(*begin)>>>::value) {
+        if constexpr(std::is_same_v<T, std::decay_t<decltype(*begin)>>) {
             std::transform(begin, end, data_.begin() + offset,
                 [](const T &value) { return std::make_pair(value, C(1)); });
         } else {

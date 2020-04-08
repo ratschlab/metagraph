@@ -34,6 +34,7 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
     ${EXTERNAL_LIB_DIR}/spdlog/include
+    ${EXTERNAL_LIB_DIR}/zlib
     /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
 )
 
@@ -47,6 +48,8 @@ IF(APPLE)
 ENDIF()
 add_subdirectory(${EXTERNAL_LIB_DIR}/spdlog spdlog)
 
+add_subdirectory(${EXTERNAL_LIB_DIR}/zlib zlib)
+
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(metagraph_common
   PUBLIC
@@ -55,6 +58,7 @@ target_link_libraries(metagraph_common
     ${SDSL_LIBRARY}
     glog::glog
     spdlog::spdlog
+    z
 )
 target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
 message(STATUS "Compile flags used:"
