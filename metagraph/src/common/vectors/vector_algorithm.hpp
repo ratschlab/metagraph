@@ -301,6 +301,73 @@ prev_bit(const t_int_vec &v,
     return v.bit_size();
 }
 
+// thread-safe bit setting/unsetting. these return the old value
+template <class t_int_vec>
+inline bool async_fetch_and_set_bit(t_int_vec &v,
+                                    size_t i,
+                                    bool async = false,
+                                    int memorder = __ATOMIC_SEQ_CST) {
+    if (async) {
+        return (__atomic_fetch_or(&v.data()[i >> 6],
+                                  1llu << (i & 0x3F),
+                                  memorder) >> (i & 0x3F)) & 1;
+    } else {
+        bool t = v[i];
+        v[i] = true;
+        return t;
+    }
+}
+
+template <class t_int_vec>
+inline bool async_fetch_and_unset_bit(t_int_vec &v,
+                                    size_t i,
+                                    bool async = false,
+                                    int memorder = __ATOMIC_SEQ_CST) {
+    if (async) {
+        return (__atomic_fetch_and(&v.data()[i >> 6],
+                                   ~(1llu << (i & 0x3F)),
+                                   memorder) >> (i & 0x3F)) & 1;
+    } else {
+        bool t = v[i];
+        v[i] = false;
+        return t;
+    }
+}
+
+template <class t_int_vec>
+inline bool async_fetch_bit(t_int_vec &v,
+                            size_t i,
+                            bool async = false,
+                            int memorder = __ATOMIC_SEQ_CST) {
+    return async
+        ? (__atomic_load_n(&v.data()[i >> 6], memorder) >> (i & 0x3F)) & 1
+        : v[i];
+}
+
+// thread-safe bit setting/unsetting
+template <class t_int_vec>
+inline void async_set_bit(t_int_vec &v,
+                          size_t i,
+                          bool async = false,
+                          int memorder = __ATOMIC_SEQ_CST) {
+    if (async) {
+        __atomic_or_fetch(&v.data()[i >> 6], 1llu << (i & 0x3F), memorder);
+    } else {
+        v[i] = true;
+    }
+}
+
+template <class t_int_vec>
+inline void async_unset_bit(t_int_vec &v,
+                            size_t i,
+                            bool async = false,
+                            int memorder = __ATOMIC_SEQ_CST) {
+    if (async) {
+        __atomic_and_fetch(&v.data()[i >> 6], ~(1llu << (i & 0x3F)), memorder);
+    } else {
+        v[i] = false;
+    }
+}
 
 namespace sdsl {
 
