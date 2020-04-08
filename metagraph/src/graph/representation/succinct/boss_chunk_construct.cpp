@@ -74,10 +74,8 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * @tparam Container the data structure in which the k-mers were merged (e.g. a
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
-template <typename KmerCollector>
-void recover_source_dummy_nodes(size_t k,
-                                size_t num_threads,
-                                typename KmerCollector::Data *kmers) {
+template <typename Data>
+void recover_source_dummy_nodes(size_t k, size_t num_threads, Data *kmers) {
     using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
@@ -231,16 +229,24 @@ static std::pair<typename T::WordType, C> to_int(std::pair<T, C> v) {
 template <typename T, typename int_type>
 std::function<void(const T &v)>
 compressed_writer(common::EliasFanoEncoderBuffered<int_type> *encoder,
-                  std::function<int_type(const T &v)> to_int) {
-    return [encoder, to_int](const T &v) { encoder->add(to_int(v)); };
+                  const std::function<int_type(const T &v)> &to_int) {
+    return [encoder, &to_int](const T &v) { encoder->add(to_int(v)); };
 };
 
-// SFINAE structs to construct the integer type corresponding to T
+/**
+ * SFINAE structs to construct the integer type corresponding to T. Simply speaking, the
+ * #type member of the structs will be T::Wortdype if T is not a pair, and
+ * std::pair<T::WordType, C> if T is a pair.
+ */
 template <typename T, typename = void>
 struct get_int_type {
     using type = typename T::WordType;
 };
 
+/**
+ * Specializes get_int_type for an std::pair<T,C>. The #type member will be set to
+ * std::pair<T::WordType, C>.
+ */
 template <typename T>
 struct get_int_type<T, void_t<typename T::second_type>> {
     using type = std::pair<typename T::first_type::WordType, typename T::second_type>;
@@ -259,6 +265,10 @@ template <typename KmerCollector>
 void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                      typename KmerCollector::Data *kmers,
                                      ThreadPool &async_worker) {
+    constexpr size_t CHUNK_QUEUE_BUFFER_SIZE = 10000;
+    constexpr size_t CHUNK_QUEUE_FENCE_SIZE = 1; // no of elements to traverse backwards
+    constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
+
     std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
     using T = typename KmerCollector::Value;
     using T_INT = typename get_int_type<T>::type;
@@ -286,7 +296,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     std::function<T_INT(const T &v)> to_intf = [](const T &v) { return to_int(v); };
     // this will contain dummy k-mers of prefix length 2
-    common::EliasFanoEncoderBuffered<T_INT> dummy_l2(files_to_merge.back(), 100'000);
+    common::EliasFanoEncoderBuffered<T_INT> dummy_l2(files_to_merge.back(), ENCODER_BUFFER_SIZE);
     common::SortedSetDisk<T, T_INT> sorted_dummy_kmers(
             no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
             tmp_path2, kmer_collector.max_disk_space(), [](const T &) {}, 100, to_intf);
@@ -298,7 +308,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
     // contains original kmers and non-redundant source dummy k-mers with prefix length 1
-    common::EliasFanoEncoderBuffered<T_INT> original_and_l1(file_name, 100'000);
+    common::EliasFanoEncoderBuffered<T_INT> original_and_l1(file_name, ENCODER_BUFFER_SIZE);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T el = *it;
@@ -326,8 +336,10 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         const filesystem::path tmp_path
                 = tmp_dir / ("dummy_source" + std::to_string(dummy_pref_len));
         const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
-        common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(), 100'000);
-        common::ChunkedWaitQueue<T> source(10000, 1, compressed_writer(&encoder, to_intf));
+        common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(),
+                                                        ENCODER_BUFFER_SIZE);
+        common::ChunkedWaitQueue<T> source(CHUNK_QUEUE_BUFFER_SIZE, CHUNK_QUEUE_FENCE_SIZE,
+                                           compressed_writer(&encoder, to_intf));
         async_merge.enqueue([&chunk_files, &source]() {
             std::function<void(const T &)> on_new_item
                     = [&source](const T &v) { source.push(v); };
@@ -356,8 +368,10 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     uint32_t num_kmers = 0;
     // iterate to merge the data and write it to disk
     const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
-    common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(), 100'000);
-    common::ChunkedWaitQueue<T> source(10000, 1, compressed_writer(&encoder, to_intf));
+    common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(),
+                                                    ENCODER_BUFFER_SIZE);
+    common::ChunkedWaitQueue<T> source(CHUNK_QUEUE_BUFFER_SIZE, CHUNK_QUEUE_FENCE_SIZE,
+                                       compressed_writer(&encoder, to_intf));
     async_merge.enqueue([&chunk_files, &source]() {
         std::function<void(const T &)> on_new_item
                 = [&source](const T &v) { source.push(v); };
