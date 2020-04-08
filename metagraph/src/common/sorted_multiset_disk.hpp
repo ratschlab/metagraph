@@ -20,14 +20,17 @@ namespace common {
  *
  * @tparam T the type of the elements that are being stored, sorted and counted,
  * typically k-mers
+ * @param INT the integer representation of the element being sorted (this representation
+ * is used for writing to disk, using Elias-Fano compression)
  * @param C the type used to count the multiplicity of each value in the multi-set
  */
-template <typename T, typename C = uint8_t>
-class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
+template <typename T, typename INT = T, typename C = uint8_t>
+class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, std::pair<INT, C>> {
   public:
     typedef T key_type;
     typedef C count_type;
     typedef std::pair<T, C> value_type;
+    typedef std::pair<INT, C> int_type;
     typedef Vector<value_type> storage_type;
     typedef ChunkedWaitQueue<value_type> result_type;
     typedef typename storage_type::iterator Iterator;
@@ -48,15 +51,20 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
             const std::filesystem::path &tmp_dir = "/tmp/",
+            size_t max_disk_space_bytes = 1e9,
             std::function<void(const value_type &)> on_item_pushed
-                = [](const value_type &) {},
-            size_t num_last_elements_cached = 100)
-        : SortedSetDiskBase<std::pair<T, C>>(cleanup,
+            = [](const value_type &) {},
+            size_t num_last_elements_cached = 100,
+            std::function<int_type(const value_type &v)> to_int
+            = [](const value_type &v) { return std::make_pair(INT(v.first), v.second); })
+        : SortedSetDiskBase<value_type, int_type>(cleanup,
                                              num_threads,
                                              reserved_num_elements,
                                              tmp_dir,
+                                             max_disk_space_bytes,
                                              on_item_pushed,
-                                             num_last_elements_cached) {}
+                                             num_last_elements_cached, to_int)
+           {}
 
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 
@@ -90,8 +98,9 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
         }
     }
 
-  protected:
-    virtual void sort_and_remove_duplicates(storage_type *vector, size_t num_threads) const {
+  private:
+    virtual void sort_and_remove_duplicates(storage_type *vector,
+                                            size_t num_threads) const override {
         assert(vector);
         ips4o::parallel::sort(
                 vector->begin(), vector->end(),

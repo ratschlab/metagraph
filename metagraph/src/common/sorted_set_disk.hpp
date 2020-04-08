@@ -27,8 +27,8 @@ namespace common {
  * @tparam T the type of the elements that are being stored and sorted,
  * typically #KMerBOSS instances
  */
-template <typename T>
-class SortedSetDisk : public SortedSetDiskBase<T> {
+template <typename T, typename INT = T>
+class SortedSetDisk : public SortedSetDiskBase<T, INT> {
   public:
     typedef T key_type;
     typedef T value_type;
@@ -51,14 +51,18 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
             const std::filesystem::path &tmp_dir = "/tmp/",
+            size_t max_disk_space_bytes = 1e9,
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
-            size_t num_last_elements_cached = 100)
-        : SortedSetDiskBase<T>(cleanup,
-                               num_threads,
-                               reserved_num_elements,
-                               tmp_dir,
-                               on_item_pushed,
-                               num_last_elements_cached) {}
+            size_t num_last_elements_cached = 100,
+            std::function<INT(const T &v)> to_int = [](const T &v) { return INT(v); })
+        : SortedSetDiskBase<T, INT>(cleanup,
+                                    num_threads,
+                                    reserved_num_elements,
+                                    tmp_dir,
+                                    max_disk_space_bytes,
+                                    on_item_pushed,
+                                    num_last_elements_cached,
+                                    to_int) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is
@@ -83,7 +87,8 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
         }
     }
 
-    virtual void sort_and_remove_duplicates(storage_type *vector, size_t num_threads) const {
+    virtual void sort_and_remove_duplicates(storage_type *vector,
+                                            size_t num_threads) const override {
         assert(vector);
 
         ips4o::parallel::sort(vector->begin(), vector->end(), std::less<value_type>(),
@@ -94,7 +99,6 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
 
         this->cleanup_(vector); // typically removes source dummy k-mers
     }
-
 };
 
 } // namespace common

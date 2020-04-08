@@ -58,7 +58,8 @@ class KmerCollector {
                   Sequence&& filter_suffix_encoded = {},
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
-                  const std::filesystem::path &tmp_dir = "/tmp");
+                  const std::filesystem::path &tmp_dir = "/tmp",
+                  size_t max_disk_space = 1e9);
 
     inline size_t get_k() const { return k_; }
 
@@ -67,16 +68,16 @@ class KmerCollector {
     void add_sequence(std::string_view sequence, uint64_t count = 1) {
         // push read to the processing queue
         if (sequence.size() >= k_)
-            batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, sequence, count);
+            batch_accumulator_.push_and_pay(sequence.size(), sequence, count);
     }
 
     void add_sequence(std::string&& sequence, uint64_t count = 1) {
         // push read to the processing queue
         if (sequence.size() >= k_)
-            batch_accumulator_.push_and_pay(sequence.size() - k_ + 1, std::move(sequence), count);
+            batch_accumulator_.push_and_pay(sequence.size(), std::move(sequence), count);
     }
 
-    size_t buffer_size();
+    size_t buffer_size() const;
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
     void add_sequences(const std::function<void(CallStringCount)> &generate_sequences);
 
@@ -91,8 +92,8 @@ class KmerCollector {
     inline bool is_both_strands_mode() const { return both_strands_mode_; }
     inline size_t num_threads() const { return num_threads_; }
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
-
-    std::filesystem::path tmp_dir() { return tmp_dir_; }
+    inline std::filesystem::path tmp_dir() const { return tmp_dir_; }
+    inline size_t max_disk_space() const { return max_disk_space_; }
 
     /**
      * Sends sequences accumulated in #batch_accumulator_ for processing
@@ -115,6 +116,11 @@ class KmerCollector {
     bool both_strands_mode_;
 
     std::filesystem::path tmp_dir_;
+
+    size_t buffer_size_;
+
+    /** Maximum disk space in bytes used by #kmers_ */
+    size_t max_disk_space_;
 };
 
 /** Visible For Testing */

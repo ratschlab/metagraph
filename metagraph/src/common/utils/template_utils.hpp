@@ -65,6 +65,17 @@ inline const U& get_second(const std::pair<T, U> &pair) { return pair.second; }
 template <typename T, typename U>
 inline U& get_second(std::pair<T, U> &pair) { return pair.second; }
 
+// return the the type of the first element if T is a pair, or T otherwise
+template <typename T, typename = void>
+struct get_first_type {
+    using type = T;
+};
+
+template <typename T>
+struct get_first_type<T, std::void_t<typename T::first_type>> {
+    using type = typename T::first_type;
+};
+
 class GreaterFirst {
   public:
     template <typename T>

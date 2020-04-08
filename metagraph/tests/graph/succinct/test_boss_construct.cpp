@@ -10,12 +10,12 @@
 #define protected public
 #define private public
 
-#include "graph/representation/succinct/boss_construct.hpp"
-#include "graph/representation/succinct/boss.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_multiset_disk.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_collector.hpp"
 
 namespace {
@@ -661,7 +661,7 @@ TYPED_TEST(CountKmers, CountKmers32bits) {
 }
 
 TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
-    using Container = common::SortedMultisetDisk<TypeParam, uint8_t>;
+    using Container = common::SortedMultisetDisk<TypeParam, typename TypeParam::WordType, uint8_t>;
     std::function<void(typename Container::storage_type *)> cleanup
             = [](typename Container::storage_type *) {};
     Container result(cleanup, 1, 100'000);
@@ -673,7 +673,7 @@ TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
 }
 
 TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
-    using Container = common::SortedMultisetDisk<TypeParam, uint32_t>;
+    using Container = common::SortedMultisetDisk<TypeParam, typename TypeParam::WordType, uint32_t>;
     std::function<void(typename Container::storage_type *)> cleanup
             = [](typename Container::storage_type *) {};
     Container result(cleanup, 1, 100'000);

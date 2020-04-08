@@ -200,7 +200,8 @@ KmerCollector<KMER, KmerExtractor, Container>
                 Sequence&& filter_suffix_encoded,
                 size_t num_threads,
                 double memory_preallocated,
-                const std::filesystem::path &tmp_dir)
+                const std::filesystem::path &tmp_dir,
+                size_t __attribute__((unused)) max_disk_space)
       : k_(k),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
@@ -214,16 +215,16 @@ KmerCollector<KMER, KmerExtractor, Container>
     auto cleanup = get_cleanup<Extractor, typename Container::storage_type>(
         filter_suffix_encoded_.empty()
     );
-    size_t num_elements = memory_preallocated / sizeof(typename Container::value_type);
-    if constexpr((utils::is_instance<Container, common::SortedSetDisk> {}
-                    || utils::is_instance<Container, common::SortedMultisetDisk> {})) {
+    buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
+    if constexpr ((utils::is_instance<typename KmerCollector::Data, common::ChunkedWaitQueue> {})) {
         if (!filter_suffix_encoded_.empty()) {
             common::logger->error("Disk based sorting does not support chunking");
             exit(1);
         }
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, num_elements, tmp_dir);
+        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_, tmp_dir,
+                                             max_disk_space);
     } else {
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, num_elements);
+        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_);
     }
     common::logger->trace(
             "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
@@ -232,8 +233,8 @@ KmerCollector<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() {
-    return kmers_->buffer_size();
+size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() const {
+    return buffer_size_;
 }
 
 template <typename KMER, class KmerExtractor, class Container>
@@ -304,10 +305,10 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
             common::SortedMultiset<KMER, uint16_t, Vector<std::pair<KMER, uint16_t>>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
             common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint8_t>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint16_t>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, uint32_t>>;
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER, KMER::WordType>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint8_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint16_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint32_t>>;
 
 
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64)

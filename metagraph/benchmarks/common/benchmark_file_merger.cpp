@@ -5,11 +5,11 @@
 
 #include <benchmark/benchmark.h>
 
-#include "common/file_merger.hpp"
+#include "common/elias_fano_file_merger.hpp"
 #include "common/utils/file_utils.hpp"
 
 // Note: if testing with many chunks use 'ulimit -n <max_files>' to increase the maxium
-// number of files the sytem allows you to open. On mac the default is only 256!
+// number of files the system allows you to open. On mac the default is only 256!
 
 constexpr size_t ITEM_COUNT = 10'000;
 const std::string chunk_prefix = "/tmp/bm_chunk_";
@@ -45,7 +45,7 @@ static void BM_merge_files(benchmark::State &state) {
     };
     bool do_cleanup = false;
     for (auto _ : state) {
-        mg::common::merge_files<uint64_t>(sources, file_writer, do_cleanup);
+        mg::common::merge_files<uint64_t, uint64_t>(sources, file_writer, do_cleanup);
     }
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });
@@ -63,7 +63,8 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     };
     bool do_cleanup = false;
     for (auto _ : state) {
-        mg::common::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
+        mg::common::merge_files<uint64_t, uint8_t, uint64_t>(sources, file_writer,
+                                                             do_cleanup);
     }
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });

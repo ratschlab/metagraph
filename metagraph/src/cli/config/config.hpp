@@ -187,6 +187,8 @@ class Config {
 
     std::filesystem::path tmp_dir = "/tmp/";
 
+    size_t disk_cap_bytes = 20e9; // 20GB default
+
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 
     static std::string annotype_to_string(AnnotationType state);
