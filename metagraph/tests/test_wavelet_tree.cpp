@@ -21,29 +21,19 @@ TYPED_TEST_SUITE(WaveletTreeTest, WaveletTreeTypes);
 
 
 void test_next(const wavelet_tree &vector) {
-    ASSERT_DEATH(vector.next(vector.size(), 1 << vector.logsigma()), "");
-    ASSERT_DEATH(vector.next(vector.size(), 10 << vector.logsigma()), "");
+    ASSERT_DEATH(vector.next(0, 1 << vector.logsigma()), "");
+    ASSERT_DEATH(vector.next(0, 10 << vector.logsigma()), "");
 
     if (vector.size() == 0)
         return;
 
-    EXPECT_EQ(vector.size(), vector.next(0, 1 << vector.logsigma()));
-    EXPECT_EQ(vector.size(), vector.next(0, 10 << vector.logsigma()));
-
-    EXPECT_EQ(vector.size(), vector.next(vector.size() / 2, 1 << vector.logsigma()));
-    EXPECT_EQ(vector.size(), vector.next(vector.size() / 2, 10 << vector.logsigma()));
-
-    EXPECT_EQ(vector.size(), vector.next(vector.size() - 1, 1 << vector.logsigma()));
-    EXPECT_EQ(vector.size(), vector.next(vector.size() - 1, 10 << vector.logsigma()));
-
-
     EXPECT_EQ(0u, vector.next(0, vector[0]));
     EXPECT_EQ(vector.size() / 5, vector.next(vector.size() / 5, vector[vector.size() / 5]));
     EXPECT_EQ(vector.size() / 2, vector.next(vector.size() / 2, vector[vector.size() / 2]));
-    EXPECT_EQ(vector.size() * 2 / 3, vector.next(vector.size() * 2 / 3, vector[vector.size() * 2 / 3]));
+    EXPECT_EQ(vector.size()*2/3, vector.next(vector.size()*2/3, vector[vector.size()*2/3]));
     EXPECT_EQ(vector.size() - 1, vector.next(vector.size() - 1, vector[vector.size() - 1]));
 
-    for (uint64_t c = 0; !(c >> (2 * vector.logsigma())); ++c) {
+    for (uint64_t c = 0; c < (1llu << vector.logsigma()); ++c) {
         for (uint64_t i : { uint64_t(0),
                             vector.size() / 5,
                             vector.size() / 2,
@@ -72,23 +62,13 @@ void test_prev(const wavelet_tree &vector) {
     if (vector.size() == 0)
         return;
 
-    ASSERT_EQ(vector.size(), vector.prev(0, 1 << vector.logsigma()));
-    ASSERT_EQ(vector.size(), vector.prev(0, 10 << vector.logsigma()));
-
-    ASSERT_EQ(vector.size(), vector.prev(vector.size() / 2, 1 << vector.logsigma()));
-    ASSERT_EQ(vector.size(), vector.prev(vector.size() / 2, 10 << vector.logsigma()));
-
-    ASSERT_EQ(vector.size(), vector.prev(vector.size() - 1, 1 << vector.logsigma()));
-    ASSERT_EQ(vector.size(), vector.prev(vector.size() - 1, 10 << vector.logsigma()));
-
-
     EXPECT_EQ(0u, vector.prev(0, vector[0]));
     EXPECT_EQ(vector.size() / 5, vector.prev(vector.size() / 5, vector[vector.size() / 5]));
     EXPECT_EQ(vector.size() / 2, vector.prev(vector.size() / 2, vector[vector.size() / 2]));
     EXPECT_EQ(vector.size() * 2 / 3, vector.prev(vector.size() * 2 / 3, vector[vector.size() * 2 / 3]));
     EXPECT_EQ(vector.size() - 1, vector.prev(vector.size() - 1, vector[vector.size() - 1]));
 
-    for (uint64_t c = 0; !(c >> (2 * vector.logsigma())); ++c) {
+    for (uint64_t c = 0; c < (1llu << vector.logsigma()); ++c) {
         for (uint64_t i : { uint64_t(0),
                             vector.size() / 5,
                             vector.size() / 2,
@@ -115,8 +95,9 @@ void reference_based_test(const wavelet_tree &vector,
     auto int_vector = vector.to_vector();
     ASSERT_TRUE(std::equal(int_vector.begin(), int_vector.end(), reference.begin()));
 
-    for (uint64_t c = 0; c < (uint64_t(1) << vector.logsigma()); ++c) {
+    for (uint64_t c = 0; c < (1ull << vector.logsigma()); ++c) {
         uint64_t max_rank = std::count(reference.begin(), reference.end(), c);
+        ASSERT_EQ(max_rank, vector.count(c));
 
         ASSERT_DEATH(vector.select(c, 0), "");
         ASSERT_DEATH(vector.select(c, max_rank + 1), "");

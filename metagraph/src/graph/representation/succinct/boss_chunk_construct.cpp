@@ -81,7 +81,7 @@ void recover_source_dummy_nodes(size_t k,
                                 ThreadPool & /* async_worker */,
                                 size_t /* buffer_size */,
                                 const std::filesystem::path & /* tmp_dir*/) {
-    using KMER = std::remove_reference_t<decltype(utils::get_first((*kmers)[0]))>;
+    using KMER = std::decay_t<decltype(utils::get_first((*kmers)[0]))>;
 
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
@@ -199,7 +199,7 @@ uint8_t write_kmer(size_t k,
         return 0;
     }
     writer->push(to_write.kmer);
-    using KMER = std::remove_reference_t<decltype(utils::get_first(to_write.kmer))>;
+    using KMER = std::decay_t<decltype(utils::get_first(to_write.kmer))>;
     using TAlphabet = typename KMER::CharType;
 
     const KMER &kmer_to_write = utils::get_first(to_write.kmer);
@@ -234,7 +234,7 @@ void recover_source_dummy_nodes(size_t k,
                                 ThreadPool &async_worker,
                                 size_t buffer_size,
                                 const std::filesystem::path &tmp_dir) {
-    using KMER = std::remove_reference_t<decltype(utils::get_first(*(kmers->begin())))>;
+    using KMER = std::decay_t<decltype(utils::get_first(*(kmers->begin())))>;
 
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name = [&tmp_dir](uint32_t pref_len) {

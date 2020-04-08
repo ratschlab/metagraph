@@ -25,6 +25,7 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
     aligner_config.max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus;
     aligner_config.min_cell_score = config.alignment_min_cell_score;
     aligner_config.min_path_score = config.alignment_min_path_score;
+    aligner_config.xdrop = config.alignment_xdrop;
     aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
     aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
     aligner_config.forward_and_reverse_complement = config.align_both_strands;
@@ -40,18 +41,17 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
         aligner_config.max_seed_length = graph.get_k();
 
     logger->trace("Alignment settings:");
-    logger->trace("\t Alignments to report: {}", config.alignment_num_alternative_paths);
-    logger->trace("\t Priority queue size: {}", config.alignment_queue_size);
+    logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
+    logger->trace("\t Priority queue size: {}", aligner_config.queue_size);
     logger->trace("\t Min seed length: {}", aligner_config.min_seed_length);
     logger->trace("\t Max seed length: {}", aligner_config.max_seed_length);
-    logger->trace("\t Max num seeds per locus: {}", config.alignment_max_num_seeds_per_locus);
-    logger->trace("\t Gap opening penalty: {}",
-                  int64_t(config.alignment_gap_opening_penalty));
-    logger->trace("\t Gap extension penalty: {}",
-                  int64_t(config.alignment_gap_extension_penalty));
-    logger->trace("\t Min DP table cell score: {}", int64_t(config.alignment_min_cell_score));
-    logger->trace("\t Min alignment score: {}", config.alignment_min_path_score);
-    logger->trace("\t Bandwidth: {}", config.alignment_vertical_bandwidth);
+    logger->trace("\t Max num seeds per locus: {}", aligner_config.max_num_seeds_per_locus);
+    logger->trace("\t Gap opening penalty: {}", int64_t(aligner_config.gap_opening_penalty));
+    logger->trace("\t Gap extension penalty: {}", int64_t(aligner_config.gap_extension_penalty));
+    logger->trace("\t Min DP table cell score: {}", int64_t(aligner_config.min_cell_score));
+    logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
+    logger->trace("\t Bandwidth: {}", aligner_config.bandwidth);
+    logger->trace("\t X drop-off: {}", aligner_config.xdrop);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {
@@ -83,7 +83,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Con
         return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
 
     } else if (aligner_config.max_seed_length == graph.get_k()) {
-        assert(config.alignment_min_seed_length == graph.get_k());
+        assert(aligner_config.min_seed_length == graph.get_k());
 
         // seeds are single k-mers
         return std::make_unique<DBGAligner<>>(graph, aligner_config);
@@ -169,9 +169,7 @@ void map_sequences_in_file(const std::string &file,
         }
 
         if (config.count_kmers) {
-            std::cout << "Kmers matched (discovered/total): "
-                      << num_discovered << "/"
-                      << num_kmers << "\n";
+            std::cout << num_discovered << "/" << num_kmers << "\n";
             return;
         }
 
@@ -265,71 +263,61 @@ int align_to_graph(Config *config) {
 
         Timer data_reading_timer;
 
-        std::ostream *outstream = config->outfbase.size()
+        std::ostream *out = config->outfbase.size()
             ? new std::ofstream(config->outfbase)
             : &std::cout;
 
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
-
         read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-            thread_pool.enqueue([&](const std::string &query,
-                                    const std::string &header) {
+            thread_pool.enqueue([&](const std::string &query, const std::string &header) {
                 auto paths = aligner->align(query);
 
-                std::ostringstream ostr;
+                std::unique_lock<std::mutex> lock(print_mutex);
                 if (!config->output_json) {
                     for (const auto &path : paths) {
                         const auto& path_query = path.get_orientation()
                             ? paths.get_query_reverse_complement()
                             : paths.get_query();
 
-                        ostr << header << "\t"
+                        *out << header << "\t"
                              << path_query << "\t"
-                             << path
-                             << std::endl;
+                             << path << "\n";
                     }
 
-                    if (paths.empty())
-                        ostr << header << "\t"
+                    if (paths.empty()) {
+                        *out << header << "\t"
                              << query << "\t"
                              << "*\t*\t"
-                             << config->alignment_min_path_score << "\t*\t*\t*"
-                             << std::endl;
+                             << config->alignment_min_path_score << "\t*\t*\t*\n";
+                    }
                 } else {
+                    Json::StreamWriterBuilder builder;
+                    builder["indentation"] = "";
+
                     bool secondary = false;
                     for (const auto &path : paths) {
                         const auto& path_query = path.get_orientation()
                             ? paths.get_query_reverse_complement()
                             : paths.get_query();
 
-                        ostr << Json::writeString(
-                                    builder,
-                                    path.to_json(path_query,
-                                                 *graph,
-                                                 secondary,
-                                                 header)
-                                )
-                             << std::endl;
+                        *out << Json::writeString(builder,
+                                                  path.to_json(path_query,
+                                                               *graph,
+                                                               secondary,
+                                                               header)) << "\n";
 
                         secondary = true;
                     }
 
                     if (paths.empty()) {
-                        ostr << Json::writeString(
-                                    builder,
-                                    DBGAligner<>::DBGAlignment().to_json(
-                                        query,
-                                        *graph,
-                                        secondary,
-                                        header)
-                                )
-                             << std::endl;
+                        *out << Json::writeString(builder,
+                                                  DBGAligner<>::DBGAlignment().to_json(
+                                                      query,
+                                                      *graph,
+                                                      secondary,
+                                                      header)
+                                                  ) << "\n";
                     }
                 }
-
-                auto lock = std::lock_guard<std::mutex>(print_mutex);
-                *outstream << ostr.str();
             }, std::string(read_stream->seq.s),
                config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
                    && read_stream->comment.l
@@ -348,7 +336,7 @@ int align_to_graph(Config *config) {
                       get_curr_RSS() >> 20, timer.elapsed());
 
         if (config->outfbase.size())
-            delete outstream;
+            delete out;
     }
 
     return 0;
