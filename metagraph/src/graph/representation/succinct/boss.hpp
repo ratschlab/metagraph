@@ -442,6 +442,7 @@ class BOSS {
                 && !std::count(begin, begin + node_suffix_length_, kSentinelCode)) {
             // search for the prefix and jump to that range if it's found
             std::vector<TAlphabet> prefix(begin, begin + node_suffix_length_);
+            // shift the alphabet: we don't cache suffixes with sentinels '$'
             for (TAlphabet &c : prefix) {
                 assert(c);
                 c--;
@@ -595,6 +596,7 @@ class BOSS {
                 && !std::count(begin, begin + node_suffix_length_, kSentinelCode)) {
             // search for the prefix and jump to that range if it's found
             std::vector<TAlphabet> prefix(begin, begin + node_suffix_length_);
+            // shift the alphabet: we don't cache suffixes with sentinels '$'
             for (TAlphabet &c : prefix) {
                 assert(c);
                 c--;

@@ -2290,13 +2290,6 @@ void BOSS::index_node_suffix_ranges(size_t suffix_length) {
     if (suffix_length == 0u)
         return;
 
-    // first, index all suffixes and write to a temporary variable
-    // to safely call index() for k-mers in call_paths
-    std::vector<std::pair<edge_index, edge_index>> node_suffix_ranges(
-        std::pow(alph_size - 1, suffix_length),
-        std::make_pair((edge_index)W_->size(), (edge_index)0)
-    );
-
 #if _PROTEIN_GRAPH
     KmerExtractor2Bit kmer_extractor(alphabets::kAlphabetProtein,
                                      alphabets::kCharToProtein,
@@ -2319,6 +2312,16 @@ void BOSS::index_node_suffix_ranges(size_t suffix_length) {
         "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
     );
 #endif
+
+    if (suffix_length * kmer_extractor.bits_per_char > 64)
+        throw std::runtime_error("ERROR: Trying to cache too long suffixes");
+
+    // first, index all suffixes and write to a temporary variable
+    // to safely call index() for k-mers in call_paths
+    std::vector<std::pair<edge_index, edge_index>> node_suffix_ranges(
+        suffix_length * kmer_extractor.bits_per_char,
+        std::make_pair((edge_index)W_->size(), (edge_index)0)
+    );
 
     Vector<KmerExtractor2Bit::Kmer64> node_suffixes;
     std::string sequence;
