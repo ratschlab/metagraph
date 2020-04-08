@@ -52,7 +52,8 @@ void FastaWriter::join() {
 }
 
 void FastaWriter::write(const std::string &sequence) {
-    seq_batcher_.push_and_pay(sequence.size(), std::string(sequence));
+    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
+                              std::string(sequence));
 }
 
 void FastaWriter::write(std::string&& sequence) {
