@@ -31,6 +31,9 @@ Config::Config(int argc, char *argv[]) {
     // parse identity from first command line argument
     if (!strcmp(argv[1], "build")) {
         identity = BUILD;
+        // for succinct graphs, cache node ranges for
+        // all suffixes of length 10 in the BOSS table
+        node_suffix_length = 10;
     } else if (!strcmp(argv[1], "clean")) {
         identity = CLEAN;
     } else if (!strcmp(argv[1], "merge")) {
