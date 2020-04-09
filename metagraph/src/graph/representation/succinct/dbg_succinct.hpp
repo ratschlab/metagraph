@@ -98,6 +98,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool has_single_incoming(node_index) const override final;
 
     virtual uint64_t num_nodes() const override final;
+    virtual uint64_t max_index() const override final { return boss_graph_->num_edges(); };
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
     virtual void reset_mask() final;
@@ -125,9 +126,6 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
-    uint64_t kmer_to_boss_index(node_index kmer_index) const;
-    node_index boss_to_kmer_index(uint64_t boss_index) const;
-
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
                                           uint32_t max_num_hash_functions = -1);
 
@@ -142,7 +140,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
   private:
     std::unique_ptr<BOSS> boss_graph_;
-    // all edges in boss except dummy
+    // all edges in boss except dummy for fast in-degree computation
     std::unique_ptr<bit_vector> valid_edges_;
 
     bool canonical_mode_;

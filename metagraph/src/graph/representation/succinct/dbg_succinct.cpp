@@ -18,6 +18,14 @@ using utils::remove_suffix;
 
 typedef DBGSuccinct::node_index node_index;
 
+// dbg node is a boss edge
+inline uint64_t kmer_to_boss_index(node_index kmer_index) {
+    return kmer_index;
+}
+inline node_index boss_to_kmer_index(uint64_t boss_index) {
+    return boss_index;
+}
+
 
 DBGSuccinct::DBGSuccinct(size_t k, bool canonical_mode)
       : boss_graph_(std::make_unique<BOSS>(k - 1)),
@@ -870,28 +878,6 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
 
 void DBGSuccinct::reset_mask() {
     valid_edges_.reset();
-}
-
-uint64_t DBGSuccinct::kmer_to_boss_index(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
-
-    if (!valid_edges_.get())
-        return node;
-
-    return valid_edges_->select1(node);
-}
-
-DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) const {
-    assert(boss_index <= boss_graph_->num_edges());
-    assert(!valid_edges_.get() || boss_index < valid_edges_->size());
-
-    if (!valid_edges_.get() || !boss_index)
-        return boss_index;
-
-    if (!(*valid_edges_)[boss_index])
-        return npos;
-
-    return valid_edges_->rank1(boss_index);
 }
 
 void DBGSuccinct
