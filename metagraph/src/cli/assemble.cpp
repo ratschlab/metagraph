@@ -63,7 +63,8 @@ int assemble(Config *config) {
     }
 
     FastaWriter writer(config->outfbase, config->header,
-                       config->enumerate_out_sequences);
+                       config->enumerate_out_sequences,
+                       get_num_threads() > 1);
 
     if (config->unitigs || config->min_tip_size > 1) {
         graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); },
