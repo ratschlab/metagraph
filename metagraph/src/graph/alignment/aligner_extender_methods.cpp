@@ -474,7 +474,9 @@ void DefaultColumnExtender<NodeType>
     assert(start_score == dp_table.best_score().second);
 
     while (columns_to_update.size()) {
-        const auto [node, best_score_update, converged] = columns_to_update.top();
+        ColumnRef top = columns_to_update.top();
+        NodeType node = std::get<0>(top);
+        score_t best_score_update = std::get<1>(top);
         const auto &cur_col = dp_table.find(node)->second;
 
         // if this happens, then it means that the column was in the priority
