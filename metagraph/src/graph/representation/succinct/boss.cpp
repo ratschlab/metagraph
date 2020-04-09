@@ -14,6 +14,7 @@
 #include "common/threads/threading.hpp"
 #include "common/serialization.hpp"
 #include "common/algorithms.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
@@ -803,17 +804,46 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
  * Given an edge index i, this function returns the k-mer sequence of its
  * source node.
  */
-std::vector<TAlphabet> BOSS::get_node_seq(edge_index k_node) const {
-    CHECK_INDEX(k_node);
+std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
+    CHECK_INDEX(x);
 
-    std::vector<TAlphabet> ret(k_, get_node_last_value(k_node));
+    std::vector<TAlphabet> ret(k_);
+    size_t i = k_;
 
-    // TODO: binary search in cached_suffix_ranges_ for decoding the prefix fast
-    for (int curr_k = k_ - 2; curr_k >= 0; --curr_k) {
-        CHECK_INDEX(k_node);
+    if (cached_suffix_length_) {
+        while (i > cached_suffix_length_) {
+            CHECK_INDEX(x);
 
-        k_node = bwd(k_node);
-        ret[curr_k] = get_node_last_value(k_node);
+            ret[--i] = get_node_last_value(x);
+            x = bwd(x);
+        }
+
+        auto it = std::lower_bound(
+            cached_suffix_ranges_.begin(),
+            cached_suffix_ranges_.end(),
+            x,
+            [](const auto &range, edge_index edge) { return (range.second < edge); }
+        );
+
+        if (it != cached_suffix_ranges_.end() && it->first <= x) {
+            assert(x <= it->second);
+            uint64_t index = it - cached_suffix_ranges_.begin();
+            for (i = 0; i < cached_suffix_length_; ++i) {
+                uint64_t next_index = index / (alph_size - 1);
+                ret[i] = index - next_index * (alph_size - 1) + 1;
+                index = next_index;
+            }
+            return ret;
+        }
+    }
+
+    ret[--i] = get_node_last_value(x);
+
+    while (i > 0) {
+        CHECK_INDEX(x);
+
+        x = bwd(x);
+        ret[--i] = get_node_last_value(x);
     }
 
     return ret;
@@ -2343,6 +2373,17 @@ void BOSS::cache_node_suffix_ranges(size_t suffix_length) {
                 = std::make_pair(rl_next, ru_next);
         }
     }
+
+    // make the upper bounds smooth so we can use binary search on them
+    for (size_t i = 1; i < cached_suffix_ranges_.size(); ++i) {
+        if (!cached_suffix_ranges_[i].second) {
+            cached_suffix_ranges_[i].second = cached_suffix_ranges_[i - 1].second;
+            cached_suffix_ranges_[i].first = cached_suffix_ranges_[i - 1].second + 1;
+        }
+    }
+    assert(std::is_sorted(cached_suffix_ranges_.begin(),
+                          cached_suffix_ranges_.end(),
+                          utils::LessSecond()));
 }
 
 bool BOSS::is_valid() const {
