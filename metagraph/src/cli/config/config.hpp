@@ -155,7 +155,7 @@ class Config {
     };
     IdentityType identity = NO_IDENTITY;
 
-    BOSS::State state = BOSS::State::STAT;
+    BOSS::State state = BOSS::State::SMALL;
 
     static std::string state_to_string(BOSS::State state);
     static BOSS::State string_to_state(const std::string &string);
