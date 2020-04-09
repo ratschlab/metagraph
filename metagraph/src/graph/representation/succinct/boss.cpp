@@ -1229,40 +1229,42 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
         return 0;
 
     // update last
-    sdsl::bit_vector new_last(last_->size() - num_edges_to_remove, false);
+    sdsl::bit_vector old_last = last_->convert_to<sdsl::bit_vector>();
+    delete last_;
+    sdsl::bit_vector last(old_last.size() - num_edges_to_remove, false);
 
     for (edge_index i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
         if (!edges_to_remove_mask[i]) {
-            new_last[new_i++] = get_last(i);
+            last[new_i++] = old_last[i];
         } else {
-            if (get_last(i) && new_i > 1 && !new_last[new_i - 1])
-                new_last[new_i - 1] = 1;
+            if (old_last[i] && new_i > 1 && !last[new_i - 1])
+                last[new_i - 1] = 1;
         }
     }
-    delete last_;
-    last_ = new bit_vector_stat(std::move(new_last));
+    last_ = new bit_vector_stat(std::move(last));
 
     // update W
-    sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, bits_per_char_W_);
-    sdsl::bit_vector first_removed(alph_size, false);
+    sdsl::int_vector<> old_W = W_->to_vector();
+    delete W_;
+    sdsl::int_vector<> W(old_W.size() - num_edges_to_remove, 0, bits_per_char_W_);
+    std::vector<bool> first_removed(alph_size, false);
 
     for (edge_index i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
-        TAlphabet c = get_W(i);
+        TAlphabet c = old_W[i];
         if (edges_to_remove_mask[i]) {
             if (c < alph_size)
                 first_removed[c] = true;
         } else {
             assert(c != alph_size);
             if (c > alph_size && first_removed[c % alph_size]) {
-                new_W[new_i++] = c % alph_size;
+                W[new_i++] = c % alph_size;
             } else {
-                new_W[new_i++] = c;
+                W[new_i++] = c;
             }
             first_removed[c % alph_size] = false;
         }
     }
-    delete W_;
-    W_ = new wavelet_tree_stat(bits_per_char_W_, std::move(new_W));
+    W_ = new wavelet_tree_stat(bits_per_char_W_, std::move(W));
 
     // update F
     TAlphabet c = 0;
