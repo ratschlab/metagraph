@@ -283,7 +283,6 @@ TYPED_TEST(SortedMultisetDiskTest, ExhaustMaxAllowedDiskSpace) {
     auto on_item_pushed = [](const std::pair<TypeParam, uint8_t> &) {};
     constexpr size_t max_disk_space
             = container_size * sizeof(std::pair<uint32_t, uint8_t>) * 2;
-    common::logger->set_level(spdlog::level::trace);
     common::SortedMultisetDisk<TypeParam, TypeParam, uint8_t> underTest(
             nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
             thread_count, container_size, "/tmp/test_chunk_", max_disk_space,
