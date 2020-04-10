@@ -41,7 +41,7 @@ class MergeHeap {
         els.emplace(it, el, idx);
     }
 
-    const value_type &top() const { return els.back(); }
+    const value_type& top() const { return els.back(); }
 
     value_type pop() {
         value_type result = els.back();
