@@ -29,10 +29,12 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
-    static_assert(std::is_same_v<KMER, typename Container::value_type>);
-    static_assert(std::is_same_v<KMER, typename Container::key_type>);
+    static_assert(std::is_same_v<typename KMER::WordType, typename Container::value_type>);
+    static_assert(std::is_same_v<typename KMER::WordType, typename Container::key_type>);
 
     Vector<KMER> temp_storage;
+    Vector<typename KMER::WordType> *temp_storage_int
+            = reinterpret_cast<Vector<typename KMER::WordType> *>(&temp_storage);
     temp_storage.reserve(1.1 * kMaxKmersChunkSize);
 
     KmerExtractor kmer_extractor;
@@ -49,11 +51,11 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
             return;
 
         if (remove_redundant) {
-            kmers->sort_and_remove_duplicates(&temp_storage, 1);
+            kmers->sort_and_remove_duplicates(temp_storage_int, 1);
         }
 
         if (temp_storage.size() > 0.9 * kMaxKmersChunkSize) {
-            kmers->insert(temp_storage.begin(), temp_storage.end());
+            kmers->insert(temp_storage_int->begin(), temp_storage_int->end());
 
             if (temp_storage.capacity() > 2 * kMaxKmersChunkSize)
                 temp_storage = Vector<KMER>(1.1 * kMaxKmersChunkSize);
@@ -64,9 +66,9 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
 
     if (temp_storage.size()) {
         if (remove_redundant) {
-            kmers->sort_and_remove_duplicates(&temp_storage, 1);
+            kmers->sort_and_remove_duplicates(temp_storage_int, 1);
         }
-        kmers->insert(temp_storage.begin(), temp_storage.end());
+        kmers->insert(temp_storage_int->begin(), temp_storage_int->end());
     }
 }
 
@@ -79,12 +81,15 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
     static_assert(utils::is_instance<Container, common::SortedMultiset> {}
                   || utils::is_instance<Container, common::SortedMultisetDisk> {});
-    static_assert(std::is_same_v<KMER, typename Container::key_type>);
+    static_assert(std::is_same_v<typename KMER::WordType, typename Container::key_type>);
 
     using KmerCount = typename Container::count_type;
 
     Vector<KMER> temp_storage;
     Vector<std::pair<KMER, KmerCount>> temp_storage_with_counts;
+    using int_pair = std::pair<typename KMER::WordType, KmerCount>;
+    Vector<int_pair> *temp_storage_with_counts_int
+            = reinterpret_cast<Vector<int_pair> *>(&temp_storage);
     temp_storage_with_counts.reserve(1.1 * kMaxKmersChunkSize);
 
     KmerExtractor kmer_extractor;
@@ -109,8 +114,8 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
         temp_storage.resize(0);
 
         if (temp_storage_with_counts.size() > kMaxKmersChunkSize) {
-            kmers->insert(temp_storage_with_counts.begin(),
-                          temp_storage_with_counts.end());
+            kmers->insert(temp_storage_with_counts_int->begin(),
+                          temp_storage_with_counts_int->end());
 
             if (temp_storage_with_counts.capacity() > 2 * kMaxKmersChunkSize)
                 temp_storage_with_counts
@@ -121,15 +126,14 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
     });
 
     if (temp_storage_with_counts.size()) {
-        kmers->insert(temp_storage_with_counts.begin(), temp_storage_with_counts.end());
+        kmers->insert(temp_storage_with_counts_int->begin(), temp_storage_with_counts_int->end());
     }
 }
 
-
 // removes redundant dummy BOSS k-mers from a sorted list
-template <class Array>
-void cleanup_boss_kmers(Array *kmers) {
-    using KMER = std::decay_t<decltype(utils::get_first(kmers->at(0)))>;
+template <class KMER, class KMER_INT>
+void cleanup_boss_kmers(Vector<KMER_INT> *kmers_int) {
+    Vector<KMER> *kmers = reinterpret_cast<Vector<KMER> *> (kmers_int);
 
     assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst()));
     assert(std::unique(kmers->begin(), kmers->end(), utils::EqualFirst()) == kmers->end());
@@ -178,18 +182,17 @@ void cleanup_boss_kmers(Array *kmers) {
     kmers->erase(kmers->begin(), kmers->begin() + last);
 }
 
-
-template <class KmerExtractor, class StorageType>
-std::function<void(StorageType*)> get_cleanup(bool clean_dummy_boss_kmers) {
-    if constexpr(std::is_same<KmerExtractor, KmerExtractorBOSS>::value) {
+template <class KmerExtractor, class KMER, class KMER_INT>
+std::function<void(Vector<KMER_INT> *)> get_cleanup(bool clean_dummy_boss_kmers) {
+    if constexpr(std::is_same_v<KmerExtractor, KmerExtractorBOSS>) {
         if (clean_dummy_boss_kmers) {
-            return cleanup_boss_kmers<StorageType>;
+            return cleanup_boss_kmers<KMER, KMER_INT>;
         } else {
-            return [](StorageType *) {};
+            return [](Vector<KMER_INT> *) {};
         }
     } else {
         std::ignore = clean_dummy_boss_kmers;
-        return [](StorageType *) {};
+        return [](Vector<KMER_INT> *) {};
     }
 }
 
@@ -212,7 +215,8 @@ KmerCollector<KMER, KmerExtractor, Container>
         both_strands_mode_(both_strands_mode),
         tmp_dir_(tmp_dir) {
     assert(num_threads_ > 0);
-    auto cleanup = get_cleanup<Extractor, typename Container::storage_type>(
+    using KMER_INT = typename Container::value_type;
+    std::function<void(Vector<KMER_INT> *)> cleanup = get_cleanup<Extractor, KMER, KMER_INT>(
         filter_suffix_encoded_.empty()
     );
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
@@ -240,7 +244,7 @@ size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() const {
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
-    if constexpr(std::is_same_v<KMER, typename Container::value_type>) {
+    if constexpr(std::is_same_v<typename KMER::WordType, typename Container::value_type>) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              generate_sequences,
                              k_, both_strands_mode_, kmers_.get(),
@@ -258,7 +262,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-    if constexpr (std::is_same_v<KMER, typename Container::value_type>) {
+    if constexpr (std::is_same_v<typename KMER::WordType, typename Container::value_type>) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallString callback) {
                                  generate_sequences([&](const std::string &seq, uint64_t) {
@@ -296,19 +300,19 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
     thread_pool_.join();
 }
 
-
 #define INSTANTIATE_KMER_STORAGE(KMER_EXTRACTOR, KMER) \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSet<KMER, Vector<KMER>>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
-            common::SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>; \
+            common::SortedSet<KMER::WordType>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
-            common::SortedMultiset<KMER, uint16_t, Vector<std::pair<KMER, uint16_t>>>>; \
+            common::SortedMultiset<KMER::WordType, uint8_t>>; \
     template class KmerCollector<KMER, KMER_EXTRACTOR, \
-            common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER, KMER::WordType>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint8_t>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint16_t>>; \
-    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER, KMER::WordType, uint32_t>>;
+            common::SortedMultiset<KMER::WordType, uint16_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, \
+            common::SortedMultiset<KMER::WordType, uint32_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedSetDisk<KMER::WordType>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER::WordType, uint8_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER::WordType, uint16_t>>; \
+    template class KmerCollector<KMER, KMER_EXTRACTOR, common::SortedMultisetDisk<KMER::WordType, uint32_t>>;
 
 
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64)

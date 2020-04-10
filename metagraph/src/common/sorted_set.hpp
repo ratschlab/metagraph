@@ -10,12 +10,13 @@
 #include <ips4o.hpp>
 
 #include "common/logger.hpp"
+#include "common/vector.hpp"
 
 namespace mg {
 namespace common {
 
 // Thread safe data storage to extract distinct elements
-template <typename T, class Container = std::vector<T>>
+template <typename T, class Container = Vector<T>>
 class SortedSet {
   public:
     static_assert(std::is_same_v<T, typename Container::value_type>);

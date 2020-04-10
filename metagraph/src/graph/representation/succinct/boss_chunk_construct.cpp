@@ -74,9 +74,9 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * @tparam Container the data structure in which the k-mers were merged (e.g. a
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
-template <typename Data>
-void recover_source_dummy_nodes(size_t k, size_t num_threads, Data *kmers) {
-    using KMER = std::decay_t<decltype(utils::get_first((*kmers)[0]))>;
+template <typename KMER, typename KMER_INT>
+void recover_source_dummy_nodes(size_t k, size_t num_threads, Vector<KMER_INT> *kmers_int) {
+    auto kmers = reinterpret_cast<Vector<KMER> *>(kmers_int);
 
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
@@ -189,7 +189,7 @@ uint8_t write_kmer(size_t k,
                    Vector<T> *dummy_kmers,
                    common::EliasFanoEncoderBuffered<INT> *encoder,
                    RecentKmers<T> *buffer,
-                   common::SortedSetDisk<T, INT> *sorted_dummy_kmers) {
+                   common::SortedSetDisk<INT> *sorted_dummy_kmers) {
     const Kmer<T> to_write = buffer->pop_front();
     if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
@@ -206,7 +206,8 @@ uint8_t write_kmer(size_t k,
     }
 
     if (dummy_kmers->size() == dummy_kmers->capacity()) {
-        sorted_dummy_kmers->insert(dummy_kmers->begin(), dummy_kmers->end());
+        auto dummy_kmers_int = reinterpret_cast<Vector<INT> *>(&dummy_kmers);
+        sorted_dummy_kmers->insert(dummy_kmers_int->begin(), dummy_kmers_int->end());
         dummy_kmers->resize(0);
     }
 
@@ -234,25 +235,6 @@ compressed_writer(common::EliasFanoEncoderBuffered<int_type> *encoder,
 };
 
 /**
- * SFINAE structs to construct the integer type corresponding to T. Simply speaking, the
- * #type member of the structs will be T::Wortdype if T is not a pair, and
- * std::pair<T::WordType, C> if T is a pair.
- */
-template <typename T, typename = void>
-struct get_int_type {
-    using type = typename T::WordType;
-};
-
-/**
- * Specializes get_int_type for an std::pair<T,C>. The #type member will be set to
- * std::pair<T::WordType, C>.
- */
-template <typename T>
-struct get_int_type<T, void_t<typename T::second_type>> {
-    using type = std::pair<typename T::first_type::WordType, typename T::second_type>;
-};
-
-/**
  * Specialization of recover_dummy_nodes for a disk-based container, such as
  * #SortedSetDisk and #SortedMultisetDisk.
  * The method first removes redundant dummy source k-mers of prefix length 1, then
@@ -270,8 +252,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
 
     std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
-    using T = typename KmerCollector::Value;
-    using T_INT = typename get_int_type<T>::type;
+    using T = typename KmerCollector::KmerType;
+    using T_INT =typename KmerCollector::Value;
     using KMER = typename utils::get_first_type<T>::type;
 
     // name of the file containing dummy k-mers of given prefix length
@@ -279,7 +261,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         return tmp_dir / ("dummy_l" + std::to_string(pref_len));
     };
 
-    const auto no_cleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
+    const auto no_cleanup = [](Vector<T_INT> *) {};
 
     std::vector<std::string> files_to_merge;
 
@@ -297,9 +279,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     std::function<T_INT(const T &v)> to_intf = [](const T &v) { return to_int(v); };
     // this will contain dummy k-mers of prefix length 2
     common::EliasFanoEncoderBuffered<T_INT> dummy_l2(files_to_merge.back(), ENCODER_BUFFER_SIZE);
-    common::SortedSetDisk<T, T_INT> sorted_dummy_kmers(
+    common::SortedSetDisk<T_INT> sorted_dummy_kmers(
             no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
-            tmp_path2, kmer_collector.max_disk_space(), [](const T &) {}, 100, to_intf);
+            tmp_path2, kmer_collector.max_disk_space());
     Vector<T> dummy_kmers;
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
@@ -311,7 +293,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     common::EliasFanoEncoderBuffered<T_INT> original_and_l1(file_name, ENCODER_BUFFER_SIZE);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
-        const T el = *it;
+        const T_INT el_int = *it;
+        const T el = *(reinterpret_cast<const T *>(&el_int));
         recent_buffer.push_back({ el, false });
         remove_redundant_dummy_source<T, KMER>(utils::get_first(el), &recent_buffer);
         if (recent_buffer.full()) {
@@ -454,8 +437,9 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                               common::ChunkedWaitQueue> {})) {
                 recover_source_dummy_nodes_disk(kmer_collector_, &kmers, async_worker_);
             } else {
+                using KMER = typename KmerCollector::KmerType;
                 // kmer_collector stores (BOSS::k_ + 1)-mers
-                recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
+                recover_source_dummy_nodes<KMER>(kmer_collector_.get_k() - 1,
                                            kmer_collector_.num_threads(), &kmers);
             }
             logger->trace("Dummy source k-mers were reconstructed in {} sec",
@@ -512,48 +496,49 @@ initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
 
 template <typename KMER>
 using KmerSetVector
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
-                              common::SortedSet<KMER, Vector<KMER>>>;
+        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedSet<typename KMER::WordType>>;
 
 template <typename KMER>
 using KmerMultsetVector8
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS,
-                              common::SortedMultiset<KMER, uint8_t,
-                                                     Vector<std::pair<KMER, uint8_t>>>>;
+        = kmer::KmerCollector<KMER,
+                              KmerExtractorBOSS,
+                              common::SortedMultiset<typename KMER::WordType, uint8_t>>;
 
 template <typename KMER>
-using KmerMultsetVector16 = kmer::KmerCollector<
-        KMER,
-        KmerExtractorBOSS,
-        common::SortedMultiset<KMER, uint16_t, Vector<std::pair<KMER, uint16_t>>>>;
+using KmerMultsetVector16
+        = kmer::KmerCollector<KMER,
+                              KmerExtractorBOSS,
+                              common::SortedMultiset<typename KMER::WordType, uint16_t>>;
 
 template <typename KMER>
-using KmerMultsetVector32 = kmer::KmerCollector<
-        KMER,
-        KmerExtractorBOSS,
-        common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>;
+using KmerMultsetVector32
+        = kmer::KmerCollector<KMER,
+                              KmerExtractorBOSS,
+                              common::SortedMultiset<typename KMER::WordType, uint32_t>>;
 
 template <typename KMER>
 using KmerSetDisk
-        = kmer::KmerCollector<KMER, KmerExtractorBOSS, common::SortedSetDisk<KMER, typename KMER::WordType>>;
+        = kmer::KmerCollector<KMER,
+                              KmerExtractorBOSS,
+                              common::SortedSetDisk<typename KMER::WordType, typename KMER::WordType>>;
 
 template <typename KMER>
 using SortedMultisetDisk8
-        = common::SortedMultisetDisk<KMER, typename KMER::WordType, uint8_t>;
+        = common::SortedMultisetDisk<typename KMER::WordType, uint8_t>;
 template <typename KMER>
 using KmerMultsetDiskVector8
         = kmer::KmerCollector<KMER, KmerExtractorBOSS, SortedMultisetDisk8<KMER>>;
 
 template <typename KMER>
 using SortedMultisetDisk16
-        = common::SortedMultisetDisk<KMER, typename KMER::WordType, uint16_t>;
+        = common::SortedMultisetDisk<typename KMER::WordType, uint16_t>;
 template <typename KMER>
 using KmerMultsetDiskVector16
         = kmer::KmerCollector<KMER, KmerExtractorBOSS, SortedMultisetDisk16<KMER>>;
 
 template <typename KMER>
 using SortedMultisetDisk32
-        = common::SortedMultisetDisk<KMER, typename KMER::WordType, uint32_t>;
+        = common::SortedMultisetDisk<typename KMER::WordType, uint32_t>;
 template <typename KMER>
 using KmerMultsetDiskVector32
         = kmer::KmerCollector<KMER, KmerExtractorBOSS, SortedMultisetDisk32<KMER>>;

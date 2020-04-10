@@ -56,8 +56,7 @@ class SortedSetDiskBase {
                       const std::filesystem::path &tmp_dir,
                       size_t max_disk_space_bytes,
                       std::function<void(const T &)> on_item_pushed,
-                      size_t num_last_elements_cached,
-                      std::function<int_type(const value_type &v)> to_int)
+                      size_t num_last_elements_cached)
         : num_threads_(num_threads),
           reserved_num_elements_(reserved_num_elements),
           max_disk_space_bytes_(max_disk_space_bytes),
@@ -66,8 +65,7 @@ class SortedSetDiskBase {
           merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
                        num_last_elements_cached,
                        on_item_pushed),
-          cleanup_(cleanup),
-          to_int_(to_int) {
+          cleanup_(cleanup) {
         std::filesystem::create_directory(tmp_dir);
         if (reserved_num_elements == 0) {
             logger->error("SortedSetDisk buffer cannot have size 0");

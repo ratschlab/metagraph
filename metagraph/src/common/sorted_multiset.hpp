@@ -10,6 +10,7 @@
 #include <ips4o.hpp>
 
 #include "common/logger.hpp"
+#include "common/vector.hpp"
 
 namespace mg {
 namespace common {
@@ -17,7 +18,7 @@ namespace common {
 // Thread safe data storage for counting
 template <typename T,
           typename C = uint8_t,
-          class Container = std::vector<std::pair<T, C>>>
+          class Container = Vector<std::pair<T, C>>>
 class SortedMultiset {
   public:
     static_assert(std::is_same_v<std::pair<T, C>, typename Container::value_type>);

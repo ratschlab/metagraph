@@ -24,9 +24,10 @@ namespace common {
  * is used for writing to disk, using Elias-Fano compression)
  * @param C the type used to count the multiplicity of each value in the multi-set
  */
-template <typename T, typename INT = T, typename C = uint8_t>
-class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, std::pair<INT, C>> {
+template <typename T, typename C = uint8_t>
+class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, std::pair<T, C>> {
   public:
+    typedef T INT; //TODO: remove
     typedef T key_type;
     typedef C count_type;
     typedef std::pair<T, C> value_type;

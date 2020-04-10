@@ -54,7 +54,7 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
             size_t max_disk_space_bytes = 1e9,
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100,
-            std::function<INT(const T &v)> to_int = [](const T &v) { return INT(v); })
+            std::function<INT(const T &v)> to_int = [](const INT &v) { return INT(v); })
         : SortedSetDiskBase<T, INT>(cleanup,
                                     num_threads,
                                     reserved_num_elements,
