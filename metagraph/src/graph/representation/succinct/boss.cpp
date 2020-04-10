@@ -1931,7 +1931,7 @@ void call_paths(const BOSS &boss,
         auto sequence = std::move(edges.back().source_kmer);
         edges.pop_back();
 
-        if (visited[edge])
+        if (async_fetch_bit(visited, edge))
             continue;
 
         path.reserve(100);
@@ -1939,8 +1939,8 @@ void call_paths(const BOSS &boss,
 
         // traverse simple path until we reach its tail or
         // the first edge that has been already visited
-        while (!visited[edge]) {
-            assert(edge > 0 && discovered[edge]);
+        while (!async_fetch_and_set_bit(visited, edge)) {
+            assert(edge > 0 && async_fetch_bit(discovered, edge));
             assert(!subgraph_mask || (*subgraph_mask)[edge]);
 
             // visit the edge
@@ -1948,7 +1948,6 @@ void call_paths(const BOSS &boss,
             TAlphabet d = w % boss.alph_size;
             sequence.push_back(d);
             path.push_back(edge);
-            visited[edge] = true;
             ++progress_bar;
 
             // stop the traversal if the next node is a dummy sink
@@ -1994,7 +1993,7 @@ void call_paths(const BOSS &boss,
             //      2. there is only one edge incoming to the target node
             //      3. we call contigs (the unitigs may be concatenated)
             if (single_outgoing && !stop_even_if_single_outgoing) {
-                discovered[edge] = true;
+                async_set_bit(discovered, edge);
                 continue;
             }
 
@@ -2006,13 +2005,12 @@ void call_paths(const BOSS &boss,
                 assert((!subgraph_mask || (*subgraph_mask)[edge] || visited[edge])
                         && "k-mers not from subgraph are marked visited");
 
-                if (!next_edge && !split_to_unitigs && !visited[edge]) {
+                if (!next_edge && !split_to_unitigs && !async_fetch_bit(visited, edge)) {
                     // save the edge for visiting if we extract contigs
-                    discovered[edge] = true;
+                    async_set_bit(discovered, edge);
                     next_edge = edge;
-                } else if (!discovered[edge]) {
+                } else if (!async_fetch_and_set_bit(discovered, edge)) {
                     // discover other edges
-                    discovered[edge] = true;
                     edges.push_back({ edge, kmer });
                 }
             } while (--edge > 0 && !boss.get_last(edge));
