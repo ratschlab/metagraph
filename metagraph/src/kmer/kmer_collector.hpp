@@ -9,12 +9,23 @@
 
 #include "common/threads/threading.hpp"
 #include "common/batch_accumulator.hpp"
+#include "common/utils/template_utils.hpp"
 
 namespace mg {
 namespace kmer {
 
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
+
+template<typename INT, typename T, typename = void>
+struct to_T {
+    using value = T;
+};
+
+template<typename INT, typename T>
+struct to_T<INT, T, typename std::void_t<typename INT::second_type>> {
+    using value = std::pair<T, typename INT::second_type>;
+};
 
 
 /**
@@ -42,6 +53,7 @@ class KmerCollector {
     using Key = typename Container::key_type;
     using Value = typename Container::value_type;
     using Data = typename Container::result_type;
+    using KmerPairType = typename to_T<Value, KMER>::value;
 
     /**
      * @param  k                      The k-mer length

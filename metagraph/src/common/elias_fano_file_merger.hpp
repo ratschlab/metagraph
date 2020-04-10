@@ -62,35 +62,31 @@ class MergeHeap {
  * Given a list of n source files, containing ordered elements of type INT, merge the n
  * sources into a single (ordered) list of type T and delete the original files.
  * @tparam T the type of the  elements to be merged (typically a 64/128 or 256-bit k-mer)
- * @tparam INT the integer representation of the type T
  * @param sources the files containing sorted lists of type T
  * @param on_new_item callback to invoke when a new element was merged
  * @param cleanup if true, remove source files after merging
- * @param to_T converts from the integer representation of T (INT) to T
  * @return the total number of elements read from all files
  *
  * Note: this method blocks until all the data was successfully merged.
  */
-template <typename T, typename INT>
-uint64_t merge_files(
-        const std::vector<std::string> &sources,
-        std::function<void(const T &)> on_new_item,
-        bool cleanup = true,
-        std::function<T(const INT &v)> to_T = [](const INT &v) { return T(v); }) {
+template <typename T>
+uint64_t merge_files(const std::vector<std::string> &sources,
+                     std::function<void(const T &)> on_new_item,
+                     bool cleanup = true) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     std::vector<std::ifstream> chunk_files(sources.size());
     uint64_t num_elements_read = 0;
 
     MergeHeap<T> merge_heap;
-    std::optional<INT> data_item;
+    std::optional<T> data_item;
 
-    std::vector<std::unique_ptr<EliasFanoDecoder<INT>>> decoders(sources.size());
+    std::vector<std::unique_ptr<EliasFanoDecoder<T>>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<EliasFanoDecoder<INT>>(sources[i], cleanup);
+        decoders[i] = std::make_unique<EliasFanoDecoder<T>>(sources[i], cleanup);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
-            merge_heap.emplace(to_T(data_item.value()), i);
+            merge_heap.emplace(data_item.value(), i);
             num_elements_read++;
         }
     }
@@ -112,7 +108,7 @@ uint64_t merge_files(
 
         if (chunk_files[chunk_index]
             && (data_item = decoders[chunk_index]->next()).has_value()) {
-            merge_heap.emplace(to_T(data_item.value()), chunk_index);
+            merge_heap.emplace(data_item.value(), chunk_index);
             num_elements_read++;
         }
     }
@@ -129,32 +125,28 @@ uint64_t merge_files(
  * @param sources the files containing sorted lists of pairs of type <T, C>
  * @param on_new_item callback to invoke when a new element was merged
  * @param cleanup if true, remove source files after merging
- * @param to_T converts from the integer representation of T (INT) to T
  *
  * @return the total number of elements read from all files
  *
  * Note: this method blocks until all the data was successfully merged.
  */
-template <typename T, typename C, typename INT>
-uint64_t merge_files(
-        const std::vector<std::string> &sources,
-        std::function<void(const std::pair<T, C> &)> on_new_item,
-        bool cleanup = true,
-        std::function<T(const INT &v)> to_T = [](const INT &v) { return T(v); }) {
+template <typename T, typename C>
+uint64_t merge_files(const std::vector<std::string> &sources,
+                     std::function<void(const std::pair<T, C> &)> on_new_item,
+                     bool cleanup = true) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     uint64_t num_elements = 0;
 
     MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
-    std::optional<std::pair<INT, C>> data_item;
-    std::vector<std::unique_ptr<EliasFanoDecoder<std::pair<INT, C>>>> decoders(
-            sources.size());
+    std::optional<std::pair<T, C>> data_item;
+    std::vector<std::unique_ptr<EliasFanoDecoder<std::pair<T, C>>>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<EliasFanoDecoder<std::pair<INT, C>>>(sources[i],
-                                                                            cleanup);
+        decoders[i]
+                = std::make_unique<EliasFanoDecoder<std::pair<T, C>>>(sources[i], cleanup);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
-            merge_heap.emplace({ to_T(data_item.value().first), data_item.value().second },
+            merge_heap.emplace({ data_item.value().first, data_item.value().second },
                                i);
             num_elements++;
         }
@@ -183,7 +175,7 @@ uint64_t merge_files(
 
         if ((data_item = decoders[chunk_index]->next()).has_value()) {
             assert(data_item.has_value());
-            merge_heap.emplace({ to_T(data_item.value().first), data_item.value().second },
+            merge_heap.emplace({ data_item.value().first, data_item.value().second },
                                chunk_index);
             num_elements++;
         }

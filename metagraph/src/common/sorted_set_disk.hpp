@@ -27,8 +27,8 @@ namespace common {
  * @tparam T the type of the elements that are being stored and sorted,
  * typically #KMerBOSS instances
  */
-template <typename T, typename INT = T>
-class SortedSetDisk : public SortedSetDiskBase<T, INT> {
+template <typename T>
+class SortedSetDisk : public SortedSetDiskBase<T> {
   public:
     typedef T key_type;
     typedef T value_type;
@@ -53,16 +53,14 @@ class SortedSetDisk : public SortedSetDiskBase<T, INT> {
             const std::filesystem::path &tmp_dir = "/tmp/",
             size_t max_disk_space_bytes = 1e9,
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
-            size_t num_last_elements_cached = 100,
-            std::function<INT(const T &v)> to_int = [](const INT &v) { return INT(v); })
-        : SortedSetDiskBase<T, INT>(cleanup,
+            size_t num_last_elements_cached = 100)
+        : SortedSetDiskBase<T>(cleanup,
                                     num_threads,
                                     reserved_num_elements,
                                     tmp_dir,
                                     max_disk_space_bytes,
                                     on_item_pushed,
-                                    num_last_elements_cached,
-                                    to_int) {}
+                                    num_last_elements_cached) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is

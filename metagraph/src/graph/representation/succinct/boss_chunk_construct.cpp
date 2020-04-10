@@ -252,9 +252,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
 
     std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
-    using T = typename KmerCollector::KmerType;
+    using T = typename KmerCollector::KmerPairType;
     using T_INT =typename KmerCollector::Value;
-    using KMER = typename utils::get_first_type<T>::type;
+    using KMER = typename KmerCollector::KmerType;
 
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name = [&tmp_dir](uint32_t pref_len) {
@@ -283,6 +283,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
             no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
             tmp_path2, kmer_collector.max_disk_space());
     Vector<T> dummy_kmers;
+    auto dummy_kmers_int = reinterpret_cast<Vector<T_INT> *>(&dummy_kmers);
     dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
     // traverse the input kmers and remove redundant dummy source k-mers of prefix length
@@ -308,7 +309,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     }
     original_and_l1.finish();
     // push out the leftover dummy kmers
-    sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
+    sorted_dummy_kmers.insert(dummy_kmers_int->begin(), dummy_kmers_int->end());
 
     logger->trace("Total number of k-mers: {}", num_parent_kmers);
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
@@ -326,7 +327,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         async_merge.enqueue([&chunk_files, &source]() {
             std::function<void(const T &)> on_new_item
                     = [&source](const T &v) { source.push(v); };
-            common::merge_files<T, T_INT>(chunk_files, on_new_item);
+            common::merge_files(chunk_files, on_new_item);
             source.shutdown();
         });
         sorted_dummy_kmers.clear(tmp_path);
@@ -334,7 +335,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         size_t num_kmers = 0;
         for (auto &it = source.begin(); it != source.end(); ++it) {
             if (dummy_kmers.size() == dummy_kmers.capacity()) {
-                sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
+                sorted_dummy_kmers.insert(dummy_kmers_int->begin(), dummy_kmers_int->end());
                 dummy_kmers.resize(0);
             }
 
@@ -342,7 +343,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
             num_kmers++;
         }
         // push out the leftover dummy kmers
-        sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
+        sorted_dummy_kmers.insert(dummy_kmers_int->begin(), dummy_kmers_int->end());
         encoder.finish();
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                       dummy_pref_len - 1, num_kmers);
@@ -358,7 +359,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     async_merge.enqueue([&chunk_files, &source]() {
         std::function<void(const T &)> on_new_item
                 = [&source](const T &v) { source.push(v); };
-        common::merge_files<T, T_INT>(chunk_files, on_new_item);
+        common::merge_files(chunk_files, on_new_item);
         source.shutdown();
     });
     for (auto &it = source.begin(); it != source.end(); ++it, ++num_kmers) {
@@ -370,9 +371,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([=]() {
-        std::function<void(const T &)> on_new_item
-                = [kmers](const T &v) { kmers->push(v); };
-        common::merge_files<T, T_INT>(files_to_merge, on_new_item);
+        std::function<void(const T_INT &)> on_new_item
+                = [kmers](const T_INT &v) { kmers->push(v); };
+        common::merge_files(files_to_merge, on_new_item);
         kmers->shutdown();
     });
 }
@@ -520,7 +521,7 @@ template <typename KMER>
 using KmerSetDisk
         = kmer::KmerCollector<KMER,
                               KmerExtractorBOSS,
-                              common::SortedSetDisk<typename KMER::WordType, typename KMER::WordType>>;
+                              common::SortedSetDisk<typename KMER::WordType>>;
 
 template <typename KMER>
 using SortedMultisetDisk8

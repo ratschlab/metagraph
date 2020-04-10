@@ -25,13 +25,11 @@ namespace common {
  * @param C the type used to count the multiplicity of each value in the multi-set
  */
 template <typename T, typename C = uint8_t>
-class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, std::pair<T, C>> {
+class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
   public:
-    typedef T INT; //TODO: remove
     typedef T key_type;
     typedef C count_type;
     typedef std::pair<T, C> value_type;
-    typedef std::pair<INT, C> int_type;
     typedef Vector<value_type> storage_type;
     typedef ChunkedWaitQueue<value_type> result_type;
     typedef typename storage_type::iterator Iterator;
@@ -55,16 +53,14 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>, std::pair<T
             size_t max_disk_space_bytes = 1e9,
             std::function<void(const value_type &)> on_item_pushed
             = [](const value_type &) {},
-            size_t num_last_elements_cached = 100,
-            std::function<int_type(const value_type &v)> to_int
-            = [](const value_type &v) { return std::make_pair(INT(v.first), v.second); })
-        : SortedSetDiskBase<value_type, int_type>(cleanup,
+            size_t num_last_elements_cached = 100)
+        : SortedSetDiskBase<value_type>(cleanup,
                                              num_threads,
                                              reserved_num_elements,
                                              tmp_dir,
                                              max_disk_space_bytes,
                                              on_item_pushed,
-                                             num_last_elements_cached, to_int)
+                                             num_last_elements_cached)
            {}
 
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }

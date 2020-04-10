@@ -35,12 +35,11 @@ namespace common {
  * @tparam INT the corresponding integer representation of T, used for compressed storage
  * on disk
  */
-template <typename T, typename INT>
+template <typename T>
 class SortedSetDiskBase {
     typedef T value_type;
-    typedef INT int_type;
-    typedef Vector<value_type> storage_type;
-    typedef ChunkedWaitQueue<value_type> result_type;
+    typedef Vector<T> storage_type;
+    typedef ChunkedWaitQueue<T> result_type;
     typedef typename storage_type::iterator Iterator;
 
     /**
@@ -141,15 +140,15 @@ class SortedSetDiskBase {
     void start_merging() {
         const std::vector<std::string> file_names = this->get_file_names();
         this->async_worker_.enqueue([file_names, this]() {
-          std::function<void(const value_type &)> on_new_item
-                  = [this](const value_type &v) { this->merge_queue_.push(v); };
-          if constexpr (utils::is_pair<T> {}) {
-              merge_files<typename T::first_type, typename T::second_type,
-                          typename INT::first_type>(file_names, on_new_item);
-          } else {
-              merge_files<T, INT>(file_names, on_new_item);
-          }
-          this->merge_queue_.shutdown();
+            std::function<void(const T &)> on_new_item
+                    = [this](const T &v) { this->merge_queue_.push(v); };
+            if constexpr (utils::is_pair<T> {}) {
+                merge_files<typename T::first_type, typename T::second_type>(file_names,
+                                                                             on_new_item);
+            } else {
+                merge_files<T>(file_names, on_new_item);
+            }
+            this->merge_queue_.shutdown();
         });
     }
 
@@ -175,12 +174,11 @@ class SortedSetDiskBase {
         std::string file_name
                 = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
 
-        EliasFanoEncoder<INT> encoder(this->data_.size(),
-                                      utils::get_first(to_int_(this->data_.front())),
-                                      utils::get_first(to_int_(this->data_.back())),
-                                      file_name);
+        EliasFanoEncoder<T> encoder(this->data_.size(),
+                                    utils::get_first(this->data_.front()),
+                                    utils::get_first(this->data_.back()), file_name);
         for (const auto &v : this->data_) {
-            encoder.add(to_int_(v));
+            encoder.add(v);
         }
         this->total_chunk_size_bytes_ += encoder.finish();
         this->data_.resize(0);
@@ -192,7 +190,7 @@ class SortedSetDiskBase {
             std::string all_merged_file = this->chunk_file_prefix_ + "_all.tmp";
             this->chunk_count_++; // needs to be incremented, so that get_file_names()
             // returns correct values
-            this->merge_all(all_merged_file, this->get_file_names(), to_int_);
+            this->merge_all(all_merged_file, this->get_file_names());
             this->merged_all_ = true;
             this->total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
             if (this->total_chunk_size_bytes_ > this->max_disk_space_bytes_ * 0.8) {
@@ -207,7 +205,7 @@ class SortedSetDiskBase {
         } else if ((this->chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
             this->async_merge_l1_.enqueue(this->merge_l1, this->chunk_file_prefix_,
                                           this->chunk_count_, &this->l1_chunk_count_,
-                                          &this->total_chunk_size_bytes_, to_int_);
+                                          &this->total_chunk_size_bytes_);
         }
         this->chunk_count_++;
     }
@@ -323,8 +321,6 @@ class SortedSetDiskBase {
 
     bool merged_all_ = false;
 
-    std::function<int_type(const value_type &v)> to_int_;
-
   private:
     /** Number of chunks for "level 1" intermediary merging. */
     static constexpr uint32_t MERGE_L1_COUNT = 4;
@@ -340,11 +336,10 @@ class SortedSetDiskBase {
     static void merge_l1(const std::string &chunk_file_prefix,
                          uint32_t chunk_count,
                          std::atomic<uint32_t> *l1_chunk_count,
-                         std::atomic<size_t> *total_size,
-                         std::function<int_type(const value_type &v)> to_int) {
+                         std::atomic<size_t> *total_size) {
         const std::string &merged_l1_file_name
-                = SortedSetDiskBase<value_type, INT>::merged_l1_name(
-                        chunk_file_prefix, chunk_count / MERGE_L1_COUNT);
+                = SortedSetDiskBase<T>::merged_l1_name(chunk_file_prefix,
+                                                       chunk_count / MERGE_L1_COUNT);
         std::vector<std::string> to_merge(MERGE_L1_COUNT);
         for (uint32_t i = 0; i < MERGE_L1_COUNT; ++i) {
             to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
@@ -352,15 +347,10 @@ class SortedSetDiskBase {
         }
         logger->trace("Starting merging last {} chunks into {}", MERGE_L1_COUNT,
                       merged_l1_file_name);
-        EliasFanoEncoderBuffered<int_type> encoder(merged_l1_file_name, 1000);
-        std::function<void(const value_type &v)> on_new_item
-                = [&encoder, to_int](const value_type &v) { encoder.add(to_int(v)); };
-        if constexpr (utils::is_pair<T> {}) {
-            merge_files<typename T::first_type, typename T::second_type, typename INT::first_type>(
-                    to_merge, on_new_item);
-        } else {
-            merge_files<T, INT>(to_merge, on_new_item);
-        }
+        EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, 1000);
+        std::function<void(const T &v)> on_new_item
+                = [&encoder](const T &v) { encoder.add(v); };
+        merge_files<T>(to_merge, on_new_item);
         encoder.finish();
 
         (*l1_chunk_count)++;
@@ -370,23 +360,17 @@ class SortedSetDiskBase {
     }
 
     static void merge_all(const std::string &out_file,
-                          const std::vector<std::string> &to_merge,
-                          std::function<int_type(const value_type &v)> to_int) {
+                          const std::vector<std::string> &to_merge) {
         std::ofstream merged_count_file(out_file + ".count",
                                         std::ios::binary | std::ios::out);
         logger->trace(
                 "Max allocated disk capacity exceeded. Starting merging all {} chunks "
                 "into {}",
                 to_merge.size(), out_file);
-        EliasFanoEncoderBuffered<int_type> encoder(out_file, 1000);
-        std::function<void(const value_type &v)> on_new_item
-                = [&encoder, to_int](const value_type &v) { encoder.add(to_int(v)); };
-        if constexpr (utils::is_pair<T> {}) {
-            merge_files<typename T::first_type, typename T::second_type, typename INT::first_type>(
-                    to_merge, on_new_item);
-        } else {
-            merge_files<T, INT>(to_merge, on_new_item);
-        }
+        EliasFanoEncoderBuffered<T> encoder(out_file, 1000);
+        std::function<void(const T &v)> on_new_item
+                = [&encoder](const T &v) { encoder.add(v); };
+        merge_files<T>(to_merge, on_new_item);
         encoder.finish();
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
