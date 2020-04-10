@@ -89,16 +89,17 @@ class Config {
     bool alignment_edit_distance = false;
 
     int8_t alignment_match_score = 2;
-    int8_t alignment_mm_transition_score = 1;
-    int8_t alignment_mm_transversion_score = 2;
-    int8_t alignment_gap_opening_penalty = 3;
-    int8_t alignment_gap_extension_penalty = 1;
+    int8_t alignment_mm_transition_score = 3;
+    int8_t alignment_mm_transversion_score = 3;
+    int8_t alignment_gap_opening_penalty = 5;
+    int8_t alignment_gap_extension_penalty = 2;
 
     int32_t alignment_min_cell_score = 0;
     int32_t alignment_min_path_score = 0;
+    int32_t alignment_xdrop = 30;
 
     size_t alignment_queue_size = 20;
-    size_t alignment_vertical_bandwidth = 17;
+    size_t alignment_vertical_bandwidth = 16;
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
@@ -186,7 +187,7 @@ class Config {
 
     std::filesystem::path tmp_dir = "/tmp/";
 
-    size_t disk_cap_bytes = 1e9;
+    size_t disk_cap_bytes = 20e9; // 20GB default
 
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 

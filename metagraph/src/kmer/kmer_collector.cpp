@@ -129,7 +129,7 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
 // removes redundant dummy BOSS k-mers from a sorted list
 template <class Array>
 void cleanup_boss_kmers(Array *kmers) {
-    using KMER = std::remove_reference_t<decltype(utils::get_first(kmers->at(0)))>;
+    using KMER = std::decay_t<decltype(utils::get_first(kmers->at(0)))>;
 
     assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst()));
     assert(std::unique(kmers->begin(), kmers->end(), utils::EqualFirst()) == kmers->end());

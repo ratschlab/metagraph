@@ -135,7 +135,8 @@ int clean_graph(Config *config) {
                                                  "kmer_counts",
                                                  graph->get_k(),
                                                  config->header,
-                                                 config->enumerate_out_sequences);
+                                                 config->enumerate_out_sequences,
+                                                 get_num_threads() > 1);
             std::vector<uint32_t> kmer_counts;
 
             call_contigs([&](const std::string &contig, const auto &path) {
@@ -148,7 +149,8 @@ int clean_graph(Config *config) {
 
         } else {
             FastaWriter writer(outfbase, config->header,
-                               config->enumerate_out_sequences);
+                               config->enumerate_out_sequences,
+                               get_num_threads() > 1);
 
             call_contigs([&](const std::string &contig, const auto &) {
                 writer.write(contig);

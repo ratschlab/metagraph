@@ -6,7 +6,7 @@
 
 class DataGenerator {
   public:
-    DataGenerator() : gen(rd()) { gen.seed(0); }
+    DataGenerator() : gen(0) {}
 
     void set_seed(int seed) { gen.seed(seed); }
 
@@ -73,7 +73,6 @@ class DataGenerator {
     replicate_shuffle(const std::vector<std::unique_ptr<bit_vector>> &vectors,
                       const std::vector<uint32_t> &frequencies);
 
-    std::random_device rd;
     std::mt19937 gen;
 };
 

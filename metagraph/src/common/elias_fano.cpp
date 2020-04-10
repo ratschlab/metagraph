@@ -1,4 +1,5 @@
 #include "elias_fano.hpp"
+#include "logger.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -190,7 +191,7 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
     sink_internal_upper_ = std::ofstream(out_filename + ".up", std::ios::binary | open_flag);
     sink_upper_ = &sink_internal_upper_;
     if (!sink_->good() || !sink_upper_->good()) {
-        std::cerr << "Unable to write to " << out_filename << std::endl;
+        logger->error("Unable to write to {}", out_filename);
         std::exit(EXIT_FAILURE);
     }
     init(size, max_value);
@@ -336,14 +337,14 @@ void EliasFanoEncoder<T>::write_bits(char *data, size_t pos, T value) {
 // ------------------------------- EliasFanoDecoder ------------------------------------
 
 template <typename T>
-EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name, bool cleanup)
-    : source_name_(source_name), cleanup_(cleanup) {
+EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name, bool remove_source)
+    : source_name_(source_name), remove_source_(remove_source) {
     source_internal_ = std::ifstream(source_name, std::ios::binary);
     source_ = &source_internal_;
     source_internal_upper_ = std::ifstream(source_name + ".up", std::ios::binary);
     source_upper_ = &source_internal_upper_;
     if (!source_->good() || !source_upper_->good()) {
-        std::cerr << "Unable to read from " << source_name << std::endl;
+        logger->error("Unable to read from {}", source_name);
         std::exit(EXIT_FAILURE);
     }
     init();
@@ -391,7 +392,7 @@ template <typename T>
 std::optional<T> EliasFanoDecoder<T>::next() {
     if (position_ == size_) {
         if (!init()) { // read the next chunk of compressed data
-            if (cleanup_) {
+            if (remove_source_) {
                 std::filesystem::remove(source_name_);
                 std::filesystem::remove(source_name_ + ".up");
             }
@@ -474,13 +475,14 @@ size_t EliasFanoEncoder<std::pair<T, C>>::finish() {
 
 // ------------------------- EliasFandDecoder<std::pair> --------------------------------
 template <typename T, typename C>
-EliasFanoDecoder<std::pair<T, C>>::EliasFanoDecoder(const std::string &source, bool cleanup)
-    : source_first_(source, cleanup),
+EliasFanoDecoder<std::pair<T, C>>::EliasFanoDecoder(const std::string &source,
+                                                    bool remove_source)
+    : source_first_(source, remove_source),
       source_second_name_(source + ".count"),
-      cleanup_(cleanup) {
+      remove_source_(remove_source) {
     source_second_ = std::ifstream(source_second_name_, std::ios::binary);
     if (!source_second_.good()) {
-        std::cerr << "Unable to write to " << source_second_name_ << std::endl;
+        logger->error("Unable to write to {}", source_second_name_);
         std::exit(EXIT_FAILURE);
     }
 }
@@ -491,7 +493,7 @@ std::optional<std::pair<T, C>> EliasFanoDecoder<std::pair<T, C>>::next() {
     C second;
     if (!first.has_value()) {
         assert(!source_second_.read(reinterpret_cast<char *>(&second), sizeof(C)));
-        if (cleanup_) {
+        if (remove_source_) {
             std::filesystem::remove(source_second_name_);
         }
         return {};

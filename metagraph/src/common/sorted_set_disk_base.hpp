@@ -14,7 +14,7 @@
 #include <ips4o.hpp>
 
 #include "common/elias_fano.hpp"
-#include "common/file_merger.hpp"
+#include "common/elias_fano_file_merger.hpp"
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/vector.hpp"
 
@@ -187,9 +187,9 @@ class SortedSetDiskBase {
         this->total_chunk_size_bytes_ += encoder.finish();
         this->data_.resize(0);
         if (is_done) {
-            this->async_merge_l1_.clear();
+            this->async_merge_l1_.remove_waiting_tasks();
         } else if (this->total_chunk_size_bytes_ > this->max_disk_space_bytes_) {
-            this->async_merge_l1_.clear();
+            this->async_merge_l1_.remove_waiting_tasks();
             this->async_merge_l1_.join();
             std::string all_merged_file = this->chunk_file_prefix_ + "_all.tmp";
             this->chunk_count_++; // needs to be incremented, so that get_file_names()

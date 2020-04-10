@@ -5,7 +5,7 @@
 
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
-    auto min_penalty_score = std::min(gap_opening_penalty, gap_extension_penalty);
+    score_t min_penalty_score = std::min(gap_opening_penalty, gap_extension_penalty);
     for (const auto &row : score_matrix_) {
         min_penalty_score = std::min(min_penalty_score, *std::min_element(row.begin(), row.end()));
     }
@@ -115,14 +115,14 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
         row.fill(mm_transversion_score);
     }
 
-    score_matrix['a']['g'] = score_matrix['A']['g'] = score_matrix['a']['G'] = score_matrix['A']['G'] = mm_transition_score;
-    score_matrix['g']['a'] = score_matrix['G']['a'] = score_matrix['g']['A'] = score_matrix['G']['A'] = mm_transition_score;
-    score_matrix['c']['t'] = score_matrix['C']['t'] = score_matrix['c']['T'] = score_matrix['C']['T'] = mm_transition_score;
-    score_matrix['t']['c'] = score_matrix['T']['c'] = score_matrix['t']['C'] = score_matrix['T']['C'] = mm_transition_score;
-    score_matrix['a']['a'] = score_matrix['A']['a'] = score_matrix['a']['A'] = score_matrix['A']['A'] = match_score;
-    score_matrix['c']['c'] = score_matrix['C']['c'] = score_matrix['c']['C'] = score_matrix['C']['C'] = match_score;
-    score_matrix['g']['g'] = score_matrix['G']['g'] = score_matrix['g']['G'] = score_matrix['G']['G'] = match_score;
-    score_matrix['t']['t'] = score_matrix['T']['t'] = score_matrix['t']['T'] = score_matrix['T']['T'] = match_score;
+    score_matrix['A']['G'] = mm_transition_score;
+    score_matrix['G']['A'] = mm_transition_score;
+    score_matrix['C']['T'] = mm_transition_score;
+    score_matrix['T']['C'] = mm_transition_score;
+    score_matrix['A']['A'] = match_score;
+    score_matrix['C']['C'] = match_score;
+    score_matrix['G']['G'] = match_score;
+    score_matrix['T']['T'] = match_score;
 
     return score_matrix;
 }
@@ -137,16 +137,13 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
     }
 
     for (uint8_t c : alphabet) {
+        // if a character is invalid, don't count matches of that character
         if (encoding[c] == encoding[0])
             continue;
 
         char upper = toupper(c);
-        char lower = tolower(c);
 
-        score_matrix[upper][upper]
-            = score_matrix[upper][lower]
-            = score_matrix[lower][upper]
-            = score_matrix[lower][lower] = match_score;
+        score_matrix[upper][upper] = match_score;
     }
 
     return score_matrix;
@@ -191,17 +188,8 @@ DBGAlignerConfig::ScoreMatrix blosum62_scoring_matrix() {
     }
 
     for (size_t i = 0; i < alphabet.size(); ++i) {
-        char a_upper = alphabet[i];
-        char a_lower = tolower(alphabet[i]);
-
         for (size_t j = 0; j < alphabet.size(); ++j) {
-            char b_upper = alphabet[j];
-            char b_lower = tolower(alphabet[j]);
-
-            score_matrix[a_lower][b_lower]
-                = score_matrix[a_lower][b_upper]
-                = score_matrix[a_upper][b_lower]
-                = score_matrix[a_upper][b_upper] = scores[i][j];
+            score_matrix[alphabet[i]][alphabet[j]] = scores[i][j];
         }
     }
 

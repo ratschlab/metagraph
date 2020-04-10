@@ -6,7 +6,7 @@
 #include <benchmark/benchmark.h>
 #include <common/threads/chunked_wait_queue.hpp>
 
-#include "common/file_merger.hpp"
+#include "common/elias_fano_file_merger.hpp"
 
 constexpr size_t CHUNK_COUNT = 10;
 constexpr size_t ITEM_COUNT = 100'000;

@@ -54,6 +54,13 @@ void ThreadPool::clear() {
     this->empty_condition.notify_all();
 }
 
+void ThreadPool::remove_waiting_tasks() {
+    std::unique_lock<std::mutex> lock(this->queue_mutex);
+    std::queue<std::function<void()>> empty;
+    this->tasks.swap(empty);
+    this->empty_condition.notify_all();
+}
+
 void ThreadPool::initialize(size_t num_workers) {
     assert(!stop_);
     assert(workers.size() == 0);

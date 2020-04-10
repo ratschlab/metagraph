@@ -14,6 +14,21 @@ class bit_vector;
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
 sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector);
 
+template <class Vector>
+sdsl::int_vector<> pack_vector(const Vector &vector, uint8_t bits_per_number) {
+    if constexpr(std::is_same_v<Vector, sdsl::int_vector<>>) {
+        if (bits_per_number == vector.width())
+            return vector;
+    }
+
+    sdsl::int_vector<> packed(vector.size(), 0, bits_per_number);
+    for (uint64_t i = 0; i < vector.size(); ++i) {
+        packed[i] = vector[i];
+    }
+    return packed;
+}
+
+
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector,
                uint64_t begin, uint64_t end,
