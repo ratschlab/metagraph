@@ -227,11 +227,10 @@ static std::pair<typename T::WordType, C> to_int(std::pair<T, C> v) {
 }
 
 /** Returns a lambda that writes compressed integers into encoder */
-template <typename T, typename int_type>
+template <typename T>
 std::function<void(const T &v)>
-compressed_writer(common::EliasFanoEncoderBuffered<int_type> *encoder,
-                  const std::function<int_type(const T &v)> &to_int) {
-    return [encoder, &to_int](const T &v) { encoder->add(to_int(v)); };
+compressed_writer(common::EliasFanoEncoderBuffered<T> *encoder) {
+    return [encoder](const T &v) { encoder->add(v); };
 };
 
 /**
@@ -322,11 +321,11 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
         common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(),
                                                         ENCODER_BUFFER_SIZE);
-        common::ChunkedWaitQueue<T> source(CHUNK_QUEUE_BUFFER_SIZE, CHUNK_QUEUE_FENCE_SIZE,
-                                           compressed_writer(&encoder, to_intf));
+        common::ChunkedWaitQueue<T_INT> source(CHUNK_QUEUE_BUFFER_SIZE, CHUNK_QUEUE_FENCE_SIZE,
+                                           compressed_writer(&encoder));
         async_merge.enqueue([&chunk_files, &source]() {
-            std::function<void(const T &)> on_new_item
-                    = [&source](const T &v) { source.push(v); };
+            std::function<void(const T_INT &)> on_new_item
+                    = [&source](const T_INT &v) { source.push(v); };
             common::merge_files(chunk_files, on_new_item);
             source.shutdown();
         });
@@ -339,7 +338,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                 dummy_kmers.resize(0);
             }
 
-            push_back(dummy_kmers, utils::get_first(*it)).to_prev(k + 1, BOSS::kSentinelCode);
+            push_back(dummy_kmers, KMER::to_prev(utils::get_first(*it),k + 1, BOSS::kSentinelCode));
             num_kmers++;
         }
         // push out the leftover dummy kmers

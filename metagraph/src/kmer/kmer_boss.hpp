@@ -93,6 +93,8 @@ class KMerBOSS {
      */
     inline void to_prev(size_t k, CharType new_first);
 
+    static inline G to_prev(G value, size_t k, CharType new_first);
+
     inline const WordType& data() const { return seq_; }
 
     template <typename T>
@@ -168,19 +170,25 @@ void KMerBOSS<G, L>::to_next(size_t k, CharType new_last) {
 
 template <typename G, int L>
 void KMerBOSS<G, L>::to_prev(size_t k, CharType new_first) {
+    return to_prev(seq_, k, new_first);
+}
+
+template <typename G, int L>
+G KMerBOSS<G, L>::to_prev(G value, size_t k, CharType new_first) {
     const int shift = kBitsPerChar * (k - 1);
-    WordType last_char = seq_ >> shift;
+    WordType last_char = value >> shift;
     //     s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-    seq_ &= kAllButFirstCharMask;
+    value &= kAllButFirstCharMask;
     //     s[7]s[6]s[5]s[4]s[3]s[2]0000
-    seq_ |= new_first;
+    value |= new_first;
     //     s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ <<= kBitsPerChar;
+    value <<= kBitsPerChar;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]0000
-    seq_ &= kAllSetMask >> (sizeof(WordType) * 8 - kBitsPerChar * k);
+    value &= kAllSetMask >> (sizeof(WordType) * 8 - kBitsPerChar * k);
     //     s[6]s[5]s[4]s[3]s[2]s[1]0000
-    seq_ |= last_char;
+    value |= last_char;
     //     s[6]s[5]s[4]s[3]s[2]s[1]s[7]
+    return value;
 }
 
 template <typename G, int L>

@@ -141,6 +141,7 @@ class EliasFanoEncoder {
 template <typename T>
 class EliasFanoDecoder {
     static constexpr uint32_t READ_BUF_SIZE = 1024;
+    static_assert( std::is_integral_v<T> || std::is_same_v<T, sdsl::uint256_t>);
 
   public:
     EliasFanoDecoder() {}
