@@ -313,7 +313,9 @@ inline bool async_fetch_and_set_bit(t_int_vec &v,
                                   memorder) >> (i & 0x3F)) & 1;
     } else {
         bool t = v[i];
-        v[i] = true;
+        if (!t)
+            v[i] = true;
+
         return t;
     }
 }
@@ -329,7 +331,9 @@ inline bool async_fetch_and_unset_bit(t_int_vec &v,
                                    memorder) >> (i & 0x3F)) & 1;
     } else {
         bool t = v[i];
-        v[i] = false;
+        if (t)
+            v[i] = false;
+
         return t;
     }
 }
