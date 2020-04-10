@@ -1832,6 +1832,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              "Traverse BOSS",
                              std::cerr, !utils::get_verbose());
 
+    auto call_paths_from = [&](edge_index start) {
+        ::call_paths(*this, start, callback, split_to_unitigs, kmers_in_single_form,
+                     trim_sentinels, &discovered, &visited, progress_bar, subgraph_mask);
+    };
+
     // start traversal from the source dummy edges first
     //
     //  .____
@@ -1839,8 +1844,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     if (!subgraph_mask) {
         for (edge_index i = succ_last(1); i >= 1; --i) {
             if (!visited[i])
-                ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
-                             trim_sentinels, &discovered, &visited, progress_bar, nullptr);
+                call_paths_from(i);
         }
 
     } else {
@@ -1856,8 +1860,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
             do {
                 if (!visited[i])
-                    ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
-                                 trim_sentinels, &discovered, &visited, progress_bar, subgraph_mask);
+                    call_paths_from(i);
             } while (--i > 0 && !get_last(i));
         });
     }
@@ -1875,15 +1878,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         do {
             if (!visited[i])
-                ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
-                             trim_sentinels, &discovered, &visited, progress_bar, subgraph_mask);
+                call_paths_from(i);
         } while (--i > 0 && !get_last(i));
     });
 
     // process all the remaining cycles that have not been traversed
     call_zeros(visited, [&](edge_index i) {
-        ::call_paths(*this, i, callback, split_to_unitigs, kmers_in_single_form,
-                     trim_sentinels, &discovered, &visited, progress_bar, subgraph_mask);
+        call_paths_from(i);
     });
 }
 
