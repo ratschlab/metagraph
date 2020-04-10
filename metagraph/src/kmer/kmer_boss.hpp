@@ -63,6 +63,8 @@ class KMerBOSS {
 
     inline CharType operator[](size_t i) const;
 
+    static inline CharType at(G v, size_t i);
+
     /**
      * Compares k-mers without one last and |minus| first characters.
      * Examples: For s[6]s[5]s[4]s[3]s[2]s[1]s[7],
@@ -71,6 +73,9 @@ class KMerBOSS {
      */
     static inline bool compare_suffix(const KMerBOSS &k1,
                                       const KMerBOSS &k2, size_t minus = 0);
+
+    static inline bool compare_suffix(const G &k1,
+                                      const G &k2, size_t minus = 0);
 
     std::string to_string(size_t k, const std::string &alphabet) const;
 
@@ -93,7 +98,7 @@ class KMerBOSS {
      */
     inline void to_prev(size_t k, CharType new_first);
 
-    static inline G to_prev(G value, size_t k, CharType new_first);
+    static inline void to_prev(G *value, size_t k, CharType new_first);
 
     inline const WordType& data() const { return seq_; }
 
@@ -170,33 +175,37 @@ void KMerBOSS<G, L>::to_next(size_t k, CharType new_last) {
 
 template <typename G, int L>
 void KMerBOSS<G, L>::to_prev(size_t k, CharType new_first) {
-    return to_prev(seq_, k, new_first);
+    to_prev(&seq_, k, new_first);
 }
 
 template <typename G, int L>
-G KMerBOSS<G, L>::to_prev(G value, size_t k, CharType new_first) {
+void KMerBOSS<G, L>::to_prev(G *value, size_t k, CharType new_first) {
     const int shift = kBitsPerChar * (k - 1);
-    WordType last_char = value >> shift;
+    G last_char = *value >> shift;
     //     s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-    value &= kAllButFirstCharMask;
+    *value &= kAllButFirstCharMask;
     //     s[7]s[6]s[5]s[4]s[3]s[2]0000
-    value |= new_first;
+    *value |= new_first;
     //     s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    value <<= kBitsPerChar;
+    *value <<= kBitsPerChar;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]0000
-    value &= kAllSetMask >> (sizeof(WordType) * 8 - kBitsPerChar * k);
+    *value &= kAllSetMask >> (sizeof(WordType) * 8 - kBitsPerChar * k);
     //     s[6]s[5]s[4]s[3]s[2]s[1]0000
-    value |= last_char;
+    *value |= last_char;
     //     s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    return value;
 }
 
 template <typename G, int L>
 typename KMerBOSS<G, L>::CharType KMerBOSS<G, L>::operator[](size_t i) const {
+   return at(seq_, i);
+}
+
+template <typename G, int L>
+typename KMerBOSS<G, L>::CharType KMerBOSS<G, L>::at(G v, size_t i) {
     static_assert(kBitsPerChar <= 64, "Too large digit!");
     assert(kBitsPerChar * (i + 1) <= sizeof(WordType) * 8);
-    return static_cast<CharType>(seq_ >> static_cast<int>(kBitsPerChar * i))
-             & kFirstCharMask;
+    return static_cast<CharType>(v >> static_cast<int>(kBitsPerChar * i))
+            & kFirstCharMask;
 }
 
 /**
@@ -207,8 +216,13 @@ typename KMerBOSS<G, L>::CharType KMerBOSS<G, L>::operator[](size_t i) const {
  */
 template <typename G, int L>
 bool KMerBOSS<G, L>::compare_suffix(const KMerBOSS &k1, const KMerBOSS &k2, size_t minus) {
-    return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
-             == k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
+    return compare_suffix(k1.seq_, k2.seq_, minus);
+}
+
+template <typename G, int L>
+bool KMerBOSS<G, L>::compare_suffix(const G &k1, const G &k2, size_t minus) {
+    return k1 >> static_cast<int>((minus + 1) * kBitsPerChar)
+            == k2 >> static_cast<int>((minus + 1) * kBitsPerChar);
 }
 
 
