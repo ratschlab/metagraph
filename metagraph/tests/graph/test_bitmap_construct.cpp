@@ -201,12 +201,13 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
 // TODO: k is node length
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        common::SortedSet<KMER, Vector<KMER>> *kmers,
+                                        common::SortedSet<KMER::WordType> *kmers,
                                         const std::vector<KmerExtractor2Bit::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    kmer::extract_kmers<KMER, KmerExtractor2Bit, common::SortedSet<KMER, Vector<KMER>>>(
+    using KMER_INT = typename KMER::WordType ;
+    kmer::extract_kmers<KMER, KmerExtractor2Bit, common::SortedSet<KMER_INT>>(
         [reads](mg::kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
@@ -216,7 +217,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
-    common::SortedSet<KMER, Vector<KMER>> result;
+    common::SortedSet<typename KMER::WordType > result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -263,7 +264,7 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
-    common::SortedSet<KMER, Vector<KMER>> result;
+    common::SortedSet<typename KMER::WordType> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
@@ -307,7 +308,7 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
-    common::SortedSet<KMER, Vector<KMER>> result;
+    common::SortedSet<typename KMER::WordType> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
@@ -353,7 +354,7 @@ TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
 }
 
 TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
-    common::SortedSet<KMER, Vector<KMER>> result;
+    common::SortedSet<typename KMER::WordType> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),

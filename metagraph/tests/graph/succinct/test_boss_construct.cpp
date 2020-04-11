@@ -10,7 +10,6 @@
 #define protected public
 #define private public
 
-#include "common/gtest_patch.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
@@ -19,6 +18,7 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_to_int_converter.hpp"
 #include "kmer/kmer_collector.hpp"
+#include "test_utils/gtest_patch.hpp"
 
 namespace {
 using namespace mg;

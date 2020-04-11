@@ -346,6 +346,7 @@ list(REVERSE metagraph_core_files)
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*main.cpp")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*/cli/.*")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*/test_utils/.*")
 
 add_library(metagraph-core STATIC ${metagraph_core_files})
 
@@ -501,6 +502,7 @@ else()
 endif()
 
 file(GLOB unit_tests_files
+  "src/test_utils/*.cpp"
   "tests/*.cpp"
   "tests/*/*.cpp"
   "tests/*/*/*.cpp"
