@@ -2157,7 +2157,6 @@ void call_path(const BOSS &boss,
     size_t begin = 0;
 
     {
-        std::ignore = split_to_unitigs;
         if (async) {
             // sync all writes
             __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -2184,6 +2183,9 @@ void call_path(const BOSS &boss,
         for (size_t i = 0; i < path.size(); ++i) {
             assert(path[i]);
             if (async) {
+                // TODO: Check to see if the first k-mer in a unitig has been
+                //       output. If so, it should be safe to unlock
+                std::ignore = split_to_unitigs;
                 async_set_bit(*visited_ptr, path[i], async);
             } else {
                 async_set_bit(discovered, path[i], async);
