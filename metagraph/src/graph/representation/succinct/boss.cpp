@@ -1964,7 +1964,6 @@ void call_paths(const BOSS &boss,
         TAlphabet d = w % boss.alph_size;
         sequence.push_back(d);
         path.push_back(edge);
-        ++progress_bar;
 
         // stop the traversal if the next node is a dummy sink
         if (!d)
@@ -2061,9 +2060,12 @@ void call_path(const BOSS &boss,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask) {
     if (!trim_sentinels && !kmers_in_single_form) {
+        progress_bar += path.size();
         callback(std::move(path), std::move(sequence));
         return;
     }
+
+    size_t old_path_size = path.size();
 
     // trim trailing sentinels '$'
     if (sequence.back() == boss.kSentinelCode) {
@@ -2075,14 +2077,17 @@ void call_path(const BOSS &boss,
         = std::find_if(sequence.begin(), sequence.end(),
                        [&boss](auto c) { return c != boss.kSentinelCode; });
 
-    if (first_valid_it + boss.get_k() >= sequence.end())
+    if (first_valid_it + boss.get_k() >= sequence.end()) {
+        progress_bar += old_path_size;
         return;
+    }
 
     sequence.erase(sequence.begin(), first_valid_it);
     path.erase(path.begin(),
                path.begin() + (first_valid_it - sequence.begin()));
 
     if (!kmers_in_single_form) {
+        progress_bar += old_path_size;
         callback(std::move(path), std::move(sequence));
         return;
     }
@@ -2100,9 +2105,6 @@ void call_path(const BOSS &boss,
     assert(std::all_of(path.begin(), path.end(),
                        [&](auto i) { return visited[i]; }));
 
-    progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
-                                  [&](auto node) { return node && !visited[node]; });
-
     // Mark all nodes in path as unvisited and re-visit them while
     // traversing the path (iterating through all nodes).
     std::for_each(path.begin(), path.end(),
@@ -2118,13 +2120,15 @@ void call_path(const BOSS &boss,
         // to the graph (subgraph) or if it matches the current k-mer and
         // hence the edge path[i] is going to be traversed first.
         if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
-                || dual_path[i] == path[i])
+                || dual_path[i] == path[i]) {
             continue;
+        }
 
         // Check if the reverse-complement k-mer has not been traversed
         // and thus, if the current edge path[i] is to be traversed first.
         if (!visited[dual_path[i]]) {
             visited[dual_path[i]] = discovered[dual_path[i]] = true;
+            ++progress_bar;
             continue;
         }
 
