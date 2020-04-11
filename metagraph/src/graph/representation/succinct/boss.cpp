@@ -1913,6 +1913,8 @@ void call_path(const BOSS &boss,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
                sdsl::bit_vector &visited,
+               bool async,
+               std::mutex &vector_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask);
 
@@ -2008,7 +2010,8 @@ void call_paths(const BOSS &boss,
 
         // loop over the outgoing edges
         do {
-            assert((!subgraph_mask || (*subgraph_mask)[edge] || async_fetch_bit(discovered, edge, async))
+            assert((!subgraph_mask || (*subgraph_mask)[edge]
+                || async_fetch_bit(discovered, edge, async))
                     && "k-mers not from subgraph are marked visited");
 
             if (!async_fetch_bit(discovered, edge, async)) {
@@ -2017,7 +2020,10 @@ void call_paths(const BOSS &boss,
                     next_edge = edge;
                 } else {
                     // discover other edges
-                    std::unique_lock<std::mutex> lock(vector_mutex);
+                    std::unique_lock<std::mutex> lock;
+                    if (async)
+                        lock = std::unique_lock<std::mutex>(vector_mutex);
+
                     edges.emplace_back(edge, kmer);
                 }
             }
@@ -2033,8 +2039,8 @@ void call_paths(const BOSS &boss,
     }
 
     call_path(boss, callback, path, sequence,
-              kmers_in_single_form, trim_sentinels,
-              discovered, visited, progress_bar, subgraph_mask);
+              kmers_in_single_form, trim_sentinels, discovered, visited,
+              async, vector_mutex, progress_bar, subgraph_mask);
 }
 
 // Call the path or all primary paths extracted from it.
@@ -2049,13 +2055,20 @@ void call_path(const BOSS &boss,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
                sdsl::bit_vector &visited,
+               bool async,
+               std::mutex &vector_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask) {
-    if (!trim_sentinels && !kmers_in_single_form) {
-        std::for_each(path.begin(), path.end(), [&](auto node) { async_set_bit(visited, node); });
-        progress_bar += path.size();
-        callback(std::move(path), std::move(sequence));
-        return;
+    if (!kmers_in_single_form) {
+        for (edge_index edge : path) {
+            async_set_bit(visited, edge, async);
+        }
+
+        if (!trim_sentinels) {
+            progress_bar += path.size();
+            callback(std::move(path), std::move(sequence));
+            return;
+        }
     }
 
     size_t old_path_size = path.size();
@@ -2071,7 +2084,6 @@ void call_path(const BOSS &boss,
                        [&boss](auto c) { return c != boss.kSentinelCode; });
 
     if (first_valid_it + boss.get_k() >= sequence.end()) {
-        std::for_each(path.begin(), path.end(), [&](auto node) { async_set_bit(visited, node); });
         progress_bar += old_path_size;
         return;
     }
@@ -2081,7 +2093,6 @@ void call_path(const BOSS &boss,
                path.begin() + (first_valid_it - sequence.begin()));
 
     if (!kmers_in_single_form) {
-        std::for_each(path.begin(), path.end(), [&](auto node) { async_set_bit(visited, node); });
         progress_bar += old_path_size;
         callback(std::move(path), std::move(sequence));
         return;
@@ -2096,37 +2107,48 @@ void call_path(const BOSS &boss,
 
     // sync all writes
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    std::unique_lock<std::mutex> lock;
 
-    // traverse the path with its dual and visit the nodes
     size_t begin = 0;
-    for (size_t i = 0; i < path.size(); ++i) {
-        assert(path[i]);
-        visited[path[i]] = true;
 
-        // Extend the path if the reverse-complement k-mer does not belong
-        // to the graph (subgraph) or if it matches the current k-mer and
-        // hence the edge path[i] is going to be traversed first.
-        if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
-                || dual_path[i] == path[i]) {
-            continue;
+    {
+        // lock all threads if needed
+        if (async)
+            lock = std::unique_lock<std::mutex>(vector_mutex);
+
+        // traverse the path with its dual and visit the nodes
+        for (size_t i = 0; i < path.size(); ++i) {
+            assert(path[i]);
+            async_set_bit(visited, path[i], async);
+
+            // Extend the path if the reverse-complement k-mer does not belong
+            // to the graph (subgraph) or if it matches the current k-mer and
+            // hence the edge path[i] is going to be traversed first.
+            if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
+                    || dual_path[i] == path[i]) {
+                continue;
+            }
+
+            // Check if the reverse-complement k-mer has not been traversed
+            // and thus, if the current edge path[i] is to be traversed first.
+            if (!async_fetch_and_set_bit(visited, dual_path[i], async)) {
+                async_set_bit(discovered, dual_path[i], async);
+                ++progress_bar;
+                continue;
+            }
+
+            // The reverse-complement k-mer had been visited
+            // -> Skip this k-mer and call the traversed path segment.
+            if (begin < i) {
+                callback({ path.begin() + begin, path.begin() + i },
+                         { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
+            }
+
+            begin = i + 1;
         }
-
-        // Check if the reverse-complement k-mer has not been traversed
-        // and thus, if the current edge path[i] is to be traversed first.
-        if (!visited[dual_path[i]]) {
-            visited[dual_path[i]] = discovered[dual_path[i]] = true;
-            ++progress_bar;
-            continue;
-        }
-
-        // The reverse-complement k-mer had been visited
-        // -> Skip this k-mer and call the traversed path segment.
-        if (begin < i)
-            callback({ path.begin() + begin, path.begin() + i },
-                     { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-
-        begin = i + 1;
     }
+
+    lock = std::unique_lock<std::mutex>();
 
     // Call the path traversed
     if (!begin) {
