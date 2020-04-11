@@ -135,7 +135,9 @@ bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
 }
 
 void MaskedDeBruijnGraph
-::call_sequences(const CallPath &callback, bool kmers_in_single_form) const {
+::call_sequences(const CallPath &callback,
+                 bool kmers_in_single_form,
+                 size_t num_threads) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
         bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
                                              only_valid_nodes_in_mask_);
@@ -146,15 +148,18 @@ void MaskedDeBruijnGraph
             }
             callback(sequence, path);
 
-        }, kmers_in_single_form, &mask);
+        }, kmers_in_single_form, &mask, num_threads);
 
     } else {
-        DeBruijnGraph::call_sequences(callback, kmers_in_single_form);
+        DeBruijnGraph::call_sequences(callback, kmers_in_single_form, num_threads);
     }
 }
 
 void MaskedDeBruijnGraph
-::call_unitigs(const CallPath &callback, size_t min_tip_size, bool kmers_in_single_form) const {
+::call_unitigs(const CallPath &callback,
+               size_t min_tip_size,
+               bool kmers_in_single_form,
+               size_t num_threads) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
         bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
                                              only_valid_nodes_in_mask_);
@@ -165,10 +170,13 @@ void MaskedDeBruijnGraph
             }
             callback(sequence, path);
 
-        }, min_tip_size, kmers_in_single_form, &mask);
+        }, min_tip_size, kmers_in_single_form, &mask, num_threads);
 
     } else {
-        DeBruijnGraph::call_unitigs(callback, min_tip_size, kmers_in_single_form);
+        DeBruijnGraph::call_unitigs(callback,
+                                    min_tip_size,
+                                    kmers_in_single_form,
+                                    num_threads);
     }
 }
 

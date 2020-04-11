@@ -1821,7 +1821,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                       bool split_to_unitigs,
                       bool kmers_in_single_form,
                       const bitmap *subgraph_mask,
-                      bool trim_sentinels) const {
+                      bool trim_sentinels,
+                      size_t num_threads) const {
     assert(!subgraph_mask || subgraph_mask->size() == W_->size());
 
     // keep track of the edges that have been reached
@@ -1840,12 +1841,12 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     std::list<std::future<std::vector<Edge>>> edges_async;
     std::mutex vector_mutex;
     std::unique_ptr<ThreadPool> thread_pool;
-    bool async = true;
+    bool async = num_threads > 1;
 
     std::unique_ptr<sdsl::bit_vector> visited;
     if (async) {
         visited = std::make_unique<sdsl::bit_vector>(discovered);
-        thread_pool = std::make_unique<ThreadPool>(6);
+        thread_pool = std::make_unique<ThreadPool>(num_threads);
     }
 
     auto call_paths_from = [&](edge_index start) {
@@ -2216,7 +2217,8 @@ void call_path(const BOSS &boss,
 
 void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                           bool kmers_in_single_form,
-                          const bitmap *subgraph_mask) const {
+                          const bitmap *subgraph_mask,
+                          size_t num_threads) const {
 
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size() >= k_ + 1);
@@ -2230,13 +2232,14 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
 
         callback(std::move(sequence), std::move(edges));
 
-    }, false, kmers_in_single_form, subgraph_mask, true);
+    }, false, kmers_in_single_form, subgraph_mask, true, num_threads);
 }
 
 void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t min_tip_size,
                         bool kmers_in_single_form,
-                        const bitmap *subgraph_mask) const {
+                        const bitmap *subgraph_mask,
+                        size_t num_threads) const {
     call_paths([&](auto&& edges, auto&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
@@ -2327,7 +2330,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
         // this is not a tip
         callback(std::move(sequence), std::move(edges));
 
-    }, true, kmers_in_single_form, subgraph_mask, true);
+    }, true, kmers_in_single_form, subgraph_mask, true, num_threads);
 }
 
 /**

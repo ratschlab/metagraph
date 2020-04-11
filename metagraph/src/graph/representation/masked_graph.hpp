@@ -55,11 +55,13 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                                          const std::function<void(node_index)> &callback) const override;
 
     virtual void call_sequences(const CallPath &callback,
-                                bool kmers_in_single_form = false) const override;
+                                bool kmers_in_single_form = false,
+                                size_t num_threads = 0) const override;
 
     virtual void call_unitigs(const CallPath &callback,
                               size_t min_tip_size = 1,
-                              bool kmers_in_single_form = false) const override;
+                              bool kmers_in_single_form = false,
+                              size_t num_threads = 0) const override;
 
     virtual uint64_t num_nodes() const override { return kmers_in_graph_->num_set_bits(); }
     virtual uint64_t max_index() const override { return graph_->max_index(); }

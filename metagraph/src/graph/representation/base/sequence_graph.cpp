@@ -342,13 +342,17 @@ void call_sequences(const DeBruijnGraph &graph,
 }
 
 void DeBruijnGraph::call_sequences(const CallPath &callback,
-                                   bool kmers_in_single_form) const {
+                                   bool kmers_in_single_form,
+                                   size_t num_threads) const {
+    std::ignore = num_threads;
     ::call_sequences(*this, callback, false, 0, kmers_in_single_form);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
                                  size_t min_tip_size,
-                                 bool kmers_in_single_form) const {
+                                 bool kmers_in_single_form,
+                                 size_t num_threads) const {
+    std::ignore = num_threads;
     ::call_sequences(*this, callback, true, min_tip_size, kmers_in_single_form);
 }
 
