@@ -2142,28 +2142,30 @@ void call_path(const BOSS &boss,
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());
 
-    // sync all writes
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     std::unique_lock<std::mutex> lock;
 
     size_t begin = 0;
 
     {
-        // lock all threads if needed
         if (async) {
+            // sync all writes
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+            // then lock all threads
             lock = std::unique_lock<std::mutex>(vector_mutex);
+
             // everything is locked, so there's no need to use async_fetch_bit
             progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
-                                          [&](auto node) {
-                                              return node && !(*visited_ptr)[node];
+                                          [&](edge_index edge) {
+                                              return edge && !(*visited_ptr)[edge];
                                           });
         } else {
-            progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
-                                          [&](auto node) {
-                                              return node && !discovered[node];
-                                          });
-            std::for_each(path.begin(), path.end(), [&](auto node) {
-                async_unset_bit(discovered, node);
+            progress_bar += std::count_if(
+                dual_path.begin(), dual_path.end(),
+                [&](edge_index edge) { return edge && !async_fetch_bit(discovered, edge); }
+            );
+            std::for_each(path.begin(), path.end(), [&](edge_index edge) {
+                async_unset_bit(discovered, edge);
             });
         }
 
