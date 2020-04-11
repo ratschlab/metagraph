@@ -1876,6 +1876,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 auto next_edges = it->get();
                 edges_async.erase(it);
                 for (Edge next_edge : next_edges) {
+                    if (async_fetch_bit(discovered, next_edge.first))
+                        continue;
+
                     edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
                         std::vector<Edge> edges;
                         edges.reserve(alph_size);
