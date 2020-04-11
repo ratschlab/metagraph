@@ -43,8 +43,9 @@ WT wavelet_tree::convert_to() {
         if (auto *wt_fast
                 = dynamic_cast<wavelet_tree_sdsl_fast<typename WT::wt_type> *>(this)) {
             // fast_wt_sdsl -> wt_sdsl
+            uint8_t logsigma = this->logsigma();
             wt_fast->int_vector_ = sdsl::int_vector<>();
-            return WT(logsigma(), std::move(wt_fast->wwt_));
+            return WT(logsigma, std::move(wt_fast->wwt_));
         }
     }
 
