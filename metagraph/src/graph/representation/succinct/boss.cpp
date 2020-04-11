@@ -2060,8 +2060,10 @@ void call_path(const BOSS &boss,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask) {
     if (!kmers_in_single_form) {
-        for (edge_index edge : path) {
-            async_set_bit(visited, edge, async);
+        if (async) {
+            for (edge_index edge : path) {
+                async_set_bit(visited, edge, async);
+            }
         }
 
         if (!trim_sentinels) {
@@ -2113,13 +2115,22 @@ void call_path(const BOSS &boss,
 
     {
         // lock all threads if needed
-        if (async)
+        if (async) {
             lock = std::unique_lock<std::mutex>(vector_mutex);
+        } else {
+            std::for_each(path.begin(), path.end(), [&](auto node) {
+                async_unset_bit(discovered, node);
+            });
+        }
 
         // traverse the path with its dual and visit the nodes
         for (size_t i = 0; i < path.size(); ++i) {
             assert(path[i]);
-            async_set_bit(visited, path[i], async);
+            if (async) {
+                async_set_bit(visited, path[i], async);
+            } else {
+                async_set_bit(discovered, path[i], async);
+            }
 
             // Extend the path if the reverse-complement k-mer does not belong
             // to the graph (subgraph) or if it matches the current k-mer and
@@ -2131,9 +2142,13 @@ void call_path(const BOSS &boss,
 
             // Check if the reverse-complement k-mer has not been traversed
             // and thus, if the current edge path[i] is to be traversed first.
-            if (!async_fetch_and_set_bit(visited, dual_path[i], async)) {
-                async_set_bit(discovered, dual_path[i], async);
+            if (!async_fetch_and_set_bit(discovered, dual_path[i], async)) {
+                // async_set_bit(discovered, dual_path[i], async);
                 ++progress_bar;
+                continue;
+            }
+
+            if (async && !async_fetch_and_set_bit(visited, dual_path[i], async)) {
                 continue;
             }
 
