@@ -73,13 +73,15 @@ int assemble(Config *config) {
                                 writer.write(unitig);
                             },
                             config->min_tip_size,
-                            config->kmers_in_single_form);
+                            config->kmers_in_single_form,
+                            get_num_threads() - 1);
     } else {
         graph->call_sequences([&](const auto &contig, auto&&) {
                                   std::unique_lock<std::mutex> lock(write_mutex);
                                   writer.write(contig);
                               },
-                              config->kmers_in_single_form);
+                              config->kmers_in_single_form,
+                              get_num_threads() - 1);
     }
 
     logger->trace("Sequences extracted in {} sec", timer.elapsed());
