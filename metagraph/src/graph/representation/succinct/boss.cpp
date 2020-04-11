@@ -1838,7 +1838,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              "Traverse BOSS",
                              std::cerr, !utils::get_verbose());
 
-    std::deque<Edge> edges;
+    std::vector<Edge> edges;
     std::mutex vector_mutex;
     auto call_paths_from = [&](edge_index start) {
         edges.emplace_back(start, get_node_seq(start));
