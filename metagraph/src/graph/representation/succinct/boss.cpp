@@ -1946,7 +1946,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     });
 
     // process all the remaining cycles that have not been traversed
-    call_zeros(discovered, [&](edge_index i) { call_paths_from(i); });
+    call_zeros(discovered, call_paths_from);
 }
 
 void call_path(const BOSS &boss,
