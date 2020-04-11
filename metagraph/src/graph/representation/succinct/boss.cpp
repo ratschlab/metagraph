@@ -1840,6 +1840,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     std::vector<Edge> edges;
     std::mutex vector_mutex;
+    std::unique_ptr<ThreadPool> thread_pool;
+    bool async = false;
+
     auto call_paths_from = [&](edge_index start) {
         edges.emplace_back(start, get_node_seq(start));
         while (edges.size()) {
@@ -1848,7 +1851,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             ::call_paths(*this, std::move(next_edge), edges, callback,
                          split_to_unitigs, kmers_in_single_form,
                          trim_sentinels, &discovered, &visited,
-                         false, vector_mutex, progress_bar, subgraph_mask);
+                         async, vector_mutex, progress_bar, subgraph_mask);
         }
     };
 
@@ -2090,6 +2093,9 @@ void call_path(const BOSS &boss,
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());
+
+    // sync all writes
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
     assert(std::all_of(path.begin(), path.end(),
                        [&](auto i) { return visited[i]; }));
