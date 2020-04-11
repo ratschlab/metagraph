@@ -21,7 +21,7 @@ struct get_kmer<sdsl::uint256_t> { using type = KmerExtractorBOSS::Kmer256;};
 template <typename T>
 using get_kmer_t = typename get_kmer<T>::type;
 template <typename T>
-struct get_kmer<T, void_t<typename T::first_type>> {
+struct get_kmer<T, std::void_t<typename T::first_type>> {
 using type = std::pair<get_kmer_t<typename T::first_type>, typename T::second_type>;
 };
 
@@ -43,7 +43,7 @@ struct get_int<KmerExtractorBOSS::Kmer256> { using type = sdsl::uint256_t;};
 template <typename T>
 using get_int_t = typename get_int<T>::type;
 template <typename T>
-struct get_int<T, void_t<typename T::first_type>> {
+struct get_int<T, std::void_t<typename T::first_type>> {
     using type = std::pair<get_int_t<typename T::first_type>, typename T::second_type>;
 };
 

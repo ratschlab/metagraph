@@ -12,6 +12,7 @@
 #include "common/unix_tools.hpp"
 #include "kmer.hpp"
 #include "kmer_extractor.hpp"
+#include "kmer_to_int_converter.hpp"
 
 namespace mg {
 namespace kmer {
@@ -131,10 +132,11 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
 }
 
 // removes redundant dummy BOSS k-mers from a sorted list
-template <class KMER_INT>
-void cleanup_boss_kmers(Vector<KMER_INT> *kmers_int) {
-    using KMER = get_kmer_t<KMER_INT>;
-    Vector<KMER> *kmers = reinterpret_cast<Vector<KMER> *> (kmers_int);
+template <class T_INT>
+void cleanup_boss_kmers(Vector<T_INT> *kmers_int) {
+    using T = get_kmer_t<T_INT>;
+    using KMER = utils::get_first_type_t<T>;
+    Vector<T> *kmers = reinterpret_cast<Vector<T> *> (kmers_int);
 
     assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst()));
     assert(std::unique(kmers->begin(), kmers->end(), utils::EqualFirst()) == kmers->end());

@@ -1,7 +1,5 @@
 #include "boss_chunk.hpp"
 
-#include "kmer_to_int_converter.hpp"
-
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/circular_buffer.hpp"
 #include "common/algorithms.hpp"
@@ -9,6 +7,7 @@
 #include "common/vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/utils/template_utils.hpp"
+#include "kmer/kmer_to_int_converter.hpp"
 
 using namespace mg;
 

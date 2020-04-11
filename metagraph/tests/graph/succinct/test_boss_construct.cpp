@@ -17,7 +17,7 @@
 #include "common/sorted_multiset_disk.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
-#include "graph/representation/succinct/kmer_to_int_converter.hpp"
+#include "kmer/kmer_to_int_converter.hpp"
 #include "kmer/kmer_collector.hpp"
 
 namespace {

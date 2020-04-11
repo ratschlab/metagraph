@@ -1,7 +1,5 @@
 #include "boss_chunk_construct.hpp"
 
-#include "kmer_to_int_converter.hpp"
-
 #include <ips4o.hpp>
 
 #include "common/circular_buffer.hpp"
@@ -16,6 +14,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
+#include "kmer/kmer_to_int_converter.hpp"
 #include "boss_chunk.hpp"
 
 namespace mg {
