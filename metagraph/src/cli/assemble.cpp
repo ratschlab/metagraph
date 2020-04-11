@@ -65,13 +65,20 @@ int assemble(Config *config) {
     FastaWriter writer(config->outfbase, config->header,
                        config->enumerate_out_sequences,
                        get_num_threads() > 1);
+    std::mutex write_mutex;
 
     if (config->unitigs || config->min_tip_size > 1) {
-        graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); },
+        graph->call_unitigs([&](const auto &unitig, auto&&) {
+                                std::unique_lock<std::mutex> lock(write_mutex);
+                                writer.write(unitig);
+                            },
                             config->min_tip_size,
                             config->kmers_in_single_form);
     } else {
-        graph->call_sequences([&](const auto &contig, auto&&) { writer.write(contig); },
+        graph->call_sequences([&](const auto &contig, auto&&) {
+                                  std::unique_lock<std::mutex> lock(write_mutex);
+                                  writer.write(contig);
+                              },
                               config->kmers_in_single_form);
     }
 
