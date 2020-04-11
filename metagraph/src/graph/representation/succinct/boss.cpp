@@ -1792,25 +1792,25 @@ inline bool masked_pick_single_incoming(const BOSS &boss,
     return false;
 }
 
-struct Edge {
-    edge_index id;
-    std::vector<TAlphabet> source_kmer;
-};
+using Edge = std::pair<edge_index, std::vector<TAlphabet>>;
 
 // traverse graph from the specified (k+1)-mer/edge and call
 // all paths reachable from it
-std::vector<Edge> call_paths(const BOSS &boss,
-                             const Edge &starting_edge,
-                             const BOSS::Call<std::vector<edge_index>&&,
-                                              std::vector<TAlphabet>&&> &callback,
-                             bool split_to_unitigs,
-                             bool kmers_in_single_form,
-                             bool trim_sentinels,
-                             sdsl::bit_vector *discovered_ptr,
-                             sdsl::bit_vector *visited_ptr,
-                             bool async,
-                             ProgressBar &progress_bar,
-                             const bitmap *subgraph_mask);
+template <class EdgeStorage>
+void call_paths(const BOSS &boss,
+                Edge&& starting_edge,
+                EdgeStorage &edges,
+                const BOSS::Call<std::vector<edge_index>&&,
+                                 std::vector<TAlphabet>&&> &callback,
+                bool split_to_unitigs,
+                bool kmers_in_single_form,
+                bool trim_sentinels,
+                sdsl::bit_vector *discovered_ptr,
+                sdsl::bit_vector *visited_ptr,
+                bool async,
+                std::mutex &vector_mutex,
+                ProgressBar &progress_bar,
+                const bitmap *subgraph_mask);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -1838,17 +1838,17 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              "Traverse BOSS",
                              std::cerr, !utils::get_verbose());
 
-    auto call_paths_from = [&,edges = std::vector<Edge>()](edge_index start) mutable {
-        edges.emplace_back(Edge{ start, get_node_seq(start) });
+    std::deque<Edge> edges;
+    std::mutex vector_mutex;
+    auto call_paths_from = [&](edge_index start) {
+        edges.emplace_back(start, get_node_seq(start));
         while (edges.size()) {
-            auto next_edge = edges.back();
+            auto next_edge = std::move(edges.back());
             edges.pop_back();
-            for (auto&& edge : ::call_paths(*this, std::move(next_edge), callback,
-                                            split_to_unitigs, kmers_in_single_form,
-                                            trim_sentinels, &discovered, &visited,
-                                            progress_bar, subgraph_mask)) {
-                edges.emplace_back(std::move(edge));
-            }
+            ::call_paths(*this, std::move(next_edge), edges, callback,
+                         split_to_unitigs, kmers_in_single_form,
+                         trim_sentinels, &discovered, &visited,
+                         false, vector_mutex, progress_bar, subgraph_mask);
         }
     };
 
@@ -1915,34 +1915,38 @@ void call_path(const BOSS &boss,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask);
 
-std::vector<Edge> call_paths(const BOSS &boss,
-                             const Edge &starting_edge,
-                             const BOSS::Call<std::vector<edge_index>&&,
-                                              std::vector<TAlphabet>&&> &callback,
-                             bool split_to_unitigs,
-                             bool kmers_in_single_form,
-                             bool trim_sentinels,
-                             sdsl::bit_vector *discovered_ptr,
-                             sdsl::bit_vector *visited_ptr,
-                             bool async,
-                             ProgressBar &progress_bar,
-                             const bitmap *subgraph_mask) {
+template <class EdgeStorage>
+void call_paths(const BOSS &boss,
+                Edge&& starting_edge,
+                EdgeStorage &edges,
+                const BOSS::Call<std::vector<edge_index>&&,
+                                 std::vector<TAlphabet>&&> &callback,
+                bool split_to_unitigs,
+                bool kmers_in_single_form,
+                bool trim_sentinels,
+                sdsl::bit_vector *discovered_ptr,
+                sdsl::bit_vector *visited_ptr,
+                bool async,
+                std::mutex &vector_mutex,
+                ProgressBar &progress_bar,
+                const bitmap *subgraph_mask) {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
     auto &visited = *visited_ptr;
-    // store all branch nodes on the way
-    std::vector<TAlphabet> kmer;
-    std::vector<Edge> edges;
 
-    std::vector<edge_index> path;
-    edge_index edge = starting_edge.id;
+    edge_index edge = starting_edge.first;
+    auto sequence = std::move(starting_edge.second);
+
     async_set_bit(discovered, edge, async);
 
     if (async_fetch_bit(visited, edge, async))
-        return {};
+        return;
 
-    auto sequence = std::move(starting_edge.source_kmer);
+    // store all branch nodes on the way
+    std::vector<TAlphabet> kmer;
+    std::vector<edge_index> path;
+
     path.reserve(100);
     sequence.reserve(100 + boss.get_k());
 
@@ -2020,7 +2024,8 @@ std::vector<Edge> call_paths(const BOSS &boss,
                 next_edge = edge;
             } else if (!async_fetch_and_set_bit(discovered, edge, async)) {
                 // discover other edges
-                edges.push_back({ edge, kmer });
+                std::unique_lock<std::mutex> lock(vector_mutex);
+                edges.emplace_back(edge, kmer);
             }
         } while (--edge > 0 && !boss.get_last(edge));
 
@@ -2036,8 +2041,6 @@ std::vector<Edge> call_paths(const BOSS &boss,
     call_path(boss, callback, path, sequence,
               kmers_in_single_form, trim_sentinels,
               discovered, visited, progress_bar, subgraph_mask);
-
-    return edges;
 }
 
 // Call the path or all primary paths extracted from it.
