@@ -2188,8 +2188,14 @@ void call_path(const BOSS &boss,
 
             // Check if the reverse-complement k-mer has not been traversed
             // and thus, if the current edge path[i] is to be traversed first.
-            if (!async_fetch_and_set_bit(discovered, dual_path[i], async)
-                    || (async && !async_fetch_and_set_bit(*visited_ptr, dual_path[i], async))) {
+            if (!async_fetch_and_set_bit(discovered, dual_path[i], async)) {
+                if (visited_ptr)
+                    async_set_bit(*visited_ptr, dual_path[i], async);
+
+                continue;
+            }
+
+            if (async && !async_fetch_and_set_bit(*visited_ptr, dual_path[i], async)) {
                 continue;
             }
 
