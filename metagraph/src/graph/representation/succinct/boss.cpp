@@ -1808,6 +1808,7 @@ std::vector<Edge> call_paths(const BOSS &boss,
                              bool trim_sentinels,
                              sdsl::bit_vector *discovered_ptr,
                              sdsl::bit_vector *visited_ptr,
+                             bool async,
                              ProgressBar &progress_bar,
                              const bitmap *subgraph_mask);
 
@@ -1923,6 +1924,7 @@ std::vector<Edge> call_paths(const BOSS &boss,
                              bool trim_sentinels,
                              sdsl::bit_vector *discovered_ptr,
                              sdsl::bit_vector *visited_ptr,
+                             bool async,
                              ProgressBar &progress_bar,
                              const bitmap *subgraph_mask) {
     assert(discovered_ptr && visited_ptr);
@@ -1935,19 +1937,19 @@ std::vector<Edge> call_paths(const BOSS &boss,
 
     std::vector<edge_index> path;
     edge_index edge = starting_edge.id;
-    discovered[edge] = true;
-    auto sequence = std::move(starting_edge.source_kmer);
+    async_set_bit(discovered, edge, async);
 
-    if (async_fetch_bit(visited, edge))
+    if (async_fetch_bit(visited, edge, async))
         return {};
 
+    auto sequence = std::move(starting_edge.source_kmer);
     path.reserve(100);
     sequence.reserve(100 + boss.get_k());
 
     // traverse simple path until we reach its tail or
     // the first edge that has been already visited
-    while (!async_fetch_and_set_bit(visited, edge)) {
-        assert(edge > 0 && async_fetch_bit(discovered, edge));
+    while (!async_fetch_and_set_bit(visited, edge, async)) {
+        assert(edge > 0 && async_fetch_bit(discovered, edge, async));
         assert(!subgraph_mask || (*subgraph_mask)[edge]);
 
         // visit the edge
@@ -2000,7 +2002,7 @@ std::vector<Edge> call_paths(const BOSS &boss,
         //      2. there is only one edge incoming to the target node
         //      3. we call contigs (the unitigs may be concatenated)
         if (single_outgoing && !stop_even_if_single_outgoing) {
-            async_set_bit(discovered, edge);
+            async_set_bit(discovered, edge, async);
             continue;
         }
 
@@ -2009,14 +2011,14 @@ std::vector<Edge> call_paths(const BOSS &boss,
 
         // loop over the outgoing edges
         do {
-            assert((!subgraph_mask || (*subgraph_mask)[edge] || visited[edge])
+            assert((!subgraph_mask || (*subgraph_mask)[edge] || async_fetch_bit(visited, edge, async))
                     && "k-mers not from subgraph are marked visited");
 
-            if (!next_edge && !split_to_unitigs && !async_fetch_bit(visited, edge)) {
+            if (!next_edge && !split_to_unitigs && !async_fetch_bit(visited, edge, async)) {
                 // save the edge for visiting if we extract contigs
-                async_set_bit(discovered, edge);
+                async_set_bit(discovered, edge, async);
                 next_edge = edge;
-            } else if (!async_fetch_and_set_bit(discovered, edge)) {
+            } else if (!async_fetch_and_set_bit(discovered, edge, async)) {
                 // discover other edges
                 edges.push_back({ edge, kmer });
             }
