@@ -1837,23 +1837,65 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              std::cerr, !utils::get_verbose());
 
     std::vector<Edge> edges;
+    std::list<std::future<std::vector<Edge>>> edges_async;
     std::mutex vector_mutex;
     std::unique_ptr<ThreadPool> thread_pool;
-    bool async = false;
+    bool async = true;
 
     std::unique_ptr<sdsl::bit_vector> visited;
-    if (async)
+    if (async) {
         visited = std::make_unique<sdsl::bit_vector>(discovered);
+        thread_pool = std::make_unique<ThreadPool>(6);
+    }
 
     auto call_paths_from = [&](edge_index start) {
-        edges.emplace_back(start, get_node_seq(start));
-        while (edges.size()) {
-            auto next_edge = std::move(edges.back());
-            edges.pop_back();
-            ::call_paths(*this, std::move(next_edge), edges, callback,
-                         split_to_unitigs, kmers_in_single_form,
-                         trim_sentinels, &discovered, visited.get(),
-                         async, vector_mutex, progress_bar, subgraph_mask);
+        if (async) {
+            edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
+                std::vector<Edge> edges;
+                edges.reserve(alph_size);
+                ::call_paths(*this, std::move(next_edge), edges, callback,
+                             split_to_unitigs, kmers_in_single_form,
+                             trim_sentinels, &discovered, visited.get(),
+                             async, vector_mutex, progress_bar, subgraph_mask);
+                return edges;
+            }, Edge(start, get_node_seq(start))));
+
+            while (edges_async.size()) {
+                // iterate through the tasks and take the first one that's ready
+                auto it = edges_async.begin();
+                while (it != edges_async.end()
+                        && it->wait_for(std::chrono::microseconds(100))
+                            != std::future_status::ready) {
+                    ++it;
+                }
+
+                if (it == edges_async.end())
+                    continue;
+
+                auto next_edges = it->get();
+                edges_async.erase(it);
+                for (Edge next_edge : next_edges) {
+                    edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
+                        std::vector<Edge> edges;
+                        edges.reserve(alph_size);
+                        ::call_paths(*this, std::move(next_edge), edges, callback,
+                                     split_to_unitigs, kmers_in_single_form,
+                                     trim_sentinels, &discovered, visited.get(),
+                                     async, vector_mutex, progress_bar, subgraph_mask);
+                        return edges;
+                    }, std::move(next_edge)));
+                }
+            }
+        } else {
+            edges.emplace_back(start, get_node_seq(start));
+            while (edges.size()) {
+                auto next_edge = std::move(edges.back());
+                edges.pop_back();
+                ::call_paths(*this, std::move(next_edge), edges, callback,
+                             split_to_unitigs, kmers_in_single_form,
+                             trim_sentinels, &discovered, visited.get(),
+                             async, vector_mutex, progress_bar, subgraph_mask);
+            }
         }
     };
 
@@ -2021,10 +2063,6 @@ void call_paths(const BOSS &boss,
                     next_edge = edge;
                 } else {
                     // discover other edges
-                    std::unique_lock<std::mutex> lock;
-                    if (async)
-                        lock = std::unique_lock<std::mutex>(vector_mutex);
-
                     edges.emplace_back(edge, kmer);
                 }
             }
