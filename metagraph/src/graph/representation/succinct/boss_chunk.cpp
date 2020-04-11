@@ -1,5 +1,7 @@
 #include "boss_chunk.hpp"
 
+#include "kmer_to_int_converter.hpp"
+
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/circular_buffer.hpp"
 #include "common/algorithms.hpp"
@@ -9,17 +11,6 @@
 #include "common/utils/template_utils.hpp"
 
 using namespace mg;
-
-
-template <typename KMER, typename COUNT>
-inline const KMER& get_kmer(const std::pair<KMER, COUNT> &pair) {
-    return pair.first;
-}
-
-template <typename KMER>
-inline const KMER& get_kmer(const KMER &kmer) {
-    return kmer;
-}
 
 static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>::value);
 static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>::value);
@@ -39,7 +30,8 @@ void initialize_chunk(uint64_t alph_size,
                       std::vector<uint64_t> *F,
                       sdsl::int_vector<> *weights = nullptr) {
     using T = std::decay_t<decltype(*begin)>;
-    using KMER = std::decay_t<decltype(get_kmer(*begin))>;
+    using KMER_INT = utils::get_first_type_t<T>;
+    using KMER = get_kmer_t<KMER_INT>;
 
     static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
 
@@ -74,14 +66,14 @@ void initialize_chunk(uint64_t alph_size,
     TAlphabet lastF = 0;
 
     for (Iterator it = begin; it != end; ++it) {
-        const KMER &kmer = get_kmer(*it);
+        const KMER &kmer = to_kmer(utils::get_first(*it));
         TAlphabet curW = kmer[0];
         TAlphabet curF = kmer[k];
 
         assert(curW < alph_size);
 
         // check redundancy and set last
-        if (it + 1 < end && KMER::compare_suffix(kmer, get_kmer(*(it + 1)))) {
+        if (it + 1 < end && KMER::compare_suffix(kmer, to_kmer(utils::get_first(*(it + 1))))) {
             // skip redundant dummy sink edges
             if (curW == 0 && curF > 0)
                 continue;
@@ -90,9 +82,9 @@ void initialize_chunk(uint64_t alph_size,
         }
         // set W
         if (it != begin && curW > 0) {
-            for (Iterator prev = it - 1; KMER::compare_suffix(kmer, get_kmer(*prev), 1);
+            for (Iterator prev = it - 1; KMER::compare_suffix(kmer, to_kmer(utils::get_first(*prev)), 1);
                  --prev) {
-                if (get_kmer(*prev)[0] == curW) {
+                if (to_kmer(utils::get_first(*prev))[0] == curW) {
                     curW += alph_size;
                     break;
                 }
@@ -178,7 +170,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         Iterator &begin = container.begin();
         Iterator &end = container.end();
 
-        using KMER = std::decay_t<decltype(get_kmer(*begin))>;
+        using KMER = utils::get_first_type_t<get_kmer_t<T>>;
 
         static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
 
@@ -205,7 +197,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         // last kmer for each label, so we can test multiple edges coming to same node
         std::vector<KMER> last_kmer(alph_size, typename KMER::WordType(0));
         for (Iterator &it = begin; it != end; ++it) {
-            const KMER kmer = get_kmer(*it);
+            const KMER kmer = to_kmer(utils::get_first(*it));
             TAlphabet curW = kmer[0];
             TAlphabet curF = kmer[k];
 
@@ -214,7 +206,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
             // peek at the next entry to check if this is a dummy sink (not source) edge
             // and to set #last
             ++it;
-            if (it != end && KMER::compare_suffix(kmer, get_kmer(*it))) {
+            if (it != end && KMER::compare_suffix(kmer, to_kmer(utils::get_first(*it)))) {
                 // skip redundant dummy sink edges
                 if (curW == 0 && curF > 0) {
                     --it;
@@ -282,15 +274,15 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
     ::initialize_chunk(alph_size_, kmers, k_, &W_, &last_, &F_);
 }
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer64>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer128>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer256>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<uint64_t>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<sdsl::uint128_t>&);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<sdsl::uint256_t>&);
 
 template <typename T>
 using CWQ = mg::common::ChunkedWaitQueue<T>;
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<KmerExtractorBOSS::Kmer64> &);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<KmerExtractorBOSS::Kmer128> &);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<KmerExtractorBOSS::Kmer256> &);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<uint64_t> &);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<sdsl::uint128_t> &);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<sdsl::uint256_t> &);
 
 template <typename Array>
 BOSS::Chunk::Chunk(uint64_t alph_size,
@@ -308,32 +300,32 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
                        &W_, &last_, &F_, &weights_);
 }
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<uint64_t, uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<sdsl::uint128_t , uint8_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<sdsl::uint256_t, uint8_t>> &, uint8_t);
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint16_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint16_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint16_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<uint64_t, uint16_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<sdsl::uint128_t , uint16_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<sdsl::uint256_t, uint16_t>> &, uint8_t);
 
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint32_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint32_t>> &, uint8_t);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint32_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<uint64_t, uint32_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<sdsl::uint128_t , uint32_t>> &, uint8_t);
+template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<sdsl::uint256_t, uint32_t>> &, uint8_t);
 
 #define BossWithPair(T, C) \
     BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<std::pair<T, C>> &, uint8_t);
 
-template BossWithPair(KmerExtractorBOSS::Kmer64, uint8_t);
-template BossWithPair(KmerExtractorBOSS::Kmer128, uint8_t);
-template BossWithPair(KmerExtractorBOSS::Kmer256, uint8_t);
+template BossWithPair(uint64_t, uint8_t);
+template BossWithPair(sdsl::uint128_t , uint8_t);
+template BossWithPair(sdsl::uint256_t, uint8_t);
 
-template BossWithPair(KmerExtractorBOSS::Kmer64, uint16_t);
-template BossWithPair(KmerExtractorBOSS::Kmer128, uint16_t);
-template BossWithPair(KmerExtractorBOSS::Kmer256, uint16_t);
+template BossWithPair(uint64_t, uint16_t);
+template BossWithPair(sdsl::uint128_t , uint16_t);
+template BossWithPair(sdsl::uint256_t, uint16_t);
 
-template BossWithPair(KmerExtractorBOSS::Kmer64, uint32_t);
-template BossWithPair(KmerExtractorBOSS::Kmer128, uint32_t);
-template BossWithPair(KmerExtractorBOSS::Kmer256, uint32_t);
+template BossWithPair(uint64_t, uint32_t);
+template BossWithPair(sdsl::uint128_t , uint32_t);
+template BossWithPair(sdsl::uint256_t, uint32_t);
 
 
 void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {

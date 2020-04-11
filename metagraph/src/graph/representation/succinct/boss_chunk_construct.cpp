@@ -1,5 +1,7 @@
 #include "boss_chunk_construct.hpp"
 
+#include "kmer_to_int_converter.hpp"
+
 #include <ips4o.hpp>
 
 #include "common/circular_buffer.hpp"
@@ -146,20 +148,20 @@ using RecentKmers = common::CircularBuffer<Kmer<T>>;
  * @param buffer queue that stores the last  |Alphabet|^2 k-mers used for identifying
  * redundant dummy source k-mers
  */
-template <typename T, typename KMER>
-static void remove_redundant_dummy_source(const typename KMER::WordType &kmer, RecentKmers<T> *buffer) {
+template <typename T_INT, typename KMER>
+static void remove_redundant_dummy_source(const KMER &kmer, RecentKmers<T_INT> *buffer) {
     using TAlphabet = typename KMER::CharType;
-    TAlphabet curW = KMER::at(utils::get_first(kmer), 0);
+    TAlphabet curW = utils::get_first(kmer)[0];
     if (buffer->size() < 2 || curW == 0) {
         return;
     }
-    using ReverseIterator = typename RecentKmers<T>::reverse_iterator;
+    using ReverseIterator = typename RecentKmers<T_INT>::reverse_iterator;
     ReverseIterator it = buffer->rbegin();
     ++it;
-    for (; KMER::compare_suffix(kmer, utils::get_first((*it).kmer), 1); ++it) {
-        const auto prev_kmer = utils::get_first((*it).kmer);
-        assert((curW || KMER::at(prev_kmer,1)) && "Main dummy source k-mer must be unique");
-        if (KMER::at(prev_kmer,0) == curW && !KMER::at(prev_kmer,1)) { // redundant dummy source k-mer
+    for (; KMER::compare_suffix(kmer, to_kmer(utils::get_first((*it).kmer)), 1); ++it) {
+        const KMER prev_kmer = to_kmer(utils::get_first((*it).kmer));
+        assert((curW || prev_kmer[1]) && "Main dummy source k-mer must be unique");
+        if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
             (*it).is_removed = true;
             return;
         }
@@ -168,37 +170,29 @@ static void remove_redundant_dummy_source(const typename KMER::WordType &kmer, R
     }
 }
 
-
-template <typename T>
-void write_or_die(std::ofstream *f, const T &v) {
-    if (!f->write(reinterpret_cast<const char *>(&v), sizeof(T))) {
-        std::cerr << "Error: Writing of merged data failed." << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-};
-
-
 /**
  * Writes the front of #buffer to a file if it's not a redundant dummy kmer. If the k-mer
  * at the front is a (not-redundant) dummy k-mer it also writes its corresponding dummy
  * k-mer of prefix length 2 into #sorted_dummy_kmers.
  */
-template <typename KMER, typename INT>
+template <typename T_INT>
 uint8_t write_kmer(size_t k,
-                   Vector<INT> *dummy_kmers,
-                   common::EliasFanoEncoderBuffered<INT> *encoder,
-                   RecentKmers<INT> *buffer,
-                   common::SortedSetDisk<INT> *sorted_dummy_kmers) {
-    const Kmer<INT> to_write = buffer->pop_front();
+                   Vector<T_INT> *dummy_kmers,
+                   common::EliasFanoEncoderBuffered<T_INT> *encoder,
+                   RecentKmers<T_INT> *buffer,
+                   common::SortedSetDisk<T_INT> *sorted_dummy_kmers) {
+    const Kmer<T_INT> to_write = buffer->pop_front();
+    using KMER = utils::get_first_type_t<get_kmer_t<T_INT>>;
+    using KMER_INT = utils::get_first_type_t <T_INT>;
     if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
     }
     encoder->add(to_write.kmer);
     using TAlphabet = typename KMER::CharType;
 
-    const typename KMER::WordType &kmer_to_write = utils::get_first(to_write.kmer);
-    const TAlphabet node_last_char = KMER::at(kmer_to_write, 1);
-    const TAlphabet edge_label = KMER::at(kmer_to_write, 0);
+    const KMER &kmer_to_write = to_kmer(utils::get_first(to_write.kmer));
+    const TAlphabet node_last_char = kmer_to_write[1];
+    const TAlphabet edge_label = kmer_to_write[0];
     if (node_last_char || !edge_label) { // not a dummy source kmer
         return 0;
     }
@@ -207,7 +201,7 @@ uint8_t write_kmer(size_t k,
         sorted_dummy_kmers->insert(dummy_kmers->begin(), dummy_kmers->end());
         dummy_kmers->resize(0);
     }
-    typename KMER::WordType& v =  push_back(*dummy_kmers, kmer_to_write);
+    KMER_INT& v =  push_back(*dummy_kmers, kmer_to_write.data());
     KMER::to_prev(&v, k + 1, BOSS::kSentinelCode);
     return 1;
 }
@@ -279,14 +273,14 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         num_parent_kmers++;
         T_INT el = *it;
         recent_buffer.push_back({ el, false });
-        remove_redundant_dummy_source<T_INT, KMER>(utils::get_first(el), &recent_buffer);
+        remove_redundant_dummy_source(to_kmer(utils::get_first(el)), &recent_buffer);
         if (recent_buffer.full()) {
-            num_dummy_parent_kmers += write_kmer<KMER, T_INT>(k, &dummy_kmers, &original_and_l1,
+            num_dummy_parent_kmers += write_kmer(k, &dummy_kmers, &original_and_l1,
                                                  &recent_buffer, &sorted_dummy_kmers);
         }
     }
     while (!recent_buffer.empty()) { // empty the buffer
-        num_dummy_parent_kmers += write_kmer<KMER, T_INT>(k, &dummy_kmers, &original_and_l1,
+        num_dummy_parent_kmers += write_kmer(k, &dummy_kmers, &original_and_l1,
                                              &recent_buffer, &sorted_dummy_kmers);
     }
     original_and_l1.finish();

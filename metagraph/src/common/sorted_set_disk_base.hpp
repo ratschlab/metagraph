@@ -142,12 +142,7 @@ class SortedSetDiskBase {
         this->async_worker_.enqueue([file_names, this]() {
             std::function<void(const T &)> on_new_item
                     = [this](const T &v) { this->merge_queue_.push(v); };
-            if constexpr (utils::is_pair<T> {}) {
-                merge_files<typename T::first_type, typename T::second_type>(file_names,
-                                                                             on_new_item);
-            } else {
-                merge_files<T>(file_names, on_new_item);
-            }
+            merge_files(file_names, on_new_item);
             this->merge_queue_.shutdown();
         });
     }
@@ -350,7 +345,7 @@ class SortedSetDiskBase {
         EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, 1000);
         std::function<void(const T &v)> on_new_item
                 = [&encoder](const T &v) { encoder.add(v); };
-        merge_files<T>(to_merge, on_new_item);
+        merge_files(to_merge, on_new_item);
         encoder.finish();
 
         (*l1_chunk_count)++;
@@ -370,7 +365,7 @@ class SortedSetDiskBase {
         EliasFanoEncoderBuffered<T> encoder(out_file, 1000);
         std::function<void(const T &v)> on_new_item
                 = [&encoder](const T &v) { encoder.add(v); };
-        merge_files<T>(to_merge, on_new_item);
+        merge_files(to_merge, on_new_item);
         encoder.finish();
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);

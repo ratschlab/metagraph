@@ -166,7 +166,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             on_new_item(current);
             current = smallest;
         } else {
-            if (current.second < std::numeric_limits<C>::max() - smallest.second) {
+            if (current.second + smallest.second < std::numeric_limits<C>::max()) {
                 current.second += smallest.second;
             } else {
                 current.second = std::numeric_limits<C>::max();

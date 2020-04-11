@@ -63,8 +63,6 @@ class KMerBOSS {
 
     inline CharType operator[](size_t i) const;
 
-    static inline CharType at(G v, size_t i);
-
     /**
      * Compares k-mers without one last and |minus| first characters.
      * Examples: For s[6]s[5]s[4]s[3]s[2]s[1]s[7],
@@ -73,9 +71,6 @@ class KMerBOSS {
      */
     static inline bool compare_suffix(const KMerBOSS &k1,
                                       const KMerBOSS &k2, size_t minus = 0);
-
-    static inline bool compare_suffix(const G &k1,
-                                      const G &k2, size_t minus = 0);
 
     std::string to_string(size_t k, const std::string &alphabet) const;
 
@@ -197,15 +192,10 @@ void KMerBOSS<G, L>::to_prev(G *value, size_t k, CharType new_first) {
 
 template <typename G, int L>
 typename KMerBOSS<G, L>::CharType KMerBOSS<G, L>::operator[](size_t i) const {
-   return at(seq_, i);
-}
-
-template <typename G, int L>
-typename KMerBOSS<G, L>::CharType KMerBOSS<G, L>::at(G v, size_t i) {
     static_assert(kBitsPerChar <= 64, "Too large digit!");
     assert(kBitsPerChar * (i + 1) <= sizeof(WordType) * 8);
-    return static_cast<CharType>(v >> static_cast<int>(kBitsPerChar * i))
-            & kFirstCharMask;
+    return static_cast<CharType>(seq_ >> static_cast<int>(kBitsPerChar * i))
+             & kFirstCharMask;
 }
 
 /**
@@ -216,13 +206,8 @@ typename KMerBOSS<G, L>::CharType KMerBOSS<G, L>::at(G v, size_t i) {
  */
 template <typename G, int L>
 bool KMerBOSS<G, L>::compare_suffix(const KMerBOSS &k1, const KMerBOSS &k2, size_t minus) {
-    return compare_suffix(k1.seq_, k2.seq_, minus);
-}
-
-template <typename G, int L>
-bool KMerBOSS<G, L>::compare_suffix(const G &k1, const G &k2, size_t minus) {
-    return k1 >> static_cast<int>((minus + 1) * kBitsPerChar)
-            == k2 >> static_cast<int>((minus + 1) * kBitsPerChar);
+    return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
+             == k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
 }
 
 
