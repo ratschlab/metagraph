@@ -31,6 +31,28 @@ inline const get_kmer_t<KMER_INT>& to_kmer(const KMER_INT &kmer_int) {
     return *reinterpret_cast<const get_kmer_t<KMER_INT> *>(&kmer_int);
 }
 
+
+template <typename T, typename = void>
+struct get_int {};
+template <>
+struct get_int<KmerExtractorBOSS::Kmer64>{ using type = uint64_t;};
+template <>
+struct get_int<KmerExtractorBOSS::Kmer128> { using type = sdsl::uint128_t;};
+template <>
+struct get_int<KmerExtractorBOSS::Kmer256> { using type = sdsl::uint256_t;};
+template <typename T>
+using get_int_t = typename get_int<T>::type;
+template <typename T>
+struct get_int<T, void_t<typename T::first_type>> {
+    using type = std::pair<get_int_t<typename T::first_type>, typename T::second_type>;
+};
+
+/** Converts an integer value to its corresponding KMERBoss value */
+template <typename KMER_INT>
+inline const get_int_t<KMER_INT>& to_kmer(const KMER_INT &kmer_int) {
+    return *reinterpret_cast<const get_int_t<KMER_INT> *>(&kmer_int);
+}
+
 template <typename KMER_INT>
 inline get_kmer_t<KMER_INT>& to_kmer(KMER_INT &kmer_int) {
     return *reinterpret_cast<get_kmer_t<KMER_INT> *>(&kmer_int);

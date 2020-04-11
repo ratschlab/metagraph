@@ -89,7 +89,7 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
     Vector<std::pair<KMER, KmerCount>> temp_storage_with_counts;
     using int_pair = std::pair<typename KMER::WordType, KmerCount>;
     Vector<int_pair> *temp_storage_with_counts_int
-            = reinterpret_cast<Vector<int_pair> *>(&temp_storage);
+            = reinterpret_cast<Vector<int_pair> *>(&temp_storage_with_counts);
     temp_storage_with_counts.reserve(1.1 * kMaxKmersChunkSize);
 
     KmerExtractor kmer_extractor;
@@ -131,8 +131,9 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
 }
 
 // removes redundant dummy BOSS k-mers from a sorted list
-template <class KMER, class KMER_INT>
+template <class KMER_INT>
 void cleanup_boss_kmers(Vector<KMER_INT> *kmers_int) {
+    using KMER = get_kmer_t<KMER_INT>;
     Vector<KMER> *kmers = reinterpret_cast<Vector<KMER> *> (kmers_int);
 
     assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst()));
@@ -182,11 +183,11 @@ void cleanup_boss_kmers(Vector<KMER_INT> *kmers_int) {
     kmers->erase(kmers->begin(), kmers->begin() + last);
 }
 
-template <class KmerExtractor, class KMER, class KMER_INT>
+template <class KmerExtractor, class KMER_INT>
 std::function<void(Vector<KMER_INT> *)> get_cleanup(bool clean_dummy_boss_kmers) {
     if constexpr(std::is_same_v<KmerExtractor, KmerExtractorBOSS>) {
         if (clean_dummy_boss_kmers) {
-            return cleanup_boss_kmers<KMER, KMER_INT>;
+            return cleanup_boss_kmers<KMER_INT>;
         } else {
             return [](Vector<KMER_INT> *) {};
         }
@@ -216,7 +217,7 @@ KmerCollector<KMER, KmerExtractor, Container>
         tmp_dir_(tmp_dir) {
     assert(num_threads_ > 0);
     using KMER_INT = typename Container::value_type;
-    std::function<void(Vector<KMER_INT> *)> cleanup = get_cleanup<Extractor, KMER, KMER_INT>(
+    std::function<void(Vector<KMER_INT> *)> cleanup = get_cleanup<Extractor, KMER_INT>(
         filter_suffix_encoded_.empty()
     );
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);

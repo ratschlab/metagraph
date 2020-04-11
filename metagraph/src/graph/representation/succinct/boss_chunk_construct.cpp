@@ -78,7 +78,7 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  */
 template <typename KMER, typename KMER_INT>
 void recover_source_dummy_nodes(size_t k, size_t num_threads, Vector<KMER_INT> *kmers_int) {
-    auto kmers = reinterpret_cast<Vector<KMER> *>(kmers_int);
+    auto kmers = reinterpret_cast<Vector<get_kmer_t<KMER_INT>> *>(kmers_int);
 
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;

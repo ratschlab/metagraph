@@ -24,13 +24,14 @@ find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 enable_testing()
 findGTest()
 
-file(GLOB test_files "*.cpp")
+file(GLOB test_files "*.cpp" "../../common/gtest_patch.cpp")
 add_executable(tests ${test_files})
 
 target_compile_definitions(tests PUBLIC TEST_DATA_DIR="${PROJECT_PARENT_DIR}/tests/data")
 target_include_directories(tests
   PRIVATE
     ${GTEST_INCLUDE_DIRS}
+    ../../  # needed for tests/common/gtest_patch.hpp
 )
 target_link_libraries(tests
     kmer

@@ -10,12 +10,14 @@
 #define protected public
 #define private public
 
+#include "common/gtest_patch.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_multiset_disk.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/kmer_to_int_converter.hpp"
 #include "kmer/kmer_collector.hpp"
 
 namespace {
@@ -64,9 +66,7 @@ typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, true>,
 TYPED_TEST_SUITE(BOSSConstruct, KmerAndWeightedTypes);
 TYPED_TEST_SUITE(WeightedBOSSConstruct, KmerWeightedTypes);
 
-typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
-                         KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
-                         KMerBOSS<sdsl::uint256_t, KmerExtractorBOSS::bits_per_char>> KmerTypes;
+typedef ::testing::Types<uint64_t, sdsl::uint128_t, sdsl::uint256_t> KmerTypes;
 
 TYPED_TEST_SUITE(CollectKmers, KmerTypes);
 TYPED_TEST_SUITE(CountKmers, KmerTypes);
@@ -376,15 +376,16 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
 
 
 // TODO: k is node length
-template <typename KMER>
+/** @tpararm INT - the integer type corresponding to a 64/128/256 bit k-mer */
+template <typename INT>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        common::SortedSet<KMER, Vector<KMER>> *kmers,
+                                        common::SortedSet<INT, Vector<INT>> *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
-    kmer::extract_kmers<KMER, KmerExtractorBOSS, common::SortedSet<KMER, Vector<KMER>>>(
+    kmer::extract_kmers<get_kmer_t<INT>, KmerExtractorBOSS, common::SortedSet<INT, Vector<INT>>>(
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
@@ -578,7 +579,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         Container *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix) {
     // kmers->try_reserve(reserved_capacity);
-    kmer::count_kmers<typename Container::key_type, KmerExtractorBOSS, Container>(
+    kmer::count_kmers<get_kmer_t<typename Container::key_type>, KmerExtractorBOSS, Container>(
             [reads](kmer::CallStringCount callback) {
             for (const auto &read : *reads) {
                 callback(read, 1);
@@ -661,7 +662,7 @@ TYPED_TEST(CountKmers, CountKmers32bits) {
 }
 
 TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
-    using Container = common::SortedMultisetDisk<typename TypeParam::WordType, uint8_t>;
+    using Container = common::SortedMultisetDisk<TypeParam, uint8_t>;
     std::function<void(typename Container::storage_type *)> cleanup
             = [](typename Container::storage_type *) {};
     Container result(cleanup, 1, 100'000);
@@ -673,7 +674,7 @@ TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
 }
 
 TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
-    using Container = common::SortedMultisetDisk<typename TypeParam::WordType, uint32_t>;
+    using Container = common::SortedMultisetDisk<TypeParam, uint32_t>;
     std::function<void(typename Container::storage_type *)> cleanup
             = [](typename Container::storage_type *) {};
     Container result(cleanup, 1, 100'000);
