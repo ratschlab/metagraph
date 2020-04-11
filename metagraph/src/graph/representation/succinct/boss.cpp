@@ -1845,7 +1845,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     std::unique_ptr<sdsl::bit_vector> visited;
     if (async) {
-        visited = std::make_unique<sdsl::bit_vector>(discovered);
+        if (kmers_in_single_form)
+            visited = std::make_unique<sdsl::bit_vector>(discovered);
+
         thread_pool = std::make_unique<ThreadPool>(num_threads);
     }
 
@@ -2006,6 +2008,7 @@ void call_paths(const BOSS &boss,
         TAlphabet d = w % boss.alph_size;
         sequence.push_back(d);
         path.push_back(edge);
+        ++progress_bar;
 
         // stop the traversal if the next node is a dummy sink
         if (!d)
@@ -2104,21 +2107,10 @@ void call_path(const BOSS &boss,
                const bitmap *subgraph_mask) {
     assert(!async || visited_ptr);
 
-    if (!kmers_in_single_form) {
-        if (async) {
-            for (edge_index edge : path) {
-                async_set_bit(*visited_ptr, edge, async);
-            }
-        }
-
-        if (!trim_sentinels) {
-            progress_bar += path.size();
-            callback(std::move(path), std::move(sequence));
-            return;
-        }
+    if (!kmers_in_single_form && !trim_sentinels) {
+        callback(std::move(path), std::move(sequence));
+        return;
     }
-
-    size_t old_path_size = path.size();
 
     // trim trailing sentinels '$'
     if (sequence.back() == boss.kSentinelCode) {
@@ -2131,7 +2123,6 @@ void call_path(const BOSS &boss,
                        [&boss](auto c) { return c != boss.kSentinelCode; });
 
     if (first_valid_it + boss.get_k() >= sequence.end()) {
-        progress_bar += old_path_size;
         return;
     }
 
@@ -2140,7 +2131,6 @@ void call_path(const BOSS &boss,
                path.begin() + (first_valid_it - sequence.begin()));
 
     if (!kmers_in_single_form) {
-        progress_bar += old_path_size;
         callback(std::move(path), std::move(sequence));
         return;
     }
@@ -2162,7 +2152,16 @@ void call_path(const BOSS &boss,
         // lock all threads if needed
         if (async) {
             lock = std::unique_lock<std::mutex>(vector_mutex);
+            // everything is locked, so there's no need to use async_fetch_bit
+            progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
+                                          [&](auto node) {
+                                              return node && !(*visited_ptr)[node];
+                                          });
         } else {
+            progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
+                                          [&](auto node) {
+                                              return node && !discovered[node];
+                                          });
             std::for_each(path.begin(), path.end(), [&](auto node) {
                 async_unset_bit(discovered, node);
             });
@@ -2187,13 +2186,8 @@ void call_path(const BOSS &boss,
 
             // Check if the reverse-complement k-mer has not been traversed
             // and thus, if the current edge path[i] is to be traversed first.
-            if (!async_fetch_and_set_bit(discovered, dual_path[i], async)) {
-                // async_set_bit(discovered, dual_path[i], async);
-                ++progress_bar;
-                continue;
-            }
-
-            if (async && !async_fetch_and_set_bit(*visited_ptr, dual_path[i], async)) {
+            if (!async_fetch_and_set_bit(discovered, dual_path[i], async)
+                    || (async && !async_fetch_and_set_bit(*visited_ptr, dual_path[i], async))) {
                 continue;
             }
 
