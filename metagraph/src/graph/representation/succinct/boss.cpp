@@ -1978,7 +1978,7 @@ void call_paths(const BOSS &boss,
                 std::mutex &vector_mutex,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask) {
-    assert(discovered_ptr && visited_ptr);
+    assert(discovered_ptr);
 
     auto &discovered = *discovered_ptr;
 
@@ -2099,6 +2099,8 @@ void call_path(const BOSS &boss,
                std::mutex &vector_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask) {
+    assert(!async || visited_ptr);
+
     if (!kmers_in_single_form) {
         if (async) {
             for (edge_index edge : path) {
