@@ -444,7 +444,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsEmptyGraph) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*empty, sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 sequences.push_back(sequence);
-            }, 0, false, num_threads);
+            }, 1, false, num_threads);
             ASSERT_EQ(0u, sequences.size());
 
             EXPECT_EQ(*empty, *build_graph<TypeParam>(k, sequences, true));
@@ -493,12 +493,12 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsOneSelfLoop) {
             graph->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 num_sequences++;
-            }, 0, false, num_threads);
+            }, 1, false, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
                 num_sequences_batch++;
-            }, 0, false, num_threads);
+            }, 1, false, num_threads);
 
             EXPECT_EQ(graph->num_nodes(), num_sequences);
             EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
@@ -586,7 +586,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsUniqueKmersCycle) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
             num_unitigs++;
             num_kmers += sequence.size() - k + 1;
-        }, 0, false, num_threads);
+        }, 1, false, num_threads);
 
         EXPECT_EQ(1u, num_unitigs);
         EXPECT_EQ(sequence.size() - k + 1, num_kmers);
@@ -627,12 +627,12 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsFourLoops) {
             graph->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 num_sequences++;
-            }, 0, false, num_threads);
+            }, 1, false, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
                 num_sequences_batch++;
-            }, 0, false, num_threads);
+            }, 1, false, num_threads);
 
             EXPECT_EQ(graph->num_nodes(), num_sequences);
             EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
@@ -769,7 +769,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigs) {
                             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
-                        }, 0, false, num_threads);
+                        }, 1, false, num_threads);
                     },
                     true
                 );
@@ -805,7 +805,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsSingleKmerForm) {
                             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
-                        }, 0, true, num_threads);
+                        }, 1, true, num_threads);
                     },
                     true
                 );
@@ -833,13 +833,13 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCheckHalfSingleKmerForm) {
                 graph->call_unitigs([&](const auto &sequence, const auto &path) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     num_kmers_both += path.size();
-                }, 0, false, num_threads);
+                }, 1, false, num_threads);
 
                 std::atomic<size_t> num_kmers = 0;
                 graph->call_unitigs([&](const auto &sequence, const auto &path) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     num_kmers += path.size();
-                }, 0, true, num_threads);
+                }, 1, true, num_threads);
 
                 EXPECT_EQ(num_kmers_both, num_kmers * 2);
             }
