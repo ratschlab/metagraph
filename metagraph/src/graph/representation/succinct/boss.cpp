@@ -1912,7 +1912,7 @@ void call_path(const BOSS &boss,
                bool kmers_in_single_form,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
-               sdsl::bit_vector &visited,
+               sdsl::bit_vector *visited_ptr,
                bool async,
                std::mutex &vector_mutex,
                ProgressBar &progress_bar,
@@ -1936,7 +1936,6 @@ void call_paths(const BOSS &boss,
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
-    auto &visited = *visited_ptr;
 
     edge_index edge = starting_edge.first;
     auto sequence = std::move(starting_edge.second);
@@ -2039,7 +2038,7 @@ void call_paths(const BOSS &boss,
     }
 
     call_path(boss, callback, path, sequence,
-              kmers_in_single_form, trim_sentinels, discovered, visited,
+              kmers_in_single_form, trim_sentinels, discovered, visited_ptr,
               async, vector_mutex, progress_bar, subgraph_mask);
 }
 
@@ -2054,7 +2053,7 @@ void call_path(const BOSS &boss,
                bool kmers_in_single_form,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
-               sdsl::bit_vector &visited,
+               sdsl::bit_vector *visited_ptr,
                bool async,
                std::mutex &vector_mutex,
                ProgressBar &progress_bar,
@@ -2062,7 +2061,7 @@ void call_path(const BOSS &boss,
     if (!kmers_in_single_form) {
         if (async) {
             for (edge_index edge : path) {
-                async_set_bit(visited, edge, async);
+                async_set_bit(*visited_ptr, edge, async);
             }
         }
 
@@ -2127,7 +2126,7 @@ void call_path(const BOSS &boss,
         for (size_t i = 0; i < path.size(); ++i) {
             assert(path[i]);
             if (async) {
-                async_set_bit(visited, path[i], async);
+                async_set_bit(*visited_ptr, path[i], async);
             } else {
                 async_set_bit(discovered, path[i], async);
             }
@@ -2148,7 +2147,7 @@ void call_path(const BOSS &boss,
                 continue;
             }
 
-            if (async && !async_fetch_and_set_bit(visited, dual_path[i], async)) {
+            if (async && !async_fetch_and_set_bit(*visited_ptr, dual_path[i], async)) {
                 continue;
             }
 
