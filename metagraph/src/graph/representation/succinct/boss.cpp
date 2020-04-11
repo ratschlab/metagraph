@@ -1831,10 +1831,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         discovered.flip();
     }
     discovered[0] = true;
-    // keep track of the edges that have already been fetched in paths
-    sdsl::bit_vector visited = discovered;
 
-    ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
+    ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(discovered),
                              "Traverse BOSS",
                              std::cerr, !utils::get_verbose());
 
@@ -1843,6 +1841,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     std::unique_ptr<ThreadPool> thread_pool;
     bool async = false;
 
+    std::unique_ptr<sdsl::bit_vector> visited;
+    if (async)
+        visited = std::make_unique<sdsl::bit_vector>(discovered);
+
     auto call_paths_from = [&](edge_index start) {
         edges.emplace_back(start, get_node_seq(start));
         while (edges.size()) {
@@ -1850,7 +1852,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             edges.pop_back();
             ::call_paths(*this, std::move(next_edge), edges, callback,
                          split_to_unitigs, kmers_in_single_form,
-                         trim_sentinels, &discovered, &visited,
+                         trim_sentinels, &discovered, visited.get(),
                          async, vector_mutex, progress_bar, subgraph_mask);
         }
     };
