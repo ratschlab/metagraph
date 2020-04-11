@@ -1959,6 +1959,7 @@ void call_path(const BOSS &boss,
                                 std::vector<TAlphabet>&&> &callback,
                std::vector<edge_index> &path,
                std::vector<TAlphabet> &sequence,
+               bool split_to_unitigs,
                bool kmers_in_single_form,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
@@ -2002,6 +2003,14 @@ void call_paths(const BOSS &boss,
     while (!async_fetch_and_set_bit(discovered, edge, async)) {
         assert(edge > 0);
         assert(!subgraph_mask || (*subgraph_mask)[edge]);
+        assert(!visited_ptr || (async && kmers_in_single_form));
+
+        // if the start of a unitig was printed already, this traversal is redundant
+        if (visited_ptr && split_to_unitigs
+                && async_fetch_bit(*visited_ptr, starting_edge.first, async)) {
+            edges.clear();
+            return;
+        }
 
         // visit the edge
         TAlphabet w = boss.get_W(edge);
@@ -2084,7 +2093,7 @@ void call_paths(const BOSS &boss,
         edge = next_edge;
     }
 
-    call_path(boss, callback, path, sequence,
+    call_path(boss, callback, path, sequence, split_to_unitigs,
               kmers_in_single_form, trim_sentinels, discovered, visited_ptr,
               async, vector_mutex, progress_bar, subgraph_mask);
 }
@@ -2097,6 +2106,7 @@ void call_path(const BOSS &boss,
                                 std::vector<TAlphabet>&&> &callback,
                std::vector<edge_index> &path,
                std::vector<TAlphabet> &sequence,
+               bool split_to_unitigs,
                bool kmers_in_single_form,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
@@ -2147,6 +2157,7 @@ void call_path(const BOSS &boss,
     size_t begin = 0;
 
     {
+        std::ignore = split_to_unitigs;
         if (async) {
             // sync all writes
             __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -2210,6 +2221,7 @@ void call_path(const BOSS &boss,
         }
     }
 
+    // unlock mutex if it was ever locked
     lock = std::unique_lock<std::mutex>();
 
     // Call the path traversed
