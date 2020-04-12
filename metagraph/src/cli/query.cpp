@@ -157,10 +157,13 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
-    graph->call_sequences(
-        [&](auto&&... contig_args) { contigs.emplace_back(std::move(contig_args)...); },
-        full_dbg.is_canonical_mode()
-    );
+    std::mutex seq_mutex;
+    graph->call_sequences([&](auto&&... contig_args) {
+                              std::unique_lock<std::mutex> lock(seq_mutex);
+                              contigs.emplace_back(std::move(contig_args)...);
+                          },
+                          full_dbg.is_canonical_mode(),
+                          get_num_threads());
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();

@@ -115,17 +115,23 @@ int clean_graph(Config *config) {
                                           *node_weights,
                                           config->min_unitig_median_kmer_abundance))
                     callback(unitig, path);
-            }, config->min_tip_size, graph->is_canonical_mode());
+            }, config->min_tip_size, graph->is_canonical_mode(), get_num_threads() - 1);
 
         } else if (config->unitigs || config->min_tip_size > 1) {
-            graph->call_unitigs(callback, config->min_tip_size, graph->is_canonical_mode());
+            graph->call_unitigs(callback,
+                                config->min_tip_size,
+                                graph->is_canonical_mode(),
+                                get_num_threads() - 1);
 
         } else {
-            graph->call_sequences(callback, graph->is_canonical_mode());
+            graph->call_sequences(callback,
+                                  graph->is_canonical_mode(),
+                                  get_num_threads() - 1);
         }
     };
 
     auto dump_contigs_to_fasta = [&](const std::string &outfbase, auto call_contigs) {
+        std::mutex seq_mutex;
         if (node_weights) {
             if (!node_weights->is_compatible(*graph)) {
                 logger->error("k-mer counts are not compatible with the subgraph");
@@ -138,14 +144,14 @@ int clean_graph(Config *config) {
                                                  config->header,
                                                  config->enumerate_out_sequences,
                                                  get_num_threads() > 1);
-            std::vector<uint32_t> kmer_counts;
-
             call_contigs([&](const std::string &contig, const auto &path) {
+                std::vector<uint32_t> kmer_counts;
                 for (auto node : path) {
                     kmer_counts.push_back((*node_weights)[node]);
                 }
+
+                std::unique_lock<std::mutex> lock(seq_mutex);
                 writer.write(contig, kmer_counts);
-                kmer_counts.resize(0);
             });
 
         } else {
@@ -154,6 +160,7 @@ int clean_graph(Config *config) {
                                get_num_threads() > 1);
 
             call_contigs([&](const std::string &contig, const auto &) {
+                std::unique_lock<std::mutex> lock(seq_mutex);
                 writer.write(contig);
             });
         }

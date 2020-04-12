@@ -49,14 +49,19 @@ int assemble(Config *config) {
         logger->trace("Writing graph to GFA...");
 
         std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa") + ".gfa");
+        std::mutex str_mutex;
 
         gfa_file << "H\tVN:Z:1.0" << std::endl;
         graph->call_unitigs(
             [&](const auto &unitig, const auto &path) {
-                gfa_file << "S\t" << path.back() << "\t" << unitig << std::endl;
+                std::ostringstream ostr;
+                ostr << "S\t" << path.back() << "\t" << unitig << "\n";
                 graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
-                    gfa_file << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M" << std::endl;
+                    ostr << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M" << "\n";
                 });
+                std::unique_lock<std::mutex> lock(str_mutex);
+                gfa_file << ostr.str();
+
             },
             config->min_tip_size
         );
