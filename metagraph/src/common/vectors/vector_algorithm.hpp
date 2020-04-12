@@ -301,75 +301,88 @@ prev_bit(const t_int_vec &v,
     return v.bit_size();
 }
 
-// thread-safe bit setting/unsetting. these return the old value
+/**
+ * Atomic bit fetching, setting, and unsetting on packed vectors.
+ * fetch_and_* return the old values. The default memorder __ATOMIC_SEQ_CST
+ * enforces the ordering of writes and reads across threads. See
+ * https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
+ * for other options.
+ */
+
 template <class t_int_vec>
-inline bool async_fetch_and_set_bit(t_int_vec &v,
-                                    size_t i,
-                                    bool async = false,
-                                    int memorder = __ATOMIC_SEQ_CST) {
+inline bool atomic_fetch_and_set_bit(t_int_vec &v,
+                                     size_t i,
+                                     bool async = false,
+                                     int memorder = __ATOMIC_SEQ_CST) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
     if (async) {
         return (__atomic_fetch_or(&v.data()[i >> 6],
                                   1llu << (i & 0x3F),
                                   memorder) >> (i & 0x3F)) & 1;
     } else {
-        bool t = v[i];
-        if (!t)
-            v[i] = true;
-
-        return t;
+        uint64_t *word = &v.data()[i >> 6];
+        if (!((*word >> (i & 0x3F)) & 1)) {
+            *word |= (1llu << (i & 0x3F));
+            return false;
+        } else {
+            return true;
+        }
     }
 }
 
 template <class t_int_vec>
-inline bool async_fetch_and_unset_bit(t_int_vec &v,
-                                    size_t i,
-                                    bool async = false,
-                                    int memorder = __ATOMIC_SEQ_CST) {
+inline bool atomic_fetch_and_unset_bit(t_int_vec &v,
+                                       size_t i,
+                                       bool async = false,
+                                       int memorder = __ATOMIC_SEQ_CST) {
     if (async) {
         return (__atomic_fetch_and(&v.data()[i >> 6],
                                    ~(1llu << (i & 0x3F)),
                                    memorder) >> (i & 0x3F)) & 1;
     } else {
-        bool t = v[i];
-        if (t)
-            v[i] = false;
-
-        return t;
+        uint64_t *word = &v.data()[i >> 6];
+        if ((*word >> (i & 0x3F)) & 1) {
+            *word &= ~(1llu << (i & 0x3F));
+            return true;
+        } else {
+            return false;
+        }
     }
 }
 
 template <class t_int_vec>
-inline bool async_fetch_bit(t_int_vec &v,
-                            size_t i,
-                            bool async = false,
-                            int memorder = __ATOMIC_SEQ_CST) {
+inline bool atomic_fetch_bit(t_int_vec &v,
+                             size_t i,
+                             bool async = false,
+                             int memorder = __ATOMIC_SEQ_CST) {
     return async
         ? (__atomic_load_n(&v.data()[i >> 6], memorder) >> (i & 0x3F)) & 1
-        : v[i];
+        : (((v.data()[i >> 6] & (1llu << (i & 0x3F))) >> (i & 0x3F)) & 1);
 }
 
-// thread-safe bit setting/unsetting
 template <class t_int_vec>
-inline void async_set_bit(t_int_vec &v,
-                          size_t i,
-                          bool async = false,
-                          int memorder = __ATOMIC_SEQ_CST) {
+inline void atomic_set_bit(t_int_vec &v,
+                           size_t i,
+                           bool async = false,
+                           int memorder = __ATOMIC_SEQ_CST) {
     if (async) {
         __atomic_or_fetch(&v.data()[i >> 6], 1llu << (i & 0x3F), memorder);
     } else {
-        v[i] = true;
+        v.data()[i >> 6] |= (1llu << (i & 0x3F));
     }
 }
 
 template <class t_int_vec>
-inline void async_unset_bit(t_int_vec &v,
-                            size_t i,
-                            bool async = false,
-                            int memorder = __ATOMIC_SEQ_CST) {
+inline void atomic_unset_bit(t_int_vec &v,
+                             size_t i,
+                             bool async = false,
+                             int memorder = __ATOMIC_SEQ_CST) {
     if (async) {
         __atomic_and_fetch(&v.data()[i >> 6], ~(1llu << (i & 0x3F)), memorder);
     } else {
-        v[i] = false;
+        v.data()[i >> 6] &= ~(1llu << (i & 0x3F));
     }
 }
 
