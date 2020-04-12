@@ -159,7 +159,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
     std::mutex seq_mutex;
     graph->call_sequences([&](auto&&... contig_args) {
-                              std::lock_guard<std::mutex> lock(seq_mutex);
+                              auto lock = conditional_unique_lock(seq_mutex,
+                                                                  get_num_threads() >= 2);
                               contigs.emplace_back(std::move(contig_args)...);
                           },
                           full_dbg.is_canonical_mode(),

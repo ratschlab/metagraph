@@ -59,7 +59,7 @@ int assemble(Config *config) {
                 graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
                     ostr << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M\n";
                 });
-                std::unique_lock<std::mutex> lock(str_mutex);
+                auto lock = conditional_unique_lock(str_mutex, get_num_threads() >= 2);
                 gfa_file << ostr.str();
 
             },
@@ -74,7 +74,10 @@ int assemble(Config *config) {
 
     if (config->unitigs || config->min_tip_size > 1) {
         graph->call_unitigs([&](const auto &unitig, auto&&) {
-                                std::unique_lock<std::mutex> lock(write_mutex);
+                                auto lock = conditional_unique_lock(
+                                    write_mutex,
+                                    get_num_threads() >= 2
+                                );
                                 writer.write(unitig);
                             },
                             config->min_tip_size,
@@ -82,7 +85,10 @@ int assemble(Config *config) {
                             get_num_threads() - 1);
     } else {
         graph->call_sequences([&](const auto &contig, auto&&) {
-                                  std::unique_lock<std::mutex> lock(write_mutex);
+                                  auto lock = conditional_unique_lock(
+                                      write_mutex,
+                                      get_num_threads() >= 2
+                                  );
                                   writer.write(contig);
                               },
                               config->kmers_in_single_form,

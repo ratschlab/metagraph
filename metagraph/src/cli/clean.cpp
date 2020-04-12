@@ -148,7 +148,7 @@ int clean_graph(Config *config) {
                     kmer_counts.push_back((*node_weights)[node]);
                 }
 
-                std::unique_lock<std::mutex> lock(seq_mutex);
+                auto lock = conditional_unique_lock(seq_mutex, get_num_threads() >= 2);
                 writer.write(contig, kmer_counts);
             }, get_num_threads() - 1);
 
@@ -158,7 +158,7 @@ int clean_graph(Config *config) {
                                get_num_threads() > 1);
 
             call_contigs([&](const std::string &contig, const auto &) {
-                std::unique_lock<std::mutex> lock(seq_mutex);
+                auto lock = conditional_unique_lock(seq_mutex, get_num_threads() >= 2);
                 writer.write(contig);
             }, get_num_threads() - 1);
         }

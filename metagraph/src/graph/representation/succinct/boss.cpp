@@ -1671,7 +1671,7 @@ sdsl::bit_vector BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
 void BOSS::merge(const BOSS &other, size_t num_threads) {
     std::mutex seq_mutex;
     other.call_sequences([&](const std::string &sequence, auto&&) {
-        std::unique_lock<std::mutex> lock(seq_mutex);
+        auto lock = conditional_unique_lock(seq_mutex, num_threads >= 2);
         add_sequence(sequence, true);
     }, false, NULL, num_threads);
 }
@@ -2154,7 +2154,7 @@ void call_path(const BOSS &boss,
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
         // then lock all threads
-        std::unique_lock<std::mutex> lock(vector_mutex);
+        auto lock = conditional_unique_lock(vector_mutex, async);
         bool safe_to_unlock = false;
 
         if (async) {

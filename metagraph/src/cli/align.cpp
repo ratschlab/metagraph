@@ -271,7 +271,7 @@ int align_to_graph(Config *config) {
             thread_pool.enqueue([&](const std::string &query, const std::string &header) {
                 auto paths = aligner->align(query);
 
-                std::unique_lock<std::mutex> lock(print_mutex);
+                auto lock = conditional_unique_lock(print_mutex, get_num_threads() >= 2);
                 if (!config->output_json) {
                     for (const auto &path : paths) {
                         const auto& path_query = path.get_orientation()
