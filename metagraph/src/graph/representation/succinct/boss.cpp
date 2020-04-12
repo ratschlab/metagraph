@@ -299,7 +299,7 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
     try {
         cached_suffix_length_ = load_number(instream);
         if (!cached_suffix_length_ || cached_suffix_length_ > k_)
-            throw std::ios_base::failure("");
+            throw std::ifstream::failure("Bad data");
 
         uint64_t index_size = std::pow(alph_size - 1, cached_suffix_length_);
 
