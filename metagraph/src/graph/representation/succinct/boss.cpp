@@ -2155,23 +2155,25 @@ void call_path(const BOSS &boss,
 
         // then lock all threads
         std::unique_lock<std::mutex> lock(vector_mutex);
+        bool safe_to_unlock = false;
 
         if (async) {
+            // If extracting unitigs, only the start of the unitig needs to be
+            // checked while locked. Afterwards, it's safe to unlock the mutex
             if (split_to_unitigs && std::all_of(
                     dual_path.begin(), dual_path.end(),
                     [&](edge_index edge) {
                         return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
                     })) {
                 if (atomic_fetch_bit(*visited_ptr, path.front(), async)
-                        || (path.front() != dual_path.back()
+                        || (path.back() != dual_path.back()
                             && atomic_fetch_bit(*visited_ptr, dual_path.back(), async))) {
                     // if this unitig or its dual path has been printed already,
                     // exit early
                     return;
                 }
 
-                // TODO: when is it safe to unlock?
-                // lock.unlock();
+                safe_to_unlock = true;
             }
 
         } else {
@@ -2185,6 +2187,11 @@ void call_path(const BOSS &boss,
             assert(path[i]);
             if (async) {
                 atomic_set_bit(*visited_ptr, path[i], async);
+
+                if (safe_to_unlock) {
+                    safe_to_unlock = false;
+                    lock.unlock();
+                }
             } else {
                 atomic_set_bit(discovered, path[i], async);
             }
