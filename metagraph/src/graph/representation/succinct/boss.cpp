@@ -2007,6 +2007,7 @@ void call_paths(const BOSS &boss,
         assert(edge > 0);
         assert(!subgraph_mask || (*subgraph_mask)[edge]);
         assert(!visited_ptr || (async && kmers_in_single_form));
+        ++progress_bar;
 
         // if the start of a unitig was printed already, this traversal is redundant
         if (visited_ptr && split_to_unitigs
@@ -2020,7 +2021,6 @@ void call_paths(const BOSS &boss,
         TAlphabet d = w % boss.alph_size;
         sequence.push_back(d);
         path.push_back(edge);
-        ++progress_bar;
 
         // stop the traversal if the next node is a dummy sink
         if (!d)
@@ -2165,17 +2165,7 @@ void call_path(const BOSS &boss,
 
             // then lock all threads
             lock = std::unique_lock<std::mutex>(vector_mutex);
-
-            // everything is locked, so there's no need to use atomic_fetch_bit
-            progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
-                                          [&](edge_index edge) {
-                                              return edge && !(*visited_ptr)[edge];
-                                          });
         } else {
-            progress_bar += std::count_if(
-                dual_path.begin(), dual_path.end(),
-                [&](edge_index edge) { return edge && !atomic_fetch_bit(discovered, edge); }
-            );
             std::for_each(path.begin(), path.end(), [&](edge_index edge) {
                 atomic_unset_bit(discovered, edge);
             });
@@ -2204,6 +2194,7 @@ void call_path(const BOSS &boss,
             // Check if the reverse-complement k-mer has not been traversed
             // and thus, if the current edge path[i] is to be traversed first.
             if (!atomic_fetch_and_set_bit(discovered, dual_path[i], async)) {
+                ++progress_bar;
                 if (visited_ptr)
                     atomic_set_bit(*visited_ptr, dual_path[i], async);
 
