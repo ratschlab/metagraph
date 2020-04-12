@@ -138,12 +138,12 @@ class SortedSetDiskBase {
                                             size_t num_threads) const = 0;
 
     void start_merging() {
-        const std::vector<std::string> file_names = this->get_file_names();
-        this->async_worker_.enqueue([file_names, this]() {
+        const std::vector<std::string> file_names = get_file_names();
+        async_worker_.enqueue([file_names, this]() {
             std::function<void(const T &)> on_new_item
-                    = [this](const T &v) { this->merge_queue_.push(v); };
+                    = [this](const T &v) { merge_queue_.push(v); };
             merge_files(file_names, on_new_item);
-            this->merge_queue_.shutdown();
+            merge_queue_.shutdown();
         });
     }
 
@@ -164,45 +164,41 @@ class SortedSetDiskBase {
      * @param is_done if this is the last chunk being dumped
      */
     void dump_to_file(bool is_done) {
-        assert(!this->data_.empty());
+        assert(!data_.empty());
 
-        std::string file_name
-                = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
+        std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
 
-        EliasFanoEncoder<T> encoder(this->data_.size(),
-                                    utils::get_first(this->data_.front()),
-                                    utils::get_first(this->data_.back()), file_name);
-        for (const auto &v : this->data_) {
+        EliasFanoEncoder<T> encoder(data_.size(), utils::get_first(data_.front()),
+                                    utils::get_first(data_.back()), file_name);
+        for (const auto &v : data_) {
             encoder.add(v);
         }
-        this->total_chunk_size_bytes_ += encoder.finish();
-        this->data_.resize(0);
+        total_chunk_size_bytes_ += encoder.finish();
+        data_.resize(0);
         if (is_done) {
-            this->async_merge_l1_.remove_waiting_tasks();
-        } else if (this->total_chunk_size_bytes_ > this->max_disk_space_bytes_) {
-            this->async_merge_l1_.remove_waiting_tasks();
-            this->async_merge_l1_.join();
-            std::string all_merged_file = this->chunk_file_prefix_ + "_all.tmp";
-            this->chunk_count_++; // needs to be incremented, so that get_file_names()
+            async_merge_l1_.remove_waiting_tasks();
+        } else if (total_chunk_size_bytes_ > max_disk_space_bytes_) {
+            async_merge_l1_.remove_waiting_tasks();
+            async_merge_l1_.join();
+            std::string all_merged_file = chunk_file_prefix_ + "_all.tmp";
+            chunk_count_++; // needs to be incremented, so that get_file_names()
             // returns correct values
-            this->merge_all(all_merged_file, this->get_file_names());
-            this->merged_all_ = true;
-            this->total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
-            if (this->total_chunk_size_bytes_ > this->max_disk_space_bytes_ * 0.8) {
+            merge_all(all_merged_file, get_file_names());
+            merged_all_ = true;
+            total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
+            if (total_chunk_size_bytes_ > max_disk_space_bytes_ * 0.8) {
                 logger->critical("Disk space reduced by < 20%. Giving up.");
                 std::exit(EXIT_FAILURE);
             }
-            std::filesystem::rename(all_merged_file,
-                                    this->merged_all_name(this->chunk_file_prefix_));
-            this->chunk_count_ = 0;
-            this->l1_chunk_count_ = 0;
+            std::filesystem::rename(all_merged_file, merged_all_name(chunk_file_prefix_));
+            chunk_count_ = 0;
+            l1_chunk_count_ = 0;
             return;
-        } else if ((this->chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
-            this->async_merge_l1_.enqueue(this->merge_l1, this->chunk_file_prefix_,
-                                          this->chunk_count_, &this->l1_chunk_count_,
-                                          &this->total_chunk_size_bytes_);
+        } else if ((chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
+            async_merge_l1_.enqueue(merge_l1, chunk_file_prefix_, chunk_count_,
+                                    &l1_chunk_count_, &total_chunk_size_bytes_);
         }
-        this->chunk_count_++;
+        chunk_count_++;
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
@@ -228,7 +224,7 @@ class SortedSetDiskBase {
     template <typename Iterator>
     Iterator safe_advance(const Iterator &it, const Iterator &end, size_t step) {
         assert(it <= end);
-        return static_cast<size_t>(end - it) < this->buffer_size() ? end : it + step;
+        return static_cast<size_t>(end - it) < buffer_size() ? end : it + step;
     }
 
     /**

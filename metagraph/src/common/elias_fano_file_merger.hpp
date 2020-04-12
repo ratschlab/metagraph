@@ -140,10 +140,10 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 
     MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
     std::optional<std::pair<T, C>> data_item;
-    std::vector<std::unique_ptr<EliasFanoDecoder<std::pair<T, C>>>> decoders(sources.size());
+    using Decoder = EliasFanoDecoder<std::pair<T, C>>;
+    std::vector<std::unique_ptr<Decoder>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i]
-                = std::make_unique<EliasFanoDecoder<std::pair<T, C>>>(sources[i], cleanup);
+        decoders[i] = std::make_unique<Decoder>(sources[i], cleanup);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
             merge_heap.emplace({ data_item.value().first, data_item.value().second },
@@ -166,7 +166,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             on_new_item(current);
             current = smallest;
         } else {
-            if (current.second + smallest.second < std::numeric_limits<C>::max()) {
+            if (current.second < std::numeric_limits<C>::max() - smallest.second) {
                 current.second += smallest.second;
             } else {
                 current.second = std::numeric_limits<C>::max();

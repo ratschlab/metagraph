@@ -148,17 +148,17 @@ using RecentKmers = common::CircularBuffer<Kmer<T>>;
  * @param buffer queue that stores the last  |Alphabet|^2 k-mers used for identifying
  * redundant dummy source k-mers
  */
-template <typename T_INT, typename KMER>
-static void remove_redundant_dummy_source(const KMER &kmer, RecentKmers<T_INT> *buffer) {
+template <typename T_INT>
+static void remove_redundant_dummy_source(const T_INT &kmer_int, RecentKmers<T_INT> *buffer) {
+    using KMER = utils::get_first_type_t <get_kmer_t<T_INT>>;
     using TAlphabet = typename KMER::CharType;
-    TAlphabet curW = utils::get_first(kmer)[0];
+    KMER kmer = to_kmer(utils::get_first(kmer_int));
+    TAlphabet curW = kmer[0];
     if (buffer->size() < 2 || curW == 0) {
         return;
     }
-    using ReverseIterator = typename RecentKmers<T_INT>::reverse_iterator;
-    ReverseIterator it = buffer->rbegin();
-    ++it;
-    for (; KMER::compare_suffix(kmer, to_kmer(utils::get_first((*it).kmer)), 1); ++it) {
+    for (auto it = ++(buffer->rbegin());
+         KMER::compare_suffix(kmer, to_kmer(utils::get_first((*it).kmer)), 1); ++it) {
         const KMER prev_kmer = to_kmer(utils::get_first((*it).kmer));
         assert((curW || prev_kmer[1]) && "Main dummy source k-mer must be unique");
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
@@ -273,7 +273,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         num_parent_kmers++;
         T_INT el = *it;
         recent_buffer.push_back({ el, false });
-        remove_redundant_dummy_source(to_kmer(utils::get_first(el)), &recent_buffer);
+        remove_redundant_dummy_source(el, &recent_buffer);
         if (recent_buffer.full()) {
             num_dummy_parent_kmers += write_kmer(k, &dummy_kmers, &original_and_l1,
                                                  &recent_buffer, &sorted_dummy_kmers);
