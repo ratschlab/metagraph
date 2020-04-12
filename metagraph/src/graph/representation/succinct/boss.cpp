@@ -2135,9 +2135,8 @@ void call_path(const BOSS &boss,
         = std::find_if(sequence.begin(), sequence.end(),
                        [&boss](auto c) { return c != boss.kSentinelCode; });
 
-    if (first_valid_it + boss.get_k() >= sequence.end()) {
+    if (first_valid_it + boss.get_k() >= sequence.end())
         return;
-    }
 
     sequence.erase(sequence.begin(), first_valid_it);
     path.erase(path.begin(),
