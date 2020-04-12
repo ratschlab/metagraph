@@ -358,8 +358,8 @@ inline bool atomic_fetch_bit(t_int_vec &v,
                              bool async = false,
                              int memorder = __ATOMIC_SEQ_CST) {
     return async
-        ? (__atomic_load_n(&v.data()[i >> 6], memorder) >> (i & 0x3F)) & 1
-        : (((v.data()[i >> 6] & (1llu << (i & 0x3F))) >> (i & 0x3F)) & 1);
+        ? ((__atomic_load_n(&v.data()[i >> 6], memorder) >> (i & 0x3F)) & 1)
+        : ((v.data()[i >> 6] >> (i & 0x3F)) & 1);
 }
 
 template <class t_int_vec>
