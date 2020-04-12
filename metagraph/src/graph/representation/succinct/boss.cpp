@@ -2009,13 +2009,6 @@ void call_paths(const BOSS &boss,
         assert(!visited_ptr || (async && kmers_in_single_form));
         ++progress_bar;
 
-        // if the start of a unitig was printed already, this traversal is redundant
-        if (visited_ptr && split_to_unitigs
-                && atomic_fetch_bit(*visited_ptr, starting_edge.first, async)) {
-            edges.clear();
-            return;
-        }
-
         // visit the edge
         TAlphabet w = boss.get_W(edge);
         TAlphabet d = w % boss.alph_size;
