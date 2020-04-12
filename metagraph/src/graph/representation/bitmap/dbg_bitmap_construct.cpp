@@ -125,11 +125,7 @@ DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>
         new DBGBitmap::Chunk(
             [&](const auto &index_callback) {
                 std::for_each(kmers.begin(), kmers.end(), [&](const typename KmerCollector::Value &kmer) {
-                    if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
-                        index_callback(typename KMER::WordType(1u) + kmer.first);
-                    } else {
-                        index_callback(typename KMER::WordType(1u) + kmer);
-                    }
+                  index_callback(typename KMER::WordType(1u) + utils::get_first(kmer));
                 });
             },
             (1llu << (get_k() * KMER::kBitsPerChar)) + 1,

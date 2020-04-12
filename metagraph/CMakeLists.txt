@@ -346,7 +346,6 @@ list(REVERSE metagraph_core_files)
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*main.cpp")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*/cli/.*")
-list(FILTER metagraph_core_files EXCLUDE REGEX ".*/test_utils/.*")
 
 add_library(metagraph-core STATIC ${metagraph_core_files})
 
@@ -502,7 +501,6 @@ else()
 endif()
 
 file(GLOB unit_tests_files
-  "src/test_utils/*.cpp"
   "tests/*.cpp"
   "tests/*/*.cpp"
   "tests/*/*/*.cpp"
@@ -514,6 +512,7 @@ link_directories(
 )
 
 add_executable(unit_tests ${unit_tests_files})
+target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}/tests")
 target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 target_link_libraries(unit_tests gtest_main gtest metagraph-core)
 

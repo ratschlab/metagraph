@@ -24,7 +24,7 @@ find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_include_directories(tests
   PRIVATE
     ${GTEST_INCLUDE_DIRS}
-    "${PROJECT_PARENT_DIR}/src/"
+    ${PROJECT_PARENT_DIR}/src/
     ${Boost_INCLUDE_DIRS}
     ${EXTERNAL_LIB_DIR}/asio/asio/include
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
@@ -47,4 +47,4 @@ target_compile_definitions(tests PUBLIC _USE_FOLLY MODE_TI)
 add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark
     EXCLUDE_FROM_ALL benchmark
 )
-add_subdirectory("${PROJECT_PARENT_DIR}/src/test_utils")
+add_subdirectory("${PROJECT_PARENT_DIR}/tests/utils")

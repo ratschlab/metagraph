@@ -64,7 +64,7 @@ class MergeHeap {
  * @tparam T the type of the  elements to be merged (typically a 64/128 or 256-bit k-mer)
  * @param sources the files containing sorted lists of type T
  * @param on_new_item callback to invoke when a new element was merged
- * @param cleanup if true, remove source files after merging
+ * @param remove_sources if true, remove source files after merging
  * @return the total number of elements read from all files
  *
  * Note: this method blocks until all the data was successfully merged.
@@ -72,7 +72,7 @@ class MergeHeap {
 template <typename T>
 uint64_t merge_files(const std::vector<std::string> &sources,
                      std::function<void(const T &)> on_new_item,
-                     bool cleanup = true) {
+                     bool remove_sources = true) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     std::vector<std::ifstream> chunk_files(sources.size());
@@ -83,7 +83,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 
     std::vector<std::unique_ptr<EliasFanoDecoder<T>>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<EliasFanoDecoder<T>>(sources[i], cleanup);
+        decoders[i] = std::make_unique<EliasFanoDecoder<T>>(sources[i], remove_sources);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
             merge_heap.emplace(data_item.value(), i);
@@ -124,7 +124,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
  * If two pairs have the same first element, the counts are added together.
  * @param sources the files containing sorted lists of pairs of type <T, C>
  * @param on_new_item callback to invoke when a new element was merged
- * @param cleanup if true, remove source files after merging
+ * @param remove_sources if true, remove source files after merging
  *
  * @return the total number of elements read from all files
  *
@@ -133,7 +133,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 template <typename T, typename C>
 uint64_t merge_files(const std::vector<std::string> &sources,
                      std::function<void(const std::pair<T, C> &)> on_new_item,
-                     bool cleanup = true) {
+                     bool remove_sources = true) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     uint64_t num_elements = 0;
@@ -143,7 +143,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     using Decoder = EliasFanoDecoder<std::pair<T, C>>;
     std::vector<std::unique_ptr<Decoder>> decoders(sources.size());
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<Decoder>(sources[i], cleanup);
+        decoders[i] = std::make_unique<Decoder>(sources[i], remove_sources);
         data_item = decoders[i]->next();
         if (data_item.has_value()) {
             merge_heap.emplace({ data_item.value().first, data_item.value().second },

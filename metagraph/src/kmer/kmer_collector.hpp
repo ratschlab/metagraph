@@ -85,8 +85,7 @@ class KmerCollector {
     // FYI: This function should be used only in special cases.
     //      In general, use `add_sequences` if possible, to make use of multiple threads.
     void add_kmer(const KMER &kmer) {
-        auto kmer_int = reinterpret_cast<const typename KMER::WordType *>(&kmer);
-        kmers_->insert(kmer_int, kmer_int + 1);
+        kmers_->insert(kmer.data(), kmer.data() + 1);
     }
 
     inline Data &data() { join(); return kmers_->data(); }

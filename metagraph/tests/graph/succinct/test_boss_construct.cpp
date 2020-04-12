@@ -18,7 +18,7 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_to_int_converter.hpp"
 #include "kmer/kmer_collector.hpp"
-#include "test_utils/gtest_patch.hpp"
+#include "utils/gtest_patch.hpp"
 
 namespace {
 using namespace mg;
