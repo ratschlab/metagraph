@@ -1855,6 +1855,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     auto call_paths_from = [&](edge_index start) {
         if (async) {
+            assert(edges_async.empty());
             edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
                 std::vector<Edge> edges;
                 edges.reserve(alph_size);
@@ -1880,7 +1881,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 auto next_edges = it->get();
                 edges_async.erase(it);
                 for (Edge next_edge : next_edges) {
-                    if (async_fetch_bit(discovered, next_edge.first))
+                    if (atomic_fetch_bit(discovered, next_edge.first))
                         continue;
 
                     edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
@@ -2002,14 +2003,14 @@ void call_paths(const BOSS &boss,
 
     // traverse simple path until we reach its tail or
     // the first edge that has been already visited
-    while (!async_fetch_and_set_bit(discovered, edge, async)) {
+    while (!atomic_fetch_and_set_bit(discovered, edge, async)) {
         assert(edge > 0);
         assert(!subgraph_mask || (*subgraph_mask)[edge]);
         assert(!visited_ptr || (async && kmers_in_single_form));
 
         // if the start of a unitig was printed already, this traversal is redundant
         if (visited_ptr && split_to_unitigs
-                && async_fetch_bit(*visited_ptr, starting_edge.first, async)) {
+                && atomic_fetch_bit(*visited_ptr, starting_edge.first, async)) {
             edges.clear();
             return;
         }
@@ -2072,10 +2073,10 @@ void call_paths(const BOSS &boss,
         // loop over the outgoing edges
         do {
             assert((!subgraph_mask || (*subgraph_mask)[edge]
-                || async_fetch_bit(discovered, edge, async))
+                || atomic_fetch_bit(discovered, edge, async))
                     && "k-mers not from subgraph are marked visited");
 
-            if (!async_fetch_bit(discovered, edge, async)) {
+            if (!atomic_fetch_bit(discovered, edge, async)) {
                 if (!next_edge && !split_to_unitigs) {
                     // save the edge for visiting if we extract contigs
                     next_edge = edge;
@@ -2166,7 +2167,7 @@ void call_path(const BOSS &boss,
             // then lock all threads
             lock = std::unique_lock<std::mutex>(vector_mutex);
 
-            // everything is locked, so there's no need to use async_fetch_bit
+            // everything is locked, so there's no need to use atomic_fetch_bit
             progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
                                           [&](edge_index edge) {
                                               return edge && !(*visited_ptr)[edge];
@@ -2174,10 +2175,10 @@ void call_path(const BOSS &boss,
         } else {
             progress_bar += std::count_if(
                 dual_path.begin(), dual_path.end(),
-                [&](edge_index edge) { return edge && !async_fetch_bit(discovered, edge); }
+                [&](edge_index edge) { return edge && !atomic_fetch_bit(discovered, edge); }
             );
             std::for_each(path.begin(), path.end(), [&](edge_index edge) {
-                async_unset_bit(discovered, edge);
+                atomic_unset_bit(discovered, edge);
             });
         }
 
@@ -2188,9 +2189,9 @@ void call_path(const BOSS &boss,
                 // TODO: Check to see if the first k-mer in a unitig has been
                 //       output. If so, it should be safe to unlock
                 std::ignore = split_to_unitigs;
-                async_set_bit(*visited_ptr, path[i], async);
+                atomic_set_bit(*visited_ptr, path[i], async);
             } else {
-                async_set_bit(discovered, path[i], async);
+                atomic_set_bit(discovered, path[i], async);
             }
 
             // Extend the path if the reverse-complement k-mer does not belong
@@ -2203,14 +2204,14 @@ void call_path(const BOSS &boss,
 
             // Check if the reverse-complement k-mer has not been traversed
             // and thus, if the current edge path[i] is to be traversed first.
-            if (!async_fetch_and_set_bit(discovered, dual_path[i], async)) {
+            if (!atomic_fetch_and_set_bit(discovered, dual_path[i], async)) {
                 if (visited_ptr)
-                    async_set_bit(*visited_ptr, dual_path[i], async);
+                    atomic_set_bit(*visited_ptr, dual_path[i], async);
 
                 continue;
             }
 
-            if (async && !async_fetch_and_set_bit(*visited_ptr, dual_path[i], async)) {
+            if (async && !atomic_fetch_and_set_bit(*visited_ptr, dual_path[i], async)) {
                 continue;
             }
 
