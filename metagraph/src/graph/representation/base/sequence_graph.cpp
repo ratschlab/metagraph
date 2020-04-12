@@ -270,7 +270,11 @@ void call_sequences(const DeBruijnGraph &graph,
                     const DeBruijnGraph::CallPath &callback,
                     bool call_unitigs,
                     uint64_t min_tip_size = 0,
-                    bool kmers_in_single_form = false) {
+                    bool kmers_in_single_form = false,
+                    size_t num_threads = 1) {
+    // TODO: port over the implementation from BOSS once it's finalized
+    std::ignore = num_threads;
+
     sdsl::bit_vector discovered(graph.max_index() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
     sdsl::bit_vector visited = discovered;
@@ -344,16 +348,19 @@ void call_sequences(const DeBruijnGraph &graph,
 void DeBruijnGraph::call_sequences(const CallPath &callback,
                                    bool kmers_in_single_form,
                                    size_t num_threads) const {
-    std::ignore = num_threads;
-    ::call_sequences(*this, callback, false, 0, kmers_in_single_form);
+    ::call_sequences(*this, callback, false, 0, kmers_in_single_form, num_threads);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
                                  size_t min_tip_size,
                                  bool kmers_in_single_form,
                                  size_t num_threads) const {
-    std::ignore = num_threads;
-    ::call_sequences(*this, callback, true, min_tip_size, kmers_in_single_form);
+    ::call_sequences(*this,
+                     callback,
+                     true,
+                     min_tip_size,
+                     kmers_in_single_form,
+                     num_threads);
 }
 
 /**

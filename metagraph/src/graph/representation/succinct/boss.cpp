@@ -1856,15 +1856,15 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     auto call_paths_from = [&](edge_index start) {
         if (async) {
             assert(edges_async.empty());
-            edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
+            edges_async.emplace_back(thread_pool->enqueue([&](edge_index start) {
                 std::vector<Edge> edges;
                 edges.reserve(alph_size);
-                ::call_paths(*this, std::move(next_edge), edges, callback,
+                ::call_paths(*this, Edge(start, get_node_seq(start)), edges, callback,
                              split_to_unitigs, kmers_in_single_form,
                              trim_sentinels, &discovered, visited.get(),
                              async, vector_mutex, progress_bar, subgraph_mask);
                 return edges;
-            }, Edge(start, get_node_seq(start))));
+            }, start));
 
             while (edges_async.size()) {
                 // iterate through the tasks and take the first one that's ready

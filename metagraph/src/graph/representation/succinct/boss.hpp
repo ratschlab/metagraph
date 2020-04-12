@@ -122,7 +122,7 @@ class BOSS {
                     bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL,
                     bool trim_sentinels = false,
-                    size_t num_threads = 0) const;
+                    size_t num_threads = 1) const;
 
     /**
      * Call contigs (dummy edges are skipped).
@@ -130,7 +130,7 @@ class BOSS {
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                         bool kmers_in_single_form = false,
                         const bitmap *subgraph_mask = NULL,
-                        size_t num_threads = 0) const;
+                        size_t num_threads = 1) const;
 
     /**
      * Call unitigs (dummy edges are skipped).
@@ -139,7 +139,7 @@ class BOSS {
                       size_t max_pruned_dead_end_size = 0,
                       bool kmers_in_single_form = false,
                       const bitmap *subgraph_mask = NULL,
-                      size_t num_threads = 0) const;
+                      size_t num_threads = 1) const;
 
     // |edge| must be the first incoming edge
     void call_incoming_to_target(edge_index edge, TAlphabet w,

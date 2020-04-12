@@ -60,12 +60,12 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_sequences(const CallPath &callback,
                                 bool kmers_in_single_form = false,
-                                size_t num_threads = 0) const override final;
+                                size_t num_threads = 1) const override final;
 
     virtual void call_unitigs(const CallPath &callback,
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false,
-                              size_t num_threads = 0) const override final;
+                              size_t num_threads = 1) const override final;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
 
