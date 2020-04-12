@@ -75,8 +75,9 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * @tparam Container the data structure in which the k-mers were merged (e.g. a
  * ChunkedWaitQueue if using a SortedSetDisk or a Vector if using SortedSet).
  */
-template <typename KMER, typename KMER_INT>
+template <typename KMER_INT>
 void recover_source_dummy_nodes(size_t k, size_t num_threads, Vector<KMER_INT> *kmers_int) {
+    using KMER = utils::get_first_type_t<get_kmer_t<KMER_INT>>;
     auto kmers = reinterpret_cast<Vector<get_kmer_t<KMER_INT>> *>(kmers_int);
 
     size_t dummy_begin = kmers->size();
@@ -230,9 +231,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
 
     std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
-    using T_INT =typename KmerCollector::Value;
-    using KMER = typename KmerCollector::KmerType;
-    using KMER_INT = typename KmerCollector::KmerType::WordType;
+    using KMER_INT = typename KmerCollector::Key; // 64/128/256-bit integer
+    using KMER = typename KmerCollector::Kmer; // 64/128/256-bit KmerBOSS
+    using T_INT =typename KmerCollector::Value; // either KMER_INT or <KMER_INT, count>
 
     // name of the file containing dummy k-mers of given prefix length
     const auto get_file_name = [&tmp_dir](uint32_t pref_len) {
@@ -414,9 +415,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                               common::ChunkedWaitQueue> {})) {
                 recover_source_dummy_nodes_disk(kmer_collector_, &kmers, async_worker_);
             } else {
-                using KMER = typename KmerCollector::KmerType;
                 // kmer_collector stores (BOSS::k_ + 1)-mers
-                recover_source_dummy_nodes<KMER>(kmer_collector_.get_k() - 1,
+                recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
                                            kmer_collector_.num_threads(), &kmers);
             }
             logger->trace("Dummy source k-mers were reconstructed in {} sec",

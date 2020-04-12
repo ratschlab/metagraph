@@ -118,7 +118,7 @@ BitmapChunkConstructor<KmerCollector>::get_weights(uint8_t bits_per_count) {
 template <typename KmerCollector>
 DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>
 ::build_chunk() {
-    using KMER = typename KmerCollector::KmerType;
+    using KMER = typename KmerCollector::Kmer;
 
     const auto &kmers = kmer_collector_.data();
     std::unique_ptr<DBGBitmap::Chunk> chunk {
