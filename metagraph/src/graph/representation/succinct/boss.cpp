@@ -2118,7 +2118,7 @@ void call_path(const BOSS &boss,
                std::mutex &vector_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask) {
-    assert(!async || visited_ptr);
+    assert(!async || !kmers_in_single_form || visited_ptr);
 
     if (!kmers_in_single_form && !trim_sentinels) {
         callback(std::move(path), std::move(sequence));
