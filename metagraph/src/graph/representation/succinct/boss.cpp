@@ -1814,6 +1814,23 @@ void call_paths(const BOSS &boss,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask);
 
+template <class EdgeStorage, class AsyncEdgeStorage>
+void call_paths_from_queue(const BOSS &boss,
+                           EdgeStorage &edges,
+                           AsyncEdgeStorage &edges_async,
+                           const BOSS::Call<std::vector<edge_index>&&,
+                                            std::vector<TAlphabet>&&> &callback,
+                           ThreadPool *thread_pool,
+                           bool split_to_unitigs,
+                           bool kmers_in_single_form,
+                           bool trim_sentinels,
+                           sdsl::bit_vector &discovered,
+                           sdsl::bit_vector *visited_ptr,
+                           bool async,
+                           std::mutex &vector_mutex,
+                           ProgressBar &progress_bar,
+                           const bitmap *subgraph_mask);
+
 /**
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
@@ -1853,9 +1870,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         thread_pool = std::make_unique<ThreadPool>(num_threads);
     }
 
-    auto call_paths_from = [&](edge_index start) {
+    auto enqueue_start = [&](edge_index start) {
         if (async) {
-            assert(edges_async.empty());
             edges_async.emplace_back(thread_pool->enqueue([&](edge_index start) {
                 std::vector<Edge> edges;
                 edges.reserve(alph_size);
@@ -1865,47 +1881,16 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              async, vector_mutex, progress_bar, subgraph_mask);
                 return edges;
             }, start));
-
-            while (edges_async.size()) {
-                // iterate through the tasks and take the first one that's ready
-                auto it = edges_async.begin();
-                while (it != edges_async.end()
-                        && it->wait_for(std::chrono::microseconds(100))
-                            != std::future_status::ready) {
-                    ++it;
-                }
-
-                if (it == edges_async.end())
-                    continue;
-
-                auto next_edges = it->get();
-                edges_async.erase(it);
-                for (Edge next_edge : next_edges) {
-                    if (atomic_fetch_bit(discovered, next_edge.first))
-                        continue;
-
-                    edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
-                        std::vector<Edge> edges;
-                        edges.reserve(alph_size);
-                        ::call_paths(*this, std::move(next_edge), edges, callback,
-                                     split_to_unitigs, kmers_in_single_form,
-                                     trim_sentinels, &discovered, visited.get(),
-                                     async, vector_mutex, progress_bar, subgraph_mask);
-                        return edges;
-                    }, std::move(next_edge)));
-                }
-            }
         } else {
             edges.emplace_back(start, get_node_seq(start));
-            while (edges.size()) {
-                auto next_edge = std::move(edges.back());
-                edges.pop_back();
-                ::call_paths(*this, std::move(next_edge), edges, callback,
-                             split_to_unitigs, kmers_in_single_form,
-                             trim_sentinels, &discovered, visited.get(),
-                             async, vector_mutex, progress_bar, subgraph_mask);
-            }
         }
+    };
+
+    auto call_paths_from_queue = [&]() {
+        ::call_paths_from_queue(*this, edges, edges_async, callback, thread_pool.get(),
+                                split_to_unitigs, kmers_in_single_form, trim_sentinels,
+                                discovered, visited.get(), async, vector_mutex,
+                                progress_bar, subgraph_mask);
     };
 
     // start traversal from the source dummy edges first
@@ -1914,9 +1899,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     if (!subgraph_mask) {
         for (edge_index i = succ_last(1); i >= 1; --i) {
-            if (!discovered[i])
-                call_paths_from(i);
+            assert(!atomic_fetch_bit(discovered, i, async));
+            enqueue_start(i);
         }
+
+        call_paths_from_queue();
 
     } else {
         call_zeros(discovered, [&](edge_index i) {
@@ -1930,8 +1917,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 return;
 
             do {
-                if (!discovered[i])
-                    call_paths_from(i);
+                if (!discovered[i]) {
+                    enqueue_start(i);
+                    call_paths_from_queue();
+                }
             } while (--i > 0 && !get_last(i));
         });
     }
@@ -1948,13 +1937,77 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             return;
 
         do {
-            if (!discovered[i])
-                call_paths_from(i);
+            if (!discovered[i]) {
+                enqueue_start(i);
+                call_paths_from_queue();
+            }
         } while (--i > 0 && !get_last(i));
+
     });
 
     // process all the remaining cycles that have not been traversed
-    call_zeros(discovered, call_paths_from);
+    call_zeros(discovered, [&](edge_index i) {
+        enqueue_start(i);
+        call_paths_from_queue();
+    });
+}
+
+template <class EdgeStorage, class AsyncEdgeStorage>
+void call_paths_from_queue(const BOSS &boss,
+                           EdgeStorage &edges,
+                           AsyncEdgeStorage &edges_async,
+                           const BOSS::Call<std::vector<edge_index>&&,
+                                            std::vector<TAlphabet>&&> &callback,
+                           ThreadPool *thread_pool,
+                           bool split_to_unitigs,
+                           bool kmers_in_single_form,
+                           bool trim_sentinels,
+                           sdsl::bit_vector &discovered,
+                           sdsl::bit_vector *visited_ptr,
+                           bool async,
+                           std::mutex &vector_mutex,
+                           ProgressBar &progress_bar,
+                           const bitmap *subgraph_mask) {
+    if (async) {
+        while (edges_async.size()) {
+            // iterate through the tasks and take the first one that's ready
+            auto it = edges_async.begin();
+            while (it != edges_async.end()
+                    && it->wait_for(std::chrono::microseconds(100))
+                        != std::future_status::ready) {
+                ++it;
+            }
+
+            if (it == edges_async.end())
+                continue;
+
+            auto next_edges = it->get();
+            edges_async.erase(it);
+            for (Edge next_edge : next_edges) {
+                if (atomic_fetch_bit(discovered, next_edge.first))
+                    continue;
+
+                edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
+                    std::vector<Edge> edges;
+                    edges.reserve(boss.alph_size);
+                    ::call_paths(boss, std::move(next_edge), edges, callback,
+                                 split_to_unitigs, kmers_in_single_form,
+                                 trim_sentinels, &discovered, visited_ptr,
+                                 async, vector_mutex, progress_bar, subgraph_mask);
+                    return edges;
+                }, std::move(next_edge)));
+            }
+        }
+    } else {
+        while (edges.size()) {
+            auto next_edge = std::move(edges.back());
+            edges.pop_back();
+            ::call_paths(boss, std::move(next_edge), edges, callback,
+                         split_to_unitigs, kmers_in_single_form,
+                         trim_sentinels, &discovered, visited_ptr,
+                         async, vector_mutex, progress_bar, subgraph_mask);
+        }
+    }
 }
 
 void call_path(const BOSS &boss,
