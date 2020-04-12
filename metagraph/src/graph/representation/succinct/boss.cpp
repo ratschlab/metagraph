@@ -1668,10 +1668,12 @@ sdsl::bit_vector BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
  * is fully traversed and all edges are added to to the current BOSS table.
  * This function is well suited to merge small graphs into large ones.
  */
-void BOSS::merge(const BOSS &other) {
+void BOSS::merge(const BOSS &other, size_t num_threads) {
+    std::mutex seq_mutex;
     other.call_sequences([&](const std::string &sequence, auto&&) {
+        std::unique_lock<std::mutex> lock(seq_mutex);
         add_sequence(sequence, true);
-    });
+    }, false, NULL, num_threads);
 }
 
 void BOSS::call_start_edges(Call<edge_index> callback) const {
