@@ -1906,6 +1906,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         call_paths_from_queue();
 
     } else {
+        // TODO: precompute these points
         call_zeros(discovered, [&](edge_index i) {
             if (!get_last(i))
                 return;
@@ -1917,10 +1918,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 return;
 
             do {
-                if (!discovered[i]) {
-                    enqueue_start(i);
-                    call_paths_from_queue();
-                }
+                assert(!discovered[i]);
+                enqueue_start(i);
+                call_paths_from_queue();
             } while (--i > 0 && !get_last(i));
         });
     }
