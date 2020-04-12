@@ -57,7 +57,7 @@ int assemble(Config *config) {
                 std::ostringstream ostr;
                 ostr << "S\t" << path.back() << "\t" << unitig << "\n";
                 graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
-                    ostr << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M" << "\n";
+                    ostr << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M\n";
                 });
                 std::unique_lock<std::mutex> lock(str_mutex);
                 gfa_file << ostr.str();
