@@ -36,7 +36,7 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
             for (DeBruijnGraph::node_index node : path) {
-                async_set_bit(unitig_mask, node, async);
+                atomic_set_bit(unitig_mask, node, async);
             }
         }
     }, 1, false, get_num_threads());
