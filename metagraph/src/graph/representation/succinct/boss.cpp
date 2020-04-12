@@ -2147,17 +2147,30 @@ void call_path(const BOSS &boss,
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());
 
-    std::unique_lock<std::mutex> lock;
-
     size_t begin = 0;
 
     {
-        if (async) {
-            // sync all writes
-            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        std::unique_lock<std::mutex> lock;
 
-            // then lock all threads
-            lock = std::unique_lock<std::mutex>(vector_mutex);
+        if (async) {
+            bool has_full_dual = split_to_unitigs && std::all_of(
+                dual_path.begin(), dual_path.end(),
+                [&](edge_index edge) {
+                    return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
+                }
+            );
+
+            if (has_full_dual && (atomic_fetch_bit(*visited_ptr, path.front(), async)
+                    || atomic_fetch_bit(*visited_ptr, dual_path.back(), async))) {
+                return;
+            } else {
+                // sync all writes
+                __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+                // then lock all threads
+                lock = std::unique_lock<std::mutex>(vector_mutex);
+            }
+
         } else {
             std::for_each(path.begin(), path.end(), [&](edge_index edge) {
                 atomic_unset_bit(discovered, edge);
@@ -2168,9 +2181,6 @@ void call_path(const BOSS &boss,
         for (size_t i = 0; i < path.size(); ++i) {
             assert(path[i]);
             if (async) {
-                // TODO: Check to see if the first k-mer in a unitig has been
-                //       output. If so, it should be safe to unlock
-                std::ignore = split_to_unitigs;
                 atomic_set_bit(*visited_ptr, path[i], async);
             } else {
                 atomic_set_bit(discovered, path[i], async);
@@ -2208,9 +2218,6 @@ void call_path(const BOSS &boss,
             begin = i + 1;
         }
     }
-
-    // unlock mutex if it was ever locked
-    lock = std::unique_lock<std::mutex>();
 
     // Call the path traversed
     if (!begin) {
