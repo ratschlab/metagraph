@@ -2150,26 +2150,28 @@ void call_path(const BOSS &boss,
     size_t begin = 0;
 
     {
-        std::unique_lock<std::mutex> lock;
+        // sync all writes
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+        // then lock all threads
+        std::unique_lock<std::mutex> lock(vector_mutex);
 
         if (async) {
-            bool has_full_dual = split_to_unitigs && std::all_of(
-                dual_path.begin(), dual_path.end(),
-                [&](edge_index edge) {
-                    return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
+            if (split_to_unitigs && std::all_of(
+                    dual_path.begin(), dual_path.end(),
+                    [&](edge_index edge) {
+                        return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
+                    })) {
+                if (atomic_fetch_bit(*visited_ptr, path.front(), async)
+                        || (path.front() != dual_path.back()
+                            && atomic_fetch_bit(*visited_ptr, dual_path.back(), async))) {
+                    // if this unitig or its dual path has been printed already,
+                    // exit early
+                    return;
                 }
-            );
 
-            if (has_full_dual && (atomic_fetch_bit(*visited_ptr, path.front(), async)
-                    || (path.front() != dual_path.back()
-                        && atomic_fetch_bit(*visited_ptr, dual_path.back(), async)))) {
-                return;
-            } else {
-                // sync all writes
-                __atomic_thread_fence(__ATOMIC_SEQ_CST);
-
-                // then lock all threads
-                lock = std::unique_lock<std::mutex>(vector_mutex);
+                // TODO: when is it safe to unlock?
+                // lock.unlock();
             }
 
         } else {
