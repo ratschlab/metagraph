@@ -99,7 +99,7 @@ int clean_graph(Config *config) {
 
     timer.reset();
 
-    auto call_clean_contigs = [&](auto callback) {
+    auto call_clean_contigs = [&](auto callback, size_t num_threads) {
         if (config->min_unitig_median_kmer_abundance != 1) {
             assert(node_weights);
             if (!node_weights->is_compatible(*graph)) {
@@ -115,18 +115,16 @@ int clean_graph(Config *config) {
                                           *node_weights,
                                           config->min_unitig_median_kmer_abundance))
                     callback(unitig, path);
-            }, config->min_tip_size, graph->is_canonical_mode(), get_num_threads() - 1);
+            }, config->min_tip_size, graph->is_canonical_mode(), num_threads);
 
         } else if (config->unitigs || config->min_tip_size > 1) {
             graph->call_unitigs(callback,
                                 config->min_tip_size,
                                 graph->is_canonical_mode(),
-                                get_num_threads() - 1);
+                                num_threads);
 
         } else {
-            graph->call_sequences(callback,
-                                  graph->is_canonical_mode(),
-                                  get_num_threads() - 1);
+            graph->call_sequences(callback, graph->is_canonical_mode(), num_threads);
         }
     };
 
@@ -152,7 +150,7 @@ int clean_graph(Config *config) {
 
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 writer.write(contig, kmer_counts);
-            });
+            }, get_num_threads() - 1);
 
         } else {
             FastaWriter writer(outfbase, config->header,
@@ -162,7 +160,7 @@ int clean_graph(Config *config) {
             call_contigs([&](const std::string &contig, const auto &) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 writer.write(contig);
-            });
+            }, get_num_threads() - 1);
         }
     };
 
@@ -196,7 +194,7 @@ int clean_graph(Config *config) {
                     count_hist[weights[i]]++;
                     removed_nodes[i] = 0;
                 }
-            });
+            }, get_num_threads() - 1);
 
             call_ones(removed_nodes, [&weights](auto i) { weights[i] = 0; });
 
@@ -233,7 +231,7 @@ int clean_graph(Config *config) {
                     + "." + std::to_string(config->count_slice_quantiles[i]);
 
             if (!count_hist_v.size()) {
-                dump_contigs_to_fasta(filebase, [](auto) {});
+                dump_contigs_to_fasta(filebase, [](auto, auto) {});
                 continue;
             }
 
@@ -256,7 +254,7 @@ int clean_graph(Config *config) {
                 graph->is_canonical_mode()
             );
 
-            dump_contigs_to_fasta(filebase, [&](auto dump_sequence) {
+            dump_contigs_to_fasta(filebase, [&](auto dump_sequence, auto /* num_threads */) {
                 graph_slice.call_sequences(dump_sequence, graph_slice.is_canonical_mode());
             });
         }
