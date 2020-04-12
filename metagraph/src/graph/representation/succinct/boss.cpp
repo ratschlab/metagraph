@@ -310,7 +310,7 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
                         * sizeof(decltype(cached_suffix_ranges_)::value_type));
 
         if (!instream.good())
-            throw std::ios_base::failure("");
+            throw std::ifstream::failure("Bad stream");
 
         return true;
 
