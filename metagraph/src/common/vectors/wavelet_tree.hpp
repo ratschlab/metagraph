@@ -2,8 +2,7 @@
 #define __WAVELET_TREE_HPP__
 
 #include <cstdint>
-#include <mutex>
-#include <atomic>
+#include <cassert>
 
 #include <sdsl/wt_huff.hpp>
 #include <dynamic.hpp>
@@ -61,12 +60,16 @@ class wavelet_tree_sdsl_fast : public wavelet_tree_sdsl_augmented {
   public:
     typedef t_wt_sdsl wt_type;
 
-    explicit wavelet_tree_sdsl_fast(uint8_t logsigma,
-                                    uint64_t size = 0, TAlphabet c = 0);
+    explicit wavelet_tree_sdsl_fast(uint8_t logsigma)
+      : wavelet_tree_sdsl_fast(logsigma, sdsl::int_vector<>()) {}
+
     template <class Vector>
     wavelet_tree_sdsl_fast(uint8_t logsigma, const Vector &vector)
       : wavelet_tree_sdsl_fast(logsigma, pack_vector(vector, logsigma)) {}
     wavelet_tree_sdsl_fast(uint8_t logsigma, sdsl::int_vector<>&& vector);
+
+    wavelet_tree_sdsl_fast(uint8_t logsigma, const t_wt_sdsl &wwt)
+      : wavelet_tree_sdsl_fast(logsigma, t_wt_sdsl(wwt)) {}
     wavelet_tree_sdsl_fast(uint8_t logsigma, t_wt_sdsl&& wwt);
 
     uint64_t rank(TAlphabet c, uint64_t i) const;
@@ -103,11 +106,13 @@ class partite_vector : public wavelet_tree_sdsl_augmented {
   public:
     typedef t_bv bv_type;
 
-    explicit partite_vector(uint8_t logsigma,
-                            uint64_t size = 0, TAlphabet c = 0);
+    explicit partite_vector(uint8_t logsigma)
+      : partite_vector(logsigma, sdsl::int_vector<>()) {}
+
     template <class Vector>
     partite_vector(uint8_t logsigma, const Vector &vector)
       : partite_vector(logsigma, pack_vector(vector, logsigma)) {}
+
     partite_vector(uint8_t logsigma, sdsl::int_vector<>&& vector);
 
     uint64_t rank(TAlphabet c, uint64_t i) const;
@@ -177,13 +182,15 @@ class wavelet_tree_sdsl : public wavelet_tree {
     typedef t_wt_sdsl wt_type;
 
     explicit wavelet_tree_sdsl(uint8_t logsigma)
-      : logsigma_(logsigma), count_(1 << logsigma, 0) {}
+      : wavelet_tree_sdsl(logsigma, t_wt_sdsl()) {}
 
     template <class Vector>
     wavelet_tree_sdsl(uint8_t logsigma, const Vector &vector)
-      : wavelet_tree_sdsl(logsigma, t_wt_sdsl(pack_vector(vector, logsigma))) {}
+      : wavelet_tree_sdsl(logsigma, t_wt_sdsl(vector)) {}
 
-    wavelet_tree_sdsl(uint8_t logsigma, const t_wt_sdsl &wwt);
+    wavelet_tree_sdsl(uint8_t logsigma, const t_wt_sdsl &wwt)
+      : wavelet_tree_sdsl(logsigma, t_wt_sdsl(wwt)) {}
+
     wavelet_tree_sdsl(uint8_t logsigma, t_wt_sdsl&& wwt);
 
     uint64_t rank(TAlphabet c, uint64_t i) const;
