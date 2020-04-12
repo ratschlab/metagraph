@@ -312,12 +312,12 @@ prev_bit(const t_int_vec &v,
 template <class t_int_vec>
 inline bool atomic_fetch_and_set_bit(t_int_vec &v,
                                      size_t i,
-                                     bool async = false,
+                                     bool atomic = false,
                                      int memorder = __ATOMIC_SEQ_CST) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
-    if (async) {
+    if (atomic) {
         return (__atomic_fetch_or(&v.data()[i >> 6],
                                   1llu << (i & 0x3F),
                                   memorder) >> (i & 0x3F)) & 1;
@@ -335,9 +335,12 @@ inline bool atomic_fetch_and_set_bit(t_int_vec &v,
 template <class t_int_vec>
 inline bool atomic_fetch_and_unset_bit(t_int_vec &v,
                                        size_t i,
-                                       bool async = false,
+                                       bool atomic = false,
                                        int memorder = __ATOMIC_SEQ_CST) {
-    if (async) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    if (atomic) {
         return (__atomic_fetch_and(&v.data()[i >> 6],
                                    ~(1llu << (i & 0x3F)),
                                    memorder) >> (i & 0x3F)) & 1;
@@ -355,9 +358,12 @@ inline bool atomic_fetch_and_unset_bit(t_int_vec &v,
 template <class t_int_vec>
 inline bool atomic_fetch_bit(t_int_vec &v,
                              size_t i,
-                             bool async = false,
+                             bool atomic = false,
                              int memorder = __ATOMIC_SEQ_CST) {
-    return async
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    return atomic
         ? ((__atomic_load_n(&v.data()[i >> 6], memorder) >> (i & 0x3F)) & 1)
         : ((v.data()[i >> 6] >> (i & 0x3F)) & 1);
 }
@@ -365,9 +371,12 @@ inline bool atomic_fetch_bit(t_int_vec &v,
 template <class t_int_vec>
 inline void atomic_set_bit(t_int_vec &v,
                            size_t i,
-                           bool async = false,
+                           bool atomic = false,
                            int memorder = __ATOMIC_SEQ_CST) {
-    if (async) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    if (atomic) {
         __atomic_or_fetch(&v.data()[i >> 6], 1llu << (i & 0x3F), memorder);
     } else {
         v.data()[i >> 6] |= (1llu << (i & 0x3F));
@@ -377,9 +386,12 @@ inline void atomic_set_bit(t_int_vec &v,
 template <class t_int_vec>
 inline void atomic_unset_bit(t_int_vec &v,
                              size_t i,
-                             bool async = false,
+                             bool atomic = false,
                              int memorder = __ATOMIC_SEQ_CST) {
-    if (async) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    if (atomic) {
         __atomic_and_fetch(&v.data()[i >> 6], ~(1llu << (i & 0x3F)), memorder);
     } else {
         v.data()[i >> 6] &= ~(1llu << (i & 0x3F));
