@@ -13,7 +13,7 @@ findGTest()
 
 file(GLOB test_files "*.cpp")
 
-add_executable(test_utils ${test_files})
+add_library(test_utils ${test_files})
 
 target_include_directories(test_utils
     PRIVATE
