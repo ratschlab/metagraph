@@ -2161,7 +2161,8 @@ void call_path(const BOSS &boss,
             );
 
             if (has_full_dual && (atomic_fetch_bit(*visited_ptr, path.front(), async)
-                    || atomic_fetch_bit(*visited_ptr, dual_path.back(), async))) {
+                    || (path.front() != dual_path.back()
+                        && atomic_fetch_bit(*visited_ptr, dual_path.back(), async)))) {
                 return;
             } else {
                 // sync all writes
@@ -2204,9 +2205,8 @@ void call_path(const BOSS &boss,
                 continue;
             }
 
-            if (async && !atomic_fetch_and_set_bit(*visited_ptr, dual_path[i], async)) {
+            if (async && !atomic_fetch_and_set_bit(*visited_ptr, dual_path[i], async))
                 continue;
-            }
 
             // The reverse-complement k-mer had been visited
             // -> Skip this k-mer and call the traversed path segment.
