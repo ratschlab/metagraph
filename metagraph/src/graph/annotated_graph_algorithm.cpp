@@ -31,12 +31,12 @@ std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
                      const KeepUnitigPath &keep_unitig) {
     sdsl::bit_vector unitig_mask(graph.max_index() + 1, false);
-    bool async = get_num_threads() > 1;
+    bool atomic = get_num_threads() > 1;
 
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
             for (DeBruijnGraph::node_index node : path) {
-                atomic_set_bit(unitig_mask, node, async);
+                atomic_set_bit(unitig_mask, node, atomic);
             }
         }
     }, 1, false, get_num_threads());
