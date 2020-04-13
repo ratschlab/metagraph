@@ -1964,7 +1964,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     });
 
-    if (!split_to_unitigs)
+    if (split_to_unitigs)
         call_paths_from_queue();
 
     // process all the remaining disconnected cycles that have not been traversed
