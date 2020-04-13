@@ -38,6 +38,9 @@ const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 6;
 const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
 
+static const uint64_t kBlockSize = 9'999'872;
+static_assert(!(kBlockSize & 0xFF));
+
 
 BOSS::BOSS(size_t k)
       : alph_size(kmer_extractor_.alphabet.size()),
@@ -1906,23 +1909,38 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         call_paths_from_queue();
 
     } else {
-        // TODO: precompute these points
-        call_zeros(discovered, [&](edge_index i) {
-            if (!get_last(i))
-                return;
+        sdsl::bit_vector sources(discovered.size());
 
-            // skip |i| if it has at least one incoming edge
-            edge_index j = bwd(i);
-            masked_pick_single_incoming(*this, &j, get_node_last_value(i), subgraph_mask);
-            if (j)
-                return;
+        // mark all source edges in parallel
+        #pragma omp parallel for num_threads(num_threads)
+        for (size_t begin = 0; begin < discovered.size(); begin += kBlockSize) {
+            call_ones(*subgraph_mask,
+                begin,
+                std::min(begin + kBlockSize, discovered.size()),
+                [&](edge_index i) {
+                    if (!get_last(i))
+                        return;
 
-            do {
-                assert(!discovered[i]);
-                enqueue_start(i);
-                call_paths_from_queue();
-            } while (--i > 0 && !get_last(i));
+                    edge_index j = bwd(i);
+                    masked_pick_single_incoming(*this, &j, get_node_last_value(i), subgraph_mask);
+                    if (j)
+                        return;
+
+                    do {
+                        atomic_set_bit(sources, i, true);
+                    } while (--i > 0 && !get_last(i));
+                }
+            );
+        }
+
+
+        // then start traversals in parallel
+        call_ones(sources, [&](edge_index i) {
+            assert(!atomic_fetch_bit(discovered, i, async));
+            enqueue_start(i);
         });
+
+        call_paths_from_queue();
     }
 
     // then all forks
