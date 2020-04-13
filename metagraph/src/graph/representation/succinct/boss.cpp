@@ -1933,7 +1933,6 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             );
         }
 
-
         // then start traversals in parallel
         call_ones(sources, [&](edge_index i) {
             assert(!atomic_fetch_bit(discovered, i, async));
@@ -1955,15 +1954,21 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             return;
 
         do {
-            if (!discovered[i]) {
+            if (!atomic_fetch_bit(discovered, i, split_to_unitigs && async)) {
                 enqueue_start(i);
-                call_paths_from_queue();
+                if (!split_to_unitigs)
+                    call_paths_from_queue();
             }
+
         } while (--i > 0 && !get_last(i));
 
     });
 
-    // process all the remaining cycles that have not been traversed
+    if (!split_to_unitigs)
+        call_paths_from_queue();
+
+    // process all the remaining disconnected cycles that have not been traversed
+    // TODO: I don't see a way this part can be parallelized...
     call_zeros(discovered, [&](edge_index i) {
         enqueue_start(i);
         call_paths_from_queue();
