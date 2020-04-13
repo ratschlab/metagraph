@@ -1927,7 +1927,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                         return;
 
                     do {
-                        atomic_set_bit(sources, i, true);
+                        if ((*subgraph_mask)[i])
+                            atomic_set_bit(sources, i, true);
                     } while (--i > 0 && !get_last(i));
                 }
             );
@@ -1935,6 +1936,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         // then start traversals in parallel
         call_ones(sources, [&](edge_index i) {
+            assert((*subgraph_mask)[i]);
             assert(!atomic_fetch_bit(discovered, i, async));
             enqueue_start(i);
         });
