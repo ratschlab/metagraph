@@ -914,7 +914,7 @@ TEST(BOSS, CallPathsEmptyGraph) {
 }
 
 TEST(BOSS, CallUnitigsEmptyGraph) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 30; ++k) {
             BOSS empty(k);
 
@@ -932,7 +932,7 @@ TEST(BOSS, CallUnitigsEmptyGraph) {
 }
 
 TEST(BOSS, CallPathsOneLoop) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 20; ++k) {
             BOSS graph(k);
 
@@ -959,7 +959,7 @@ TEST(BOSS, CallPathsOneLoop) {
 }
 
 TEST(BOSS, CallUnitigsOneLoop) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 20; ++k) {
             BOSS graph(k);
 
@@ -986,7 +986,7 @@ TEST(BOSS, CallUnitigsOneLoop) {
 }
 
 TEST(BOSS, CallPathsTwoLoops) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 20; ++k) {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A') });
@@ -1015,7 +1015,7 @@ TEST(BOSS, CallPathsTwoLoops) {
 }
 
 TEST(BOSS, CallUnitigsTwoLoops) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 20; ++k) {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A') });
@@ -1044,7 +1044,7 @@ TEST(BOSS, CallUnitigsTwoLoops) {
 }
 
 TEST(BOSS, CallPathsFourLoops) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 20; ++k) {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
@@ -1075,7 +1075,7 @@ TEST(BOSS, CallPathsFourLoops) {
 }
 
 TEST(BOSS, CallUnitigsFourLoops) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 20; ++k) {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
@@ -1106,7 +1106,7 @@ TEST(BOSS, CallUnitigsFourLoops) {
 }
 
 TEST(BOSS, CallPaths) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             std::mutex seq_mutex;
             {
@@ -1196,7 +1196,7 @@ TEST(BOSS, CallPaths) {
 }
 
 TEST(BOSS, CallUnitigs) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             std::mutex seq_mutex;
             {
@@ -1286,7 +1286,7 @@ TEST(BOSS, CallUnitigs) {
 }
 
 TEST(BOSS, CallUnitigs1) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         BOSSConstructor constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT" });
@@ -1319,7 +1319,7 @@ TEST(BOSS, CallUnitigs1) {
 }
 
 TEST(BOSS, CallUnitigsDisconnected1) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         BOSSConstructor constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
@@ -1356,7 +1356,7 @@ TEST(BOSS, CallUnitigsDisconnected1) {
 
 #ifndef _DNA_GRAPH
 TEST(BOSS, CallUnitigsDisconnected2) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         BOSSConstructor constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
@@ -1394,7 +1394,7 @@ TEST(BOSS, CallUnitigsDisconnected2) {
 }
 
 TEST(BOSS, CallUnitigsTwoComponents) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         BOSSConstructor constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
@@ -1436,7 +1436,7 @@ TEST(BOSS, CallUnitigsTwoComponents) {
 #endif
 
 TEST(BOSS, CallUnitigsWithPruning) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         BOSSConstructor constructor(4);
         constructor.add_sequences({
             "ACTATAGCTAGTCTATGCGA",
@@ -1542,186 +1542,6 @@ TEST(BOSS, CallUnitigsWithPruning) {
             , 6, false, NULL, num_threads);
             EXPECT_EQ(contigs.size(), num_contigs);
         }
-    }
-}
-
-TEST(BOSS, CallUnitigsCheckDegree) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
-        std::vector<std::string> sequences {
-            "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
-            "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
-            "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATAACTGGAAAA",
-            "CCGAACTAGTGAAACTGCAACAGACATACGCTGCTCTGAACTCTAAGGC",
-            "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
-            "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGC",
-            "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAATTGGCTGAAAAGC",
-            "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
-        };
-
-        BOSSConstructor constructor(8);
-        constructor.add_sequences(sequences);
-        BOSS graph(&constructor);
-        ASSERT_EQ(8u, graph.get_k());
-
-        std::multiset<std::string> unitigs {
-            "AGACAAATCGCTCCACCAA",
-            "AGACAAATTGGCTGAAAAGC",
-            "ATCGGAAGAGCACACGTCTGAACT",
-            "CAGACATAACTGGAAAA",
-            "CAGACATACGCTGCTCTGAACT",
-            "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATA",
-            "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAAT",
-            "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCG",
-            "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
-            "CCGAACTAGTGAAACTGCAACAGACATA",
-            "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAAT",
-            "CTGAACTCCAGACACTAAGGCATCTCGTATGC",
-            "CTGAACTCTAAGGC",
-            "TCTGAACTC"
-        };
-
-        std::multiset<std::string> obs_unitigs;
-        std::mutex seq_mutex;
-        graph.call_unitigs(
-            [&](const auto &unitig, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(unitig));
-                std::unique_lock<std::mutex> lock(seq_mutex);
-                obs_unitigs.insert(unitig);
-            },
-            2,
-            false,
-            NULL,
-            num_threads
-        );
-
-        EXPECT_EQ(unitigs, obs_unitigs);
-    }
-}
-
-TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
-        std::vector<std::string> sequences {
-            "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
-            "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
-            "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATAACTGGAAAA",
-            "CCGAACTAGTGAAACTGCAACAGACATACGCTGCTCTGAACTCTAAGGC",
-            "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
-            "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGC",
-            "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAATTGGCTGAAAAGC",
-            "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
-        };
-
-        BOSSConstructor constructor(8);
-        constructor.add_sequences(sequences);
-        BOSS graph(&constructor);
-        ASSERT_EQ(8u, graph.get_k());
-
-        std::multiset<std::string> unitigs {
-            "AGACAAATCGCTCCACCAA",
-            "AGACAAATTGGCTGAAAAGC",
-            "ATCGGAAGAGCACACGTCTGAACT",
-            "CAGACATAACTGGAAAA",
-            "CAGACATACGCTGCTCTGAACT",
-            "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATA",
-            "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAAT",
-            "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCG",
-            "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
-            "CCGAACTAGTGAAACTGCAACAGACATA",
-            "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAAT",
-            "CTGAACTCCAGACACTAAGGCATCTCGTATGC",
-            "CTGAACTCTAAGGC",
-            "TCTGAACTC"
-        };
-
-        std::multiset<std::string> obs_unitigs;
-        std::mutex seq_mutex;
-        graph.call_unitigs(
-            [&](const auto &unitig, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(unitig));
-                std::unique_lock<std::mutex> lock(seq_mutex);
-                obs_unitigs.insert(unitig);
-            },
-            2,
-            false,
-            NULL,
-            num_threads
-        );
-
-        EXPECT_EQ(unitigs, obs_unitigs);
-    }
-}
-
-TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
-        std::vector<std::string> sequences {
-            "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
-            "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
-            "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
-        };
-
-        BOSSConstructor constructor(30);
-        constructor.add_sequences(sequences);
-        BOSS graph(&constructor);
-        ASSERT_EQ(30u, graph.get_k());
-
-        std::multiset<std::string> unitigs {
-            "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
-            "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
-            "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
-        };
-
-        std::multiset<std::string> obs_unitigs;
-        std::mutex seq_mutex;
-        graph.call_unitigs(
-            [&](const auto &unitig, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(unitig));
-                std::unique_lock<std::mutex> lock(seq_mutex);
-                obs_unitigs.insert(unitig);
-            },
-            2,
-            false,
-            NULL,
-            num_threads
-        );
-
-        EXPECT_EQ(unitigs, obs_unitigs);
-    }
-}
-
-TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
-        std::vector<std::string> sequences {
-            "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
-            "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
-            "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
-        };
-
-        BOSSConstructor constructor(30);
-        constructor.add_sequences(sequences);
-        BOSS graph(&constructor);
-        ASSERT_EQ(30u, graph.get_k());
-
-        std::multiset<std::string> unitigs {
-            "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
-            "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
-            "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
-        };
-
-        std::multiset<std::string> obs_unitigs;
-        std::mutex seq_mutex;
-        graph.call_unitigs(
-            [&](const auto &unitig, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(unitig));
-                std::unique_lock<std::mutex> lock(seq_mutex);
-                obs_unitigs.insert(unitig);
-            },
-            2,
-            false,
-            NULL,
-            num_threads
-        );
-
-        EXPECT_EQ(unitigs, obs_unitigs);
     }
 }
 

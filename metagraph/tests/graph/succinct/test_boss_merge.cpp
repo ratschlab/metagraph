@@ -9,7 +9,7 @@ const std::string test_data_dir = TEST_DATA_DIR;
 
 
 TEST(BOSSMerge, TraversalMergeWithEmpty) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -22,7 +22,7 @@ TEST(BOSSMerge, TraversalMergeWithEmpty) {
 }
 
 TEST(BOSSMerge, TraversalMergeEmpty) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -35,7 +35,7 @@ TEST(BOSSMerge, TraversalMergeEmpty) {
 }
 
 TEST(BOSSMerge, TraversalMergeEmptyRandomTest) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS random(k);
 
@@ -63,7 +63,7 @@ TEST(BOSSMerge, TraversalMergeEmptyRandomTest) {
 }
 
 TEST(BOSSMerge, TraversalMergeEqualPaths) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -79,7 +79,7 @@ TEST(BOSSMerge, TraversalMergeEqualPaths) {
 }
 
 TEST(BOSSMerge, TraversalMergeTwoPaths) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -95,7 +95,7 @@ TEST(BOSSMerge, TraversalMergeTwoPaths) {
 }
 
 TEST(BOSSMerge, TraversalMergeSinglePathWithTwo) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -112,7 +112,7 @@ TEST(BOSSMerge, TraversalMergeSinglePathWithTwo) {
 }
 
 TEST(BOSSMerge, TraversalMergeTwoGraphs) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -133,7 +133,7 @@ TEST(BOSSMerge, TraversalMergeTwoGraphs) {
 }
 
 TEST(BOSSMerge, TraversalMergeDisconnectedGraphs) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSSConstructor constructor_first(k);
             constructor_first.add_sequences({ std::string(100, 'A') });
@@ -162,7 +162,7 @@ TEST(BOSSMerge, TraversalMergeDisconnectedGraphs) {
 }
 
 TEST(BOSSMerge, ParallelMergeEmptyGraphs) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -190,7 +190,7 @@ TEST(BOSSMerge, ParallelMergeEmptyGraphs) {
 }
 
 TEST(BOSSMerge, ParallelMergeTwoPaths) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -220,7 +220,7 @@ TEST(BOSSMerge, ParallelMergeTwoPaths) {
 }
 
 TEST(BOSSMerge, ParallelMergeSinglePathWithTwo) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -251,7 +251,7 @@ TEST(BOSSMerge, ParallelMergeSinglePathWithTwo) {
 }
 
 TEST(BOSSMerge, ParallelMergeThreeGraphs) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -287,7 +287,7 @@ TEST(BOSSMerge, ParallelMergeThreeGraphs) {
 }
 
 TEST(BOSSMerge, ParallelChunkedMergeThreeGraphs) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
@@ -339,7 +339,7 @@ TEST(BOSSMerge, ParallelChunkedMergeThreeGraphs) {
 }
 
 TEST(BOSSMerge, ParallelDumpedChunkedMergeThreeGraphs) {
-    for (size_t num_threads = 0; num_threads < 3; ++num_threads) {
+    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
         for (size_t k = 1; k < 10; ++k) {
             BOSS first(k);
             BOSS second(k);
