@@ -1808,7 +1808,7 @@ void call_paths(const BOSS &boss,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
                 sdsl::bit_vector *discovered_ptr,
-                sdsl::bit_vector *visited_ptr,
+                sdsl::bit_vector *written_ptr,
                 bool async,
                 std::mutex &vector_mutex,
                 ProgressBar &progress_bar,
@@ -1825,7 +1825,7 @@ void call_paths_from_queue(const BOSS &boss,
                            bool kmers_in_single_form,
                            bool trim_sentinels,
                            sdsl::bit_vector &discovered,
-                           sdsl::bit_vector *visited_ptr,
+                           sdsl::bit_vector *writted_ptr,
                            bool async,
                            std::mutex &vector_mutex,
                            ProgressBar &progress_bar,
@@ -1862,10 +1862,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     std::unique_ptr<ThreadPool> thread_pool;
     bool async = num_threads > 1;
 
-    std::unique_ptr<sdsl::bit_vector> visited;
+    std::unique_ptr<sdsl::bit_vector> written;
     if (async) {
         if (kmers_in_single_form)
-            visited = std::make_unique<sdsl::bit_vector>(discovered);
+            written = std::make_unique<sdsl::bit_vector>(discovered);
 
         thread_pool = std::make_unique<ThreadPool>(num_threads);
     }
@@ -1877,7 +1877,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 edges.reserve(alph_size);
                 ::call_paths(*this, Edge(start, get_node_seq(start)), edges, callback,
                              split_to_unitigs, kmers_in_single_form,
-                             trim_sentinels, &discovered, visited.get(),
+                             trim_sentinels, &discovered, written.get(),
                              async, vector_mutex, progress_bar, subgraph_mask);
                 return edges;
             }, start));
@@ -1889,7 +1889,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     auto call_paths_from_queue = [&]() {
         ::call_paths_from_queue(*this, edges, edges_async, callback, thread_pool.get(),
                                 split_to_unitigs, kmers_in_single_form, trim_sentinels,
-                                discovered, visited.get(), async, vector_mutex,
+                                discovered, written.get(), async, vector_mutex,
                                 progress_bar, subgraph_mask);
     };
 
@@ -1963,7 +1963,7 @@ void call_paths_from_queue(const BOSS &boss,
                            bool kmers_in_single_form,
                            bool trim_sentinels,
                            sdsl::bit_vector &discovered,
-                           sdsl::bit_vector *visited_ptr,
+                           sdsl::bit_vector *written_ptr,
                            bool async,
                            std::mutex &vector_mutex,
                            ProgressBar &progress_bar,
@@ -1992,7 +1992,7 @@ void call_paths_from_queue(const BOSS &boss,
                     edges.reserve(boss.alph_size);
                     ::call_paths(boss, std::move(next_edge), edges, callback,
                                  split_to_unitigs, kmers_in_single_form,
-                                 trim_sentinels, &discovered, visited_ptr,
+                                 trim_sentinels, &discovered, written_ptr,
                                  async, vector_mutex, progress_bar, subgraph_mask);
                     return edges;
                 }, std::move(next_edge)));
@@ -2004,7 +2004,7 @@ void call_paths_from_queue(const BOSS &boss,
             edges.pop_back();
             ::call_paths(boss, std::move(next_edge), edges, callback,
                          split_to_unitigs, kmers_in_single_form,
-                         trim_sentinels, &discovered, visited_ptr,
+                         trim_sentinels, &discovered, written_ptr,
                          async, vector_mutex, progress_bar, subgraph_mask);
         }
     }
@@ -2019,7 +2019,7 @@ void call_path(const BOSS &boss,
                bool kmers_in_single_form,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
-               sdsl::bit_vector *visited_ptr,
+               sdsl::bit_vector *written_ptr,
                bool async,
                std::mutex &vector_mutex,
                ProgressBar &progress_bar,
@@ -2035,7 +2035,7 @@ void call_paths(const BOSS &boss,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
                 sdsl::bit_vector *discovered_ptr,
-                sdsl::bit_vector *visited_ptr,
+                sdsl::bit_vector *written_ptr,
                 bool async,
                 std::mutex &vector_mutex,
                 ProgressBar &progress_bar,
@@ -2055,14 +2055,14 @@ void call_paths(const BOSS &boss,
     sequence.reserve(100 + boss.get_k());
 
     // traverse simple path until we reach its tail or
-    // the first edge that has been already visited
+    // the first edge that has already been discovered
     while (!atomic_fetch_and_set_bit(discovered, edge, async)) {
         assert(edge > 0);
         assert(!subgraph_mask || (*subgraph_mask)[edge]);
-        assert(!visited_ptr || (async && kmers_in_single_form));
+        assert(!written_ptr || (async && kmers_in_single_form));
         ++progress_bar;
 
-        // visit the edge
+        // discover the edge
         TAlphabet w = boss.get_W(edge);
         TAlphabet d = w % boss.alph_size;
         sequence.push_back(d);
@@ -2120,11 +2120,11 @@ void call_paths(const BOSS &boss,
         do {
             assert((!subgraph_mask || (*subgraph_mask)[edge]
                 || atomic_fetch_bit(discovered, edge, async))
-                    && "k-mers not from subgraph are marked visited");
+                    && "k-mers not from subgraph are marked as discovered");
 
             if (!atomic_fetch_bit(discovered, edge, async)) {
                 if (!next_edge && !split_to_unitigs) {
-                    // save the edge for visiting if we extract contigs
+                    // save the edge for discovery if we extract contigs
                     next_edge = edge;
                 } else {
                     // discover other edges
@@ -2137,13 +2137,13 @@ void call_paths(const BOSS &boss,
         if (!next_edge)
             break;
 
-        // pick the last outgoing but not yet visited
+        // pick the last outgoing but not yet discovered
         // edge and continue traversing the graph
         edge = next_edge;
     }
 
     call_path(boss, callback, path, sequence, split_to_unitigs,
-              kmers_in_single_form, trim_sentinels, discovered, visited_ptr,
+              kmers_in_single_form, trim_sentinels, discovered, written_ptr,
               async, vector_mutex, progress_bar, subgraph_mask);
 }
 
@@ -2159,12 +2159,12 @@ void call_path(const BOSS &boss,
                bool kmers_in_single_form,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
-               sdsl::bit_vector *visited_ptr,
+               sdsl::bit_vector *written_ptr,
                bool async,
                std::mutex &vector_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask) {
-    assert(!async || !kmers_in_single_form || visited_ptr);
+    assert(!async || !kmers_in_single_form || written_ptr);
 
     if (!kmers_in_single_form && !trim_sentinels) {
         callback(std::move(path), std::move(sequence));
@@ -2218,11 +2218,11 @@ void call_path(const BOSS &boss,
                     [&](edge_index edge) {
                         return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
                     })) {
-                if (atomic_fetch_bit(*visited_ptr, path.front(), async)
+                // if this unitig or its dual path has been printed already,
+                // exit early
+                if (atomic_fetch_bit(*written_ptr, path.front(), async)
                         || (path.back() != dual_path.back()
-                            && atomic_fetch_bit(*visited_ptr, dual_path.back(), async))) {
-                    // if this unitig or its dual path has been printed already,
-                    // exit early
+                            && atomic_fetch_bit(*written_ptr, dual_path.back(), async))) {
                     return;
                 }
 
@@ -2235,11 +2235,11 @@ void call_path(const BOSS &boss,
             });
         }
 
-        // traverse the path with its dual and visit the nodes
+        // traverse the path with its dual and discover them
         for (size_t i = 0; i < path.size(); ++i) {
             assert(path[i]);
             if (async) {
-                atomic_set_bit(*visited_ptr, path[i], async);
+                atomic_set_bit(*written_ptr, path[i], async);
 
                 if (safe_to_unlock) {
                     safe_to_unlock = false;
@@ -2261,16 +2261,17 @@ void call_path(const BOSS &boss,
             // and thus, if the current edge path[i] is to be traversed first.
             if (!atomic_fetch_and_set_bit(discovered, dual_path[i], async)) {
                 ++progress_bar;
-                if (visited_ptr)
-                    atomic_set_bit(*visited_ptr, dual_path[i], async);
+                if (written_ptr)
+                    atomic_set_bit(*written_ptr, dual_path[i], async);
 
                 continue;
             }
 
-            if (async && !atomic_fetch_and_set_bit(*visited_ptr, dual_path[i], async))
+            // check if another thread has written the reverse-complement k-mer
+            if (async && !atomic_fetch_and_set_bit(*written_ptr, dual_path[i], async))
                 continue;
 
-            // The reverse-complement k-mer had been visited
+            // The reverse-complement k-mer had been discovered or written
             // -> Skip this k-mer and call the traversed path segment.
             if (begin < i) {
                 callback({ path.begin() + begin, path.begin() + i },
