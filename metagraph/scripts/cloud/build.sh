@@ -38,29 +38,20 @@ fi
 
 exit_code=0
 set +e
-for i in {1..1}; do  # we now know how much memory we need, so retrying is not necessary
-  if execute metagraph build -v -p 4 -k 31 --container "${container_type}" --canonical --state small --count-kmers --no-shrink -o "${output_dir}/${sra_number}" --mem-cap-gb ${mem_cap_gb} --tmp-dir ${tmp_dir} --disk-cap-gb 200 --count-width 16 ${input_dir}/${sra_number}.kmc.kmc_pre; then
-    exit_code=0
-    break
-  else
-    exit_code=1
-  fi
-  space=$(df -P "$output_dir" | tail -1 | awk '{print $4}')
-  if (( space < 2*mem_cap_gb )); then # we ran out of disk
-    echo_err "Not enough disk space to process $sra_number. $space bytes left. Giving up"
-    exit_code=2
-    break
-  fi
-  if (( mem_cap_gb > 2)); then
-    mem_cap_gb=$(( mem_cap_gb - 2 ))
-  else
-    echo_err "Build process for $sra_number died and memory size can't be reduced. Giving up."
-    exit_code=1
-    break
-  fi
-  execute rm -rf ${tmp_dir}
-  mkdir -p "${tmp_dir}"
-done
+if execute metagraph build -v -p 4 -k 31 --container "${container_type}" --canonical --state small --count-kmers --no-shrink -o "${output_dir}/${sra_number}" --mem-cap-gb ${mem_cap_gb} --tmp-dir ${tmp_dir} --disk-cap-gb 200 --count-width 16 ${input_dir}/${sra_number}.kmc.kmc_pre; then
+  exit_code=0
+else
+  exit_code=1
+fi
+space=$(df -P "$output_dir" | tail -1 | awk '{print $4}')
+if (( space < 2*mem_cap_gb )); then # we ran out of disk
+  echo_err "Not enough disk space to process $sra_number. $space bytes left. Giving up"
+  exit_code=2
+fi
+execute rm -rf ${tmp_dir}
+mkdir -p "${tmp_dir}"
+
+execute metagraph stats -p 4 --count-dummy "${output_dir}/${sra_number}.dbg" | grep "edges" > "${output_dir}/${sra_number}.stats"
 
 execute rm -rf "${input_dir}"
 if (( exit_code == 0 )); then

@@ -64,7 +64,7 @@ Download done: %s
 def get_work():
     global downloads_done
     if downloads_done or len(download_processes) >= MAX_DOWNLOAD_PROCESSES or len(
-            waiting_builds) >= 3 * MAX_BUILD_PROCESSES:
+            waiting_builds) >= 2 * MAX_BUILD_PROCESSES:
         return None
     url = f'http://{args.server}/jobs'
     for i in range(10):
@@ -250,6 +250,20 @@ def dir_size(dir_path):
     return round(total_size / 1000000, 2)
 
 
+# Simple sanity check for graph built: unique kmer count from KMC * 2 is equal to edges - dummy_source - dummy_sink
+def check_sanity(sra_id):
+    stat_file = open(os.path.join(build_dir(sra_id), f'{sra_id}.stats')).readlines()
+    if len(stat_file) != 3:
+        logging.error(f'Stat file should have 3 lines, but has ${len(stat_file)}')
+        return False
+    unique_kmers = int(stat_file[0].split(' ')[-1])
+    unique_kmers -= (int(stat_file[1].split(' ')[-1]) + int(stat_file[2].split(' ')[-1]))
+    sanity = unique_kmers == 2 * sra_info[sra_id][2]
+    if not sanity:
+        logging.error(f'Sanity check for graph build failed. Expected 2 * {sra_info[sra_id][2]} kmers, got {unique_kmers}')
+    return unique_kmers == 2 * sra_info[sra_id][2]  # *2 because we build a canonical graph
+
+
 def check_status():
     global must_quit
     if must_quit:
@@ -294,7 +308,8 @@ def check_status():
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
                           'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
                           'kmer_count_total': kmer_count_total, 'kmer_count_singletons': kmer_count_singletons}
-                sra_info[sra_id] = (*sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons, kmer_count_total)
+                sra_info[sra_id] = (
+                *sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons, kmer_count_total)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
@@ -324,8 +339,9 @@ def check_status():
             build_size = dir_size(build_path)
             if return_code == 0:
                 logging.info(f'Building graph for SRA id {sra_id} completed successfully.')
+                sanity = check_sanity(sra_id)
                 params = {'id': sra_id, 'time': int(time.time() - start_time),
-                          'wait_time': int(wait_time), 'size_mb': build_size}
+                          'wait_time': int(wait_time), 'size_mb': build_size, 'sanity': sanity}
                 ack('build', params)
                 waiting_cleans[sra_id] = (time.time())
             else:
@@ -404,7 +420,7 @@ def check_status():
                 kmer_count_unique = sra_info[sra_id][2]
                 kmer_count_singletons = sra_info[sra_id][3]
                 kmer_count_total = sra_info[sra_id][4]
-                coverage = kmer_count_total/kmer_count_unique
+                coverage = kmer_count_total / kmer_count_unique
                 fallback = 5 if coverage > 5 else 2 if coverage > 2 else 1
                 start_clean(sra_id, time.time() - start_time, kmer_count_singletons, fallback)
                 del waiting_cleans[sra_id]
@@ -436,7 +452,8 @@ def check_status():
                 buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
                 start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk')
         else:
-            logging.info(f'Not enough RAM for building {sra_id}. Have {round(available_ram_gb, 2)}GB need {required_ram_gb}GB')
+            logging.info(
+                f'Not enough RAM for building {sra_id}. Have {round(available_ram_gb, 2)}GB need {required_ram_gb}GB')
             waiting_builds[sra_id] = (start_time)
 
     for d in completed_transfers:
@@ -587,9 +604,9 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://mg28/clean/',
+    parser.add_argument('--destination', default='gs://mg29/clean/',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default='gs://mg28/logs',
+    parser.add_argument('--log_destination', default='gs://mg29/logs',
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
     args = parser.parse_args()
@@ -601,7 +618,7 @@ if __name__ == '__main__':
 
     if not args.server:
         logging.info('Trying to find server address...')
-        if subprocess.call(['gsutil', 'cp', 'gs://mg28/server', '/tmp/server'], stdout=subprocess.PIPE,
+        if subprocess.call(['gsutil', 'cp', 'gs://mg29/server', '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
             exit(1)
