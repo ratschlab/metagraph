@@ -76,8 +76,11 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
 
 sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
                                uint8_t bits_per_number) {
-    // TODO: why vector.width(bits_per_number) breaks things here?
-    return pack_vector(vector, bits_per_number);
+    if (bits_per_number == vector.width()) {
+        return std::move(vector);
+    } else {
+        return pack_vector(vector, bits_per_number);
+    }
 }
 
 uint64_t count_ones(const sdsl::bit_vector &vector,
