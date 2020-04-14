@@ -52,13 +52,13 @@ for sra_file in $(ls -p "${sra_dir}"); do
   fi
   rm -rf "${tmp_dir}/*"
   if (( exit_code != 0 )); then
-    echo_err "Download of $sra_id failed"
+    echo_err "[$sra_id] Download failed"
     exit $exit_code
   fi
 done
 
 if [ -z "$(ls -A ${sra_dir})" ]; then
-  echo_err "No SRA files available for $sra_id. Good-bye."
+  echo_err "[$sra_id] No SRA files available. Good-bye."
   exit 1
 fi
 
@@ -68,13 +68,15 @@ for i in $(ls -p "${fastq_dir}"); do
 done
 bin_count=$(( $(ulimit -n) - 10))
 kmc_output="${output_dir}/stats"
-execute kmc -k31 -ci1 -m2 -fq -cs65535 -n$bin_count -j$kmc_output @${kmc_input} ${kmc_dir}/${sra_id}.kmc $tmp_dir
+execute kmc -k31 -ci1 -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "${tmp_dir}"
 unique_kmers=$(jq -r ' .Stats | ."#Unique_k-mers"' $kmc_output)
 total_kmers=$(jq -r ' .Stats | ."#Total no. of k-mers"' $kmc_output)
 coverage=$((total_kmers/unique_kmers))
 if ((coverage >= 5)); then
-  echo "Coverage for $sra_id is $coverage, eliminating singletons"
-  execute kmc -k31 -ci2 -m2 -fq -cs65535 -n$bin_count -j$kmc_output @${kmc_input} ${kmc_dir}/${sra_id}.kmc $tmp_dir
+  echo "[$sra_id] Coverage is $coverage, eliminating singletons"
+  execute kmc -k31 -ci2 -m2 -fq -cs65535 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "$tmp_dir"
+else
+  echo "[$sra_id] Coverage is $coverage, keeping singletons"
 fi
 rm -rf "${tmp_dir}" "${fastq_dir}"
 
