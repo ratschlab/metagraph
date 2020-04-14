@@ -132,7 +132,7 @@ def start_download(download_resp):
         download_processes[sra_id] = (subprocess.Popen(['./download_ena.sh', sra_id, download_dir_base()]), time.time())
     else:
         if not download_resp['bucket']:
-            logging.fatal('Specified NCBI as download source, but server response has no "bucket" field')
+            logging.fatal(f'[{sra_id}] Specified NCBI as download source, but server response has no "bucket" field')
         make_dir_if_needed(download_dir(sra_id))
         log_file_name = os.path.join(download_dir(sra_id), 'download.log')
         bucket = download_resp['bucket']
@@ -153,7 +153,7 @@ def internal_ip():
 def start_build(sra_id, wait_time, buffer_size_gb, container_type):
     input_dir = download_dir(sra_id)
     output_dir = build_dir(sra_id)
-    logging.info(f'Starting build from {input_dir} to {output_dir}, ram={round(buffer_size_gb, 2)}')
+    logging.info(f'[{sra_id}] Starting build from {input_dir} to {output_dir}, ram={round(buffer_size_gb, 2)}')
     make_dir_if_needed(build_dir(sra_id))
     log_file_name = os.path.join(build_dir(sra_id), 'build.log')
     build_processes[sra_id] = (subprocess.Popen(
@@ -173,7 +173,7 @@ def start_clean(sra_id, wait_time, kmer_count_singletons, fallback):
     input_file = build_file(sra_id)
     make_dir_if_needed(clean_dir(sra_id))
     output_file = os.path.join(clean_dir(sra_id), sra_id)
-    logging.info(f'Starting clean with {input_file} {output_file}')
+    logging.info(f'[{sra_id}] Starting clean with {input_file} {output_file}')
     clean_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
     clean_processes[sra_id] = (
         subprocess.Popen(
@@ -254,13 +254,14 @@ def dir_size(dir_path):
 def check_sanity(sra_id):
     stat_file = open(os.path.join(build_dir(sra_id), f'{sra_id}.stats')).readlines()
     if len(stat_file) != 3:
-        logging.error(f'Stat file should have 3 lines, but has ${len(stat_file)}')
+        logging.error(f'[{sra_id}] Stat file should have 3 lines, but has ${len(stat_file)}')
         return False
     unique_kmers = int(stat_file[0].split(' ')[-1])
     unique_kmers -= (int(stat_file[1].split(' ')[-1]) + int(stat_file[2].split(' ')[-1]))
     sanity = unique_kmers == 2 * sra_info[sra_id][2]
     if not sanity:
-        logging.error(f'Sanity check for graph build failed. Expected 2 * {sra_info[sra_id][2]} kmers, got {unique_kmers}')
+        logging.error(
+            f'[{sra_id}] Sanity check for graph build failed. Expected 2 * {sra_info[sra_id][2]} kmers, got {unique_kmers}')
     return unique_kmers == 2 * sra_info[sra_id][2]  # *2 because we build a canonical graph
 
 
@@ -275,7 +276,7 @@ def check_status():
         if return_code is not None or is_timed_out:
             completed_downloads.add(sra_id)
             log_file_name = os.path.join(download_dir(sra_id), 'download.log')
-            logging.info(f'Download finished with output\n {open(log_file_name).read()}')
+            logging.info(f'\n\n\n[{sra_id}] Download finished with output\n {open(log_file_name).read()}\n\n\n')
             download_path = download_dir(sra_id)
             sra_dir = os.path.join(download_path, 'sra')
             download_size_mb = dir_size(sra_dir)
@@ -297,10 +298,10 @@ def check_status():
                         kmer_count_total = int(json_resp['Stats']['#Total no. of k-mers'])
                         kmer_count_singletons = int(json_resp['Stats']['#k-mers_below_min_threshold'])
                     else:
-                        logging.warning('KMC returned no stats, assuming failure')
+                        logging.warning('[{sra_id}] KMC returned no stats, assuming failure')
                         success = False
                 except FileNotFoundError:
-                    logging.warning(f'Could not find KMC stats file {stats_file}, baling out.')
+                    logging.warning(f'[{sra_id}] Could not find KMC stats file {stats_file}, baling out.')
                     success = False
             else:
                 success = False
@@ -309,7 +310,7 @@ def check_status():
                           'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
                           'kmer_count_total': kmer_count_total, 'kmer_count_singletons': kmer_count_singletons}
                 sra_info[sra_id] = (
-                *sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons, kmer_count_total)
+                    *sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons, kmer_count_total)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
@@ -328,11 +329,11 @@ def check_status():
         if return_code is not None:
             completed_builds.add(sra_id)
             log_file_name = os.path.join(build_dir(sra_id), 'build.log')
-            logging.info(f'Build finished with output\n {open(log_file_name).read()}')
+            logging.info(f'\n\n\n[{sra_id}] Build finished with output\n {open(log_file_name).read()}\n\n\n')
 
             # clean up the download path; if adding retries, do this only on success
             download_path = download_dir(sra_id)
-            logging.info(f'Cleaning up {download_path}')
+            logging.info(f'[{sra_id}] Cleaning up {download_path}')
             subprocess.run(['rm', '-rf', download_path])
 
             build_path = build_dir(sra_id)
@@ -359,11 +360,11 @@ def check_status():
         if return_code is not None:
             completed_cleans.add(sra_id)
             log_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
-            logging.info(f'Clean finished with output\n {open(log_file_name).read()}')
+            logging.info(f'\n\n\n[{sra_id}] Clean finished with output\n {open(log_file_name).read()}\n\n\n')
 
             # clean up the original graph; if adding retries, do this only on success
             build_path = build_dir(sra_id)
-            logging.info(f'Cleaning up {build_path}')
+            logging.info(f'[{sra_id}] Cleaning up {build_path}')
             subprocess.run(['rm', '-rf', build_path])
 
             cleaned_dir = clean_dir(sra_id)
@@ -392,7 +393,7 @@ def check_status():
             # clean up the cleaned graph; if adding retries, do this only on success
             clean_path = clean_dir(sra_id)
             cleaned_size = dir_size(clean_path)
-            logging.info(f'Cleaning up {clean_path}')
+            logging.info(f'[{sra_id}] Cleaning up {clean_path}')
             subprocess.run(['rm', '-rf', clean_path])
 
             if return_code == 0:
@@ -423,7 +424,7 @@ def check_status():
                 coverage = kmer_count_total / kmer_count_unique
                 fallback = 5 if coverage > 5 else 2 if coverage > 2 else 1
                 # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
-                start_clean(sra_id, time.time() - start_time, 2*kmer_count_singletons, fallback)
+                start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, fallback)
                 del waiting_cleans[sra_id]
                 break
             logging.info(f'Not enough RAM for cleaning {sra_id}. '
@@ -432,14 +433,15 @@ def check_status():
     if 3 * (len(build_processes) + 1) + len(clean_processes) <= CORES and waiting_builds:
         sra_id, (start_time) = waiting_builds.popitem()
         num_kmers = sra_info[sra_id][2]
-        # estimated RAM needed for loading graph in memory; 1 bytes/kmer, 2 byte/kmer-count, 1 extra for dummy kmers
-        required_ram_gb = round((num_kmers * 4) / 1e9 + 1, 2)
-        logging.info(f'Estimated {required_ram_gb}GB needed for building')
+        # estimated RAM needed for loading graph in memory; 0.6 bytes/kmer (for --small representation),
+        # 2 byte/kmer-count; the 3.5 comes from 2x canonical+non-canonical + ~1.5 for dummy kmers
+        required_ram_gb = round((num_kmers * 3.5 * (2 + 0.6)) / 1e9 + 0.5, 2)
+        logging.info(f'[{sra_id}] Estimated {required_ram_gb}GB needed for building')
         total_ram_gb = psutil.virtual_memory().total / 1e9
         if required_ram_gb > total_ram_gb - 3:
             build_path = build_dir(sra_id)
-            logging.warning(f'Building graph for SRA id {sra_id} needs too much RAM '
-                            f'({required_ram_gb}GB). Removing {build_path}.')
+            logging.warning(
+                f'Building graph for SRA id {sra_id} needs too much RAM: {required_ram_gb}GB). Removing {build_path}.')
             subprocess.run(['rm', '-rf', build_path])
             params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
                       'size_mb': build_size, 'required_ram_gb': required_ram_gb}
@@ -475,7 +477,7 @@ def do_work():
         if 'download' in work_response:
             start_download(work_response['download'])
         else:
-            logging.error(f'Server response invalid. Expected a \'download\' tag: {work_response}')
+            logging.error(f'[{sra_id}] Server response invalid. Expected a \'download\' tag: {work_response}')
         subprocess.Popen(
             [f'gsutil rsync -x \'(?!^client.log$)\' {args.output_dir} {args.log_destination}/{internal_ip()}/'],
             shell=True,

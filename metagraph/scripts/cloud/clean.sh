@@ -24,9 +24,6 @@ input_file=$2
 output_file=$3
 num_singletons=$4
 fallback=$5
-if ((num_singletons < 100)); then # just in case we have a few kmers that are errors
-  num_singletons_s=0
-fi
 
 execute metagraph clean -v -p 2 --min-count 1 --num-singletons "${num_singletons}"  --prune-unitigs 0 --fallback "${fallback}" --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
 rm -rf $(dirname "${input_file}")
