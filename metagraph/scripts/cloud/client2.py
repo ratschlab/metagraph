@@ -422,7 +422,8 @@ def check_status():
                 kmer_count_total = sra_info[sra_id][4]
                 coverage = kmer_count_total / kmer_count_unique
                 fallback = 5 if coverage > 5 else 2 if coverage > 2 else 1
-                start_clean(sra_id, time.time() - start_time, kmer_count_singletons, fallback)
+                # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
+                start_clean(sra_id, time.time() - start_time, 2*kmer_count_singletons, fallback)
                 del waiting_cleans[sra_id]
                 break
             logging.info(f'Not enough RAM for cleaning {sra_id}. '
@@ -604,9 +605,9 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://mg29/clean/',
+    parser.add_argument('--destination', default='gs://mg30/clean/',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default='gs://mg29/logs',
+    parser.add_argument('--log_destination', default='gs://mg30/logs',
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
     args = parser.parse_args()
@@ -618,7 +619,7 @@ if __name__ == '__main__':
 
     if not args.server:
         logging.info('Trying to find server address...')
-        if subprocess.call(['gsutil', 'cp', 'gs://mg29/server', '/tmp/server'], stdout=subprocess.PIPE,
+        if subprocess.call(['gsutil', 'cp', 'gs://mg30/server', '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
             exit(1)
