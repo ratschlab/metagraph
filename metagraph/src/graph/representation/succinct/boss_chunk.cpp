@@ -400,7 +400,7 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
 void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     assert(graph->W_);
     delete graph->W_;
-    graph->W_ = new wavelet_tree_stat(get_W_width(), std::move(W_));
+    graph->W_ = new wavelet_tree_small(get_W_width(), std::move(W_));
     W_ = decltype(W_)();
 
     assert(graph->last_);
@@ -414,7 +414,7 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
 
     graph->k_ = k_;
 
-    graph->state = BOSS::State::STAT;
+    graph->state = BOSS::State::SMALL;
 
     if (weights)
         *weights = std::move(weights_);
@@ -545,7 +545,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     assert(F.size());
 
     delete graph->W_;
-    graph->W_ = new wavelet_tree_stat(W.width(), std::move(W));
+    graph->W_ = new wavelet_tree_small(W.width(), std::move(W));
     W = decltype(W)();
 
     delete graph->last_;
@@ -555,7 +555,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     graph->F_ = std::move(F);
     graph->recompute_NF();
 
-    graph->state = BOSS::State::STAT;
+    graph->state = BOSS::State::SMALL;
 
     assert(graph->is_valid());
 

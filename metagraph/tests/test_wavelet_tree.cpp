@@ -364,7 +364,7 @@ TYPED_TEST(WaveletTreeTest, Serialization) {
     outstream.close();
     delete vector;
 
-    vector = new TypeParam(4);
+    vector = new TypeParam(1);
     ASSERT_TRUE(vector);
     std::ifstream instream(test_dump_basename);
     ASSERT_TRUE(vector->load(instream));
@@ -403,6 +403,36 @@ TYPED_TEST(WaveletTreeTest, MoveAssignment) {
     second = std::move(first);
 
     reference_based_test(second, numbers);
+}
+
+template <class FirstType, class SecondType>
+void test_convert_to(const sdsl::int_vector<> &vector) {
+    FirstType first(vector.width(), vector);
+
+    ASSERT_EQ(vector.size(), first.size());
+    ASSERT_EQ(vector.width(), first.logsigma());
+    ASSERT_EQ(vector, first.to_vector());
+
+    SecondType second = first.template convert_to<SecondType>();
+
+    EXPECT_EQ(vector.size(), second.size());
+    EXPECT_EQ(vector.width(), second.logsigma());
+    EXPECT_EQ(vector, second.to_vector());
+}
+
+TYPED_TEST(WaveletTreeTest, Convert) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+
+    sdsl::int_vector<> int_vector(numbers.size(), 0, 2);
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        int_vector[i] = numbers[i];
+    }
+
+    test_convert_to<TypeParam, wavelet_tree_stat>(int_vector);
+    test_convert_to<TypeParam, wavelet_tree_fast>(int_vector);
+    test_convert_to<TypeParam, wavelet_tree_dyn>(int_vector);
+    test_convert_to<TypeParam, wavelet_tree_small>(int_vector);
 }
 
 TYPED_TEST(WaveletTreeTest, BeyondTheDNA) {

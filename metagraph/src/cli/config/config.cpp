@@ -561,13 +561,13 @@ Config::Config(int argc, char *argv[]) {
 std::string Config::state_to_string(BOSS::State state) {
     switch (state) {
         case BOSS::State::STAT:
-            return "fast";
+            return "stat-obsolete";
         case BOSS::State::DYN:
             return "dynamic";
         case BOSS::State::SMALL:
             return "small";
         case BOSS::State::FAST:
-            return "faster";
+            return "fast";
         default:
             assert(false);
             return "Never happens";
@@ -575,13 +575,13 @@ std::string Config::state_to_string(BOSS::State state) {
 }
 
 BOSS::State Config::string_to_state(const std::string &string) {
-    if (string == "fast") {
+    if (string == "stat-obsolete") {
         return BOSS::State::STAT;
     } else if (string == "dynamic") {
         return BOSS::State::DYN;
     } else if (string == "small") {
         return BOSS::State::SMALL;
-    } else if (string == "faster") {
+    } else if (string == "fast") {
         return BOSS::State::FAST;
     } else {
         throw std::runtime_error("Error: unknown graph state");
@@ -858,7 +858,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [small]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");

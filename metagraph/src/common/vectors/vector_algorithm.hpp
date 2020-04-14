@@ -28,6 +28,9 @@ sdsl::int_vector<> pack_vector(const Vector &vector, uint8_t bits_per_number) {
     return packed;
 }
 
+sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
+                               uint8_t bits_per_number);
+
 
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector,

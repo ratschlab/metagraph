@@ -74,6 +74,15 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     return result;
 }
 
+sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
+                               uint8_t bits_per_number) {
+    if (bits_per_number == vector.width()) {
+        return std::move(vector);
+    } else {
+        return pack_vector(vector, bits_per_number);
+    }
+}
+
 uint64_t count_ones(const sdsl::bit_vector &vector,
                     uint64_t begin, uint64_t end) {
     assert(begin <= end);
