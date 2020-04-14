@@ -605,9 +605,9 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://mg30/clean/',
+    parser.add_argument('--destination', default='gs://mg31/clean/',
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default='gs://mg30/logs',
+    parser.add_argument('--log_destination', default='gs://mg31/logs',
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
     args = parser.parse_args()
@@ -619,7 +619,7 @@ if __name__ == '__main__':
 
     if not args.server:
         logging.info('Trying to find server address...')
-        if subprocess.call(['gsutil', 'cp', 'gs://mg30/server', '/tmp/server'], stdout=subprocess.PIPE,
+        if subprocess.call(['gsutil', 'cp', 'gs://mg31/server', '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
             exit(1)
