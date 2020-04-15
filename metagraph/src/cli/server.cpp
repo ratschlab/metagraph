@@ -22,6 +22,8 @@ using mg::common::logger;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
+const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
+
 Json::Value adjust_for_types(const string &v) {
     if(v == "nan") {
         return Json::nullValue;
@@ -42,8 +44,13 @@ string convert_to_json(const string &ret_str) {
     for (auto qit = queries.begin(); qit != queries.end(); ++qit) {
         vector<string> parts = utils::split_string(*qit, "\t");
 
+        // no sequences found
+        if(parts.size() <= 2) {
+            continue;
+        }
+
         Json::Value res_obj;
-        res_obj["query"] =  parts[1];
+        res_obj[SEQ_DESCRIPTION_JSON_FIELD] = utils::split_string(parts[1], ":")[0];
 
         res_obj["results"] = Json::Value(Json::arrayValue);
 
@@ -110,8 +117,6 @@ std::string form_client_reply(const std::string &received_message,
                               const Config &config_orig,
                               IDBGAligner *aligner,
                               ThreadPool &thread_pool) {
-    // TODO: query with alignment to graph
-    std::ignore = aligner;
     Json::Value json = parse_json_string(received_message);
 
     const auto &fasta = json["FASTA"];
@@ -122,10 +127,10 @@ std::string form_client_reply(const std::string &received_message,
     config.discovery_fraction = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
     config.count_labels = json.get("count_labels", config.count_labels).asBool();
-    config.print_signature = json.get("print_signature", config.print_signature).asBool();
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
-
     config.fast = json.get("fast", config.fast).asBool();
+
+    bool do_alignment = json.get("align", false).asBool();
 
     std::ostringstream oss;
 
@@ -140,7 +145,9 @@ std::string form_client_reply(const std::string &received_message,
 
         std::mutex oss_mutex;
 
-        QueryExecutor qe(config, anno_graph, nullptr, thread_pool);
+        QueryExecutor qe(config, anno_graph,
+                do_alignment ? aligner : nullptr,
+                thread_pool);
         qe.query_fasta(tf.name(), [&](const std::string res){
           std::lock_guard<std::mutex> lock(oss_mutex);
           oss << res;
@@ -172,7 +179,7 @@ std::string form_align_reply(const std::string &received_message,
         const auto paths = aligner->align(query);
 
         Json::Value align_entry;
-        align_entry["name"] = name;
+        align_entry[SEQ_DESCRIPTION_JSON_FIELD] = name;
 
         // not supporting reverse complement yet
         if(!paths.empty()) {
@@ -297,7 +304,6 @@ int run_server(Config *config) {
 
     server.config.port = config->port;
 
-    ThreadPool query_thread_pool(num_threads);
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
         // Retrieve string:
         auto content = request->content.string();
@@ -305,6 +311,7 @@ int run_server(Config *config) {
         logger->info("Got search request from " + request->remote_endpoint().address().to_string());
 
         try {
+            ThreadPool query_thread_pool(num_threads); // TODO: smarter way to determine how many threads to use?
             auto ret = form_client_reply(content, *anno_graph, *config, aligner.get(), query_thread_pool);
             write_compressed_if_possible(SimpleWeb::StatusCode::success_ok, ret, response, request);
         }  catch(const std::exception &e) {
