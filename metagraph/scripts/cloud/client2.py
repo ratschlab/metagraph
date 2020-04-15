@@ -21,6 +21,7 @@ args = None
 
 sra_info = {}  # global information about a processed SRA (for now, time only)
 
+pending_processes = []
 download_processes = {}
 build_processes = {}
 clean_processes = {}
@@ -132,11 +133,21 @@ def destination_dir(sra_id):
     return os.path.join(args.destination, result)
 
 
+def dump_pending(sra_ids):
+    ids = ','.join(sra_ids)
+    url = f'http://{args.server}/jobs/preempt'
+    data = f'client_id={internal_ip()}&ids={ids}'
+    with open('/tmp/shutdown.sh', 'w') as f:
+        f.write(f'curl --data "{data}&reason=shutdown" "{url}"')
+
+
 def start_download(download_resp):
     if 'id' not in download_resp:
         logging.info('No more downloads available. We\'re almost done!')
         return
     sra_id = download_resp['id']
+    pending_processes.append(sra_id)
+    dump_pending(pending_processes)
     if args.source == 'ena':
         download_processes[sra_id] = (subprocess.Popen(['./download_ena.sh', sra_id, download_dir_base()]), time.time())
     else:
@@ -195,6 +206,11 @@ def start_clean(sra_id, wait_time, kmer_count_singletons, fallback):
 def start_transfer(sra_id, cleaned_graph_location):
     transfer_processes[sra_id] = (subprocess.Popen(
         f'gsutil -q -u metagraph cp -r {cleaned_graph_location} {destination_dir(sra_id)}', shell=True), time.time())
+    if sra_id in pending_processes:
+        pending_processes.remove(sra_id)
+        dump_pending(pending_processes)
+    else:
+        logging.error(f'[sra_id] just transferred successfully but not present in pending_ids. Something is messed up.')
 
 
 def ack(operation, params):
@@ -555,6 +571,9 @@ def handle_quit():
         except:
             logging.error(f'Failed to open URL {url} Reason: unknown.')
             time.sleep(5)  # wait a bit and try again
+    global pending_processes
+    pending_processes = []
+    dump_pending(pending_processes)
     global must_quit
     must_quit = True
     for k, v in download_processes.items():
