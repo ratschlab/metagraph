@@ -23,6 +23,8 @@ using mg::common::logger;
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
 const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
+const std::string SCORE_JSON_FIELD = "score";
+const std::string SEQUENCE_JSON_FIELD = "sequence";
 
 Json::Value adjust_for_types(const string &v) {
     if(v == "nan") {
@@ -50,7 +52,15 @@ string convert_to_json(const string &ret_str) {
         }
 
         Json::Value res_obj;
-        res_obj[SEQ_DESCRIPTION_JSON_FIELD] = utils::split_string(parts[1], ":")[0];
+        vector<string> query_desc_parts = utils::split_string(parts[1], ":");
+        res_obj[SEQ_DESCRIPTION_JSON_FIELD] = query_desc_parts[0];
+
+        if(query_desc_parts.size() > 1) {
+            // we aligned first, so extracting aligned sequence and score:
+
+            res_obj[SEQUENCE_JSON_FIELD] = query_desc_parts[1];
+            res_obj[SCORE_JSON_FIELD] = (int) atoi(query_desc_parts[2].c_str());
+        }
 
         res_obj["results"] = Json::Value(Json::arrayValue);
 
@@ -185,10 +195,10 @@ std::string form_align_reply(const std::string &received_message,
         if(!paths.empty()) {
             auto path = paths.front();
 
-            align_entry["score"] = path.get_score();
-            align_entry["sequence"] = path.get_sequence();
+            align_entry[SCORE_JSON_FIELD] = path.get_score();
+            align_entry[SEQUENCE_JSON_FIELD] = path.get_sequence();
         } else {
-            align_entry["sequence"] = "";
+            align_entry[SEQUENCE_JSON_FIELD] = "";
         }
 
         root.append(align_entry);
