@@ -267,11 +267,11 @@ def check_sanity(sra_id):
         return False
     unique_kmers = int(stat_file[0].split(' ')[-1])
     unique_kmers -= (int(stat_file[1].split(' ')[-1]) + int(stat_file[2].split(' ')[-1]))
-    sanity = unique_kmers == 2 * sra_info[sra_id][2]
+    sanity = unique_kmers == 2 * sra_info[sra_id][2]  # *2 because we build a canonical graph
     if not sanity:
         logging.error(
             f'[{sra_id}] Sanity check for graph build failed. Expected 2 * {sra_info[sra_id][2]} kmers, got {unique_kmers}')
-    return unique_kmers == 2 * sra_info[sra_id][2]  # *2 because we build a canonical graph
+    return sanity
 
 
 def tab(string_list):
@@ -309,12 +309,12 @@ def check_status():
                 try:
                     with open(stats_file) as stats:
                         json_resp = json.loads(stats.read())
-                    if 'Stats' in json_resp and '#Unique_counted_k-mers' in json_resp['Stats']:
-                        kmer_count_unique = int(json_resp['Stats']['#Unique_counted_k-mers'])
-                        kmer_count_total = int(json_resp['Stats']['#Total no. of k-mers'])
-                        kmer_count_singletons = int(json_resp['Stats']['#k-mers_below_min_threshold'])
+                    if '#k-mers_coverage' in json_resp and '#k-mers_below_min_threshold' in json_resp:
+                        kmer_count_unique = int(json_resp['#Unique_counted_k-mers'])
+                        kmer_coverage = int(json_resp['#k-mers_coverage'])
+                        kmer_count_singletons = int(json_resp['#k-mers_below_min_threshold'])
                     else:
-                        logging.warning(f'[{sra_id}] KMC returned no stats, assuming failure')
+                        logging.warning(f'[{sra_id}] Invalid KMC stat files, assuming failure')
                         success = False
                 except FileNotFoundError:
                     logging.warning(f'[{sra_id}] Could not find KMC stats file {stats_file}, baling out.')
@@ -324,9 +324,9 @@ def check_status():
             if success:
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
                           'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
-                          'kmer_count_total': kmer_count_total, 'kmer_count_singletons': kmer_count_singletons}
+                          'kmer_coverage': kmer_coverage, 'kmer_count_singletons': kmer_count_singletons}
                 sra_info[sra_id] = (
-                    *sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons, kmer_count_total)
+                    *sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_coverage, kmer_count_singletons)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
@@ -436,14 +436,9 @@ def check_status():
             required_ram_gb = max(build_size_gb * 1.1, build_size_gb + 1)
 
             if available_ram_gb - required_ram_gb > 0:
-                kmer_count_unique = sra_info[sra_id][2]
-                kmer_count_singletons = sra_info[sra_id][3]
-                kmer_count_total = sra_info[sra_id][4]
-                coverage = kmer_count_total / kmer_count_unique
-                fallback = 5 if coverage > 5 else 2 if coverage > 2 else 1
-                if coverage < 5:
-                    logging.info(f'[{sra_id}] Coverage is {coverage} < 5. Setting --num-singletons to 0')
-                    kmer_count_singletons = 0
+                kmer_coverage = sra_info[sra_id][3]
+                kmer_count_singletons = sra_info[sra_id][4]
+                fallback = 5 if kmer_coverage > 5 else 2 if kmer_coverage > 2 else 1
                 # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
                 start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, fallback)
                 del waiting_cleans[sra_id]
