@@ -3,6 +3,7 @@ import os
 import shlex
 import time
 from subprocess import Popen
+from parameterized import parameterized
 
 import requests
 
@@ -55,10 +56,8 @@ class TestApi(TestingBase):
 
         return Popen(shlex.split(construct_command))
 
-
-
     # do various queries
-    def test_api_simple_search(self):
+    def test_api_simple_query(self):
         ret = self.graph_client.search_json("CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG")
 
         self.assertIn(self.graph_name, ret.keys())
@@ -140,3 +139,23 @@ class TestApi(TestingBase):
 
         self.assertGreater(len(label_list), 0)
         self.assertTrue(all(l.startswith('ENST') for l in label_list))
+
+
+    @parameterized.expand([(1,1), (3,1)])
+    def test_api_raw_align_sequence(self, repetitions, foo):
+        fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
+
+        payload = json.dumps({"FASTA": fasta_str})
+
+        ret = self.raw_post_request('align', payload)
+
+        self.assertEqual(ret.status_code, 200)
+
+        self.assertEqual(len(ret.json()), repetitions)
+        expected = {'score': 12, 'seq_description': 'query0', 'sequence': 'TCGATC'}
+        self.assertDictEqual(ret.json()[0], expected)
+
+        self.assertListEqual(
+            [ret.json()[i]['seq_description'] for i in range(repetitions)],
+            [f"query{i}" for i in range(repetitions)]
+        )
