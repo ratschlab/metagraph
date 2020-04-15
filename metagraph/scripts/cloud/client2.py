@@ -475,8 +475,7 @@ def check_status():
             logging.warning(
                 f'[{sra_id}] Building graph needs too much RAM: {required_ram_gb}GB). Removing {build_path}.')
             subprocess.run(['rm', '-rf', build_path])
-            params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
-                      'size_mb': build_size, 'required_ram_gb': required_ram_gb}
+            params = {'id': sra_id, 'time': int(time.time() - start_time), 'required_ram_gb': required_ram_gb}
             nack('build', params)
         elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
             # how much memory does it take to load all unique kmers into RAM
