@@ -15,35 +15,37 @@ from base import TestingBase, METAGRAPH, TEST_DATA_DIR
 class TestApi(TestingBase):
     graph_name = 'test_graph'
 
-    def setUp(self):
-        super().setUp()
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
 
         fasta = TEST_DATA_DIR + '/transcripts_100.fa'
 
-        graph_path = self.tempdir.name + '/graph.dbg'
-        annotation_path = self.tempdir.name + '/annotation.column.annodbg'
+        graph_path = cls.tempdir.name + '/graph.dbg'
+        annotation_path = cls.tempdir.name + '/annotation.column.annodbg'
 
-        host = '127.0.0.1'
-        port = 3456
-        self._build_graph(fasta, graph_path, 6, 'succinct')
+        cls.host = '127.0.0.1'
+        cls.port = 3456
+        cls._build_graph(cls, fasta, graph_path, 6, 'succinct')
 
-        self._annotate_graph(fasta, graph_path, annotation_path, 'column')
-        print(os.listdir(self.tempdir.name))
+        cls._annotate_graph(cls, fasta, graph_path, annotation_path, 'column')
+        print(os.listdir(cls.tempdir.name))
 
-        self.server_process = self._start_server(graph_path, annotation_path, port)
+        cls.server_process = cls._start_server(cls, graph_path, annotation_path, cls.port)
 
-        print("waiting for the server to start up on " + str(self.server_process.pid))
+        print("waiting for the server to start up on " + str(cls.server_process.pid))
         time.sleep(1)
 
-        self.graph_client = Client()
+        cls.graph_client = Client()
 
-        self.graph_client.add_graph(host, port, self.graph_name)
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
-        self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{host}:{port}/{cmd}', data=payload)
+    def setUp(self) -> None:
+        self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
 
-    def tearDown(self) -> None:
-        self.server_process.kill()
-
+    @classmethod
+    def tearDownClass(cls):
+        cls.server_process.kill()
 
     def _start_server(self, graph, annotation, port):
         construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address 127.0.0.1 -p {threads}'.format(

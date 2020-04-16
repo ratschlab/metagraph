@@ -23,9 +23,9 @@ NUM_THREADS = 4
 
 
 class TestingBase(unittest.TestCase):
-    def setUp(self):
-        self.tempdir = TemporaryDirectory()
-
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
 
     def _get_stats(self, graph_filename):
         stats_command = METAGRAPH + ' stats ' + graph_filename
@@ -44,7 +44,7 @@ class TestingBase(unittest.TestCase):
 
         res = subprocess.run([construct_command], shell=True, stdout=PIPE,
                              stderr=PIPE)
-        self.assertEqual(res.returncode, 0)
+        assert res.returncode == 0
 
 
     def _annotate_graph(self, input, graph_path, output, anno_repr):
@@ -57,4 +57,4 @@ class TestingBase(unittest.TestCase):
             input=input
         )
         res = subprocess.run([annotate_command], shell=True)
-        self.assertEqual(res.returncode, 0)
+        assert res.returncode == 0
