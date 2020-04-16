@@ -14,6 +14,8 @@ from base import TestingBase, METAGRAPH, TEST_DATA_DIR
 
 class TestApi(TestingBase):
     graph_name = 'test_graph'
+    sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+    sample_query_expected_cols = 98
 
     @classmethod
     def setUpClass(cls):
@@ -60,7 +62,7 @@ class TestApi(TestingBase):
 
     # do various queries
     def test_api_simple_query(self):
-        ret = self.graph_client.search_json("CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG")
+        ret = self.graph_client.search_json(self.sample_query)
 
         self.assertIn(self.graph_name, ret.keys())
 
@@ -68,7 +70,7 @@ class TestApi(TestingBase):
         self.assertEqual(len(res_list), 1)
 
         res_obj = res_list[0]['results']
-        self.assertEqual(len(res_obj), 98)
+        self.assertEqual(len(res_obj), self.sample_query_expected_cols)
 
         first_res = res_obj[0]
 
@@ -77,6 +79,29 @@ class TestApi(TestingBase):
         self.assertTrue(first_res['sampleName'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
         self.assertTrue('properties' not in first_res.keys()) # doesn't have properties, so don't sent them
 
+    def test_api_multiple_query(self):
+        repetitions = 4
+        ret = self.graph_client.search_json([self.sample_query] * repetitions)
+
+        res_list, _ = ret[self.graph_name]
+        self.assertEqual(len(res_list), repetitions)
+
+        # testing if results are in the same order as the queries
+        for i in range(0, repetitions):
+            self.assertEqual(res_list[i]['seq_description'], str(i))
+
+
+    def test_api_simple_query_df(self):
+        ret = self.graph_client.search(self.sample_query)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_cols, 2), df.shape)
+
+    def test_api_multiple_query_df(self):
+        repetitions = 5
+        ret = self.graph_client.search([self.sample_query] * repetitions)
+        df = ret[self.graph_name]
+        self.assertEqual((self.sample_query_expected_cols * repetitions, 3), df.shape)
 
     def test_api_raw_incomplete_json(self):
         ret = self.raw_post_request('search', '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "count_labels": true,')

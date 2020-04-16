@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import json
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Iterable, Union
 
 import pandas as pd
 import requests
@@ -22,23 +22,34 @@ class Client:
         return self.graphs
 
     # TODO: discovery threshoold unit?
-    def search(self, sequence: str, discovery_threshold: float = 1.0) -> Dict[
+    def search(self, sequence: Union[str, Iterable[str]], discovery_threshold: float = 1.0) -> Dict[
         str, Tuple[pd.DataFrame, str]]:
 
         json_res = self.search_json(sequence, discovery_threshold)
 
-        def build_dict(row):
-            d = dict(row)
-            props = d.pop('properties')
-            return {**d, **props}
+        # def build_dict(row):
+        #     d = dict(row)
+        #     props = d.pop('properties')
+        #     return {**d, **props}
+
+        #def build_df_from_json(j):
+        #    return pd.DataFrame([build_dict(r) for r in j['results']])
+
+        def _build_df_per_result(res):
+            df = pd.DataFrame(res['results'])
+
+            if not isinstance(sequence, str):
+                # only add sequence description if several queries are being made
+                df['seq_description'] = res['seq_description']
+            return df
 
         def build_df_from_json(j):
-            return pd.DataFrame([build_dict(r) for r in j['results']])
+            return pd.concat(_build_df_per_result(query_res) for query_res in j)
 
         return {l: (build_df_from_json(j) if j else pd.DataFrame()) for (l, (j, e))
                 in json_res.items()}
 
-    def search_json(self, sequence: str, discovery_threshold: float = 1.0) -> \
+    def search_json(self, sequence: Union[str, Iterable[str]], discovery_threshold: float = 1.0) -> \
     Dict[str, Tuple[str, str]]:
         if not self.graphs:
             raise ValueError("No graphs registered")  # TODO: better error
@@ -46,10 +57,14 @@ class Client:
         results = {}
 
         for label, (host, port) in self.graphs.items():
+            if isinstance(sequence, str):
+                fasta_str = f">query\n{sequence}"
+            else:
+                seqs = list(sequence)
+                fasta_str = '\n'.join([ f">{i}\n{seqs[i]}" for i in range(0, len(seqs))])
+
             payload = json.dumps({
-                "FASTA": "\n".join([">query",
-                                    sequence,
-                                    ]),
+                "FASTA": fasta_str,
                 "count_labels": True,
                 "discovery_fraction": discovery_threshold / 100,
                 "num_labels": 10000
