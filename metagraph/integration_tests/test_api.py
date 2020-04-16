@@ -97,6 +97,13 @@ class TestApi(TestingBase):
 
         self.assertEqual((self.sample_query_expected_cols, 2), df.shape)
 
+    def test_api_simple_query_align_df(self):
+        ret = self.graph_client.search(self.sample_query, align=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_cols, 4), df.shape)
+
+
     def test_api_multiple_query_df(self):
         repetitions = 5
         ret = self.graph_client.search([self.sample_query] * repetitions)

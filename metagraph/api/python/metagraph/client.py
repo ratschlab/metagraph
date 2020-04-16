@@ -21,11 +21,11 @@ class Client:
     def list_graphs(self) -> Dict[str, Tuple[str, str]]:
         return self.graphs
 
-    # TODO: discovery threshoold unit?
-    def search(self, sequence: Union[str, Iterable[str]], discovery_threshold: float = 1.0) -> Dict[
-        str, Tuple[pd.DataFrame, str]]:
+    def search(self, sequence: Union[str, Iterable[str]],
+               top_labels: int = 10000, discovery_threshold: float = 1.0, align: bool = False) -> \
+            Dict[str, Tuple[pd.DataFrame, str]]:
 
-        json_res = self.search_json(sequence, discovery_threshold)
+        json_res = self.search_json(sequence, top_labels, discovery_threshold, align)
 
         # def build_dict(row):
         #     d = dict(row)
@@ -41,6 +41,11 @@ class Client:
             if not isinstance(sequence, str):
                 # only add sequence description if several queries are being made
                 df['seq_description'] = res['seq_description']
+
+            if align:
+                df['sequence'] = res['sequence']
+                df['score'] = res['score']
+
             return df
 
         def build_df_from_json(j):
@@ -57,12 +62,13 @@ class Client:
         return {l: (pd.DataFrame(j) if j else pd.DataFrame()) for (l, (j, e))
                 in json_res.items()}
 
-
-    def search_json(self, sequence: Union[str, Iterable[str]], discovery_threshold: float = 1.0) -> \
-    Dict[str, Tuple[str, str]]:
+    def search_json(self, sequence: Union[str, Iterable[str]], top_labels=10000,
+                    discovery_threshold: float = 1.0, align: bool = False) -> \
+            Dict[str, Tuple[str, str]]:
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold / 100,
-                      "num_labels": 10000}
+                      "num_labels": top_labels,
+                      "align": align}
 
         return self._json_query(sequence, param_dict, "search")
 
