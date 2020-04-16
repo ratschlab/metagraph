@@ -156,7 +156,6 @@ class TestApi(TestingBase):
         self.assertEqual(ret.status_code, 200)
         self.assertEqual(ret.json(), [])
 
-
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
 
@@ -166,7 +165,6 @@ class TestApi(TestingBase):
 
         self.assertGreater(len(label_list), 0)
         self.assertTrue(all(l.startswith('ENST') for l in label_list))
-
 
     @parameterized.expand([(1,1), (3,1)])
     def test_api_raw_align_sequence(self, repetitions, foo):
@@ -186,3 +184,15 @@ class TestApi(TestingBase):
             [ret.json()[i]['seq_description'] for i in range(repetitions)],
             [f"query{i}" for i in range(repetitions)]
         )
+
+    def test_api_align_json(self):
+        ret = self.graph_client.align_json("TCGATCGA")
+        align_res, _ = ret[self.graph_name]
+        self.assertEqual(len(align_res), 1)
+
+    def test_api_align_df(self):
+        repetitions = 4
+        ret = self.graph_client.align(["TCGATCGA"] * repetitions)
+
+        align_res = ret[self.graph_name]
+        self.assertEqual(len(align_res), repetitions)

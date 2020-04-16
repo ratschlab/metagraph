@@ -49,8 +49,30 @@ class Client:
         return {l: (build_df_from_json(j) if j else pd.DataFrame()) for (l, (j, e))
                 in json_res.items()}
 
+    def align(self, sequence: Union[str, Iterable[str]]) -> Dict[
+        str, Tuple[pd.DataFrame, str]]:
+
+        json_res = self.align_json(sequence)
+
+        return {l: (pd.DataFrame(j) if j else pd.DataFrame()) for (l, (j, e))
+                in json_res.items()}
+
+
     def search_json(self, sequence: Union[str, Iterable[str]], discovery_threshold: float = 1.0) -> \
     Dict[str, Tuple[str, str]]:
+        param_dict = {"count_labels": True,
+                      "discovery_fraction": discovery_threshold / 100,
+                      "num_labels": 10000}
+
+        return self._json_query(sequence, param_dict, "search")
+
+    def align_json(self, sequence: Union[str, Iterable[str]]) -> Dict[
+        str, Tuple[str, str]]:
+        return self._json_query(sequence, {}, "align")
+
+    def _json_query(self, sequence: Union[str, Iterable[str]], param_dict, end_point: str) -> Dict[
+        str, Tuple[str, str]]:
+
         if not self.graphs:
             raise ValueError("No graphs registered")  # TODO: better error
 
@@ -63,14 +85,11 @@ class Client:
                 seqs = list(sequence)
                 fasta_str = '\n'.join([ f">{i}\n{seqs[i]}" for i in range(0, len(seqs))])
 
-            payload = json.dumps({
-                "FASTA": fasta_str,
-                "count_labels": True,
-                "discovery_fraction": discovery_threshold / 100,
-                "num_labels": 10000
-            })
+            payload_dict = {"FASTA": fasta_str}
+            payload_dict.update(param_dict)
+            payload = json.dumps(payload_dict)
 
-            ret = requests.post(url=f'http://{host}:{port}/search', data=payload)
+            ret = requests.post(url=f'http://{host}:{port}/{end_point}', data=payload)
 
             if ret.ok:
                 results[label] = (ret.json(), None)
