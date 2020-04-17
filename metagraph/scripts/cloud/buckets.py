@@ -1,6 +1,7 @@
 import fileinput
 import logging
 import os
+import subprocess
 import urllib
 
 
@@ -53,6 +54,19 @@ class Sra:
     def load_sraid_to_bucket(self):
         if self.sraid_to_bucket:
             return  # already loaded
+        if not all([os.path.exists(os.path.join(self.data_dir, f'bucket{i}')) for i in range(1, 9)]):
+            logging.info(
+                'SRA Bucket files are not present. Will start downloading. Go get a coffee, this will take a while')
+            for i in range(1, 9):
+                logging.info(f'Downloading bucket{i}/9...')
+                with open(os.path.join(self.data_dir, f'bucket{i}'), 'w') as f:
+                    if subprocess.call(['gsutil', '-u', 'metagraph', 'ls', f'gs://sra-pub-run-{i}/'],
+                                       stdout=f,
+                                       stderr=subprocess.PIPE) != 0:
+                        logging.error('Cannot download bucket information from GCS. Heroically dying.')
+                        exit(1)
+        else:
+            logging.info(f'Bucket files found in {self.data_dir}')
         for i in range(1, 9):
             bucket_file = os.path.join(self.data_dir, f'bucket_proc{i}')
             if not os.path.exists(bucket_file):

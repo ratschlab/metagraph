@@ -21,6 +21,7 @@ args = None
 
 sra_info = {}  # global information about a processed SRA (for now, time only)
 
+pending_processes = []
 download_processes = {}
 build_processes = {}
 clean_processes = {}
@@ -132,11 +133,21 @@ def destination_dir(sra_id):
     return os.path.join(args.destination, result)
 
 
+def dump_pending(sra_ids):
+    ids = ','.join(sra_ids)
+    url = f'http://{args.server}/jobs/preempt'
+    data = f'client_id={internal_ip()}&ids={ids}'
+    with open('/tmp/shutdown.sh', 'w') as f:
+        f.write(f'curl --data "{data}&reason=shutdown" "{url}"')
+
+
 def start_download(download_resp):
     if 'id' not in download_resp:
         logging.info('No more downloads available. We\'re almost done!')
         return
     sra_id = download_resp['id']
+    pending_processes.append(sra_id)
+    dump_pending(pending_processes)
     if args.source == 'ena':
         download_processes[sra_id] = (subprocess.Popen(['./download_ena.sh', sra_id, download_dir_base()]), time.time())
     else:
@@ -195,6 +206,11 @@ def start_clean(sra_id, wait_time, kmer_count_singletons, fallback):
 def start_transfer(sra_id, cleaned_graph_location):
     transfer_processes[sra_id] = (subprocess.Popen(
         f'gsutil -q -u metagraph cp -r {cleaned_graph_location} {destination_dir(sra_id)}', shell=True), time.time())
+    if sra_id in pending_processes:
+        pending_processes.remove(sra_id)
+        dump_pending(pending_processes)
+    else:
+        logging.error(f'[sra_id] just transferred successfully but not present in pending_ids. Something is messed up.')
 
 
 def ack(operation, params):
@@ -267,11 +283,11 @@ def check_sanity(sra_id):
         return False
     unique_kmers = int(stat_file[0].split(' ')[-1])
     unique_kmers -= (int(stat_file[1].split(' ')[-1]) + int(stat_file[2].split(' ')[-1]))
-    sanity = unique_kmers == 2 * sra_info[sra_id][2]
+    sanity = unique_kmers == 2 * sra_info[sra_id][2]  # *2 because we build a canonical graph
     if not sanity:
         logging.error(
             f'[{sra_id}] Sanity check for graph build failed. Expected 2 * {sra_info[sra_id][2]} kmers, got {unique_kmers}')
-    return unique_kmers == 2 * sra_info[sra_id][2]  # *2 because we build a canonical graph
+    return sanity
 
 
 def tab(string_list):
@@ -309,12 +325,12 @@ def check_status():
                 try:
                     with open(stats_file) as stats:
                         json_resp = json.loads(stats.read())
-                    if 'Stats' in json_resp and '#Unique_counted_k-mers' in json_resp['Stats']:
-                        kmer_count_unique = int(json_resp['Stats']['#Unique_counted_k-mers'])
-                        kmer_count_total = int(json_resp['Stats']['#Total no. of k-mers'])
-                        kmer_count_singletons = int(json_resp['Stats']['#k-mers_below_min_threshold'])
+                    if '#k-mers_coverage' in json_resp and '#k-mers_below_min_threshold' in json_resp:
+                        kmer_count_unique = int(json_resp['#Unique_counted_k-mers'])
+                        kmer_coverage = int(json_resp['#k-mers_coverage'])
+                        kmer_count_singletons = int(json_resp['#k-mers_below_min_threshold'])
                     else:
-                        logging.warning(f'[{sra_id}] KMC returned no stats, assuming failure')
+                        logging.warning(f'[{sra_id}] Invalid KMC stat files, assuming failure')
                         success = False
                 except FileNotFoundError:
                     logging.warning(f'[{sra_id}] Could not find KMC stats file {stats_file}, baling out.')
@@ -324,9 +340,9 @@ def check_status():
             if success:
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
                           'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
-                          'kmer_count_total': kmer_count_total, 'kmer_count_singletons': kmer_count_singletons}
+                          'kmer_coverage': kmer_coverage, 'kmer_count_singletons': kmer_count_singletons}
                 sra_info[sra_id] = (
-                    *sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_count_singletons, kmer_count_total)
+                    *sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_coverage, kmer_count_singletons)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
@@ -436,14 +452,9 @@ def check_status():
             required_ram_gb = max(build_size_gb * 1.1, build_size_gb + 1)
 
             if available_ram_gb - required_ram_gb > 0:
-                kmer_count_unique = sra_info[sra_id][2]
-                kmer_count_singletons = sra_info[sra_id][3]
-                kmer_count_total = sra_info[sra_id][4]
-                coverage = kmer_count_total / kmer_count_unique
-                fallback = 5 if coverage > 5 else 2 if coverage > 2 else 1
-                if coverage < 5:
-                    logging.info(f'[{sra_id}] Coverage is {coverage} < 5. Setting --num-singletons to 0')
-                    kmer_count_singletons = 0
+                kmer_coverage = sra_info[sra_id][3]
+                kmer_count_singletons = sra_info[sra_id][4]
+                fallback = 5 if kmer_coverage > 5 else 2 if kmer_coverage > 2 else 1
                 # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
                 start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, fallback)
                 del waiting_cleans[sra_id]
@@ -464,8 +475,7 @@ def check_status():
             logging.warning(
                 f'[{sra_id}] Building graph needs too much RAM: {required_ram_gb}GB). Removing {build_path}.')
             subprocess.run(['rm', '-rf', build_path])
-            params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
-                      'size_mb': build_size, 'required_ram_gb': required_ram_gb}
+            params = {'id': sra_id, 'time': int(time.time() - start_time), 'required_ram_gb': required_ram_gb}
             nack('build', params)
         elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
             # how much memory does it take to load all unique kmers into RAM
@@ -560,6 +570,9 @@ def handle_quit():
         except:
             logging.error(f'Failed to open URL {url} Reason: unknown.')
             time.sleep(5)  # wait a bit and try again
+    global pending_processes
+    pending_processes = []
+    dump_pending(pending_processes)
     global must_quit
     must_quit = True
     for k, v in download_processes.items():
@@ -633,6 +646,8 @@ if __name__ == '__main__':
     parser.add_argument('--log_destination', default='gs://metagraph-test/logs',
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
+    parser.add_argument('--server_info', default='gs://metagraph-test/server',
+                        help='Where to publish the server host/port on gcs')
     args = parser.parse_args()
     if not os.path.isabs(args.output_dir):
         logging.error(f'output_dir must be an absolute path, not {args.output_dir}')
@@ -642,7 +657,7 @@ if __name__ == '__main__':
 
     if not args.server:
         logging.info('Trying to find server address...')
-        if subprocess.call(['gsutil', 'cp', 'gs://metagraph-test/server', '/tmp/server'], stdout=subprocess.PIPE,
+        if subprocess.call(['gsutil', 'cp', args.server_info, '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
             exit(1)

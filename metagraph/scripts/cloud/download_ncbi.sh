@@ -78,6 +78,16 @@ if ((coverage >= 5)); then
 else
   echo "[$sra_id] Coverage is $coverage, keeping singletons"
 fi
+# edit the KMC output and add the coverage property (this will also eliminate all stuff except for 'Stats')
+jq --arg cov $coverage  '.Stats | ."#k-mers_coverage" = $cov' $kmc_output > $tmp_dir/stats
+mv $tmp_dir/stats $kmc_output
+# just to be on the safe side, set the singleton count to 0 (i.e. "not set") if we don't remove singletons
+if ((coverage < 5)); then
+  jq '."#k-mers_below_min_threshold" = 0' $kmc_output > $tmp_dir/stats
+  mv $tmp_dir/stats $kmc_output
+fi
+
+echo singleton_kmers > "${kmc_dir}/${sra_id}.stats"
 rm -rf "${tmp_dir}" "${fastq_dir}"
 
 exit $exit_code
