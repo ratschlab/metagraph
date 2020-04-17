@@ -192,7 +192,11 @@ uint8_t write_kmer(size_t k,
     if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
     }
-    encoder->add(reinterpret_cast<const T_INT &>(to_write.data));
+    if constexpr(utils::is_pair<T>{}) {
+        encoder->add({ to_write.data.first.data(), to_write.data.second });
+    } else {
+        encoder->add(to_write.data.data());
+    }
     auto &kmer_to_write = get_first(to_write.data);
     const TAlphabet node_last_char = kmer_to_write[1];
     const TAlphabet edge_label = kmer_to_write[0];
