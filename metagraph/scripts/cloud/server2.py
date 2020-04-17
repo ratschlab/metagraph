@@ -97,7 +97,7 @@ def internal_ip():
 def publish_ip():
     with open('/tmp/server', 'w') as fp:
         fp.write(f'{internal_ip()}:{args.port}')
-    if subprocess.call(['gsutil', 'cp', '/tmp/server', 'gs://mg33/server'], stdout=subprocess.PIPE,
+    if subprocess.call(['gsutil', 'cp', '/tmp/server', args.server_info], stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE) != 0:
         logging.error("Cannot publish server ip/port on Google Cloud Storage. Sorry, I tried.")
         exit(1)
@@ -427,6 +427,8 @@ def parse_args():
     parser.add_argument('--checkpoint', default='transferred|!downloaded|!built|!cleaned',
                         help='Which checkpointed SRAs to eliminate from processing, '
                              'a combination of downloaded/built/cleaned/transferred optionally preceded by !')
+    parser.add_argument('--server_info', default='gs://metagraph-test/server',
+                        help='Where to publish the server host/port on gcs')
 
     global args
     args = parser.parse_args()
