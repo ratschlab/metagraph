@@ -57,9 +57,6 @@ class KMer {
     bool operator>=(const KMer &other) const { return seq_ >= other.seq_; }
     bool operator==(const KMer &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMer &other) const { return seq_ != other.seq_; }
-    explicit operator uint64_t () const { static_assert(sizeof(WordType) < 64); return seq_; }
-    explicit operator sdsl::uint128_t () const { static_assert(sizeof(WordType) < 128); return seq_; }
-    explicit operator sdsl::uint256_t () const { static_assert(sizeof(WordType) < 256); return seq_; }
 
     /** Return the character at position #i in the kmer. Undefined behavior if #i is
      * out of range. */
@@ -88,6 +85,7 @@ class KMer {
 
     inline const WordType& data() const { return seq_; }
 
+    // TODO: remove this from here
     template <typename T>
     inline static bool match_suffix(const T *kmer, size_t k, const std::vector<T> &suffix) {
         assert(k > 0);

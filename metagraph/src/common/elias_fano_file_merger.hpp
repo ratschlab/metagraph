@@ -59,7 +59,7 @@ class MergeHeap {
 
 
 /**
- * Given a list of n source files, containing ordered elements of type INT, merge the n
+ * Given a list of n source files, containing ordered elements of type T, merge the n
  * sources into a single (ordered) list of type T and delete the original files.
  * @tparam T the type of the  elements to be merged (typically a 64/128 or 256-bit k-mer)
  * @param sources the files containing sorted lists of type T
@@ -71,20 +71,19 @@ class MergeHeap {
  */
 template <typename T>
 uint64_t merge_files(const std::vector<std::string> &sources,
-                     std::function<void(const T &)> on_new_item,
+                     const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
-    std::vector<std::ifstream> chunk_files(sources.size());
     uint64_t num_elements_read = 0;
 
     MergeHeap<T> merge_heap;
     std::optional<T> data_item;
 
-    std::vector<std::unique_ptr<EliasFanoDecoder<T>>> decoders(sources.size());
+    std::vector<EliasFanoDecoder<T>> decoders;
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<EliasFanoDecoder<T>>(sources[i], remove_sources);
-        data_item = decoders[i]->next();
+        decoders.emplace_back(sources[i], remove_sources);
+        data_item = decoders.back().next();
         if (data_item.has_value()) {
             merge_heap.emplace(data_item.value(), i);
             num_elements_read++;
@@ -106,8 +105,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             last_written = smallest;
         }
 
-        if (chunk_files[chunk_index]
-            && (data_item = decoders[chunk_index]->next()).has_value()) {
+        if ((data_item = decoders[chunk_index].next()).has_value()) {
             merge_heap.emplace(data_item.value(), chunk_index);
             num_elements_read++;
         }
@@ -117,6 +115,9 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 }
 
 
+// TODO: these two `merge_files` are almost identical. Merge them into one.
+//       Implement the merging mechanism  (remove duplicates, increment
+//       counters) in the caller?
 /**
  * Given a list of n source files, containing ordered pairs of  <element, count>,
  * merge the n sources (and the corresponding counts) into a single list, ordered by el
@@ -132,28 +133,26 @@ uint64_t merge_files(const std::vector<std::string> &sources,
  */
 template <typename T, typename C>
 uint64_t merge_files(const std::vector<std::string> &sources,
-                     std::function<void(const std::pair<T, C> &)> on_new_item,
+                     const std::function<void(const std::pair<T, C> &)> &on_new_item,
                      bool remove_sources = true) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
-    uint64_t num_elements = 0;
+    uint64_t num_elements_read = 0;
 
     MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
     std::optional<std::pair<T, C>> data_item;
-    using Decoder = EliasFanoDecoder<std::pair<T, C>>;
-    std::vector<std::unique_ptr<Decoder>> decoders(sources.size());
+    std::vector<EliasFanoDecoder<std::pair<T, C>>> decoders;
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<Decoder>(sources[i], remove_sources);
-        data_item = decoders[i]->next();
+        decoders.emplace_back(sources[i], remove_sources);
+        data_item = decoders.back().next();
         if (data_item.has_value()) {
-            merge_heap.emplace({ data_item.value().first, data_item.value().second },
-                               i);
-            num_elements++;
+            merge_heap.emplace(data_item.value(), i);
+            num_elements_read++;
         }
     }
 
     if (merge_heap.empty()) {
-        return num_elements;
+        return num_elements_read;
     }
 
     // initialize the smallest element
@@ -173,16 +172,14 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             }
         }
 
-        if ((data_item = decoders[chunk_index]->next()).has_value()) {
-            assert(data_item.has_value());
-            merge_heap.emplace({ data_item.value().first, data_item.value().second },
-                               chunk_index);
-            num_elements++;
+        if ((data_item = decoders[chunk_index].next()).has_value()) {
+            merge_heap.emplace(data_item.value(), chunk_index);
+            num_elements_read++;
         }
     }
     on_new_item(current);
 
-    return num_elements;
+    return num_elements_read;
 }
 
 } // namespace common

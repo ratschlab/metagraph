@@ -18,7 +18,7 @@ add_library(test_utils ${test_files})
 target_include_directories(test_utils
     PRIVATE
     ${GTEST_INCLUDE_DIRS}
-    )
+)
 target_link_libraries(test_utils
     ${GTEST_BOTH_LIBRARIES}
-    )
+)

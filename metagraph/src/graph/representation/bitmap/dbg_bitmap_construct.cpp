@@ -116,17 +116,16 @@ BitmapChunkConstructor<KmerCollector>::get_weights(uint8_t bits_per_count) {
  * Initialize graph chunk from a list of sorted kmers.
  */
 template <typename KmerCollector>
-DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>
-::build_chunk() {
+DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>::build_chunk() {
     using KMER = typename KmerCollector::Kmer;
 
     const auto &kmers = kmer_collector_.data();
     std::unique_ptr<DBGBitmap::Chunk> chunk {
         new DBGBitmap::Chunk(
             [&](const auto &index_callback) {
-                std::for_each(kmers.begin(), kmers.end(), [&](const typename KmerCollector::Value &kmer) {
-                  index_callback(typename KMER::WordType(1u) + utils::get_first(kmer));
-                });
+                std::for_each(kmers.begin(), kmers.end(),
+                    [&](const auto &kmer) { index_callback(utils::get_first(kmer) + 1); }
+                );
             },
             (1llu << (get_k() * KMER::kBitsPerChar)) + 1,
             kmers.size()

@@ -83,7 +83,7 @@ class SortedSetDiskBase {
      * Returns the globally sorted and counted data. Typically called once all the data
      * was inserted via insert().
      */
-    ChunkedWaitQueue<T> &data() {
+    ChunkedWaitQueue<T>& data() {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
 

@@ -9,7 +9,6 @@
 
 #include "common/threads/threading.hpp"
 #include "common/batch_accumulator.hpp"
-#include "kmer/kmer_to_int_converter.hpp"
 
 namespace mg {
 namespace kmer {
@@ -84,11 +83,11 @@ class KmerCollector {
 
     // FYI: This function should be used only in special cases.
     //      In general, use `add_sequences` if possible, to make use of multiple threads.
-    void add_kmer(const KMER &kmer) {
-        kmers_->insert(&kmer.data(), &kmer.data() + 1);
-    }
+    void add_kmer(const KMER &kmer) { kmers_->insert(&kmer.data(), &kmer.data() + 1); }
 
-    inline Data &data() { join(); return kmers_->data(); }
+    // FYI: This returns a container with integer representation of k-mers.
+    //      Use reinterpret_cast to cast them back to k-mers.
+    inline Data& data() { join(); return kmers_->data(); }
 
     void clear() { join(); kmers_->clear(); }
 

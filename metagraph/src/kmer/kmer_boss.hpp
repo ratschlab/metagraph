@@ -57,9 +57,6 @@ class KMerBOSS {
     bool operator>=(const KMerBOSS &other) const { return seq_ >= other.seq_; }
     bool operator==(const KMerBOSS &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMerBOSS &other) const { return seq_ != other.seq_; }
-    explicit operator uint64_t () const { static_assert(sizeof(WordType) < 64); return seq_; }
-    explicit operator sdsl::uint128_t () const { static_assert(sizeof(WordType) < 128); return seq_; }
-    explicit operator sdsl::uint256_t () const { static_assert(sizeof(WordType) < 256); return seq_; }
 
     inline CharType operator[](size_t i) const;
 
@@ -92,8 +89,6 @@ class KMerBOSS {
      * @param first_char the first character in the predecessor
      */
     inline void to_prev(size_t k, CharType new_first);
-
-    static inline void to_prev(G *value, size_t k, CharType new_first);
 
     inline const WordType& data() const { return seq_; }
 
@@ -170,23 +165,18 @@ void KMerBOSS<G, L>::to_next(size_t k, CharType new_last) {
 
 template <typename G, int L>
 void KMerBOSS<G, L>::to_prev(size_t k, CharType new_first) {
-    to_prev(&seq_, k, new_first);
-}
-
-template <typename G, int L>
-inline void KMerBOSS<G, L>::to_prev(G *value, size_t k, CharType new_first) {
     const int shift = kBitsPerChar * (k - 1);
-    G last_char = *value >> shift;
+    G last_char = seq_ >> shift;
     //     s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-    *value &= kAllButFirstCharMask;
+    seq_ &= kAllButFirstCharMask;
     //     s[7]s[6]s[5]s[4]s[3]s[2]0000
-    *value |= new_first;
+    seq_ |= new_first;
     //     s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    *value <<= kBitsPerChar;
+    seq_ <<= kBitsPerChar;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]0000
-    *value &= kAllSetMask >> (sizeof(WordType) * 8 - kBitsPerChar * k);
+    seq_ &= kAllSetMask >> (sizeof(WordType) * 8 - kBitsPerChar * k);
     //     s[6]s[5]s[4]s[3]s[2]s[1]0000
-    *value |= last_char;
+    seq_ |= last_char;
     //     s[6]s[5]s[4]s[3]s[2]s[1]s[7]
 }
 

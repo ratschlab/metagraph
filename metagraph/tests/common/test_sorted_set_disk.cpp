@@ -145,15 +145,15 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
     std::vector<std::thread> workers;
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
-        workers.push_back(std::thread([&underTest, i]() {
+        workers.emplace_back([&underTest, i]() {
             std::array<TypeParam, 4> elements
-                    = { TypeParam(4 * i), TypeParam(4 * i + 1), TypeParam(4 * i + 2),
-                        TypeParam(4 * i + 3) };
+                = { TypeParam(4 * i), TypeParam(4 * i + 1), TypeParam(4 * i + 2),
+                    TypeParam(4 * i + 3) };
             underTest.insert(elements.begin(), elements.end());
-        }));
-        std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
-                                              TypeParam(4 * i + 2), TypeParam(4 * i + 3) };
-        expected_result.insert(expected_result.end(), elements.begin(), elements.end());
+        });
+    }
+    for (uint32_t i = 0; i < 400; ++i) {
+        expected_result.emplace_back(i);
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
     expect_equals(underTest, expected_result);
@@ -168,12 +168,14 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
     std::vector<std::thread> workers;
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
-        workers.push_back(std::thread([&underTest, i]() {
+        workers.emplace_back([&underTest, i]() {
             std::array<TypeParam, 4> elements = { TypeParam(3 * i), TypeParam(3 * i + 1) };
             underTest.insert(elements.begin(), elements.end());
             elements = { TypeParam(3 * i + 1), TypeParam(3 * i + 2) };
             underTest.insert(elements.begin(), elements.end());
-        }));
+        });
+    }
+    for (uint32_t i = 0; i < 100; ++i) {
         std::array<TypeParam, 3> elements
                 = { TypeParam(3 * i), TypeParam(3 * i + 1), TypeParam(3 * i + 2) };
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());

@@ -163,12 +163,12 @@ TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDup
     std::vector<std::thread> workers;
     std::vector<std::pair<TypeParam, uint8_t>> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
-        workers.push_back(std::thread([&underTest, i]() {
+        workers.emplace_back([&underTest, i]() {
             std::array<TypeParam, 2> elements = { TypeParam(3 * i), TypeParam(3 * i + 1) };
             underTest.insert(elements.begin(), elements.end());
             elements = { TypeParam(3 * i + 1), TypeParam(3 * i + 2) };
             underTest.insert(elements.begin(), elements.end());
-        }));
+        });
 
         expected_result.push_back(std::make_pair(TypeParam(3 * i), 1));
         expected_result.push_back(std::make_pair(TypeParam(3 * i + 1), 2));
