@@ -1,4 +1,5 @@
 #pragma once
+
 #include <cstddef>
 
 /** Compile-time utils for conversion between k-mers and integers. */

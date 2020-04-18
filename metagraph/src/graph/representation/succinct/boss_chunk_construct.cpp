@@ -147,7 +147,8 @@ struct KmerBuffered {
 template <typename T>
 using RecentKmers = common::CircularBuffer<KmerBuffered<T>>;
 /**
- * Iterate backwards and check if there is a dummy incoming edge (a dummy edge with
+ * Push a k-mer into the buffer, then
+ * iterate backwards and check if there is a dummy incoming edge (a dummy edge with
  * identical suffix and label as the current one) into the same node.
  * If such an edge is found, then we remove it (because it's redundant).
  * @param kmer check for redundancy against this k-mer
@@ -155,9 +156,12 @@ using RecentKmers = common::CircularBuffer<KmerBuffered<T>>;
  * redundant dummy source k-mers
  */
 template <typename T>
-static void remove_redundant_dummy_source(const get_first_type_t<T> &kmer,
-                                          RecentKmers<T> *buffer) {
+static void push_and_remove_redundant_dummy_source(const T &el,
+                                                   RecentKmers<T> *buffer) {
+    buffer->push_back({ el, false });
+
     using KMER = get_first_type_t<T>;
+    const KMER &kmer = get_first(el);
 
     TAlphabet curW = kmer[0];
     if (buffer->size() < 2 || curW == 0) {
@@ -226,54 +230,36 @@ template <class KmerCollector, typename T>
 void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                      ChunkedWaitQueue<T> *kmers,
                                      ThreadPool &async_worker) {
-    constexpr size_t CHUNK_QUEUE_BUFFER_SIZE = 10000;
-    constexpr size_t CHUNK_QUEUE_FENCE_SIZE = 1; // no of elements to traverse backwards
     constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
 
-    std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
+    const std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
     using T_INT = get_int_t<T>; // either KMER_INT or <KMER_INT, count>
 
-    // name of the file containing dummy k-mers of given prefix length
-    const auto get_file_name = [&tmp_dir](uint32_t pref_len) {
-        return tmp_dir / ("dummy_l" + std::to_string(pref_len));
-    };
+    size_t k = kmer_collector.get_k() - 1;
 
     const auto no_cleanup = [](Vector<T_INT> *) {};
 
-    std::vector<std::string> files_to_merge;
-
-    const std::string file_name = tmp_dir / "original_and_dummy_l1";
-    files_to_merge.push_back(file_name);
-    size_t k = kmer_collector.get_k() - 1;
-    files_to_merge.reserve(k + 1);
-
-    RecentKmers<T> recent_buffer(std::pow(1llu << KMER::kBitsPerChar, 2));
-
-    files_to_merge.push_back(get_file_name(2));
-
-    const filesystem::path tmp_path2 = tmp_dir / "dummy_source2";
-
+    // contains original kmers and non-redundant source dummy k-mers with prefix length 1
+    std::vector<std::string> files_to_merge { tmp_dir/"original_and_dummy_l1" };
+    common::EliasFanoEncoderBuffered<T_INT> original_and_l1(files_to_merge.front(),
+                                                            ENCODER_BUFFER_SIZE);
     // this will contain dummy k-mers of prefix length 2
-    common::EliasFanoEncoderBuffered<T_INT> dummy_l2(files_to_merge.back(), ENCODER_BUFFER_SIZE);
-
     common::SortedSetDisk<T_INT> sorted_dummy_kmers(
             no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
-            tmp_path2, kmer_collector.max_disk_space());
+            tmp_dir/"dummy_source_2", kmer_collector.max_disk_space());
     Vector<T_INT> dummy_kmers;
-    dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
+    dummy_kmers.reserve(ENCODER_BUFFER_SIZE);
 
     // traverse the input kmers and remove redundant dummy source k-mers of prefix length
     // 1. While traversing we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
-    // contains original kmers and non-redundant source dummy k-mers with prefix length 1
-    common::EliasFanoEncoderBuffered<T_INT> original_and_l1(file_name, ENCODER_BUFFER_SIZE);
+
+    RecentKmers<T> recent_buffer(std::pow(1llu << KMER::kBitsPerChar, 2));
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
-        T el = *it;
-        recent_buffer.push_back({ el, false });
-        remove_redundant_dummy_source(get_first(el), &recent_buffer);
+        push_and_remove_redundant_dummy_source(*it, &recent_buffer);
         if (recent_buffer.full()) {
             num_dummy_parent_kmers += write_kmer(k, recent_buffer.pop_front(),
                                                  &dummy_kmers, &original_and_l1,
@@ -292,24 +278,20 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     logger->trace("Total number of k-mers: {}", num_parent_kmers);
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   num_dummy_parent_kmers);
-    ThreadPool async_merge = ThreadPool(1, 1);
-    // generate dummy k-mers of prefix length 3..k
-    for (size_t dummy_pref_len = 3; dummy_pref_len < k + 1; ++dummy_pref_len) {
-        const filesystem::path tmp_path
-                = tmp_dir / ("dummy_source" + std::to_string(dummy_pref_len));
-        const std::vector<string> chunk_files = sorted_dummy_kmers.files_to_merge();
+
+    // generate dummy k-mers of prefix length 2..k
+    for (size_t dummy_pref_len = 2; dummy_pref_len <= k; ++dummy_pref_len) {
+        // this will compress all sorted dummy k-mers of given prefix length
+        files_to_merge.push_back(tmp_dir/("dummy_l" + std::to_string(dummy_pref_len)));
         common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(),
                                                         ENCODER_BUFFER_SIZE);
-        ChunkedWaitQueue<T_INT> source(CHUNK_QUEUE_BUFFER_SIZE, CHUNK_QUEUE_FENCE_SIZE,
-                                       [&encoder](const T_INT &v) { encoder.add(v); });
-        async_merge.enqueue([&chunk_files, &source]() {
-            common::merge_files<T_INT>(chunk_files, [&](const T_INT &v) { source.push(v); });
-            source.shutdown();
-        });
-        sorted_dummy_kmers.clear(tmp_path);
+        ChunkedWaitQueue<T_INT> &source = sorted_dummy_kmers.data(false); // don't reset the buffer
+        // this will sort and store dummy k-mers of the next level
+        sorted_dummy_kmers.clear(tmp_dir/("dummy_source_" + std::to_string(dummy_pref_len + 1)));
         dummy_kmers.resize(0);
         size_t num_kmers = 0;
         for (auto &it = source.begin(); it != source.end(); ++it) {
+            encoder.add(*it);
             if (dummy_kmers.size() == dummy_kmers.capacity()) {
                 sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
                 dummy_kmers.resize(0);
@@ -323,26 +305,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         sorted_dummy_kmers.insert(dummy_kmers.begin(), dummy_kmers.end());
         encoder.finish();
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
-                      dummy_pref_len - 1, num_kmers);
-        files_to_merge.push_back(get_file_name(dummy_pref_len));
+                      dummy_pref_len, num_kmers);
     }
-    //TODO: remove this (add one iteration of the loop above)
-    uint32_t num_kmers = 0;
-    // iterate to merge the data and write it to disk
-    common::EliasFanoEncoderBuffered<T_INT> encoder(files_to_merge.back(),
-                                                    ENCODER_BUFFER_SIZE);
-    ChunkedWaitQueue<T_INT> source(CHUNK_QUEUE_BUFFER_SIZE, CHUNK_QUEUE_FENCE_SIZE,
-                                   [&encoder](const T_INT &v) { encoder.add(v); });
-    async_merge.enqueue([&]() {
-        common::merge_files<T_INT>(sorted_dummy_kmers.files_to_merge(),
-                                   [&source](const T_INT &v) { source.push(v); });
-        source.shutdown();
-    });
-    for (auto &it = source.begin(); it != source.end(); ++it, ++num_kmers) {
-    }
-    encoder.finish();
-    logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}", k, num_kmers);
-
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     kmers->reset();

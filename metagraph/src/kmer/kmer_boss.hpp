@@ -166,7 +166,7 @@ void KMerBOSS<G, L>::to_next(size_t k, CharType new_last) {
 template <typename G, int L>
 void KMerBOSS<G, L>::to_prev(size_t k, CharType new_first) {
     const int shift = kBitsPerChar * (k - 1);
-    G last_char = seq_ >> shift;
+    WordType last_char = seq_ >> shift;
     //     s[7]s[6]s[5]s[4]s[3]s[2]s[8]
     seq_ &= kAllButFirstCharMask;
     //     s[7]s[6]s[5]s[4]s[3]s[2]0000

@@ -83,7 +83,7 @@ class SortedSetDiskBase {
      * Returns the globally sorted and counted data. Typically called once all the data
      * was inserted via insert().
      */
-    ChunkedWaitQueue<T>& data() {
+    ChunkedWaitQueue<T>& data(bool free_buffer = true) {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
 
@@ -94,7 +94,9 @@ class SortedSetDiskBase {
                 sort_and_remove_duplicates(&data_, num_threads_);
                 dump_to_file(true /* is_done */);
             }
-            Vector<T>().swap(data_); // free up the (usually very large) buffer
+            if (free_buffer) {
+                Vector<T>().swap(data_); // free up the (usually very large) buffer
+            }
             start_merging();
         }
         return merge_queue_;
@@ -116,7 +118,7 @@ class SortedSetDiskBase {
 
     /**
      * Clears the set, preparing it to be re-used for another merge. Creating a new
-     * sorted set may be expensive when #data_ is large. In these cases, prefere calling
+     * sorted set may be expensive when #data_ is large. In these cases, prefer calling
      * #clear and re-using the sorted.
      */
     void clear(const std::filesystem::path &tmp_path = "/tmp/") {
@@ -130,7 +132,6 @@ class SortedSetDiskBase {
         data_.resize(0); // this makes sure the buffer is not reallocated
         chunk_file_prefix_ = tmp_path / "chunk_";
         std::filesystem::create_directory(tmp_path);
-        merge_queue_.reset(on_item_pushed_);
     }
 
   protected: // TODO: move most of these methods to private before submitting
@@ -140,6 +141,7 @@ class SortedSetDiskBase {
     void start_merging() {
         const std::vector<std::string> file_names = get_file_names();
         async_worker_.enqueue([file_names, this]() {
+            merge_queue_.reset(on_item_pushed_);
             std::function<void(const T &)> on_new_item
                     = [this](const T &v) { merge_queue_.push(v); };
             merge_files(file_names, on_new_item);
