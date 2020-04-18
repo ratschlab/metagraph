@@ -1969,14 +1969,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             return;
 
         do {
-            if (!atomic_fetch_bit(discovered, i, split_to_unitigs && async))
+            if (!discovered[i]) {
                 enqueue_start(i);
+                call_paths_from_queue();
+            }
 
         } while (--i > 0 && !get_last(i));
 
     });
-
-    call_paths_from_queue();
 
     // process all the remaining disconnected cycles that have not been traversed
     // TODO: I don't see a way this part can be parallelized...
@@ -2018,7 +2018,7 @@ void call_paths_from_queue(const BOSS &boss,
             auto next_edges = it->get();
             edges_async.erase(it);
             for (Edge next_edge : next_edges) {
-                if (atomic_fetch_bit(discovered, next_edge.first))
+                if (atomic_fetch_bit(discovered, next_edge.first, async))
                     continue;
 
                 edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
