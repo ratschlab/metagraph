@@ -254,6 +254,8 @@ int clean_graph(Config *config) {
                 graph->is_canonical_mode()
             );
 
+            // the outer for loop is parallelized, so don't start another thread
+            // pool here
             dump_contigs_to_fasta(filebase, [&](auto dump_sequence, auto /* num_threads */) {
                 graph_slice.call_sequences(dump_sequence, graph_slice.is_canonical_mode());
             });
