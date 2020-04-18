@@ -338,11 +338,9 @@ void EliasFanoEncoder<T>::write_bits(char *data, size_t pos, T value) {
 template <typename T>
 EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name, bool remove_source)
     : source_name_(source_name), remove_source_(remove_source) {
-    source_internal_ = std::ifstream(source_name, std::ios::binary);
-    source_ = &source_internal_;
-    source_internal_upper_ = std::ifstream(source_name + ".up", std::ios::binary);
-    source_upper_ = &source_internal_upper_;
-    if (!source_->good() || !source_upper_->good()) {
+    source_.open(source_name, std::ios::binary);
+    source_upper_.open(source_name + ".up", std::ios::binary);
+    if (!source_.good() || !source_upper_.good()) {
         logger->error("Unable to read from {}", source_name);
         std::exit(EXIT_FAILURE);
     }
@@ -374,7 +372,7 @@ T EliasFanoDecoder<T>::next_lower() {
         if (lower_idx_ == READ_BUF_SIZE - 1 && num_lower_bytes_ > 0) {
             const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
             lower_[0] = lower_[lower_idx_];
-            source_->read(reinterpret_cast<char *>(&lower_[1]), to_read);
+            source_.read(reinterpret_cast<char *>(&lower_[1]), to_read);
             num_lower_bytes_ -= to_read;
             lower_idx_ = 0;
         }
@@ -414,22 +412,22 @@ bool EliasFanoDecoder<T>::init() {
     // Initialized to a negative number to save on decrement instruction in
     // #next_upper.
     upper_pos_ = static_cast<uint64_t>(-sizeof(T));
-    if (!source_->read(reinterpret_cast<char *>(&size_), sizeof(size_t))) {
+    if (!source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t))) {
         return false;
     }
-    source_->read(reinterpret_cast<char *>(&offset_), sizeof(T));
-    source_->read(reinterpret_cast<char *>(&num_lower_bits_), 1);
-    source_->read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
-    source_->read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
+    source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
+    source_.read(reinterpret_cast<char *>(&num_lower_bits_), 1);
+    source_.read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
+    source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
     size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
-    source_->read(reinterpret_cast<char *>(lower_), low_bytes_read);
+    source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
     num_lower_bytes_ -= low_bytes_read;
 
     // Reserve a bit extra space for unaligned reads and set all to
     // zero to silence Valgrind uninitilized memory warnings
     upper_.resize(num_upper_bytes_ + sizeof(T) - 1, 0);
-    source_upper_->read(upper_.data(), num_upper_bytes_);
-    assert(static_cast<uint32_t>(source_upper_->gcount()) == num_upper_bytes_);
+    source_upper_.read(upper_.data(), num_upper_bytes_);
+    assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
 
     return true;
 }
