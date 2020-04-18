@@ -61,7 +61,6 @@ int assemble(Config *config) {
                 });
                 auto lock = conditional_unique_lock(str_mutex, get_num_threads() >= 2);
                 gfa_file << ostr.str();
-
             },
             config->min_tip_size
         );
