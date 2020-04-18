@@ -80,10 +80,10 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     MergeHeap<T> merge_heap;
     std::optional<T> data_item;
 
-    std::vector<std::unique_ptr<EliasFanoDecoder<T>>> decoders(sources.size());
+    std::vector<EliasFanoDecoder<T>> decoders;
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<EliasFanoDecoder<T>>(sources[i], remove_sources);
-        data_item = decoders[i]->next();
+        decoders.emplace_back(sources[i], remove_sources);
+        data_item = decoders.back().next();
         if (data_item.has_value()) {
             merge_heap.emplace(data_item.value(), i);
             num_elements_read++;
@@ -105,7 +105,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             last_written = smallest;
         }
 
-        if ((data_item = decoders[chunk_index]->next()).has_value()) {
+        if ((data_item = decoders[chunk_index].next()).has_value()) {
             merge_heap.emplace(data_item.value(), chunk_index);
             num_elements_read++;
         }
@@ -141,11 +141,10 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 
     MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
     std::optional<std::pair<T, C>> data_item;
-    using Decoder = EliasFanoDecoder<std::pair<T, C>>;
-    std::vector<std::unique_ptr<Decoder>> decoders(sources.size());
+    std::vector<EliasFanoDecoder<std::pair<T, C>>> decoders;
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders[i] = std::make_unique<Decoder>(sources[i], remove_sources);
-        data_item = decoders[i]->next();
+        decoders.emplace_back(sources[i], remove_sources);
+        data_item = decoders.back().next();
         if (data_item.has_value()) {
             merge_heap.emplace(data_item.value(), i);
             num_elements_read++;
@@ -173,7 +172,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
             }
         }
 
-        if ((data_item = decoders[chunk_index]->next()).has_value()) {
+        if ((data_item = decoders[chunk_index].next()).has_value()) {
             merge_heap.emplace(data_item.value(), chunk_index);
             num_elements_read++;
         }
