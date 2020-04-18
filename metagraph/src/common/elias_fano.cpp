@@ -416,7 +416,6 @@ bool EliasFanoDecoder<T>::init() {
     // #next_upper.
     upper_pos_ = static_cast<uint64_t>(-sizeof(T));
     if (!source_->read(reinterpret_cast<char *>(&size_), sizeof(size_t))) {
-        assert(!source_upper_->read(upper_.data(), 1));
         return false;
     }
     source_->read(reinterpret_cast<char *>(&offset_), sizeof(T));
