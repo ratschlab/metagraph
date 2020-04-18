@@ -164,7 +164,7 @@ static void remove_redundant_dummy_source(const get_first_type_t<T> &kmer,
         return;
     }
     for (auto it = ++buffer->rbegin();
-            KMER::compare_suffix(kmer, get_first((*(++it)).data), 1); ++it) {
+            KMER::compare_suffix(kmer, get_first((*it).data), 1); ++it) {
         KMER &prev_kmer = get_first((*it).data);
         assert((curW || prev_kmer[1]) && "Main dummy source k-mer must be unique");
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
