@@ -291,8 +291,7 @@ void EliasFanoEncoder<T>::init(size_t size, T max_value) {
     // lower and upper sequences are readable (the stored value doesn't matter and
     // won't be changed), so we reserve an additional 7 bytes for padding
     if (size > 0) {
-        upper_.reserve(num_upper_bytes_ + sizeof(T) - 1);
-        upper_.resize(num_upper_bytes_);
+        upper_.resize(num_upper_bytes_ + sizeof(T) - 1, 0);
     }
 
     sink_->write(reinterpret_cast<char *>(&size), sizeof(size_t));
@@ -426,13 +425,9 @@ bool EliasFanoDecoder<T>::init() {
     source_->read(reinterpret_cast<char *>(lower_), low_bytes_read);
     num_lower_bytes_ -= low_bytes_read;
 
-    upper_.reserve(num_upper_bytes_ + sizeof(T) - 1);
-#ifndef NDEBUG
-    // silence Valgrind uninitialized warnings. Because our reads are unaligned, we read
-    // (and correctly ignore) from uninitilized memory
-    memset(upper_.data(), 0, num_upper_bytes_ + sizeof(T) - 1);
-#endif
-    upper_.resize(num_upper_bytes_);
+    // Reserve a bit extra space for unaligned reads and set all to
+    // zero to silence Valgrind uninitilized memory warnings
+    upper_.resize(num_upper_bytes_ + sizeof(T) - 1, 0);
     source_upper_->read(upper_.data(), num_upper_bytes_);
     assert(static_cast<uint32_t>(source_upper_->gcount()) == num_upper_bytes_);
 
