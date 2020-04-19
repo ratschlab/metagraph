@@ -152,7 +152,7 @@ class ChunkedWaitQueue {
      * iterating.
      */
     // TODO: construct iterator and return it instead of returning a reference
-    Iterator &begin() const { return const_cast<ChunkedWaitQueue *>(this)->iter(); }
+    Iterator& begin() const { return const_cast<ChunkedWaitQueue *>(this)->iter(); }
 
     /**
      * Special iterator indicating the end of the queue - the end is reached when the

@@ -141,7 +141,6 @@ class SortedSetDiskBase {
         data_.resize(0); // this makes sure the buffer is not reallocated
         chunk_file_prefix_ = tmp_path/"chunk_";
         std::filesystem::create_directory(tmp_path);
-        merge_queue_.reset();
     }
 
   protected: // TODO: move most of these methods to private before submitting
@@ -149,6 +148,10 @@ class SortedSetDiskBase {
                                             size_t num_threads) const = 0;
 
     void start_merging_async() {
+        // wait until the previous merging job is done
+        async_worker_.join();
+        // now the queue can be reinitialized and used in the next merge
+        merge_queue_.reset();
         const std::vector<std::string> file_names = get_file_names();
         async_worker_.enqueue([file_names, this]() {
             std::function<void(const T &)> on_new_item
