@@ -10,7 +10,6 @@
 #include <ips4o.hpp>
 
 #include "common/sorted_set_disk_base.hpp"
-#include "common/threads/chunked_wait_queue.hpp"
 #include "common/vector.hpp"
 
 namespace mg {
@@ -55,12 +54,12 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
             std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100)
         : SortedSetDiskBase<T>(cleanup,
-                                    num_threads,
-                                    reserved_num_elements,
-                                    tmp_dir,
-                                    max_disk_space_bytes,
-                                    on_item_pushed,
-                                    num_last_elements_cached) {}
+                               num_threads,
+                               reserved_num_elements,
+                               tmp_dir,
+                               max_disk_space_bytes,
+                               on_item_pushed,
+                               num_last_elements_cached) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is

@@ -60,7 +60,7 @@ class SortedSetDiskBase {
           reserved_num_elements_(reserved_num_elements),
           max_disk_space_bytes_(max_disk_space_bytes),
           on_item_pushed_(on_item_pushed),
-          chunk_file_prefix_(tmp_dir / "chunk_"),
+          chunk_file_prefix_(tmp_dir/"chunk_"),
           merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
                        num_last_elements_cached,
                        on_item_pushed),
@@ -74,7 +74,11 @@ class SortedSetDiskBase {
     }
 
     virtual ~SortedSetDiskBase() {
-        merge_queue_.shutdown(); // make sure the data was processed
+        // remove the files that have not been requested to merge
+        for (const auto &chunk_file : get_file_names()) {
+            std::filesystem::remove(chunk_file);
+        }
+        async_worker_.join(); // make sure the data was processed
     }
 
     size_t buffer_size() const { return data_.capacity(); }
@@ -97,7 +101,11 @@ class SortedSetDiskBase {
             if (free_buffer) {
                 Vector<T>().swap(data_); // free up the (usually very large) buffer
             }
-            start_merging();
+            assert(data_.empty());
+            start_merging_async();
+            chunk_count_ = 0;
+            l1_chunk_count_ = 0;
+            total_chunk_size_bytes_ = 0;
         }
         return merge_queue_;
     }
@@ -119,18 +127,22 @@ class SortedSetDiskBase {
     /**
      * Clears the set, preparing it to be re-used for another merge. Creating a new
      * sorted set may be expensive when #data_ is large. In these cases, prefer calling
-     * #clear and re-using the sorted.
+     * #clear and re-using the buffer.
      */
     void clear(const std::filesystem::path &tmp_path = "/tmp/") {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         is_merging_ = false;
+        // remove the files that have not been requested to merge
+        for (const auto &chunk_file : get_file_names()) {
+            std::filesystem::remove(chunk_file);
+        }
         chunk_count_ = 0;
         l1_chunk_count_ = 0;
         total_chunk_size_bytes_ = 0;
         try_reserve(reserved_num_elements_);
         data_.resize(0); // this makes sure the buffer is not reallocated
-        chunk_file_prefix_ = tmp_path / "chunk_";
+        chunk_file_prefix_ = tmp_path/"chunk_";
         std::filesystem::create_directory(tmp_path);
     }
 
@@ -138,7 +150,7 @@ class SortedSetDiskBase {
     virtual void sort_and_remove_duplicates(storage_type *vector,
                                             size_t num_threads) const = 0;
 
-    void start_merging() {
+    void start_merging_async() {
         const std::vector<std::string> file_names = get_file_names();
         async_worker_.enqueue([file_names, this]() {
             merge_queue_.reset(on_item_pushed_);
