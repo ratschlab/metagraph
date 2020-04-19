@@ -51,14 +51,12 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
             size_t reserved_num_elements = 1e6,
             const std::filesystem::path &tmp_dir = "/tmp/",
             size_t max_disk_space_bytes = 1e9,
-            std::function<void(const T &)> on_item_pushed = [](const T &) {},
             size_t num_last_elements_cached = 100)
         : SortedSetDiskBase<T>(cleanup,
                                num_threads,
                                reserved_num_elements,
                                tmp_dir,
                                max_disk_space_bytes,
-                               on_item_pushed,
                                num_last_elements_cached) {}
 
     /**

@@ -21,15 +21,12 @@ template <typename TypeParam>
 void expect_equals(common::SortedSetDisk<TypeParam> &underTest,
                    const std::vector<TypeParam> &expectedValues) {
     uint32_t size = 0;
-    using ChunkedQueueIterator = typename common::ChunkedWaitQueue<TypeParam>::Iterator;
     common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.data();
-    for (ChunkedQueueIterator &iterator = merge_queue.begin();
-         iterator != merge_queue.end(); ++iterator) {
-        EXPECT_EQ(expectedValues[size], *iterator);
+    for (auto &it = merge_queue.begin(); it != merge_queue.end(); ++it) {
+        EXPECT_EQ(expectedValues[size], *it);
         size++;
     }
     EXPECT_EQ(expectedValues.size(), size);
-    merge_queue.shutdown();
 }
 
 template <typename T>
@@ -38,9 +35,8 @@ common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8,
     constexpr size_t thread_count = 1;
     constexpr size_t max_disk_space = 1e6;
     auto nocleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
-    auto on_item_pushed = [](const T &) {};
     return common::SortedSetDisk<T>(nocleanup, thread_count, container_size,
-                                    "/tmp/test_chunk_", max_disk_space, on_item_pushed,
+                                    "/tmp/test_chunk_", max_disk_space,
                                     num_elements_cached);
 }
 

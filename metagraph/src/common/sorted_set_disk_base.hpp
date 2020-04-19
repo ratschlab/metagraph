@@ -54,16 +54,13 @@ class SortedSetDiskBase {
                       size_t reserved_num_elements,
                       const std::filesystem::path &tmp_dir,
                       size_t max_disk_space_bytes,
-                      std::function<void(const T &)> on_item_pushed,
                       size_t num_last_elements_cached)
         : num_threads_(num_threads),
           reserved_num_elements_(reserved_num_elements),
           max_disk_space_bytes_(max_disk_space_bytes),
-          on_item_pushed_(on_item_pushed),
           chunk_file_prefix_(tmp_dir/"chunk_"),
           merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
-                       num_last_elements_cached,
-                       on_item_pushed),
+                       num_last_elements_cached),
           cleanup_(cleanup) {
         std::filesystem::create_directory(tmp_dir);
         if (reserved_num_elements == 0) {
@@ -153,7 +150,7 @@ class SortedSetDiskBase {
     void start_merging_async() {
         const std::vector<std::string> file_names = get_file_names();
         async_worker_.enqueue([file_names, this]() {
-            merge_queue_.reset(on_item_pushed_);
+            merge_queue_.reset();
             std::function<void(const T &)> on_new_item
                     = [this](const T &v) { merge_queue_.push(v); };
             merge_files(file_names, on_new_item);
@@ -287,8 +284,6 @@ class SortedSetDiskBase {
     size_t reserved_num_elements_;
 
     size_t max_disk_space_bytes_;
-
-    std::function<void(const T &)> on_item_pushed_;
 
     std::string chunk_file_prefix_;
 
