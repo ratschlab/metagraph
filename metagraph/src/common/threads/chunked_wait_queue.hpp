@@ -124,12 +124,21 @@ class ChunkedWaitQueue {
 
     /**
      * Enqueues x by *moving* it into the queue, blocks when full.
-     *
-     * Note that this function receives its parameter by value, so make sure you
-     * std::move it into the queue if the copy construction is expensive.
      */
-    void push(value_type x) {
+    void push(value_type&& x) {
         write_buf_.push_back(std::move(x));
+        if (write_buf_.size() == write_buf_.capacity()) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            can_flush_.wait(lock, [this] { return can_flush(); });
+            flush();
+        }
+    }
+
+    /**
+     * Pushes x into the queue, blocks when full.
+     */
+    void push(const value_type &x) {
+        write_buf_.push_back(x);
         if (write_buf_.size() == write_buf_.capacity()) {
             std::unique_lock<std::mutex> lock(mutex_);
             can_flush_.wait(lock, [this] { return can_flush(); });
