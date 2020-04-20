@@ -1978,6 +1978,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     });
 
+    // this past part can only be done in a single thread, so turn off async
+    thread_pool->join();
+    thread_pool.reset();
+    async = false;
+
     // process all the remaining disconnected cycles that have not been traversed
     // TODO: I don't see a way this part can be parallelized...
     call_zeros(discovered, [&](edge_index i) {
@@ -2235,7 +2240,8 @@ void call_path(const BOSS &boss,
 
     {
         // sync all writes
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        if (async)
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
         // then lock all threads
         auto lock = conditional_unique_lock(vector_mutex, async);
