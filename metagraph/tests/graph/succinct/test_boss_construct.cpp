@@ -68,7 +68,7 @@ TYPED_TEST_SUITE(WeightedBOSSConstruct, KmerWeightedTypes);
 #define kMaxK ( sizeof(typename TypeParam::Kmer) * 8 / KmerExtractorBOSS::bits_per_char )
 
 typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
-                         KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,   
+                         KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
                          KMerBOSS<sdsl::uint256_t, KmerExtractorBOSS::bits_per_char>> KmerTypes;
 
 TYPED_TEST_SUITE(CollectKmers, KmerTypes);
