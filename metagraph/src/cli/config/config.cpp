@@ -476,8 +476,7 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if ((identity == ANNOTATE || identity == ANNOTATE_COORDINATES)
-            && outfbase.empty())
+    if (identity == ANNOTATE_COORDINATES && outfbase.empty())
         outfbase = utils::remove_suffix(infbase, ".dbg",
                                                  ".orhashdbg",
                                                  ".hashstrdbg",
@@ -497,6 +496,8 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if ((identity == TRANSFORM
+            || identity == BUILD
+            || identity == ANNOTATE
             || identity == CONCATENATE
             || identity == EXTEND
             || identity == MERGE
@@ -718,7 +719,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             return;
         }
         case BUILD: {
-            fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
+            fprintf(stderr, "Usage: %s build [options] -o <outfile-base> FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA, FASTQ, VCF, or KMC format.\n"
                             "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
@@ -907,7 +908,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE: {
-            fprintf(stderr, "Usage: %s annotate -i <GRAPH> [options] FILE1 [[FILE2] ...]\n"
+            fprintf(stderr, "Usage: %s annotate -i <GRAPH> -o <annotation-basename> [options] FILE1 [[FILE2] ...]\n"
                             "\tEach file is given in FASTA, FASTQ, VCF, or KMC format.\n"
                             "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
@@ -921,7 +922,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t   --cache \t\tnumber of columns in cache (for column representation only) [10]\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file [<GRAPH>]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
             fprintf(stderr, "\n");
@@ -946,7 +947,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case MERGE_ANNOTATIONS: {
-            fprintf(stderr, "Usage: %s merge_anno -o <annotator_basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s merge_anno -o <annotation-basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
@@ -955,7 +956,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {
-            fprintf(stderr, "Usage: %s transform_anno -o <annotator_basename> [options] ANNOTATOR\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s transform_anno -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
@@ -975,7 +976,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
         } break;
         case RELAX_BRWT: {
-            fprintf(stderr, "Usage: %s relax_brwt -o <annotator_basename> [options] ANNOTATOR\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s relax_brwt -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
