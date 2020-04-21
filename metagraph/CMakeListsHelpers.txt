@@ -138,6 +138,9 @@ endfunction()
 
 
 function (findGTest)
+if(TARGET gtest)
+  return()
+endif()
 execute_process(COMMAND rm -rf ${EXTERNAL_LIB_DIR}/sdsl-lite/include/gtest)
 add_subdirectory(${EXTERNAL_LIB_DIR}/googletest googletest EXCLUDE_FROM_ALL)
 target_compile_options(gtest_main PRIVATE -w)

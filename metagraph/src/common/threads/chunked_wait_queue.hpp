@@ -69,16 +69,11 @@ class ChunkedWaitQueue {
      * will always keep at least fence_size elements behind the furthest iterator for this
      * purpose. Must be smaller than #buffer_size, and in practice it's orders of
      * magnitude smaller.
-     * @param on_item_pushed callback to invoke when an item is pushed into the queue
      */
-    explicit ChunkedWaitQueue(
-            size_type buffer_size,
-            size_type fence_size,
-            std::function<void(const T &)> on_item_pushed = [](const T &) {})
+    explicit ChunkedWaitQueue(size_type buffer_size, size_type fence_size)
         : chunk_size_(std::min(std::max(1UL, buffer_size / 3), buffer_size - fence_size)),
           buffer_size_(buffer_size),
           fence_size_(fence_size),
-          on_item_pushed_(on_item_pushed),
           buffer_(buffer_size),
           end_iterator_(Iterator(this, std::min(WRITE_BUF_SIZE, chunk_size_), buffer_size)),
           is_shutdown_(false) {
@@ -100,13 +95,12 @@ class ChunkedWaitQueue {
      * Resets the queue to an empty state.
      * Undefined behavior if the queue is reset while iterating over it.
      */
-    void reset(std::function<void(const T&)> on_item_pushed = [](const T&) {}) {
+    void reset() {
         shutdown();
         first_ = 0;
         last_ = buffer_size_;
         is_shutdown_ = false;
         iterator_.reset();
-        on_item_pushed_ = on_item_pushed;
     }
 
     /**
@@ -130,13 +124,21 @@ class ChunkedWaitQueue {
 
     /**
      * Enqueues x by *moving* it into the queue, blocks when full.
-     *
-     * Note that this function receives its parameter by value, so make sure you
-     * std::move it into the queue if the copy construction is expensive.
      */
-    void push(value_type x) {
-        on_item_pushed_(x);
+    void push(value_type&& x) {
         write_buf_.push_back(std::move(x));
+        if (write_buf_.size() == write_buf_.capacity()) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            can_flush_.wait(lock, [this] { return can_flush(); });
+            flush();
+        }
+    }
+
+    /**
+     * Pushes x into the queue, blocks when full.
+     */
+    void push(const value_type &x) {
+        write_buf_.push_back(x);
         if (write_buf_.size() == write_buf_.capacity()) {
             std::unique_lock<std::mutex> lock(mutex_);
             can_flush_.wait(lock, [this] { return can_flush(); });
@@ -150,7 +152,7 @@ class ChunkedWaitQueue {
      * iterating.
      */
     // TODO: construct iterator and return it instead of returning a reference
-    Iterator &begin() const { return const_cast<ChunkedWaitQueue *>(this)->iter(); }
+    Iterator& begin() const { return const_cast<ChunkedWaitQueue *>(this)->iter(); }
 
     /**
      * Special iterator indicating the end of the queue - the end is reached when the
@@ -163,8 +165,6 @@ class ChunkedWaitQueue {
     const size_type chunk_size_;
     const size_type buffer_size_;
     const size_type fence_size_;
-
-    std::function<void(const T &)> on_item_pushed_;
 
     std::vector<T, Alloc> buffer_;
 

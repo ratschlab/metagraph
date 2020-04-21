@@ -116,21 +116,16 @@ BitmapChunkConstructor<KmerCollector>::get_weights(uint8_t bits_per_count) {
  * Initialize graph chunk from a list of sorted kmers.
  */
 template <typename KmerCollector>
-DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>
-::build_chunk() {
-    using KMER = typename KmerCollector::Key;
+DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>::build_chunk() {
+    using KMER = typename KmerCollector::Kmer;
 
     const auto &kmers = kmer_collector_.data();
     std::unique_ptr<DBGBitmap::Chunk> chunk {
         new DBGBitmap::Chunk(
             [&](const auto &index_callback) {
-                std::for_each(kmers.begin(), kmers.end(), [&](const typename KmerCollector::Value &kmer) {
-                    if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
-                        index_callback(typename KMER::WordType(1u) + kmer.first.data());
-                    } else {
-                        index_callback(typename KMER::WordType(1u) + kmer.data());
-                    }
-                });
+                std::for_each(kmers.begin(), kmers.end(),
+                    [&](const auto &kmer) { index_callback(utils::get_first(kmer) + 1); }
+                );
             },
             (1llu << (get_k() * KMER::kBitsPerChar)) + 1,
             kmers.size()
@@ -253,18 +248,20 @@ initialize_bitmap_chunk_constructor(size_t k, const Args& ...args) {
 }
 
 template <typename KMER>
-using KmerSet = kmer::KmerCollector<KMER,
-                                    KmerExtractor2Bit,
-                                    common::SortedSet<KMER, Vector<KMER>>>;
+using KmerSet
+        = kmer::KmerCollector<KMER, KmerExtractor2Bit, common::SortedSet<typename KMER::WordType>>;
 template <typename KMER>
-using KmerMultsetVector8 = kmer::KmerCollector<KMER, KmerExtractor2Bit,
-        common::SortedMultiset<KMER, uint8_t, Vector<std::pair<KMER, uint8_t>>>>;
+using KmerMultsetVector8 = kmer::KmerCollector<KMER,
+                                               KmerExtractor2Bit,
+                                               common::SortedMultiset<typename KMER::WordType, uint8_t>>;
 template <typename KMER>
-using KmerMultsetVector16 = kmer::KmerCollector<KMER, KmerExtractor2Bit,
-        common::SortedMultiset<KMER, uint16_t, Vector<std::pair<KMER, uint16_t>>>>;
+using KmerMultsetVector16 = kmer::KmerCollector<KMER,
+                                                KmerExtractor2Bit,
+                                                common::SortedMultiset<typename KMER::WordType, uint16_t>>;
 template <typename KMER>
-using KmerMultsetVector32 = kmer::KmerCollector<KMER, KmerExtractor2Bit,
-        common::SortedMultiset<KMER, uint32_t, Vector<std::pair<KMER, uint32_t>>>>;
+using KmerMultsetVector32 = kmer::KmerCollector<KMER,
+                                                KmerExtractor2Bit,
+                                                common::SortedMultiset<typename KMER::WordType, uint32_t>>;
 
 IBitmapChunkConstructor*
 IBitmapChunkConstructor

@@ -76,6 +76,9 @@ struct get_first_type<T, std::void_t<typename T::first_type>> {
     using type = typename T::first_type;
 };
 
+template <typename T>
+using get_first_type_t = typename get_first_type<T>::type;
+
 class GreaterFirst {
   public:
     template <typename T>

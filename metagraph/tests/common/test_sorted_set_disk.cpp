@@ -21,15 +21,12 @@ template <typename TypeParam>
 void expect_equals(common::SortedSetDisk<TypeParam> &underTest,
                    const std::vector<TypeParam> &expectedValues) {
     uint32_t size = 0;
-    using ChunkedQueueIterator = typename common::ChunkedWaitQueue<TypeParam>::Iterator;
     common::ChunkedWaitQueue<TypeParam> &merge_queue = underTest.data();
-    for (ChunkedQueueIterator &iterator = merge_queue.begin();
-         iterator != merge_queue.end(); ++iterator) {
-        EXPECT_EQ(expectedValues[size], *iterator);
+    for (auto &it = merge_queue.begin(); it != merge_queue.end(); ++it) {
+        EXPECT_EQ(expectedValues[size], *it);
         size++;
     }
     EXPECT_EQ(expectedValues.size(), size);
-    merge_queue.shutdown();
 }
 
 template <typename T>
@@ -38,9 +35,8 @@ common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8,
     constexpr size_t thread_count = 1;
     constexpr size_t max_disk_space = 1e6;
     auto nocleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
-    auto on_item_pushed = [](const T &) {};
     return common::SortedSetDisk<T>(nocleanup, thread_count, container_size,
-                                    "/tmp/test_chunk_", max_disk_space, on_item_pushed,
+                                    "/tmp/test_chunk_", max_disk_space,
                                     num_elements_cached);
 }
 
@@ -145,15 +141,15 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
     std::vector<std::thread> workers;
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
-        workers.push_back(std::thread([&underTest, i]() {
+        workers.emplace_back([&underTest, i]() {
             std::array<TypeParam, 4> elements
-                    = { TypeParam(4 * i), TypeParam(4 * i + 1), TypeParam(4 * i + 2),
-                        TypeParam(4 * i + 3) };
+                = { TypeParam(4 * i), TypeParam(4 * i + 1), TypeParam(4 * i + 2),
+                    TypeParam(4 * i + 3) };
             underTest.insert(elements.begin(), elements.end());
-        }));
-        std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
-                                              TypeParam(4 * i + 2), TypeParam(4 * i + 3) };
-        expected_result.insert(expected_result.end(), elements.begin(), elements.end());
+        });
+    }
+    for (uint32_t i = 0; i < 400; ++i) {
+        expected_result.emplace_back(i);
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
     expect_equals(underTest, expected_result);
@@ -168,12 +164,14 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
     std::vector<std::thread> workers;
     std::vector<TypeParam> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
-        workers.push_back(std::thread([&underTest, i]() {
+        workers.emplace_back([&underTest, i]() {
             std::array<TypeParam, 4> elements = { TypeParam(3 * i), TypeParam(3 * i + 1) };
             underTest.insert(elements.begin(), elements.end());
             elements = { TypeParam(3 * i + 1), TypeParam(3 * i + 2) };
             underTest.insert(elements.begin(), elements.end());
-        }));
+        });
+    }
+    for (uint32_t i = 0; i < 100; ++i) {
         std::array<TypeParam, 3> elements
                 = { TypeParam(3 * i), TypeParam(3 * i + 1), TypeParam(3 * i + 2) };
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());

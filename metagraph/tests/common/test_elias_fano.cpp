@@ -10,7 +10,7 @@
 
 #include "common/elias_fano.hpp"
 #include "common/utils/file_utils.hpp"
-#include "gtest_patch.hpp"
+#include "tests/utils/gtest_patch.hpp"
 
 namespace {
 
