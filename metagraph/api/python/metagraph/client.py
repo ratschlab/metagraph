@@ -27,16 +27,19 @@ class Client:
 
         json_res = self.search_json(sequence, top_labels, discovery_threshold, align)
 
-        # def build_dict(row):
-        #     d = dict(row)
-        #     props = d.pop('properties')
-        #     return {**d, **props}
+        def _build_dict(row):
+            d = dict(row)
+            if 'properties' in d.keys():
+                props = d.pop('properties')
+            else:
+                props = {}
+            return {**d, **props}
 
-        #def build_df_from_json(j):
-        #    return pd.DataFrame([build_dict(r) for r in j['results']])
+        def _build_df_from_json(j):
+            return pd.DataFrame([_build_dict(r) for r in j['results']])
 
         def _build_df_per_result(res):
-            df = pd.DataFrame(res['results'])
+            df = _build_df_from_json(res)
 
             if not isinstance(sequence, str):
                 # only add sequence description if several queries are being made

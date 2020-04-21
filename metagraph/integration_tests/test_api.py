@@ -11,39 +11,23 @@ from metagraph.client import Client
 
 from base import TestingBase, METAGRAPH, TEST_DATA_DIR
 
-
-class TestApi(TestingBase):
-    graph_name = 'test_graph'
-    sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_cols = 98
-
+class TestAPIBase(TestingBase):
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls, fasta_path):
         super().setUpClass()
-
-        fasta = TEST_DATA_DIR + '/transcripts_100.fa'
 
         graph_path = cls.tempdir.name + '/graph.dbg'
         annotation_path = cls.tempdir.name + '/annotation.column.annodbg'
 
+        cls._build_graph(cls, fasta_path, graph_path, 6, 'succinct')
+        cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column')
+
         cls.host = '127.0.0.1'
         cls.port = 3456
-        cls._build_graph(cls, fasta, graph_path, 6, 'succinct')
-
-        cls._annotate_graph(cls, fasta, graph_path, annotation_path, 'column')
-        print(os.listdir(cls.tempdir.name))
-
         cls.server_process = cls._start_server(cls, graph_path, annotation_path, cls.port)
 
-        print("waiting for the server to start up on " + str(cls.server_process.pid))
+        print("Waiting for the server to start up on " + str(cls.server_process.pid))
         time.sleep(1)
-
-        cls.graph_client = Client()
-
-        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
-
-    def setUp(self) -> None:
-        self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
 
     @classmethod
     def tearDownClass(cls):
@@ -60,55 +44,14 @@ class TestApi(TestingBase):
 
         return Popen(shlex.split(construct_command))
 
-    # do various queries
-    def test_api_simple_query(self):
-        ret = self.graph_client.search_json(self.sample_query)
 
-        self.assertIn(self.graph_name, ret.keys())
+class TestAPIRaw(TestAPIBase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa')
 
-        res_list, _ = ret[self.graph_name]
-        self.assertEqual(len(res_list), 1)
-
-        res_obj = res_list[0]['results']
-        self.assertEqual(len(res_obj), self.sample_query_expected_cols)
-
-        first_res = res_obj[0]
-
-        self.assertEqual(first_res['sampleCount'], 39)
-
-        self.assertTrue(first_res['sampleName'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
-        self.assertTrue('properties' not in first_res.keys()) # doesn't have properties, so don't sent them
-
-    def test_api_multiple_query(self):
-        repetitions = 4
-        ret = self.graph_client.search_json([self.sample_query] * repetitions)
-
-        res_list, _ = ret[self.graph_name]
-        self.assertEqual(len(res_list), repetitions)
-
-        # testing if results are in the same order as the queries
-        for i in range(0, repetitions):
-            self.assertEqual(res_list[i]['seq_description'], str(i))
-
-
-    def test_api_simple_query_df(self):
-        ret = self.graph_client.search(self.sample_query)
-        df = ret[self.graph_name]
-
-        self.assertEqual((self.sample_query_expected_cols, 2), df.shape)
-
-    def test_api_simple_query_align_df(self):
-        ret = self.graph_client.search(self.sample_query, align=True)
-        df = ret[self.graph_name]
-
-        self.assertEqual((self.sample_query_expected_cols, 4), df.shape)
-
-
-    def test_api_multiple_query_df(self):
-        repetitions = 5
-        ret = self.graph_client.search([self.sample_query] * repetitions)
-        df = ret[self.graph_name]
-        self.assertEqual((self.sample_query_expected_cols * repetitions, 3), df.shape)
+    def setUp(self) -> None:
+        self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
 
     def test_api_raw_incomplete_json(self):
         ret = self.raw_post_request('search', '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "count_labels": true,')
@@ -163,16 +106,6 @@ class TestApi(TestingBase):
         self.assertEqual(ret.status_code, 200)
         self.assertEqual(ret.json(), [])
 
-    def test_api_client_column_labels(self):
-        ret = self.graph_client.column_labels()
-
-        self.assertIn(self.graph_name, ret.keys())
-
-        label_list = ret[self.graph_name]
-
-        self.assertGreater(len(label_list), 0)
-        self.assertTrue(all(l.startswith('ENST') for l in label_list))
-
     @parameterized.expand([(1,1), (3,1)])
     def test_api_raw_align_sequence(self, repetitions, foo):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
@@ -192,6 +125,78 @@ class TestApi(TestingBase):
             [f"query{i}" for i in range(repetitions)]
         )
 
+
+class TestAPIClient(TestAPIBase):
+    graph_name = 'test_graph'
+
+    sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+    sample_query_expected_cols = 98
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa')
+
+        cls.graph_client = Client()
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
+
+    # do various queries
+    def test_api_simple_query(self):
+        ret = self.graph_client.search_json(self.sample_query)
+
+        self.assertIn(self.graph_name, ret.keys())
+
+        res_list, _ = ret[self.graph_name]
+        self.assertEqual(len(res_list), 1)
+
+        res_obj = res_list[0]['results']
+        self.assertEqual(len(res_obj), self.sample_query_expected_cols)
+
+        first_res = res_obj[0]
+
+        self.assertEqual(first_res['sampleCount'], 39)
+
+        self.assertTrue(first_res['sampleName'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
+        self.assertTrue('properties' not in first_res.keys()) # doesn't have properties, so don't sent them
+
+    def test_api_multiple_query(self):
+        repetitions = 4
+        ret = self.graph_client.search_json([self.sample_query] * repetitions)
+
+        res_list, _ = ret[self.graph_name]
+        self.assertEqual(len(res_list), repetitions)
+
+        # testing if results are in the same order as the queries
+        for i in range(0, repetitions):
+            self.assertEqual(res_list[i]['seq_description'], str(i))
+
+    def test_api_multiple_query_df(self):
+        repetitions = 5
+        ret = self.graph_client.search([self.sample_query] * repetitions)
+        df = ret[self.graph_name]
+        self.assertEqual((self.sample_query_expected_cols * repetitions, 3), df.shape)
+
+    def test_api_simple_query_df(self):
+        ret = self.graph_client.search(self.sample_query)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_cols, 2), df.shape)
+
+    def test_api_simple_query_align_df(self):
+        ret = self.graph_client.search(self.sample_query, align=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_cols, 4), df.shape)
+
+    def test_api_client_column_labels(self):
+        ret = self.graph_client.column_labels()
+
+        self.assertIn(self.graph_name, ret.keys())
+
+        label_list = ret[self.graph_name]
+
+        self.assertGreater(len(label_list), 0)
+        self.assertTrue(all(l.startswith('ENST') for l in label_list))
+
     def test_api_align_json(self):
         ret = self.graph_client.align_json("TCGATCGA")
         align_res, _ = ret[self.graph_name]
@@ -203,3 +208,25 @@ class TestApi(TestingBase):
 
         align_res = ret[self.graph_name]
         self.assertEqual(len(align_res), repetitions)
+
+
+class TestAPIClientWithProperties(TestAPIBase):
+    graph_name = 'test_graph_metasub'
+
+    sample_query = 'GCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGA'
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/metasub_fake_data.fa')
+
+        cls.graph_client = Client()
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
+
+    def test_api_search_property_df(self):
+        df = self.graph_client.search(self.sample_query)[self.graph_name]
+
+        self.assertIn('sampleCount', df.columns)
+        self.assertEqual(df['sampleCount'].dtype, int)
+        self.assertIn('latitude', df.columns)
+        self.assertEqual(df['latitude'].dtype, float)
+        self.assertEqual(df.shape, (3, 9))
