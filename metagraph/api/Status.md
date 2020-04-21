@@ -9,8 +9,8 @@
 * [x] JSON strings as response payload, including error messages
 * [x] parallel processing of HTTP queries
 * [x] support compression
-* [ ] robust against malformed input (currently it still may crash under certain circumstances)
-* [ ] implement mechanism to tell client to come back after a while to check whether computation has been performed done
+* [ ] (high) robust against malformed input (currently it still may crash under certain circumstances)
+* [ ] (low-medium) implement mechanism to tell client to come back after a while to check whether computation has been performed done
       (useful for longer-running queries)
 
 
@@ -37,9 +37,8 @@ Supported parameters:
 * [x] `discovery_fraction` [0, 1.0] (minimum fraction of kmers of sequence found in annotation)
 * [x] `fast`: fast queries, i.e. first generate query graph (currently only exposed for test purposes)
 * [x] `align`: align query first, include aligned sequence and score in result
-* [ ] `count_labels`, only True supported (get set of labels back, no count (terminate early when discovery fraction)) future always count labels
-* [ ] `fwd-and-reverse` (query its reverse complement as well)
-* [ ] `print_signature`:  mask of k-mer: mask of present kmers. one mask per sequence
+* [ ] (low) `fwd-and-reverse` (query its reverse complement as well)
+* [ ] (low-medium) `print_signature`:  mask of k-mer: mask of present kmers. one mask per sequence
 
 
 Returns:
@@ -53,7 +52,7 @@ Returns list of objects, one for each query sequence. Such an object contains fo
 
 More capabilities:
 
-* [ ] don't write temporary file for query (or only do so for fast queries)
+* [ ] (low) don't write temporary file for query (or only do so for fast queries)
 
 ### Python API Support
 
@@ -74,7 +73,8 @@ Takes fasta file.
 
 No parameters currently supported. Currently, processing multiple sequences sequentially.
 
-* [ ] return more than one alignment per sequence?
+* [ ] return graph
+* [ ] (low) return more than one alignment per sequence?
 
 
 Returns list of result object for each query sequence. A result object contains following fields:
