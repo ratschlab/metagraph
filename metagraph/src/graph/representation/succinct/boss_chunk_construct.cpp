@@ -310,7 +310,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     kmers->reset();
-    async_worker.enqueue([=]() {
+    async_worker.enqueue([kmers, files_to_merge]() {
         common::merge_files<T_INT>(files_to_merge,
             [kmers](const T_INT &v) {
                 kmers->push(reinterpret_cast<const T &>(v));

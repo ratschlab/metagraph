@@ -364,7 +364,7 @@ TYPED_TEST(WaveletTreeTest, Serialization) {
     outstream.close();
     delete vector;
 
-    vector = new TypeParam(4);
+    vector = new TypeParam(1);
     ASSERT_TRUE(vector);
     std::ifstream instream(test_dump_basename);
     ASSERT_TRUE(vector->load(instream));

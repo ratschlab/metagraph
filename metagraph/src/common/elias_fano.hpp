@@ -36,8 +36,7 @@ class EliasFanoEncoder {
     EliasFanoEncoder(size_t size,
                      T min_value,
                      T max_value,
-                     const std::string &out_filename,
-                     bool is_append = false);
+                     const std::string &out_filename);
 
     /** Constructs an encoder that encodes the #data array */
     EliasFanoEncoder(const Vector<T> &data, std::ofstream *sink, std::ofstream *sink_upper);
@@ -244,8 +243,7 @@ class EliasFanoEncoder<std::pair<T, C>> {
     EliasFanoEncoder(size_t size,
                      const T &first_value,
                      const T &last_value,
-                     const std::string &sink_name,
-                     bool is_append = false);
+                     const std::string &sink_name);
 
     void add(const std::pair<T, C> &value);
 
@@ -290,6 +288,8 @@ class EliasFanoEncoderBuffered {
     void encode_chunk();
   private:
     Vector<T> buffer_;
+    std::ofstream sink_;
+    std::ofstream sink_upper_;
     std::string file_name_;
     size_t total_size_ = 0;
 };
