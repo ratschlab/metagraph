@@ -1,5 +1,3 @@
-#include "graph/representation/succinct/boss_construct.hpp"
-
 #include <stdio.h>
 #include <string>
 #include <sstream>
@@ -12,11 +10,12 @@
 #define protected public
 #define private public
 
-#include "graph/representation/succinct/boss.hpp"
-
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
+#include "common/sorted_multiset_disk.hpp"
+#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_collector.hpp"
 
 namespace {
@@ -140,57 +139,62 @@ TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
-    for (size_t k = 1; k < kMaxK; ++k) {
-        std::vector<std::string> input_data = {
-            "ACAGCTAGCTAGCTAGCTAGCTG",
-            "ATATTATAAAAAATTTTAAAAAA",
-            "ATATATTCTCTCTCTCTCATA",
-            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-        };
-        BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor.add_sequences(input_data);
-        BOSS constructed(&constructor);
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; ++k) {
+            std::vector<std::string> input_data = {
+                "ACAGCTAGCTAGCTAGCTAGCTG",
+                "ATATTATAAAAAATTTTAAAAAA",
+                "ATATATTCTCTCTCTCTCATA",
+                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+            };
+            BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
+                                        20000, container);
+            constructor.add_sequences(input_data);
+            BOSS constructed(&constructor);
 
-        BOSS appended(k);
-        for (const auto &sequence : input_data) {
-            appended.add_sequence(sequence);
+            BOSS appended(k);
+            for (const auto &sequence : input_data) {
+                appended.add_sequence(sequence);
+            }
+
+            EXPECT_EQ(constructed, appended);
         }
-
-        EXPECT_EQ(constructed, appended);
     }
 }
 
 TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
     ASSERT_TRUE(TypeParam::kWeighted);
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; ++k) {
+            std::vector<std::string> input_data = {
+                "ACAGCTAGCTAGCTAGCTAGCTG",
+                "ATATTATAAAAAATTTTAAAAAA",
+                "ATATATTCTCTCTCTCTCATA",
+                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+            };
 
-    for (size_t k = 1; k < kMaxK; ++k) {
-        std::vector<std::string> input_data = {
-            "ACAGCTAGCTAGCTAGCTAGCTG",
-            "ATATTATAAAAAATTTTAAAAAA",
-            "ATATATTCTCTCTCTCTCATA",
-            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-        };
+            BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
+                                        20000, container);
+            constructor.add_sequences(input_data);
 
-        BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor.add_sequences(input_data);
+            BOSS constructed;
+            sdsl::int_vector<> weights;
+            constructor.build_graph(&constructed, &weights);
 
-        BOSS constructed;
-        sdsl::int_vector<> weights;
-        constructor.build_graph(&constructed, &weights);
+            ASSERT_EQ(constructed.num_edges() + 1, weights.size());
 
-        ASSERT_EQ(constructed.num_edges() + 1, weights.size());
+            auto mask = constructed.mark_all_dummy_edges(1);
+            ASSERT_EQ(weights.size(), mask.size());
 
-        auto mask = constructed.mark_all_dummy_edges(1);
-        ASSERT_EQ(weights.size(), mask.size());
+            for (size_t i = 1; i < weights.size(); ++i) {
+                auto node_str = constructed.get_node_str(i)
+                        + constructed.decode(constructed.get_W(i) % constructed.alph_size);
 
-        for (size_t i = 1; i < weights.size(); ++i) {
-            auto node_str = constructed.get_node_str(i)
-                + constructed.decode(constructed.get_W(i) % constructed.alph_size);
+                ASSERT_EQ(k + 1, node_str.size());
+                ASSERT_EQ(node_str[0] == '$' || node_str[k] == '$', mask[i]);
 
-            ASSERT_EQ(k + 1, node_str.size());
-            ASSERT_EQ(node_str[0] == '$' || node_str[k] == '$', mask[i]);
-
-            EXPECT_EQ(mask[i], weights[i] == 0) << i << " " << node_str;
+                EXPECT_EQ(mask[i], weights[i] == 0) << i << " " << node_str;
+            }
         }
     }
 }
@@ -198,7 +202,7 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
 TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
     ASSERT_TRUE(TypeParam::kWeighted);
 
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType ::VECTOR_DISK }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -211,7 +215,7 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
 
             auto constructor
                     = IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
-                                                        "", 1, 0, container);
+                                                        "", 1, 20000, container);
 
             for (auto &&sequence : input_data) {
                 constructor->add_sequence(std::move(sequence));
@@ -241,53 +245,62 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
-    for (size_t k = 1; k < kMaxK; ++k) {
-        std::vector<std::string> input_data = {
-            "ACAGCTAGCTAGCTAGCTAGCTG",
-            "ATATTATAAAAAATTTTAAAAAA",
-            "ATATATTCTCTCTCTCTCATA",
-            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-        };
-        BOSSConstructor constructor(k, true, TypeParam::kWeighted ? 8 : 0);
-        constructor.add_sequences(input_data);
-        BOSS constructed(&constructor);
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; ++k) {
+            std::vector<std::string> input_data = {
+                "ACAGCTAGCTAGCTAGCTAGCTG",
+                "ATATTATAAAAAATTTTAAAAAA",
+                "ATATATTCTCTCTCTCTCATA",
+                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+            };
+            BOSSConstructor constructor(k, true, TypeParam::kWeighted ? 8 : 0, "", 1,
+                                        20'000, container);
+            constructor.add_sequences(input_data);
+            BOSS constructed(&constructor);
 
-        BOSS appended(k);
-        for (auto &sequence : input_data) {
-            appended.add_sequence(sequence);
-            reverse_complement(sequence.begin(), sequence.end());
-            appended.add_sequence(sequence);
+            BOSS appended(k);
+            for (auto &sequence : input_data) {
+                appended.add_sequence(sequence);
+                reverse_complement(sequence.begin(), sequence.end());
+                appended.add_sequence(sequence);
+            }
+
+            EXPECT_EQ(constructed, appended);
         }
-
-        EXPECT_EQ(constructed, appended);
     }
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionLong) {
-    for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor.add_sequences({ std::string(k + 1, 'A') });
-        BOSS constructed(&constructor);
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; ++k) {
+            BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
+                                        20'000, container);
+            constructor.add_sequences({ std::string(k + 1, 'A') });
+            BOSS constructed(&constructor);
 
-        BOSS appended(k);
-        appended.add_sequence(std::string(k + 1, 'A'));
+            BOSS appended(k);
+            appended.add_sequence(std::string(k + 1, 'A'));
 
-        EXPECT_EQ(constructed, appended);
-        ASSERT_TRUE(constructed.num_nodes() > 1u);
+            EXPECT_EQ(constructed, appended);
+            ASSERT_TRUE(constructed.num_nodes() > 1u);
+        }
     }
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionShort) {
-    for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor.add_sequences({ std::string(k, 'A') });
-        BOSS constructed(&constructor);
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; ++k) {
+            BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
+                                        20'000, container);
+            constructor.add_sequences({ std::string(k, 'A') });
+            BOSS constructed(&constructor);
 
-        BOSS appended(k);
-        appended.add_sequence(std::string(k, 'A'));
+            BOSS appended(k);
+            appended.add_sequence(std::string(k, 'A'));
 
-        EXPECT_EQ(constructed, appended);
+            EXPECT_EQ(constructed, appended);
         ASSERT_EQ(1u, constructed.num_nodes());
+        }
     }
 }
 
@@ -559,20 +572,13 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
 }
 
 // TODO: k is node length
-template <typename TypeParam, typename KmerCount>
+template <typename Container>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        common::SortedMultiset<TypeParam,
-                                                               KmerCount,
-                                                               Vector<std::pair<TypeParam, KmerCount>>> *kmers,
-                                        const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
-                                        size_t reserved_capacity) {
-    kmers->try_reserve(reserved_capacity);
-    kmer::count_kmers<TypeParam,
-                      KmerExtractorBOSS,
-                      common::SortedMultiset<TypeParam,
-                                             KmerCount,
-                                             Vector<std::pair<TypeParam, KmerCount>>>>(
+                                        Container *kmers,
+                                        const std::vector<KmerExtractorBOSS::TAlphabet> &suffix) {
+    // kmers->try_reserve(reserved_capacity);
+    kmer::count_kmers<typename Container::key_type, KmerExtractorBOSS, Container>(
             [reads](kmer::CallStringCount callback) {
             for (const auto &read : *reads) {
                 callback(read, 1);
@@ -583,183 +589,120 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     delete reads;
 }
 
-TYPED_TEST(CountKmers, CountKmers8bits) {
-    common::SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>>
-            result;
+/**
+ * Checks that the given container contains the expected list of elements
+ * @tparam Container the container to check the contents for, in our case a
+ * SortedMultiset or a SortedMultisetDisk
+ */
+template <typename Container>
+void assert_contents(Container &c, const std::initializer_list<size_t> &expected_els) {
+    size_t size = 0;
+    auto it_els = expected_els.begin();
+    for (typename Container::result_type::iterator it = c.data().begin();
+         it != c.data().end(); ++it, ++size, ++it_els) {
+        EXPECT_EQ(*it_els, (*it).second);
+    }
+    EXPECT_EQ(expected_els.size(), size);
+}
+
+template <typename Container>
+void check_counts() {
+    std::function<void(typename Container::storage_type *)> cleanup
+            = [](typename Container::storage_type *) {};
+    Container result(cleanup, 1, 100'000);
     size_t sequence_size = 500;
+    size_t max_value = std::numeric_limits<typename Container::count_type>::max();
+    const size_t five_times = std::min(5 * (sequence_size - 2 + 1), max_value);
+    const size_t ten_times = std::min(10 * (sequence_size - 2 + 1), max_value);
+    const size_t fifteen_times = std::min(15 * (sequence_size - 2 + 1), max_value);
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 100'000
-    );
-    ASSERT_EQ(3u, result.data().size());
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+    assert_contents(result, { 5u, 5u, five_times });
 
-    EXPECT_EQ(5u, result.data()[0].second);
-    EXPECT_EQ(5u, result.data()[1].second);
-    EXPECT_EQ(255u, result.data()[2].second);
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 100'000
-    );
-    ASSERT_EQ(3u, result.data().size());
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+    assert_contents(result, { 10u, 10u, ten_times });
 
-    EXPECT_EQ(10u, result.data()[0].second);
-    EXPECT_EQ(10u, result.data()[1].second);
-    EXPECT_EQ(255u, result.data()[2].second);
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 100'000
-    );
-    ASSERT_EQ(3u, result.data().size());
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+    assert_contents(result, { 15u, 15u, fifteen_times });
 
-    EXPECT_EQ(15u, result.data()[0].second);
-    EXPECT_EQ(15u, result.data()[1].second);
-    EXPECT_EQ(255u, result.data()[2].second);
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, {}, 100'000
-    );
-    ASSERT_EQ(6u, result.data().size());
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result, {});
+    assert_contents(result, { 15u, 5u, 15u, fifteen_times, 5u, five_times });
 
-    EXPECT_EQ(15u, result.data()[0].second);
-    EXPECT_EQ(5u, result.data()[1].second);
-    EXPECT_EQ(15u, result.data()[2].second);
-    EXPECT_EQ(255u, result.data()[3].second);
-    EXPECT_EQ(5u, result.data()[4].second);
-    EXPECT_EQ(255u, result.data()[5].second);
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, { 1, }, 100'000
-    );
-    ASSERT_EQ(6u, result.data().size());
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result,
+            { 1 });
+    assert_contents(result, { 15u, 5u, 15u, fifteen_times, 5u, five_times });
 
-    EXPECT_EQ(15u, result.data()[0].second);
-    EXPECT_EQ(5u, result.data()[1].second);
-    EXPECT_EQ(15u, result.data()[2].second);
-    EXPECT_EQ(255u, result.data()[3].second);
-    EXPECT_EQ(5u, result.data()[4].second);
-    EXPECT_EQ(255u, result.data()[5].second);
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, { 0, }, 100'000
-    );
-    ASSERT_EQ(6u, result.data().size());
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result,
+            { 0 });
+    assert_contents(result, { 15u, 10u, 15u, fifteen_times, 5u, five_times });
+}
 
-    EXPECT_EQ(15u, result.data()[0].second);
-    EXPECT_EQ(10u, result.data()[1].second);
-    EXPECT_EQ(15u, result.data()[2].second);
-    EXPECT_EQ(255u, result.data()[3].second);
-    EXPECT_EQ(5u, result.data()[4].second);
-    EXPECT_EQ(255u, result.data()[5].second);
+TYPED_TEST(CountKmers, CountKmers8bits) {
+    using Container
+            = common::SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>>;
+    check_counts<Container>();
 }
 
 TYPED_TEST(CountKmers, CountKmers32bits) {
-    common::SortedMultiset<TypeParam, uint32_t, Vector<std::pair<TypeParam, uint32_t>>>
-            result;
+    using Container
+            = common::SortedMultiset<TypeParam, uint32_t, Vector<std::pair<TypeParam, uint32_t>>>;
+    check_counts<Container>();
+}
+
+TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
+    using Container = common::SortedMultisetDisk<TypeParam, typename TypeParam::WordType, uint8_t>;
+    std::function<void(typename Container::storage_type *)> cleanup
+            = [](typename Container::storage_type *) {};
+    Container result(cleanup, 1, 100'000);
     size_t sequence_size = 500;
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 100'000
-    );
-    ASSERT_EQ(3u, result.data().size());
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+    assert_contents(result, { 5u, 5u, 255u });
+}
 
-    EXPECT_EQ(5u, result.data()[0].second);
-    EXPECT_EQ(5u, result.data()[1].second);
-    EXPECT_EQ(5 * (sequence_size - 2 + 1), result.data()[2].second);
+TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
+    using Container = common::SortedMultisetDisk<TypeParam, typename TypeParam::WordType, uint32_t>;
+    std::function<void(typename Container::storage_type *)> cleanup
+            = [](typename Container::storage_type *) {};
+    Container result(cleanup, 1, 100'000);
+    size_t sequence_size = 500;
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 100'000
-    );
-    ASSERT_EQ(3u, result.data().size());
-
-    EXPECT_EQ(10u, result.data()[0].second);
-    EXPECT_EQ(10u, result.data()[1].second);
-    EXPECT_EQ(10 * (sequence_size - 2 + 1), result.data()[2].second);
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 100'000
-    );
-    ASSERT_EQ(3u, result.data().size());
-
-    EXPECT_EQ(15u, result.data()[0].second);
-    EXPECT_EQ(15u, result.data()[1].second);
-    EXPECT_EQ(15 * (sequence_size - 2 + 1), result.data()[2].second);
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, {}, 100'000
-    );
-    ASSERT_EQ(6u, result.data().size());
-
-    EXPECT_EQ(15u, result.data()[0].second);
-    EXPECT_EQ(5u, result.data()[1].second);
-    EXPECT_EQ(15u, result.data()[2].second);
-    EXPECT_EQ(15 * (sequence_size - 2 + 1), result.data()[3].second);
-    EXPECT_EQ(5u, result.data()[4].second);
-    EXPECT_EQ(5 * (sequence_size - 2 + 1), result.data()[5].second);
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, { 1, }, 100'000
-    );
-    ASSERT_EQ(6u, result.data().size());
-
-    EXPECT_EQ(15u, result.data()[0].second);
-    EXPECT_EQ(5u, result.data()[1].second);
-    EXPECT_EQ(15u, result.data()[2].second);
-    EXPECT_EQ(15 * (sequence_size - 2 + 1), result.data()[3].second);
-    EXPECT_EQ(5u, result.data()[4].second);
-    EXPECT_EQ(5 * (sequence_size - 2 + 1), result.data()[5].second);
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, { 0, }, 100'000
-    );
-    ASSERT_EQ(6u, result.data().size());
-
-    EXPECT_EQ(15u, result.data()[0].second);
-    EXPECT_EQ(10u, result.data()[1].second);
-    EXPECT_EQ(15u, result.data()[2].second);
-    EXPECT_EQ(15 * (sequence_size - 2 + 1), result.data()[3].second);
-    EXPECT_EQ(5u, result.data()[4].second);
-    EXPECT_EQ(5 * (sequence_size - 2 + 1), result.data()[5].second);
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+    assert_contents(result, { 5u, 5u, 5 * (sequence_size - 2 + 1) });
 }
 
 TYPED_TEST(CountKmers, CountKmersAppendParallel) {
-    common::SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>>
-            result;
+    using Container
+            = common::SortedMultiset<TypeParam, uint8_t, Vector<std::pair<TypeParam, uint8_t>>>;
+    Container result;
     size_t sequence_size = 500;
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 0
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 0
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, 0
-    );
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     ASSERT_EQ(3u, result.data().size());
 
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, 0
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, 0
-    );
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result, {});
+    sequence_to_kmers_parallel_wrapper<Container>(
+            new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result,
+            { 1 });
 #if _DNA_GRAPH
     ASSERT_EQ(3u, result.data().size());
 #else

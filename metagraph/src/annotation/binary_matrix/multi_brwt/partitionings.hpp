@@ -1,22 +1,17 @@
 #ifndef __PARTITIONINGS_HPP__
 #define __PARTITIONINGS_HPP__
 
-#include "BRWT_builders.hpp"
+#include <vector>
 
+#include "common/vectors/bit_vector.hpp"
 
-// Partitionings for Multi-BRWT
+// Clustering columns for Multi-BRWT
 
 // input: columns
-// output: partition, for instance -- a set of column pairs
-BRWTBottomUpBuilder::Partition
-parallel_binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns,
-                                size_t num_threads);
-
-BRWTBottomUpBuilder::Partition
-binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns);
-
-std::function<BRWTBottomUpBuilder::Partition(const BRWTBottomUpBuilder::VectorsPtr &)>
-get_parallel_binary_grouping_greedy(size_t num_threads);
-
+// output: partition -- a set of column pairs greedily matched
+std::vector<std::vector<uint64_t>>
+greedy_matching(const std::vector<const bit_vector *> &columns,
+                size_t num_threads = 1,
+                uint64_t num_rows_subsampled = 1'000'000);
 
 #endif // __PARTITIONINGS_HPP__

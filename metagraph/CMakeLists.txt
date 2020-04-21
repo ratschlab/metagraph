@@ -227,6 +227,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
+  ${CMAKE_BINARY_DIR}/zlib
   ${CMAKE_BINARY_DIR}/lib
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/libmaus2/lib
@@ -250,6 +251,7 @@ include_directories(
   external-libraries/nvbio/contrib/priority-deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
+  external-libraries/zlib
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -267,6 +269,7 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
+add_subdirectory(external-libraries/zlib zlib)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
@@ -297,12 +300,11 @@ if(FOLLY_LIBRARIES)
   find_package(OpenSSL REQUIRED COMPONENTS Crypto)
   set(METALIBS ${METALIBS}
     ${FOLLY_LIBRARIES}
-    -ldouble-conversion
     -ldl
     -lboost_regex
     -lboost_filesystem
     -lboost_program_options
-    OpenSSL::Crypto
+    -lcrypto
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
@@ -365,20 +367,22 @@ set(METALIBS ${METALIBS}
   brwt
   jsoncpp_lib
   progress_bar
-  ${OpenMP_CXX_LIBRARIES}
   fmt::fmt
   mersenne_twister
   spdlog::spdlog
 )
+if(APPLE)
+  set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
+endif()
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)
 endif()
 
 if(BUILD_STATIC)
-  set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL REQUIRED)
-  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl ${OPENSSL_LIBRARIES})
+  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl -lssl -lcrypto)
 endif()
 
 # check for std::filesystem::temp_directory_path
@@ -513,6 +517,22 @@ target_link_libraries(unit_tests gtest_main gtest metagraph-core)
 
 target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
+#-------------------
+# Benchmarks
+#-------------------
+add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL)
+
+file(GLOB benchmark_files
+  "benchmarks/*.cpp"
+  "benchmarks/*/*.cpp"
+)
+list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
+
+add_executable(benchmarks ${benchmark_files})
+target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
+
+target_compile_options(benchmarks PRIVATE -Wno-undefined-var-template)
 
 #-------------------
 # Tests
@@ -533,6 +553,18 @@ add_custom_target(check_all
 add_test(NAME integration_tests COMMAND make check)
 add_test(NAME unit_tests COMMAND unit_tests)
 
+# --- integration tests runner ---
+get_target_property(PythonPath Python3::Interpreter IMPORTED_LOCATION)
+file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests" "#!/bin/bash\n")
+file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+  "\n${PythonPath} ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
+)
+file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+  DESTINATION "${PROJECT_BINARY_DIR}/"
+  FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                   GROUP_READ GROUP_EXECUTE
+                   WORLD_READ WORLD_EXECUTE
+)
 
 #-------------------
 # Python interfaces

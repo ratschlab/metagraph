@@ -7,7 +7,7 @@
 
 /** A faster alternative to std::allocator<T>
  *
- * The code was copied and has been modified from:
+ * This implementation is based on:
  * https://probablydance.com/2014/11/09/plalloc-a-simple-stateful-allocator-for-node-based-containers/
  */
 template <typename T>

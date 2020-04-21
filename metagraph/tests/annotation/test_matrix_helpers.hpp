@@ -5,8 +5,8 @@
 #include <string>
 #include <memory>
 
-#include "annotation/binary_matrix/multi_brwt/BRWT.hpp"
-#include "annotation/binary_matrix/multi_brwt/BRWT_builders.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
 #include "common/vectors/bit_vector.hpp"
 

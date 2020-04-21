@@ -26,16 +26,17 @@ RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse)  {
 }
 
 template <typename Label>
-RowCompressed<Label>::RowCompressed(uint64_t num_rows,
-                                    const std::vector<Label> &labels,
-                                    std::function<void(CallRow)> call_rows)
-      : matrix_(new VectorRowBinMat<SetBitPositions>(num_rows,
-                                                     labels.size(),
-                                                     call_rows)) {
+template <typename RowType>
+RowCompressed<Label>::RowCompressed(std::vector<RowType>&& annotation_rows,
+                                    const std::vector<Label> &labels)
+      : matrix_(new VectorRowBinMat<RowType>(std::move(annotation_rows), labels.size())) {
     for (const auto &label : labels) {
         label_encoder_.insert_and_encode(label);
     }
 }
+
+template RowCompressed<std::string>::RowCompressed(std::vector<SmallVector<uint32_t>>&&, const std::vector<std::string> &);
+template RowCompressed<std::string>::RowCompressed(std::vector<Vector<uint64_t>>&&, const std::vector<std::string> &);
 
 template <typename Label>
 void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
@@ -196,7 +197,7 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
             }
 
             // set all bits from the next block
-            for (uint64_t i = 0; i < next_block->num_rows(); ++i) {
+            for (uint64_t i = 0, n_rows = next_block->num_rows(); i < n_rows; ++i) {
                 for (auto j : next_block->get_row(i)) {
                     matrix.force_set(i, new_column_positions[j]);
                 }

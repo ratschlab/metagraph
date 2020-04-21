@@ -4,13 +4,14 @@
 #include <progress_bar.hpp>
 
 #include "common/algorithms.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
-const uint64_t kNumRowsSampled = 1'000'000;
+typedef std::vector<std::vector<uint64_t>> Partition;
+typedef std::vector<const bit_vector *> VectorPtrs;
 
 
 std::vector<sdsl::bit_vector>
-get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
+get_submatrix(const VectorPtrs &columns,
               const std::vector<uint64_t> &row_indexes,
               size_t num_threads) {
     assert(std::is_sorted(row_indexes.begin(), row_indexes.end()));
@@ -27,13 +28,18 @@ get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < columns.size(); ++i) {
-        submatrix[i] = subvector(*columns[i], row_indexes);
+        const bit_vector &col = *columns[i];
+        sdsl::bit_vector &subvector = submatrix[i];
 
-#ifndef NDEBUG
+        assert(row_indexes.size() <= col.size());
+
+        subvector = sdsl::bit_vector(row_indexes.size(), false);
+
         for (size_t j = 0; j < row_indexes.size(); ++j) {
-            assert(submatrix[i][j] == (*columns[i])[row_indexes[j]]);
+            if (col[row_indexes[j]])
+                subvector[j] = true;
         }
-#endif
+
         ++progress_bar;
     }
 
@@ -42,10 +48,8 @@ get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
 // returns shrinked columns
 std::vector<sdsl::bit_vector>
-random_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
-                 uint64_t num_rows_sampled,
-                 int seed,
-                 size_t num_threads) {
+random_submatrix(const VectorPtrs &columns,
+                 uint64_t num_rows_sampled, int seed, size_t num_threads) {
     if (!columns.size())
         return {};
 
@@ -70,24 +74,23 @@ random_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
 // input: columns
 // output: partition, for instance -- a set of column pairs
-std::vector<BRWTBottomUpBuilder::Column>
-inverted_arrangement(const BRWTBottomUpBuilder::VectorsPtr &vectors) {
+std::vector<uint64_t> inverted_arrangement(const VectorPtrs &vectors) {
     auto init_arrangement
-            = utils::arange<BRWTBottomUpBuilder::Column>(0, vectors.size());
+            = utils::arange<uint64_t>(0, vectors.size());
 
     return { init_arrangement.rbegin(), init_arrangement.rend() };
 }
 
-std::vector<std::vector<double>>
+std::vector<std::vector<uint64_t>>
 correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
                        size_t num_threads) {
-    std::vector<std::vector<double>> similarities(cols.size());
+    std::vector<std::vector<uint64_t>> similarities(cols.size());
 
     for (size_t j = 1; j < cols.size(); ++j) {
-        similarities[j] = std::vector<double>(j, 0.);
+        similarities[j].assign(j, 0);
     }
 
-    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Computing correlations",
+    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Correlations",
                              std::cerr, !utils::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)
@@ -105,8 +108,13 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
 }
 
 std::vector<std::vector<double>>
-jaccard_similarity(const std::vector<sdsl::bit_vector> &cols,
-                   size_t num_threads) {
+jaccard_similarity(const std::vector<sdsl::bit_vector> &cols, size_t num_threads) {
+    std::vector<std::vector<double>> similarities(cols.size());
+
+    for (size_t j = 1; j < cols.size(); ++j) {
+        similarities[j].assign(j, 0);
+    }
+
     std::vector<uint64_t> num_set_bits(cols.size(), 0);
 
     #pragma omp parallel for num_threads(num_threads)
@@ -114,7 +122,8 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols,
         num_set_bits[j] = sdsl::util::cnt_one_bits(cols[j]);
     }
 
-    auto similarities = correlation_similarity(cols, num_threads);
+    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Jaccard",
+                             std::cerr, !utils::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)
     for (size_t j = 0; j < cols.size(); ++j) {
@@ -122,10 +131,10 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols,
             if (k >= j)
                 continue;
 
-            similarities[j][k] /= (num_set_bits[j]
-                                    + num_set_bits[k]
-                                    - similarities[j][k]);
-            std::cout << similarities[j][k] << std::endl;
+            uint64_t intersect = inner_prod(cols[j], cols[k]);
+            similarities[j][k]
+                = intersect / (num_set_bits[j] + num_set_bits[k] - intersect);
+            ++progress_bar;
         }
     }
 
@@ -133,13 +142,14 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols,
 }
 
 // For each vector j return similarities with vectors 0, ..., j-1
-std::vector<std::vector<double>>
-estimate_similarities(const BRWTBottomUpBuilder::VectorsPtr &vectors,
-                      size_t num_threads) {
+std::vector<std::vector<uint64_t>>
+estimate_similarities(const VectorPtrs &vectors,
+                      size_t num_threads,
+                      uint64_t num_rows_subsampled) {
     if (!vectors.size())
         return {};
 
-    uint64_t num_sampled_rows = std::min(kNumRowsSampled, vectors[0]->size());
+    uint64_t num_sampled_rows = std::min(num_rows_subsampled, vectors[0]->size());
 
     return correlation_similarity(
         random_submatrix(vectors, num_sampled_rows, 1, num_threads),
@@ -154,20 +164,35 @@ inline T dist(T first, T second) {
                 : second - first;
 }
 
+template <typename P>
+inline bool first_closest(P first_pair, P second_pair) {
+    auto first_dist = dist(std::get<0>(first_pair), std::get<1>(first_pair));
+    auto second_dist = dist(std::get<0>(second_pair), std::get<1>(second_pair));
+    return first_dist < second_dist
+        || (first_dist == second_dist
+                && std::min(std::get<0>(first_pair), std::get<1>(first_pair))
+                    < std::min(std::get<0>(second_pair), std::get<1>(second_pair)));
+}
+
 // input: columns
 // output: partition, for instance -- a set of column pairs
-BRWTBottomUpBuilder::Partition
-parallel_binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns,
-                                size_t num_threads) {
+Partition greedy_matching(const VectorPtrs &columns,
+                          size_t num_threads,
+                          uint64_t num_rows_subsampled) {
     if (!columns.size())
         return {};
 
-    auto similarities = estimate_similarities(columns, num_threads);
+    if (columns.size() > std::numeric_limits<uint32_t>::max()) {
+        std::cerr << "ERROR: too many columns" << std::endl;
+        exit(1);
+    }
+
+    auto similarities = estimate_similarities(columns, num_threads, num_rows_subsampled);
 
     ProgressBar progress_bar(columns.size() * (columns.size() - 1), "Clustering",
                              std::cerr, !utils::get_verbose());
 
-    std::vector<std::tuple<size_t, size_t, uint64_t>> candidates;
+    std::vector<std::tuple<uint32_t, uint32_t, uint64_t>> candidates;
     candidates.reserve(columns.size() * (columns.size() - 1) / 2);
 
     for (size_t j = 1; j < similarities.size(); ++j) {
@@ -183,16 +208,15 @@ parallel_binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns,
         [](const auto &first_pair, const auto &second_pair) {
               return std::get<2>(first_pair) > std::get<2>(second_pair)
                 || (std::get<2>(first_pair) == std::get<2>(second_pair)
-                        && dist(std::get<0>(first_pair), std::get<1>(first_pair))
-                            < dist(std::get<0>(second_pair), std::get<1>(second_pair)));
+                        && first_closest(first_pair, second_pair));
         },
         num_threads
     );
 
-    BRWTBottomUpBuilder::Partition partition;
+    Partition partition;
     partition.reserve((columns.size() + 1) / 2);
 
-    std::vector<bool> matched(columns.size(), false);
+    std::vector<uint_fast8_t> matched(columns.size(), false);
 
     for (const auto &next_candidate : candidates) {
         auto i = std::get<0>(next_candidate);
@@ -210,16 +234,4 @@ parallel_binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns,
     }
 
     return partition;
-}
-
-BRWTBottomUpBuilder::Partition
-binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns) {
-    return parallel_binary_grouping_greedy(columns, 1);
-}
-
-std::function<BRWTBottomUpBuilder::Partition(const BRWTBottomUpBuilder::VectorsPtr &)>
-get_parallel_binary_grouping_greedy(size_t num_threads) {
-    return [num_threads](const BRWTBottomUpBuilder::VectorsPtr &columns) {
-        return parallel_binary_grouping_greedy(columns, num_threads);
-    };
 }

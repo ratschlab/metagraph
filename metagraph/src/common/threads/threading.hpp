@@ -16,16 +16,20 @@ unsigned int get_num_threads();
 
 
 /**
- * The code was copied and has been modified from:
+ * A Thread Pool for parallel execution of tasks with arbitrary parameters
+ *
+ * The implementation is based on:
  * https://github.com/progschj/ThreadPool/blob/master/ThreadPool.h
  */
 class ThreadPool {
   public:
-    ThreadPool(size_t num_workers, size_t max_num_tasks = -1);
+    ThreadPool(size_t num_workers, size_t max_num_tasks);
+    explicit ThreadPool(size_t num_workers)
+        : ThreadPool(num_workers, num_workers * 5) {}
 
     template <class F, typename... Args>
     auto enqueue(F&& f, Args&&... args) {
-        using return_type = decltype(f(std::forward<Args>(args)...));
+        using return_type = decltype(f(args...));
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
         );
@@ -46,6 +50,8 @@ class ThreadPool {
     }
 
     void join();
+
+    void remove_waiting_tasks();
 
     ~ThreadPool();
 

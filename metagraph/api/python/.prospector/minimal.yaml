@@ -1,0 +1,37 @@
+inherits:
+  - strictness_verylow
+
+pylint:
+  options:
+    ignored-modules: numpy,matplotlib.cm # pylint doesnt recognize members very well (https://stackoverflow.com/questions/20553551/how-do-i-get-pylint-to-recognize-numpy-members)
+    ignored-classes: numpy,matplotlib.cm
+    enable:
+      - E1103 no-member
+      - no-member
+      - no-name-in-module
+      - unused-variable
+
+  disable:
+    - len-as-condition
+    - misplaced-comparison-constant
+    - wrong-import-position
+    - consider-using-enumerate
+    - singleton-comparison
+    - consider-iterating-dictionary
+    - unidiomatic-typecheck
+    - trailing-newlines
+    - simplifiable-if-statement
+    - multiple-imports
+
+pep8:
+  disable:
+    - E305 # expected 2 blank lines after class or function definition
+    - E713 # test for membership should be 'not in'
+    - E714 # test for object identity should be 'is not'
+
+pyflakes:
+  enable:
+    - F841
+
+vulture:
+  run: true

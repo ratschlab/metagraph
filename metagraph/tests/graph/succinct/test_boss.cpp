@@ -15,6 +15,10 @@ const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
 
+uint64_t fwd(const BOSS &boss, uint64_t i) {
+    return boss.fwd(i, boss.get_W(i) % boss.alph_size);
+}
+
 void test_graph(BOSS *graph, const std::string &last,
                              const std::vector<uint64_t> &W,
                              const std::string &F,
@@ -33,9 +37,11 @@ void test_graph(BOSS *graph, const std::string &last,
         EXPECT_EQ((graph->get_W())[i], graph->get_W(i));
 
         auto last_outgoing = graph->succ_last(i);
-        graph->call_incoming_to_target(graph->bwd(i), [&](auto incoming) {
-            EXPECT_EQ(last_outgoing, graph->fwd(incoming));
-        });
+        graph->call_incoming_to_target(graph->bwd(i), graph->get_node_last_value(i),
+            [&](auto incoming) {
+                EXPECT_EQ(last_outgoing, fwd(*graph, incoming));
+            }
+        );
     }
 
     ostr.clear();
@@ -49,8 +55,8 @@ void test_graph(BOSS *graph, const std::string &last,
     ostr.clear();
     ostr.str("");
 
-    for (size_t i = 0; i < graph->get_F().size(); ++i) {
-        ostr << graph->get_F()[i] << " ";
+    for (size_t c = 0; c < graph->alph_size; ++c) {
+        ostr << graph->get_F(c) << " ";
     }
     EXPECT_EQ(F, ostr.str()) << "state: " << state
                              << ", old state: " << old_state;
@@ -162,35 +168,35 @@ TEST(BOSS, SmallGraphTraversal) {
 
     uint64_t dummy_edge = graph->select_last(1);
     EXPECT_EQ(1u, graph->pick_edge(dummy_edge, BOSS::kSentinelCode));
-    EXPECT_EQ(dummy_edge, graph->fwd(1));
+    EXPECT_EQ(dummy_edge, fwd(*graph, 1));
 
     for (size_t i = 1; i <= graph->num_edges(); ++i) {
         //test forward traversal given an output edge label
         if (graph->get_W(i) != BOSS::kSentinelCode) {
             EXPECT_EQ(outgoing_edges[i],
-                graph->fwd(graph->pick_edge(graph->succ_last(i),
-                                            graph->get_W(i) % graph->alph_size))
+                fwd(*graph, graph->pick_edge(graph->succ_last(i),
+                                             graph->get_W(i) % graph->alph_size))
             ) << "Edge index: " << i << "\n"
               << *graph;
 
             EXPECT_EQ(i,
                 graph->pick_incoming_edge(
-                    graph->bwd(graph->fwd(i)),
+                    graph->bwd(fwd(*graph, i)),
                     graph->get_minus_k_value(i, graph->get_k() - 1).first
                 )
             );
             for (int c = 0; c < graph->alph_size; ++c) {
                 uint64_t prev_edge = graph->pick_incoming_edge(graph->bwd(i), c);
                 if (prev_edge) {
-                    EXPECT_EQ(i, graph->pick_edge(graph->fwd(prev_edge),
+                    EXPECT_EQ(i, graph->pick_edge(fwd(*graph, prev_edge),
                                                   graph->get_W(i) % graph->alph_size));
                 }
             }
 
             //test FM index property
-            EXPECT_TRUE(graph->get_last(graph->fwd(i)));
+            EXPECT_TRUE(graph->get_last(fwd(*graph, i)));
             EXPECT_EQ(graph->get_W(i) % graph->alph_size,
-                      graph->get_node_last_value(graph->fwd(i)));
+                      graph->get_node_last_value(fwd(*graph, i)));
         }
     }
 
@@ -1605,11 +1611,12 @@ TEST(BOSS, CallUnitigsMasked) {
     constructor.add_sequences(sequences);
     BOSS graph(&constructor);
 
-    bit_vector_stat mask(graph.num_edges() + 1, false);
+    sdsl::bit_vector mask_bv(graph.num_edges() + 1, false);
     graph.map_to_edges(
         sequences[0],
-        [&](auto edge) { mask.set(edge, true); }
+        [&](auto edge) { mask_bv[edge] = true; }
     );
+    bit_vector_stat mask(std::move(mask_bv));
 
     std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
     std::unordered_multiset<std::string> obs;

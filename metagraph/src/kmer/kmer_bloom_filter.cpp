@@ -1,21 +1,18 @@
 #include "kmer_bloom_filter.hpp"
 
-#include <Eigen/StdVector>
-
 #ifndef NDEBUG
 #include "common/seq_tools/reverse_complement.hpp"
 #endif
 
 #include "common/serialization.hpp"
 #include "common/algorithms.hpp"
+#include "common/utils/simd_utils.hpp"
+#include "common/vectors/aligned_vector.hpp"
 #include "kmer/kmer_extractor.hpp"
 
 // TODO: switch to KmerExtractor once it supports all alphabets
 typedef KmerExtractorBOSS KmerDef;
 typedef KmerDef::TAlphabet TAlphabet;
-
-template <typename T>
-using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
 
 template <class KmerBF, class Callback>

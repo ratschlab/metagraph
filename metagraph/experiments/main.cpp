@@ -1,6 +1,8 @@
 #include <filesystem>
 #include <thread>
 #include <chrono>
+#include <cmath>
+
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
 #include <ips4o.hpp>
@@ -17,13 +19,16 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/wavelet_tree.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/data_generation.hpp"
 #include "graph/alignment/aligner_helper.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/kmc_parser.hpp"
 #include "cli/config/config.hpp"
 #include "method_constructors.hpp"
-#include "data_generation.hpp"
 
 using namespace std::chrono_literals;
 
@@ -34,23 +39,16 @@ using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
 
 
-//TODO
-// THINGS TO REPORT:
-//  - querying time
+// THINGS REPORTED:
+//  - query time
 //  - RAM usage
 //  - disk usage
-//  - construction time
-
 template <class BitVector>
 void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     DataGenerator generator;
     generator.set_seed(42);
 
-    auto other = generator.generate_random_column(n, d)->convert_to<BitVector>();
-
-    if (static_cast<int>(other.rank1(1)) < -1
-            || static_cast<int>(other.rank0(1)) < -1)
-        throw std::runtime_error("Never happends, just initializing the rank support");
+    BitVector other(generator.generate_random_column(n, d));
 
     std::filesystem::path path(std::string("test.")
                                 + prefix
@@ -65,29 +63,119 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     auto mem_before = get_curr_RSS();
 
-    BitVector another;
+    std::vector<BitVector> vectors(20);
 
-    std::this_thread::sleep_for(5s);
+    for (auto &another : vectors) {
+        std::ifstream in(path, std::ios::binary);
+        another.load(in);
+    }
 
-    std::ifstream in(path, std::ios::binary);
-    another.load(in);
-    in.close();
+    auto RAM_per_vector = (get_curr_RSS() - mem_before) / vectors.size();
 
-    if (static_cast<int>(another.rank1(another.size() / 2)) < -1
-            || static_cast<int>(another.rank0(another.size() / 2)) < -1)
-        throw std::runtime_error("Never happends, just initializing the rank support");
-    if (another.num_set_bits() && static_cast<int>(another.select1(1)) < -1)
-        throw std::runtime_error("Never happends, just initializing the select support");
+    BitVector another = std::move(vectors.back());
+    vectors.clear();
 
-    auto RAM = get_curr_RSS() - mem_before;
+    Timer timer;
+    uint64_t result = 0;
+    const size_t num_iterations = 10'000'000;
+
+    // Random access time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size(); i < num_iterations; ++i) {
+        result += another[(i * 87'178'291'199) % size];
+    }
+    double random_access = timer.elapsed() / num_iterations;
+
+    // Random get_int time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size() / 64; i < num_iterations; i += 64) {
+        result += another.get_int(((i * 87'178'291'199) % size) * 64, 64);
+    }
+    double random_access_word = timer.elapsed() / ((num_iterations + 63) / 64);
+
+    // Random rank time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size(); i < num_iterations; ++i) {
+        result += another.rank1((i * 87'178'291'199) % size);
+    }
+    double random_rank = timer.elapsed() / num_iterations;
+
+    // Random conditional rank time
+    timer.reset();
+    for (uint64_t i = 0, size = another.size(); i < num_iterations; ++i) {
+        result += another.conditional_rank1((i * 87'178'291'199) % size);
+    }
+    double random_cond_rank = timer.elapsed() / num_iterations;
+
+    // Random select time
+    timer.reset();
+    double random_select = NAN;
+    if (another.num_set_bits() && !std::is_same_v<BitVector, bit_vector_hyb<>>
+                               && !std::is_same_v<BitVector, bit_vector_smallrank>) {
+        for (uint64_t i = 0, rank = another.num_set_bits(); i < num_iterations; ++i) {
+            result += another.select1(1 + (i * 87'178'291'199) % rank);
+        }
+        random_select = timer.elapsed() / num_iterations;
+    }
+
+    // Sequential access time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size(); i < num_iterations; ++i) {
+        if (j == size)
+            j = 0;
+        result += another[j++];
+    }
+    double sequential_access = timer.elapsed() / num_iterations;
+
+    // Random get_int time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size() / 64; i < num_iterations; i += 64) {
+        if (j == size)
+            j = 0;
+        result += another.get_int(64 * j++, 64);
+    }
+    double sequential_access_word = timer.elapsed() / ((num_iterations + 63) / 64);
+
+    // Sequential rank time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size(); i < num_iterations; ++i) {
+        if (j == size)
+            j = 0;
+        result += another.rank1(j++);
+    }
+    double sequential_rank = timer.elapsed() / num_iterations;
+
+    // Sequential conditional rank time
+    timer.reset();
+    for (uint64_t i = 0, j = 0, size = another.size(); i < num_iterations; ++i) {
+        if (j == size)
+            j = 0;
+        result += another.conditional_rank1(j++);
+    }
+    double sequential_cond_rank = timer.elapsed() / num_iterations;
+
+    // Sequential select time
+    double sequential_select = NAN;
+    if (another.num_set_bits() && !std::is_base_of_v<BitVector, bit_vector_hyb<>>
+                               && !std::is_base_of_v<BitVector, bit_vector_smallrank>) {
+        timer.reset();
+        for (uint64_t i = 0, j = 1, rank = another.num_set_bits(); i < num_iterations; ++i) {
+            if (j > rank)
+                j = 1;
+            result += another.select1(j++);
+        }
+        sequential_select = timer.elapsed() / num_iterations;
+    }
 
     std::filesystem::remove(path);
 
-    uint64_t predicted_size;
-    if constexpr(!std::is_base_of<bit_vector_dyn, BitVector>::value) {
-        predicted_size = predict_size<BitVector>(another.size(), another.num_set_bits());
-    } else {
-        predicted_size = 0;
+    // Write result to /dev/null so the compiler doesn't optimize it away
+    std::ofstream ofs("/dev/null");
+    ofs << result;
+
+    double predicted_size = NAN;
+    if constexpr(!std::is_base_of_v<bit_vector_hyb<>, BitVector>) {
+        predicted_size = BitVector::predict_size(another.size(), another.num_set_bits());
     }
 
     std::cout << prefix
@@ -95,8 +183,13 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
               << "\t" << d
               << "\t" << 1. * another.num_set_bits() / another.size()
               << "\t" << 1. * serialized_size * 8 / n
-              << "\t" << RAM
+              << "\t" << RAM_per_vector
               << "\t" << 1. * predicted_size / another.size()
+              << "\t" << random_access      << "\t" << sequential_access
+              << "\t" << random_access_word << "\t" << sequential_access_word
+              << "\t" << random_rank        << "\t" << sequential_rank
+              << "\t" << random_select      << "\t" << sequential_select
+              << "\t" << random_cond_rank   << "\t" << sequential_cond_rank
               << std::endl;
 }
 
@@ -139,7 +232,8 @@ double test_row_time(const BinaryMatrix &matrix,
     generator.set_seed(42);
     //std::cout << "Generating " << num_samples << " samples";
     auto positions = generator.generate_random_ints(
-        num_samples, 0, matrix.num_rows());
+        num_samples, 0, matrix.num_rows()
+    );
 
     Timer timer;
     timer.reset();
@@ -223,8 +317,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 
 typedef annotate::MultiLabelEncoded<std::string> Annotator;
 
-std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
-                                                 size_t cache_size = 0) {
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename) {
     std::unique_ptr<Annotator> annotation;
 
     switch (parse_annotation_type(filename)) {
@@ -237,23 +330,23 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
             break;
         }
         case Config::BRWT: {
-            annotation.reset(new annotate::MultiBRWTAnnotator(cache_size));
+            annotation.reset(new annotate::MultiBRWTAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {
-            annotation.reset(new annotate::BinRelWT_sdslAnnotator(cache_size));
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator());
             break;
         }
         case Config::BinRelWT: {
-            annotation.reset(new annotate::BinRelWTAnnotator(cache_size));
+            annotation.reset(new annotate::BinRelWTAnnotator());
             break;
         }
         case Config::RowFlat: {
-            annotation.reset(new annotate::RowFlatAnnotator(cache_size));
+            annotation.reset(new annotate::RowFlatAnnotator());
             break;
         }
         case Config::RBFish: {
-            annotation.reset(new annotate::RainbowfishAnnotator(cache_size));
+            annotation.reset(new annotate::RainbowfishAnnotator());
             break;
         }
     }
@@ -271,7 +364,7 @@ int main(int argc, char *argv[]) {
     try {
         TCLAP::CmdLine cmd("Benchmarks and data generation for metagraph", ' ', "");
 
-        std::vector<std::string> regimes {
+        ValuesConstraint<std::string> regimes({
             "vectors",
             "matrices",
             "subsets",
@@ -283,10 +376,8 @@ int main(int argc, char *argv[]) {
             "evaluate_alignment",
             "query_annotation_rows",
             "to_dna4"
-        };
-
-        ValuesConstraint<std::string> regime_constraint(regimes);
-        UnlabeledValueArg<std::string> regime_arg("regime", "Regime", true, "", &regime_constraint, cmd);
+        });
+        UnlabeledValueArg<std::string> regime_arg("regime", "Regime", true, "", &regimes, cmd);
         cmd.parse(std::min(argc, 2), argv);
 
         std::string regime = regime_arg.getValue();
@@ -298,9 +389,15 @@ int main(int argc, char *argv[]) {
                 "smart",
                 "stat",
                 "sd",
+                "hyb",
+                "il",
+                "rrr15",
+                "rrr31",
                 "rrr63",
                 "rrr127",
                 "rrr255",
+                "rank",
+                "smallrank",
                 "dyn",
             };
             ValuesConstraint<std::string> vector_type_constraint(vector_types);
@@ -331,18 +428,38 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_sd>(length_arg.getValue(),
                                                   density_arg.getValue(),
                                                   "sd");
-            } else if (vector_type == "rrr63") {
-                test_vector_points<bit_vector_rrr<>>(length_arg.getValue(),
+            } else if (vector_type == "hyb") {
+                test_vector_points<bit_vector_hyb<>>(length_arg.getValue(),
                                                      density_arg.getValue(),
-                                                     "rrr");
+                                                     "hyb");
+            } else if (vector_type == "il") {
+                test_vector_points<bit_vector_il<>>(length_arg.getValue(),
+                                                    density_arg.getValue(),
+                                                    "il");
+            } else if (vector_type == "rrr15") {
+                test_vector_points<bit_vector_rrr<15>>(length_arg.getValue(),
+                                                       density_arg.getValue(),
+                                                       "rrr15");
+            } else if (vector_type == "rrr31") {
+                test_vector_points<bit_vector_rrr<31>>(length_arg.getValue(),
+                                                       density_arg.getValue(),
+                                                       "rrr31");
+            } else if (vector_type == "rrr63") {
+                test_vector_points<bit_vector_rrr<63>>(length_arg.getValue(),
+                                                       density_arg.getValue(),
+                                                       "rrr63");
             } else if (vector_type == "rrr127") {
                 test_vector_points<bit_vector_rrr<127>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr127");
+                                                        density_arg.getValue(),
+                                                        "rrr127");
             } else if (vector_type == "rrr255") {
                 test_vector_points<bit_vector_rrr<255>>(length_arg.getValue(),
-                                                     density_arg.getValue(),
-                                                     "rrr255");
+                                                        density_arg.getValue(),
+                                                        "rrr255");
+            } else if (vector_type == "smallrank") {
+                test_vector_points<bit_vector_smallrank>(length_arg.getValue(),
+                                                         density_arg.getValue(),
+                                                         "smallrank");
             } else if (vector_type == "dyn") {
                 test_vector_points<bit_vector_dyn>(length_arg.getValue(),
                                                    density_arg.getValue(),
@@ -990,8 +1107,7 @@ int main(int argc, char *argv[]) {
                     reverse_complement(ref.begin(), ref.end());
 
                 Cigar cigar_ob(cigar);
-                if (!cigar_ob.is_valid(&*ref.begin(), &*ref.end(),
-                                       &*alt.begin(), &*alt.end())) {
+                if (!cigar_ob.is_valid(ref, alt)) {
                     std::cerr << "ERROR: invalid CIGAR" << std::endl
                               << cigar << std::endl
                               << ref << std::endl
@@ -1000,14 +1116,12 @@ int main(int argc, char *argv[]) {
                     exit(1);
                 }
 
-                std::cout << config->score_cigar(&*ref.begin(), &*ref.end(),
-                                                 &*alt.begin(), &*alt.end(),
-                                                 cigar_ob) << std::endl;
+                std::cout << config->score_cigar(ref, alt, cigar_ob) << std::endl;
             }
         } else if (regime == "query_annotation_rows") {
             UnlabeledValueArg<std::string> annotation_arg("input_file", "Annotation", true, "", "string", cmd);
             ValueArg<int> num_rows_arg("", "num_rows", "Rows to query", true, 0, "int", cmd);
-            ValueArg<int> cache_size_arg("", "cache_size", "Number of rows cached", false, 0, "int", cmd);
+            // ValueArg<int> cache_size_arg("", "cache_size", "Number of rows cached", false, 0, "int", cmd);
             ValueArg<int> batch_size_arg("", "batch_size", "Number of rows in batch (task)", false, 100'000, "int", cmd);
             ValueArg<int> num_threads_arg("", "num_threads", "Number threads", false, 1, "int", cmd);
             cmd.parse(argc, argv);
@@ -1019,8 +1133,7 @@ int main(int argc, char *argv[]) {
 
             Timer timer;
 
-            auto annotation = initialize_annotation(annotation_arg.getValue(),
-                                                    cache_size_arg.getValue());
+            auto annotation = initialize_annotation(annotation_arg.getValue());
 
             std::cout << "Annotation loaded in " << timer.elapsed() << " sec" << std::endl;
             timer.reset();
@@ -1045,40 +1158,43 @@ int main(int argc, char *argv[]) {
             timer.reset();
 
             // initialize fast query annotation
+            std::vector<BinaryMatrix::SetBitPositions> annotation_rows(num_rows_arg.getValue());
+
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (uint64_t batch_begin = 0;
+                                batch_begin < from_full_to_query.size();
+                                                batch_begin += batch_size) {
+
+                const uint64_t batch_end
+                    = std::min(batch_begin + batch_size_arg.getValue(),
+                               static_cast<uint64_t>(from_full_to_query.size()));
+
+                std::vector<uint64_t> row_indexes;
+                row_indexes.reserve(batch_end - batch_begin);
+
+                for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                    assert(from_full_to_query[i].first < annotation->num_objects());
+
+                    row_indexes.push_back(from_full_to_query[i].first);
+                }
+
+                Timer timer;
+                auto rows = annotation->get_matrix().get_rows(row_indexes);
+                std::cout << "Annotation block extracted in "
+                          << timer.elapsed() << " sec" << std::endl;
+
+                assert(rows.size() == batch_end - batch_begin);
+
+                for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                    annotation_rows[from_full_to_query[i].second]
+                        = std::move(rows[i - batch_begin]);
+                }
+            }
+
             // copy annotations from the full graph to the query graph
             auto row_annotation = std::make_unique<annotate::RowCompressed<>>(
-                num_rows_arg.getValue(),
-                annotation->get_label_encoder().get_labels(),
-                [&](annotate::RowCompressed<>::CallRow call_row) {
-
-                    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-                    for (uint64_t batch_begin = 0;
-                                        batch_begin < from_full_to_query.size();
-                                                        batch_begin += batch_size) {
-
-                        const uint64_t batch_end
-                            = std::min(batch_begin + batch_size_arg.getValue(),
-                                       static_cast<uint64_t>(from_full_to_query.size()));
-
-                        std::vector<uint64_t> row_indexes;
-                        row_indexes.reserve(batch_end - batch_begin);
-
-                        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                            assert(from_full_to_query[i].first < annotation->num_objects());
-
-                            row_indexes.push_back(from_full_to_query[i].first);
-                        }
-
-                        auto rows = annotation->get_label_codes(row_indexes);
-
-                        assert(rows.size() == batch_end - batch_begin);
-
-                        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                            call_row(from_full_to_query[i].second,
-                                     std::move(rows[i - batch_begin]));
-                        }
-                    }
-                }
+                std::move(annotation_rows),
+                annotation->get_label_encoder().get_labels()
             );
 
             std::cout << "Submatrix constructed in " << timer.elapsed() << " sec" << std::endl;

@@ -6,13 +6,14 @@
 #include <numeric>
 #include <ostream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 #include <cassert>
 
 #include <json/json.h>
+#include <tsl/hopscotch_map.h>
 
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/utils/template_utils.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
@@ -20,10 +21,10 @@ class Cigar {
   public:
     enum Operator : int32_t {
         CLIPPED,
-        MATCH,
         MISMATCH,
-        INSERTION,
-        DELETION
+        MATCH,
+        DELETION,
+        INSERTION
     };
 
     typedef uint32_t LengthType;
@@ -33,7 +34,6 @@ class Cigar {
 
     static OperatorTable char_to_op;
     static const OperatorTableRow& get_op_row(char a) { return char_to_op[a]; }
-    static void initialize_opt_table(const std::string &alphabet, const uint8_t *encoding);
 
     Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
@@ -56,6 +56,11 @@ class Cigar {
         cigar_.erase(cigar_.begin(), cigar_.begin() + 1);
     }
 
+    void pop_back() {
+        assert(cigar_.size());
+        cigar_.pop_back();
+    }
+
     typedef typename std::vector<value_type>::iterator iterator;
     typedef typename std::vector<value_type>::const_iterator const_iterator;
 
@@ -64,6 +69,11 @@ class Cigar {
     iterator end() { return cigar_.end(); }
     const_iterator begin() const { return cigar_.cbegin(); }
     const_iterator end() const { return cigar_.cend(); }
+
+    template <typename... Args>
+    void insert(iterator it, Args&&... args) {
+        cigar_.insert(it, std::forward<Args>(args)...);
+    }
 
     value_type& front() { return cigar_.front(); }
     value_type& back() { return cigar_.back(); }
@@ -88,13 +98,22 @@ class Cigar {
             : 0;
     }
 
+    size_t get_num_matches() const {
+        return std::accumulate(begin(), end(), 0, [&](size_t old, const value_type &op) {
+            return old + (op.first == Operator::MATCH) * op.second;
+        });
+    }
+
     // Return true if the cigar is valid. reference_begin points to the first
     // character of the reference sequence after clipping is trimmed
-    bool is_valid(const char *reference_begin, const char *reference_end,
-                  const char *query_begin, const char *query_end) const;
+    bool is_valid(const std::string_view reference, const std::string_view query) const;
+
+    static char opt_to_char(Cigar::Operator op);
 
   private:
     std::vector<value_type> cigar_;
+
+    static OperatorTable initialize_opt_table();
 };
 
 typedef int32_t score_t;
@@ -102,42 +121,33 @@ typedef int32_t score_t;
 class DBGAlignerConfig {
   public:
     typedef ::score_t score_t;
-    typedef std::array<int8_t, 128> ScoreMatrixRow;
+    typedef std::array<score_t, 128> ScoreMatrixRow;
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
     // Set parameters manually and call `set_scoring_matrix()`
     DBGAlignerConfig() {}
 
     explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
-                              int8_t gap_opening = -3,
-                              int8_t gap_extension = -1);
+                              int8_t gap_opening = -5,
+                              int8_t gap_extension = -2);
 
     DBGAlignerConfig(ScoreMatrix&& score_matrix,
-                     int8_t gap_opening = -3,
-                     int8_t gap_extension = -1);
+                     int8_t gap_opening = -5,
+                     int8_t gap_extension = -2);
 
-    template <class StringItA, class StringItB>
-    score_t score_sequences(StringItA a_begin, StringItA a_end,
-                            StringItB b_begin) const {
-        assert(a_end >= a_begin);
-
+    score_t score_sequences(const std::string_view a, const std::string_view b) const {
         return std::inner_product(
-            a_begin,
-            a_end,
-            b_begin,
-            score_t(0),
-            std::plus<score_t>(),
+            a.begin(), a.end(), b.begin(), score_t(0), std::plus<score_t>(),
             [&](char a, char b) -> score_t { return score_matrix_[a][b]; }
         );
     }
 
-    template <class StringIt>
-    score_t match_score(StringIt begin, StringIt end) const {
-        return score_sequences(begin, end, begin);
+    score_t match_score(const std::string_view query) const {
+        return score_sequences(query, query);
     }
 
-    score_t score_cigar(const char *reference_begin, const char *reference_end,
-                        const char *query_begin, const char *query_end,
+    score_t score_cigar(const std::string_view reference,
+                        const std::string_view query,
                         const Cigar &cigar) const;
 
     const ScoreMatrixRow& get_row(char char_in_query) const {
@@ -153,6 +163,7 @@ class DBGAlignerConfig {
     // thresholds for scores
     score_t min_cell_score = 0;
     score_t min_path_score = 0;
+    score_t xdrop = std::numeric_limits<score_t>::max();
 
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
@@ -184,42 +195,43 @@ class DBGAlignerConfig {
 };
 
 
-template <typename NodeType = SequenceGraph::node_index>
+template <typename NodeType>
 class DPTable;
+
+template <typename NodeType>
+class SuffixSeeder;
 
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
 template <typename NodeType = SequenceGraph::node_index>
 class Alignment {
+  friend SuffixSeeder<NodeType>;
+
   public:
     typedef NodeType node_index;
     typedef ::score_t score_t;
     typedef ::DPTable<NodeType> DPTable;
 
     // Used for constructing seeds
-    Alignment(const char* query_begin = nullptr,
-              const char* query_end = nullptr,
+    Alignment(const std::string_view query = {},
               std::vector<NodeType>&& nodes = {},
               score_t score = 0,
               size_t clipping = 0,
               bool orientation = false,
               size_t offset = 0)
-          : Alignment(query_begin,
-                      query_end,
+          : Alignment(query,
                       std::move(nodes),
-                      std::string(query_begin, query_end),
-                      query_end - query_begin,
+                      std::string(query),
                       score,
-                      Cigar(Cigar::Operator::MATCH, query_end - query_begin),
+                      Cigar(Cigar::Operator::MATCH, query.size()),
                       clipping,
                       orientation,
                       offset) {
         assert(nodes.empty() || clipping || is_exact_match());
     }
 
-    Alignment(const char* query_begin,
-              const char* query_end,
+    Alignment(const std::string_view query,
               std::vector<NodeType>&& nodes,
               std::string&& sequence,
               score_t score,
@@ -228,16 +240,16 @@ class Alignment {
               size_t offset = 0);
 
     // TODO: construct multiple alignments from the same starting point
-    // Since insertions into DPTable may invalidate iterators, use pointers instead
     Alignment(const DPTable &dp_table,
-              const typename DPTable::value_type *column,
+              const DBGAlignerConfig &config,
+              const std::string_view query_view,
+              typename DPTable::const_iterator column,
               size_t start_pos,
-              score_t score,
-              const char* path_end,
-              bool orientation,
-              size_t offset);
+              size_t offset,
+              NodeType *start_node,
+              const Alignment &seed);
 
-    void append(Alignment&& other, size_t overlap = 0, int8_t match_score = 0);
+    void append(Alignment&& other);
 
     size_t size() const { return nodes_.size(); }
     const NodeType& front() const { return nodes_.front(); }
@@ -246,12 +258,11 @@ class Alignment {
     bool empty() const { return nodes_.empty(); }
 
     score_t get_score() const { return score_; }
-    uint64_t get_num_matches() const { return num_matches_; }
+    uint64_t get_num_matches() const { return cigar_.get_num_matches(); }
 
-    void recompute_score(const DBGAlignerConfig &config);
-
-    size_t query_size() const { return query_end_ - query_begin_; }
-    const char* get_query_begin() const { return query_begin_; }
+    const std::string_view get_query() const {
+        return std::string_view(query_begin_, query_end_ - query_begin_);
+    }
     const char* get_query_end() const { return query_end_; }
 
     void set_query_begin(const char *begin) {
@@ -260,12 +271,59 @@ class Alignment {
         query_begin_ = begin;
     }
 
-    void extend_query_end(const char *end) {
-        assert(end >= query_end_);
-        if (end == query_end_)
+    void extend_query_begin(const char *begin) {
+        size_t clipping = get_clipping();
+        assert(begin <= query_begin_ - clipping);
+        if (begin == query_begin_ - clipping)
             return;
 
-        cigar_.append(Cigar::Operator::CLIPPED, end - query_end_);
+        if (clipping) {
+            cigar_.front().second += query_begin_ - clipping - begin;
+            return;
+        }
+
+        cigar_.insert(
+            cigar_.begin(),
+            typename Cigar::value_type { Cigar::Operator::CLIPPED, query_begin_ - begin }
+        );
+    }
+
+    void extend_query_end(const char *end) {
+        size_t end_clipping = get_end_clipping();
+        assert(end >= query_end_ + end_clipping);
+        if (end == query_end_ + end_clipping)
+            return;
+
+        cigar_.append(Cigar::Operator::CLIPPED, end - query_end_ - end_clipping);
+    }
+
+    void trim_clipping() {
+        if (get_clipping())
+            cigar_.pop_front();
+    }
+
+    void trim_end_clipping() {
+        if (get_end_clipping())
+            cigar_.pop_back();
+    }
+
+    void reverse_complement(const DeBruijnGraph &graph,
+                            const std::string_view query_rev_comp) {
+        assert(query_end_ + get_end_clipping()
+            == query_begin_ - get_clipping() + query_rev_comp.size());
+
+        assert(!offset_);
+
+        std::reverse(cigar_.begin(), cigar_.end());
+        ::reverse_complement(sequence_.begin(), sequence_.end());
+        nodes_ = map_sequence_to_nodes(graph, sequence_);
+
+        orientation_ = !orientation_;
+
+        query_begin_ = query_rev_comp.data() + get_clipping();
+        query_end_ = query_rev_comp.data() + (query_rev_comp.size() - get_end_clipping());
+
+        assert(query_end_ >= query_begin_);
     }
 
     const std::string& get_sequence() const { return sequence_; }
@@ -293,7 +351,6 @@ class Alignment {
     bool operator==(const Alignment &other) const {
         return orientation_ == other.orientation_
             && score_ == other.score_
-            && num_matches_ == other.num_matches_
             && sequence_ == other.sequence_
             && std::equal(query_begin_, query_end_, other.query_begin_, other.query_end_)
             && cigar_ == other.cigar_;
@@ -320,21 +377,18 @@ class Alignment {
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
   private:
-    Alignment(const char* query_begin,
-              const char* query_end,
+    Alignment(const std::string_view query,
               std::vector<NodeType>&& nodes = {},
               std::string&& sequence = "",
-              size_t num_matches = 0,
               score_t score = 0,
               Cigar&& cigar = Cigar(),
               size_t clipping = 0,
               bool orientation = false,
               size_t offset = 0)
-          : query_begin_(query_begin),
-            query_end_(query_end),
+          : query_begin_(query.data()),
+            query_end_(query.data() + query.size()),
             nodes_(std::move(nodes)),
             sequence_(std::move(sequence)),
-            num_matches_(num_matches),
             score_(score),
             cigar_(Cigar::Operator::CLIPPED, clipping),
             orientation_(orientation),
@@ -346,7 +400,6 @@ class Alignment {
     const char* query_end_;
     std::vector<NodeType> nodes_;
     std::string sequence_;
-    uint64_t num_matches_;
     score_t score_;
     Cigar cigar_;
     bool orientation_;
@@ -371,8 +424,7 @@ class QueryAlignment {
   public:
     typedef Alignment<NodeType> value_type;
 
-    explicit QueryAlignment(const std::string &query);
-
+    QueryAlignment(const std::string_view query);
     QueryAlignment(const QueryAlignment &other);
     QueryAlignment(QueryAlignment&& other) noexcept;
 
@@ -385,11 +437,11 @@ class QueryAlignment {
 
         // sanity checks
         assert(alignments_.back().get_orientation()
-            || alignments_.back().get_query_begin() >= query_.c_str());
+            || alignments_.back().get_query().data() >= query_.c_str());
         assert(alignments_.back().get_orientation()
             || alignments_.back().get_query_end() <= query_.c_str() + query_.size());
         assert(!alignments_.back().get_orientation()
-            || alignments_.back().get_query_begin() >= query_rc_.c_str());
+            || alignments_.back().get_query().data() >= query_rc_.c_str());
         assert(!alignments_.back().get_orientation()
             || alignments_.back().get_query_end() <= query_rc_.c_str() + query_rc_.size());
     }
@@ -422,8 +474,6 @@ class QueryAlignment {
 
     bool operator!=(const QueryAlignment &other) const { return !(*this == other); }
 
-    std::vector<double> get_alignment_weights(const DBGAlignerConfig &config) const;
-
   private:
     // When a QueryAlignment is copied or moved, the pointers in the alignment
     // vector may be incorrect, so this corrects them
@@ -436,50 +486,63 @@ class QueryAlignment {
 
 
 // dynamic programming table stores score columns and steps needed to reconstruct paths
-template <typename NodeType>
+template <typename NodeType = SequenceGraph::node_index>
 class DPTable {
   public:
     typedef ::score_t score_t;
 
     struct Column {
+        Column() = default;
+
         Column(size_t size,
                score_t min_score,
                char start_char,
-               std::vector<NodeType>&& in_nodes,
-               size_t pos = 0)
-              : scores(size, min_score),
-                ops(size),
-                prev_nodes(size),
+               size_t pos = 0,
+               size_t priority_pos = 0)
+              : size_(size),
+                scores(size + 8, min_score),
+                gap_scores(size + 8, min_score),
+                ops(scores.size()),
+                prev_nodes(scores.size()),
                 last_char(start_char),
-                incoming(std::move(in_nodes)),
-                best_pos(pos) {}
+                best_pos(pos),
+                last_priority_pos(priority_pos) {}
 
+        size_t size_;
         std::vector<score_t> scores;
+        std::vector<score_t> gap_scores;
         std::vector<Cigar::Operator> ops;
         std::vector<NodeType> prev_nodes;
         char last_char;
-        const std::vector<NodeType> incoming;
         size_t best_pos;
+        size_t last_priority_pos;
 
         const score_t& best_score() const { return scores.at(best_pos); }
+        const score_t& last_priority_value() const { return scores.at(last_priority_pos); }
         const Cigar::Operator& best_op() const { return ops.at(best_pos); }
         const NodeType& best_prev_node() const { return prev_nodes.at(best_pos); }
 
         bool operator<(const Column &other) const {
             return best_score() < other.best_score();
         }
+
+        size_t size() const { return size_; }
     };
 
-    explicit DPTable(const SequenceGraph &graph,
-                     NodeType start_node,
-                     char start_char,
-                     score_t initial_score,
-                     score_t min_score,
-                     size_t size,
-                     int8_t gap_opening_penalty,
-                     int8_t gap_extension_penalty);
+    DPTable() {}
 
-    typedef std::unordered_map<NodeType, Column> Storage;
+    bool add_seed(NodeType start_node,
+                  char start_char,
+                  score_t last_char_score,
+                  score_t initial_score,
+                  score_t min_score,
+                  size_t size,
+                  size_t start_pos,
+                  int8_t gap_opening_penalty,
+                  int8_t gap_extension_penalty,
+                  size_t query_offset = 0);
+
+    typedef tsl::hopscotch_map<NodeType, Column> Storage;
 
     typedef NodeType key_type;
     typedef Column mapped_type;
@@ -498,23 +561,34 @@ class DPTable {
 
     size_t size() const { return dp_table_.size(); }
 
+    void clear() { dp_table_.clear(); }
+
     template <typename... Args>
     std::pair<iterator, bool> emplace(Args&&... args) {
         return dp_table_.emplace(std::forward<Args>(args)...);
     }
 
-    std::vector<Alignment<NodeType>>
-    extract_alignments(const DeBruijnGraph &graph,
-                       const DBGAlignerConfig &config,
-                       score_t start_score,
-                       const char *align_start,
-                       bool orientation,
-                       score_t min_path_score);
+    void extract_alignments(const DeBruijnGraph &graph,
+                            const DBGAlignerConfig &config,
+                            const std::string_view query_view,
+                            std::function<void(Alignment<NodeType>&&, NodeType)> callback,
+                            score_t min_path_score,
+                            const Alignment<NodeType> &seed,
+                            NodeType *node = nullptr);
+
+    std::pair<NodeType, score_t> best_score() const {
+        auto mx = std::max_element(begin(), end(), utils::LessSecond());
+        return std::make_pair(mx->first, mx->second.best_score());
+    }
 
     const Storage& data() const { return dp_table_; }
+    size_t get_query_offset() const { return query_offset_; }
+    NodeType get_start_node() const { return start_node_; }
 
   private:
     Storage dp_table_;
+    NodeType start_node_;
+    size_t query_offset_ = 0;
 };
 
 

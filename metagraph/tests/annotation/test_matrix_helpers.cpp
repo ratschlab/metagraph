@@ -5,15 +5,14 @@
 #include "gtest/gtest.h"
 
 #include "../test_helpers.hpp"
-#include "annotation/binary_matrix/multi_brwt/BRWT.hpp"
-#include "annotation/binary_matrix/multi_brwt/BRWT_builders.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
-typedef BinaryMatrix::SetBitPositions RowSetBits;
-typedef std::function<void(const RowSetBits &)> RowCallback;
+typedef std::function<void(const BinaryMatrix::SetBitPositions &)> RowCallback;
 
 
 // Used to generate a set of columns from a row generator
@@ -23,20 +22,25 @@ build_matrix_from_columns(const std::function<void(const RowCallback &)> &genera
                           uint64_t num_columns,
                           uint64_t num_rows,
                           uint64_t) {
-    BitVectorPtrArray columns;
+    std::vector<sdsl::bit_vector> columns;
     while (num_columns--) {
-        columns.emplace_back(new bit_vector_stat(num_rows, false));
+        columns.emplace_back(num_rows, false);
     }
 
     uint64_t cur_row = 0;
     generate_rows([&](auto row) {
         for (const auto &column : row) {
-            columns.at(column)->set(cur_row, true);
+            columns.at(column)[cur_row] = true;
         }
         cur_row++;
     });
 
-    return build_matrix_from_columns<BinMat>(std::move(columns), num_rows);
+    BitVectorPtrArray data;
+    for (auto &bv : columns) {
+        data.emplace_back(new bit_vector_stat(std::move(bv)));
+    }
+
+    return build_matrix_from_columns<BinMat>(std::move(data), num_rows);
 }
 
 template <typename BinMat>
@@ -323,7 +327,7 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
     }
 
     // check get_row
-    for (size_t i = 0; i < matrix.num_rows(); ++i) {
+    for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
         auto row_set_bits = matrix.get_row(i);
 
         // make sure all returned indexes are unique
@@ -369,8 +373,43 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
+    // check slice_rows, query first |n| rows
+    for (size_t n : { size_t(0),
+                      size_t(matrix.num_rows() / 2),
+                      size_t(matrix.num_rows()) }) {
+        std::vector<uint64_t> indices(n);
+        std::iota(indices.begin(), indices.end(), 0);
+
+        auto slice = matrix.slice_rows(indices);
+
+        ASSERT_TRUE(slice.size() >= indices.size());
+
+        auto row_begin = slice.begin();
+
+        for (size_t i = 0; i < indices.size(); ++i) {
+            // every row in `slice` ends with `-1`
+            auto row_end = std::find(row_begin, slice.end(),
+                                     std::numeric_limits<BinaryMatrix::Column>::max());
+            std::vector<BinaryMatrix::Column> row_set_bits(row_begin, row_end);
+            row_begin = row_end + 1;
+
+            // make sure all returned indexes are unique
+            ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
+
+            for (auto j : row_set_bits) {
+                ASSERT_TRUE(j < matrix.num_columns());
+                EXPECT_TRUE((*columns[j])[i]);
+            }
+
+            auto set_bits = convert_to_set(row_set_bits);
+            for (size_t j = 0; j < columns.size(); ++j) {
+                EXPECT_EQ((*columns[j])[i], set_bits.count(j));
+            }
+        }
+    }
+
     // check get
-    for (size_t i = 0; i < matrix.num_rows(); ++i) {
+    for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
         for (size_t j = 0; j < matrix.num_columns(); ++j) {
             EXPECT_EQ(columns[j]->operator[](i), matrix.get(i, j))
                 << i << " " << j;

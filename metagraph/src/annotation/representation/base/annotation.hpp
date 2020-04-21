@@ -124,17 +124,12 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     using Index = typename MultiLabelAnnotation<uint64_t, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<uint64_t, LabelType>::Label;
     using VLabels = typename MultiLabelAnnotation<uint64_t, LabelType>::VLabels;
-    typedef Vector<uint64_t> SetBitPositions;
 
     virtual ~MultiLabelEncoded() {}
 
     /******************* General functionality *******************/
 
     virtual VLabels get(Index i) const override final;
-
-    virtual SetBitPositions get_label_codes(Index i) const = 0;
-    virtual std::vector<SetBitPositions>
-    get_label_codes(const std::vector<Index> &indices) const;
 
     virtual inline const LabelEncoder<Label>& get_label_encoder() const final {
         return label_encoder_;
@@ -172,7 +167,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
      * Stop counting if count is greater than |count_cap|.
      */
     virtual std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-    count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
+    count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const;
 

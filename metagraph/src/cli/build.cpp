@@ -13,7 +13,8 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "config/config.hpp"
-#include "sequence_reader.hpp"
+#include "parse_sequences.hpp"
+#include "stats.hpp"
 
 using mg::common::logger;
 using utils::get_verbose;
@@ -62,6 +63,11 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
+        std::string tmp_dir_str(config->tmp_dir / "XXXXXX");
+        mkdtemp(tmp_dir_str.data());
+        std::filesystem::path tmp_dir(tmp_dir_str);
+        logger->trace("Setting temporary directory to {}", tmp_dir);
+
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
             timer.reset();
@@ -77,7 +83,9 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                config->container
+                config->container,
+                tmp_dir,
+                config->disk_cap_bytes
             );
 
             parse_sequences(files, *config, timer,
@@ -103,6 +111,7 @@ int build_graph(Config *config) {
             graph_data.extend(*next_block);
             delete next_block;
         }
+        std::filesystem::remove_all(tmp_dir);
 
         if (config->count_kmers) {
             sdsl::int_vector<> kmer_counts;
@@ -294,6 +303,88 @@ int build_graph(Config *config) {
         graph->serialize(config->outfbase);
         graph->serialize_extensions(config->outfbase);
     }
+
+    return 0;
+}
+
+int concatenate_graph_chunks(Config *config) {
+    assert(config);
+
+    const auto &files = config->fnames;
+
+    assert(config->outfbase.size());
+
+    auto chunk_files = files;
+
+    Timer timer;
+
+    if (!files.size()) {
+        assert(config->infbase.size());
+
+        const auto sorted_suffixes = config->graph_type == Config::GraphType::SUCCINCT
+                ? KmerExtractorBOSS().generate_suffixes(config->suffix_len)
+                : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+
+        for (const std::string &suffix : sorted_suffixes) {
+            assert(suffix.size() == config->suffix_len);
+            chunk_files.push_back(config->infbase + "." + suffix);
+        }
+    }
+
+    if (!chunk_files.size()) {
+        logger->error("No input files provided, nothing to concatenate");
+        exit(1);
+    }
+
+    for (auto &filename : chunk_files) {
+        filename = utils::remove_suffix(filename,
+                                        BOSS::Chunk::kFileExtension,
+                                        DBGBitmap::kChunkFileExtension);
+    }
+
+    // collect results on an external merge or construction
+    std::unique_ptr<DeBruijnGraph> graph;
+    switch (config->graph_type) {
+        case Config::GraphType::SUCCINCT: {
+            auto p = BOSS::Chunk::build_boss_from_chunks(chunk_files, get_verbose());
+            auto dbg_succ = std::make_unique<DBGSuccinct>(p.first, p.second);
+
+            logger->trace("Chunks concatenated in {} sec", timer.elapsed());
+
+            if (config->clear_dummy) {
+                logger->trace("Traverse source dummy edges,"
+                              " remove redundant ones, and mark"
+                              " those that cannot be removed");
+                dbg_succ->mask_dummy_kmers(get_num_threads(), true);
+            }
+            graph = std::move(dbg_succ);
+            break;
+        }
+        case Config::GraphType::BITMAP: {
+            graph.reset(DBGBitmapConstructor::build_graph_from_chunks(
+                chunk_files, config->canonical, get_verbose()
+            ));
+            break;
+        }
+        default:
+            logger->error("Cannot concatenate chunks for this graph representation");
+            exit(1);
+    }
+    assert(graph);
+
+    logger->trace("Graph was assembled in {} sec", timer.elapsed());
+
+    if (logger->level() <= spdlog::level::level_enum::trace) {
+        print_stats(*graph);
+        if (config->graph_type == Config::GraphType::SUCCINCT) {
+            print_boss_stats(
+                dynamic_cast<DBGSuccinct*>(graph.get())->get_boss()
+            );
+        }
+    }
+
+    // graph output
+    graph->serialize(config->outfbase);
 
     return 0;
 }

@@ -1,7 +1,16 @@
 #include "gtest/gtest.h"
 
+#include <tsl/ordered_map.h>
+
 #include "../test_helpers.hpp"
 #include "test_annotation.hpp"
+
+template <typename Key, typename T>
+using VectorOrderedMap = tsl::ordered_map<Key, T,
+                                          std::hash<Key>, std::equal_to<Key>,
+                                          std::allocator<std::pair<Key, T>>,
+                                          std::vector<std::pair<Key, T>>,
+                                          uint64_t>;
 
 
 std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<std::string> &annotator,
@@ -17,7 +26,7 @@ std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<std::strin
     }
 
     for (auto i : indices) {
-        for (auto j : annotator.get_label_codes(i)) {
+        for (auto j : annotator.get_matrix().get_row(i)) {
             label_counts[j].second++;
         }
     }
@@ -96,7 +105,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
 std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
-    tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    VectorOrderedMap<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }
@@ -104,7 +113,7 @@ std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<s
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    auto code_counts = annotator.count_labels(index_counts, min_count, min_count);
+    auto code_counts = annotator.count_labels(index_counts.values_container(), min_count, min_count);
 
     std::vector<std::string> labels;
     labels.reserve(code_counts.size());
@@ -197,7 +206,7 @@ get_top_labels(const annotate::MultiLabelEncoded<std::string> &annotator,
     }
 
     for (auto i : indices) {
-        for (auto j : annotator.get_label_codes(i)) {
+        for (auto j : annotator.get_matrix().get_row(i)) {
             label_counts[j].second++;
         }
     }
@@ -274,12 +283,12 @@ get_top_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotato
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    tsl::hopscotch_map<uint64_t, size_t> index_counts;
+    VectorOrderedMap<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }
 
-    auto code_counts = annotator.count_labels(index_counts, min_count);
+    auto code_counts = annotator.count_labels(index_counts.values_container(), min_count);
 
     assert(std::all_of(
         code_counts.begin(), code_counts.end(),

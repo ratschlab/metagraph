@@ -10,19 +10,14 @@
 
 
 template <typename RowType>
-VectorRowBinMat<RowType>::VectorRowBinMat(uint64_t num_rows,
-                                          uint64_t num_columns,
-                                          std::function<void(CallRow)> call_rows)
-      : num_columns_(num_columns), vector_(num_rows) {
-
-    call_rows([&](uint64_t i, RowType&& row) {
-        assert(i < num_rows);
-        assert(vector_[i].empty());
-        assert(std::all_of(row.begin(), row.end(),
-                           [num_columns](auto j) { return j < num_columns; }));
-
-        vector_[i] = std::move(row);
-    });
+VectorRowBinMat<RowType>::VectorRowBinMat(std::vector<RowType>&& rows,
+                                          uint64_t num_columns)
+      : num_columns_(num_columns), vector_(std::move(rows)) {
+    // make sure there are no columns with indexes greater than num_labels
+    assert(std::all_of(vector_.begin(), vector_.end(), [&](const auto &row) {
+        return std::all_of(row.begin(), row.end(),
+                           [num_columns](uint64_t col_id) { return col_id < num_columns; });
+    }));
 }
 
 template <typename RowType>

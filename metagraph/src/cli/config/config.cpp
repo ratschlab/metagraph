@@ -44,8 +44,6 @@ Config::Config(int argc, char *argv[]) {
         identity = COMPARE;
     } else if (!strcmp(argv[1], "align")) {
         identity = ALIGN;
-    } else if (!strcmp(argv[1], "experiment")) {
-        identity = EXPERIMENT;
     } else if (!strcmp(argv[1], "stats")) {
         identity = STATS;
     } else if (!strcmp(argv[1], "annotate")) {
@@ -66,10 +64,6 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
-    } else if (!strcmp(argv[1], "call_variants")) {
-        identity = CALL_VARIANTS;
-    } else if (!strcmp(argv[1], "parse_taxonomy")) {
-        identity = PARSE_TAXONOMY;
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -142,6 +136,8 @@ Config::Config(int argc, char *argv[]) {
             num_columns_cached = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
+        } else if (!strcmp(argv[i], "--batch-size")) {
+            query_batch_size_in_bytes = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
@@ -178,12 +174,14 @@ Config::Config(int argc, char *argv[]) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
+        } else if (!strcmp(argv[i], "--print-signature")) {
+            print_signature = true;
         } else if (!strcmp(argv[i], "--map")) {
             map_sequences = true;
-        } else if (!strcmp(argv[i], "--align-seed-unimems")) {
-            alignment_seed_unimems = true;
         } else if (!strcmp(argv[i], "--align")) {
             align_sequences = true;
+        } else if (!strcmp(argv[i], "--align-both-strands")) {
+            align_both_strands = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-length")) {
@@ -208,6 +206,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_min_cell_score = atol(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-path-score")) {
             alignment_min_path_score = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-xdrop")) {
+            alignment_xdrop = atol(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-seed-length")) {
             alignment_min_seed_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-seed-length")) {
@@ -282,6 +282,8 @@ Config::Config(int argc, char *argv[]) {
             min_unitig_median_kmer_abundance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fallback")) {
             fallback_abundance_cutoff = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--num-singletons")) {
+            num_singleton_kmers = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--count-dummy")) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
@@ -296,12 +298,14 @@ Config::Config(int argc, char *argv[]) {
         //    debug = true;
         } else if (!strcmp(argv[i], "--greedy")) {
             greedy_brwt = true;
+        } else if (!strcmp(argv[i], "--subsample")) {
+            num_rows_subsampled = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--arity")) {
             arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--relax-arity")) {
             relax_arity_brwt = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--cache-size")) {
-            row_cache_size = atoi(get_value(i++));
+        // } else if (!strcmp(argv[i], "--cache-size")) {
+        //     row_cache_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_welcome_message();
             print_usage(argv[0], identity);
@@ -316,22 +320,14 @@ Config::Config(int argc, char *argv[]) {
             label_mask_out_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--label-other-fraction")) {
             label_other_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-filter")) {
-            label_filter.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--filter-by-kmer")) {
             filter_by_kmer = true;
-        } else if (!strcmp(argv[i], "--call-bubbles")) {
-            call_bubbles = true;
-        } else if (!strcmp(argv[i], "--call-breakpoints")) {
-            call_breakpoints = true;
-        } else if (!strcmp(argv[i], "--accession")) {
-            accession2taxid = std::string(get_value(i++));
-        } else if (!strcmp(argv[i], "--taxonomy")) {
-            taxonomy_nodes = std::string(get_value(i++));
-        } else if (!strcmp(argv[i], "--taxonomy-map")) {
-            taxonomy_map = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--container")) {
             container = string_to_container(get_value(i++));
+        } else if (!strcmp(argv[i], "--tmp-dir")) {
+            tmp_dir = get_value(i++);
+        } else if (!strcmp(argv[i], "--disk-cap-gb")) {
+            disk_cap_bytes = atoi(get_value(i++)) * 1e9;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -360,8 +356,6 @@ Config::Config(int argc, char *argv[]) {
     if (!fnames.size() && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
-                      && !(identity == CALL_VARIANTS)
-                      && !(identity == PARSE_TAXONOMY)
                       && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
@@ -419,8 +413,6 @@ Config::Config(int argc, char *argv[]) {
             && identity != STATS
             && identity != SERVER_QUERY
             && !(identity == BUILD && complete)
-            && !(identity == CALL_VARIANTS)
-            && !(identity == PARSE_TAXONOMY)
             && !fnames.size())
         print_usage_and_exit = true;
 
@@ -429,6 +421,22 @@ Config::Config(int argc, char *argv[]) {
                   << " or use the -i and -l options" << std::endl;
         print_usage_and_exit = true;
     }
+
+    // No need to align in the both strands mode if we align
+    // both forward and reverse complement sequences anyway.
+    if (forward_and_reverse)
+        align_both_strands = false;
+
+    if (alignment_min_seed_length > alignment_max_seed_length) {
+        std::cerr << "Error: min_seed_length must be <= max_seed_length" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    // only the best alignment is used in query
+    // |alignment_num_alternative_paths| must be set to 1
+    if (identity == QUERY && align_sequences
+                          && alignment_num_alternative_paths != 1)
+        print_usage_and_exit = true;
 
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
@@ -500,10 +508,6 @@ Config::Config(int argc, char *argv[]) {
                     && outfbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == PARSE_TAXONOMY &&
-            ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
-        print_usage_and_exit = true;
-
     if (identity == MERGE && fnames.size() < 2)
         print_usage_and_exit = true;
 
@@ -557,13 +561,13 @@ Config::Config(int argc, char *argv[]) {
 std::string Config::state_to_string(BOSS::State state) {
     switch (state) {
         case BOSS::State::STAT:
-            return "fast";
+            return "stat-obsolete";
         case BOSS::State::DYN:
             return "dynamic";
         case BOSS::State::SMALL:
             return "small";
         case BOSS::State::FAST:
-            return "faster";
+            return "fast";
         default:
             assert(false);
             return "Never happens";
@@ -571,13 +575,13 @@ std::string Config::state_to_string(BOSS::State state) {
 }
 
 BOSS::State Config::string_to_state(const std::string &string) {
-    if (string == "fast") {
+    if (string == "stat-obsolete") {
         return BOSS::State::STAT;
     } else if (string == "dynamic") {
         return BOSS::State::DYN;
     } else if (string == "small") {
         return BOSS::State::SMALL;
-    } else if (string == "faster") {
+    } else if (string == "fast") {
         return BOSS::State::FAST;
     } else {
         throw std::runtime_error("Error: unknown graph state");
@@ -711,16 +715,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
-            fprintf(stderr, "\tcall_variants\tgenerate a masked annotated graph and call variants\n");
-            fprintf(stderr, "\t\t\trelative to unmasked graph\n\n");
-
-            fprintf(stderr, "\tparse_taxonomy\tgenerate NCBI Accession ID to Taxonomy ID mapper\n\n");
-
             return;
         }
-        case EXPERIMENT: {
-            fprintf(stderr, "Usage: %s experiment ???\n\n", prog_name.c_str());
-        } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA, FASTQ, VCF, or KMC format.\n"
@@ -748,12 +744,15 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --container [STR] \tcontainer to use for storing k-mers: vector / vector_disk [vector]\n");
+            fprintf(stderr, "\t   --tmp-dir [STR] \tdirectory to use for temporary files [/tmp/]\n");
+            fprintf(stderr, "\t   --disk-cap-gb [INT] \tmax temp disk space to use before forcing a merge, in GB [20]\n");
         } break;
         case CLEAN: {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --num-singletons [INT] \treset the number of count 1 k-mers in histogram (0: off) [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
             fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
@@ -788,7 +787,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
-            fprintf(stderr, "\t   --fwd-and-reverse \t\talign both forward and reverse complement sequences [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \t\tfor each input sequence, align its reverse complement as well [off]\n");
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
@@ -803,24 +802,25 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
-            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
-            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
-            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [17]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\t\t\tbasename of output file []\n");
+            fprintf(stderr, "\t   --json \t\t\t\toutput alignment in JSON format [off]\n");
+            fprintf(stderr, "\t   --align-both-strands \t\treturn best alignments for either input sequence or its reverse complement [off]\n");
+            fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-min-path-score [INT]\t\tthe minimum score that a reported path can have [0]\n");
+            fprintf(stderr, "\t   --align-edit-distance \t\tuse unit costs for scoring matrix [off]\n");
+            fprintf(stderr, "\t   --align-queue-size [INT]\t\tmaximum size of the priority queue for alignment [20]\n");
+            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\tmaximum width of a window to consider in alignment step [16]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
-            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [1]\n");
-            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [2]\n");
-            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [3]\n");
-            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [1]\n");
+            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [3]\n");
+            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
+            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [5]\n");
+            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
             fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\tthe maximum difference between the current and the best alignment [30]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximal exact matches along unitigs as seeds [off]\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");
@@ -858,7 +858,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [small]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
@@ -967,6 +967,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
+            fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
@@ -985,11 +986,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for query:\n");
-            fprintf(stderr, "\t   --fwd-and-reverse \tquery both forward and reverse complement sequences [off]\n");
-            fprintf(stderr, "\t   --align \t\talign sequences instead of mapping k-mers.\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \tfor each input sequence, query its reverse complement as well [off]\n");
+            fprintf(stderr, "\t   --align \t\talign sequences instead of mapping k-mers [off]\n");
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
+            fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [1.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
@@ -997,26 +999,28 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-            fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
+            // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
+            fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
-            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
-            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
-            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [17]\n");
+            fprintf(stderr, "\t   --align-both-strands \t\treturn best alignments for either input sequence or its reverse complement [off]\n");
+            // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-min-path-score [INT]\t\tthe minimum score that a reported path can have [0]\n");
+            fprintf(stderr, "\t   --align-edit-distance \t\tuse unit costs for scoring matrix [off]\n");
+            fprintf(stderr, "\t   --align-queue-size [INT]\t\tmaximum size of the priority queue for alignment [20]\n");
+            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\tmaximum width of a window to consider in alignment step [16]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
-            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [1]\n");
-            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [2]\n");
-            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [3]\n");
-            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [1]\n");
+            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [3]\n");
+            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
+            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [5]\n");
+            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
             fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\tthe maximum difference between the current and the best alignment [30]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximal exact matches along unitigs as seeds [off]\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");
@@ -1026,59 +1030,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for server_query:\n");
             fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
-            fprintf(stderr, "\t   --align \t\talign sequences instead of mapping k-mers.\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
-            fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "Available options for --align:\n");
-            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
-            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
-            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [17]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for scoring:\n");
-            fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
-            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [1]\n");
-            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [2]\n");
-            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [3]\n");
-            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [1]\n");
-            fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-seed-unimems \t\t\tuse maximal exact matches along unitigs as seeds [off]\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [1]\n");
-        } break;
-        case CALL_VARIANTS: {
-            fprintf(stderr, "Usage: %s call_variants -i <GRAPH> -a <annotation> [options]\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for call_variants:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph []\n");
-            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph []\n");
-            fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
-            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
-            fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
-            fprintf(stderr, "\t   --filter-by-kmer \t\t\tmask out graph k-mers individually [off]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --call-bubbles \t\tcall labels from bubbles [off]\n");
-            fprintf(stderr, "\t   --call-breakpoints \t\tcall labels from breakpoints [off]\n");
-            fprintf(stderr, "\t   --label-filter [STR] \tdiscard variants with this label []\n");
-            fprintf(stderr, "\t   --taxonomy-map [STR] \tfilename of taxonomy map file []\n");
-            fprintf(stderr, "\t   --cache-size [INT] \t\tnumber of uncompressed rows to store in the cache [0]\n");
-        } break;
-        case PARSE_TAXONOMY: {
-            fprintf(stderr, "Usage: %s parse_taxonomy -o <OUTBASE> [options]\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for parse_taxonomy:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --accession [STR] \tfilename of the accession2taxid.gz file []\n");
-            fprintf(stderr, "\t   --taxonomy [STR] \tfilename of the nodes.dmp file []\n");
+            // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
         } break;
     }
 

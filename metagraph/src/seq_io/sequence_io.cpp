@@ -9,11 +9,28 @@
 
 const char kDefaultFastQualityChar = 'I';
 
+// Optimal values found from a grid search with the BM_WriteRandomSequences benchmark
+const size_t kWorkerQueueSize = 1;
+const size_t kBufferSize = 1000000;
+
 
 FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
-                         bool enumerate_sequences)
-      : header_(header), enumerate_sequences_(enumerate_sequences) {
+                         bool enumerate_sequences,
+                         bool async)
+      : header_(header),
+        enumerate_sequences_(enumerate_sequences),
+        worker_(async, kWorkerQueueSize),
+        seq_batcher_([&](std::vector<std::string>&& buffer) {
+            worker_.enqueue([&](const auto &buffer) {
+                                for (const std::string &sequence : buffer) {
+                                    write_to_disk(sequence);
+                                }
+                            },
+                            std::move(buffer));
+        },
+        std::numeric_limits<size_t>::max(),
+        kBufferSize / kWorkerQueueSize) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
     gz_out_ = gzopen(filename.c_str(), "w");
@@ -24,10 +41,26 @@ FastaWriter::FastaWriter(const std::string &filebase,
 }
 
 FastaWriter::~FastaWriter() {
+    join();
     gzclose(gz_out_);
 }
 
+void FastaWriter::join() {
+    seq_batcher_.process_all_buffered();
+    worker_.join();
+}
+
 void FastaWriter::write(const std::string &sequence) {
+    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
+                              std::string(sequence));
+}
+
+void FastaWriter::write(std::string&& sequence) {
+    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
+                              std::move(sequence));
+}
+
+void FastaWriter::write_to_disk(const std::string &sequence) {
     if (!write_fasta(gz_out_,
                      enumerate_sequences_ ? header_ + std::to_string(++count_)
                                           : header_,
@@ -43,10 +76,22 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                                             const std::string &feature_name,
                                             uint32_t kmer_length,
                                             const std::string &header,
-                                            bool enumerate_sequences)
+                                            bool enumerate_sequences,
+                                            bool async)
       : kmer_length_(kmer_length),
         header_(header),
-        enumerate_sequences_(enumerate_sequences) {
+        enumerate_sequences_(enumerate_sequences),
+        worker_(async, kWorkerQueueSize),
+        batcher_([&](std::vector<value_type> &&buffer) {
+                    worker_.enqueue([&](const auto &buffer) {
+                                        for (const auto &value_pair : buffer) {
+                                            write_to_disk(value_pair);
+                                        }
+                                    },
+                                    std::move(buffer));
+                 },
+                 std::numeric_limits<size_t>::max(),
+                 kBufferSize / kWorkerQueueSize) {
     assert(feature_name.size());
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
@@ -69,8 +114,15 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
 
 template <typename T>
 ExtendedFastaWriter<T>::~ExtendedFastaWriter() {
+    join();
     gzclose(fasta_gz_out_);
     gzclose(feature_gz_out_);
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::join() {
+    batcher_.process_all_buffered();
+    worker_.join();
 }
 
 template <typename T>
@@ -78,6 +130,24 @@ void ExtendedFastaWriter<T>::write(const std::string &sequence,
                                    const std::vector<feature_type> &kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size()
+                            + sizeof(std::string) + sizeof(std::vector<feature_type>),
+                          std::make_pair(sequence, kmer_features));
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::write(std::string&& sequence,
+                                   std::vector<feature_type>&& kmer_features) {
+    assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
+
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size()
+                            + sizeof(std::string) + sizeof(std::vector<feature_type>),
+                          std::make_pair(std::move(sequence), std::move(kmer_features)));
+}
+
+template <typename T>
+void ExtendedFastaWriter<T>::write_to_disk(const value_type &value_pair) {
+    const auto &[sequence, kmer_features] = value_pair;
     if (!write_fasta(fasta_gz_out_,
                      enumerate_sequences_ ? header_ + std::to_string(++count_)
                                           : header_,
@@ -154,6 +224,123 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
                         == static_cast<int>(qual.size())
         && gzputc(gz_out, '\n') == '\n';
 }
+
+
+FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
+    if (!other.read_stream_) {
+        // free memory, reset members and return
+        deinit_stream();
+        filename_.clear();
+        with_reverse_complement_ = false;
+        read_stream_ = NULL;
+        is_reverse_complement_ = false;
+        return *this;
+    }
+
+    if (!read_stream_) {
+        *this = iterator(other.filename_, other.with_reverse_complement_);
+
+    } else if (filename_ != other.filename_) {
+        // The current iterator doesn't point to the target fasta file.
+        // Thus, we need to open a new descriptor and seek to the target position.
+
+        filename_ = other.filename_;
+
+        // close the old file descriptor
+        gzclose(read_stream_->f->f);
+
+        // open a new file descriptor
+        read_stream_->f->f = gzopen(filename_.c_str(), "r");
+        if (read_stream_->f->f == Z_NULL) {
+            std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
+            exit(1);
+        }
+    }
+
+    gzseek(read_stream_->f->f, gztell(other.read_stream_->f->f), SEEK_SET);
+
+#define KSTRING_COPY(kstr, other_kstr) \
+            kstr.l = other_kstr.l; \
+            if (kstr.m != other_kstr.m) { \
+                kstr.m = other_kstr.m; \
+                kstr.s = (char*)realloc(kstr.s, kstr.m); \
+                if (!kstr.s) { \
+                    std::cerr << "ERROR: realloc failed" << std::endl; \
+                    exit(1); \
+                } \
+            } \
+            memcpy(kstr.s, other_kstr.s, other_kstr.m); \
+
+    // copy last cached record
+    KSTRING_COPY(read_stream_->name, other.read_stream_->name);
+    KSTRING_COPY(read_stream_->comment, other.read_stream_->comment);
+    KSTRING_COPY(read_stream_->seq, other.read_stream_->seq);
+    KSTRING_COPY(read_stream_->qual, other.read_stream_->qual);
+
+    read_stream_->last_char = other.read_stream_->last_char;
+
+    // copy stream state
+    kstream_t *f = read_stream_->f;
+    kstream_t *other_f = other.read_stream_->f;
+
+    f->begin = other_f->begin;
+    f->end = other_f->end;
+    f->is_eof = other_f->is_eof;
+    f->seek_pos = other_f->seek_pos;
+    if (f->bufsize != other_f->bufsize) {
+        f->bufsize = other_f->bufsize;
+        f->buf = (unsigned char*)realloc(f->buf, f->bufsize);
+        if (!f->buf) {
+            std::cerr << "ERROR: realloc failed" << std::endl;
+            exit(1);
+        }
+    }
+    memcpy(f->buf, other_f->buf, other_f->bufsize);
+
+    is_reverse_complement_ = other.is_reverse_complement_;
+
+    return *this;
+}
+
+FastaParser::iterator& FastaParser::iterator::operator=(iterator&& other) {
+    std::swap(filename_, other.filename_);
+    with_reverse_complement_ = other.with_reverse_complement_;
+    std::swap(read_stream_, other.read_stream_);
+    is_reverse_complement_ = other.is_reverse_complement_;
+    // the destructor in |other| will be responsible for freeing the memory now
+    return *this;
+}
+
+FastaParser::iterator::iterator(const std::string &filename,
+                                bool with_reverse_complement)
+      : filename_(filename),
+        with_reverse_complement_(with_reverse_complement) {
+    gzFile input_p = gzopen(filename_.c_str(), "r");
+    if (input_p == Z_NULL) {
+        std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
+        exit(1);
+    }
+
+    read_stream_ = kseq_init(input_p);
+    if (read_stream_ == NULL) {
+        std::cerr << "ERROR: failed to initialize kseq file descriptor" << std::endl;
+        exit(1);
+    }
+
+    if (kseq_read(read_stream_) < 0) {
+        deinit_stream();
+    }
+}
+
+void FastaParser::iterator::deinit_stream() {
+    if (read_stream_) {
+        gzFile input_p = read_stream_->f->f;
+        kseq_destroy(read_stream_);
+        gzclose(input_p);
+    }
+    read_stream_ = NULL;
+}
+
 
 template <class Callback>
 void read_fasta_file_critical(gzFile input_p,

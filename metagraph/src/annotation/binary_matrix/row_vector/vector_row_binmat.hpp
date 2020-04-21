@@ -12,13 +12,9 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
   public:
     typedef RowType row_type;
 
-    VectorRowBinMat(uint64_t num_rows = 0) : vector_(num_rows) {}
+    explicit VectorRowBinMat(uint64_t num_rows = 0) : vector_(num_rows) {}
 
-    typedef std::function<void(uint64_t /* index */,
-                               RowType&& /* row */)> CallRow;
-    VectorRowBinMat(uint64_t num_rows,
-                    uint64_t num_columns,
-                    std::function<void(CallRow)> call_rows);
+    VectorRowBinMat(std::vector<RowType>&& rows, uint64_t num_columns);
 
     VectorRowBinMat(const VectorRowBinMat &other) = default;
     VectorRowBinMat& operator=(const VectorRowBinMat &other) = default;

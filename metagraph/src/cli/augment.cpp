@@ -8,13 +8,14 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotation.hpp"
 #include "config/config.hpp"
-#include "sequence_reader.hpp"
+#include "parse_sequences.hpp"
 
 using mg::common::logger;
 using utils::get_verbose;

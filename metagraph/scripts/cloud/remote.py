@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
-import os
+import os.path
 import subprocess
 import time
 
@@ -20,6 +20,9 @@ def count_pending_operations(compute, project, zone, operation_ids):
 
 
 def wait_for_all_operations(compute, project, zone, ids):
+    if not ids:
+        print('There are no operations to wait for to finish. This is probably an error.')
+        return
     print('Waiting for *all* operations to finish...', end='', flush=True)
     sleep_time_sec = 1
     while True:
@@ -119,25 +122,42 @@ def stop_instances(compute, project, zone, name, count):
     wait_for_all_operations(compute, project, zone, ids)
 
 
-def send_create_request(compute, project, zone, name, startup_script_name):
+def send_create_request(compute, project, zone, name, script_dir, server_host):
     """ Send a request to creates a new instance with the given parameters """
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
-    image_response = compute.images().getFromFamily(
-        project='metagraph', family='metagraph').execute()
+    # image_response = compute.images().getFromFamily(project='metagraph', family='metagraph2').execute()
+    image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph7').execute()
     source_disk_image = image_response['selfLink']
 
-    # Configure the machine
-    machine_type = f"zones/{zone}/machineTypes/n1-standard-1"
-    metadata = [{
-        'key': 'instance_id',
-        'value': name.split('-')[-1]}]
-    if startup_script_name != '':
+    # Configure the machine: 1vCPU, 3.75GB of RAM
+    machine_type = f"zones/{zone}/machineTypes/n1-standard-4"
+    metadata = [
+        {
+            'key': 'instance_id',
+            'value': name.split('-')[-1]
+        },
+        {
+            'key': 'server_host',
+            'value': server_host
+        }
+    ]
+    startup_script_name = os.path.join(script_dir, 'startup.sh')
+    if os.path.isfile(startup_script_name):
         startup_script = open(startup_script_name, 'r').read()
         metadata.append({
             # Startup script is automatically executed by the instance upon startup.
             'key': 'startup-script',
             'value': startup_script
+        })
+
+    shutdown_script_name = os.path.join(script_dir, 'shutdown.sh')
+    if os.path.isfile(shutdown_script_name):
+        shutdown_script = open(shutdown_script_name, 'r').read()
+        metadata.append({
+            # Startup script is automatically executed by the instance upon startup.
+            'key': 'shutdown-script',
+            'value': shutdown_script
         })
     config = {
         'name': name,
@@ -149,8 +169,16 @@ def send_create_request(compute, project, zone, name, startup_script_name):
                 'boot': True,
                 'autoDelete': True,  # disk will be deleted together with instance
                 'initializeParams': {
-                    'sourceImage': source_disk_image,
+                    'sourceSnapshot': source_disk_image,
                 }
+            },
+            {
+                'type': 'SCRATCH',
+                'initializeParams': {
+                    'diskType': f'zones/{zone}/diskTypes/local-ssd'
+                },
+                'autoDelete': True,
+                'interface': 'NVME'
             }
         ],
 
@@ -159,7 +187,7 @@ def send_create_request(compute, project, zone, name, startup_script_name):
         'networkInterfaces': [{
             'network': 'global/networks/default',
             'accessConfigs': [
-                {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
+                #    {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
             ]
         }],
 
@@ -178,31 +206,39 @@ def send_create_request(compute, project, zone, name, startup_script_name):
             'items': metadata
         }
     }
+    try:
+        operation = compute.instances().insert(
+            project=project,
+            zone=zone,
+            body=config).execute()
+        return operation
+    except googleapiclient.errors.HttpError as err:
+        if err.resp.status == 409:
+            print('Instance already exists. Skipping')
+        else:
+            print(f'Instance couldn\'t be created: {err._get_reason()}')
+    return None
 
-    operation = compute.instances().insert(
-        project=project,
-        zone=zone,
-        body=config).execute()
-    return operation
 
-
-def create_instances(compute, project, zone, name, count, startup_script):
+def create_instances(compute, project, zone, name, count, script_dir, server_host):
     ids = []
     for i in range(count):
-        operation = send_create_request(compute, project, zone, name + '-' + str(i), startup_script)
-        ids.append(operation['id'])
+        operation = send_create_request(compute, project, zone, name + '-' + str(i), script_dir, server_host)
+        if operation:
+            ids.append(operation['id'])
 
     wait_for_all_operations(compute, project, zone, ids)
 
 
-def run_command(compute, project, zone, name, count, startup_script_name):
-    startup_script = open(startup_script_name, 'r').read()[:-1].replace("'", "\'")
+def run_command(compute, project, zone, user, name, count, command_file):
+    command_content = open(command_file, 'r').read()[:-1].replace("'", "\'")
     for i in range(count):
         instance = name + "-" + str(i)
-        command = ['gcloud', 'compute',  'ssh', instance, '--zone', zone, '--command', startup_script]
+        command = ['gcloud', 'compute', 'ssh', user + '@' + instance, '--zone', zone, '--command', command_content]
         print(f'Running command\n{command}')
         out_file = open('/tmp/log-' + instance, 'w')
-        subprocess.run(command, stdout=out_file, stderr=subprocess.STDOUT)
+        time.sleep(1)  # needed because gcloud crashes miserably if run in quick succession
+        subprocess.Popen(command, stdout=out_file, stderr=subprocess.STDOUT)
 
 
 if __name__ == '__main__':
@@ -213,20 +249,24 @@ if __name__ == '__main__':
     parser.add_argument('--project_id', default='metagraph', help='Google Cloud project ID.')
     parser.add_argument(
         '--zone',
-        default='europe-west6-c',
+        default='us-east1-b',  # Belgium; this seems to be the cheapest in EU; 107USD/4vCPU instance/month
         help='Compute Engine zone to deploy to.')
     parser.add_argument(
         '--name', default='', help='Name (or prefix) of instances to perform the action on')
-    parser.add_argument('-n', '--num_instances', default=1, type=int, choices=range(1, 50),
+    parser.add_argument('-n', '--num_instances', default=1, type=int, choices=range(1, 200),
                         help='Number of instances to create/start')
-    parser.add_argument('--script', default='',
+    parser.add_argument('--script_dir', default='./',
                         help='Optional name of script to run at creation time')
+    parser.add_argument('-u', '--user', default='ddanciu',
+                        help='User to run comands under (for action==run)')
+    parser.add_argument('--server_host', default='34.65.229.224',
+                        help='The IP/hostname of the REST server that distributes jobs')
 
     args = parser.parse_args()
 
     compute = googleapiclient.discovery.build('compute', 'v1')
     if args.action == 'create' or args.action == 'c':
-        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script)
+        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script_dir, args.server_host)
     elif args.action == 'delete' or args.action == 'd':
         delete_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
     elif args.action == 'list' or args.action == 'l':
@@ -236,6 +276,6 @@ if __name__ == '__main__':
     elif args.action == 'start':
         start_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
     elif args.action == 'run':
-        run_command(compute, args.project_id, args.zone, args.name, args.num_instances, args.script)
+        run_command(compute, args.project_id, args.zone, args.user, args.name, args.num_instances, args.script)
     else:
         print(f'Invalid action {args.action}')

@@ -2,21 +2,7 @@
 
 # Script to download a specific SRA (Sequence Read Archive) directory from ENA (European Nucleutide Archive) using IBM's aspera client
 
-# displays a message to stderr in red
-function echo_err() {
-	RED='\033[0;31m'
-	NC='\033[0m'
-	echo -e "${RED}Error:${NC} $*" 1>&2;
-}
-
-# executes the given command
-function execute {
-    cmd=("$@")
-    echo "Executing ${cmd[*]}"
-
-    # execute the command:
-    "${cmd[@]}" || exit 1
-}
+. common.sh
 
 ############ Main Script ###############
 # Arguments:
@@ -25,13 +11,20 @@ function execute {
 #  - the location where the cleaned file bill be placed
 
 # check the command-line arguments
-if [ "$#" -ne 3 ]; then
-	    echo_err "Usage: clean.sh <sra_id> <input_file> <output_dir>"
+if [ "$#" -ne 4 ]; then
+      cmd=("$@")
+	    echo_err "Usage: clean.sh <sra_id> <input_file> <output_file> <num_singletons>, called with ${cmd[*]}"
 	    exit 1
 fi
+
+set -e # exit on error
 
 sra_number=$1
 input_file=$2
 output_file=$3
-# --prune-unitigs 0 --fallback 3
-execute metagraph clean -v -p 1  --prune-tips 20 --to-fasta -o "${output_file}" "${input_file}"
+num_singletons=$4
+if ((num_singletons < 100)); then # just in case we have a few kmers that are errors
+  num_singletons_s=0
+fi
+execute metagraph clean -v -p 1 --min-count 1 --num-singletons ${num_singletons}  --prune-unitigs 0 --fallback 5 --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
+rm -rf $(dirname "${input_file}")

@@ -9,6 +9,7 @@
 #include "common/algorithms.hpp"
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/threads/threading.hpp"
 
 using utils::remove_suffix;
@@ -57,38 +58,6 @@ void ColumnCompressed<Label>::set(Index i, const VLabels &labels) {
     for (size_t j = 0; j < row.size(); ++j) {
         set(i, j, row[j]);
     }
-}
-
-template <typename Label>
-typename ColumnCompressed<Label>::SetBitPositions
-ColumnCompressed<Label>::get_label_codes(Index i) const {
-    assert(i < num_rows_);
-
-    SetBitPositions label_indices;
-    for (size_t j = 0; j < num_labels(); ++j) {
-        if (get_column(j)[i])
-            label_indices.push_back(j);
-    }
-    return label_indices;
-}
-
-template <typename Label>
-std::vector<typename ColumnCompressed<Label>::SetBitPositions>
-ColumnCompressed<Label>::get_label_codes(const std::vector<Index> &indices) const {
-    std::vector<SetBitPositions> rows(indices.size());
-
-    for (size_t j = 0; j < num_labels(); ++j) {
-        const auto &column = get_column(j);
-
-        for (size_t i = 0; i < indices.size(); ++i) {
-            assert(indices[i] < num_rows_);
-
-            if (column[indices[i]])
-                rows[i].push_back(j);
-        }
-    }
-
-    return rows;
 }
 
 template <typename Label>
@@ -261,13 +230,16 @@ void ColumnCompressed<Label>
 template <typename Label>
 std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 ColumnCompressed<Label>
-::count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
+::count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
                size_t min_count,
                size_t count_cap) const {
 
-    min_count = std::max(min_count, size_t(1));
-
     assert(count_cap >= min_count);
+
+    if (!count_cap)
+        return {};
+
+    min_count = std::max(min_count, size_t(1));
 
     size_t total_sum_count = 0;
     for (const auto &pair : index_counts) {

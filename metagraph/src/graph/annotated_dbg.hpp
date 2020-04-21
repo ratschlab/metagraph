@@ -5,6 +5,8 @@
 #include <memory>
 #include <mutex>
 
+#include <sdsl/int_vector.hpp>
+
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
 
@@ -77,11 +79,8 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // return labels that occur at least in |presence_ratio| k-mers
     std::vector<std::string> get_labels(const std::string &sequence,
                                         double presence_ratio) const;
-    // Weights don't need to sum to 1
-    std::vector<std::string> get_labels(const std::vector<std::string> &sequences,
-                                        const std::vector<double> &weights,
-                                        double presence_ratio) const;
-    std::vector<std::string> get_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
+
+    std::vector<std::string> get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                                         size_t min_count) const;
 
     // return top |num_top_labels| labels with their counts
@@ -90,17 +89,19 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    size_t num_top_labels,
                    double presence_ratio = 0.0) const;
 
-    // Weights don't need to sum to 1
     std::vector<std::pair<std::string, size_t>>
-    get_top_labels(const std::vector<std::string> &sequences,
-                   const std::vector<double> &weights,
-                   size_t num_top_labels,
-                   double presence_ratio = 0.0) const;
-
-    std::vector<std::pair<std::string, size_t>>
-    get_top_labels(const tsl::hopscotch_map<row_index, size_t> &index_counts,
+    get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                    size_t num_top_labels,
                    size_t min_count = 0) const;
+
+    std::vector<std::pair<std::string, sdsl::bit_vector>>
+    get_top_label_signatures(const std::string &sequence,
+                             size_t num_top_labels,
+                             double presence_ratio = 0.0) const;
+
+    int32_t score_kmer_presence_mask(const sdsl::bit_vector &kmer_presence_mask,
+                                     int32_t match_score = 1,
+                                     int32_t mismatch_score = 2) const;
 
   private:
     DeBruijnGraph &dbg_;

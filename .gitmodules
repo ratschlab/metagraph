@@ -27,7 +27,7 @@
 	url = https://github.com/sara-jvz/binrel_wt.git
 [submodule "metagraph/external-libraries/ordered-map"]
 	path = metagraph/external-libraries/ordered-map
-	url = https://github.com/chrisbarber/ordered-map.git
+	url = https://github.com/Tessil/ordered-map.git
 [submodule "metagraph/external-libraries/tclap"]
 	path = metagraph/external-libraries/tclap
 	url = https://github.com/mirror/tclap.git
@@ -58,3 +58,9 @@
 [submodule "metagraph/external-libraries/googletest"]
 	path = metagraph/external-libraries/googletest
 	url = https://github.com/google/googletest.git
+[submodule "metagraph/external-libraries/benchmark"]
+	path = metagraph/external-libraries/benchmark
+	url = https://github.com/google/benchmark
+[submodule "metagraph/external-libraries/zlib"]
+	path = metagraph/external-libraries/zlib
+	url = https://github.com/cloudflare/zlib

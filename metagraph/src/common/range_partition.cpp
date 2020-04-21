@@ -9,6 +9,7 @@ RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,
                                const std::vector<size_t> &group_sizes) {
     size_t offset = 0;
     for (size_t group_size : group_sizes) {
+        assert(group_size && "partition blocks must not be empty");
         partition_.emplace_back(arrangement.begin() + offset,
                                 arrangement.begin() + offset + group_size);
         offset += group_size;
@@ -21,12 +22,8 @@ RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,
 RangePartition::RangePartition(std::vector<std::vector<uint64_t>>&& partition) {
     partition_.reserve(partition.size());
     for (auto &group : partition) {
-        partition_.push_back({});
-        partition_.back().reserve(group.size());
-        for (auto value : group) {
-            assert(uint64_t(value) <= std::numeric_limits<T>::max());
-            partition_.back().push_back(value);
-        }
+        assert(group.size() && "partition blocks must not be empty");
+        partition_.emplace_back(group.begin(), group.end());
         group.clear();
     }
     partition.clear();
@@ -61,29 +58,6 @@ bool RangePartition::initialize_groups_and_ranks() {
         }
     }
     return true;
-}
-
-RangePartition::G RangePartition::group(T value) const {
-    assert(value < groups_.size());
-    return groups_[value];
-}
-
-RangePartition::R RangePartition::rank(T value) const {
-    assert(value < ranks_.size());
-    return ranks_[value];
-}
-
-RangePartition::T RangePartition::get(G group, R rank) const {
-    return partition_[group][rank];
-}
-
-uint64_t RangePartition::num_groups() const {
-    return partition_.size();
-}
-
-uint64_t RangePartition::size() const {
-    assert(groups_.size() == ranks_.size());
-    return ranks_.size();
 }
 
 bool RangePartition::load(std::istream &in) {

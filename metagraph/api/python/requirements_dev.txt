@@ -1,0 +1,13 @@
+pip==9.0.1
+bumpversion==0.5.3
+wheel==0.30.0
+watchdog==0.8.3
+flake8==3.5.0
+tox==2.9.1
+coverage==4.5.1
+Sphinx==1.7.0
+click==6.7
+pytest==3.4.1
+pytest-runner==2.11.1
+prospector==0.12.7
+vulture>=0.6,<0.25  # Required for https://github.com/landscapeio/prospector/issues/230

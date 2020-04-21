@@ -7,7 +7,7 @@
 #include "common/algorithms.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 #include "common/threads/threading.hpp"
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "seq_io/formats.hpp"
 
 const std::string test_data_dir = "../tests/data";

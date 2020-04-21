@@ -13,13 +13,14 @@ void test_rainbowfish_buffer(const uint64_t num_rows) {
 
     BitVectorPtrArray columns, copy;
     for (size_t j = 0; j < vectors.size(); ++j) {
-        columns.emplace_back(new bit_vector_stat(num_rows, false));
+        sdsl::bit_vector bv(num_rows, false);
         ASSERT_GE(vectors.at(j).size(), num_rows);
         for (size_t i = 0; i < num_rows; ++i) {
             if (vectors.at(j)[i])
-                columns.back()->set(i, true);
+                bv[i] = true;
         }
-        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+        columns.emplace_back(new bit_vector_stat(std::move(bv)));
+        copy.push_back(columns.back()->copy());
     }
 
     test_matrix(

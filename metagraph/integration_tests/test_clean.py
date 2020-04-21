@@ -38,14 +38,14 @@ class TestCleanWeighted(unittest.TestCase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
 
-        res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
+        res = subprocess.run([construct_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -80,7 +80,7 @@ class TestCleanWeighted(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -100,14 +100,14 @@ class TestCleanWeighted(unittest.TestCase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
 
-        res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
+        res = subprocess.run([construct_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -142,7 +142,7 @@ class TestCleanWeighted(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -168,14 +168,14 @@ class TestCleanWeightedCanonical(unittest.TestCase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
 
-        res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
+        res = subprocess.run([construct_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
@@ -210,7 +210,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
@@ -231,14 +231,14 @@ class TestCleanWeightedCanonical(unittest.TestCase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
 
-        res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
+        res = subprocess.run([construct_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
@@ -273,7 +273,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])

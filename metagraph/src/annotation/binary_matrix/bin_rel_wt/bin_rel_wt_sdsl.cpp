@@ -6,7 +6,7 @@
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 
 BinRelWT_sdsl
@@ -35,9 +35,7 @@ BinRelWT_sdsl
 
     assert(index == num_relations);
 
-
-    delimiters_ = bit_vector_stat(to_sdsl(std::move(delimiters_vec)))
-                    .convert_to<bit_vector_rrr<>>();
+    delimiters_ = bit_vector_rrr<>(to_sdsl(std::move(delimiters_vec)));
 
     decltype(wt_)(std::move(flat)).swap(wt_);
 }

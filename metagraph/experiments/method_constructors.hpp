@@ -2,12 +2,12 @@
 #define __METHOD_CONSTRUCTORS_HPP__
 
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
-#include "annotation/binary_matrix/multi_brwt/BRWT_builders.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "annotation/binary_matrix/multi_brwt/partitionings.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
-#include "data_generation.hpp"
+#include "common/data_generation.hpp"
 
 
 template <typename T>
@@ -113,7 +113,8 @@ generate_brwt_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
     if (greedy) {
         binary_matrix = std::make_unique<BRWT>(
             BRWTBottomUpBuilder::build(std::move(columns),
-                                       binary_grouping_greedy)
+                [](const auto &columns) { return greedy_matching(columns); }
+            )
         );
     } else {
         binary_matrix = std::make_unique<BRWT>(
@@ -160,7 +161,8 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
         case MatrixType::BRWT_EXTRA: {
             binary_matrix.reset(new BRWT(
                 BRWTBottomUpBuilder::build(std::move(columns),
-                                           binary_grouping_greedy)
+                    [](const auto &columns) { return greedy_matching(columns); }
+                )
             ));
             break;
         }

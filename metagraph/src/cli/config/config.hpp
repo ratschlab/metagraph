@@ -1,6 +1,7 @@
 #ifndef __CONFIG_HPP__
 #define __CONFIG_HPP__
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,7 @@ class Config {
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
     bool count_kmers = false;
+    bool print_signature = false;
     bool query_presence = false;
     bool filter_present = false;
     bool dump_text_anno = false;
@@ -49,6 +51,7 @@ class Config {
     bool call_breakpoints = false;
     bool map_sequences = false;
     bool align_sequences = false;
+    bool align_both_strands = false;
     bool filter_by_kmer = false;
     bool output_json = false;
 
@@ -68,7 +71,7 @@ class Config {
     unsigned int genome_binsize_anno = 1000;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
-    unsigned int row_cache_size = 0;
+    // unsigned int row_cache_size = 0;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     unsigned int fallback_abundance_cutoff = 1;
@@ -76,23 +79,27 @@ class Config {
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
 
+    unsigned long long int query_batch_size_in_bytes = 100'000'000;
+    unsigned long long int num_rows_subsampled = 1'000'000;
+    unsigned long long int num_singleton_kmers = 0;
+
     uint8_t count_width = 8;
 
     // Alignment options
-    bool alignment_seed_unimems = false;
     bool alignment_edit_distance = false;
 
     int8_t alignment_match_score = 2;
-    int8_t alignment_mm_transition_score = 1;
-    int8_t alignment_mm_transversion_score = 2;
-    int8_t alignment_gap_opening_penalty = 3;
-    int8_t alignment_gap_extension_penalty = 1;
+    int8_t alignment_mm_transition_score = 3;
+    int8_t alignment_mm_transversion_score = 3;
+    int8_t alignment_gap_opening_penalty = 5;
+    int8_t alignment_gap_extension_penalty = 2;
 
     int32_t alignment_min_cell_score = 0;
     int32_t alignment_min_path_score = 0;
+    int32_t alignment_xdrop = 30;
 
     size_t alignment_queue_size = 20;
-    size_t alignment_vertical_bandwidth = 17;
+    size_t alignment_vertical_bandwidth = 16;
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
@@ -113,7 +120,6 @@ class Config {
     std::vector<std::string> infbase_annotators;
     std::vector<std::string> label_mask_in;
     std::vector<std::string> label_mask_out;
-    std::vector<std::string> label_filter;
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
@@ -126,15 +132,12 @@ class Config {
     std::string annotation_label = "";
     std::string header = "";
     std::string accession2taxid;
-    std::string taxonomy_nodes;
-    std::string taxonomy_map;
 
     enum IdentityType {
         NO_IDENTITY = -1,
         BUILD = 1,
         CLEAN,
         EXTEND,
-        EXPERIMENT,
         MERGE,
         CONCATENATE,
         COMPARE,
@@ -149,12 +152,10 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
-        CALL_VARIANTS,
-        PARSE_TAXONOMY
     };
     IdentityType identity = NO_IDENTITY;
 
-    BOSS::State state = BOSS::State::STAT;
+    BOSS::State state = BOSS::State::SMALL;
 
     static std::string state_to_string(BOSS::State state);
     static BOSS::State string_to_state(const std::string &string);
@@ -183,6 +184,10 @@ class Config {
     GraphType graph_type = SUCCINCT;
 
     mg::kmer::ContainerType container = mg::kmer::ContainerType::VECTOR;
+
+    std::filesystem::path tmp_dir = "/tmp/";
+
+    size_t disk_cap_bytes = 20e9; // 20GB default
 
     static mg::kmer::ContainerType string_to_container(const std::string &string);
 

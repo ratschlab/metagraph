@@ -49,7 +49,7 @@ class TestAnnotate(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -74,7 +74,7 @@ class TestAnnotate(unittest.TestCase):
                 exe=METAGRAPH,
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
             )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE, stderr=PIPE)
+            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  100', params_str[0])
@@ -102,7 +102,7 @@ class TestAnnotate(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
@@ -127,7 +127,7 @@ class TestAnnotate(unittest.TestCase):
                 exe=METAGRAPH,
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
             )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE, stderr=PIPE)
+            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  100', params_str[0])
@@ -157,7 +157,7 @@ class TestAnnotate(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -182,7 +182,7 @@ class TestAnnotate(unittest.TestCase):
                 exe=METAGRAPH,
                 annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
             )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE, stderr=PIPE)
+            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  1', params_str[0])
@@ -212,7 +212,7 @@ class TestAnnotate(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -237,7 +237,7 @@ class TestAnnotate(unittest.TestCase):
                 exe=METAGRAPH,
                 annotation=self.tempdir.name + '/annotation_single' + anno_file_extension[anno_repr],
             )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE, stderr=PIPE)
+            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  1', params_str[0])
@@ -262,7 +262,7 @@ class TestAnnotate(unittest.TestCase):
                 exe=METAGRAPH,
                 annotation=self.tempdir.name + '/annotation_both' + anno_file_extension[anno_repr],
             )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE, stderr=PIPE)
+            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  1', params_str[0])
@@ -293,7 +293,7 @@ class TestAnnotate(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
@@ -318,7 +318,7 @@ class TestAnnotate(unittest.TestCase):
                 exe=METAGRAPH,
                 annotation=self.tempdir.name + '/annotation_single' + anno_file_extension[anno_repr],
             )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE, stderr=PIPE)
+            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  1', params_str[0])
@@ -343,7 +343,7 @@ class TestAnnotate(unittest.TestCase):
                 exe=METAGRAPH,
                 annotation=self.tempdir.name + '/annotation_both' + anno_file_extension[anno_repr],
             )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE, stderr=PIPE)
+            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  1', params_str[0])

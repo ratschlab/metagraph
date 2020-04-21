@@ -63,6 +63,9 @@ class DBGHashString : public DeBruijnGraph {
     size_t get_k() const { return k_; }
     uint64_t num_nodes() const { return kmers_.size(); }
 
+    // TODO: add the support for the canonical mode
+    bool is_canonical_mode() const { return false; }
+
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
 

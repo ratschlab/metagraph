@@ -5,7 +5,7 @@
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/vector.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "common/utils/template_utils.hpp"
 
 using namespace mg;
@@ -21,9 +21,9 @@ inline const KMER& get_kmer(const KMER &kmer) {
     return kmer;
 }
 
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64,uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128,uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer256,uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>::value);
+static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer64>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer128>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer256>::value);
@@ -38,8 +38,8 @@ void initialize_chunk(uint64_t alph_size,
                       std::vector<bool> *last,
                       std::vector<uint64_t> *F,
                       sdsl::int_vector<> *weights = nullptr) {
-    using T = std::remove_const_t<std::remove_reference_t<decltype(*begin)>>;
-    using KMER = std::remove_reference_t<decltype(get_kmer(*begin))>;
+    using T = std::decay_t<decltype(*begin)>;
+    using KMER = std::decay_t<decltype(get_kmer(*begin))>;
 
     static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
 
@@ -128,9 +128,8 @@ void initialize_chunk(uint64_t alph_size,
 
 
 /**
- * Wrapper class around a static initializer for a BOSS chunk in order to allow
- * partial template specialization for ChunkedWaitQueue, which exposes a more
- * restrictive interface than Vector
+ * Wrapper class around #initialize_chunk() in order to allow partial template
+ * specialization for ChunkedWaitQueue.
  */
 template <class Container, class T, typename TAlphabet>
 struct Init {
@@ -152,20 +151,20 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
     using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
 
     template <typename KMER>
-    static void set_weight(const size_t count,
-                            const KMER &kmer,
-                            size_t curpos,
-                            uint64_t max_count,
-                            sdsl::int_vector<> *weights) {
-        if (weights->capacity() == curpos) {
-            weights->resize(weights->capacity() * 1.5);
-        }
-        if (weights) { // set weights for non-dummy k-mers
-            if (count && kmer[0] && kmer[1]) {
-                (*weights)[curpos] = std::min(static_cast<uint64_t>(count), max_count);
-            } else { // dummy k-mers have a weight of 0
-                (*weights)[curpos] = 0;
-            }
+    static void set_weight(const uint64_t count,
+                           const KMER &kmer,
+                           size_t curpos,
+                           uint64_t max_count,
+                           sdsl::int_vector<> *weights) {
+        assert(weights);
+
+        if (weights->size() == curpos)
+            weights->resize(weights->size() * 1.5);
+
+        if (count && kmer[0] && kmer[1]) {
+            (*weights)[curpos] = std::min(count, max_count);
+        } else { // dummy k-mers have a weight of 0
+            (*weights)[curpos] = 0;
         }
     }
 
@@ -192,10 +191,8 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         F->assign(alph_size, 0);
 
         uint64_t max_count __attribute__((unused)) = 0;
-        if (weights) {
+        if constexpr(utils::is_pair<T>::value) {
             weights->resize(100);
-            assert(utils::is_pair<T>::value);
-            sdsl::util::set_to_value(*weights, 0);
             max_count = sdsl::bits::lo_set[weights->width()];
         }
 
@@ -245,7 +242,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                 F->at(++lastF) = curpos - 1;
             }
 
-            if constexpr (utils::is_pair<T>::value) {
+            if constexpr(utils::is_pair<T>::value) {
                 set_weight((*it).second, kmer, curpos, max_count, weights);
             }
 
@@ -259,7 +256,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         W->resize(curpos);
         last->resize(curpos);
 
-        if (weights)
+        if constexpr(utils::is_pair<T>::value)
             weights->resize(curpos);
     }
 };
@@ -322,6 +319,22 @@ template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerE
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer64, uint32_t>> &, uint8_t);
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer128, uint32_t>> &, uint8_t);
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<KmerExtractorBOSS::Kmer256, uint32_t>> &, uint8_t);
+
+#define BossWithPair(T, C) \
+    BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<std::pair<T, C>> &, uint8_t);
+
+template BossWithPair(KmerExtractorBOSS::Kmer64, uint8_t);
+template BossWithPair(KmerExtractorBOSS::Kmer128, uint8_t);
+template BossWithPair(KmerExtractorBOSS::Kmer256, uint8_t);
+
+template BossWithPair(KmerExtractorBOSS::Kmer64, uint16_t);
+template BossWithPair(KmerExtractorBOSS::Kmer128, uint16_t);
+template BossWithPair(KmerExtractorBOSS::Kmer256, uint16_t);
+
+template BossWithPair(KmerExtractorBOSS::Kmer64, uint32_t);
+template BossWithPair(KmerExtractorBOSS::Kmer128, uint32_t);
+template BossWithPair(KmerExtractorBOSS::Kmer256, uint32_t);
+
 
 void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     assert(W < 2 * alph_size_);
@@ -387,7 +400,7 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
 void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     assert(graph->W_);
     delete graph->W_;
-    graph->W_ = new wavelet_tree_stat(get_W_width(), std::move(W_));
+    graph->W_ = new wavelet_tree_small(get_W_width(), std::move(W_));
     W_ = decltype(W_)();
 
     assert(graph->last_);
@@ -397,10 +410,11 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     graph->last_ = new bit_vector_stat(std::move(last_bv));
 
     graph->F_ = F_;
+    graph->recompute_NF();
 
     graph->k_ = k_;
 
-    graph->state = BOSS::State::STAT;
+    graph->state = BOSS::State::SMALL;
 
     if (weights)
         *weights = std::move(weights_);
@@ -531,7 +545,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     assert(F.size());
 
     delete graph->W_;
-    graph->W_ = new wavelet_tree_stat(W.width(), std::move(W));
+    graph->W_ = new wavelet_tree_small(W.width(), std::move(W));
     W = decltype(W)();
 
     delete graph->last_;
@@ -539,8 +553,9 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     last = decltype(last)();
 
     graph->F_ = std::move(F);
+    graph->recompute_NF();
 
-    graph->state = BOSS::State::STAT;
+    graph->state = BOSS::State::SMALL;
 
     assert(graph->is_valid());
 

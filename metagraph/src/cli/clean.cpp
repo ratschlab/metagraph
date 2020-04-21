@@ -4,14 +4,14 @@
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "graph/graph_cleaning.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
-#include "sequence_reader.hpp"
+#include "parse_sequences.hpp"
 
 using mg::common::logger;
 
@@ -59,27 +59,32 @@ int clean_graph(Config *config) {
             exit(1);
         }
 
+        if (config->min_unitig_median_kmer_abundance == 0) {
+            // skip zero k-mer counts for dummy k-mers in DBGSuccinct
+            const auto _graph = dynamic_cast<DBGSuccinct*>(graph.get())
+                    ? std::make_shared<MaskedDeBruijnGraph>(graph,
+                        [&](auto i) { return (*node_weights)[i] > 0; }, true)
+                    : graph;
+
+            config->min_unitig_median_kmer_abundance
+                = estimate_min_kmer_abundance(*_graph, *node_weights,
+                                              config->fallback_abundance_cutoff,
+                                              config->num_singleton_kmers);
+        }
+
         if (config->min_count > 1
                 || config->max_count < std::numeric_limits<unsigned int>::max()) {
             const auto &weights = *graph->get_extension<NodeWeights>();
 
             graph = std::make_shared<MaskedDeBruijnGraph>(graph,
                 [&](auto i) { return weights[i] >= config->min_count
-                                    && weights[i] <= config->max_count; });
+                                    && weights[i] <= config->max_count; },
+                true,
+                graph->is_canonical_mode()
+            );
             graph->add_extension(node_weights);
 
             assert(node_weights->is_compatible(*graph));
-        }
-
-        if (config->min_unitig_median_kmer_abundance == 0) {
-            // skip zero k-mer counts for dummy k-mers in DBGSuccinct
-            const auto _graph = dynamic_cast<DBGSuccinct*>(graph.get())
-                    ? std::make_shared<MaskedDeBruijnGraph>(graph, [&](auto i) { return (*node_weights)[i] > 0; })
-                    : graph;
-
-            config->min_unitig_median_kmer_abundance
-                = estimate_min_kmer_abundance(*_graph, *node_weights,
-                                              config->fallback_abundance_cutoff);
         }
     }
 
@@ -130,7 +135,8 @@ int clean_graph(Config *config) {
                                                  "kmer_counts",
                                                  graph->get_k(),
                                                  config->header,
-                                                 config->enumerate_out_sequences);
+                                                 config->enumerate_out_sequences,
+                                                 get_num_threads() > 1);
             std::vector<uint32_t> kmer_counts;
 
             call_contigs([&](const std::string &contig, const auto &path) {
@@ -143,7 +149,8 @@ int clean_graph(Config *config) {
 
         } else {
             FastaWriter writer(outfbase, config->header,
-                               config->enumerate_out_sequences);
+                               config->enumerate_out_sequences,
+                               get_num_threads() > 1);
 
             call_contigs([&](const std::string &contig, const auto &) {
                 writer.write(contig);
@@ -236,13 +243,13 @@ int clean_graph(Config *config) {
             assert(node_weights->is_compatible(*graph));
 
             MaskedDeBruijnGraph graph_slice(graph,
-                [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; });
+                [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; },
+                false,
+                graph->is_canonical_mode()
+            );
 
             dump_contigs_to_fasta(filebase, [&](auto dump_sequence) {
-                graph_slice.call_unitigs([&](const std::string &contig,
-                                             const auto &path) {
-                    dump_sequence(contig, path);
-                });
+                graph_slice.call_sequences(dump_sequence, graph_slice.is_canonical_mode());
             });
         }
     }

@@ -4,11 +4,13 @@ project(metagraph_common)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 findFolly()
+find_package(glog REQUIRED)
 checkFileSystem() # check for std::filesystem::temp_directory_path
 
 file(GLOB src_files "*.cpp" "*/*.cpp")
@@ -32,6 +34,8 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
     ${EXTERNAL_LIB_DIR}/spdlog/include
+    ${EXTERNAL_LIB_DIR}/zlib
+    /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
 )
 
 # assume built-in pthreads on MacOS
@@ -44,15 +48,19 @@ IF(APPLE)
 ENDIF()
 add_subdirectory(${EXTERNAL_LIB_DIR}/spdlog spdlog)
 
+add_subdirectory(${EXTERNAL_LIB_DIR}/zlib zlib)
+
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(metagraph_common
   PUBLIC
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
     ${SDSL_LIBRARY}
+    glog::glog
     spdlog::spdlog
+    z
 )
-
+target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"

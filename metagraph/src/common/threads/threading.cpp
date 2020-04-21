@@ -15,7 +15,7 @@ unsigned int get_num_threads() {
 
 
 ThreadPool::ThreadPool(size_t num_workers, size_t max_num_tasks)
-      : max_num_tasks_(std::min(max_num_tasks, num_workers * 5)), stop_(false) {
+      : max_num_tasks_(std::max(max_num_tasks, size_t(1))), stop_(false) {
     initialize(num_workers);
 }
 
@@ -43,6 +43,13 @@ void ThreadPool::join() {
 
     if (!stop_)
         initialize(num_workers);
+}
+
+void ThreadPool::remove_waiting_tasks() {
+    std::unique_lock<std::mutex> lock(this->queue_mutex);
+    std::queue<std::function<void()>> empty;
+    this->tasks.swap(empty);
+    this->empty_condition.notify_all();
 }
 
 void ThreadPool::initialize(size_t num_workers) {

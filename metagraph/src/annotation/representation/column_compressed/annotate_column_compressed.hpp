@@ -24,7 +24,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
   public:
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
-    using SetBitPositions = typename MultiLabelEncoded<Label>::SetBitPositions;
 
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
@@ -42,10 +41,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
-
-    SetBitPositions get_label_codes(Index i) const override;
-    std::vector<SetBitPositions>
-    get_label_codes(const std::vector<Index> &indices) const override;
 
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
@@ -70,7 +65,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
      * Stop counting if count is greater than |count_cap|.
      */
     std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-    count_labels(const tsl::hopscotch_map<Index, size_t> &index_counts,
+    count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
                  size_t min_count = 1,
                  size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 

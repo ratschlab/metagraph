@@ -2,12 +2,22 @@
 
 #include <unordered_set>
 
+#include <tsl/ordered_map.h>
+
 #include "common/algorithms.hpp"
-#include "common/vectors/int_vector_algorithm.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "kmer/alphabets.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/alignment/aligner_helper.hpp"
 #include "graph/representation/masked_graph.hpp"
+
+template <typename Key, typename T>
+using VectorOrderedMap = tsl::ordered_map<Key, T,
+                                          std::hash<Key>, std::equal_to<Key>,
+                                          std::allocator<std::pair<Key, T>>,
+                                          std::vector<std::pair<Key, T>>,
+                                          uint64_t>;
+
 
 namespace annotated_graph_algorithm {
 
@@ -24,7 +34,7 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
 
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
-            for (const auto node : path) {
+            for (DeBruijnGraph::node_index node : path) {
                 unitig_mask[node] = true;
             }
         }
@@ -59,37 +69,34 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
         labels_out_enc.emplace(label_encoder.encode(label_out));
     }
 
-    return annotated_graph_algorithm::mask_nodes_by_unitig(
-        dbg,
-        [&](const auto &, const auto &path) {
-            tsl::hopscotch_map<row_index, size_t> index_counts;
-            for (const auto i : path) {
-                index_counts[anno_graph.graph_to_anno_index(i)]++;
-            }
-
-            size_t other_count = 0;
-            size_t in_count = 0;
-            size_t out_count = 0;
-            const size_t out_count_cutoff = label_out_factor * path.size();
-
-            for (const auto &pair : annotation.count_labels(index_counts)) {
-                if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
-                    in_count += pair.second;
-
-                } else if (labels_out_enc.find(pair.first) != labels_out_enc.end()) {
-                    // early cutoff
-                    if ((out_count += pair.second) > out_count_cutoff)
-                        return false;
-
-                } else {
-                    other_count += pair.second;
-                }
-            }
-
-            return (in_count >= label_in_factor * path.size())
-                && (other_count <= label_other_fraction * (in_count + out_count + other_count));
+    return mask_nodes_by_unitig(dbg, [&](const auto &, const auto &path) {
+        VectorOrderedMap<row_index, size_t> index_counts;
+        for (node_index i : path) {
+            index_counts[anno_graph.graph_to_anno_index(i)]++;
         }
-    );
+
+        size_t other_count = 0;
+        size_t in_count = 0;
+        size_t out_count = 0;
+        const size_t out_count_cutoff = label_out_factor * path.size();
+
+        for (const auto &pair : annotation.count_labels(index_counts.values_container())) {
+            if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
+                in_count += pair.second;
+
+            } else if (labels_out_enc.find(pair.first) != labels_out_enc.end()) {
+                // early cutoff
+                if ((out_count += pair.second) > out_count_cutoff)
+                    return false;
+
+            } else {
+                other_count += pair.second;
+            }
+        }
+
+        return (in_count >= label_in_factor * path.size())
+            && (other_count <= label_other_fraction * (in_count + out_count + other_count));
+    });
 }
 
 sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
@@ -101,8 +108,9 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::int_vector<> counts(anno_graph.get_graph().max_index() + 1, 0, width << 1);
 
-    for (const auto &label_in : labels_in) {
-        anno_graph.call_annotated_nodes(label_in, [&](auto i) { counts[i]++; });
+    for (const std::string &label_in : labels_in) {
+        anno_graph.call_annotated_nodes(label_in,
+                                        [&](DeBruijnGraph::node_index i) { counts[i]++; });
     }
 
     // correct the width of counts, making it single-width
@@ -111,7 +119,7 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
     for (const auto &label_out : labels_out) {
         anno_graph.call_annotated_nodes(
             label_out,
-            [&](auto i) { counts[(i << 1) + 1]++; }
+            [&](DeBruijnGraph::node_index i) { counts[(i << 1) + 1]++; }
         );
     }
 
@@ -124,7 +132,7 @@ sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
 std::function<uint64_t(SequenceGraph::node_index)>
 build_label_counter(const AnnotatedDBG &anno_graph,
                     const std::vector<Label> &labels_to_check) {
-    return [&anno_graph, labels_to_check](auto i) {
+    return [&anno_graph, labels_to_check](SequenceGraph::node_index i) {
         assert(i != SequenceGraph::npos);
         return std::count_if(labels_to_check.begin(), labels_to_check.end(),
             [&](const auto &label) { return anno_graph.has_label(i, label); }
@@ -187,21 +195,19 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                                           labels_out_infrequent);
 
             // the width of counts is double, since it's both in and out counts interleaved
-            auto width = counts.width() >> 1;
-            size_t int_mask = (size_t(1) << width) - 1;
+            uint32_t width = counts.width() >> 1;
+            uint64_t int_mask = (uint64_t(1) << width) - 1;
 
             // Flatten count vector to bitmap if all labels were infrequent
             if (labels_in_frequent.empty() && labels_out_frequent.empty()) {
                 sdsl::bit_vector mask(anno_graph.get_graph().max_index() + 1, false);
 
-                call_nonzeros(counts,
-                    [&](auto i, auto count) {
-                        if (i != DeBruijnGraph::npos
-                                && is_node_in_mask(i, [&]() { return count & int_mask; },
-                                                      [&]() { return count >> width; }))
-                            mask[i] = true;
-                    }
-                );
+                call_nonzeros(counts, [&](DeBruijnGraph::node_index i, size_t count) {
+                    if (i != DeBruijnGraph::npos
+                            && is_node_in_mask(i, [&]() { return count & int_mask; },
+                                                  [&]() { return count >> width; }))
+                        mask[i] = true;
+                });
 
                 return std::make_unique<bitmap_vector>(std::move(mask));
             }
@@ -212,13 +218,12 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                                                 labels_in_frequent);
             auto count_frequent_out_labels = build_label_counter(anno_graph,
                                                                  labels_out_frequent);
-            return std::make_unique<bitmap_lazy>(
-                [=](uint64_t i) {
-                    auto count = counts[i];
-                    return i != DeBruijnGraph::npos
-                        && is_node_in_mask(i,
-                                [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
-                                [&]() { return (count >> width) + count_frequent_out_labels(i); });
+            return std::make_unique<bitmap_lazy>([=](uint64_t i) {
+                auto count = counts[i];
+                return i != DeBruijnGraph::npos
+                    && is_node_in_mask(i,
+                            [&]() { return (count & int_mask) + count_frequent_in_labels(i); },
+                            [&]() { return (count >> width) + count_frequent_out_labels(i); });
             }, counts.size());
         }
     }
@@ -228,339 +233,12 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     auto count_frequent_in_labels = build_label_counter(anno_graph, labels_in);
     auto count_frequent_out_labels = build_label_counter(anno_graph, labels_out);
 
-    return std::make_unique<bitmap_lazy>(
-        [=](uint64_t i) {
-            return i != DeBruijnGraph::npos
-                && is_node_in_mask(i,
-                        [&]() { return count_frequent_in_labels(i); },
-                        [&]() { return count_frequent_out_labels(i); });
+    return std::make_unique<bitmap_lazy>([=](DeBruijnGraph::node_index i) {
+        return i != DeBruijnGraph::npos
+            && is_node_in_mask(i, [&]() { return count_frequent_in_labels(i); },
+                                  [&]() { return count_frequent_out_labels(i); });
     }, anno_graph.get_graph().max_index() + 1);
 }
 
-void
-call_paths_from_branch(const DeBruijnGraph &graph,
-                       const DeBruijnGraph &full_graph,
-                       const std::function<void(node_index, node_index, std::string&&)> &callback,
-                       const std::function<bool(node_index, node_index, const std::string&)> &stop_path,
-                       const std::function<bool()> &terminate = []() { return false; }) {
-    assert(&graph != &full_graph);
-
-    sdsl::bit_vector visited(graph.max_index() + 1, false);
-
-    bool stop = false;
-    graph.call_nodes(
-        [&](node_index start) {
-            if (visited[start] || full_graph.outdegree(start) <= 1)
-                return;
-
-            visited[start] = true;
-
-            std::string node_seq = graph.get_node_sequence(start);
-
-            if (stop_path(start, start, node_seq)) {
-                if (!(stop = terminate()))
-                    callback(start, start, std::move(node_seq));
-
-                return;
-            }
-
-            std::stack<std::tuple<node_index, node_index, std::string>> paths;
-            paths.emplace(start, start, std::move(node_seq));
-            while (paths.size()) {
-                auto path = std::move(paths.top());
-                paths.pop();
-
-                if (!visited[std::get<1>(path)]
-                        && full_graph.outdegree(std::get<1>(path)) > 1) {
-                    visited[std::get<1>(path)] = true;
-                    paths.emplace(std::get<1>(path),
-                                  std::get<1>(path),
-                                  std::string(std::get<2>(path).end() - graph.get_k(),
-                                              std::get<2>(path).end()));
-                }
-
-                while (!std::apply(stop_path, path)) {
-                    size_t cur_size = std::get<2>(path).size();
-
-                    graph.call_outgoing_kmers(
-                        std::get<1>(path),
-                        [&](const auto &index, char out_char) {
-                            if (std::get<2>(path).size() == cur_size) {
-                                std::get<2>(path).push_back(out_char);
-                                std::get<1>(path) = index;
-                            } else {
-                                paths.emplace(
-                                    std::get<0>(path),
-                                    index,
-                                    std::get<2>(path).substr(
-                                        0, std::get<2>(path).length() - 1
-                                    ) + out_char
-                                );
-                            }
-                        }
-                    );
-
-                    if (std::get<2>(path).size() == cur_size)
-                        break;
-                }
-
-                if ((stop = terminate()))
-                    break;
-
-                std::apply(callback, std::move(path));
-            }
-        },
-        [&]() { return stop; }
-    );
-}
-
-void call_breakpoints(const MaskedDeBruijnGraph &graph,
-                      const AnnotatedDBG &anno_graph,
-                      const VariantLabelCallback &callback,
-                      ThreadPool *thread_pool,
-                      const std::function<bool()> &terminate) {
-    const auto dbg_succ = dynamic_pointer_cast<const DeBruijnGraph>(
-        anno_graph.get_graph_ptr()
-    );
-
-    assert(dbg_succ.get());
-
-    if (&graph == dbg_succ.get())
-        return;
-
-    thread_pool = nullptr;
-
-    #if _PROTEIN_GRAPH
-        const auto *alphabet = alphabets::kAlphabetProtein;
-        const auto *alphabet_encoding = alphabets::kCharToProtein;
-    #elif _DNA_CASE_SENSITIVE_GRAPH
-        const auto *alphabet = alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = alphabets::kCharToDNA;
-    #elif _DNA5_GRAPH
-        const auto *alphabet = alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = alphabets::kCharToDNA;
-    #elif _DNA_GRAPH
-        const auto *alphabet = alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = alphabets::kCharToDNA;
-    #else
-        static_assert(false,
-            "Define an alphabet: either "
-            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
-        );
-    #endif
-    const DBGAlignerConfig variant_config(
-        DBGAlignerConfig::unit_scoring_matrix(1, alphabet, alphabet_encoding),
-        -1, -1
-    );
-
-    bool stop = false;
-    call_paths_from_branch(
-        graph,
-        *dbg_succ,
-        [&](node_index first, node_index, std::string&& sequence) {
-            assert(sequence.size() == graph.get_k());
-
-            std::vector<std::pair<DeBruijnGraph::node_index, char>> outgoing;
-            graph.call_outgoing_kmers(
-                first,
-                [&](const auto &next_index, char c) {
-                    outgoing.emplace_back(next_index, c);
-                }
-            );
-
-            MaskedDeBruijnGraph background_masked(
-                dbg_succ,
-                [&](const auto &i) { return i == first || !graph.in_subgraph(i); }
-            );
-
-            // if outgoing is empty, we don't have to check for it to be excluded
-            // from the mask
-            const DeBruijnGraph& background = outgoing.size()
-                ? background_masked : *dbg_succ;
-
-            background.call_outgoing_kmers(
-                first,
-                [&](const auto &next_index, char c) {
-                    if ((stop = terminate()))
-                        return;
-
-                    auto var = sequence + c;
-                    auto ref = const_cast<const std::string&>(sequence);
-
-                    if (outgoing.size())
-                        ref += outgoing.front().second;
-
-                    auto score = variant_config.score_sequences(ref.begin(),
-                                                                ref.end(),
-                                                                var.begin());
-
-                    if (ref.size() != var.size()) {
-                        auto difference = ref.size() > var.size()
-                            ? ref.size() - var.size() - 1
-                            : var.size() - ref.size() - 1;
-
-                        score += variant_config.gap_opening_penalty
-                            + difference * variant_config.gap_extension_penalty;
-                    }
-
-                    DBGAlignment breakpoint(ref.c_str(),
-                                            ref.c_str() + ref.size(),
-                                            { first, next_index },
-                                            std::move(var),
-                                            score);
-
-                    assert(breakpoint.is_valid(background));
-
-                    callback(std::move(breakpoint),
-                             ref,
-                             anno_graph.get_labels(next_index));
-                }
-            );
-        },
-        [&](const auto&...) { return true; },
-        [&]() { return stop; }
-    );
-
-    if (thread_pool)
-        thread_pool->join();
-}
-
-void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
-                            const MaskedDeBruijnGraph &background,
-                            const AnnotatedDBG &anno_graph,
-                            node_index first,
-                            const std::string &ref,
-                            const VariantLabelCallback &callback,
-                            const std::function<bool()> &terminate,
-                            const DBGAlignerConfig &variant_config) {
-    assert(&foreground != &background);
-    assert(ref.length() == foreground.get_k() * 2 + 1);
-
-    const char ref_char = ref[foreground.get_k()];
-    bool stop = false;
-    background.call_outgoing_kmers(
-        first,
-        [&](auto, char c) {
-            if ((stop = terminate()))
-                return;
-
-            if (c == ref_char)
-                return;
-
-            // For each outgoing edge, traverse path and intersect labels
-            std::string var = ref;
-            var[foreground.get_k()] = c;
-
-            bool in_foreground = true;
-            bool in_background = true;
-            std::vector<DeBruijnGraph::node_index> nodes { first };
-            anno_graph.get_graph().map_to_nodes_sequentially(
-                std::string_view(var).substr(1),
-                [&](node_index i) {
-                    nodes.emplace_back(i);
-                    in_foreground &= foreground.in_subgraph(i);
-                    in_background &= background.in_subgraph(i);
-                },
-                [&]() { return !in_background; }
-            );
-
-            if (in_foreground || !in_background)
-                return;
-
-            auto labels = anno_graph.get_labels(var, 1.0);
-            if (labels.size()) {
-                auto score = variant_config.score_sequences(ref.begin(),
-                                                            ref.end(),
-                                                            var.begin());
-
-                DBGAlignment bubble(ref.c_str(),
-                                    ref.c_str() + ref.size(),
-                                    std::move(nodes),
-                                    std::move(var),
-                                    score);
-                assert(bubble.is_valid(background));
-
-                callback(std::move(bubble), ref, std::move(labels));
-            }
-        }
-    );
-}
-
-void call_bubbles(const MaskedDeBruijnGraph &graph,
-                  const AnnotatedDBG &anno_graph,
-                  const VariantLabelCallback &callback,
-                  ThreadPool *thread_pool,
-                  const std::function<bool()> &terminate) {
-    const auto dbg_succ = dynamic_pointer_cast<const DeBruijnGraph>(
-        anno_graph.get_graph_ptr()
-    );
-
-    assert(dbg_succ.get());
-
-    if (&graph == dbg_succ.get())
-        return;
-
-    // TODO: REPLACE THIS
-    #if _PROTEIN_GRAPH
-        const auto *alphabet = alphabets::kAlphabetProtein;
-        const auto *alphabet_encoding = alphabets::kCharToProtein;
-    #elif _DNA_CASE_SENSITIVE_GRAPH
-        const auto *alphabet = alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = alphabets::kCharToDNA;
-    #elif _DNA5_GRAPH
-        const auto *alphabet = alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = alphabets::kCharToDNA;
-    #elif _DNA_GRAPH
-        const auto *alphabet = alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = alphabets::kCharToDNA;
-    #else
-        static_assert(false,
-            "Define an alphabet: either "
-            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
-        );
-    #endif
-    const DBGAlignerConfig variant_config(
-        DBGAlignerConfig::unit_scoring_matrix(1, alphabet, alphabet_encoding),
-        -1, -1
-    );
-
-    size_t path_length = graph.get_k() * 2 + 1;
-
-    call_paths_from_branch(
-        graph,
-        *dbg_succ,
-        [&](node_index first, node_index last, std::string&& sequence) {
-            if (sequence.size() != path_length || dbg_succ->indegree(last) <= 1)
-                return;
-
-            auto process_path = [&, first, seq{std::move(sequence)}]() {
-                // TODO: does this make sense? Background is the full `*dbg_succ`
-                call_bubbles_from_path(
-                    graph,
-                    MaskedDeBruijnGraph(dbg_succ, [&](auto) { return true; }),
-                    anno_graph,
-                    first,
-                    seq,
-                    callback,
-                    terminate,
-                    variant_config
-                );
-            };
-
-            if (thread_pool) {
-                thread_pool->enqueue(process_path);
-            } else {
-                process_path();
-            }
-        },
-        [&](node_index, node_index, const std::string &sequence) {
-            return sequence.size() >= path_length;
-        },
-        terminate
-    );
-
-    if (thread_pool)
-        thread_pool->join();
-}
 
 } // namespace annotated_graph_algorithm

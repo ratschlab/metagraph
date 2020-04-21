@@ -41,8 +41,8 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
         return false;
     }
     std::set<size_t> encoded_labels;
-    for (auto col : get_label_codes(i)) {
-        encoded_labels.insert(col);
+    for (uint64_t col_id : get_matrix().get_row(i)) {
+        encoded_labels.insert(col_id);
     }
     return std::includes(encoded_labels.begin(), encoded_labels.end(),
                          querying_codes.begin(), querying_codes.end());
@@ -99,35 +99,6 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
 }
 
 template <class BinaryMatrixType, typename Label>
-typename StaticBinRelAnnotator<BinaryMatrixType, Label>::SetBitPositions
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::get_label_codes(Index i) const {
-    if (!cached_rows_.get())
-        return matrix_->get_row(i);
-
-    try {
-        return cached_rows_->Get(i);
-    } catch (...) {
-        auto row = matrix_->get_row(i);
-        cached_rows_->Put(i, row);
-        return row;
-    }
-}
-
-template <class BinaryMatrixType, typename Label>
-std::vector<typename StaticBinRelAnnotator<BinaryMatrixType, Label>::SetBitPositions>
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::get_label_codes(const std::vector<Index> &indices) const {
-    return matrix_->get_rows(indices);
-}
-
-template <class BinaryMatrixType, typename Label>
-void StaticBinRelAnnotator<BinaryMatrixType, Label>
-::reset_row_cache(size_t size) {
-    cached_rows_.reset(size ? new RowCacheType(size) : nullptr);
-}
-
-template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::dump_columns(const std::string &prefix, uint64_t num_threads) const {
     size_t m = this->num_labels();
@@ -162,17 +133,10 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 
 template <class BinaryMatrixType, typename Label>
 StaticBinRelAnnotator<BinaryMatrixType, Label>
-::StaticBinRelAnnotator(size_t row_cache_size) : matrix_(new BinaryMatrixType()) {
-    reset_row_cache(row_cache_size);
-}
-
-template <class BinaryMatrixType, typename Label>
-StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
-                        const LabelEncoder<Label> &label_encoder,
-                        size_t row_cache_size) : matrix_(std::move(matrix)) {
+                        const LabelEncoder<Label> &label_encoder)
+      : matrix_(std::move(matrix)) {
     assert(matrix_.get());
-    reset_row_cache(row_cache_size);
     label_encoder_ = label_encoder;
 }
 

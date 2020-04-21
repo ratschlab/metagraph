@@ -16,6 +16,8 @@ enable_testing()
 findGTest()
 
 file(GLOB test_files "*.cpp")
+list(FILTER test_files  EXCLUDE REGEX "benchmark_.*")
+
 add_executable(tests ${test_files})
 
 find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
@@ -37,5 +39,10 @@ target_link_libraries(tests
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
     ${SDSL_LIBRARY}
+    ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
+target_compile_definitions(tests PUBLIC _USE_FOLLY MODE_TI)
 
+add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark
+    EXCLUDE_FROM_ALL benchmark
+)
