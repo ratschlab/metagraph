@@ -99,12 +99,14 @@ void initialize_chunk(uint64_t alph_size,
 
         if constexpr(utils::is_pair<T>::value) {
             // set weights for non-dummy k-mers
-            if (weights && it->second && kmer[0] && kmer[1])
-                (*weights)[curpos] = std::min(static_cast<uint64_t>(it->second), max_count);
+            if (it->second && curW && kmer[1])
+                (*weights)[curpos] = std::min(static_cast<uint64_t>(it->second),
+                                              max_count);
         }
 
         curpos++;
     }
+
     while (++lastF < alph_size) {
         F->at(lastF) = curpos - 1;
     }
@@ -197,6 +199,7 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
         TAlphabet lastF = 0;
         // last kmer for each label, so we can test multiple edges coming to same node
         std::vector<KMER> last_kmer(alph_size, typename KMER::WordType(0));
+
         for (Iterator &it = begin; it != end; ++it) {
             const KMER kmer = get_first(*it);
             TAlphabet curW = kmer[0];
