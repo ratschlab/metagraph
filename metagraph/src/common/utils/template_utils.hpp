@@ -25,6 +25,9 @@ struct is_instance : public std::false_type {};
 template <typename... Ts, template <typename, typename...> class U>
 struct is_instance<U<Ts...>, U> : public std::true_type {};
 
+template <typename T, template <typename, typename...> class U>
+inline constexpr bool is_instance_v = is_instance<T, U>::value;
+
 // check if two classes have the same template parameters
 template <class, class>
 struct same_template : public std::false_type {};

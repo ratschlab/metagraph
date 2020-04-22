@@ -19,7 +19,8 @@ namespace kmer {
 
 using namespace mg;
 
-const size_t kMaxKmersChunkSize = 30'000'000;
+const size_t kLargeBufferSize = 30'000'000;
+const size_t kBufferSize = 100'000;
 
 
 template <typename KMER, class KmerExtractor, class Container>
@@ -33,43 +34,44 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
     static_assert(std::is_same_v<typename KMER::WordType, typename Container::value_type>);
     static_assert(std::is_same_v<typename KMER::WordType, typename Container::key_type>);
 
-    Vector<typename KMER::WordType> temp_storage;
-    temp_storage.reserve(1.1 * kMaxKmersChunkSize);
+    Vector<typename KMER::WordType> buffer;
+    size_t capacity = remove_redundant ? kLargeBufferSize : kBufferSize;
+    buffer.reserve(capacity);
 
     KmerExtractor kmer_extractor;
 
     generate_reads([&](const std::string &read) {
         kmer_extractor.sequence_to_kmers(read, k, suffix,
-                                         reinterpret_cast<Vector<KMER> *>(&temp_storage));
+                                         reinterpret_cast<Vector<KMER> *>(&buffer));
         if (both_strands_mode) {
             auto rev_read = read;
             reverse_complement(rev_read.begin(), rev_read.end());
             kmer_extractor.sequence_to_kmers(rev_read, k, suffix,
-                                             reinterpret_cast<Vector<KMER> *>(&temp_storage));
+                                             reinterpret_cast<Vector<KMER> *>(&buffer));
         }
 
-        if (temp_storage.size() < kMaxKmersChunkSize)
+        if (buffer.size() < 0.9 * capacity)
             return;
 
         if (remove_redundant) {
-            kmers->sort_and_remove_duplicates(&temp_storage, 1);
+            kmers->sort_and_remove_duplicates(&buffer, 1);
         }
 
-        if (temp_storage.size() > 0.9 * kMaxKmersChunkSize) {
-            kmers->insert(temp_storage.begin(), temp_storage.end());
+        if (buffer.size() > 0.8 * capacity) {
+            kmers->insert(buffer.begin(), buffer.end());
 
-            if (temp_storage.capacity() > 2 * kMaxKmersChunkSize)
-                temp_storage = Vector<typename KMER::WordType>(1.1 * kMaxKmersChunkSize);
+            if (buffer.capacity() > 2 * capacity)
+                buffer = Vector<typename KMER::WordType>(capacity);
 
-            temp_storage.resize(0);
+            buffer.resize(0);
         }
     });
 
-    if (temp_storage.size()) {
+    if (buffer.size()) {
         if (remove_redundant) {
-            kmers->sort_and_remove_duplicates(&temp_storage, 1);
+            kmers->sort_and_remove_duplicates(&buffer, 1);
         }
-        kmers->insert(temp_storage.begin(), temp_storage.end());
+        kmers->insert(buffer.begin(), buffer.end());
     }
 }
 
@@ -80,52 +82,53 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  Container *kmers,
                  const std::vector<typename KmerExtractor::TAlphabet> &suffix) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
-    static_assert(utils::is_instance<Container, common::SortedMultiset> {}
-                  || utils::is_instance<Container, common::SortedMultisetDisk> {});
+    static_assert(utils::is_instance_v<Container, common::SortedMultiset>
+                  || utils::is_instance_v<Container, common::SortedMultisetDisk>);
     static_assert(std::is_same_v<typename KMER::WordType, typename Container::key_type>);
 
     using KmerCount = typename Container::count_type;
 
-    Vector<KMER> temp_storage;
-    Vector<std::pair<typename KMER::WordType, KmerCount>> temp_storage_with_counts;
-    temp_storage_with_counts.reserve(1.1 * kMaxKmersChunkSize);
+    Vector<KMER> buffer;
+    Vector<std::pair<typename KMER::WordType, KmerCount>> buffer_with_counts;
+    buffer.reserve(kBufferSize);
+    buffer_with_counts.reserve(kBufferSize);
 
     KmerExtractor kmer_extractor;
 
     generate_reads([&](const std::string &read, uint64_t count) {
         count = std::min(count, kmers->max_count());
 
-        kmer_extractor.sequence_to_kmers(read, k, suffix, &temp_storage);
+        kmer_extractor.sequence_to_kmers(read, k, suffix, &buffer);
         if (both_strands_mode) {
             auto rev_read = read;
             reverse_complement(rev_read.begin(), rev_read.end());
-            kmer_extractor.sequence_to_kmers(rev_read, k, suffix, &temp_storage);
+            kmer_extractor.sequence_to_kmers(rev_read, k, suffix, &buffer);
         }
 
-        for (const KMER &kmer : temp_storage) {
-            temp_storage_with_counts.emplace_back(kmer.data(), count);
+        for (const KMER &kmer : buffer) {
+            buffer_with_counts.emplace_back(kmer.data(), count);
         }
 
-        if (temp_storage.capacity() > 2 * kMaxKmersChunkSize)
-            temp_storage = Vector<KMER>(1.1 * kMaxKmersChunkSize);
+        if (buffer.capacity() > 2 * kBufferSize)
+            buffer = Vector<KMER>(kBufferSize);
 
-        temp_storage.resize(0);
+        buffer.resize(0);
 
-        if (temp_storage_with_counts.size() > kMaxKmersChunkSize) {
-            kmers->insert(temp_storage_with_counts.begin(),
-                          temp_storage_with_counts.end());
+        if (buffer_with_counts.size() > kBufferSize) {
+            kmers->insert(buffer_with_counts.begin(),
+                          buffer_with_counts.end());
 
-            if (temp_storage_with_counts.capacity() > 2 * kMaxKmersChunkSize)
-                temp_storage_with_counts
-                    = decltype(temp_storage_with_counts)(1.1 * kMaxKmersChunkSize);
+            if (buffer_with_counts.capacity() > 2 * kBufferSize)
+                buffer_with_counts
+                    = decltype(buffer_with_counts)(kBufferSize);
 
-            temp_storage_with_counts.resize(0);
+            buffer_with_counts.resize(0);
         }
     });
 
-    if (temp_storage_with_counts.size()) {
-        kmers->insert(temp_storage_with_counts.begin(),
-                      temp_storage_with_counts.end());
+    if (buffer_with_counts.size()) {
+        kmers->insert(buffer_with_counts.begin(),
+                      buffer_with_counts.end());
     }
 }
 
@@ -206,8 +209,10 @@ KmerCollector<KMER, KmerExtractor, Container>
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
-        batch_accumulator_([this](auto&& sequences) { add_batch(std::move(sequences)); },
-                           kMaxKmersChunkSize, kMaxKmersChunkSize, kMaxKmersChunkSize),
+        buffer_([this](auto&& sequences) { add_batch(std::move(sequences)); },
+                       kLargeBufferSize
+                            / sizeof(typename decltype(buffer_)::value_type),
+                       kLargeBufferSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
         both_strands_mode_(both_strands_mode),
         tmp_dir_(tmp_dir) {
@@ -217,13 +222,13 @@ KmerCollector<KMER, KmerExtractor, Container>
 
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
-    if constexpr ((utils::is_instance<typename KmerCollector::Data, common::ChunkedWaitQueue> {})) {
+    if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
         if (!filter_suffix_encoded_.empty()) {
             common::logger->error("Disk based sorting does not support chunking");
             exit(1);
         }
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_, tmp_dir,
-                                             max_disk_space);
+        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_,
+                                             tmp_dir, max_disk_space);
     } else {
         kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_);
     }
@@ -234,18 +239,13 @@ KmerCollector<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-size_t KmerCollector<KMER, KmerExtractor, Container>::buffer_size() const {
-    return buffer_size_;
-}
-
-template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
     if constexpr(std::is_same_v<typename KMER::WordType, typename Container::value_type>) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              generate_sequences,
                              k_, both_strands_mode_, kmers_.get(),
-                             filter_suffix_encoded_, true);
+                             filter_suffix_encoded_, false);
     } else {
         thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallStringCount callback) {
@@ -259,7 +259,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-    if constexpr (std::is_same_v<typename KMER::WordType, typename Container::value_type>) {
+    if constexpr(std::is_same_v<typename KMER::WordType, typename Container::value_type>) {
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallString callback) {
                                  generate_sequences([&](const std::string &seq, uint64_t) {
@@ -267,7 +267,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
                                  });
                              },
                              k_, both_strands_mode_, kmers_.get(),
-                             filter_suffix_encoded_, true);
+                             filter_suffix_encoded_, false);
     } else {
         thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
                              generate_sequences,
@@ -293,7 +293,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>::join() {
-    batch_accumulator_.process_all_buffered();
+    buffer_.process_all_buffered();
     thread_pool_.join();
 }
 
