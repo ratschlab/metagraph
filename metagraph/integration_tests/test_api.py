@@ -54,7 +54,7 @@ class TestAPIRaw(TestAPIBase):
         self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
 
     def test_api_raw_incomplete_json(self):
-        ret = self.raw_post_request('search', '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "count_labels": true,')
+        ret = self.raw_post_request('search', '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
 
         self.assertEqual(ret.status_code, 400)
         self.assertIn("Bad json received:", ret.json()['error'])
@@ -66,7 +66,6 @@ class TestAPIRaw(TestAPIBase):
                     "FASTA": "\n".join([">query",
                                         'AATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA',
                                         ]),
-                    "count_labels": True,
                     "discovery_fraction": 1 / 100,
                     })
 
@@ -78,7 +77,6 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_missing_params(self):
         payload = json.dumps({
             "num_labels": 100,
-            "count_labels": True,
             "discovery_fraction": 1 / 100
         })
 
@@ -97,7 +95,6 @@ class TestAPIRaw(TestAPIBase):
                     "FASTA": "\n".join([">query",
                                         'SEQUENCE_NOT_IN_GRAPH',
                                         ]),
-                    "count_labels": True,
                     "discovery_fraction": 1 / 100,
                     "num_labels": 1,
                     })

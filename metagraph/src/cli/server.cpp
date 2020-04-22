@@ -136,7 +136,7 @@ std::string form_client_reply(const std::string &received_message,
     // discovery_fraction a proxy of 1 - %similarity
     config.discovery_fraction = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
-    config.count_labels = json.get("count_labels", config.count_labels).asBool();
+    config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
     config.fast = json.get("fast", config.fast).asBool();
 
