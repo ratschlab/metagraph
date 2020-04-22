@@ -55,14 +55,14 @@ class BOSS::Chunk {
      */
     void push_back(TAlphabet W, TAlphabet F, bool last);
 
-    TAlphabet get_W_back() const { return W_.back(); }
-    void alter_W_back(TAlphabet W) { W_.back() = W; }
+    TAlphabet get_W_back() const { return W_[size_ - 1]; }
+    void alter_W_back(TAlphabet W) { W_[size_ - 1] = W; }
 
-    void alter_last_back(bool last) { last_.back() = last; }
+    void alter_last_back(bool last) { last_[size_ - 1] = last; }
 
     void extend(const Chunk &other);
 
-    uint64_t size() const { return W_.size() - 1; }
+    uint64_t size() const { return size_; }
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
@@ -87,10 +87,11 @@ class BOSS::Chunk {
     size_t k_;
     bool canonical_;
     // see the BOSS paper for the meaning of W_, last_ and F_
-    std::vector<TAlphabet> W_;
-    std::vector<bool> last_;
+    sdsl::int_vector<> W_;
+    sdsl::bit_vector last_;
     std::vector<uint64_t> F_;
     sdsl::int_vector<> weights_;
+    uint64_t size_;
 };
 
 

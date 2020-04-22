@@ -116,7 +116,7 @@ int build_graph(Config *config) {
 
             auto next_block = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
-                          next_block->size(), timer.elapsed());
+                          next_block->size() - 1, timer.elapsed());
 
             if (config->outfbase.size() && config->suffix.size()) {
                 logger->info("Serialize the graph chunk for suffix '{}'...", suffix);
