@@ -20,27 +20,27 @@ static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer256>::value);
 
 //TODO cleanup
 // k is node length
-template <typename Iterator, typename TAlphabet>
+template <typename Iterator>
 void initialize_chunk(uint64_t alph_size,
                       Iterator begin, Iterator end,
                       size_t k,
-                      std::vector<TAlphabet> *W,
-                      std::vector<bool> *last,
+                      sdsl::int_vector<> *W,
+                      sdsl::bit_vector *last,
                       std::vector<uint64_t> *F,
                       sdsl::int_vector<> *weights = nullptr) {
     using T = std::decay_t<decltype(*begin)>;
     using KMER = std::decay_t<decltype(get_first(*begin))>;
+    using CharType = typename KMER::CharType;
 
-    static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
-
-    assert(2 * alph_size - 1 <= std::numeric_limits<TAlphabet>::max());
+    assert(KMER::kBitsPerChar <= W->width());
+    assert(2 * alph_size - 1 <= sdsl::bits::lo_set[W->width()]);
     assert(alph_size);
     assert(k);
     assert(W && last && F);
     assert(bool(weights) == utils::is_pair<T>::value);
 
     W->resize(end - begin + 1);
-    last->assign(end - begin + 1, 1);
+    last->resize(end - begin + 1);
     F->assign(alph_size, 0);
 
     uint64_t max_count __attribute__((unused)) = 0;
@@ -54,19 +54,19 @@ void initialize_chunk(uint64_t alph_size,
     assert(std::is_sorted(begin, end, utils::LessFirst()));
 
     // the array containing edge labels
-    W->at(0) = 0;
+    (*W)[0] = 0;
     // the bit array indicating last outgoing edges for nodes
-    last->at(0) = 0;
+    (*last)[0] = 0;
     // offsets
     F->at(0) = 0;
 
     size_t curpos = 1;
-    TAlphabet lastF = 0;
+    CharType lastF = 0;
 
     for (Iterator it = begin; it != end; ++it) {
         const KMER &kmer = get_first(*it);
-        TAlphabet curW = kmer[0];
-        TAlphabet curF = kmer[k];
+        uint64_t curW = kmer[0];
+        CharType curF = kmer[k];
 
         assert(curW < alph_size);
 
@@ -76,7 +76,9 @@ void initialize_chunk(uint64_t alph_size,
             if (curW == 0 && curF > 0)
                 continue;
 
-            (*last)[curpos] = 0;
+            (*last)[curpos] = false;
+        } else {
+            (*last)[curpos] = true;
         }
         // set W
         if (it != begin && curW > 0) {
@@ -90,10 +92,10 @@ void initialize_chunk(uint64_t alph_size,
                     break;
             }
         }
-        assert(curW < (1llu << (alph_size + 1)));
+        assert(curW <= sdsl::bits::lo_set[W->width()]);
         (*W)[curpos] = curW;
 
-        while (curF > lastF && lastF + 1 < static_cast<TAlphabet>(alph_size)) {
+        while (curF > lastF && lastF + 1 < alph_size) {
             F->at(++lastF) = curpos - 1;
         }
 
@@ -123,13 +125,13 @@ void initialize_chunk(uint64_t alph_size,
  * Wrapper class around #initialize_chunk() in order to allow partial template
  * specialization for ChunkedWaitQueue.
  */
-template <class Container, class T, typename TAlphabet>
+template <class Container, class T>
 struct Init {
     static void initialize_chunk(uint64_t alph_size,
                                  const Container &container,
                                  size_t k,
-                                 std::vector<TAlphabet> *W,
-                                 std::vector<bool> *last,
+                                 sdsl::int_vector<> *W,
+                                 sdsl::bit_vector *last,
                                  std::vector<uint64_t> *F,
                                  sdsl::int_vector<> *weights = nullptr) {
         return ::initialize_chunk(alph_size, container.begin(), container.end(),
@@ -138,27 +140,9 @@ struct Init {
 };
 
 // specialization of initialize_chunk for ChunkedWaitQueue
-template <typename T, typename TAlphabet>
-struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
+template <typename T>
+struct Init<typename common::ChunkedWaitQueue<T>, T> {
     using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
-
-    template <typename KMER>
-    static void set_weight(const uint64_t count,
-                           const KMER &kmer,
-                           size_t curpos,
-                           uint64_t max_count,
-                           sdsl::int_vector<> *weights) {
-        assert(weights);
-
-        if (weights->size() == curpos)
-            weights->resize(weights->size() * 1.5);
-
-        if (count && kmer[0] && kmer[1]) {
-            (*weights)[curpos] = std::min(count, max_count);
-        } else { // dummy k-mers have a weight of 0
-            (*weights)[curpos] = 0;
-        }
-    }
 
     // TODO: write a unified interface for common::ChunkedWaitQueue<T>::Iterator
     //       vector::iterator and merge this function with
@@ -166,46 +150,59 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
     static void initialize_chunk(uint64_t alph_size,
                                  const common::ChunkedWaitQueue<T> &container,
                                  size_t k,
-                                 std::vector<TAlphabet> *W,
-                                 std::vector<bool> *last,
+                                 sdsl::int_vector<> *W,
+                                 sdsl::bit_vector *last,
                                  std::vector<uint64_t> *F,
                                  sdsl::int_vector<> *weights = nullptr) {
         Iterator &begin = container.begin();
         Iterator &end = container.end();
 
         using KMER = utils::get_first_type_t<T>;
+        using CharType = typename KMER::CharType;
 
-        static_assert(KMER::kBitsPerChar <= sizeof(TAlphabet) * 8);
-
-        assert(2 * alph_size - 1 <= std::numeric_limits<TAlphabet>::max());
+        assert(KMER::kBitsPerChar <= W->width());
+        assert(2 * alph_size - 1 <= sdsl::bits::lo_set[W->width()]);
         assert(alph_size);
         assert(k);
         assert(W && last && F);
         assert(bool(weights) == utils::is_pair<T>::value);
 
-        F->assign(alph_size, 0);
-
         uint64_t max_count __attribute__((unused)) = 0;
+
+        W->resize(1000);
+        last->resize(1000);
+        F->assign(alph_size, 0);
         if constexpr(utils::is_pair<T>::value) {
-            weights->resize(100);
+            weights->resize(1000);
+            (*weights)[0] = 0;
             max_count = sdsl::bits::lo_set[weights->width()];
         }
 
-        W->push_back(0); // the array containing edge labels
-        last->push_back(0); // the bit array indicating last outgoing edges for nodes
+        (*W)[0] = 0; // the array containing edge labels
+        (*last)[0] = 0; // the bit array indicating last outgoing edges for nodes
         F->at(0) = 0; // offsets for the first character
 
         size_t curpos = 1;
-        TAlphabet lastF = 0;
+        CharType lastF = 0;
         // last kmer for each label, so we can test multiple edges coming to same node
         std::vector<KMER> last_kmer(alph_size, typename KMER::WordType(0));
 
         for (Iterator &it = begin; it != end; ++it) {
             const KMER kmer = get_first(*it);
-            TAlphabet curW = kmer[0];
-            TAlphabet curF = kmer[k];
+            uint64_t curW = kmer[0];
+            CharType curF = kmer[k];
 
             assert(curW < alph_size);
+
+            assert(last->size() == W->size());
+            assert(!utils::is_pair<T>::value || weights->size() == W->size());
+
+            if (curpos == W->size()) {
+                W->resize(curpos * 1.5);
+                last->resize(curpos * 1.5);
+                if constexpr(utils::is_pair<T>::value)
+                    weights->resize(curpos * 1.5);
+            }
 
             // peek at the next entry to check if this is a dummy sink (not source) edge
             // and to set #last
@@ -217,9 +214,9 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                     continue;
                 }
 
-                last->push_back(false);
+                (*last)[curpos] = false;
             } else {
-                last->push_back(true);
+                (*last)[curpos] = true;
             }
             --it;
 
@@ -232,14 +229,19 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
                     last_kmer[curW] = kmer;
                 }
             }
-            W->push_back(curW);
+            (*W)[curpos] = curW;
 
-            while (curF > lastF && lastF + 1 < static_cast<TAlphabet>(alph_size)) {
+            while (curF > lastF && lastF + 1 < alph_size) {
                 F->at(++lastF) = curpos - 1;
             }
 
             if constexpr(utils::is_pair<T>::value) {
-                set_weight((*it).second, kmer, curpos, max_count, weights);
+                uint64_t count = (*it).second;
+                if (count && curW && kmer[1]) {
+                    (*weights)[curpos] = std::min(count, max_count);
+                } else { // dummy k-mers have a weight of 0
+                    (*weights)[curpos] = 0;
+                }
             }
 
             curpos++;
@@ -251,7 +253,6 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
         W->resize(curpos);
         last->resize(curpos);
-
         if constexpr(utils::is_pair<T>::value)
             weights->resize(curpos);
     }
@@ -260,22 +261,17 @@ struct Init<typename common::ChunkedWaitQueue<T>, T, TAlphabet> {
 
 BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical)
       : alph_size_(alph_size), k_(k), canonical_(canonical),
-        W_(1, 0), last_(1, 0), F_(alph_size_, 0) {
-
-    assert(sizeof(TAlphabet) * 8 >= get_W_width());
-    assert(alph_size_ * 2 <= 1llu << get_W_width());
-}
+        W_(1, 0, get_W_width()), last_(1, 0), F_(alph_size_, 0), size_(1) {}
 
 template <typename Array>
 BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
                    const Array &kmers)
-      : alph_size_(alph_size), k_(k), canonical_(canonical) {
+      : Chunk(alph_size, k, canonical) {
 
-    assert(sizeof(TAlphabet) * 8 >= get_W_width());
-    assert(alph_size_ * 2 <= 1llu << get_W_width());
-
-    Init<Array, typename Array::value_type, TAlphabet>
+    Init<Array, typename Array::value_type>
     ::initialize_chunk(alph_size_, kmers, k_, &W_, &last_, &F_);
+
+    size_ = W_.size();
 }
 
 template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer64>&);
@@ -294,14 +290,14 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
                    bool canonical,
                    const Array &kmers_with_counts,
                    uint8_t bits_per_count)
-      : alph_size_(alph_size), k_(k), canonical_(canonical), weights_(0, 0, bits_per_count) {
+      : Chunk(alph_size, k, canonical) {
 
-    assert(sizeof(TAlphabet) * 8 >= get_W_width());
-    assert(alph_size_ * 2 <= 1llu << get_W_width());
+    weights_.width(bits_per_count);
 
-    Init<Array, typename Array::value_type, TAlphabet>
+    Init<Array, typename Array::value_type>
     ::initialize_chunk(alph_size_, kmers_with_counts, k_,
                        &W_, &last_, &F_, &weights_);
+    size_ = W_.size();
 }
 
 #define INSTANTIATE_BOSS_WITH_COUNTS(T, C) \
@@ -326,44 +322,57 @@ void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     assert(F < alph_size_);
     assert(k_);
 
-    W_.push_back(W);
+    assert(last_.size() == W_.size());
+    assert(weights_.empty());
+
+    if (size_ == W_.size()) {
+        W_.resize(1 + size_ * 1.5);
+        last_.resize(1 + size_ * 1.5);
+    }
+
+    W_[size_] = W;
+    last_[size_] = last;
     for (TAlphabet a = F + 1; a < F_.size(); ++a) {
         F_[a]++;
     }
-    last_.push_back(last);
-
-    assert(weights_.empty());
+    size_++;
 }
 
 void BOSS::Chunk::extend(const BOSS::Chunk &other) {
+    assert(size_ && other.size_);
     assert(!weights_.size() || weights_.size() == W_.size());
     assert(!other.weights_.size() || other.weights_.size() == other.W_.size());
 
-    if (alph_size_ != other.alph_size_ || k_ != other.k_ || canonical_ != other.canonical_) {
+    if (alph_size_ != other.alph_size_
+            || k_ != other.k_
+            || canonical_ != other.canonical_
+            || W_.width() != other.W_.width()) {
         std::cerr << "ERROR: trying to concatenate incompatible graph chunks" << std::endl;
         exit(1);
     }
 
-    if (!other.size())
+    if (other.size_ == 1)
         return;
 
-    if (!size()) {
+    if (size_ == 1) {
         *this = other;
         return;
     }
-
-    assert(size() && other.size());
 
     if (weights_.empty() != other.weights_.empty()) {
         std::cerr << "ERROR: trying to concatenate weighted and unweighted blocks" << std::endl;
         exit(1);
     }
 
-    W_.reserve(W_.size() + other.size());
-    W_.insert(W_.end(), other.W_.begin() + 1, other.W_.end());
+    W_.resize(size_ + other.size_ - 1);
+    std::copy(other.W_.begin() + 1,
+              other.W_.begin() + other.size_,
+              W_.begin() + size_);
 
-    last_.reserve(last_.size() + other.size());
-    last_.insert(last_.end(), other.last_.begin() + 1, other.last_.end());
+    last_.resize(size_ + other.size_ - 1);
+    std::copy(other.last_.begin() + 1,
+              other.last_.begin() + other.size_,
+              last_.begin() + size_);
 
     assert(F_.size() == other.F_.size());
     for (size_t p = 0; p < other.F_.size(); ++p) {
@@ -371,18 +380,28 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
     }
 
     if (other.weights_.size()) {
-        const auto start = weights_.size();
-        weights_.resize(weights_.size() + other.size());
+        weights_.resize(size_ + other.size_ - 1);
         std::copy(other.weights_.begin() + 1,
-                  other.weights_.end(),
-                  weights_.begin() + start);
+                  other.weights_.begin() + other.size_,
+                  weights_.begin() + size_);
     }
+
+    size_ += other.size_ - 1;
 
     assert(W_.size() == last_.size());
     assert(!weights_.size() || weights_.size() == W_.size());
 }
 
 void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
+    assert(size_ <= W_.size());
+    assert(last_.size() == W_.size());
+    assert(weights_.empty() || weights_.size() == W_.size());
+
+    W_.resize(size_);
+    last_.resize(size_);
+    if (weights_.size())
+        weights_.resize(size_);
+
     assert(graph->W_);
     delete graph->W_;
     graph->W_ = new wavelet_tree_small(get_W_width(), std::move(W_));
@@ -390,9 +409,8 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
 
     assert(graph->last_);
     delete graph->last_;
-    auto last_bv = to_sdsl(last_);
+    graph->last_ = new bit_vector_stat(std::move(last_));
     last_ = decltype(last_)();
-    graph->last_ = new bit_vector_stat(std::move(last_bv));
 
     graph->F_ = F_;
     graph->recompute_NF();
@@ -401,8 +419,12 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
 
     graph->state = BOSS::State::SMALL;
 
-    if (weights)
-        *weights = std::move(weights_);
+    if (weights) {
+        weights->swap(weights_);
+    }
+    weights_ = decltype(weights_)();
+
+    size_ = 0;
 
     assert(graph->is_valid());
 }
@@ -431,7 +453,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
                       << file << std::endl;
             exit(1);
         }
-        cumulative_size += get_number_vector_size(chunk_in) - 1;
+        cumulative_size += load_number(chunk_in) - 1;
     }
 
     if (verbose)
@@ -484,7 +506,8 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
 
         } else if (graph->k_ != graph_chunk.k_
                     || graph->alph_size != graph_chunk.alph_size_
-                    || canonical != graph_chunk.canonical_) {
+                    || canonical != graph_chunk.canonical_
+                    || W.width() != graph_chunk.W_.width()) {
             std::cerr << "ERROR: trying to concatenate incompatible graph chunks"
                       << std::endl;
             exit(1);
@@ -500,20 +523,20 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         }
 
         std::copy(graph_chunk.W_.begin() + 1,
-                  graph_chunk.W_.end(),
+                  graph_chunk.W_.begin() + graph_chunk.size_,
                   W.begin() + pos);
 
         std::copy(graph_chunk.last_.begin() + 1,
-                  graph_chunk.last_.end(),
+                  graph_chunk.last_.begin() + graph_chunk.size_,
                   last.begin() + pos);
 
         if (weights && i) {
             std::copy(graph_chunk.weights_.begin() + 1,
-                      graph_chunk.weights_.end(),
+                      graph_chunk.weights_.begin() + graph_chunk.size_,
                       weights->begin() + pos);
         }
 
-        pos += graph_chunk.size();
+        pos += graph_chunk.size_ - 1;
 
         assert(graph_chunk.F_.size() == F.size());
         for (size_t p = 0; p < F.size(); ++p) {
@@ -552,16 +575,9 @@ bool BOSS::Chunk::load(const std::string &infbase) {
         std::ifstream instream(utils::remove_suffix(infbase, kFileExtension)
                                                                 + kFileExtension,
                                std::ios::binary);
-
-        if (!load_number_vector(instream, &W_)) {
-            std::cerr << "ERROR: failed to load W vector" << std::endl;
-            return false;
-        }
-
-        if (!load_number_vector(instream, &last_)) {
-            std::cerr << "ERROR: failed to load L vector" << std::endl;
-            return false;
-        }
+        size_ = load_number(instream);
+        W_.load(instream);
+        last_.load(instream);
 
         if (!load_number_vector(instream, &F_)) {
             std::cerr << "ERROR: failed to load F vector" << std::endl;
@@ -575,6 +591,7 @@ bool BOSS::Chunk::load(const std::string &infbase) {
         canonical_ = load_number(instream);
 
         return k_ && alph_size_ && W_.size() == last_.size()
+                                && size_ <= W_.size()
                                 && F_.size() == alph_size_
                                 && (!weights_.size() || weights_.size() == W_.size());
 
@@ -591,9 +608,9 @@ void BOSS::Chunk::serialize(const std::string &outbase) const {
     std::ofstream outstream(utils::remove_suffix(outbase, kFileExtension)
                                                                 + kFileExtension,
                             std::ios::binary);
-
-    serialize_number_vector(outstream, W_, get_W_width());
-    serialize_number_vector(outstream, last_, 1);
+    serialize_number(outstream, size_);
+    W_.serialize(outstream);
+    last_.serialize(outstream);
     serialize_number_vector(outstream, F_);
 
     weights_.serialize(outstream);
