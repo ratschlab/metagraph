@@ -11,7 +11,7 @@ const char kDefaultFastQualityChar = 'I';
 
 // Optimal values found from a grid search with the BM_WriteRandomSequences benchmark
 const size_t kWorkerQueueSize = 1;
-const size_t kBufferSize = 1000000;
+const size_t kBufferSize = 1'000'000;
 
 
 FastaWriter::FastaWriter(const std::string &filebase,
@@ -21,16 +21,18 @@ FastaWriter::FastaWriter(const std::string &filebase,
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(async, kWorkerQueueSize),
-        seq_batcher_([&](std::vector<std::string>&& buffer) {
-            worker_.enqueue([&](const auto &buffer) {
-                                for (const std::string &sequence : buffer) {
-                                    write_to_disk(sequence);
-                                }
-                            },
-                            std::move(buffer));
-        },
-        std::numeric_limits<size_t>::max(),
-        kBufferSize / kWorkerQueueSize) {
+        buffer_(
+            [&](std::vector<std::string>&& buffer) {
+                worker_.enqueue([&](const auto &buffer) {
+                                    for (const std::string &sequence : buffer) {
+                                        write_to_disk(sequence);
+                                    }
+                                },
+                                std::move(buffer));
+            },
+            std::numeric_limits<size_t>::max(),
+            kBufferSize / kWorkerQueueSize
+        ) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
     gz_out_ = gzopen(filename.c_str(), "w");
@@ -41,23 +43,23 @@ FastaWriter::FastaWriter(const std::string &filebase,
 }
 
 FastaWriter::~FastaWriter() {
-    join();
+    flush();
     gzclose(gz_out_);
 }
 
-void FastaWriter::join() {
-    seq_batcher_.process_all_buffered();
+void FastaWriter::flush() {
+    buffer_.process_all_buffered();
     worker_.join();
 }
 
 void FastaWriter::write(const std::string &sequence) {
-    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
-                              std::string(sequence));
+    buffer_.push_and_pay(sequence.size() + sizeof(std::string),
+                         sequence);
 }
 
 void FastaWriter::write(std::string&& sequence) {
-    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
-                              std::move(sequence));
+    buffer_.push_and_pay(sequence.size() + sizeof(std::string),
+                         std::move(sequence));
 }
 
 void FastaWriter::write_to_disk(const std::string &sequence) {
@@ -114,13 +116,13 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
 
 template <typename T>
 ExtendedFastaWriter<T>::~ExtendedFastaWriter() {
-    join();
+    flush();
     gzclose(fasta_gz_out_);
     gzclose(feature_gz_out_);
 }
 
 template <typename T>
-void ExtendedFastaWriter<T>::join() {
+void ExtendedFastaWriter<T>::flush() {
     batcher_.process_all_buffered();
     worker_.join();
 }
