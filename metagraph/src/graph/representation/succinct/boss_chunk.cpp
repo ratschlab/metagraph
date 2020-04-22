@@ -18,18 +18,23 @@ static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer64>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer128>::value);
 static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer256>::value);
 
-//TODO cleanup
+const double kGrowthFactor = 1.5;
+
+
 // k is node length
 template <typename Iterator>
 void initialize_chunk(uint64_t alph_size,
-                      Iterator begin, Iterator end,
+                      Iterator *begin_ptr, Iterator *end_ptr,
                       size_t k,
                       sdsl::int_vector<> *W,
                       sdsl::bit_vector *last,
                       std::vector<uint64_t> *F,
                       sdsl::int_vector<> *weights = nullptr) {
-    using T = std::decay_t<decltype(*begin)>;
-    using KMER = std::decay_t<decltype(get_first(*begin))>;
+    Iterator &it = *begin_ptr;
+    Iterator &end = *end_ptr;
+
+    using T = std::decay_t<decltype(*it)>;
+    using KMER = utils::get_first_type_t<T>;
     using CharType = typename KMER::CharType;
 
     assert(KMER::kBitsPerChar <= W->width());
@@ -39,39 +44,49 @@ void initialize_chunk(uint64_t alph_size,
     assert(W && last && F);
     assert(bool(weights) == utils::is_pair<T>::value);
 
-    W->resize(end - begin + 1);
-    last->resize(end - begin + 1);
-    F->assign(alph_size, 0);
-
     uint64_t max_count __attribute__((unused)) = 0;
-    if (weights) {
-        assert(utils::is_pair<T>::value);
-        weights->resize(end - begin + 1);
-        sdsl::util::set_to_value(*weights, 0);
+
+    W->resize(1000);
+    last->resize(1000);
+    F->assign(alph_size, 0);
+    if constexpr(utils::is_pair<T>::value) {
+        weights->resize(1000);
+        (*weights)[0] = 0;
         max_count = sdsl::bits::lo_set[weights->width()];
     }
 
-    assert(std::is_sorted(begin, end, utils::LessFirst()));
-
-    // the array containing edge labels
-    (*W)[0] = 0;
-    // the bit array indicating last outgoing edges for nodes
-    (*last)[0] = 0;
-    // offsets
-    F->at(0) = 0;
+    (*W)[0] = 0; // the array containing edge labels
+    (*last)[0] = 0; // the bit array indicating last outgoing edges for nodes
+    F->at(0) = 0; // the offsets for the last characters in the nodes of BOSS
 
     size_t curpos = 1;
     CharType lastF = 0;
+    // last kmer for each label, so we can test multiple edges coming to same node
+    std::vector<KMER> last_kmer(alph_size, typename KMER::WordType(0));
 
-    for (Iterator it = begin; it != end; ++it) {
-        const KMER &kmer = get_first(*it);
+    while (it != end) {
+        const T value = *it;
+        const KMER &kmer = get_first(value);
+
         uint64_t curW = kmer[0];
         CharType curF = kmer[k];
 
         assert(curW < alph_size);
 
-        // check redundancy and set last
-        if (it + 1 < end && KMER::compare_suffix(kmer, get_first(*(it + 1)))) {
+        assert(last->size() == W->size());
+        assert(!utils::is_pair<T>::value || weights->size() == W->size());
+
+        if (curpos == W->size()) {
+            W->resize(curpos * kGrowthFactor);
+            last->resize(curpos * kGrowthFactor);
+            if constexpr(utils::is_pair<T>::value)
+                weights->resize(curpos * kGrowthFactor);
+        }
+
+        // peek at the next entry to check if this is a dummy sink (not source) edge
+        // and to set #last
+        ++it;
+        if (it != end && KMER::compare_suffix(kmer, get_first(*it))) {
             // skip redundant dummy sink edges
             if (curW == 0 && curF > 0)
                 continue;
@@ -80,16 +95,16 @@ void initialize_chunk(uint64_t alph_size,
         } else {
             (*last)[curpos] = true;
         }
+
         // set W
-        if (it != begin && curW > 0) {
-            for (Iterator prev = it - 1; KMER::compare_suffix(kmer, get_first(*prev), 1);
-                 --prev) {
-                if (get_first(*prev)[0] == curW) {
-                    curW += alph_size;
-                    break;
-                }
-                if (prev == begin)
-                    break;
+        if (curW) {
+            if (last_kmer[curW].data()
+                    && KMER::compare_suffix(kmer, last_kmer[curW], 1)) {
+                assert(last_kmer[curW][0] == curW);
+                // not the first incoming edge to the node, mark with -
+                curW += alph_size;
+            } else {
+                last_kmer[curW] = kmer;
             }
         }
         assert(curW <= sdsl::bits::lo_set[W->width()]);
@@ -100,10 +115,12 @@ void initialize_chunk(uint64_t alph_size,
         }
 
         if constexpr(utils::is_pair<T>::value) {
-            // set weights for non-dummy k-mers
-            if (it->second && curW && kmer[1])
-                (*weights)[curpos] = std::min(static_cast<uint64_t>(it->second),
+            if (value.second && curW && kmer[1]) {
+                (*weights)[curpos] = std::min(static_cast<uint64_t>(value.second),
                                               max_count);
+            } else {
+                (*weights)[curpos] = 0; // dummy k-mers have a weight of 0
+            }
         }
 
         curpos++;
@@ -115,174 +132,15 @@ void initialize_chunk(uint64_t alph_size,
 
     W->resize(curpos);
     last->resize(curpos);
-
-    if (weights)
+    if constexpr(utils::is_pair<T>::value)
         weights->resize(curpos);
 }
-
-
-/**
- * Wrapper class around #initialize_chunk() in order to allow partial template
- * specialization for ChunkedWaitQueue.
- */
-template <class Container, class T>
-struct Init {
-    static void initialize_chunk(uint64_t alph_size,
-                                 const Container &container,
-                                 size_t k,
-                                 sdsl::int_vector<> *W,
-                                 sdsl::bit_vector *last,
-                                 std::vector<uint64_t> *F,
-                                 sdsl::int_vector<> *weights = nullptr) {
-        return ::initialize_chunk(alph_size, container.begin(), container.end(),
-                                  k, W, last, F, weights);
-    }
-};
-
-// specialization of initialize_chunk for ChunkedWaitQueue
-template <typename T>
-struct Init<typename common::ChunkedWaitQueue<T>, T> {
-    using Iterator = typename common::ChunkedWaitQueue<T>::iterator;
-
-    // TODO: write a unified interface for common::ChunkedWaitQueue<T>::Iterator
-    //       vector::iterator and merge this function with
-    //       the other `initialize_chunk`
-    static void initialize_chunk(uint64_t alph_size,
-                                 const common::ChunkedWaitQueue<T> &container,
-                                 size_t k,
-                                 sdsl::int_vector<> *W,
-                                 sdsl::bit_vector *last,
-                                 std::vector<uint64_t> *F,
-                                 sdsl::int_vector<> *weights = nullptr) {
-        Iterator &begin = container.begin();
-        Iterator &end = container.end();
-
-        using KMER = utils::get_first_type_t<T>;
-        using CharType = typename KMER::CharType;
-
-        assert(KMER::kBitsPerChar <= W->width());
-        assert(2 * alph_size - 1 <= sdsl::bits::lo_set[W->width()]);
-        assert(alph_size);
-        assert(k);
-        assert(W && last && F);
-        assert(bool(weights) == utils::is_pair<T>::value);
-
-        uint64_t max_count __attribute__((unused)) = 0;
-
-        W->resize(1000);
-        last->resize(1000);
-        F->assign(alph_size, 0);
-        if constexpr(utils::is_pair<T>::value) {
-            weights->resize(1000);
-            (*weights)[0] = 0;
-            max_count = sdsl::bits::lo_set[weights->width()];
-        }
-
-        (*W)[0] = 0; // the array containing edge labels
-        (*last)[0] = 0; // the bit array indicating last outgoing edges for nodes
-        F->at(0) = 0; // offsets for the first character
-
-        size_t curpos = 1;
-        CharType lastF = 0;
-        // last kmer for each label, so we can test multiple edges coming to same node
-        std::vector<KMER> last_kmer(alph_size, typename KMER::WordType(0));
-
-        for (Iterator &it = begin; it != end; ++it) {
-            const KMER kmer = get_first(*it);
-            uint64_t curW = kmer[0];
-            CharType curF = kmer[k];
-
-            assert(curW < alph_size);
-
-            assert(last->size() == W->size());
-            assert(!utils::is_pair<T>::value || weights->size() == W->size());
-
-            if (curpos == W->size()) {
-                W->resize(curpos * 1.5);
-                last->resize(curpos * 1.5);
-                if constexpr(utils::is_pair<T>::value)
-                    weights->resize(curpos * 1.5);
-            }
-
-            // peek at the next entry to check if this is a dummy sink (not source) edge
-            // and to set #last
-            ++it;
-            if (it != end && KMER::compare_suffix(kmer, get_first(*it))) {
-                // skip redundant dummy sink edges
-                if (curW == 0 && curF > 0) {
-                    --it;
-                    continue;
-                }
-
-                (*last)[curpos] = false;
-            } else {
-                (*last)[curpos] = true;
-            }
-            --it;
-
-            if (curW) {
-                if (last_kmer[curW].data() && KMER::compare_suffix(kmer, last_kmer[curW], 1)) {
-                    assert(last_kmer[curW][0] == curW);
-                    // not the first incoming edge to the node, mark with -
-                    curW += alph_size;
-                } else {
-                    last_kmer[curW] = kmer;
-                }
-            }
-            (*W)[curpos] = curW;
-
-            while (curF > lastF && lastF + 1 < alph_size) {
-                F->at(++lastF) = curpos - 1;
-            }
-
-            if constexpr(utils::is_pair<T>::value) {
-                uint64_t count = (*it).second;
-                if (count && curW && kmer[1]) {
-                    (*weights)[curpos] = std::min(count, max_count);
-                } else { // dummy k-mers have a weight of 0
-                    (*weights)[curpos] = 0;
-                }
-            }
-
-            curpos++;
-        }
-
-        while (++lastF < alph_size) {
-            F->at(lastF) = curpos - 1;
-        }
-
-        W->resize(curpos);
-        last->resize(curpos);
-        if constexpr(utils::is_pair<T>::value)
-            weights->resize(curpos);
-    }
-};
 
 
 BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical)
       : alph_size_(alph_size), k_(k), canonical_(canonical),
         W_(1, 0, get_W_width()), last_(1, 0), F_(alph_size_, 0), size_(1) {}
 
-template <typename Array>
-BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
-                   const Array &kmers)
-      : Chunk(alph_size, k, canonical) {
-
-    Init<Array, typename Array::value_type>
-    ::initialize_chunk(alph_size_, kmers, k_, &W_, &last_, &F_);
-
-    size_ = W_.size();
-}
-
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer64>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer128>&);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<KmerExtractorBOSS::Kmer256>&);
-
-template <typename T>
-using CWQ = mg::common::ChunkedWaitQueue<T>;
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<KmerExtractorBOSS::Kmer64> &);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<KmerExtractorBOSS::Kmer128> &);
-template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<KmerExtractorBOSS::Kmer256> &);
 
 template <typename Array>
 BOSS::Chunk::Chunk(uint64_t alph_size,
@@ -294,27 +152,42 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
 
     weights_.width(bits_per_count);
 
-    Init<Array, typename Array::value_type>
-    ::initialize_chunk(alph_size_, kmers_with_counts, k_,
-                       &W_, &last_, &F_, &weights_);
+    if constexpr(utils::is_instance_v<Array, mg::common::ChunkedWaitQueue>) {
+        initialize_chunk(alph_size_,
+                         &kmers_with_counts.begin(),
+                         &kmers_with_counts.end(),
+                         k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL);
+    } else {
+        auto begin = kmers_with_counts.begin();
+        auto end = kmers_with_counts.end();
+        initialize_chunk(alph_size_, &begin, &end,
+                         k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL);
+    }
     size_ = W_.size();
 }
 
-#define INSTANTIATE_BOSS_WITH_COUNTS(T, C) \
-    template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<std::pair<T, C>> &, uint8_t); \
-    template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<std::pair<T, C>> &, uint8_t);
+template <typename T>
+using CWQ = mg::common::ChunkedWaitQueue<T>;
 
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer64, uint8_t);
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer128, uint8_t);
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer256, uint8_t);
+#define INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(...) \
+    template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<__VA_ARGS__> &, uint8_t); \
+    template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<__VA_ARGS__> &, uint8_t);
 
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer64, uint16_t);
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer128, uint16_t);
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer256, uint16_t);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(KmerExtractorBOSS::Kmer64);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(KmerExtractorBOSS::Kmer128);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(KmerExtractorBOSS::Kmer256);
 
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer64, uint32_t);
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer128, uint32_t);
-INSTANTIATE_BOSS_WITH_COUNTS(KmerExtractorBOSS::Kmer256, uint32_t);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer64, uint8_t>);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer128, uint8_t>);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer256, uint8_t>);
+
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer64, uint16_t>);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer128, uint16_t>);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer256, uint16_t>);
+
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer64, uint32_t>);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer128, uint32_t>);
+INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(std::pair<KmerExtractorBOSS::Kmer256, uint32_t>);
 
 
 void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
@@ -326,8 +199,8 @@ void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     assert(weights_.empty());
 
     if (size_ == W_.size()) {
-        W_.resize(1 + size_ * 1.5);
-        last_.resize(1 + size_ * 1.5);
+        W_.resize(std::max(size_ + 1, static_cast<uint64_t>(size_ * kGrowthFactor)));
+        last_.resize(std::max(size_ + 1, static_cast<uint64_t>(size_ * kGrowthFactor)));
     }
 
     W_[size_] = W;

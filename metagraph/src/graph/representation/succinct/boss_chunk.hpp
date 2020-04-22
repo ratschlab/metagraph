@@ -38,14 +38,7 @@ class BOSS::Chunk {
           size_t k,
           bool canonical,
           const Array &kmers_with_counts,
-          uint8_t bits_per_count);
-
-    /**
-     * Creates a BOSS Chunk (no weights) from the given kmers, which should be distinct
-     * and sorted.
-     */
-    template <typename Array>
-    Chunk(uint64_t alph_size, size_t k, bool canonical, const Array &kmers);
+          uint8_t bits_per_count = 0);
 
     /**
      * Adds an entry into the BOSS table.
