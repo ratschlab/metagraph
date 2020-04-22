@@ -53,7 +53,7 @@ string convert_to_json(const string &ret_str) {
 
         Json::Value res_obj;
         vector<string> query_desc_parts = utils::split_string(parts[1], ":");
-        res_obj[SEQ_DESCRIPTION_JSON_FIELD] = query_desc_parts[0];
+        res_obj[SEQ_DESCRIPTION_JSON_FIELD] = query_desc_parts[0].substr(1);
 
         if(query_desc_parts.size() > 1) {
             // we aligned first, so extracting aligned sequence and score:
@@ -317,7 +317,6 @@ int run_server(Config *config) {
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
         // Retrieve string:
         auto content = request->content.string();
-
         logger->info("Got search request from " + request->remote_endpoint().address().to_string());
 
         try {

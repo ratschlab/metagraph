@@ -125,6 +125,19 @@ class TestAPIRaw(TestAPIBase):
             [f"query{i}" for i in range(repetitions)]
         )
 
+    def test_api_raw_align_empty_fasta_desc(self):
+        fasta_str = ">\nTCGATCGA"
+        payload = json.dumps({"FASTA": fasta_str})
+        ret = self.raw_post_request('align', payload).json()
+
+        self.assertEqual(ret[0]['seq_description'], '')
+
+    def test_api_raw_search_empty_fasta_desc(self):
+        fasta_str = ">\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
+        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'discovery_fraction': 0.1})
+        ret = self.raw_post_request('search', payload).json()
+
+        self.assertEqual(ret[0]['seq_description'], '')
 
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
