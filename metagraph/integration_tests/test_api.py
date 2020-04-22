@@ -85,6 +85,30 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 400)
         self.assertIn("No input sequences received from client", ret.json()['error'])
 
+    def test_api_raw_invalid_discovery_fraction(self):
+        payload = json.dumps({
+            "FASTA": "\n".join([">query",
+                                'TCGA',
+                                ]),
+            "discovery_fraction": 1.1,
+            "num_labels": 1,
+        })
+        ret = self.raw_post_request('search', payload)
+
+        self.assertEqual(ret.status_code, 400)
+
+    def test_api_raw_missing_num_labels(self):
+        payload = json.dumps({
+            "FASTA": "\n".join([">query",
+                                'TCGA',
+                                ]),
+            "discovery_fraction": 0.1
+        })
+        ret = self.raw_post_request('search', payload)
+
+        # server has uses some default value
+        self.assertEqual(ret.status_code, 200)
+
     def test_api_raw_invalid_url(self):
         ret = self.raw_post_request('not_valid', {})
         self.assertEqual(ret.status_code, 404)

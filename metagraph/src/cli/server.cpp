@@ -136,6 +136,10 @@ std::string form_client_reply(const std::string &received_message,
     // discovery_fraction a proxy of 1 - %similarity
     config.discovery_fraction = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
+    if(config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
+        throw std::domain_error("Discovery fraction should be within [0, 1.0]. Instead got " + std::to_string(config.discovery_fraction));
+    }
+
     config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
     config.fast = json.get("fast", config.fast).asBool();
@@ -313,6 +317,8 @@ int run_server(Config *config) {
     }
 
     server.config.port = config->port;
+
+    config->num_top_labels = 10000;
 
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
         // Retrieve string:
