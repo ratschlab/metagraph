@@ -16,7 +16,6 @@ namespace kmer {
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
 
-
 /**
  * Collects k-mers extracted by a KmerExtractor into Container. K-mers are
  * extracted from sequences (reads) that can be added one by one using
@@ -34,13 +33,14 @@ class KmerCollector {
     using Sequence = std::vector<typename Extractor::TAlphabet>;
     Extractor kmer_extractor_;
 
-    static_assert(std::is_base_of<typename Container::key_type, KMER>::value);
+    static_assert(std::is_same_v<typename Container::key_type, typename KMER::WordType>);
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
   public:
     using Key = typename Container::key_type;
     using Value = typename Container::value_type;
     using Data = typename Container::result_type;
+    using Kmer = KMER;
 
     /**
      * @param  k                      The k-mer length
@@ -83,9 +83,11 @@ class KmerCollector {
 
     // FYI: This function should be used only in special cases.
     //      In general, use `add_sequences` if possible, to make use of multiple threads.
-    void add_kmer(const KMER &kmer) { kmers_->insert(&kmer, &kmer + 1); }
+    void add_kmer(const KMER &kmer) { kmers_->insert(&kmer.data(), &kmer.data() + 1); }
 
-    inline Data &data() { join(); return kmers_->data(); }
+    // FYI: This returns a container with integer representation of k-mers.
+    //      Use reinterpret_cast to cast them back to k-mers.
+    inline Data& data() { join(); return kmers_->data(); }
 
     void clear() { join(); kmers_->clear(); }
 

@@ -57,9 +57,6 @@ class KMerBOSS {
     bool operator>=(const KMerBOSS &other) const { return seq_ >= other.seq_; }
     bool operator==(const KMerBOSS &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMerBOSS &other) const { return seq_ != other.seq_; }
-    explicit operator uint64_t () const { static_assert(sizeof(WordType) < 64); return seq_; }
-    explicit operator sdsl::uint128_t () const { static_assert(sizeof(WordType) < 128); return seq_; }
-    explicit operator sdsl::uint256_t () const { static_assert(sizeof(WordType) < 256); return seq_; }
 
     inline CharType operator[](size_t i) const;
 

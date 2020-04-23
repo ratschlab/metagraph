@@ -20,30 +20,26 @@ template <typename T>
 static void nocleanup(T *) {}
 
 template <typename TypeParam>
-void expect_equals(common::SortedMultisetDisk<TypeParam, TypeParam, uint8_t> &underTest,
+void expect_equals(common::SortedMultisetDisk<TypeParam, uint8_t> &underTest,
                    const std::vector<std::pair<TypeParam, uint8_t>> &expectedValues) {
     using Pair = std::pair<TypeParam, uint8_t>;
     uint32_t size = 0;
-    using ChunkedQueueIterator = typename common::ChunkedWaitQueue<Pair>::Iterator;
     common::ChunkedWaitQueue<Pair> &merge_queue = underTest.data();
-    for (ChunkedQueueIterator &iterator = merge_queue.begin();
-         iterator != merge_queue.end(); ++iterator) {
-        EXPECT_EQ(expectedValues[size], *iterator);
+    for (auto &it = merge_queue.begin(); it != merge_queue.end(); ++it) {
+        EXPECT_EQ(expectedValues[size], *it);
         size++;
     }
     EXPECT_EQ(expectedValues.size(), size);
-    merge_queue.shutdown();
 }
 
 template <typename T>
-common::SortedMultisetDisk<T, T, uint8_t>
+common::SortedMultisetDisk<T, uint8_t>
 create_sorted_set_disk(size_t container_size = 8, size_t num_elements_cached = 2) {
     constexpr size_t thread_count = 1;
     constexpr size_t max_disk_space = 1e6;
-    auto on_item_pushed = [](const std::pair<T, uint8_t> &) {};
-    return common::SortedMultisetDisk<T, T, uint8_t>(
+    return common::SortedMultisetDisk<T, uint8_t>(
             nocleanup<typename common::SortedMultisetDisk<T>::storage_type>, thread_count,
-            container_size, "/tmp/test_chunk_", max_disk_space, on_item_pushed,
+            container_size, "/tmp/test_chunk_", max_disk_space,
             num_elements_cached);
 }
 
@@ -163,12 +159,12 @@ TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDup
     std::vector<std::thread> workers;
     std::vector<std::pair<TypeParam, uint8_t>> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
-        workers.push_back(std::thread([&underTest, i]() {
+        workers.emplace_back([&underTest, i]() {
             std::array<TypeParam, 2> elements = { TypeParam(3 * i), TypeParam(3 * i + 1) };
             underTest.insert(elements.begin(), elements.end());
             elements = { TypeParam(3 * i + 1), TypeParam(3 * i + 2) };
             underTest.insert(elements.begin(), elements.end());
-        }));
+        });
 
         expected_result.push_back(std::make_pair(TypeParam(3 * i), 1));
         expected_result.push_back(std::make_pair(TypeParam(3 * i + 1), 2));
@@ -179,7 +175,7 @@ TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDup
 }
 
 TYPED_TEST(SortedMultisetDiskTest, IterateBackwards) {
-    common::SortedMultisetDisk<TypeParam, TypeParam, uint8_t> underTest
+    common::SortedMultisetDisk<TypeParam, uint8_t> underTest
             = create_sorted_set_disk<TypeParam>(100, 10);
     using Pair = std::pair<TypeParam, uint8_t>;
     std::vector<Pair> expected_result;
@@ -220,10 +216,10 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeDisk) {
     // make sure we correctly count up to the max value of the counter
     // the container size is 8, so we are guaranteed to generate many chunk files that
     // will have to be merged and overflow handled correctly
-    common::SortedMultisetDisk<TypeParam, TypeParam, uint8_t> underTest
+    common::SortedMultisetDisk<TypeParam, uint8_t> underTest
             = create_sorted_set_disk<TypeParam>();
+    std::vector<TypeParam> values = { TypeParam(value) };
     for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
-        std::vector<TypeParam> values = { TypeParam(value) };
         underTest.insert(values.begin(), values.end());
     }
     expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
@@ -248,12 +244,10 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
     constexpr uint32_t container_size = 2 * std::numeric_limits<uint8_t>::max();
 
     constexpr size_t thread_count = 1;
-    auto on_item_pushed = [](const std::pair<TypeParam, uint8_t> &) {};
     constexpr size_t max_disk_space = 1e6;
-    common::SortedMultisetDisk<TypeParam, TypeParam, uint8_t> underTest(
+    common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
             nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
-            thread_count, container_size, "/tmp/test_chunk_", max_disk_space,
-            on_item_pushed, 2);
+            thread_count, container_size, "/tmp/test_chunk_", max_disk_space, 2);
     // make sure we correctly count up to the max value of the counter
     for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
         std::vector<TypeParam> values = { TypeParam(value) };
@@ -280,13 +274,11 @@ TYPED_TEST(SortedMultisetDiskTest, ExhaustMaxAllowedDiskSpace) {
     constexpr uint32_t container_size = 256;
 
     constexpr size_t thread_count = 1;
-    auto on_item_pushed = [](const std::pair<TypeParam, uint8_t> &) {};
     constexpr size_t max_disk_space
             = container_size * sizeof(std::pair<uint32_t, uint8_t>) * 2;
-    common::SortedMultisetDisk<TypeParam, TypeParam, uint8_t> underTest(
+    common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
             nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
-            thread_count, container_size, "/tmp/test_chunk_", max_disk_space,
-            on_item_pushed, 2);
+            thread_count, container_size, "/tmp/test_chunk_", max_disk_space, 2);
     std::vector<TypeParam> values(container_size / 1.5);
     std::iota(values.begin(), values.end(), 0);
     // these values will fill the buffer and write to disk filling half the allowed space

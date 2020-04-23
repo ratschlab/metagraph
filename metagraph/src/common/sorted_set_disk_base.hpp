@@ -35,12 +35,11 @@ namespace common {
  * @tparam INT the corresponding integer representation of T, used for compressed storage
  * on disk
  */
-template <typename T, typename INT>
+template <typename T>
 class SortedSetDiskBase {
     typedef T value_type;
-    typedef INT int_type;
-    typedef Vector<value_type> storage_type;
-    typedef ChunkedWaitQueue<value_type> result_type;
+    typedef Vector<T> storage_type;
+    typedef ChunkedWaitQueue<T> result_type;
     typedef typename storage_type::iterator Iterator;
 
     /**
@@ -55,19 +54,14 @@ class SortedSetDiskBase {
                       size_t reserved_num_elements,
                       const std::filesystem::path &tmp_dir,
                       size_t max_disk_space_bytes,
-                      std::function<void(const T &)> on_item_pushed,
-                      size_t num_last_elements_cached,
-                      std::function<int_type(const value_type &v)> to_int)
+                      size_t num_last_elements_cached)
         : num_threads_(num_threads),
           reserved_num_elements_(reserved_num_elements),
           max_disk_space_bytes_(max_disk_space_bytes),
-          on_item_pushed_(on_item_pushed),
-          chunk_file_prefix_(tmp_dir / "chunk_"),
+          chunk_file_prefix_(tmp_dir/"chunk_"),
           merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
-                       num_last_elements_cached,
-                       on_item_pushed),
-          cleanup_(cleanup),
-          to_int_(to_int) {
+                       num_last_elements_cached),
+          cleanup_(cleanup) {
         std::filesystem::create_directory(tmp_dir);
         if (reserved_num_elements == 0) {
             logger->error("SortedSetDisk buffer cannot have size 0");
@@ -77,7 +71,11 @@ class SortedSetDiskBase {
     }
 
     virtual ~SortedSetDiskBase() {
-        merge_queue_.shutdown(); // make sure the data was processed
+        // remove the files that have not been requested to merge
+        for (const auto &chunk_file : get_file_names()) {
+            std::filesystem::remove(chunk_file);
+        }
+        async_worker_.join(); // make sure the data was processed
     }
 
     size_t buffer_size() const { return data_.capacity(); }
@@ -86,7 +84,7 @@ class SortedSetDiskBase {
      * Returns the globally sorted and counted data. Typically called once all the data
      * was inserted via insert().
      */
-    ChunkedWaitQueue<T> &data() {
+    ChunkedWaitQueue<T>& data(bool free_buffer = true) {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
 
@@ -97,8 +95,14 @@ class SortedSetDiskBase {
                 sort_and_remove_duplicates(&data_, num_threads_);
                 dump_to_file(true /* is_done */);
             }
-            Vector<T>().swap(data_); // free up the (usually very large) buffer
-            start_merging();
+            if (free_buffer) {
+                Vector<T>().swap(data_); // free up the (usually very large) buffer
+            }
+            assert(data_.empty());
+            start_merging_async();
+            chunk_count_ = 0;
+            l1_chunk_count_ = 0;
+            total_chunk_size_bytes_ = 0;
         }
         return merge_queue_;
     }
@@ -119,39 +123,41 @@ class SortedSetDiskBase {
 
     /**
      * Clears the set, preparing it to be re-used for another merge. Creating a new
-     * sorted set may be expensive when #data_ is large. In these cases, prefere calling
-     * #clear and re-using the sorted.
+     * sorted set may be expensive when #data_ is large. In these cases, prefer calling
+     * #clear and re-using the buffer.
      */
     void clear(const std::filesystem::path &tmp_path = "/tmp/") {
         std::unique_lock<std::mutex> exclusive_lock(mutex_);
         std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
         is_merging_ = false;
+        // remove the files that have not been requested to merge
+        for (const auto &chunk_file : get_file_names()) {
+            std::filesystem::remove(chunk_file);
+        }
         chunk_count_ = 0;
         l1_chunk_count_ = 0;
         total_chunk_size_bytes_ = 0;
         try_reserve(reserved_num_elements_);
         data_.resize(0); // this makes sure the buffer is not reallocated
-        chunk_file_prefix_ = tmp_path / "chunk_";
+        chunk_file_prefix_ = tmp_path/"chunk_";
         std::filesystem::create_directory(tmp_path);
-        merge_queue_.reset(on_item_pushed_);
     }
 
   protected: // TODO: move most of these methods to private before submitting
     virtual void sort_and_remove_duplicates(storage_type *vector,
                                             size_t num_threads) const = 0;
 
-    void start_merging() {
-        const std::vector<std::string> file_names = this->get_file_names();
-        this->async_worker_.enqueue([file_names, this]() {
-          std::function<void(const value_type &)> on_new_item
-                  = [this](const value_type &v) { this->merge_queue_.push(v); };
-          if constexpr (utils::is_pair<T> {}) {
-              merge_files<typename T::first_type, typename T::second_type,
-                          typename INT::first_type>(file_names, on_new_item);
-          } else {
-              merge_files<T, INT>(file_names, on_new_item);
-          }
-          this->merge_queue_.shutdown();
+    void start_merging_async() {
+        // wait until the previous merging job is done
+        async_worker_.join();
+        // now the queue can be reinitialized and used in the next merge
+        merge_queue_.reset();
+        const std::vector<std::string> file_names = get_file_names();
+        async_worker_.enqueue([file_names, this]() {
+            std::function<void(const T &)> on_new_item
+                    = [this](const T &v) { merge_queue_.push(v); };
+            merge_files(file_names, on_new_item);
+            merge_queue_.shutdown();
         });
     }
 
@@ -172,46 +178,41 @@ class SortedSetDiskBase {
      * @param is_done if this is the last chunk being dumped
      */
     void dump_to_file(bool is_done) {
-        assert(!this->data_.empty());
+        assert(!data_.empty());
 
-        std::string file_name
-                = this->chunk_file_prefix_ + std::to_string(this->chunk_count_);
+        std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
 
-        EliasFanoEncoder<INT> encoder(this->data_.size(),
-                                      utils::get_first(to_int_(this->data_.front())),
-                                      utils::get_first(to_int_(this->data_.back())),
-                                      file_name);
-        for (const auto &v : this->data_) {
-            encoder.add(to_int_(v));
+        EliasFanoEncoder<T> encoder(data_.size(), utils::get_first(data_.front()),
+                                    utils::get_first(data_.back()), file_name);
+        for (const auto &v : data_) {
+            encoder.add(v);
         }
-        this->total_chunk_size_bytes_ += encoder.finish();
-        this->data_.resize(0);
+        total_chunk_size_bytes_ += encoder.finish();
+        data_.resize(0);
         if (is_done) {
-            this->async_merge_l1_.remove_waiting_tasks();
-        } else if (this->total_chunk_size_bytes_ > this->max_disk_space_bytes_) {
-            this->async_merge_l1_.remove_waiting_tasks();
-            this->async_merge_l1_.join();
-            std::string all_merged_file = this->chunk_file_prefix_ + "_all.tmp";
-            this->chunk_count_++; // needs to be incremented, so that get_file_names()
+            async_merge_l1_.remove_waiting_tasks();
+        } else if (total_chunk_size_bytes_ > max_disk_space_bytes_) {
+            async_merge_l1_.remove_waiting_tasks();
+            async_merge_l1_.join();
+            std::string all_merged_file = chunk_file_prefix_ + "_all.tmp";
+            chunk_count_++; // needs to be incremented, so that get_file_names()
             // returns correct values
-            this->merge_all(all_merged_file, this->get_file_names(), to_int_);
-            this->merged_all_ = true;
-            this->total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
-            if (this->total_chunk_size_bytes_ > this->max_disk_space_bytes_ * 0.8) {
+            merge_all(all_merged_file, get_file_names());
+            merged_all_ = true;
+            total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
+            if (total_chunk_size_bytes_ > max_disk_space_bytes_ * 0.8) {
                 logger->critical("Disk space reduced by < 20%. Giving up.");
                 std::exit(EXIT_FAILURE);
             }
-            std::filesystem::rename(all_merged_file,
-                                    this->merged_all_name(this->chunk_file_prefix_));
-            this->chunk_count_ = 0;
-            this->l1_chunk_count_ = 0;
+            std::filesystem::rename(all_merged_file, merged_all_name(chunk_file_prefix_));
+            chunk_count_ = 0;
+            l1_chunk_count_ = 0;
             return;
-        } else if ((this->chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
-            this->async_merge_l1_.enqueue(this->merge_l1, this->chunk_file_prefix_,
-                                          this->chunk_count_, &this->l1_chunk_count_,
-                                          &this->total_chunk_size_bytes_, to_int_);
+        } else if ((chunk_count_ + 1) % MERGE_L1_COUNT == 0) {
+            async_merge_l1_.enqueue(merge_l1, chunk_file_prefix_, chunk_count_,
+                                    &l1_chunk_count_, &total_chunk_size_bytes_);
         }
-        this->chunk_count_++;
+        chunk_count_++;
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
@@ -237,7 +238,7 @@ class SortedSetDiskBase {
     template <typename Iterator>
     Iterator safe_advance(const Iterator &it, const Iterator &end, size_t step) {
         assert(it <= end);
-        return static_cast<size_t>(end - it) < this->buffer_size() ? end : it + step;
+        return static_cast<size_t>(end - it) < buffer_size() ? end : it + step;
     }
 
     /**
@@ -287,8 +288,6 @@ class SortedSetDiskBase {
 
     size_t max_disk_space_bytes_;
 
-    std::function<void(const T &)> on_item_pushed_;
-
     std::string chunk_file_prefix_;
 
     /**
@@ -325,8 +324,6 @@ class SortedSetDiskBase {
 
     bool merged_all_ = false;
 
-    std::function<int_type(const value_type &v)> to_int_;
-
   private:
     /** Number of chunks for "level 1" intermediary merging. */
     static constexpr uint32_t MERGE_L1_COUNT = 4;
@@ -342,11 +339,10 @@ class SortedSetDiskBase {
     static void merge_l1(const std::string &chunk_file_prefix,
                          uint32_t chunk_count,
                          std::atomic<uint32_t> *l1_chunk_count,
-                         std::atomic<size_t> *total_size,
-                         std::function<int_type(const value_type &v)> to_int) {
+                         std::atomic<size_t> *total_size) {
         const std::string &merged_l1_file_name
-                = SortedSetDiskBase<value_type, INT>::merged_l1_name(
-                        chunk_file_prefix, chunk_count / MERGE_L1_COUNT);
+                = SortedSetDiskBase<T>::merged_l1_name(chunk_file_prefix,
+                                                       chunk_count / MERGE_L1_COUNT);
         std::vector<std::string> to_merge(MERGE_L1_COUNT);
         for (uint32_t i = 0; i < MERGE_L1_COUNT; ++i) {
             to_merge[i] = chunk_file_prefix + std::to_string(chunk_count - i);
@@ -354,15 +350,10 @@ class SortedSetDiskBase {
         }
         logger->trace("Starting merging last {} chunks into {}", MERGE_L1_COUNT,
                       merged_l1_file_name);
-        EliasFanoEncoderBuffered<int_type> encoder(merged_l1_file_name, 1000);
-        std::function<void(const value_type &v)> on_new_item
-                = [&encoder, to_int](const value_type &v) { encoder.add(to_int(v)); };
-        if constexpr (utils::is_pair<T> {}) {
-            merge_files<typename T::first_type, typename T::second_type, typename INT::first_type>(
-                    to_merge, on_new_item);
-        } else {
-            merge_files<T, INT>(to_merge, on_new_item);
-        }
+        EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, 1000);
+        std::function<void(const T &v)> on_new_item
+                = [&encoder](const T &v) { encoder.add(v); };
+        merge_files(to_merge, on_new_item);
         encoder.finish();
 
         (*l1_chunk_count)++;
@@ -372,23 +363,17 @@ class SortedSetDiskBase {
     }
 
     static void merge_all(const std::string &out_file,
-                          const std::vector<std::string> &to_merge,
-                          std::function<int_type(const value_type &v)> to_int) {
+                          const std::vector<std::string> &to_merge) {
         std::ofstream merged_count_file(out_file + ".count",
                                         std::ios::binary | std::ios::out);
         logger->trace(
                 "Max allocated disk capacity exceeded. Starting merging all {} chunks "
                 "into {}",
                 to_merge.size(), out_file);
-        EliasFanoEncoderBuffered<int_type> encoder(out_file, 1000);
-        std::function<void(const value_type &v)> on_new_item
-                = [&encoder, to_int](const value_type &v) { encoder.add(to_int(v)); };
-        if constexpr (utils::is_pair<T> {}) {
-            merge_files<typename T::first_type, typename T::second_type, typename INT::first_type>(
-                    to_merge, on_new_item);
-        } else {
-            merge_files<T, INT>(to_merge, on_new_item);
-        }
+        EliasFanoEncoderBuffered<T> encoder(out_file, 1000);
+        std::function<void(const T &v)> on_new_item
+                = [&encoder](const T &v) { encoder.add(v); };
+        merge_files(to_merge, on_new_item);
         encoder.finish();
         logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
                       to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);

@@ -26,6 +26,9 @@ class EliasFanoEncoder {
     static constexpr uint32_t WRITE_BUF_SIZE = 1024;
     EliasFanoEncoder() {}
 
+    EliasFanoEncoder(EliasFanoEncoder&&) = delete;
+    EliasFanoEncoder& operator=(EliasFanoEncoder&&) = delete;
+
     /**
      * Constructs an Elias-Fano encoder of an array with the given #size and given
      * #max_value. The encoded output is written to #out_filename.
@@ -140,6 +143,7 @@ class EliasFanoEncoder {
 template <typename T>
 class EliasFanoDecoder {
     static constexpr uint32_t READ_BUF_SIZE = 1024;
+    static_assert( std::is_integral_v<T> || std::is_same_v<T, sdsl::uint256_t>);
 
   public:
     EliasFanoDecoder() {}
@@ -210,18 +214,14 @@ class EliasFanoDecoder {
     std::string source_name_;
 
     /**
-     * Stream containing the compressed data. Points to either #source_internal_ or to
-     * a stream provided in the constructor
+     * Stream containing the compressed data.
      */
-    std::ifstream *source_;
+    std::ifstream source_;
     /**
      * Stream containing the upper bytes of the compressed data (saved separately to avoid
      * costly tellg/seekg operations in the file.
      */
-    std::ifstream *source_upper_;
-
-    std::ifstream source_internal_;
-    std::ifstream source_internal_upper_;
+    std::ifstream source_upper_;
 
     /** Value to add to each decoded element */
     T offset_;

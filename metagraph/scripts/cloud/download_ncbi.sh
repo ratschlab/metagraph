@@ -21,12 +21,12 @@ set -e
 
 trap "exit" INT
 sra_bucket=$1
-sra_number=$2
+sra_id=$2
 download_dir=$3
 
 download_dir=${download_dir%/}  # remove trailing slash, if present
 
-output_dir="${download_dir}/${sra_number}"
+output_dir="${download_dir}/${sra_id}"
 sra_dir="${output_dir}/sra"
 fastq_dir="${output_dir}/fastq"
 tmp_dir="${output_dir}/tmp"
@@ -39,9 +39,9 @@ mkdir -p "${fastq_dir}"
 mkdir -p "${kmc_dir}"
 
 if ! [ -f "${sra_dir}" ]; then
-  execute gsutil -q -u metagraph  cp "gs://sra-pub-run-${sra_bucket}/${sra_number}/*" "${sra_dir}/"
+  execute gsutil -q -u metagraph  cp "gs://sra-pub-run-${sra_bucket}/${sra_id}/*" "${sra_dir}/"
 else
-  echo "${sra_number} already downloaded"
+  echo "${sra_id} already downloaded"
 fi
 
 exit_code=0
@@ -52,13 +52,13 @@ for sra_file in $(ls -p "${sra_dir}"); do
   fi
   rm -rf "${tmp_dir}/*"
   if (( exit_code != 0 )); then
-    echo_err "Download of $sra_number failed"
+    echo_err "[$sra_id] Download failed"
     exit $exit_code
   fi
 done
 
 if [ -z "$(ls -A ${sra_dir})" ]; then
-  echo_err "No SRA files available. Good-bye."
+  echo_err "[$sra_id] No SRA files available. Good-bye."
   exit 1
 fi
 
@@ -68,14 +68,26 @@ for i in $(ls -p "${fastq_dir}"); do
 done
 bin_count=$(( $(ulimit -n) - 10))
 kmc_output="${output_dir}/stats"
-execute kmc -k31 -ci1 -m2 -fq -cs65535 -n$bin_count -j$kmc_output @${kmc_input} ${kmc_dir}/${sra_number}.kmc $tmp_dir
+execute kmc -k31 -ci1 -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "${tmp_dir}"
 unique_kmers=$(jq -r ' .Stats | ."#Unique_k-mers"' $kmc_output)
 total_kmers=$(jq -r ' .Stats | ."#Total no. of k-mers"' $kmc_output)
 coverage=$((total_kmers/unique_kmers))
 if ((coverage >= 5)); then
-  echo "Coverage is $coverage, eliminating singletons"
-  execute kmc -k31 -ci2 -m2 -fq -cs65535 -n$bin_count -j$kmc_output @${kmc_input} ${kmc_dir}/${sra_number}.kmc $tmp_dir
+  echo "[$sra_id] Coverage is $coverage, eliminating singletons"
+  execute kmc -k31 -ci2 -m2 -fq -cs65535 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "$tmp_dir"
+else
+  echo "[$sra_id] Coverage is $coverage, keeping singletons"
 fi
+# edit the KMC output and add the coverage property (this will also eliminate all stuff except for 'Stats')
+jq --arg cov $coverage  '.Stats | ."#k-mers_coverage" = $cov' $kmc_output > $tmp_dir/stats
+mv $tmp_dir/stats $kmc_output
+# just to be on the safe side, set the singleton count to 0 (i.e. "not set") if we don't remove singletons
+if ((coverage < 5)); then
+  jq '."#k-mers_below_min_threshold" = 0' $kmc_output > $tmp_dir/stats
+  mv $tmp_dir/stats $kmc_output
+fi
+
+echo singleton_kmers > "${kmc_dir}/${sra_id}.stats"
 rm -rf "${tmp_dir}" "${fastq_dir}"
 
 exit $exit_code

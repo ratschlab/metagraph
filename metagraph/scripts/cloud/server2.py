@@ -97,7 +97,7 @@ def internal_ip():
 def publish_ip():
     with open('/tmp/server', 'w') as fp:
         fp.write(f'{internal_ip()}:{args.port}')
-    if subprocess.call(['gsutil', 'cp', '/tmp/server', 'gs://mg21/server'], stdout=subprocess.PIPE,
+    if subprocess.call(['gsutil', 'cp', '/tmp/server', args.server_info], stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE) != 0:
         logging.error("Cannot publish server ip/port on Google Cloud Storage. Sorry, I tried.")
         exit(1)
@@ -330,6 +330,8 @@ def load_file_set(filename):
     try:
         with open(filename) as fp:
             for line in fp:
+                if len(line.rstrip()) == 0:
+                    continue
                 tokens = line.split()
                 assert len(tokens) == 1, f'Invalid line in downloads sras {line}'
                 result.add(tokens[0])
@@ -363,13 +365,23 @@ def init_state():
             if exc.errno != errno.EEXIST:
                 raise
     global downloaded_sras, built_sras, cleaned_sras, transferred_sras
-    downloaded_sras = load_file_set(filename)
-    built_sras = load_file_set(os.path.join(args.output_dir, 'succeed_build.id'))
-    cleaned_sras = load_file_set(os.path.join(args.output_dir, 'succeed_clean.id'))
-    transferred_sras = load_file_set(os.path.join(args.output_dir, 'succeed_transfer.id'))
+    state_map = {'downloaded': load_file_set(filename),
+                 'built': load_file_set(os.path.join(args.output_dir, 'succeed_build.id')),
+                 'cleaned': load_file_set(os.path.join(args.output_dir, 'succeed_clean.id')),
+                 'transferred': load_file_set(os.path.join(args.output_dir, 'succeed_transfer.id')),
+                 '!downloaded': load_file_set(os.path.join(args.output_dir, 'failed_download.id')),
+                 '!built': load_file_set(os.path.join(args.output_dir, 'failed_build.id')),
+                 '!cleaned': load_file_set(os.path.join(args.output_dir, 'failed_clean.id')),
+                 '!transferred': load_file_set(os.path.join(args.output_dir, 'failed_transfer.id'))}
 
+    checkpoint = args.checkpoint.split('|')
+    to_eliminate = set()
+    for state in checkpoint:
+        if len(state_map[state]) != 0:
+            logging.info('Eliminating: ' + state)
+        to_eliminate.update(state_map[state])
     global sra_download_gen
-    sra_download_gen = buckets.Sra(data_files, args.add_gcloud_bucket, args.data_dir, downloaded_sras).next_item()
+    sra_download_gen = buckets.Sra(data_files, args.add_gcloud_bucket, args.data_dir, to_eliminate).next_item()
 
 
 def init_logging():
@@ -410,7 +422,13 @@ def parse_args():
         help='Location of the directory containing the input data')
     parser.add_argument('--add_gcloud_bucket', default=True,
                         help='Whether to add the NCBI gcloud bucket id for each sra')
+    # leave this to 1 to avoid race conditions, or fix race conditions :)
     parser.add_argument('--worker_count', default=1, help='Number of workers processing data')
+    parser.add_argument('--checkpoint', default='transferred|!downloaded|!built|!cleaned',
+                        help='Which checkpointed SRAs to eliminate from processing, '
+                             'a combination of downloaded/built/cleaned/transferred optionally preceded by !')
+    parser.add_argument('--server_info', default='gs://metagraph-test/server',
+                        help='Where to publish the server host/port on gcs')
 
     global args
     args = parser.parse_args()
