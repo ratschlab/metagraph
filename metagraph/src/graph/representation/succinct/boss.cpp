@@ -287,36 +287,36 @@ bool BOSS::load(std::ifstream &instream) {
 
 void BOSS::serialize_suffix_ranges(std::ofstream &outstream) const {
     // dump node range index
-    serialize_number(outstream, cached_suffix_length_);
+    serialize_number(outstream, indexed_suffix_length_);
 
-    outstream.write(reinterpret_cast<const char *>(cached_suffix_ranges_.data()),
-                    cached_suffix_ranges_.size()
-                        * sizeof(decltype(cached_suffix_ranges_)::value_type));
+    outstream.write(reinterpret_cast<const char *>(indexed_suffix_ranges_.data()),
+                    indexed_suffix_ranges_.size()
+                        * sizeof(decltype(indexed_suffix_ranges_)::value_type));
 }
 
 bool BOSS::load_suffix_ranges(std::ifstream &instream) {
     // load node suffix range index if exists
     try {
-        cached_suffix_length_ = load_number(instream);
-        if (!cached_suffix_length_ || cached_suffix_length_ > k_)
-            throw std::ifstream::failure("Bad data");
+        indexed_suffix_length_ = load_number(instream);
+        if (!indexed_suffix_length_ || indexed_suffix_length_ > k_)
+            throw std::ifstream::failure("");
 
-        uint64_t index_size = std::pow(alph_size - 1, cached_suffix_length_);
+        uint64_t index_size = std::pow(alph_size - 1, indexed_suffix_length_);
 
-        cached_suffix_ranges_.resize(index_size);
+        indexed_suffix_ranges_.resize(index_size);
 
-        instream.read(reinterpret_cast<char *>(cached_suffix_ranges_.data()),
-                      cached_suffix_ranges_.size()
-                        * sizeof(decltype(cached_suffix_ranges_)::value_type));
+        instream.read(reinterpret_cast<char *>(indexed_suffix_ranges_.data()),
+                      indexed_suffix_ranges_.size()
+                        * sizeof(decltype(indexed_suffix_ranges_)::value_type));
 
         if (!instream.good())
-            throw std::ifstream::failure("Bad stream");
+            throw std::ifstream::failure("");
 
         return true;
 
     } catch(...) {
-        cached_suffix_length_ = 0;
-        cached_suffix_ranges_.clear();
+        indexed_suffix_length_ = 0;
+        indexed_suffix_ranges_.clear();
         return false;
     }
 }
@@ -810,8 +810,8 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
     std::vector<TAlphabet> ret(k_);
     size_t i = k_;
 
-    if (cached_suffix_length_) {
-        while (i > cached_suffix_length_) {
+    if (indexed_suffix_length_) {
+        while (i > indexed_suffix_length_) {
             CHECK_INDEX(x);
 
             ret[--i] = get_node_last_value(x);
@@ -819,16 +819,16 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
         }
 
         auto it = std::lower_bound(
-            cached_suffix_ranges_.begin(),
-            cached_suffix_ranges_.end(),
+            indexed_suffix_ranges_.begin(),
+            indexed_suffix_ranges_.end(),
             x,
             [](const auto &range, edge_index edge) { return (range.second < edge); }
         );
 
-        if (it != cached_suffix_ranges_.end() && it->first <= x) {
+        if (it != indexed_suffix_ranges_.end() && it->first <= x) {
             assert(x <= it->second);
-            uint64_t index = it - cached_suffix_ranges_.begin();
-            for (i = 0; i < cached_suffix_length_; ++i) {
+            uint64_t index = it - indexed_suffix_ranges_.begin();
+            for (i = 0; i < indexed_suffix_length_; ++i) {
                 uint64_t next_index = index / (alph_size - 1);
                 ret[i] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
@@ -2312,27 +2312,28 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
     }
 }
 
-void BOSS::cache_node_suffix_ranges(size_t suffix_length) {
+void BOSS::index_suffix_ranges(size_t suffix_length) {
     assert(suffix_length <= k_);
 
-    cached_suffix_length_ = suffix_length;
-    cached_suffix_ranges_.clear();
+    indexed_suffix_length_ = suffix_length;
+    indexed_suffix_ranges_.clear();
 
-    if (cached_suffix_length_ == 0u)
+    if (indexed_suffix_length_ == 0u)
         return;
 
-    if (cached_suffix_length_ * log2(alph_size - 1) >= 64)
-        throw std::runtime_error("ERROR: Trying to cache too long suffixes");
+    if (indexed_suffix_length_ * log2(alph_size - 1) >= 64)
+        throw std::runtime_error("ERROR: Trying to index too long suffixes");
 
-    // first, take suffixes of length 1
     std::vector<std::tuple<uint64_t, edge_index, edge_index>> suffix_ranges;
+
+    // first, take empty suffix and the entire range of nodes in the BOSS table
+    uint64_t num_suffixes = 1;
     suffix_ranges.emplace_back(0, 1, W_->size() - 1);
 
     // grow the suffix length up to |suffix_length - 1|
-    uint64_t msd = 1;
-    for (size_t len = 1; len < cached_suffix_length_; ++len) {
-        std::vector<std::tuple<uint64_t, edge_index, edge_index>> narrowed_ranges;
-        narrowed_ranges.reserve(suffix_ranges.size() * (alph_size - 1));
+    for (size_t len = 1; len < indexed_suffix_length_; ++len) {
+        std::vector<std::tuple<uint64_t, edge_index, edge_index>> narrowed;
+        narrowed.reserve(suffix_ranges.size() * (alph_size - 1));
 
         for (const auto &[idx, rl, ru] : suffix_ranges) {
             // prepend the suffix with one of the |alph_size - 1| possible characters
@@ -2345,17 +2346,21 @@ void BOSS::cache_node_suffix_ranges(size_t suffix_length) {
 
                 edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
                 edge_index ru_next = select_last(NF_[c] + rk_ru);
-                assert(idx < msd);
-                narrowed_ranges.emplace_back(idx + msd * (c - 1), rl_next, ru_next);
+                assert(idx < num_suffixes);
+                narrowed.emplace_back(idx + num_suffixes * (c - 1),
+                                      rl_next, ru_next);
             }
         }
-        std::swap(narrowed_ranges, suffix_ranges);
-        msd *= (alph_size - 1);
+        suffix_ranges.swap(narrowed);
+        num_suffixes *= (alph_size - 1);
     }
 
-    // grow the suffix length the last time and build the final cache
-    cached_suffix_ranges_.assign(std::pow(alph_size - 1, cached_suffix_length_),
-                                 std::pair<edge_index, edge_index>(W_->size(), 0));
+    // grow the suffix length the last time and build the final index
+    indexed_suffix_ranges_.assign(suffix_ranges.size() * (alph_size - 1),
+                                  std::pair<edge_index, edge_index>(W_->size(), 0));
+
+    assert(indexed_suffix_ranges_.size()
+            == std::pow(alph_size - 1, indexed_suffix_length_));
 
     for (const auto &[idx, rl, ru] : suffix_ranges) {
         // prepend the suffix with one of the |alph_size - 1| possible characters
@@ -2368,21 +2373,22 @@ void BOSS::cache_node_suffix_ranges(size_t suffix_length) {
 
             edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
             edge_index ru_next = select_last(NF_[c] + rk_ru);
-            assert(idx < msd);
-            cached_suffix_ranges_[idx + msd * (c - 1)]
+            assert(idx < num_suffixes);
+            indexed_suffix_ranges_[idx + num_suffixes * (c - 1)]
                 = std::make_pair(rl_next, ru_next);
         }
     }
 
-    // make the upper bounds smooth so we can use binary search on them
-    for (size_t i = 1; i < cached_suffix_ranges_.size(); ++i) {
-        if (!cached_suffix_ranges_[i].second) {
-            cached_suffix_ranges_[i].second = cached_suffix_ranges_[i - 1].second;
-            cached_suffix_ranges_[i].first = cached_suffix_ranges_[i - 1].second + 1;
+    // aline the upper bounds to enable the binary search on them
+    for (size_t i = 1; i < indexed_suffix_ranges_.size(); ++i) {
+        if (!indexed_suffix_ranges_[i].second) {
+            // shift the upper bounds of the empty ranges but still keep them empty
+            indexed_suffix_ranges_[i].second = indexed_suffix_ranges_[i - 1].second;
+            indexed_suffix_ranges_[i].first = indexed_suffix_ranges_[i - 1].second + 1;
         }
     }
-    assert(std::is_sorted(cached_suffix_ranges_.begin(),
-                          cached_suffix_ranges_.end(),
+    assert(std::is_sorted(indexed_suffix_ranges_.begin(),
+                          indexed_suffix_ranges_.end(),
                           utils::LessSecond()));
 }
 

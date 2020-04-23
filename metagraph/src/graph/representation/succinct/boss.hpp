@@ -68,6 +68,10 @@ class BOSS {
     bool load(std::ifstream &instream);
     void serialize(std::ofstream &outstream) const;
 
+    /**
+     * Load the index of node ranges constructed with index_suffix_ranges()
+     * to speed up the search in the BOSS table.
+     */
     bool load_suffix_ranges(std::ifstream &instream);
     void serialize_suffix_ranges(std::ofstream &outstream) const;
 
@@ -236,11 +240,14 @@ class BOSS {
     std::pair<TAlphabet, edge_index> get_minus_k_value(edge_index i, size_t k) const;
 
     /**
-     * Hash ranges of nodes with all possible suffixes (alph_size-1)^t
+     * Index ranges of nodes for all possible suffixes (alph_size-1)^t
+     * Suffixes with sentinel characters are not indexed.
+     * After the index is constructed, it speeds up search in the BOSS table
+     * by narrowing down the initial node range and skipping several fwd calls.
      */
-    void cache_node_suffix_ranges(size_t suffix_length);
+    void index_suffix_ranges(size_t suffix_length);
 
-    size_t get_cached_suffix_length() const { return cached_suffix_length_; }
+    size_t get_indexed_suffix_length() const { return indexed_suffix_length_; }
 
     /**
      * Print current representation of the graph to stream.
@@ -424,50 +431,29 @@ class BOSS {
         if (std::find(begin, end, alph_size) != end)
             return std::make_tuple((edge_index)0, (edge_index)0, begin);
 
-        // get first
-        TAlphabet s = *begin;
+        // get the initial node range
+        auto [rl, ru, offset] = get_initial_range(begin, end);
+        if (rl > ru) {
+            // start search from scratch
+            TAlphabet s = *begin;
 
-        // initial range
-        edge_index rl = F_.at(s) + 1 < W_->size()
-                        ? F_.at(s) + 1
-                        : W_->size(); // lower bound
-        edge_index ru = s + 1 < alph_size
-                        ? F_[s + 1]
-                        : W_->size() - 1; // upper bound
-        if (rl > ru)
-            return std::make_tuple((edge_index)0, (edge_index)0, begin);
+            rl = F_.at(s) + 1 < W_->size()
+                    ? F_.at(s) + 1
+                    : W_->size(); // lower bound
+            ru = s + 1 < alph_size
+                    ? F_[s + 1]
+                    : W_->size() - 1; // upper bound
 
-        if (cached_suffix_length_
-                && begin + cached_suffix_length_ <= end
-                // only node suffixes without sentinels are cached
-                && !std::count(begin, begin + cached_suffix_length_, kSentinelCode)) {
-            // find range of nodes with suffixes matching
-            // prefix [begin, begin + cached_suffix_length_)
-            uint64_t index = 0;
-            // use the co-lex order to assign close indexes to suffixes of
-            // nodes close in the boss table
-            for (auto it = begin + cached_suffix_length_ - 1, end = begin - 1; it != end; --it) {
-                assert(*it && *it < alph_size);
-                // shift the alphabet: suffixes with sentinels '$' are not cached
-                index = index * (alph_size - 1) + (*it - 1);
-            }
+            if (rl > ru)
+                return std::make_tuple((edge_index)0, (edge_index)0, begin);
 
-            // query range
-            auto [first, last] = cached_suffix_ranges_[index];
-
-            if (first <= last) {
-                // there are (range_end - range_begin) nodes in the boss table
-                // with suffixes equal to the searched prefix
-                rl = first;
-                ru = last;
-                begin += cached_suffix_length_ - 1;
-            }
+            offset = 1;
         }
 
-        auto it = begin + 1;
+        auto it = begin + offset;
         // update range iteratively while scanning through s
         for (; it != end; ++it) {
-            s = *it;
+            TAlphabet s = *it;
 
             // Tighten the range including all edges where
             // the source nodes have the given suffix.
@@ -518,8 +504,8 @@ class BOSS {
 
     State state = State::DYN;
 
-    size_t cached_suffix_length_ = 0;
-    std::vector<std::pair<edge_index, edge_index>> cached_suffix_ranges_;
+    size_t indexed_suffix_length_ = 0;
+    std::vector<std::pair<edge_index, edge_index>> indexed_suffix_ranges_;
 
     /**
      * This function gets a character c and updates the edge offsets F_
@@ -581,6 +567,51 @@ class BOSS {
                 : npos;
     }
 
+    template <typename RandomAccessIt>
+    inline std::tuple<edge_index, edge_index, size_t>
+    get_initial_range(RandomAccessIt begin, RandomAccessIt end) const {
+        assert(std::all_of(begin, end, [&](TAlphabet c) { return c < alph_size; }));
+
+        // node range
+        edge_index rl, ru;
+        size_t offset;
+
+        if (indexed_suffix_length_
+                && begin + indexed_suffix_length_ <= end
+                // only node suffixes without sentinels are indexed
+                && !std::count(begin, begin + indexed_suffix_length_, kSentinelCode)) {
+            // find range of nodes with suffixes matching
+            // prefix [begin, begin + indexed_suffix_length_)
+            uint64_t index = 0;
+            // use the co-lex order to assign close indexes to suffixes of
+            // nodes close in the boss table
+            for (auto it = begin + indexed_suffix_length_ - 1, end = begin - 1; it != end; --it) {
+                assert(*it && *it < alph_size);
+                // shift the alphabet: suffixes with sentinels '$' are not indexed
+                index = index * (alph_size - 1) + (*it - 1);
+            }
+
+            // query range
+            std::tie(rl, ru) = indexed_suffix_ranges_[index];
+            offset = indexed_suffix_length_;
+
+        } else {
+            // get first
+            TAlphabet s = *begin;
+            // use the initial range
+            rl = F_.at(s) + 1 < W_->size()
+                 ? F_.at(s) + 1
+                 : W_->size(); // lower bound
+            ru = s + 1 < alph_size
+                 ? F_[s + 1]
+                 : W_->size() - 1; // upper bound
+
+            offset = 1;
+        }
+
+        return std::make_tuple(rl, ru, offset);
+    }
+
     /**
      * Given a k-mer, this function returns the index of last edge going out
      * from the k-mer's corresponding node, if such a node exists and 0 otherwise.
@@ -596,48 +627,14 @@ class BOSS {
         if (std::find(begin, end, alph_size) != end)
             return npos;
 
-        // get first
-        TAlphabet s = *begin;
-
-        // node range
-        edge_index rl, ru;
-
-        if (cached_suffix_length_
-                && begin + cached_suffix_length_ <= end
-                // only node suffixes without sentinels are cached
-                && !std::count(begin, begin + cached_suffix_length_, kSentinelCode)) {
-            // find range of nodes with suffixes matching
-            // prefix [begin, begin + cached_suffix_length_)
-            uint64_t index = 0;
-            // use the co-lex order to assign close indexes to suffixes of
-            // nodes close in the boss table
-            for (auto it = begin + cached_suffix_length_ - 1, end = begin - 1; it != end; --it) {
-                assert(*it && *it < alph_size);
-                // shift the alphabet: suffixes with sentinels '$' are not cached
-                index = index * (alph_size - 1) + (*it - 1);
-            }
-
-            // query range
-            std::tie(rl, ru) = cached_suffix_ranges_[index];
-            begin += cached_suffix_length_ - 1;
-
-        } else {
-            // use the initial range
-            rl = F_.at(s) + 1 < W_->size()
-                 ? F_.at(s) + 1
-                 : W_->size(); // lower bound
-            ru = s + 1 < alph_size
-                 ? F_[s + 1]
-                 : W_->size() - 1; // upper bound
-        }
-
+        // get the initial node range
+        auto [rl, ru, offset] = get_initial_range(begin, end);
         if (rl > ru)
             return npos;
 
-        auto it = begin + 1;
         // update range iteratively while scanning through s
-        for (; it != end; ++it) {
-            s = *it;
+        for (auto it = begin + offset; it != end; ++it) {
+            TAlphabet s = *it;
 
             // Tighten the range including all edges where
             // the source nodes have the given suffix.
