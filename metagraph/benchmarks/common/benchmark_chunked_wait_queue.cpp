@@ -9,8 +9,8 @@
 
 #include "common/threads/chunked_wait_queue.hpp"
 
-constexpr size_t ITEM_COUNT = 100'000;
 const std::string chunk_prefix = "/tmp/chunk_";
+
 
 template <typename T>
 static void BM_queue_push_pop(benchmark::State &state) {
