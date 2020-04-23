@@ -2347,7 +2347,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length) {
                 edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
                 edge_index ru_next = select_last(NF_[c] + rk_ru);
                 assert(idx < num_suffixes);
-                narrowed.emplace_back(idx + num_suffixes * (c - 1),
+                narrowed.emplace_back(num_suffixes * (c - 1) + idx,
                                       rl_next, ru_next);
             }
         }
@@ -2356,7 +2356,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length) {
     }
 
     // grow the suffix length the last time and build the final index
-    indexed_suffix_ranges_.assign(suffix_ranges.size() * (alph_size - 1),
+    indexed_suffix_ranges_.assign(num_suffixes * (alph_size - 1),
                                   std::pair<edge_index, edge_index>(W_->size(), 0));
 
     assert(indexed_suffix_ranges_.size()
@@ -2374,7 +2374,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length) {
             edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
             edge_index ru_next = select_last(NF_[c] + rk_ru);
             assert(idx < num_suffixes);
-            indexed_suffix_ranges_[idx + num_suffixes * (c - 1)]
+            indexed_suffix_ranges_[num_suffixes * (c - 1) + idx]
                 = std::make_pair(rl_next, ru_next);
         }
     }
