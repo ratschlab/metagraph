@@ -1,5 +1,7 @@
 #include "build.hpp"
 
+#include <csignal>
+
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
@@ -23,9 +25,24 @@ using namespace mg::succinct;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
+std::filesystem::path tmp_dir;
+
+
+void signal_handler(int sig) {
+    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", tmp_dir);
+    if (!tmp_dir.empty())
+        std::filesystem::remove_all(tmp_dir);
+
+    std::exit(sig);
+}
 
 int build_graph(Config *config) {
     assert(config);
+
+    if (std::signal(SIGINT, signal_handler) == SIG_ERR)
+        logger->error("Couldn't reset the singal handler for SIGINT");
+    if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
+        logger->error("Couldn't reset the singal handler for SIGTERM");
 
     const auto &files = config->fnames;
 
@@ -63,9 +80,12 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        std::string tmp_dir_str(config->tmp_dir / "XXXXXX");
-        mkdtemp(tmp_dir_str.data());
-        std::filesystem::path tmp_dir(tmp_dir_str);
+        std::string tmp_dir_str(config->tmp_dir / "temp_dbg_XXXXXX");
+        if (!mkdtemp(tmp_dir_str.data())) {
+            logger->error("Failed to create a temporary directory in {}", config->tmp_dir);
+            exit(1);
+        }
+        tmp_dir = tmp_dir_str;
         logger->trace("Setting temporary directory to {}", tmp_dir);
 
         //one pass per suffix
