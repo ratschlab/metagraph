@@ -656,6 +656,9 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
         } catch (...) {
             canonical_mode_ = false;
         }
+
+        if (!boss_graph_->load_suffix_ranges(instream))
+            std::cerr << "Warning: no index for node ranges could be loaded" << std::endl;
     }
 
     return true;
@@ -749,6 +752,8 @@ void DBGSuccinct::serialize(const std::string &filename) const {
         std::ofstream outstream(out_filename, std::ios::binary);
         boss_graph_->serialize(outstream);
         serialize_number(outstream, canonical_mode_);
+
+        boss_graph_->serialize_suffix_ranges(outstream);
 
         if (!outstream.good())
             throw std::ios_base::failure("Can't write to file " + out_filename);

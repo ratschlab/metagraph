@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <string>
 #include <cstdio>
+#include <cmath>
 
 #include <progress_bar.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
@@ -13,6 +14,7 @@
 #include "common/threads/threading.hpp"
 #include "common/serialization.hpp"
 #include "common/algorithms.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
@@ -273,11 +275,53 @@ bool BOSS::load(std::ifstream &instream) {
 
         recompute_NF();
 
-        return true;
+        return instream.good();
+
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load the BOSS table." << std::endl;
         return false;
     } catch (...) {
+        return false;
+    }
+}
+
+void BOSS::serialize_suffix_ranges(std::ofstream &outstream) const {
+    // dump node range index
+    serialize_number(outstream, indexed_suffix_length_);
+
+    outstream.write(reinterpret_cast<const char *>(indexed_suffix_ranges_.data()),
+                    indexed_suffix_ranges_.size()
+                        * sizeof(decltype(indexed_suffix_ranges_)::value_type));
+}
+
+bool BOSS::load_suffix_ranges(std::ifstream &instream) {
+    // load node suffix range index if exists
+    try {
+        indexed_suffix_length_ = load_number(instream);
+        if (!indexed_suffix_length_
+                || indexed_suffix_length_ > k_
+                || indexed_suffix_length_ * log2(alph_size - 1) > 63)
+            throw std::ifstream::failure("");
+
+        uint64_t index_size = 1;
+        for (size_t len = 1; len <= indexed_suffix_length_; ++len) {
+            index_size *= (alph_size - 1);
+        }
+
+        indexed_suffix_ranges_.resize(index_size);
+
+        instream.read(reinterpret_cast<char *>(indexed_suffix_ranges_.data()),
+                      indexed_suffix_ranges_.size()
+                        * sizeof(decltype(indexed_suffix_ranges_)::value_type));
+
+        if (!instream.good())
+            throw std::ifstream::failure("");
+
+        return true;
+
+    } catch(...) {
+        indexed_suffix_length_ = 0;
+        indexed_suffix_ranges_.clear();
         return false;
     }
 }
@@ -765,16 +809,46 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
  * Given an edge index i, this function returns the k-mer sequence of its
  * source node.
  */
-std::vector<TAlphabet> BOSS::get_node_seq(edge_index k_node) const {
-    CHECK_INDEX(k_node);
+std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
+    CHECK_INDEX(x);
 
-    std::vector<TAlphabet> ret(k_, get_node_last_value(k_node));
+    std::vector<TAlphabet> ret(k_);
+    size_t i = k_;
 
-    for (int curr_k = k_ - 2; curr_k >= 0; --curr_k) {
-        CHECK_INDEX(k_node);
+    if (indexed_suffix_length_) {
+        while (i > indexed_suffix_length_) {
+            CHECK_INDEX(x);
 
-        k_node = bwd(k_node);
-        ret[curr_k] = get_node_last_value(k_node);
+            ret[--i] = get_node_last_value(x);
+            x = bwd(x);
+        }
+
+        auto it = std::lower_bound(
+            indexed_suffix_ranges_.begin(),
+            indexed_suffix_ranges_.end(),
+            x,
+            [](const auto &range, edge_index edge) { return (range.second < edge); }
+        );
+
+        if (it != indexed_suffix_ranges_.end() && it->first <= x) {
+            assert(x <= it->second);
+            uint64_t index = it - indexed_suffix_ranges_.begin();
+            for (i = 0; i < indexed_suffix_length_; ++i) {
+                uint64_t next_index = index / (alph_size - 1);
+                ret[i] = index - next_index * (alph_size - 1) + 1;
+                index = next_index;
+            }
+            return ret;
+        }
+    }
+
+    ret[--i] = get_node_last_value(x);
+
+    while (i > 0) {
+        CHECK_INDEX(x);
+
+        x = bwd(x);
+        ret[--i] = get_node_last_value(x);
     }
 
     return ret;
@@ -2243,6 +2317,83 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
             }
         }
     }
+}
+
+void BOSS::index_suffix_ranges(size_t suffix_length) {
+    assert(suffix_length <= k_);
+
+    indexed_suffix_length_ = suffix_length;
+    indexed_suffix_ranges_.clear();
+
+    if (indexed_suffix_length_ == 0u)
+        return;
+
+    if (indexed_suffix_length_ * log2(alph_size - 1) >= 64)
+        throw std::runtime_error("ERROR: Trying to index too long suffixes");
+
+    std::vector<std::tuple<uint64_t, edge_index, edge_index>> suffix_ranges;
+
+    // first, take empty suffix and the entire range of nodes in the BOSS table
+    uint64_t num_suffixes = 1;
+    suffix_ranges.emplace_back(0, 1, W_->size() - 1);
+
+    // grow the suffix length up to |suffix_length - 1|
+    for (size_t len = 1; len < indexed_suffix_length_; ++len) {
+        std::vector<std::tuple<uint64_t, edge_index, edge_index>> narrowed;
+        narrowed.reserve(suffix_ranges.size() * (alph_size - 1));
+
+        for (const auto &[idx, rl, ru] : suffix_ranges) {
+            // prepend the suffix with one of the |alph_size - 1| possible characters
+            for (TAlphabet c = 1; c < alph_size; ++c) {
+                // tighten the range for nodes ending with |c|
+                uint64_t rk_rl = rank_W(rl - 1, c) + 1;
+                uint64_t rk_ru = rank_W(ru, c);
+                if (rk_rl > rk_ru)
+                    continue;
+
+                edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
+                edge_index ru_next = select_last(NF_[c] + rk_ru);
+                assert(idx < num_suffixes);
+                narrowed.emplace_back(num_suffixes * (c - 1) + idx,
+                                      rl_next, ru_next);
+            }
+        }
+        suffix_ranges.swap(narrowed);
+        num_suffixes *= (alph_size - 1);
+    }
+
+    // grow the suffix length the last time and build the final index
+    indexed_suffix_ranges_.assign(num_suffixes * (alph_size - 1),
+                                  std::pair<edge_index, edge_index>(W_->size(), 0));
+
+    for (const auto &[idx, rl, ru] : suffix_ranges) {
+        // prepend the suffix with one of the |alph_size - 1| possible characters
+        for (TAlphabet c = 1; c < alph_size; ++c) {
+            // tighten the range
+            uint64_t rk_rl = rank_W(rl - 1, c) + 1;
+            uint64_t rk_ru = rank_W(ru, c);
+            if (rk_rl > rk_ru)
+                continue;
+
+            edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
+            edge_index ru_next = select_last(NF_[c] + rk_ru);
+            assert(idx < num_suffixes);
+            indexed_suffix_ranges_[num_suffixes * (c - 1) + idx]
+                = std::make_pair(rl_next, ru_next);
+        }
+    }
+
+    // aline the upper bounds to enable the binary search on them
+    for (size_t i = 1; i < indexed_suffix_ranges_.size(); ++i) {
+        if (!indexed_suffix_ranges_[i].second) {
+            // shift the upper bounds of the empty ranges but still keep them empty
+            indexed_suffix_ranges_[i].second = indexed_suffix_ranges_[i - 1].second;
+            indexed_suffix_ranges_[i].first = indexed_suffix_ranges_[i - 1].second + 1;
+        }
+    }
+    assert(std::is_sorted(indexed_suffix_ranges_.begin(),
+                          indexed_suffix_ranges_.end(),
+                          utils::LessSecond()));
 }
 
 bool BOSS::is_valid() const {

@@ -83,6 +83,40 @@ build_graph<DBGSuccinct>(uint64_t k,
 
 template <>
 std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctIndexed<1>>(uint64_t k,
+                                   const std::vector<std::string> &sequences,
+                                   bool canonical) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).get_boss().index_suffix_ranges(1);
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctIndexed<2>>(uint64_t k,
+                                   const std::vector<std::string> &sequences,
+                                   bool canonical) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph)
+        .get_boss()
+        .index_suffix_ranges(std::min(k - 1, (uint64_t)2));
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctIndexed<10>>(uint64_t k,
+                                    const std::vector<std::string> &sequences,
+                                    bool canonical) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph)
+        .get_boss()
+        .index_suffix_ranges(std::min(k - 1, (uint64_t)10));
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctBloomFPR<1, 1>>(uint64_t k,
                                        const std::vector<std::string> &sequences,
                                        bool canonical) {
@@ -163,6 +197,40 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
     std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor), canonical) };
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
     EXPECT_EQ(k, graph->get_k());
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctIndexed<1>>(uint64_t k,
+                                         const std::vector<std::string> &sequences,
+                                         bool canonical) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph).get_boss().index_suffix_ranges(1);
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctIndexed<2>>(uint64_t k,
+                                         const std::vector<std::string> &sequences,
+                                         bool canonical) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph)
+        .get_boss()
+        .index_suffix_ranges(std::min(k - 1, (uint64_t)2));
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctIndexed<10>>(uint64_t k,
+                                          const std::vector<std::string> &sequences,
+                                          bool canonical) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, canonical);
+    dynamic_cast<DBGSuccinct&>(*graph)
+        .get_boss()
+        .index_suffix_ranges(std::min(k - 1, (uint64_t)10));
     return graph;
 }
 
@@ -253,6 +321,9 @@ bool check_graph(const std::string &alphabet, bool canonical, bool check_sequenc
 }
 
 template bool check_graph<DBGSuccinct>(const std::string &, bool, bool);
+template bool check_graph<DBGSuccinctIndexed<1>>(const std::string &, bool, bool);
+template bool check_graph<DBGSuccinctIndexed<2>>(const std::string &, bool, bool);
+template bool check_graph<DBGSuccinctIndexed<10>>(const std::string &, bool, bool);
 template bool check_graph<DBGSuccinctBloomFPR<1, 1>>(const std::string &, bool, bool);
 template bool check_graph<DBGSuccinctBloomFPR<1, 10>>(const std::string &, bool, bool);
 template bool check_graph<DBGSuccinctBloom<4, 1>>(const std::string &, bool, bool);

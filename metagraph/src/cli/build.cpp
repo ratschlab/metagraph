@@ -1,5 +1,7 @@
 #include "build.hpp"
 
+#include <csignal>
+
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
@@ -23,9 +25,24 @@ using namespace mg::succinct;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
+std::filesystem::path tmp_dir;
+
+
+void signal_handler(int sig) {
+    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", tmp_dir);
+    if (!tmp_dir.empty())
+        std::filesystem::remove_all(tmp_dir);
+
+    std::exit(sig);
+}
 
 int build_graph(Config *config) {
     assert(config);
+
+    if (std::signal(SIGINT, signal_handler) == SIG_ERR)
+        logger->error("Couldn't reset the singal handler for SIGINT");
+    if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
+        logger->error("Couldn't reset the singal handler for SIGTERM");
 
     const auto &files = config->fnames;
 
@@ -63,9 +80,12 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        std::string tmp_dir_str(config->tmp_dir / "XXXXXX");
-        mkdtemp(tmp_dir_str.data());
-        std::filesystem::path tmp_dir(tmp_dir_str);
+        std::string tmp_dir_str(config->tmp_dir / "temp_dbg_XXXXXX");
+        if (!mkdtemp(tmp_dir_str.data())) {
+            logger->error("Failed to create a temporary directory in {}", config->tmp_dir);
+            exit(1);
+        }
+        tmp_dir = tmp_dir_str;
         logger->trace("Setting temporary directory to {}", tmp_dir);
 
         //one pass per suffix
@@ -291,13 +311,33 @@ int build_graph(Config *config) {
     logger->trace("Graph construction finished in {} sec", timer.elapsed());
 
     if (!config->outfbase.empty()) {
-        if (dynamic_cast<DBGSuccinct*>(graph.get()) && config->mark_dummy_kmers) {
-            logger->trace("Detecting all dummy k-mers...");
+        if (auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get())) {
+            if (config->mark_dummy_kmers) {
+                logger->trace("Detecting all dummy k-mers...");
 
-            timer.reset();
-            dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(get_num_threads(), false);
+                timer.reset();
+                dbg_succ->mask_dummy_kmers(get_num_threads(), false);
 
-            logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
+                logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
+            }
+
+            size_t suffix_length = std::min((size_t)config->node_suffix_length,
+                                            dbg_succ->get_boss().get_k());
+
+            if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
+                logger->warn("Node ranges for k-mer suffixes longer than {} cannot be indexed",
+                             static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
+
+            } else if (suffix_length) {
+                logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
+                              suffix_length,
+                              std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
+                                    * 2. * sizeof(uint64_t) * 1e-6);
+                timer.reset();
+                dbg_succ->get_boss().index_suffix_ranges(suffix_length);
+
+                logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
+            }
         }
 
         graph->serialize(config->outfbase);
