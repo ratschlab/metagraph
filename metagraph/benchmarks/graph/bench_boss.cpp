@@ -2,7 +2,7 @@
 
 #include <benchmark/benchmark.h>
 
-#include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 const std::string filename = "./benchmark_graph.dbg";
@@ -13,13 +13,15 @@ constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;
 namespace mg {
 namespace bm {
 
-void load_graph(benchmark::State &state, BOSS *boss) {
+std::unique_ptr<DBGSuccinct> load_graph(benchmark::State &state) {
+    auto graph = std::make_unique<DBGSuccinct>(2);
     if (!std::getenv("GRAPH")) {
         state.SkipWithError("Set environment variable GRAPH");
-    } else if (!boss->load(std::getenv("GRAPH"))) {
+    } else if (!graph->load(std::getenv("GRAPH"))) {
         state.SkipWithError((std::string("Can't load the graph from ")
                                 + std::getenv("GRAPH")).c_str());
     }
+    return graph;
 }
 
 // generate a deterministic sequence of pseudo-random numbers
@@ -37,8 +39,8 @@ std::vector<uint64_t> random_numbers(size_t size, uint64_t min, uint64_t max) {
 
 #define DEFINE_BOSS_BENCHMARK(NAME, OPERATION, VECTOR, SIZE, ...) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
-    BOSS boss; \
-    load_graph(state, &boss); \
+    auto graph = load_graph(state); \
+    const BOSS &boss = graph->get_boss(); \
  \
     auto indexes = random_numbers(NUM_DISTINCT_INDEXES, 1, boss.VECTOR().SIZE() - 1); \
     size_t i = 0; \
@@ -65,8 +67,8 @@ DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {
-    BOSS boss;
-    load_graph(state, &boss);
+    auto graph = load_graph(state);
+    const BOSS &boss = graph->get_boss();
 
     std::mt19937 gen(32);
     std::uniform_int_distribution<uint64_t> dis(1, boss.get_W().size() - 1);
@@ -89,8 +91,8 @@ BENCHMARK(BM_BOSS_get_W_and_fwd) -> Unit(benchmark::kMicrosecond);
 
 
 static void BM_BOSS_fwd(benchmark::State &state) {
-    BOSS boss;
-    load_graph(state, &boss);
+    auto graph = load_graph(state);
+    const BOSS &boss = graph->get_boss();
 
     std::mt19937 gen(32);
     std::uniform_int_distribution<uint64_t> dis(1, boss.get_W().size() - 1);
@@ -114,8 +116,8 @@ BENCHMARK(BM_BOSS_fwd) -> Unit(benchmark::kMicrosecond);
 
 template <BOSS::TAlphabet edge_label>
 static void BM_BOSS_pick_edge(benchmark::State &state) {
-    BOSS boss;
-    load_graph(state, &boss);
+    auto graph = load_graph(state);
+    const BOSS &boss = graph->get_boss();
 
     std::mt19937 gen(32);
     std::uniform_int_distribution<uint64_t> dis(1, boss.get_W().size() - 1);
@@ -143,8 +145,8 @@ BENCHMARK_TEMPLATE(BM_BOSS_pick_edge, 4) -> Unit(benchmark::kMicrosecond);
 
 template <BOSS::TAlphabet edge_label>
 static void BM_BOSS_fwd_and_pick_edge(benchmark::State &state) {
-    BOSS boss;
-    load_graph(state, &boss);
+    auto graph = load_graph(state);
+    const BOSS &boss = graph->get_boss();
 
     std::mt19937 gen(32);
     std::uniform_int_distribution<uint64_t> dis(1, boss.get_W().size() - 1);
@@ -193,8 +195,8 @@ DEFINE_BOSS_BENCHMARK(succ_W_TTm,          succ_W,              get_W,    size, 
 
 
 static void BM_BOSS_num_incoming_to_target(benchmark::State &state) {
-    BOSS boss;
-    load_graph(state, &boss);
+    auto graph = load_graph(state);
+    const BOSS &boss = graph->get_boss();
 
     std::mt19937 gen(32);
     std::uniform_int_distribution<uint64_t> dis(1, boss.get_W().size() - 1);
@@ -214,6 +216,8 @@ static void BM_BOSS_num_incoming_to_target(benchmark::State &state) {
 }
 BENCHMARK(BM_BOSS_num_incoming_to_target) -> Unit(benchmark::kMicrosecond);
 
+
+DEFINE_BOSS_BENCHMARK(get_node_seq,  get_node_seq,              get_W,    size);
 
 } // namespace bm
 } // namespace mg

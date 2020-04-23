@@ -30,6 +30,14 @@ class DBGSuccinctBloom : public DBGSuccinct {
           : DBGSuccinct(std::forward<Args>(args)...) {}
 };
 
+template <size_t indexed_suffix_length>
+class DBGSuccinctIndexed : public DBGSuccinct {
+  public:
+    template <typename... Args>
+    DBGSuccinctIndexed(Args&&... args)
+          : DBGSuccinct(std::forward<Args>(args)...) {}
+};
+
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
@@ -70,6 +78,9 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered,
                          DBGHashFast,
                          DBGSuccinct,
+                         DBGSuccinctIndexed<1>,
+                         DBGSuccinctIndexed<2>,
+                         DBGSuccinctIndexed<10>,
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
@@ -81,6 +92,9 @@ template <typename Graph>
 class StableDeBruijnGraphTest : public ::testing::Test { };
 typedef ::testing::Types<DBGBitmap,
                          DBGSuccinct,
+                         DBGSuccinctIndexed<1>,
+                         DBGSuccinctIndexed<2>,
+                         DBGSuccinctIndexed<10>,
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
@@ -88,6 +102,7 @@ typedef ::testing::Types<DBGBitmap,
 
 typedef ::testing::Types<DBGHashFast,
                          DBGSuccinct,
+                         DBGSuccinctIndexed<10>,
                          DBGSuccinctBloomFPR<1, 10>> FewGraphTypes;
 
 #endif // __TEST_DBG_HELPERS_HPP__

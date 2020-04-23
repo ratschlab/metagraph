@@ -68,6 +68,13 @@ class BOSS {
     bool load(std::ifstream &instream);
     void serialize(std::ofstream &outstream) const;
 
+    /**
+     * Load the index of node ranges constructed with index_suffix_ranges()
+     * to speed up the search in the BOSS table.
+     */
+    bool load_suffix_ranges(std::ifstream &instream);
+    void serialize_suffix_ranges(std::ofstream &outstream) const;
+
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
     // Invokes #callback with npos if a k-mer can't be mapped to the graph edges
@@ -231,6 +238,16 @@ class BOSS {
      * returns the k-th last character of the source node for edge i.
      */
     std::pair<TAlphabet, edge_index> get_minus_k_value(edge_index i, size_t k) const;
+
+    /**
+     * Index ranges of nodes for all possible suffixes (alph_size-1)^t
+     * Suffixes with sentinel characters are not indexed.
+     * After the index is constructed, it speeds up search in the BOSS table
+     * by narrowing down the initial node range and skipping several fwd calls.
+     */
+    void index_suffix_ranges(size_t suffix_length);
+
+    size_t get_indexed_suffix_length() const { return indexed_suffix_length_; }
 
     /**
      * Print current representation of the graph to stream.
@@ -398,54 +415,8 @@ class BOSS {
      * sequence matched). If a match is not found, it returns std::make_tuple(0, 0, begin)
      */
     template <typename RandomAccessIt>
-    std::tuple<edge_index, edge_index, RandomAccessIt>
-    index_range(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
-                      "Only encoded sequences can be queried");
-
-        assert(end >= begin);
-        assert(end <= begin + k_);
-        assert(std::all_of(begin, end, [&](TAlphabet c) { return c <= alph_size; }));
-
-        if (begin == end)
-            return std::make_tuple((edge_index)1, (edge_index)1, begin);
-
-        // check if all characters belong to the alphabet
-        if (std::find(begin, end, alph_size) != end)
-            return std::make_tuple((edge_index)0, (edge_index)0, begin);
-
-        // get first
-        TAlphabet s = *begin;
-
-        // initial range
-        edge_index rl = F_.at(s) + 1 < W_->size()
-                        ? F_.at(s) + 1
-                        : W_->size(); // lower bound
-        edge_index ru = s + 1 < alph_size
-                        ? F_[s + 1]
-                        : W_->size() - 1; // upper bound
-        if (rl > ru)
-            return std::make_tuple((edge_index)0, (edge_index)0, begin);
-
-        auto it = begin + 1;
-        // update range iteratively while scanning through s
-        for (; it != end; ++it) {
-            s = *it;
-
-            // Tighten the range including all edges where
-            // the source nodes have the given suffix.
-            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
-            uint64_t rk_ru = rank_W(ru, s);
-            if (rk_rl > rk_ru)
-                return std::make_tuple(succ_last(rl), ru, it);
-
-            // select the index of the position in last that is rank many positions after offset
-            ru = select_last(NF_[s] + rk_ru);
-            rl = select_last(NF_[s] + rk_rl - 1) + 1;
-        }
-        assert(succ_last(rl) <= ru);
-        return std::make_tuple(succ_last(rl), ru, it);
-    }
+    inline std::tuple<edge_index, edge_index, RandomAccessIt>
+    index_range(RandomAccessIt begin, RandomAccessIt end) const;
 
     /**
      * The size of the alphabet for kmers that this graph encodes.
@@ -480,6 +451,9 @@ class BOSS {
     wavelet_tree *W_;
 
     State state = State::DYN;
+
+    size_t indexed_suffix_length_ = 0;
+    std::vector<std::pair<edge_index, edge_index>> indexed_suffix_ranges_;
 
     /**
      * This function gets a character c and updates the edge offsets F_
@@ -530,32 +504,27 @@ class BOSS {
      * of the corresponding edge, if such exists and 0 otherwise.
      */
     template <typename RandomAccessIt>
-    edge_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
-        assert(begin + k_ + 1 == end);
+    inline edge_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const;
 
-        // return npos if invalid characters are found
-        if (std::find(begin, end, alph_size) != end)
-            return npos;
-
-        edge_index edge = index(begin, end - 1);
-
-        return edge ? pick_edge(edge, *(end - 1)) : npos;
-    }
+    /**
+     * Maps a prefix of the query to a range of nodes in the BOSS table
+     * with the same suffixes.
+     * If suffix ranges are indexed in the BOSS table and the query is longer
+     * than |indexed_suffix_length_| and contains no sentinels, take a prefix
+     * of that size.
+     * Otherwise, match only the first character *begin.
+     * Returns: range and length of the prefix matched.
+     */
+    template <typename RandomAccessIt>
+    inline std::tuple<edge_index, edge_index, size_t>
+    get_initial_range(RandomAccessIt begin, RandomAccessIt end) const;
 
     /**
      * Given a k-mer, this function returns the index of last edge going out
      * from the k-mer's corresponding node, if such a node exists and 0 otherwise.
      */
     template <typename RandomAccessIt>
-    edge_index index(RandomAccessIt begin, RandomAccessIt end) const {
-        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
-                      "Only encoded sequences can be queried");
-        assert(begin + k_ == end);
-
-        auto match = index_range(begin, end);
-
-        return std::get<2>(match) == end ? std::get<1>(match) : 0;
-    }
+    inline edge_index index(RandomAccessIt begin, RandomAccessIt end) const;
 
     void verbose_cout() const {}
 
@@ -578,5 +547,154 @@ class BOSS {
 
 std::ostream& operator<<(std::ostream &os, const BOSS &graph);
 
+
+template <typename RandomAccessIt>
+std::tuple<BOSS::edge_index, BOSS::edge_index, size_t>
+BOSS::get_initial_range(RandomAccessIt begin, RandomAccessIt end) const {
+    assert(std::all_of(begin, end, [&](TAlphabet c) { return c < alph_size; }));
+
+    // node range
+    edge_index rl, ru;
+    size_t offset;
+
+    if (indexed_suffix_length_
+            && begin + indexed_suffix_length_ <= end
+            // only node suffixes without sentinels are indexed
+            && !std::count(begin, begin + indexed_suffix_length_, kSentinelCode)) {
+        // find range of nodes with suffixes matching
+        // prefix [begin, begin + indexed_suffix_length_)
+        uint64_t index = 0;
+        // use the co-lex order to assign close indexes to suffixes of
+        // nodes close in the boss table
+        for (auto it = begin + indexed_suffix_length_ - 1, end = begin - 1; it != end; --it) {
+            assert(*it && *it < alph_size);
+            // shift the alphabet: suffixes with sentinels '$' are not indexed
+            index = index * (alph_size - 1) + (*it - 1);
+        }
+
+        // query range
+        std::tie(rl, ru) = indexed_suffix_ranges_[index];
+        offset = indexed_suffix_length_;
+
+    } else {
+        // get first
+        TAlphabet s = *begin;
+        // use the initial range
+        rl = F_.at(s) + 1 < W_->size()
+             ? F_.at(s) + 1
+             : W_->size(); // lower bound
+        ru = s + 1 < alph_size
+             ? F_[s + 1]
+             : W_->size() - 1; // upper bound
+
+        offset = 1;
+    }
+
+    return std::make_tuple(rl, ru, offset);
+}
+
+template <typename RandomAccessIt>
+BOSS::edge_index BOSS::index(RandomAccessIt begin, RandomAccessIt end) const {
+    static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
+                  "Only encoded sequences can be queried");
+    assert(begin + k_ == end);
+    assert(std::all_of(begin, end, [&](TAlphabet c) { return c <= alph_size; }));
+
+    // return npos if invalid characters are found
+    if (std::find(begin, end, alph_size) != end)
+        return npos;
+
+    // get the initial node range
+    auto [rl, ru, offset] = get_initial_range(begin, end);
+    if (rl > ru)
+        return npos;
+
+    // update range iteratively while scanning through s
+    for (auto it = begin + offset; it != end; ++it) {
+        TAlphabet s = *it;
+
+        // Tighten the range including all edges where
+        // the source nodes have the given suffix.
+        uint64_t rk_rl = rank_W(rl - 1, s) + 1;
+        uint64_t rk_ru = rank_W(ru, s);
+        if (rk_rl > rk_ru)
+            return npos;
+
+        // select the index of the position in last that is rank many positions after offset
+        ru = select_last(NF_[s] + rk_ru);
+        rl = select_last(NF_[s] + rk_rl - 1) + 1;
+    }
+    assert(succ_last(rl) <= ru);
+    return ru;
+}
+
+template <typename RandomAccessIt>
+std::tuple<BOSS::edge_index, BOSS::edge_index, RandomAccessIt>
+BOSS::index_range(RandomAccessIt begin, RandomAccessIt end) const {
+    static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
+                  "Only encoded sequences can be queried");
+
+    assert(end >= begin);
+    assert(end <= begin + k_);
+    assert(std::all_of(begin, end, [&](TAlphabet c) { return c <= alph_size; }));
+
+    if (begin == end)
+        return std::make_tuple((edge_index)1, (edge_index)1, begin);
+
+    // check if all characters belong to the alphabet
+    if (std::find(begin, end, alph_size) != end)
+        return std::make_tuple((edge_index)0, (edge_index)0, begin);
+
+    // get the initial node range
+    auto [rl, ru, offset] = get_initial_range(begin, end);
+    if (rl > ru) {
+        // start search from scratch
+        TAlphabet s = *begin;
+
+        rl = F_.at(s) + 1 < W_->size()
+                ? F_.at(s) + 1
+                : W_->size(); // lower bound
+        ru = s + 1 < alph_size
+                ? F_[s + 1]
+                : W_->size() - 1; // upper bound
+
+        if (rl > ru)
+            return std::make_tuple((edge_index)0, (edge_index)0, begin);
+
+        offset = 1;
+    }
+
+    auto it = begin + offset;
+    // update range iteratively while scanning through s
+    for (; it != end; ++it) {
+        TAlphabet s = *it;
+
+        // Tighten the range including all edges where
+        // the source nodes have the given suffix.
+        uint64_t rk_rl = rank_W(rl - 1, s) + 1;
+        uint64_t rk_ru = rank_W(ru, s);
+        if (rk_rl > rk_ru)
+            return std::make_tuple(succ_last(rl), ru, it);
+
+        // select the index of the position in last that is rank many positions after offset
+        ru = select_last(NF_[s] + rk_ru);
+        rl = select_last(NF_[s] + rk_rl - 1) + 1;
+    }
+    assert(succ_last(rl) <= ru);
+    return std::make_tuple(succ_last(rl), ru, it);
+}
+
+template <typename RandomAccessIt>
+BOSS::edge_index
+BOSS::map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
+    assert(begin + k_ + 1 == end);
+    assert(std::all_of(begin, end, [&](TAlphabet c) { return c <= alph_size; }));
+
+    edge_index edge = index(begin, end - 1);
+
+    return edge && *(end - 1) < alph_size
+            ? pick_edge(edge, *(end - 1))
+            : npos;
+}
 
 #endif // __BOSS_HPP__

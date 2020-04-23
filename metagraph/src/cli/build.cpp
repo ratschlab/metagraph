@@ -291,13 +291,33 @@ int build_graph(Config *config) {
     logger->trace("Graph construction finished in {} sec", timer.elapsed());
 
     if (!config->outfbase.empty()) {
-        if (dynamic_cast<DBGSuccinct*>(graph.get()) && config->mark_dummy_kmers) {
-            logger->trace("Detecting all dummy k-mers...");
+        if (auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get())) {
+            if (config->mark_dummy_kmers) {
+                logger->trace("Detecting all dummy k-mers...");
 
-            timer.reset();
-            dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(get_num_threads(), false);
+                timer.reset();
+                dbg_succ->mask_dummy_kmers(get_num_threads(), false);
 
-            logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
+                logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
+            }
+
+            size_t suffix_length = std::min((size_t)config->node_suffix_length,
+                                            dbg_succ->get_boss().get_k());
+
+            if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
+                logger->warn("Node ranges for k-mer suffixes longer than {} cannot be indexed",
+                             static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
+
+            } else if (suffix_length) {
+                logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
+                              suffix_length,
+                              std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
+                                    * 2. * sizeof(uint64_t) * 1e-6);
+                timer.reset();
+                dbg_succ->get_boss().index_suffix_ranges(suffix_length);
+
+                logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
+            }
         }
 
         graph->serialize(config->outfbase);
