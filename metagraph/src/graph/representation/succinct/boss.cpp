@@ -298,10 +298,15 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
     // load node suffix range index if exists
     try {
         indexed_suffix_length_ = load_number(instream);
-        if (!indexed_suffix_length_ || indexed_suffix_length_ > k_)
+        if (!indexed_suffix_length_
+                || indexed_suffix_length_ > k_
+                || indexed_suffix_length_ * log2(alph_size - 1) > 63)
             throw std::ifstream::failure("");
 
-        uint64_t index_size = std::pow(alph_size - 1, indexed_suffix_length_);
+        uint64_t index_size = 1;
+        for (size_t len = 1; len <= indexed_suffix_length_; ++len) {
+            index_size *= (alph_size - 1);
+        }
 
         indexed_suffix_ranges_.resize(index_size);
 
@@ -2358,9 +2363,6 @@ void BOSS::index_suffix_ranges(size_t suffix_length) {
     // grow the suffix length the last time and build the final index
     indexed_suffix_ranges_.assign(num_suffixes * (alph_size - 1),
                                   std::pair<edge_index, edge_index>(W_->size(), 0));
-
-    assert(indexed_suffix_ranges_.size()
-            == std::pow(alph_size - 1, indexed_suffix_length_));
 
     for (const auto &[idx, rl, ru] : suffix_ranges) {
         // prepend the suffix with one of the |alph_size - 1| possible characters
