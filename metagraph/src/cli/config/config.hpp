@@ -136,6 +136,10 @@ class Config {
     std::string header = "";
     std::string accession2taxid;
 
+    std::filesystem::path tmp_dir;
+
+    size_t disk_cap_bytes = 20e9; // 20GB default
+
     enum IdentityType {
         NO_IDENTITY = -1,
         BUILD = 1,
@@ -186,16 +190,9 @@ class Config {
     AnnotationType anno_type = ColumnCompressed;
     GraphType graph_type = SUCCINCT;
 
-    mg::kmer::ContainerType container = mg::kmer::ContainerType::VECTOR;
-
-    std::filesystem::path tmp_dir = "/tmp/";
-
-    size_t disk_cap_bytes = 20e9; // 20GB default
-
-    static mg::kmer::ContainerType string_to_container(const std::string &string);
-
     static std::string annotype_to_string(AnnotationType state);
     static AnnotationType string_to_annotype(const std::string &string);
+
     static GraphType string_to_graphtype(const std::string &string);
 
     void print_usage(const std::string &prog_name,

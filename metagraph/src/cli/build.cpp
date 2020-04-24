@@ -85,13 +85,15 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        std::string tmp_dir_str(config->tmp_dir / "temp_dbg_XXXXXX");
-        if (!mkdtemp(tmp_dir_str.data())) {
-            logger->error("Failed to create a temporary directory in {}", config->tmp_dir);
-            exit(1);
+        if (!config->tmp_dir.empty()) {
+            std::string tmp_dir_str(config->tmp_dir/"temp_dbg_XXXXXX");
+            if (!mkdtemp(tmp_dir_str.data())) {
+                logger->error("Failed to create a temporary directory in {}", config->tmp_dir);
+                exit(1);
+            }
+            tmp_dir = tmp_dir_str;
+            logger->trace("Setting temporary directory to {}", tmp_dir);
         }
-        tmp_dir = tmp_dir_str;
-        logger->trace("Setting temporary directory to {}", tmp_dir);
 
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
@@ -108,7 +110,8 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                config->container,
+                tmp_dir.empty() ? mg::kmer::ContainerType::VECTOR
+                                : mg::kmer::ContainerType::VECTOR_DISK,
                 tmp_dir,
                 config->disk_cap_bytes
             );

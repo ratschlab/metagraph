@@ -324,9 +324,7 @@ Config::Config(int argc, char *argv[]) {
             label_other_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--filter-by-kmer")) {
             filter_by_kmer = true;
-        } else if (!strcmp(argv[i], "--container")) {
-            container = string_to_container(get_value(i++));
-        } else if (!strcmp(argv[i], "--tmp-dir")) {
+        } else if (!strcmp(argv[i], "--disk-swap")) {
             tmp_dir = get_value(i++);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
             disk_cap_bytes = atoi(get_value(i++)) * 1e9;
@@ -591,16 +589,6 @@ BOSS::State Config::string_to_state(const std::string &string) {
     }
 }
 
-kmer::ContainerType Config::string_to_container(const std::string &string) {
-    if (string == "vector") {
-        return kmer::ContainerType::VECTOR;
-    } else if (string == "vector_disk") {
-        return kmer::ContainerType::VECTOR_DISK;
-    } else {
-        throw std::runtime_error("Error: unknown k-mer container: " + string);
-    }
-}
-
 std::string Config::annotype_to_string(AnnotationType state) {
     switch (state) {
         case ColumnCompressed:
@@ -747,8 +735,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-            fprintf(stderr, "\t   --container [STR] \tcontainer to use for storing k-mers: vector / vector_disk [vector]\n");
-            fprintf(stderr, "\t   --tmp-dir [STR] \tdirectory to use for temporary files [/tmp/]\n");
+            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
             fprintf(stderr, "\t   --disk-cap-gb [INT] \tmax temp disk space to use before forcing a merge, in GB [20]\n");
         } break;
         case CLEAN: {
