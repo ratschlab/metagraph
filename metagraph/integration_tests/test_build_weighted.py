@@ -38,7 +38,7 @@ class TestBuildWeighted(unittest.TestCase):
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 20 --count-kmers --disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -68,7 +68,7 @@ class TestBuildWeighted(unittest.TestCase):
     def test_simple_all_graphs_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --canonical --count-kmers --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -96,7 +96,7 @@ class TestBuildWeighted(unittest.TestCase):
     @parameterized.expand(BUILDS)
     def test_build_tiny_k(self, build):
         representation, tmp_dir = build_params[build]
-        args = [METAGRAPH, 'build', '--graph', representation,
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation,
                 '--count-kmers',
                 '--disk-swap', tmp_dir,
                 '-k', '2',
@@ -125,7 +125,7 @@ class TestBuildWeighted(unittest.TestCase):
     def test_build_tiny_k_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation, '--canonical',
                 '--count-kmers',
                 '--disk-swap', tmp_dir,
                 '-k', '2',
@@ -153,7 +153,7 @@ class TestBuildWeighted(unittest.TestCase):
     def test_build_from_kmc(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --count-kmers --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -182,7 +182,7 @@ class TestBuildWeighted(unittest.TestCase):
     def test_build_from_kmc_both(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --count-kmers --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -212,7 +212,7 @@ class TestBuildWeighted(unittest.TestCase):
     def test_build_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --count-kmers --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -242,7 +242,7 @@ class TestBuildWeighted(unittest.TestCase):
     def test_build_from_kmc_both_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --count-kmers --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -283,7 +283,7 @@ class TestBuildWeighted(unittest.TestCase):
         representation, tmp_dir = build_params[build]
         count_width, avg_count_expected = width_result
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 4 --count-kmers --disk-swap {tmp_dir} --count-width {width} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -345,7 +345,7 @@ class TestBuildWeighted(unittest.TestCase):
             f.write(b'>CG_10^6times\n')
             f.write(b'CG' * 10**6)
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k {k} --count-kmers --disk-swap {tmp_dir} --count-width {width} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,

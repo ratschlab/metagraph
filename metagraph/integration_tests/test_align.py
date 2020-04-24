@@ -30,7 +30,7 @@ class TestAlign(unittest.TestCase):
 
         self.maxDiff = None
 
-        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/genome.MT',
@@ -70,7 +70,7 @@ class TestAlign(unittest.TestCase):
 
         self.maxDiff = None
 
-        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/genome.MT',
@@ -108,7 +108,7 @@ class TestAlign(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_simple_align_json_all_graphs(self, representation):
 
-        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/genome.MT',
@@ -141,7 +141,7 @@ class TestAlign(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_fwd_rev_comp_all_graphs(self, representation):
 
-        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/genome.MT',
@@ -179,7 +179,7 @@ class TestAlign(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_simple_align_fwd_rev_comp_json_all_graphs(self, representation):
 
-        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/genome.MT',
@@ -216,7 +216,7 @@ class TestAlign(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_simple_align_edit_distance_all_graphs(self, representation):
 
-        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/genome.MT',

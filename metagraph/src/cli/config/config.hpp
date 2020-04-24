@@ -22,7 +22,7 @@ class Config {
     bool canonical = false;
     bool complete = false;
     bool dynamic = false;
-    bool mark_dummy_kmers = true;
+    bool mark_dummy_kmers = false;
     bool filename_anno = false;
     bool annotate_sequence_headers = false;
     bool to_adj_list = false;

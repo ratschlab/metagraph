@@ -33,7 +33,7 @@ class TestAnnotate(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs(self, graph_repr):
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -86,7 +86,7 @@ class TestAnnotate(unittest.TestCase):
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_simple_all_graphs_canonical(self, graph_repr):
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -141,7 +141,7 @@ class TestAnnotate(unittest.TestCase):
         Annotate non-canonical graph constructed from non-canonical KMC database
         """
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -196,7 +196,7 @@ class TestAnnotate(unittest.TestCase):
         Annotate non-canonical graph constructed from canonical KMC database
         """
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -277,7 +277,7 @@ class TestAnnotate(unittest.TestCase):
         Annotate canonical graph with k-mers from KMC
         """
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,

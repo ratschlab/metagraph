@@ -41,7 +41,7 @@ class TestBuild(unittest.TestCase):
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -63,7 +63,7 @@ class TestBuild(unittest.TestCase):
     def test_simple_bloom_graph(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -107,7 +107,7 @@ class TestBuild(unittest.TestCase):
         """
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -130,7 +130,7 @@ class TestBuild(unittest.TestCase):
     def test_build_tiny_k(self, build):
         representation, tmp_dir = build_params[build]
 
-        args = [METAGRAPH, 'build', '--graph', representation,
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation,
                 '-k', '2',
                 '--disk-swap', tmp_dir,
                 '-o', self.tempdir.name + '/graph',
@@ -152,7 +152,7 @@ class TestBuild(unittest.TestCase):
     def test_build_tiny_k_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation, '--canonical',
                 '-k', '2',
                 '--disk-swap', tmp_dir,
                 '-o', self.tempdir.name + '/graph',
@@ -173,7 +173,7 @@ class TestBuild(unittest.TestCase):
     def test_build_from_kmc(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --graph {repr} --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -195,7 +195,7 @@ class TestBuild(unittest.TestCase):
     def test_build_from_kmc_both(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --graph {repr} --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -217,7 +217,7 @@ class TestBuild(unittest.TestCase):
     def test_build_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -240,7 +240,7 @@ class TestBuild(unittest.TestCase):
     def test_build_from_kmc_both_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -264,7 +264,7 @@ class TestBuild(unittest.TestCase):
 
         # Build chunks
         for suffix in ['$', 'A', 'C', 'G', 'T']:
-            construct_command = '{exe} build \
+            construct_command = '{exe} build --mask-dummy \
                                 --graph {repr} -k 11 --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
@@ -301,7 +301,7 @@ class TestBuild(unittest.TestCase):
 
         # Build chunks
         for suffix in ['$', 'A', 'C', 'G', 'T']:
-            construct_command = '{exe} build --graph {repr} --canonical -k 11 \
+            construct_command = '{exe} build --mask-dummy --graph {repr} --canonical -k 11 \
                     --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,

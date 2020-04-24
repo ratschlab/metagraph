@@ -116,8 +116,8 @@ Config::Config(int argc, char *argv[]) {
             complete = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
             dynamic = true;
-        } else if (!strcmp(argv[i], "--no-shrink")) {
-            mark_dummy_kmers = false;
+        } else if (!strcmp(argv[i], "--mask-dummy")) {
+            mark_dummy_kmers = true;
         } else if (!strcmp(argv[i], "--anno-filename")) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
@@ -733,7 +733,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
-            fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
+            fprintf(stderr, "\t   --mask-dummy \tbuild mask for dummy k-mers (only for Succinct graph) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
             fprintf(stderr, "\t   --disk-cap-gb [INT] \tmax temp disk space to use before forcing a merge, in GB [20]\n");
@@ -848,7 +848,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [10]\n");
-            fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
+            fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [small]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
