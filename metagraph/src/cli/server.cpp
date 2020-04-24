@@ -292,17 +292,35 @@ void write_compressed_if_possible(SimpleWeb::StatusCode status, const string& ms
 }
 
 
+void process_request(shared_ptr<HttpServer::Response> &response, shared_ptr<HttpServer::Request> &request, const std::function<std::string(const std::string &)> &process) {
+    // Retrieve string:
+    std::string content = request->content.string();
+    logger->info("[Server] {} request from {}", request->path, request->remote_endpoint().address().to_string());
+
+    try {
+        std::string ret = process(content);
+        write_compressed_if_possible(SimpleWeb::StatusCode::success_ok, ret, response, request);
+    }  catch(const std::exception &e) {
+        logger->info("[Server] Error on request " + string(e.what()));
+        response->write(SimpleWeb::StatusCode::client_error_bad_request, json_str_with_error_msg(e.what()));
+    }
+    catch(...) {
+        logger->info("[Server] Error on request ");
+        response->write(SimpleWeb::StatusCode::server_error_internal_server_error, json_str_with_error_msg("Internal server error"));
+    }
+}
+
 int run_server(Config *config) {
     assert(config);
 
     assert(config->infbase_annotators.size() == 1);
 
-    logger->info("Loading graph...");
+    logger->info("[Server] Loading graph...");
 
     auto graph = load_critical_dbg(config->infbase);
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 
-    logger->info("Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+    logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
 
     std::unique_ptr<IDBGAligner> aligner;
     aligner.reset(build_aligner(*graph, *config).release());
@@ -312,69 +330,40 @@ int run_server(Config *config) {
     HttpServer server;
     server.config.thread_pool_size = num_threads;
     if(config->host_address != "") {
-        logger->info("Will listen on interface {}", config->host_address);
+        logger->info("[Server] Will listen on interface {}", config->host_address);
         server.config.address = config->host_address;
     }
 
     server.config.port = config->port;
 
     config->num_top_labels = 10000;
-    config->fast = True;
+    config->fast = true;
 
-    server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
-        // Retrieve string:
-        auto content = request->content.string();
-        logger->info("Got search request from " + request->remote_endpoint().address().to_string());
-
-        try {
-            ThreadPool query_thread_pool(num_threads); // TODO: smarter way to determine how many threads to use?
-            auto ret = form_client_reply(content, *anno_graph, *config, aligner.get(), query_thread_pool);
-            write_compressed_if_possible(SimpleWeb::StatusCode::success_ok, ret, response, request);
-        }  catch(const std::exception &e) {
-            logger->info("Error on request " + string(e.what()));
-            response->write(SimpleWeb::StatusCode::client_error_bad_request, json_str_with_error_msg(e.what()));
-        }
-        catch(...) {
-            logger->info("Error on request ");
-            response->write(SimpleWeb::StatusCode::server_error_internal_server_error, json_str_with_error_msg("Internal server error"));
-        }
+    server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
+                                              shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, [&](const std::string &content) {
+            ThreadPool query_thread_pool(
+                    num_threads); // TODO: smarter way to determine how many threads to use?
+            return form_client_reply(content, *anno_graph, *config, aligner.get(),
+                                     query_thread_pool);
+        });
     };
 
-    // TODO: refactor request business in lambda, use switch?
-    server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
-        // Retrieve string:
-        auto content = request->content.string();
-
-        logger->info("Got align request from " + request->remote_endpoint().address().to_string());
-
-        try {
-            auto ret = form_align_reply(content, *config, aligner.get());
-            write_compressed_if_possible(SimpleWeb::StatusCode::success_ok, ret, response, request);
-        }  catch(const std::exception &e) {
-            logger->info("Error on request " + string(e.what()));
-            response->write(SimpleWeb::StatusCode::client_error_bad_request, json_str_with_error_msg(e.what()));
-        }
-        catch(...) {
-            logger->info("Error on request ");
-            response->write(SimpleWeb::StatusCode::server_error_internal_server_error, json_str_with_error_msg("Internal server error"));
-        }
+    server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
+                                             shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, [&](const std::string &content) {
+            return form_align_reply(content, *config, aligner.get());
+        });
     };
 
-    server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
-        logger->info("Got column_labels request from " + request->remote_endpoint().address().to_string());
-
-        try {
-            auto ret = form_column_labels_reply(*anno_graph);
-            response->write(SimpleWeb::StatusCode::success_ok, ret);
-        }  catch(const std::exception &e) {
-            logger->info("Error on request " + string(e.what()));
-            response->write(SimpleWeb::StatusCode::client_error_bad_request, json_str_with_error_msg(e.what()));
-        }
-        catch(...) {
-            logger->info("Error on request ");
-            response->write(SimpleWeb::StatusCode::server_error_internal_server_error, json_str_with_error_msg("Internal server error"));
-        }
-    };
+    server.resource["^/column_labels"]["GET"]
+            = [&](shared_ptr<HttpServer::Response> response,
+                  shared_ptr<HttpServer::Request> request) {
+                  process_request(response, request, [&](const std::string &content) {
+                      std::ignore = content;
+                      return form_column_labels_reply(*anno_graph);
+                  });
+              };
 
     server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
         logger->info("Not found " + request->path);
@@ -386,7 +375,7 @@ int run_server(Config *config) {
         // Handle errors here
         // Note that connection timeouts will also call this handle with ec set to SimpleWeb::errc::operation_canceled
         if(ec.value() != asio::stream_errc::eof) {
-            logger->info("Got error " + ec.message() + " " + ec.category().name() + " " + std::to_string(ec.value()));
+            logger->info("[Server] Got error " + ec.message() + " " + ec.category().name() + " " + std::to_string(ec.value()));
         }
     };
 
@@ -398,7 +387,7 @@ int run_server(Config *config) {
         });
     });
 
-    logger->info("Initializing a HTTP server with {} threads"
+    logger->info("[Server] Initializing a HTTP server with {} threads"
                  ", listening on port {}", num_threads, server_port.get_future().get());
 
     server_thread.join();
