@@ -319,6 +319,7 @@ int run_server(Config *config) {
     server.config.port = config->port;
 
     config->num_top_labels = 10000;
+    config->fast = True;
 
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response, shared_ptr<HttpServer::Request> request) {
         // Retrieve string:
