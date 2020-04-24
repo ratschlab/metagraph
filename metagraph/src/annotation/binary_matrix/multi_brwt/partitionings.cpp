@@ -84,8 +84,10 @@ std::vector<uint64_t> inverted_arrangement(const VectorPtrs &vectors) {
 std::vector<std::tuple<uint32_t, uint32_t, float>>
 correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
                        size_t num_threads) {
-    if (cols.size() > std::numeric_limits<uint32_t>::max())
-        throw std::runtime_error("ERROR: too many columns");
+    if (cols.size() > std::numeric_limits<uint32_t>::max()) {
+        std::cerr << "ERROR: too many columns" << std::endl;
+        exit(1);
+    }
 
     std::vector<std::tuple<uint32_t, uint32_t, float>>
             similarities(cols.size() * (cols.size() - 1) / 2);

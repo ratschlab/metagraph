@@ -94,22 +94,22 @@ int build_graph(Config *config) {
                 [&](const auto &loop) { constructor->add_sequences(loop); }
             );
 
-            auto next_block = constructor->build_chunk();
+            BOSS::Chunk *next_chunk = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
-                          next_block->size() - 1, timer.elapsed());
+                          next_chunk->size() - 1, timer.elapsed());
 
             if (config->outfbase.size() && config->suffix.size()) {
                 logger->info("Serialize the graph chunk for suffix '{}'...", suffix);
                 timer.reset();
-                next_block->serialize(config->outfbase + "." + suffix);
+                next_chunk->serialize(config->outfbase + "." + suffix);
                 logger->info("Serialization done in {} sec", timer.elapsed());
             }
 
             if (config->suffix.size())
                 return 0;
 
-            graph_data.extend(*next_block);
-            delete next_block;
+            graph_data.extend(*next_chunk);
+            delete next_chunk;
         }
         std::filesystem::remove_all(tmp_dir);
 

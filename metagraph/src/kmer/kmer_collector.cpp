@@ -209,10 +209,9 @@ KmerCollector<KMER, KmerExtractor, Container>
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
-        buffer_([this](auto&& sequences) { add_batch(std::move(sequences)); },
-                       kLargeBufferSize
-                            / sizeof(typename decltype(buffer_)::value_type),
-                       kLargeBufferSize),
+        batcher_([this](auto&& sequences) { add_batch(std::move(sequences)); },
+                 kLargeBufferSize / sizeof(typename decltype(batcher_)::value_type),
+                 kLargeBufferSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
         both_strands_mode_(both_strands_mode),
         tmp_dir_(tmp_dir) {
@@ -293,7 +292,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>::join() {
-    buffer_.process_all_buffered();
+    batcher_.process_all_buffered();
     thread_pool_.join();
 }
 
