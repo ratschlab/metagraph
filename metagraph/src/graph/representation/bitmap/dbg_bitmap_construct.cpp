@@ -93,7 +93,7 @@ DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
 template <typename KmerCollector>
 sdsl::int_vector<>
 BitmapChunkConstructor<KmerCollector>::get_weights(uint8_t bits_per_count) {
-    if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
+    if constexpr(utils::is_pair_v<typename KmerCollector::Value>) {
         const auto &kmers = kmer_collector_.data();
 
         sdsl::int_vector<> weights(kmers.size() + 1, 0, bits_per_count);

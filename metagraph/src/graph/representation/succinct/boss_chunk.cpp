@@ -11,12 +11,12 @@
 using namespace mg;
 using utils::get_first;
 
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>::value);
-static_assert(utils::is_pair<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>>::value);
-static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer64>::value);
-static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer128>::value);
-static_assert(!utils::is_pair<KmerExtractorBOSS::Kmer256>::value);
+static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>);
+static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>);
+static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>>);
+static_assert(!utils::is_pair_v<KmerExtractorBOSS::Kmer64>);
+static_assert(!utils::is_pair_v<KmerExtractorBOSS::Kmer128>);
+static_assert(!utils::is_pair_v<KmerExtractorBOSS::Kmer256>);
 
 const double kGrowthFactor = 1.5;
 
@@ -42,22 +42,21 @@ void initialize_chunk(uint64_t alph_size,
     assert(alph_size);
     assert(k);
     assert(W && last && F);
-    assert(bool(weights) == utils::is_pair<T>::value);
+    assert(bool(weights) == utils::is_pair_v<T>);
 
     uint64_t max_count __attribute__((unused)) = 0;
 
-    W->resize(1000);
-    last->resize(1000);
-    F->assign(alph_size, 0);
-    if constexpr(utils::is_pair<T>::value) {
-        weights->resize(1000);
+    if (W->size() < 1000)
+        W->resize(1000);
+    last->resize(W->size());
+    if constexpr(utils::is_pair_v<T>) {
+        weights->resize(W->size());
         (*weights)[0] = 0;
         max_count = sdsl::bits::lo_set[weights->width()];
     }
-
     (*W)[0] = 0; // the array containing edge labels
     (*last)[0] = 0; // the bit array indicating last outgoing edges for nodes
-    F->at(0) = 0; // the offsets for the last characters in the nodes of BOSS
+    F->assign(alph_size, 0); // the offsets for the last characters in the nodes of BOSS
 
     size_t curpos = 1;
     CharType lastF = 0;
@@ -74,12 +73,12 @@ void initialize_chunk(uint64_t alph_size,
         assert(curW < alph_size);
 
         assert(last->size() == W->size());
-        assert(!utils::is_pair<T>::value || weights->size() == W->size());
+        assert(!utils::is_pair_v<T> || weights->size() == W->size());
 
         if (curpos == W->size()) {
             W->resize(curpos * kGrowthFactor);
             last->resize(curpos * kGrowthFactor);
-            if constexpr(utils::is_pair<T>::value)
+            if constexpr(utils::is_pair_v<T>)
                 weights->resize(curpos * kGrowthFactor);
         }
 
@@ -114,7 +113,7 @@ void initialize_chunk(uint64_t alph_size,
             F->at(++lastF) = curpos - 1;
         }
 
-        if constexpr(utils::is_pair<T>::value) {
+        if constexpr(utils::is_pair_v<T>) {
             if (value.second && curW && kmer[1]) {
                 (*weights)[curpos] = std::min(static_cast<uint64_t>(value.second),
                                               max_count);
@@ -132,7 +131,7 @@ void initialize_chunk(uint64_t alph_size,
 
     W->resize(curpos);
     last->resize(curpos);
-    if constexpr(utils::is_pair<T>::value)
+    if constexpr(utils::is_pair_v<T>)
         weights->resize(curpos);
 }
 
@@ -160,6 +159,10 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
     } else {
         auto begin = kmers_with_counts.begin();
         auto end = kmers_with_counts.end();
+        W_.resize(end - begin + 1);
+        last_.resize(end - begin + 1);
+        if (bits_per_count)
+            weights_.resize(end - begin + 1);
         initialize_chunk(alph_size_, &begin, &end,
                          k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL);
     }

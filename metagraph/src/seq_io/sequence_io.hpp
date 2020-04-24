@@ -37,7 +37,7 @@ class FastaWriter {
     bool enumerate_sequences_;
     uint64_t count_ = 0;
     ThreadPool worker_;
-    BatchAccumulator<std::string> buffer_;
+    BatchAccumulator<std::string> batcher_;
 };
 
 template <typename T = uint32_t>
