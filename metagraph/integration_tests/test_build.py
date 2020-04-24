@@ -259,15 +259,17 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('nodes (k): 802920', params_str[1])
         self.assertEqual('canonical mode: yes', params_str[2])
 
-    def test_build_chunks_from_kmc(self):
-        representation = 'succinct'
+    @parameterized.expand(['succinct', 'succinct_disk'])
+    def test_build_chunks_from_kmc(self, build):
+        representation, tmp_dir = build_params[build]
 
         # Build chunks
         for suffix in ['$', 'A', 'C', 'G', 'T']:
-            construct_command = '{exe} build --mask-dummy \
+            construct_command = '{exe} build --mask-dummy --disk-swap {tmp_dir} \
                                 --graph {repr} -k 11 --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
+                tmp_dir=tmp_dir,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf',
                 suffix=suffix
@@ -296,15 +298,17 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('nodes (k): 469983', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-    def test_build_chunks_from_kmc_canonical(self):
-        representation = 'succinct'
+    @parameterized.expand(['succinct', 'succinct_disk'])
+    def test_build_chunks_from_kmc_canonical(self, build):
+        representation, tmp_dir = build_params[build]
 
         # Build chunks
         for suffix in ['$', 'A', 'C', 'G', 'T']:
-            construct_command = '{exe} build --mask-dummy --graph {repr} --canonical -k 11 \
+            construct_command = '{exe} build --mask-dummy --disk-swap {tmp_dir} --graph {repr} --canonical -k 11 \
                     --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
+                tmp_dir=tmp_dir,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf',
                 suffix=suffix

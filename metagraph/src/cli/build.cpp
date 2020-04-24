@@ -133,8 +133,10 @@ int build_graph(Config *config) {
                 logger->info("Serialization done in {} sec", timer.elapsed());
             }
 
-            if (config->suffix.size())
+            if (config->suffix.size()) {
+                std::filesystem::remove_all(tmp_dir);
                 return 0;
+            }
 
             graph_data.extend(*next_chunk);
             delete next_chunk;

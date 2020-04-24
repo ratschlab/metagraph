@@ -186,15 +186,6 @@ void cleanup_boss_kmers(Vector<get_int_t<T>> *kmers_int) {
     kmers->erase(kmers->begin(), kmers->begin() + last);
 }
 
-template <class KmerExtractor, typename T>
-std::function<void(Vector<get_int_t<T>> *)>
-get_cleanup(bool clean_dummy_boss_kmers) {
-    if constexpr(std::is_same_v<KmerExtractor, KmerExtractorBOSS>) {
-        if (clean_dummy_boss_kmers)
-            return cleanup_boss_kmers<T>;
-    }
-    return [](Vector<get_int_t<T>> *) {};
-}
 
 template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
@@ -217,15 +208,15 @@ KmerCollector<KMER, KmerExtractor, Container>
         tmp_dir_(tmp_dir) {
     assert(num_threads_ > 0);
 
-    auto cleanup = get_cleanup<Extractor, get_kmer_t<KMER, Value>>(filter_suffix_encoded_.empty());
+    std::function<void(Vector<Value> *)> cleanup = [](Vector<Value> *) {};
+    if constexpr(std::is_same_v<Extractor, KmerExtractorBOSS>) {
+        if (filter_suffix_encoded_.empty())
+            cleanup = cleanup_boss_kmers<get_kmer_t<KMER, Value>>;
+    }
 
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
     if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
-        if (!filter_suffix_encoded_.empty()) {
-            common::logger->error("Disk based sorting does not support chunking");
-            exit(1);
-        }
         kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_,
                                              tmp_dir, max_disk_space);
     } else {
