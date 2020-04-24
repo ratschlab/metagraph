@@ -11,7 +11,7 @@ const char kDefaultFastQualityChar = 'I';
 
 // Optimal values found from a grid search with the BM_WriteRandomSequences benchmark
 const size_t kWorkerQueueSize = 1;
-const size_t kBufferSize = 1000000;
+const size_t kBufferSize = 1'000'000;
 
 
 FastaWriter::FastaWriter(const std::string &filebase,
@@ -20,17 +20,7 @@ FastaWriter::FastaWriter(const std::string &filebase,
                          bool async)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
-        worker_(async, kWorkerQueueSize),
-        seq_batcher_([&](std::vector<std::string>&& buffer) {
-            worker_.enqueue([&](const auto &buffer) {
-                                for (const std::string &sequence : buffer) {
-                                    write_to_disk(sequence);
-                                }
-                            },
-                            std::move(buffer));
-        },
-        std::numeric_limits<size_t>::max(),
-        kBufferSize / kWorkerQueueSize) {
+        worker_(async, kWorkerQueueSize) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
     gz_out_ = gzopen(filename.c_str(), "w");
@@ -38,26 +28,37 @@ FastaWriter::FastaWriter(const std::string &filebase,
         std::cerr << "ERROR: Can't write to " << filename << std::endl;
         exit(1);
     }
+
+    batcher_ = BatchAccumulator<std::string>(
+        [&](std::vector<std::string>&& buffer) {
+            worker_.enqueue([&](const auto &buffer) {
+                                for (const std::string &sequence : buffer) {
+                                    write_to_disk(sequence);
+                                }
+                            },
+                            std::move(buffer));
+        },
+        kBufferSize / kWorkerQueueSize / sizeof(std::string),  // max size
+        kBufferSize / kWorkerQueueSize  // max cumulative length
+    );
 }
 
 FastaWriter::~FastaWriter() {
-    join();
+    flush();
     gzclose(gz_out_);
 }
 
-void FastaWriter::join() {
-    seq_batcher_.process_all_buffered();
+void FastaWriter::flush() {
+    batcher_.process_all_buffered();
     worker_.join();
 }
 
 void FastaWriter::write(const std::string &sequence) {
-    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
-                              std::string(sequence));
+    batcher_.push_and_pay(sequence.size(), sequence);
 }
 
 void FastaWriter::write(std::string&& sequence) {
-    seq_batcher_.push_and_pay(sequence.size() + sizeof(std::string),
-                              std::move(sequence));
+    batcher_.push_and_pay(sequence.size(), std::move(sequence));
 }
 
 void FastaWriter::write_to_disk(const std::string &sequence) {
@@ -81,17 +82,7 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
       : kmer_length_(kmer_length),
         header_(header),
         enumerate_sequences_(enumerate_sequences),
-        worker_(async, kWorkerQueueSize),
-        batcher_([&](std::vector<value_type> &&buffer) {
-                    worker_.enqueue([&](const auto &buffer) {
-                                        for (const auto &value_pair : buffer) {
-                                            write_to_disk(value_pair);
-                                        }
-                                    },
-                                    std::move(buffer));
-                 },
-                 std::numeric_limits<size_t>::max(),
-                 kBufferSize / kWorkerQueueSize) {
+        worker_(async, kWorkerQueueSize) {
     assert(feature_name.size());
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
@@ -110,17 +101,30 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
         std::cerr << "ERROR: Can't write to " << filename << std::endl;
         exit(1);
     }
+
+    batcher_ = BatchAccumulator<value_type>(
+        [&](std::vector<value_type>&& buffer) {
+            worker_.enqueue([&](const auto &buffer) {
+                                for (const value_type &value_pair : buffer) {
+                                    write_to_disk(value_pair);
+                                }
+                            },
+                            std::move(buffer));
+        },
+        kBufferSize / kWorkerQueueSize / sizeof(value_type),  // max size
+        kBufferSize / kWorkerQueueSize  // max cumulative length
+    );
 }
 
 template <typename T>
 ExtendedFastaWriter<T>::~ExtendedFastaWriter() {
-    join();
+    flush();
     gzclose(fasta_gz_out_);
     gzclose(feature_gz_out_);
 }
 
 template <typename T>
-void ExtendedFastaWriter<T>::join() {
+void ExtendedFastaWriter<T>::flush() {
     batcher_.process_all_buffered();
     worker_.join();
 }
@@ -130,8 +134,7 @@ void ExtendedFastaWriter<T>::write(const std::string &sequence,
                                    const std::vector<feature_type> &kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
-    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size()
-                            + sizeof(std::string) + sizeof(std::vector<feature_type>),
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
                           std::make_pair(sequence, kmer_features));
 }
 
@@ -140,8 +143,7 @@ void ExtendedFastaWriter<T>::write(std::string&& sequence,
                                    std::vector<feature_type>&& kmer_features) {
     assert(kmer_features.size() + kmer_length_ - 1 == sequence.size());
 
-    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size()
-                            + sizeof(std::string) + sizeof(std::vector<feature_type>),
+    batcher_.push_and_pay(sequence.size() + sizeof(feature_type) * kmer_features.size(),
                           std::make_pair(std::move(sequence), std::move(kmer_features)));
 }
 

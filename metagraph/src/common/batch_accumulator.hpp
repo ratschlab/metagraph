@@ -15,6 +15,10 @@ template <typename T,
           class Buffer = std::vector<T>>
 class BatchAccumulator {
   public:
+    typedef T value_type;
+
+    BatchAccumulator() {}
+
     BatchAccumulator(const std::function<void(Buffer&&)> &process_batch,
                      size_t batch_size_limit,
                      CostType batch_cost_limit = std::numeric_limits<CostType>::max(),

@@ -20,12 +20,12 @@ graph_file_extension = {'succinct': '.dbg',
                         'hashfast': '.hashfastdbg',
                         'hashstr': '.hashstrdbg'}
 
-build_params = {'succinct': ('succinct', 'vector'),
-                'succinct_disk': ('succinct', 'vector_disk'),
-                'bitmap': ('bitmap', 'vector'),
-                'hash': ('hash', 'vector'),
-                'hashfast': ('hashfast', 'vector'),
-                'hashstr': ('hashstr', 'vector')}
+build_params = {'succinct': ('succinct', '""'),
+                'succinct_disk': ('succinct', '/tmp/'),  # build with disk swap
+                'bitmap': ('bitmap', '""'),
+                'hash': ('hash', '""'),
+                'hashfast': ('hashfast', '""'),
+                'hashstr': ('hashstr', '""')}
 
 BUILDS = [name for name, _ in build_params.items()]
 
@@ -36,13 +36,13 @@ class TestBuildWeighted(unittest.TestCase):
 
     @parameterized.expand(BUILDS)
     def test_simple_all_graphs(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
-                --graph {repr} -k 20 --count-kmers --container {container} -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} -k 20 --count-kmers --disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -66,13 +66,13 @@ class TestBuildWeighted(unittest.TestCase):
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     def test_simple_all_graphs_canonical(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
-                --graph {repr} --canonical --count-kmers --container {container} -k 20 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} --canonical --count-kmers --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -95,10 +95,10 @@ class TestBuildWeighted(unittest.TestCase):
 
     @parameterized.expand(BUILDS)
     def test_build_tiny_k(self, build):
-        representation, container = build_params[build]
-        args = [METAGRAPH, 'build', '--graph', representation,
+        representation, tmp_dir = build_params[build]
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation,
                 '--count-kmers',
-                '--container', container,
+                '--disk-swap', tmp_dir,
                 '-k', '2',
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
@@ -123,11 +123,11 @@ class TestBuildWeighted(unittest.TestCase):
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     def test_build_tiny_k_canonical(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation, '--canonical',
                 '--count-kmers',
-                '--container', container,
+                '--disk-swap', tmp_dir,
                 '-k', '2',
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
@@ -151,13 +151,13 @@ class TestBuildWeighted(unittest.TestCase):
 
     @parameterized.expand(BUILDS)
     def test_build_from_kmc(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
-                --graph {repr} --count-kmers --container {container} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} --count-kmers --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -180,13 +180,13 @@ class TestBuildWeighted(unittest.TestCase):
 
     @parameterized.expand(BUILDS)
     def test_build_from_kmc_both(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
-                --graph {repr} --count-kmers --container {container} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} --count-kmers --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -210,13 +210,13 @@ class TestBuildWeighted(unittest.TestCase):
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     def test_build_from_kmc_canonical(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
-                --graph {repr} --count-kmers --container {container} --canonical -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} --count-kmers --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -240,13 +240,13 @@ class TestBuildWeighted(unittest.TestCase):
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     def test_build_from_kmc_both_canonical(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
-                --graph {repr} --count-kmers --container {container} --canonical -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} --count-kmers --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -280,14 +280,14 @@ class TestBuildWeighted(unittest.TestCase):
                           ]
                           ))
     def test_kmer_count_width(self, build, width_result):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
         count_width, avg_count_expected = width_result
 
-        construct_command = '{exe} build \
-                --graph {repr} -k 4 --count-kmers --container {container} --count-width {width} -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} -k 4 --count-kmers --disk-swap {tmp_dir} --count-width {width} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             width=count_width,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
@@ -337,7 +337,7 @@ class TestBuildWeighted(unittest.TestCase):
                           )
     ))
     def test_kmer_count_width_large(self, build, k_width_result):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
         k, count_width, avg_count_expected = k_width_result
 
         fasta_file = self.tempdir.name + '/CG_10_6.fasta.gz'
@@ -345,11 +345,11 @@ class TestBuildWeighted(unittest.TestCase):
             f.write(b'>CG_10^6times\n')
             f.write(b'CG' * 10**6)
 
-        construct_command = '{exe} build \
-                --graph {repr} -k {k} --count-kmers --container {container} --count-width {width} -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} -k {k} --count-kmers --disk-swap {tmp_dir} --count-width {width} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             k=k,
             width=count_width,
             outfile=self.tempdir.name + '/graph',

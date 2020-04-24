@@ -18,12 +18,12 @@ graph_file_extension = {'succinct': '.dbg',
                         'hashfast': '.hashfastdbg',
                         'hashstr': '.hashstrdbg'}
 
-build_params = {'succinct': ('succinct', 'vector'),
-                'succinct_disk': ('succinct', 'vector_disk'),
-                'bitmap': ('bitmap', 'vector'),
-                'hash': ('hash', 'vector'),
-                'hashfast': ('hashfast', 'vector'),
-                'hashstr': ('hashstr', 'vector')}
+build_params = {'succinct': ('succinct', '""'),
+                'succinct_disk': ('succinct', '/tmp/'),  # build with disk swap
+                'bitmap': ('bitmap', '""'),
+                'hash': ('hash', '""'),
+                'hashfast': ('hashfast', '""'),
+                'hashstr': ('hashstr', '""')}
 
 BUILDS = [name for name, _ in build_params.items()]
 
@@ -39,12 +39,12 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand(BUILDS)
     def test_simple_all_graphs(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --graph {repr} --container {container} -k 20 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -61,12 +61,12 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand(['succinct'])
     def test_simple_bloom_graph(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --graph {repr} --container {container} -k 20 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -105,13 +105,13 @@ class TestBuild(unittest.TestCase):
         """
         Build simple canonical graphs
         """
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -128,11 +128,11 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand(BUILDS)
     def test_build_tiny_k(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        args = [METAGRAPH, 'build', '--graph', representation,
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation,
                 '-k', '2',
-                '--container', container,
+                '--disk-swap', tmp_dir,
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
         construct_command = ' '.join(args)
@@ -150,11 +150,11 @@ class TestBuild(unittest.TestCase):
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     def test_build_tiny_k_canonical(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        args = [METAGRAPH, 'build', '--graph', representation, '--canonical',
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation, '--canonical',
                 '-k', '2',
-                '--container', container,
+                '--disk-swap', tmp_dir,
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
         construct_command = ' '.join(args)
@@ -171,12 +171,12 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand(BUILDS)
     def test_build_from_kmc(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --graph {repr} --container {container} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -193,12 +193,12 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand(BUILDS)
     def test_build_from_kmc_both(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --graph {repr} --container {container} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -215,13 +215,13 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     def test_build_from_kmc_canonical(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
-                --graph {repr} --container {container} --canonical -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -238,13 +238,13 @@ class TestBuild(unittest.TestCase):
 
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     def test_build_from_kmc_both_canonical(self, build):
-        representation, container = build_params[build]
+        representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build \
-                --graph {repr} --container {container} --canonical -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --mask-dummy \
+                --graph {repr} --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            container=container,
+            tmp_dir=tmp_dir,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -259,15 +259,17 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('nodes (k): 802920', params_str[1])
         self.assertEqual('canonical mode: yes', params_str[2])
 
-    def test_build_chunks_from_kmc(self):
-        representation = 'succinct'
+    @parameterized.expand(['succinct', 'succinct_disk'])
+    def test_build_chunks_from_kmc(self, build):
+        representation, tmp_dir = build_params[build]
 
         # Build chunks
         for suffix in ['$', 'A', 'C', 'G', 'T']:
-            construct_command = '{exe} build \
+            construct_command = '{exe} build --mask-dummy --disk-swap {tmp_dir} \
                                 --graph {repr} -k 11 --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
+                tmp_dir=tmp_dir,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf',
                 suffix=suffix
@@ -296,15 +298,17 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('nodes (k): 469983', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-    def test_build_chunks_from_kmc_canonical(self):
-        representation = 'succinct'
+    @parameterized.expand(['succinct', 'succinct_disk'])
+    def test_build_chunks_from_kmc_canonical(self, build):
+        representation, tmp_dir = build_params[build]
 
         # Build chunks
         for suffix in ['$', 'A', 'C', 'G', 'T']:
-            construct_command = '{exe} build --graph {repr} --canonical -k 11 \
+            construct_command = '{exe} build --mask-dummy --disk-swap {tmp_dir} --graph {repr} --canonical -k 11 \
                     --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
+                tmp_dir=tmp_dir,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf',
                 suffix=suffix

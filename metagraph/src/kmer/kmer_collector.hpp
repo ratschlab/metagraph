@@ -68,16 +68,17 @@ class KmerCollector {
     void add_sequence(std::string_view sequence, uint64_t count = 1) {
         // push read to the processing queue
         if (sequence.size() >= k_)
-            batch_accumulator_.push_and_pay(sequence.size(), sequence, count);
+            batcher_.push_and_pay(sequence.size(), sequence, count);
     }
 
     void add_sequence(std::string&& sequence, uint64_t count = 1) {
         // push read to the processing queue
         if (sequence.size() >= k_)
-            batch_accumulator_.push_and_pay(sequence.size(), std::move(sequence), count);
+            batcher_.push_and_pay(sequence.size(), std::move(sequence), count);
     }
 
-    size_t buffer_size() const;
+    size_t buffer_size() const { return buffer_size_; }
+
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
     void add_sequences(const std::function<void(CallStringCount)> &generate_sequences);
 
@@ -98,7 +99,7 @@ class KmerCollector {
     inline size_t max_disk_space() const { return max_disk_space_; }
 
     /**
-     * Sends sequences accumulated in #batch_accumulator_ for processing
+     * Sends sequences accumulated in #batcher_ for processing
      * on the thread pool. */
     void add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences);
 
@@ -111,7 +112,7 @@ class KmerCollector {
     size_t num_threads_;
     ThreadPool thread_pool_;
 
-    BatchAccumulator<std::pair<std::string, uint64_t>, size_t> batch_accumulator_;
+    BatchAccumulator<std::pair<std::string, uint64_t>> batcher_;
 
     Sequence filter_suffix_encoded_;
 

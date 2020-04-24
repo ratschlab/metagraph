@@ -30,7 +30,7 @@ class TestCleanWeighted(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_no_cleaning_contigs(self, representation):
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 20 --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -65,7 +65,7 @@ class TestCleanWeighted(unittest.TestCase):
         res = subprocess.run([clean_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        reconstruct_command = '{exe} build \
+        reconstruct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 20 --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -92,7 +92,7 @@ class TestCleanWeighted(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_no_cleaning_contigs_2bit_counts(self, representation):
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 20 --count-kmers --count-width 2 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -127,7 +127,7 @@ class TestCleanWeighted(unittest.TestCase):
         res = subprocess.run([clean_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        reconstruct_command = '{exe} build \
+        reconstruct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 20 --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -160,7 +160,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_no_cleaning_contigs(self, representation):
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 31 --canonical --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -195,7 +195,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
         res = subprocess.run([clean_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        reconstruct_command = '{exe} build \
+        reconstruct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 31 --canonical --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -223,7 +223,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_no_cleaning_contigs_2bit_counts(self, representation):
 
-        construct_command = '{exe} build \
+        construct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 31 --canonical --count-kmers --count-width 2 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -258,7 +258,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
         res = subprocess.run([clean_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        reconstruct_command = '{exe} build \
+        reconstruct_command = '{exe} build --mask-dummy \
                 --graph {repr} -k 31 --canonical --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,

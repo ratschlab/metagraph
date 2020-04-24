@@ -57,7 +57,7 @@ void shrink_kmers(Array *kmers,
 
 template <class Container, typename KMER>
 inline KMER& push_back(Container &kmers, const KMER &kmer) {
-    if constexpr(utils::is_pair<typename Container::value_type>::value) {
+    if constexpr(utils::is_pair_v<typename Container::value_type>) {
         kmers.emplace_back(kmer, 0);
         return kmers.back().first;
     } else {
@@ -196,7 +196,7 @@ uint8_t write_kmer(size_t k,
     if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
     }
-    if constexpr(utils::is_pair<T>{}) {
+    if constexpr(utils::is_pair_v<T>) {
         encoder->add({ to_write.data.first.data(), to_write.data.second });
     } else {
         encoder->add(to_write.data.data());
@@ -408,7 +408,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
         BOSS::Chunk *result;
 
-        if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
+        if constexpr(utils::is_pair_v<typename KmerCollector::Value>) {
             // kmer_collector stores (BOSS::k_ + 1)-mers
             result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
                                      kmer_collector_.get_k() - 1,
@@ -439,6 +439,12 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 template <template <typename KMER> class KmerContainer, typename... Args>
 static std::unique_ptr<IBOSSChunkConstructor>
 initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
+    if (k < 1 || k > 256 / KmerExtractorBOSS::bits_per_char - 1) {
+        logger->error("For succinct graph, k must be between 2 and {}",
+                      256 / KmerExtractorBOSS::bits_per_char - 1);
+        exit(1);
+    }
+
     if ((k + 1) * KmerExtractorBOSS::bits_per_char <= 64) {
         return std::unique_ptr<IBOSSChunkConstructor>(
             new BOSSChunkConstructor<KmerContainer<KmerExtractorBOSS::Kmer64>>(k, args...)

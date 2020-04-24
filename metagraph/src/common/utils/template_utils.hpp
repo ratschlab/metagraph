@@ -13,6 +13,9 @@ struct is_pair : std::false_type {};
 template <typename T1, typename T2>
 struct is_pair<std::pair<T1,T2>> : std::true_type {};
 
+template <typename T>
+inline constexpr bool is_pair_v = is_pair<T>::value;
+
 static_assert(is_pair<std::pair<int,size_t>>::value);
 static_assert(is_pair<std::pair<uint64_t,size_t>>::value);
 
@@ -24,6 +27,9 @@ struct is_instance : public std::false_type {};
 
 template <typename... Ts, template <typename, typename...> class U>
 struct is_instance<U<Ts...>, U> : public std::true_type {};
+
+template <typename T, template <typename, typename...> class U>
+inline constexpr bool is_instance_v = is_instance<T, U>::value;
 
 // check if two classes have the same template parameters
 template <class, class>

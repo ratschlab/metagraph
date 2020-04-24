@@ -8,20 +8,26 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
-#include "common/algorithms.hpp"
+#include "common/logger.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
 using utils::remove_suffix;
+using mg::common::logger;
 
 typedef DBGSuccinct::node_index node_index;
 
 
 DBGSuccinct::DBGSuccinct(size_t k, bool canonical_mode)
       : boss_graph_(std::make_unique<BOSS>(k - 1)),
-        canonical_mode_(canonical_mode) {}
+        canonical_mode_(canonical_mode) {
+    if (k < 2) {
+        logger->error("For succinct graph, k must be at least 2");
+        exit(1);
+    }
+}
 
 DBGSuccinct::DBGSuccinct(BOSS *boss_graph, bool canonical_mode)
       : boss_graph_(boss_graph),
@@ -658,7 +664,7 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
         }
 
         if (!boss_graph_->load_suffix_ranges(instream))
-            std::cerr << "Warning: no index for node ranges could be loaded" << std::endl;
+            logger->warn("No index for node ranges could be loaded");
     }
 
     return true;
@@ -731,11 +737,8 @@ bool DBGSuccinct::load(const std::string &filename) {
             return false;
         }
 
-        if (utils::get_verbose()) {
-            std::cout << "Bloom filter loaded from "
-                      << prefix + kBloomFilterExtension
-                      << " successfully" << std::endl;
-        }
+        logger->trace("Bloom filter loaded from {} successfully",
+                      prefix + kBloomFilterExtension);
     }
 
     return true;

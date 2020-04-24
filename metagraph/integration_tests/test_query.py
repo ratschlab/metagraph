@@ -33,7 +33,7 @@ class TestQuery(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_query_all_graphs(self, graph_repr):
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -239,7 +239,7 @@ class TestQuery(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_query_graphs_bloom(self, graph_repr):
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -343,7 +343,7 @@ class TestQuery(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_query_all_graphs_batch(self, graph_repr):
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -549,7 +549,7 @@ class TestQuery(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_query_all_graphs_tiny_batch(self, graph_repr):
 
-        construct_command = '{exe} build -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -626,7 +626,7 @@ class TestQueryCanonical(unittest.TestCase):
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # 'hashstr'
     def test_query_all_graphs(self, graph_repr):
 
-        construct_command = '{exe} build --canonical -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --canonical -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -719,7 +719,7 @@ class TestQueryCanonical(unittest.TestCase):
     @parameterized.expand(['succinct'])  # 'hashstr'
     def test_query_graphs_bloom(self, graph_repr):
 
-        construct_command = '{exe} build --canonical -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --canonical -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -800,7 +800,7 @@ class TestQueryCanonical(unittest.TestCase):
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # 'hashstr'
     def test_query_all_graphs_batch(self, graph_repr):
 
-        construct_command = '{exe} build --canonical -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --canonical -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -893,7 +893,7 @@ class TestQueryCanonical(unittest.TestCase):
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # 'hashstr'
     def test_query_all_graphs_batch_tiny_batch(self, graph_repr):
 
-        construct_command = '{exe} build --canonical -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --canonical -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,

@@ -3,6 +3,7 @@
 #include <progress_bar.hpp>
 
 #include "common/algorithms.hpp"
+#include "common/logger.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/utils/template_utils.hpp"
@@ -13,6 +14,7 @@ namespace mg {
 namespace bitmap_graph {
 
 using namespace mg;
+using mg::common::logger;
 
 
 template <typename KmerCollector>
@@ -79,21 +81,22 @@ DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
                                            uint8_t bits_per_count,
                                            const std::string &filter_suffix,
                                            size_t num_threads,
-                                           double memory_preallocated)
-      : constructor_(IBitmapChunkConstructor::initialize(
-            k,
-            canonical_mode,
-            bits_per_count,
-            filter_suffix,
-            num_threads,
-            memory_preallocated)
-        ),
-        bits_per_count_(bits_per_count) {}
+                                           double memory_preallocated) {
+    constructor_.reset(
+        IBitmapChunkConstructor::initialize(k,
+                                            canonical_mode,
+                                            bits_per_count,
+                                            filter_suffix,
+                                            num_threads,
+                                            memory_preallocated)
+    );
+    bits_per_count_ = bits_per_count;
+}
 
 template <typename KmerCollector>
 sdsl::int_vector<>
 BitmapChunkConstructor<KmerCollector>::get_weights(uint8_t bits_per_count) {
-    if constexpr(utils::is_pair<typename KmerCollector::Value>::value) {
+    if constexpr(utils::is_pair_v<typename KmerCollector::Value>) {
         const auto &kmers = kmer_collector_.data();
 
         sdsl::int_vector<> weights(kmers.size() + 1, 0, bits_per_count);
@@ -188,7 +191,7 @@ DBGBitmap* DBGBitmapConstructor
         if (!i) {
             size = chunk->size();
         } else if (size != chunk->size()) {
-            std::cerr << "ERROR: inconsistent graph chunks" << std::endl;
+            logger->error("Inconsistent graph chunks");
             exit(1);
         }
 
@@ -197,14 +200,14 @@ DBGBitmap* DBGBitmapConstructor
     assert(size > 0);
 
     if (verbose)
-        std::cout << "Cumulative size of chunks: "
-                  << cumulative_size - 1 << std::endl;
+        logger->info("Cumulative size of chunks: {}", cumulative_size - 1);
 
     size_t chunk_idx = 0;
 
     //TODO configure stream for verbose output globally and refactor
     std::ofstream null_ofstream;
-    ProgressBar progress_bar(chunk_filenames.size(), "Processing chunks", verbose ? std::cout : null_ofstream);
+    ProgressBar progress_bar(chunk_filenames.size(), "Processing chunks",
+                             verbose ? std::cout : null_ofstream);
 
     return build_graph_from_chunks(
         size,
@@ -220,7 +223,7 @@ DBGBitmap* DBGBitmapConstructor
             std::ifstream chunk_in(chunk_filename, std::ios::binary);
 
             if (!chunk_in.good()) {
-                std::cerr << "ERROR: input file " << chunk_filename << " corrupted" << std::endl;
+                logger->error("Input file {} corrupted", chunk_filename);
                 exit(1);
             }
 
@@ -238,6 +241,12 @@ DBGBitmap* DBGBitmapConstructor
 template <template <typename KMER> class KmerCollector, typename... Args>
 IBitmapChunkConstructor*
 initialize_bitmap_chunk_constructor(size_t k, const Args& ...args) {
+    if (k < 1 || k > 63 / KmerExtractor2Bit::bits_per_char) {
+        logger->error("For bitmap graph, k must be between 1 and {}",
+                      63 / KmerExtractor2Bit::bits_per_char);
+        exit(1);
+    }
+
     if (k * KmerExtractor2Bit::bits_per_char <= 64) {
         return new BitmapChunkConstructor<KmerCollector<KmerExtractor2Bit::Kmer64>>(k, args...);
     } else if (k * KmerExtractor2Bit::bits_per_char <= 128) {
@@ -264,13 +273,12 @@ using KmerMultsetVector32 = kmer::KmerCollector<KMER,
                                                 common::SortedMultiset<typename KMER::WordType, uint32_t>>;
 
 IBitmapChunkConstructor*
-IBitmapChunkConstructor
-::initialize(size_t k,
-             bool canonical_mode,
-             uint8_t bits_per_count,
-             const std::string &filter_suffix,
-             size_t num_threads,
-             double memory_preallocated) {
+IBitmapChunkConstructor::initialize(size_t k,
+                                    bool canonical_mode,
+                                    uint8_t bits_per_count,
+                                    const std::string &filter_suffix,
+                                    size_t num_threads,
+                                    double memory_preallocated) {
 #define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated
 
     if (!bits_per_count) {

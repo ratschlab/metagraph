@@ -113,12 +113,7 @@ class KMerBOSS {
 template <typename G, int L>
 template <typename V>
 KMerBOSS<G, L>::KMerBOSS(const V &arr, size_t k) : seq_(0) {
-    if (k * kBitsPerChar > sizeof(WordType) * 8 || k < 2) {
-        std::cerr << "ERROR: Invalid k-mer size: passed "
-                  << k << " but must be between 2 and "
-                  << sizeof(WordType) * 8 / kBitsPerChar << std::endl;
-        exit(1);
-    }
+    assert(k * kBitsPerChar <= sizeof(WordType) * 8 && k >= 2);
 
     for (int i = k - 2; i >= 0; --i) {
         assert(static_cast<uint64_t>(arr[i]) <= kFirstCharMask

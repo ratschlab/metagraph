@@ -27,7 +27,7 @@ class FastaWriter {
     void write(const std::string &sequence);
     void write(std::string&& sequence);
 
-    void join();
+    void flush();
 
   private:
     void write_to_disk(const std::string &sequence);
@@ -37,7 +37,7 @@ class FastaWriter {
     bool enumerate_sequences_;
     uint64_t count_ = 0;
     ThreadPool worker_;
-    BatchAccumulator<std::string> seq_batcher_;
+    BatchAccumulator<std::string> batcher_;
 };
 
 template <typename T = uint32_t>
@@ -71,7 +71,7 @@ class ExtendedFastaWriter {
     void write(std::string&& sequence,
                std::vector<feature_type>&& kmer_features);
 
-    void join();
+    void flush();
 
   private:
     void write_to_disk(const value_type &value_pair);

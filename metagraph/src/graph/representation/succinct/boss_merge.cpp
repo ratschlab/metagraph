@@ -389,7 +389,7 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
         bool remove_dummy_edge = false;
 
         // handle multiple outgoing edges
-        if (chunk->size() > 0 && val != chunk->get_W_back() % alph_size) {
+        if (chunk->size() > 1 && val != chunk->get_W_back() % alph_size) {
             auto pred_node = last_added_nodes[chunk->get_W_back() % alph_size];
 
             // compare the last two added nodes

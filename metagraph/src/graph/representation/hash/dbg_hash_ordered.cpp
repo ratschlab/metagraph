@@ -8,8 +8,10 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/hash/hash.hpp"
+#include "common/logger.hpp"
 #include "kmer/kmer_extractor.hpp"
 
+using mg::common::logger;
 
 #define _DBGHash_LINEAR_PATH_OPTIMIZATIONS 1
 
@@ -593,6 +595,12 @@ std::unique_ptr<DBGHashOrdered::DBGHashOrderedInterface>
 DBGHashOrdered::initialize_graph(size_t k,
                                  bool canonical_mode,
                                  bool packed_serialization) {
+    if (k < 1 || k > 256 / KmerExtractor2Bit::bits_per_char) {
+        logger->error("For hash graph, k must be between 1 and {}",
+                      256 / KmerExtractor2Bit::bits_per_char);
+        exit(1);
+    }
+
     if (k * KmerExtractor2Bit::bits_per_char <= 64) {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer64>>(
             k, canonical_mode, packed_serialization
