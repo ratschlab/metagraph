@@ -439,6 +439,12 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 template <template <typename KMER> class KmerContainer, typename... Args>
 static std::unique_ptr<IBOSSChunkConstructor>
 initialize_boss_chunk_constructor(size_t k, const Args& ...args) {
+    if (k < 1 || k > 256 / KmerExtractorBOSS::bits_per_char - 1) {
+        logger->error("For succinct graph, k must be between 2 and {}",
+                      256 / KmerExtractorBOSS::bits_per_char - 1);
+        exit(1);
+    }
+
     if ((k + 1) * KmerExtractorBOSS::bits_per_char <= 64) {
         return std::unique_ptr<IBOSSChunkConstructor>(
             new BOSSChunkConstructor<KmerContainer<KmerExtractorBOSS::Kmer64>>(k, args...)

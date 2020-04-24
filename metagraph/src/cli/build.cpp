@@ -50,6 +50,11 @@ int build_graph(Config *config) {
 
     logger->trace("Build De Bruijn Graph with k-mer size k={}", config->k);
 
+    if (!config->outfbase.size()) {
+        logger->error("No output file provided");
+        exit(1);
+    }
+
     Timer timer;
 
     if (config->canonical)
@@ -118,7 +123,7 @@ int build_graph(Config *config) {
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
                           next_chunk->size() - 1, timer.elapsed());
 
-            if (config->outfbase.size() && config->suffix.size()) {
+            if (config->suffix.size()) {
                 logger->info("Serialize the graph chunk for suffix '{}'...", suffix);
                 timer.reset();
                 next_chunk->serialize(config->outfbase + "." + suffix);
@@ -145,11 +150,6 @@ int build_graph(Config *config) {
         }
 
     } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
-
-        if (!config->outfbase.size()) {
-            logger->error("No output file provided");
-            exit(1);
-        }
 
         logger->trace("Start reading data and extracting k-mers");
         // enumerate all suffixes
@@ -310,39 +310,37 @@ int build_graph(Config *config) {
 
     logger->trace("Graph construction finished in {} sec", timer.elapsed());
 
-    if (!config->outfbase.empty()) {
-        if (auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get())) {
-            if (config->mark_dummy_kmers) {
-                logger->trace("Detecting all dummy k-mers...");
+    if (auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get())) {
+        if (config->mark_dummy_kmers) {
+            logger->trace("Detecting all dummy k-mers...");
 
-                timer.reset();
-                dbg_succ->mask_dummy_kmers(get_num_threads(), false);
+            timer.reset();
+            dbg_succ->mask_dummy_kmers(get_num_threads(), false);
 
-                logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
-            }
-
-            size_t suffix_length = std::min((size_t)config->node_suffix_length,
-                                            dbg_succ->get_boss().get_k());
-
-            if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
-                logger->warn("Node ranges for k-mer suffixes longer than {} cannot be indexed",
-                             static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
-
-            } else if (suffix_length) {
-                logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
-                              suffix_length,
-                              std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
-                                    * 2. * sizeof(uint64_t) * 1e-6);
-                timer.reset();
-                dbg_succ->get_boss().index_suffix_ranges(suffix_length);
-
-                logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
-            }
+            logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
         }
 
-        graph->serialize(config->outfbase);
-        graph->serialize_extensions(config->outfbase);
+        size_t suffix_length = std::min((size_t)config->node_suffix_length,
+                                        dbg_succ->get_boss().get_k());
+
+        if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
+            logger->warn("Node ranges for k-mer suffixes longer than {} cannot be indexed",
+                         static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
+
+        } else if (suffix_length) {
+            logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
+                          suffix_length,
+                          std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
+                                * 2. * sizeof(uint64_t) * 1e-6);
+            timer.reset();
+            dbg_succ->get_boss().index_suffix_ranges(suffix_length);
+
+            logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
+        }
     }
+
+    graph->serialize(config->outfbase);
+    graph->serialize_extensions(config->outfbase);
 
     return 0;
 }

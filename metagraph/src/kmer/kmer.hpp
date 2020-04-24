@@ -108,12 +108,7 @@ class KMer {
 template <typename G, int L>
 template <typename V>
 KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
-    if (k * kBitsPerChar > sizeof(WordType) * 8 || k < 1) {
-        std::cerr << "ERROR: Invalid k-mer size "
-                  << k << ": must be between 1 and "
-                  << sizeof(WordType) * 8 / kBitsPerChar << std::endl;
-        exit(1);
-    }
+    assert(k * kBitsPerChar <= sizeof(WordType) * 8 && k >= 1);
 
     for (int i = k - 1; i > 0; --i) {
         assert(static_cast<CharType>(arr[i]) <= kFirstCharMask
