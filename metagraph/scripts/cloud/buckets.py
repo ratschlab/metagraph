@@ -9,7 +9,7 @@ def convert_bucket(data_dir):
     """ Converts the original gs://... bucket urls in bucket1..bucket9 to sra_id bucket_no pairs for faster parsing """
 
     logging.info('Converting bucket files to a faster to parse format...')
-    for i in range(1, 9):
+    for i in range(1, 10):
         fileout = os.path.join(data_dir, f'bucket_proc{i}')
         with open(fileout, 'w') as fpout:
             file = os.path.join(data_dir, f'bucket{i}')
@@ -36,6 +36,21 @@ class Sra:
         self.ignore_sras = ignore_sras
         if add_gcloud_bucket:
             self.add_buckets()
+        self.total_sras = self.get_total_sras()
+        self.processed_sras = 0
+
+    def get_total_sras(self):
+        logging.info('Computing total number of SRAs...')
+        total_sra_count = 0
+        for file in self.data_files:
+            with open(file) as fp:
+                for line in fp:
+                    total_sra_count += 1
+        to_process_count = total_sra_count - len(self.ignore_sras)
+        logging.info(
+            f'Found {total_sra_count} SRAs, left out {len(self.ignore_sras)} SRAs, '
+            f'processing {to_process_count} SRAs')
+        return to_process_count
 
     def next_item(self):
         """Lazy function (generator) to read a sequence of files line by line."""
@@ -46,18 +61,19 @@ class Sra:
                     if len(line) == 0:
                         continue
                     if line[0] in self.ignore_sras:  # already processed
-                        print(f'{line[0]} already downloaded - assuming it\'s ready for processing')
+                        print(f'{line[0]} is marked as already processed. Skipping...')
                         continue
+                    self.processed_sras += 1
                     yield line
         return None
 
     def load_sraid_to_bucket(self):
         if self.sraid_to_bucket:
             return  # already loaded
-        if not all([os.path.exists(os.path.join(self.data_dir, f'bucket{i}')) for i in range(1, 9)]):
+        if not all([os.path.exists(os.path.join(self.data_dir, f'bucket{i}')) for i in range(1, 10)]):
             logging.info(
                 'SRA Bucket files are not present. Will start downloading. Go get a coffee, this will take a while')
-            for i in range(1, 9):
+            for i in range(1, 10):
                 logging.info(f'Downloading bucket{i}/9...')
                 with open(os.path.join(self.data_dir, f'bucket{i}'), 'w') as f:
                     if subprocess.call(['gsutil', '-u', 'metagraph', 'ls', f'gs://sra-pub-run-{i}/'],
@@ -67,7 +83,7 @@ class Sra:
                         exit(1)
         else:
             logging.info(f'Bucket files found in {self.data_dir}')
-        for i in range(1, 9):
+        for i in range(1, 10):
             bucket_file = os.path.join(self.data_dir, f'bucket_proc{i}')
             if not os.path.exists(bucket_file):
                 convert_bucket(self.data_dir)

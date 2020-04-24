@@ -38,7 +38,7 @@ fi
 
 exit_code=0
 set +e
-if execute metagraph build -v -p 4 -k 31 --container "${container_type}" --canonical --state small --count-kmers --no-shrink -o "${output_dir}/${sra_id}" --mem-cap-gb ${mem_cap_gb} --tmp-dir ${tmp_dir} --disk-cap-gb 200 --count-width 16 ${input_dir}/${sra_id}.kmc.kmc_pre; then
+if execute metagraph build -v -p 8 -k 31 --container "${container_type}" --canonical --state small --count-kmers --no-shrink -o "${output_dir}/${sra_id}" --mem-cap-gb ${mem_cap_gb} --tmp-dir ${tmp_dir} --disk-cap-gb 200 --count-width 16 ${input_dir}/${sra_id}.kmc.kmc_pre; then
   exit_code=0
 else
   exit_code=1
@@ -51,7 +51,7 @@ fi
 execute rm -rf ${tmp_dir}
 mkdir -p "${tmp_dir}"
 
-execute metagraph stats -p 4 --count-dummy "${output_dir}/${sra_id}.dbg" | grep "edges" > "${output_dir}/${sra_id}.stats"
+execute metagraph stats -p 8 --count-dummy "${output_dir}/${sra_id}.dbg" | grep "edges" > "${output_dir}/${sra_id}.stats"
 
 execute rm -rf "${input_dir}"
 if (( exit_code == 0 )); then

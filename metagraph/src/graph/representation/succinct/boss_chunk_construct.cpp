@@ -236,27 +236,32 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
     using T_INT = get_int_t<T>; // either KMER_INT or <KMER_INT, count>
 
+    const filesystem::path dummy_l1_path = tmp_dir / "dummy_source1";
+    std::filesystem::create_directory(dummy_l1_path);
+    const std::string orig_dummy_l1 = dummy_l1_path / "original_and_dummy_l1";
+    files_to_merge.push_back(orig_dummy_l1);
     size_t k = kmer_collector.get_k() - 1;
 
     const auto no_cleanup = [](Vector<T_INT> *) {};
 
-    // contains original kmers and non-redundant source dummy k-mers with prefix length 1
-    std::vector<std::string> files_to_merge { tmp_dir/"original_and_dummy_l1" };
-    common::EliasFanoEncoderBuffered<T_INT> original_and_l1(files_to_merge.front(),
-                                                            ENCODER_BUFFER_SIZE);
+    files_to_merge.push_back(get_file_name(2));
+
+    const filesystem::path dummy_l2_path = tmp_dir / "dummy_source2";
+
+    std::function<T_INT(const T &v)> to_intf = [](const T &v) { return to_int(v); };
     // this will contain dummy k-mers of prefix length 2
     common::SortedSetDisk<T_INT> sorted_dummy_kmers(
             no_cleanup, kmer_collector.num_threads(), kmer_collector.buffer_size(),
-            tmp_dir/"dummy_source_2", kmer_collector.max_disk_space());
-    Vector<T_INT> dummy_kmers;
-    dummy_kmers.reserve(ENCODER_BUFFER_SIZE);
+            dummy_l2_path, kmer_collector.max_disk_space(), [](const T &) {}, 100, to_intf);
+    Vector<T> dummy_kmers;
+    dummy_kmers.reserve(sorted_dummy_kmers.buffer_size());
 
     // traverse the input kmers and remove redundant dummy source k-mers of prefix length
     // 1. While traversing we also  generate dummy k-mers of prefix length 2.
     size_t num_dummy_parent_kmers = 0;
     size_t num_parent_kmers = 0;
-
-    RecentKmers<T> recent_buffer(std::pow(1llu << KMER::kBitsPerChar, 2));
+    // contains original kmers and non-redundant source dummy k-mers with prefix length 1
+    common::EliasFanoEncoderBuffered<T_INT> original_and_l1(orig_dummy_l1, ENCODER_BUFFER_SIZE);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         push_and_remove_redundant_dummy_source(*it, &recent_buffer);
@@ -310,13 +315,14 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix
     // length x in /tmp/dummy_{x}, and we'll merge them all into a single stream
     kmers->reset();
-    async_worker.enqueue([kmers, files_to_merge]() {
-        common::merge_files<T_INT>(files_to_merge,
-            [kmers](const T_INT &v) {
-                kmers->push(reinterpret_cast<const T &>(v));
-            }
-        );
+    async_worker.enqueue([kmers, files_to_merge, k, &tmp_dir]() {
+        std::function<void(const T &)> on_new_item
+                = [kmers](const T &v) { kmers->push(v); };
+        common::merge_files<T, T_INT>(files_to_merge, on_new_item);
         kmers->shutdown();
+        for (u_int32_t i = 1; i < k + 1; ++i) {
+            std::filesystem::remove_all(tmp_dir / ("dummy_source" + std::to_string(i)));
+        }
     });
 }
 
