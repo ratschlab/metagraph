@@ -19,7 +19,8 @@ import urllib.parse
 
 args = None  # the parsed command line arguments
 
-sra_download_gen = None  # the generator function that returns the next SRA id to be downloaded
+sra_generator = None  # class responsible for generating SRA ids to process
+sra_download_gen = None  # the generator function in sra_generator that returns the next SRA id to be downloaded
 
 # jobs done
 downloaded_sras = set()  # the downloaded sras
@@ -54,6 +55,7 @@ status_str = f"""
 </head>
 <body>
 <h3> Progress </h3>
+<p>Processed: %s/%s</p>
 <p>Uptime: %s</p>
 <p>MB downloaded: %s</p>
 <p>Download Time: %s (%s MB/s/machine)</p>
@@ -160,12 +162,14 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         clean_time = millis_to_human(op_time_ms.get('clean', 0))
         transfer_time = millis_to_human(op_time_ms.get('transfer', 0))
         total_MBps = round(total_transfer_size_MB / (time.time() - start_time), 2)
+        global sra_generator
         self.send_reply(200, status_str % (
-            uptime, round(total_download_size_MB, 2), download_time, download_MBps, total_build_size_MB, build_time,
-            build_MBps, round(total_clean_size_MB, 2), clean_time, clean_MBps, round(total_transfer_size_MB, 2),
-            transfer_time, transfer_MBps, total_MBps, pending_downloads, pending_builds, pending_cleans,
-            pending_transfers, preempted_ids, len(downloaded_sras), downloaded_sras, len(built_sras), built_sras,
-            len(cleaned_sras), cleaned_sras, len(transferred_sras), transferred_sras, download_done),
+            sra_generator.processed_sras, sra_generator.total_sras, uptime, round(total_download_size_MB, 2),
+            download_time, download_MBps, total_build_size_MB, build_time, build_MBps, round(total_clean_size_MB, 2),
+            clean_time, clean_MBps, round(total_transfer_size_MB, 2), transfer_time, transfer_MBps, total_MBps,
+            pending_downloads, pending_builds, pending_cleans, pending_transfers, preempted_ids, len(downloaded_sras),
+            downloaded_sras, len(built_sras), built_sras, len(cleaned_sras), cleaned_sras, len(transferred_sras),
+            transferred_sras, download_done),
                         {'Content-type': 'text/html'})
 
     def handle_ack(self, operation, post_vars, add_sets, pending_operations):
@@ -377,11 +381,13 @@ def init_state():
     checkpoint = args.checkpoint.split('|')
     to_eliminate = set()
     for state in checkpoint:
-        if len(state_map[state]) != 0:
-            logging.info('Eliminating: ' + state)
+        state_size = len(state_map[state])
+        if state_size != 0:
+            logging.info(f'Eliminating {state} of size {state_size}')
         to_eliminate.update(state_map[state])
-    global sra_download_gen
-    sra_download_gen = buckets.Sra(data_files, args.add_gcloud_bucket, args.data_dir, to_eliminate).next_item()
+    global sra_download_gen, sra_generator
+    sra_generator = buckets.Sra(data_files, args.add_gcloud_bucket, args.data_dir, to_eliminate)
+    sra_download_gen = sra_generator.next_item()
 
 
 def init_logging():
@@ -420,14 +426,17 @@ def parse_args():
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--add_gcloud_bucket', default=True,
+    parser.add_argument('--add_gcloud_bucket', default=True, dest='add_gcloud_bucket', action='store_true',
                         help='Whether to add the NCBI gcloud bucket id for each sra')
+    parser.add_argument('--noadd_gcloud_bucket', default=True, dest='add_gcloud_bucket', action='store_false',
+                        help='Whether to NOT add the NCBI gcloud bucket id for each sra')
+    parser.set_defaults(feature=True)
     # leave this to 1 to avoid race conditions, or fix race conditions :)
     parser.add_argument('--worker_count', default=1, help='Number of workers processing data')
     parser.add_argument('--checkpoint', default='transferred|!downloaded|!built|!cleaned',
                         help='Which checkpointed SRAs to eliminate from processing, '
                              'a combination of downloaded/built/cleaned/transferred optionally preceded by !')
-    parser.add_argument('--server_info', default='gs://metagraph-test/server',
+    parser.add_argument('--server_info', default='gs://mg36/server',
                         help='Where to publish the server host/port on gcs')
 
     global args
