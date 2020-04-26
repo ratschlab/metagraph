@@ -417,7 +417,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--port', default=8000, help='HTTP Port on which the server runs')
+    parser.add_argument('--port', default=8000, type=int, help='HTTP Port on which the server runs')
     parser.add_argument(
         '--data_dir',
         default=os.path.expanduser('~/Downloads/sra_test/'),
