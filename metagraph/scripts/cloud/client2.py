@@ -685,13 +685,13 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://mg36/', #TODO make the default empty
+    parser.add_argument('--destination', default='gs://mg36/',  # TODO make the default empty
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default=,
+    parser.add_argument('--log_destination', default=None,
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
-    parser.add_argument('--server_info', default=,
-                        help='Where to publish the server host/port on gcs')
+    parser.add_argument('--server_info', default=None,
+                        help='Where to obtain the server host/port on gcs')
     args = parser.parse_args()
 
     args.log_destination = args.log_destination or os.path.join(args.destination, 'logs')
