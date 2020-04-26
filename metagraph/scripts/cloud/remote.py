@@ -122,20 +122,24 @@ def stop_instances(compute, project, zone, name, count):
     wait_for_all_operations(compute, project, zone, ids)
 
 
-def send_create_request(compute, project, zone, name, script_dir, server_host):
+def send_create_request(compute, project, zone, name, script_dir, server_host, num_instances):
     """ Send a request to creates a new instance with the given parameters """
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
-    # image_response = compute.images().getFromFamily(project='metagraph', family='metagraph2').execute()
-    image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph7').execute()
+    image_response = compute.images().get(project='metagraph', image='mg-image-33').execute()
+    # image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph7').execute()
     source_disk_image = image_response['selfLink']
 
     # Configure the machine: 1vCPU, 3.75GB of RAM
-    machine_type = f"zones/{zone}/machineTypes/n1-standard-4"
+    machine_type = f"zones/{zone}/machineTypes/n1-standard-1"
     metadata = [
         {
             'key': 'instance_id',
             'value': name.split('-')[-1]
+        },
+        {
+            'key': 'num_instances',
+            'value': num_instances
         },
         {
             'key': 'server_host',
@@ -169,17 +173,18 @@ def send_create_request(compute, project, zone, name, script_dir, server_host):
                 'boot': True,
                 'autoDelete': True,  # disk will be deleted together with instance
                 'initializeParams': {
-                    'sourceSnapshot': source_disk_image,
-                }
-            },
-            {
-                'type': 'SCRATCH',
-                'initializeParams': {
-                    'diskType': f'zones/{zone}/diskTypes/local-ssd'
+                    'sourceImage': source_disk_image,  # or sourceSnapshot if using snapshots
                 },
-                'autoDelete': True,
-                'interface': 'NVME'
+                'diskSizeGb': 150,
             }
+            # {
+            #     'type': 'SCRATCH',
+            #     'initializeParams': {
+            #         'diskType': f'zones/{zone}/diskTypes/local-ssd'
+            #     },
+            #     'autoDelete': True,
+            #     'interface': 'NVME'
+            # }
         ],
 
         # Specify a network interface with NAT to access the public
@@ -187,7 +192,7 @@ def send_create_request(compute, project, zone, name, script_dir, server_host):
         'networkInterfaces': [{
             'network': 'global/networks/default',
             'accessConfigs': [
-                #    {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
+                {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
             ]
         }],
 
@@ -220,10 +225,11 @@ def send_create_request(compute, project, zone, name, script_dir, server_host):
     return None
 
 
-def create_instances(compute, project, zone, name, count, script_dir, server_host):
+def create_instances(compute, project, zone, name, count, script_dir, server_host, num_instances):
     ids = []
     for i in range(count):
-        operation = send_create_request(compute, project, zone, name + '-' + str(i), script_dir, server_host)
+        operation = send_create_request(compute, project, zone, name + '-' + str(i), script_dir, server_host,
+                                        num_instances)
         if operation:
             ids.append(operation['id'])
 
@@ -258,7 +264,7 @@ if __name__ == '__main__':
     parser.add_argument('--script_dir', default='./',
                         help='Optional name of script to run at creation time')
     parser.add_argument('-u', '--user', default='ddanciu',
-                        help='User to run comands under (for action==run)')
+                        help='User to run commands under (for action==run)')
     parser.add_argument('--server_host', default='34.65.229.224',
                         help='The IP/hostname of the REST server that distributes jobs')
 
@@ -266,7 +272,8 @@ if __name__ == '__main__':
 
     compute = googleapiclient.discovery.build('compute', 'v1')
     if args.action == 'create' or args.action == 'c':
-        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script_dir, args.server_host)
+        create_instances(compute, args.project_id, args.zone, args.name, args.num_instances, args.script_dir,
+                         args.server_host, args.num_instances)
     elif args.action == 'delete' or args.action == 'd':
         delete_instances(compute, args.project_id, args.zone, args.name, args.num_instances)
     elif args.action == 'list' or args.action == 'l':
