@@ -49,7 +49,7 @@ get_submatrix(const VectorPtrs &columns,
 // returns shrinked columns
 std::vector<sdsl::bit_vector>
 random_submatrix(const VectorPtrs &columns,
-                 uint64_t num_rows_sampled, int seed, size_t num_threads) {
+                 uint64_t num_rows_sampled, size_t num_threads, int seed) {
     if (!columns.size())
         return {};
 
@@ -57,6 +57,8 @@ random_submatrix(const VectorPtrs &columns,
 
     if (seed)
         gen.seed(seed);
+
+    num_rows_sampled = std::min(num_rows_sampled, columns[0]->size());
 
     auto indexes = utils::sample_indexes(columns[0]->size(),
                                          num_rows_sampled,
@@ -144,22 +146,6 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols, size_t num_threads
     return similarities;
 }
 
-// For each vector j return similarities with vectors 0, ..., j-1
-std::vector<std::tuple<uint32_t, uint32_t, float>>
-estimate_similarities(const VectorPtrs &vectors,
-                      size_t num_threads,
-                      uint64_t num_rows_subsampled) {
-    if (!vectors.size())
-        return {};
-
-    uint64_t num_sampled_rows = std::min(num_rows_subsampled, vectors[0]->size());
-
-    return correlation_similarity(
-        random_submatrix(vectors, num_sampled_rows, 1, num_threads),
-        num_threads
-    );
-}
-
 template <typename T>
 inline T dist(T first, T second) {
     return first > second
@@ -179,9 +165,8 @@ inline bool first_closest(const P &first, const P &second) {
 
 // input: columns
 // output: partition, for instance -- a set of column pairs
-Partition greedy_matching(const VectorPtrs &columns,
-                          size_t num_threads,
-                          uint64_t num_rows_subsampled) {
+Partition greedy_matching(const std::vector<sdsl::bit_vector> &columns,
+                          size_t num_threads) {
     if (!columns.size())
         return {};
 
@@ -190,7 +175,7 @@ Partition greedy_matching(const VectorPtrs &columns,
         exit(1);
     }
 
-    auto similarities = estimate_similarities(columns, num_threads, num_rows_subsampled);
+    auto similarities = correlation_similarity(columns, num_threads);
 
     ProgressBar progress_bar(similarities.size(), "Clustering",
                              std::cerr, !utils::get_verbose());
@@ -225,4 +210,70 @@ Partition greedy_matching(const VectorPtrs &columns,
     }
 
     return partition;
+}
+
+Eigen::MatrixXd
+agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
+                             size_t num_threads) {
+    if (!columns.size())
+        return Eigen::MatrixXd(0, 4);
+
+    Eigen::MatrixXd linkage_matrix(columns.size() - 1, 4);
+    size_t i = 0;
+
+    uint64_t num_clusters = columns.size();
+    std::vector<uint64_t> column_ids
+            = utils::arange<uint64_t>(0, columns.size());
+
+    for (size_t level = 1; columns.size() > 1; ++level) {
+        mg::common::logger->trace("Clustering: level {}", level);
+
+        Partition groups = greedy_matching(columns, num_threads);
+
+        assert(groups.size() > 0);
+        assert(groups.size() < columns.size());
+
+        std::vector<sdsl::bit_vector> cluster_centers(groups.size());
+        std::vector<uint64_t> cluster_ids(groups.size());
+
+        ProgressBar progress_bar(groups.size(), "Merging clusters",
+                                 std::cerr, !utils::get_verbose());
+
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        for (size_t g = 0; g < groups.size(); ++g) {
+            // merge into new clusters
+            cluster_centers[g] = sdsl::bit_vector(columns[0].size(), 0);
+            for (size_t i : groups[g]) {
+                cluster_centers[g] |= columns[i];
+            }
+
+            uint64_t num_set_bits = sdsl::util::cnt_one_bits(cluster_centers[g]);
+
+            #pragma omp critical
+            {
+                if (groups[g].size() > 1) {
+                    assert(groups[g].size() == 2);
+                    cluster_ids[g] = num_clusters;
+                    linkage_matrix(i, 0) = column_ids[groups[g][0]];
+                    linkage_matrix(i, 1) = column_ids[groups[g][1]];
+                    linkage_matrix(i, 2) = num_set_bits;
+                    linkage_matrix(i, 3) = cluster_ids[g];
+                    num_clusters++;
+                    i++;
+                } else {
+                    assert(groups[g].size() == 1);
+                    cluster_ids[g] = column_ids[groups[g][0]];
+                }
+            }
+
+            ++progress_bar;
+        }
+
+        columns.swap(cluster_centers);
+        column_ids.swap(cluster_ids);
+    }
+
+    assert(i == static_cast<size_t>(linkage_matrix.rows()));
+
+    return linkage_matrix;
 }

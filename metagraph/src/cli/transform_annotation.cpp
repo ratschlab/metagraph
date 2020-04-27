@@ -7,6 +7,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/binary_matrix/multi_brwt/partitionings.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
@@ -16,6 +17,9 @@ using utils::get_verbose;
 using namespace annotate;
 
 typedef MultiLabelEncoded<std::string> Annotator;
+
+static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
+                                       Eigen::DontAlignCols, " ", "\n");
 
 
 template <class AnnotatorTo, class AnnotatorFrom>
@@ -154,6 +158,44 @@ int transform_annotation(Config *config) {
 
     const Config::AnnotationType input_anno_type
         = parse_annotation_type(files.at(0));
+
+    if (config->cluster_linkage) {
+        if (input_anno_type != Config::ColumnCompressed) {
+            logger->error("Column clustering is only supported for ColumnCompressed");
+            exit(1);
+        }
+        auto annotation = std::make_unique<ColumnCompressed<>>();
+
+        logger->trace("Loading annotation...");
+
+        // Load annotation from disk
+        if (!annotation->merge_load(files)) {
+            logger->error("Cannot load annotations");
+            exit(1);
+        }
+
+        logger->trace("Annotation loaded in {} sec", timer.elapsed());
+
+        std::vector<const bit_vector *> columns;
+        for (const auto &col : annotation->get_matrix().data()) {
+            columns.push_back(&(*col));
+        }
+
+        std::vector<sdsl::bit_vector> subvectors
+                = random_submatrix(columns, config->num_rows_subsampled,
+                                            get_num_threads());
+        // free memory
+        annotation.reset();
+
+        Eigen::MatrixXd linkage_matrix
+                = agglomerative_greedy_linkage(std::move(subvectors));
+
+        std::ofstream out(config->outfbase);
+        out << linkage_matrix.format(CSVFormat) << std::endl;
+
+        logger->trace("Linkage matrix is written to {}", config->outfbase);
+        return 0;
+    }
 
     if (config->anno_type == input_anno_type) {
         logger->info("Skipping conversion: same input and target type: {}",

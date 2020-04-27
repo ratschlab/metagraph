@@ -239,7 +239,9 @@ convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
     return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
         [num_threads,num_rows_subsampled](const auto &columns) {
-            return greedy_matching(columns, num_threads, num_rows_subsampled);
+            std::vector<sdsl::bit_vector> subvectors
+                = random_submatrix(columns, num_rows_subsampled, num_threads);
+            return greedy_matching(subvectors, num_threads);
         },
         num_parallel_nodes,
         num_threads

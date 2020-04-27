@@ -113,7 +113,11 @@ generate_brwt_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
     if (greedy) {
         binary_matrix = std::make_unique<BRWT>(
             BRWTBottomUpBuilder::build(std::move(columns),
-                [](const auto &columns) { return greedy_matching(columns); }
+                [](const auto &columns) {
+                    std::vector<sdsl::bit_vector> subvectors
+                        = random_submatrix(columns, 1'000'000);
+                    return greedy_matching(subvectors);
+                }
             )
         );
     } else {
@@ -161,7 +165,11 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
         case MatrixType::BRWT_EXTRA: {
             binary_matrix.reset(new BRWT(
                 BRWTBottomUpBuilder::build(std::move(columns),
-                    [](const auto &columns) { return greedy_matching(columns); }
+                    [](const auto &columns) {
+                        std::vector<sdsl::bit_vector> subvectors
+                            = random_submatrix(columns, 1'000'000);
+                        return greedy_matching(subvectors);
+                    }
                 )
             ));
             break;
