@@ -114,7 +114,6 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     return num_elements_read;
 }
 
-
 // TODO: these two `merge_files` are almost identical. Merge them into one.
 //       Implement the merging mechanism  (remove duplicates, increment
 //       counters) in the caller?
@@ -181,6 +180,48 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 
     return num_elements_read;
 }
+
+template <typename T>
+uint64_t merge_dummy(const std::string &source,
+                     const std::vector<std::string> &source_dummy,
+                     const std::function<void(const T &)> &on_new_item,
+                     bool remove_sources = true) {
+    std::vector<std::string> sources(source_dummy);
+    sources.push_back(source);
+    return merge_files(sources, on_new_item, remove_sources);
+}
+
+template <typename T, typename C>
+uint64_t merge_dummy(const std::string &source,
+                     const std::vector<std::string> &source_dummy,
+                     const std::function<void(const std::pair<T, C> &)> &on_new_item,
+                     bool remove_sources = true) {
+    uint64_t num_elements_read = 0;
+
+    EliasFanoDecoder<std::pair<T,C>> decoder(source, remove_sources);
+    std::optional<std::pair<T, C>> data_item = decoder.next();
+
+    const std::function<void(const T &)> merge_dummy
+            = [&data_item, &on_new_item, &num_elements_read, &decoder](const T &v) {
+              num_elements_read++;
+              if (!data_item.has_value() || data_item.value().first > v) {
+                  on_new_item({ v, 0 });
+              } else {
+                  on_new_item(data_item.value());
+                  data_item = decoder.next();
+              }
+            };
+    merge_files(source_dummy, merge_dummy);
+
+    // add the leftover contents from #source
+    while (data_item.has_value()) {
+        on_new_item(data_item.value());
+        data_item = decoder.next();
+    }
+
+    return num_elements_read;
+}
+
 
 } // namespace common
 } // namespace mg
