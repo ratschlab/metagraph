@@ -512,10 +512,10 @@ def check_status():
             # then multiply all by 2 to leave space for reallocation, except that I multiply by 1.5
             required_ram_gb = round(1.5 * (num_kmers * 3.5 * (2 + 1.3)) / 1e9 + 0.5, 2)
             if required_ram_gb > total_ram_gb - 2:
-                build_path = build_dir(sra_id)
+                download_path = download_dir(sra_id)
                 logging.warning(
-                    f'[{sra_id}] Building graph needs too much RAM: {required_ram_gb}GB). Removing {build_path}.')
-                subprocess.run(['rm', '-rf', build_path])
+                    f'[{sra_id}] Building graph needs too much RAM: {required_ram_gb}GB). Removing {download_path}.')
+                subprocess.run(['rm', '-rf', download_path])
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'required_ram_gb': required_ram_gb}
                 nack('build', params)
                 del waiting_builds[sra_id]

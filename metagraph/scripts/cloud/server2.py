@@ -208,6 +208,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         if self.handle_ack('download', post_vars, [downloaded_sras, pending_builds], pending_downloads):
             global total_download_size_MB, sra_to_size
             size_MB = float(get_var(post_vars, 'size_mb'))
+            if size_MB == 0:
+                size_MB = float(get_var(post_vars, 'download_size_mb'))
             total_download_size_MB += size_MB
             sra_to_size[get_var(post_vars, 'id')] = size_MB
 
