@@ -45,17 +45,18 @@ mkdir -p "${tmp_dir}"
 mkdir -p "${fastq_dir}"
 mkdir -p "${kmc_dir}"
 
-vdb-config --report-cloud-identity no  # the next command should work whether we use the cloud or not
-size_str=$(vdb-dump --info "${sra_id}" | grep size | cut -f 2 -d:)
-size=${size_str//,}
-size="$(echo -e "${size}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-
-re='^[0-9]+$'
-echo "Sra size is $size bytes"
-if ! [[ $size =~ $re ]] ; then
-   echo_err "Result of vdb-info is not a number"
-   exit_with 7
-fi
+#vdb-config --report-cloud-identity no  # the next command should work whether we use the cloud or not
+#size_str=$(vdb-dump --info "${sra_id}" | grep size | cut -f 2 -d:)
+#size=${size_str//,}
+#size="$(echo -e "${size}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+#re='^[0-9]+$'
+#echo "Sra size is $size bytes"
+#if ! [[ $size =~ $re ]] ; then
+#   echo_err "Result of vdb-info is not a number"
+#   exit_with 7
+#fi
+#TODO: enable query above once NCBI stops blocking us
+size=0
 echo $size > "${output_dir}/size"
 
 if (( sra_bucket > 0 )); then  # Get data from GCS
