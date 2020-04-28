@@ -170,37 +170,46 @@ int transform_annotation(Config *config) {
         logger->trace("Loading annotation...");
 
         std::vector<uint64_t> row_indexes;
-        std::vector<sdsl::bit_vector> subcolumns;
+        std::vector<std::unique_ptr<sdsl::bit_vector>> subcolumn_ptrs;
         uint64_t num_rows = 0;
 
-        omp_set_max_active_levels(2);
         // Load columns from disk
         bool success = ColumnCompressed<>::merge_load(files,
             [&](const std::string &label, auto&& column_ptr) {
-                if (row_indexes.empty()) {
-                    num_rows = column_ptr->size();
-                    row_indexes = sample_row_indexes(num_rows,
-                                                     config->num_rows_subsampled);
-                } else if (column_ptr->size() != num_rows) {
-                    logger->error("Size of column {} is {} != {}",
-                                  label, column_ptr->size(), num_rows);
-                    exit(1);
+                sdsl::bit_vector *subvector;
+                #pragma omp critical
+                {
+                    if (row_indexes.empty()) {
+                        num_rows = column_ptr->size();
+                        row_indexes = sample_row_indexes(num_rows,
+                                                         config->num_rows_subsampled);
+                    } else if (column_ptr->size() != num_rows) {
+                        logger->error("Size of column {} is {} != {}",
+                                      label, column_ptr->size(), num_rows);
+                        exit(1);
+                    }
+                    subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
+                    subvector = &(*subcolumn_ptrs.back());
+                    fmt::print("{}: {}\n", subcolumn_ptrs.size(), label);
                 }
-                sdsl::bit_vector &subvector
-                    = subcolumns.emplace_back(row_indexes.size(), false);
-                fmt::print("{}: {}\n", subcolumns.size(), label);
 
-                #pragma omp parallel for num_threads(get_num_threads()) schedule(static, 2048)
+                *subvector = sdsl::bit_vector(row_indexes.size(), false);
                 for (size_t j = 0; j < row_indexes.size(); ++j) {
                     if ((*column_ptr)[row_indexes[j]])
-                        subvector[j] = true;
+                        (*subvector)[j] = true;
                 }
-            }
+            },
+            get_num_threads()
         );
 
         if (!success) {
             logger->error("Cannot load annotations");
             exit(1);
+        }
+
+        std::vector<sdsl::bit_vector> subcolumns;
+        for (auto &col_ptr : subcolumn_ptrs) {
+            subcolumns.push_back(std::move(*col_ptr));
         }
 
         Eigen::MatrixXd linkage_matrix
