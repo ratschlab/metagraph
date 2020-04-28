@@ -10,7 +10,6 @@ import math
 import multiprocessing
 import os
 import psutil
-import resource
 import signal
 import socket
 import subprocess
@@ -177,8 +176,8 @@ def internal_ip():
 def write_log_header(log_file_name, operation, sra_id, required_ram_gb, available_ram_gb):
     with open(log_file_name, 'w') as f:
         free_ram_gb = psutil.virtual_memory().available / 1e9
-        f.write(f'[{sra_id}] Starting {operation} on {internal_ip()}, required RAM {required_ram_gb}, free RAM '
-                f'{free_ram_gb}GB, available for {operation} (not reserved) RAM {available_ram_gb}GB')
+        f.write(f'[{sra_id}] Starting {operation} on {internal_ip()}, required RAM {round(required_ram_gb,2)}, free RAM '
+                f'{round(free_ram_gb,2)}GB, available for {operation} (not reserved) RAM {round(available_ram_gb,2)}GB')
         f.write(f'[{sra_id}] Full machine log: "gsutil cat {args.destination}logs/{internal_ip()}/client.log"')
 
 
@@ -318,7 +317,6 @@ def check_status():
     global must_quit
     if must_quit:
         return False
-    print(f'Resource usage: {resource.getrusage(resource.RUSAGE_CHILDREN)}')
     completed_downloads = set()
     for sra_id, (download_process, start_time) in download_processes.items():
         return_code = download_process.poll()
@@ -342,6 +340,7 @@ def check_status():
             size_file = os.path.join(download_dir(sra_id), 'size')
             if os.path.exists(size_file):
                 sra_size_mb = round(int(open(size_file).read()) / 1e6, 2)
+                logging.info(f'Downloaded sra files have {sra_size_mb}MB')
             else:
                 logging.warning('Could not find size file. Reporting size -1')
                 sra_size_mb = -1
