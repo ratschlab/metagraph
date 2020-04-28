@@ -64,12 +64,14 @@ Download done: %s
 
 
 class TeeLogger:
-    def __init__(self, file_name):
+    def __init__(self, file_name, filter_str=''):
         self.log_file = open(file_name, 'w')
+        self.filter_str = filter_str
 
     def write(self, msg):
         print(msg)
-        self.log_file.write(msg)
+        if self.filter_str not in msg:
+            self.log_file.write(msg)
 
     def fileno(self):
         return self.log_file.fileno()
@@ -171,7 +173,7 @@ def start_download(download_resp):
         make_dir_if_needed(download_dir(sra_id))
         log_file_name = os.path.join(download_dir(sra_id), 'download.log')
         bucket = download_resp['bucket']
-        log_file = TeeLogger(log_file_name)
+        log_file = TeeLogger(log_file_name, 'Stage')
         download_processes[sra_id] = (subprocess.Popen(
             ['./download_ncbi.sh', bucket, sra_id, download_dir_base()], stdout=log_file, stderr=log_file), time.time())
     sra_info[sra_id] = (time.time(),)
@@ -201,9 +203,10 @@ def start_build(sra_id, wait_time, buffer_size_gb, container_type, required_ram_
     make_dir_if_needed(build_dir(sra_id))
     log_file_name = os.path.join(build_dir(sra_id), 'build.log')
     write_log_header(log_file_name, 'build', sra_id, required_ram_gb, available_ram_gb)
+    log_file = TeeLogger(log_file_name)
     build_processes[sra_id] = (subprocess.Popen(
-        f'./build.sh {sra_id} {input_dir} {output_dir} {buffer_size_gb} {container_type} 2>&1 >> {log_file_name}',
-        shell=True), time.time(), wait_time, required_ram_gb)
+        ['./build.sh', sra_id, input_dir, output_dir, str(buffer_size_gb), container_type], stdout=log_file,
+        stderr=log_file), time.time(), wait_time, required_ram_gb)
     return True
 
 
@@ -218,12 +221,13 @@ def start_clean(sra_id, wait_time, kmer_count_singletons, fallback, required_ram
     input_file = build_file(sra_id)
     output_file = os.path.join(clean_dir(sra_id), sra_id)
     logging.info(f'[{sra_id}] Starting clean from {input_file} to {output_file}')
-    clean_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
-    write_log_header(clean_file_name, 'clean', sra_id, required_ram_gb, available_ram_gb)
+    log_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
+    write_log_header(log_file_name, 'clean', sra_id, required_ram_gb, available_ram_gb)
+    log_file = TeeLogger(log_file_name, '%,')  # %, eliminates the progress bar spam
     clean_processes[sra_id] = (
         subprocess.Popen(
-            f'./clean.sh {sra_id} {input_file} {output_file} {kmer_count_singletons} {fallback} 2>&1 | grep -v "%," >> {clean_file_name}',
-            shell=True),
+            ['./clean.sh', sra_id, input_file, output_file, str(kmer_count_singletons), str(fallback)], stdout=log_file,
+            stderr=log_file),
         time.time(), wait_time, required_ram_gb)
     return True
 
@@ -332,12 +336,15 @@ def check_status():
     completed_downloads = set()
     for sra_id, (download_process, start_time) in download_processes.items():
         return_code = download_process.poll()
-        is_timed_out = (time.time() - start_time) > 15 * 60
+        is_timed_out = (time.time() - start_time) > 120 * 60
         if return_code is not None or is_timed_out:
             if os.path.exists(os.path.join(download_dir(sra_id), 'code')):
                 return_code = int(open(os.path.join(download_dir(sra_id), 'code')).read())
+            elif is_timed_out:
+                logging.warning(f'[{sra_id}] Download timed out after {time.time()-start_time} seconds.')
+                return_code = 254
             else:
-                logging.error('Download process did not provide a return code. Assuming error')
+                logging.error(f'[{sra_id}]Download process did not provide a return code. Assuming error')
                 return_code = 255
             completed_downloads.add(sra_id)
             log_file_name = os.path.join(download_dir(sra_id), 'download.log')
