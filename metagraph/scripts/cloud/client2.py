@@ -68,10 +68,10 @@ class TeeLogger:
         self.log_file = open(file_name, 'w')
         self.filter_str = filter_str
 
-    def write(self, msg):
-        print(msg)
-        if self.filter_str not in msg:
-            self.log_file.write(msg)
+    def write(self, message):
+        print(message)
+        if self.filter_str not in message:
+            self.log_file.write(message)
 
     def fileno(self):
         return self.log_file.fileno()
@@ -512,7 +512,8 @@ def check_status():
                     f'[{sra_id}] Estimated {required_ram_gb}GB needed for cleaning, available {available_ram_gb} GB')
                 kmer_coverage = sra_info[sra_id][3]
                 kmer_count_singletons = sra_info[sra_id][4]
-                fallback = 5 if kmer_coverage > 5 else 2 if kmer_coverage > 2 else 1
+                fallback = 5 if kmer_coverage > 5 else 2 if kmer_coverage > 2 or kmer_count_unique > 1e6 else 1
+
                 # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
                 start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, fallback, required_ram_gb,
                             available_ram_gb)
