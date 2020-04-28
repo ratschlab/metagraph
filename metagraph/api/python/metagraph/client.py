@@ -32,7 +32,7 @@ class GraphClientJson:
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False) -> Tuple[JsonDict, str]:
         param_dict = {"count_labels": True,
-                      "discovery_fraction": discovery_threshold / 100,
+                      "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
                       "align": align}
 

@@ -173,18 +173,18 @@ class TestAPIClient(TestAPIBase):
 
     def test_api_multiple_query_df(self):
         repetitions = 5
-        ret = self.graph_client.search([self.sample_query] * repetitions)
+        ret = self.graph_client.search([self.sample_query] * repetitions, discovery_threshold=0.01)
         df = ret[self.graph_name]
         self.assertEqual((self.sample_query_expected_cols * repetitions, 3), df.shape)
 
     def test_api_simple_query_df(self):
-        ret = self.graph_client.search(self.sample_query)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_cols, 2), df.shape)
 
     def test_api_simple_query_align_df(self):
-        ret = self.graph_client.search(self.sample_query, align=True)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_cols, 4), df.shape)
@@ -225,7 +225,7 @@ class TestAPIJson(TestAPIBase):
 
     # do various queries
     def test_api_simple_query(self):
-        res_list, _ = self.graph_client.search(self.sample_query)
+        res_list, _ = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
 
         self.assertEqual(len(res_list), 1)
 
