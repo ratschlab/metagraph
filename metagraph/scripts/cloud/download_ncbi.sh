@@ -15,7 +15,27 @@ function echo_err2() { # TODO: remove this once downloads work again
   	RED='\033[0;31m'
 	NC='\033[0m'
 	echo -e "${RED}Error:${NC} $*" 1>&2;
-	echo "$*" >> "${download_dir}/download2.log"
+	echo "$*" >> "${download_dir}/download.log"
+}
+
+function echo_log() { # TODO: remove this once downloads work again
+	echo -e "Info: $*" 1>&2;
+	echo "$*" >> "${download_dir}/download.log"
+}
+
+function execute_retry {
+    cmd=("$@")
+    set +e
+    for i in {1..3}; do
+      echo_log "Executing ${cmd[*]}, attempt #$i"
+      if "${cmd[@]}"; then
+        return 0
+      fi
+      echo_err2 "attempt #$i of 3 failed"
+      sleep 0.15
+    done
+    set -e
+    return 1
 }
 
 ############ Main Script ###############
@@ -78,9 +98,9 @@ if (( sra_bucket > 0 )); then  # Get data from GCS
       exit_with 5
     fi
   else
-    echo "${sra_id} already downloaded"
+    echo_log "${sra_id} already downloaded"
   fi
-  echo "gsutil command finished successfully"
+  echo_log "gsutil command finished successfully"
   exit_code=0
   for sra_file in $(ls -p "${sra_dir}"); do
     # fasterq-dump is flakey, so trying the dump 3 times before giving up
@@ -107,7 +127,7 @@ else  # Get data via HTTP (machine must have external ip or internet access via 
       exit_with 4
     fi
 fi
-echo "fasterq-dump command finished successfully"
+echo_log "fasterq-dump command finished successfully"
 
 kmc_input=${kmc_dir}/sra_file_list
 for i in $(ls -p "${fastq_dir}"); do
@@ -123,19 +143,23 @@ if ! [ -f $kmc_output ]; then
   echo_err2 "kmc output '$kmc_output' missing. Exiting with code 6"
   exit_with 6
 fi
-echo "kmc command finished successfully"
+echo_log "kmc command finished successfully"
 
 unique_kmers=$(jq -r ' .Stats | ."#Unique_k-mers"' $kmc_output)
 total_kmers=$(jq -r ' .Stats | ."#Total no. of k-mers"' $kmc_output)
+if (( unique_kmers == 0 )); then
+  echo_err2 "No unique k-mers, probably all reads are shorter than k"
+  exit_with 8
+fi
 coverage=$((total_kmers/unique_kmers))
 if ((coverage >= 5)); then
-  echo "[$sra_id] Coverage is $coverage, eliminating singletons"
+  echo_log "[$sra_id] Coverage is $coverage, eliminating singletons"
   if ! (execute kmc -k31 -ci2 -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "$tmp_dir"); then
     echo_err2 "kmc command run #2 failed. Exiting with code 7"
     exit_with 7
   fi
 else
-  echo "[$sra_id] Coverage is $coverage, keeping singletons"
+  echo_log "[$sra_id] Coverage is $coverage, keeping singletons"
 fi
 # edit the KMC output and add the coverage property (this will also eliminate all stuff except for 'Stats')
 jq --arg cov $coverage  '.Stats | ."#k-mers_coverage" = $cov' $kmc_output > $tmp_dir/stats
@@ -146,7 +170,7 @@ if ((coverage < 5)); then
   mv $tmp_dir/stats $kmc_output
 fi
 
-echo singleton_kmers > "${kmc_dir}/${sra_id}.stats"
+echo_log singleton_kmers > "${kmc_dir}/${sra_id}.stats"
 rm -rf "${tmp_dir}" "${fastq_dir}"
 rm -rf /mnt/disks/ssd/fasterqdump
 exit_with 0
