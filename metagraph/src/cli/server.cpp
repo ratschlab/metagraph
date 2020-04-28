@@ -71,7 +71,7 @@ string convert_to_json(const string &ret_str) {
 
             vector<string> labels = utils::split_string(entries[0].substr(1, entries[0].size()-2), ";");
 
-            sampleEntry["sampleName"] = labels[0];
+            sampleEntry["sample"] = labels[0];
 
             Json::Value properties = Json::objectValue;
 
@@ -83,7 +83,7 @@ string convert_to_json(const string &ret_str) {
             if(properties.size() > 0) {
                 sampleEntry["properties"] = properties;
             }
-            sampleEntry["sampleCount"] = (int) atoi(entries[1].c_str());
+            sampleEntry["kmer_count"] = (int) atoi(entries[1].c_str());
 
             res_obj["results"].append(sampleEntry);
         }

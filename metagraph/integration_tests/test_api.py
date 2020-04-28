@@ -234,9 +234,9 @@ class TestAPIJson(TestAPIBase):
 
         first_res = res_obj[0]
 
-        self.assertEqual(first_res['sampleCount'], 39)
+        self.assertEqual(first_res['kmer_count'], 39)
 
-        self.assertTrue(first_res['sampleName'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
+        self.assertTrue(first_res['sample'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
         self.assertTrue('properties' not in first_res.keys()) # doesn't have properties, so don't sent them
 
     def test_api_multiple_queries(self):
@@ -268,8 +268,8 @@ class TestAPIClientWithProperties(TestAPIBase):
     def test_api_search_property_df(self):
         df = self.graph_client.search(self.sample_query)[self.graph_name]
 
-        self.assertIn('sampleCount', df.columns)
-        self.assertEqual(df['sampleCount'].dtype, int)
+        self.assertIn('kmer_count', df.columns)
+        self.assertEqual(df['kmer_count'].dtype, int)
         self.assertIn('latitude', df.columns)
         self.assertEqual(df['latitude'].dtype, float)
         self.assertEqual(df.shape, (3, 9))
