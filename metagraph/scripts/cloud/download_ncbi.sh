@@ -104,11 +104,7 @@ if (( sra_bucket > 0 )); then  # Get data from GCS
   exit_code=0
   for sra_file in $(ls -p "${sra_dir}"); do
     # fasterq-dump is flakey, so trying the dump 3 times before giving up
-    if (( use_gcs )); then
-      source="${sra_dir}/${sra_file}"
-    else
-      source="${sra_id}"
-    fi
+    source="${sra_dir}/${sra_file}"
     if ! (execute_retry fasterq-dump "${source}" -f -e 4  -O "${fastq_dir}" -t "${tmp_dir}"); then
       exit_code=4  # TODO: check if return code 3 is also acceptable as success
     fi
