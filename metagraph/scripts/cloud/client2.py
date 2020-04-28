@@ -63,6 +63,18 @@ Download done: %s
 """
 
 
+class TeeLogger:
+    def __init__(self, file_name):
+        self.log_file = open(file_name, 'w')
+
+    def write(self, msg):
+        print(msg)
+        self.log_file.write(msg)
+
+    def fileno(self):
+        return self.log_file.fileno()
+
+
 def get_work():
     global downloads_done
     if downloads_done or len(download_processes) >= MAX_DOWNLOAD_PROCESSES or len(
@@ -159,10 +171,9 @@ def start_download(download_resp):
         make_dir_if_needed(download_dir(sra_id))
         log_file_name = os.path.join(download_dir(sra_id), 'download.log')
         bucket = download_resp['bucket']
+        log_file = TeeLogger(log_file_name)
         download_processes[sra_id] = (subprocess.Popen(
-            f'./download_ncbi.sh {bucket} {sra_id} {download_dir_base()}  2>&1 | '
-            f'grep -v "Stage" >{log_file_name}', shell=True),
-                                      time.time())
+            ['./download_ncbi.sh', bucket, sra_id, download_dir_base()], stdout=log_file, stderr=log_file), time.time())
     sra_info[sra_id] = (time.time(),)
 
 
@@ -176,8 +187,9 @@ def internal_ip():
 def write_log_header(log_file_name, operation, sra_id, required_ram_gb, available_ram_gb):
     with open(log_file_name, 'w') as f:
         free_ram_gb = psutil.virtual_memory().available / 1e9
-        f.write(f'[{sra_id}] Starting {operation} on {internal_ip()}, required RAM {round(required_ram_gb,2)}, free RAM '
-                f'{round(free_ram_gb,2)}GB, available for {operation} (not reserved) RAM {round(available_ram_gb,2)}GB')
+        f.write(
+            f'[{sra_id}] Starting {operation} on {internal_ip()}, required RAM {round(required_ram_gb, 2)}, free RAM '
+            f'{round(free_ram_gb, 2)}GB, available for {operation} (not reserved) RAM {round(available_ram_gb, 2)}GB')
         f.write(f'[{sra_id}] Full machine log: "gsutil cat {args.destination}logs/{internal_ip()}/client.log"')
 
 
