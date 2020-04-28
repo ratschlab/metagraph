@@ -1,15 +1,14 @@
 import json
-import os
 import shlex
 import time
 from subprocess import Popen
-from parameterized import parameterized
 
 import requests
-
-from metagraph.client import Client
+from metagraph.client import GraphClientJson, MultiGraphClient
+from parameterized import parameterized
 
 from base import TestingBase, METAGRAPH, TEST_DATA_DIR
+
 
 class TestAPIBase(TestingBase):
     @classmethod
@@ -60,7 +59,6 @@ class TestAPIRaw(TestAPIBase):
         self.assertIn("Bad json received:", ret.json()['error'])
 
     def test_api_raw_invalid_params(self):
-        # TODO: some parametrized testing, making various cases?
         payload = json.dumps({
                     "num_labels": 'not_a_number',
                     "FASTA": "\n".join([">query",
@@ -114,7 +112,6 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 404)
 
     def test_api_raw_no_sequence(self):
-        # TODO: some parametrized testing, making various cases?
         payload = json.dumps({
                     "FASTA": "\n".join([">query",
                                         'SEQUENCE_NOT_IN_GRAPH',
@@ -160,6 +157,7 @@ class TestAPIRaw(TestAPIBase):
 
         self.assertEqual(ret[0]['seq_description'], '')
 
+
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -170,38 +168,8 @@ class TestAPIClient(TestAPIBase):
     def setUpClass(cls):
         super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa')
 
-        cls.graph_client = Client()
+        cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
-
-    # do various queries
-    def test_api_simple_query(self):
-        ret = self.graph_client.search_json(self.sample_query)
-
-        self.assertIn(self.graph_name, ret.keys())
-
-        res_list, _ = ret[self.graph_name]
-        self.assertEqual(len(res_list), 1)
-
-        res_obj = res_list[0]['results']
-        self.assertEqual(len(res_obj), self.sample_query_expected_cols)
-
-        first_res = res_obj[0]
-
-        self.assertEqual(first_res['sampleCount'], 39)
-
-        self.assertTrue(first_res['sampleName'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
-        self.assertTrue('properties' not in first_res.keys()) # doesn't have properties, so don't sent them
-
-    def test_api_multiple_query(self):
-        repetitions = 4
-        ret = self.graph_client.search_json([self.sample_query] * repetitions)
-
-        res_list, _ = ret[self.graph_name]
-        self.assertEqual(len(res_list), repetitions)
-
-        # testing if results are in the same order as the queries
-        for i in range(0, repetitions):
-            self.assertEqual(res_list[i]['seq_description'], str(i))
 
     def test_api_multiple_query_df(self):
         repetitions = 5
@@ -231,11 +199,6 @@ class TestAPIClient(TestAPIBase):
         self.assertGreater(len(label_list), 0)
         self.assertTrue(all(l.startswith('ENST') for l in label_list))
 
-    def test_api_align_json(self):
-        ret = self.graph_client.align_json("TCGATCGA")
-        align_res, _ = ret[self.graph_name]
-        self.assertEqual(len(align_res), 1)
-
     def test_api_align_df(self):
         repetitions = 4
         ret = self.graph_client.align(["TCGATCGA"] * repetitions)
@@ -244,7 +207,53 @@ class TestAPIClient(TestAPIBase):
         self.assertEqual(len(align_res), repetitions)
 
 
+class TestAPIJson(TestAPIBase):
+    graph_name = 'test_graph'
+
+    sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+    sample_query_expected_cols = 98
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa')
+
+        cls.graph_client = GraphClientJson(cls.host, cls.port)
+
+    def test_api_align_json(self):
+        ret, _ = self.graph_client.align("TCGATCGA")
+        self.assertEqual(len(ret), 1)
+
+    # do various queries
+    def test_api_simple_query(self):
+        res_list, _ = self.graph_client.search(self.sample_query)
+
+        self.assertEqual(len(res_list), 1)
+
+        res_obj = res_list[0]['results']
+        self.assertEqual(len(res_obj), self.sample_query_expected_cols)
+
+        first_res = res_obj[0]
+
+        self.assertEqual(first_res['sampleCount'], 39)
+
+        self.assertTrue(first_res['sampleName'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
+        self.assertTrue('properties' not in first_res.keys()) # doesn't have properties, so don't sent them
+
+    def test_api_multiple_queries(self):
+        repetitions = 4
+
+        res_list, _ = self.graph_client.search([self.sample_query] * repetitions)
+        self.assertEqual(len(res_list), repetitions)
+
+        # testing if results are in the same order as the queries
+        for i in range(0, repetitions):
+            self.assertEqual(res_list[i]['seq_description'], str(i))
+
+
 class TestAPIClientWithProperties(TestAPIBase):
+    """
+    Testing whether properties encoded in sample name are properly processed
+    """
     graph_name = 'test_graph_metasub'
 
     sample_query = 'GCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGA'
@@ -253,7 +262,7 @@ class TestAPIClientWithProperties(TestAPIBase):
     def setUpClass(cls):
         super().setUpClass(TEST_DATA_DIR + '/metasub_fake_data.fa')
 
-        cls.graph_client = Client()
+        cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
     def test_api_search_property_df(self):

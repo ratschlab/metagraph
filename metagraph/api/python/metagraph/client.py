@@ -1,31 +1,97 @@
 # -*- coding: utf-8 -*-
 
 import json
-from typing import Dict, Tuple, List, Iterable, Union
+from typing import Dict, Tuple, List, Iterable, Union, Any
 
 import pandas as pd
 import requests
 
 """Metagraph client."""
 
+DEFAULT_TOP_LABELS = 10000
+DEFAULT_DISCOVERY_THRESHOLD = 1.0
 
-class Client:
-    def __init__(self):
-        self.graphs = {}
+JsonDict = Dict[str, Any]
+JsonStrList = List[str]
 
-    def add_graph(self, host: str, port: int, label: str = None) -> None:
-        if not label:
-            label = f"{host}:{port}"
-        self.graphs[label] = (host, port)
 
-    def list_graphs(self) -> Dict[str, Tuple[str, str]]:
-        return self.graphs
+class GraphClientJson:
+    """
+    Relatively low level version of the client API. Client returning results
+    from the server as json objects. If there was an error,
+    returning error message in the second element of the tuple returned.
+    """
+
+    def __init__(self, host: str, port: int, label: str = None):
+        self.host = host
+        self.port = port
+        self.label = label
 
     def search(self, sequence: Union[str, Iterable[str]],
-               top_labels: int = 10000, discovery_threshold: float = 1.0, align: bool = False) -> \
-            Dict[str, Tuple[pd.DataFrame, str]]:
+               top_labels=DEFAULT_TOP_LABELS,
+               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               align: bool = False) -> Tuple[JsonDict, str]:
+        param_dict = {"count_labels": True,
+                      "discovery_fraction": discovery_threshold / 100,
+                      "num_labels": top_labels,
+                      "align": align}
 
-        json_res = self.search_json(sequence, top_labels, discovery_threshold, align)
+        return self._json_seq_query(sequence, param_dict, "search")
+
+    def align(self, sequence: Union[str, Iterable[str]]) -> Tuple[JsonDict, str]:
+        return self._json_seq_query(sequence, {}, "align")
+
+    # noinspection PyTypeChecker
+    def column_labels(self) -> Tuple[JsonStrList, str]:
+        return self._do_request("column_labels", {}, False)
+
+    def _json_seq_query(self, sequence: Union[str, Iterable[str]], param_dict,
+                        endpoint: str) -> Tuple[JsonDict, str]:
+
+        if isinstance(sequence, str):
+            fasta_str = f">query\n{sequence}"
+        else:
+            seqs = list(sequence)
+            fasta_str = '\n'.join(
+                [f">{i}\n{seqs[i]}" for i in range(0, len(seqs))])
+
+        payload_dict = {"FASTA": fasta_str}
+        payload_dict.update(param_dict)
+        payload = json.dumps(payload_dict)
+
+        return self._do_request(endpoint, payload)
+
+    def _do_request(self, endpoint, payload, post_req=True) -> Tuple[JsonDict, str]:
+        url = f'http://{self.host}:{self.port}/{endpoint}'
+        if post_req:
+            ret = requests.post(url=url, data=payload)
+        else:
+            ret = requests.get(url=url)
+
+        json_obj = ret.json()
+        if not ret.ok:
+            error_msg = json_obj[
+                'error'] if 'error' in json_obj.keys() else str(json_obj)
+            return {}, str(ret.status_code) + " " + error_msg
+
+        return json_obj, ""
+
+
+class GraphClient:
+    def __init__(self, host: str, port: int, label: str = None):
+        self._json_client = GraphClientJson(host, port)
+        self.label = label
+
+    def search(self, sequence: Union[str, Iterable[str]],
+               top_labels: int = DEFAULT_TOP_LABELS,
+               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               align: bool = False) -> pd.DataFrame:
+        (json_obj, err) = self._json_client.search(sequence, top_labels,
+                                                   discovery_threshold, align)
+
+        if err:
+            raise RuntimeError(
+                f"Error while calling the server API {str(err)}")
 
         def _build_dict(row):
             d = dict(row)
@@ -54,64 +120,63 @@ class Client:
         def build_df_from_json(j):
             return pd.concat(_build_df_per_result(query_res) for query_res in j)
 
-        return {l: (build_df_from_json(j) if j else pd.DataFrame()) for (l, (j, e))
-                in json_res.items()}
+        return build_df_from_json(json_obj)
+
+    def align(self, sequence: Union[str, Iterable[str]]) -> pd.DataFrame:
+        json_obj, err = self._json_client.align(sequence)
+
+        if err:
+            raise RuntimeError(f"Error while calling the server API {str(err)}")
+        return pd.DataFrame(json_obj)
+
+    def column_labels(self) -> List[str]:
+        json_obj, err = self._json_client.column_labels()
+
+        if err:
+            raise RuntimeError(f"Error while calling the server API {str(err)}")
+        return json_obj
+
+
+class MultiGraphClient:
+    # TODO: make things asynchronously. this should be the added value of this class
+    def __init__(self):
+        self.graphs = {}
+
+    def add_graph(self, host: str, port: int, label: str = None) -> None:
+        if not label:
+            label = f"{host}:{port}"
+
+        self.graphs[label] = GraphClient(host, port, label)
+
+    def list_graphs(self) -> Dict[str, Tuple[str, int]]:
+        return {lbl: (inst.host, inst.port) for (lbl, inst) in
+                self.graphs.items()}
+
+    def search(self, sequence: Union[str, Iterable[str]],
+               top_labels: int = DEFAULT_TOP_LABELS,
+               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               align: bool = False) -> \
+            Dict[str, pd.DataFrame]:
+
+        result = {}
+        for label, graph_client in self.graphs.items():
+            result[label] = graph_client.search(sequence, top_labels,
+                                                discovery_threshold, align)
+
+        return result
 
     def align(self, sequence: Union[str, Iterable[str]]) -> Dict[
-        str, Tuple[pd.DataFrame, str]]:
+        str, pd.DataFrame]:
+        result = {}
+        for label, graph_client in self.graphs.items():
+            # TODO: do this async
+            result[label] = graph_client.align(sequence)
 
-        json_res = self.align_json(sequence)
-
-        return {l: (pd.DataFrame(j) if j else pd.DataFrame()) for (l, (j, e))
-                in json_res.items()}
-
-    def search_json(self, sequence: Union[str, Iterable[str]], top_labels=10000,
-                    discovery_threshold: float = 1.0, align: bool = False) -> \
-            Dict[str, Tuple[str, str]]:
-        param_dict = {"count_labels": True,
-                      "discovery_fraction": discovery_threshold / 100,
-                      "num_labels": top_labels,
-                      "align": align}
-
-        return self._json_query(sequence, param_dict, "search")
-
-    def align_json(self, sequence: Union[str, Iterable[str]]) -> Dict[
-        str, Tuple[str, str]]:
-        return self._json_query(sequence, {}, "align")
-
-    def _json_query(self, sequence: Union[str, Iterable[str]], param_dict, end_point: str) -> Dict[
-        str, Tuple[str, str]]:
-
-        if not self.graphs:
-            raise ValueError("No graphs registered")  # TODO: better error
-
-        results = {}
-
-        for label, (host, port) in self.graphs.items():
-            if isinstance(sequence, str):
-                fasta_str = f">query\n{sequence}"
-            else:
-                seqs = list(sequence)
-                fasta_str = '\n'.join([ f">{i}\n{seqs[i]}" for i in range(0, len(seqs))])
-
-            payload_dict = {"FASTA": fasta_str}
-            payload_dict.update(param_dict)
-            payload = json.dumps(payload_dict)
-
-            ret = requests.post(url=f'http://{host}:{port}/{end_point}', data=payload)
-
-            if ret.ok:
-                results[label] = (ret.json(), None)
-            else:
-                results[label] = ("", str(ret.status_code) + " " + ret.json()['error'])
-        return results
+        return result
 
     def column_labels(self) -> Dict[str, List[str]]:
         ret = {}
-        for label, (host, port) in self.graphs.items():
-            r = requests.get(url=f'http://{host}:{port}/column_labels')
-
-            # TODO: how to handle errors?
-            ret[label] = r.json()
+        for label, graph_client in self.graphs.items():
+            ret[label] = graph_client.column_labels()
 
         return ret
