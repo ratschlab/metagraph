@@ -47,26 +47,32 @@ get_submatrix(const VectorPtrs &columns,
 }
 
 // returns shrinked columns
+std::vector<uint64_t>
+sample_row_indexes(uint64_t num_rows, uint64_t num_samples, int seed) {
+    std::mt19937 gen;
+
+    if (seed)
+        gen.seed(seed);
+
+    num_samples = std::min(num_samples, num_rows);
+
+    auto indexes = utils::sample_indexes(num_rows, num_samples, gen);
+    // sort indexes
+    std::sort(indexes.begin(), indexes.end());
+    // check if indexes are sampled without replacement
+    assert(std::unique(indexes.begin(), indexes.end()) == indexes.end());
+
+    return indexes;
+}
+
+// returns shrinked columns
 std::vector<sdsl::bit_vector>
 random_submatrix(const VectorPtrs &columns,
                  uint64_t num_rows_sampled, size_t num_threads, int seed) {
     if (!columns.size())
         return {};
 
-    std::mt19937 gen;
-
-    if (seed)
-        gen.seed(seed);
-
-    num_rows_sampled = std::min(num_rows_sampled, columns[0]->size());
-
-    auto indexes = utils::sample_indexes(columns[0]->size(),
-                                         num_rows_sampled,
-                                         gen);
-    // sort indexes
-    std::sort(indexes.begin(), indexes.end());
-    // check if indexes are sampled without replacement
-    assert(std::unique(indexes.begin(), indexes.end()) == indexes.end());
+    auto indexes = sample_row_indexes(columns[0]->size(), num_rows_sampled, seed);
 
     return get_submatrix(columns, indexes, num_threads);
 }

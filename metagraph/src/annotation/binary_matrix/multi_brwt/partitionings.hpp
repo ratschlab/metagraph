@@ -23,6 +23,9 @@ Eigen::MatrixXd
 agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
                              size_t num_threads = 1);
 
+std::vector<uint64_t>
+sample_row_indexes(uint64_t num_rows, uint64_t size, int seed = 1);
+
 std::vector<sdsl::bit_vector>
 random_submatrix(const std::vector<const bit_vector *> &columns,
                  uint64_t num_rows_sampled,

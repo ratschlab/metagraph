@@ -1,5 +1,7 @@
 #include "transform_annotation.hpp"
 
+#include <fmt/format.h>
+
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
@@ -164,31 +166,46 @@ int transform_annotation(Config *config) {
             logger->error("Column clustering is only supported for ColumnCompressed");
             exit(1);
         }
-        auto annotation = std::make_unique<ColumnCompressed<>>();
 
         logger->trace("Loading annotation...");
 
-        // Load annotation from disk
-        if (!annotation->merge_load(files)) {
+        std::vector<uint64_t> row_indexes;
+        std::vector<sdsl::bit_vector> subcolumns;
+        uint64_t num_rows = 0;
+
+        omp_set_max_active_levels(2);
+        // Load columns from disk
+        bool success = ColumnCompressed<>::merge_load(files,
+            [&](const std::string &label, auto&& column_ptr) {
+                if (row_indexes.empty()) {
+                    num_rows = column_ptr->size();
+                    row_indexes = sample_row_indexes(num_rows,
+                                                     config->num_rows_subsampled);
+                } else if (column_ptr->size() != num_rows) {
+                    logger->error("Size of column {} is {} != {}",
+                                  label, column_ptr->size(), num_rows);
+                    exit(1);
+                }
+                sdsl::bit_vector &subvector
+                    = subcolumns.emplace_back(row_indexes.size(), false);
+                fmt::print("{}: {}\n", subcolumns.size(), label);
+
+                #pragma omp parallel for num_threads(get_num_threads()) schedule(static, 2048)
+                for (size_t j = 0; j < row_indexes.size(); ++j) {
+                    if ((*column_ptr)[row_indexes[j]])
+                        subvector[j] = true;
+                }
+            }
+        );
+
+        if (!success) {
             logger->error("Cannot load annotations");
             exit(1);
         }
 
-        logger->trace("Annotation loaded in {} sec", timer.elapsed());
-
-        std::vector<const bit_vector *> columns;
-        for (const auto &col : annotation->get_matrix().data()) {
-            columns.push_back(&(*col));
-        }
-
-        std::vector<sdsl::bit_vector> subvectors
-                = random_submatrix(columns, config->num_rows_subsampled,
-                                            get_num_threads());
-        // free memory
-        annotation.reset();
-
         Eigen::MatrixXd linkage_matrix
-                = agglomerative_greedy_linkage(std::move(subvectors));
+                = agglomerative_greedy_linkage(std::move(subcolumns),
+                                               get_num_threads());
 
         std::ofstream out(config->outfbase);
         out << linkage_matrix.format(CSVFormat) << std::endl;
@@ -356,7 +373,7 @@ int merge_annotation(Config *config) {
     const auto &files = config->fnames;
 
     if (config->anno_type == Config::ColumnCompressed) {
-        ColumnCompressed<> annotation(0, config->num_columns_cached, get_verbose());
+        ColumnCompressed<> annotation(0, config->num_columns_cached);
         if (!annotation.merge_load(files)) {
             logger->error("Cannot load annotations");
             exit(1);
