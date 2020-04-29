@@ -104,14 +104,13 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
                              std::cerr, !utils::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)
-    for (uint32_t j = 1; j < cols.size(); ++j) {
-        for (uint32_t i = 0; i < cols.size(); ++i) {
-            if (i >= j)
-                continue;
-
-            float sim = inner_prod(cols[i], cols[j]);
-            similarities[(uint64_t)(j - 1) * j / 2 + i] = std::make_tuple(i, j, sim);
-            ++progress_bar;
+    for (uint64_t j = 1; j < cols.size(); ++j) {
+        for (uint64_t i = 0; i < cols.size(); ++i) {
+            if (i < j) {
+                float sim = inner_prod(cols[i], cols[j]);
+                similarities[(j - 1) * j / 2 + i] = std::tie(i, j, sim);
+                ++progress_bar;
+            }
         }
     }
 
