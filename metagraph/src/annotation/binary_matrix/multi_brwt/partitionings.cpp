@@ -183,7 +183,7 @@ Partition greedy_matching(const std::vector<sdsl::bit_vector> &columns,
 
     auto similarities = correlation_similarity(columns, num_threads);
 
-    ProgressBar progress_bar(similarities.size(), "Clustering",
+    ProgressBar progress_bar(similarities.size(), "Matching",
                              std::cerr, !utils::get_verbose());
 
     // pick either a pair of the most similar columns,

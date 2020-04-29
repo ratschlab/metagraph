@@ -164,7 +164,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::atomic<bool> error_occurred = false;
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
         if (error_occurred)
             continue;
