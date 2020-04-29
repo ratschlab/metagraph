@@ -1,5 +1,5 @@
-#ifndef __PARTITIONINGS_HPP__
-#define __PARTITIONINGS_HPP__
+#ifndef __CLUSTERING_HPP__
+#define __CLUSTERING_HPP__
 
 #include <vector>
 
@@ -31,4 +31,4 @@ random_submatrix(const std::vector<const bit_vector *> &columns,
                  uint64_t num_rows_sampled,
                  size_t num_threads = 1, int seed = 1);
 
-#endif // __PARTITIONINGS_HPP__
+#endif // __CLUSTERING_HPP__

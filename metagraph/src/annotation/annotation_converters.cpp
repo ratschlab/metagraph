@@ -12,7 +12,7 @@
 #include "common/vectors/bitmap_mergers.hpp"
 #include "binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "binary_matrix/multi_brwt/brwt_builders.hpp"
-#include "binary_matrix/multi_brwt/partitionings.hpp"
+#include "binary_matrix/multi_brwt/clustering.hpp"
 #include "representation/annotation_matrix/static_annotators_def.hpp"
 #include "representation/column_compressed/annotate_column_compressed.hpp"
 #include "representation/row_compressed/annotate_row_compressed.hpp"

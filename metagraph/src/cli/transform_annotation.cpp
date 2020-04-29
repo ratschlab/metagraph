@@ -9,7 +9,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
-#include "annotation/binary_matrix/multi_brwt/partitionings.hpp"
+#include "annotation/binary_matrix/multi_brwt/clustering.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
