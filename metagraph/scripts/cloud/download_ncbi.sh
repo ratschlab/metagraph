@@ -11,21 +11,6 @@ function exit_with() {
   exit $code
 }
 
-function execute_retry {
-    cmd=("$@")
-    set +e
-    for i in {1..3}; do
-      echo "Executing ${cmd[*]}, attempt #$i"
-      if "${cmd[@]}"; then
-        return 0
-      fi
-      echo_err "attempt #$i of 3 failed"
-      sleep 0.15
-    done
-    set -e
-    return 1
-}
-
 ############ Main Script ###############
 # Arguments:
 # -  the bucket index (1 to 9) where the SRA resides
@@ -91,8 +76,7 @@ if (( sra_bucket > 0 )); then  # Get data from GCS
   echo "[$sra_id] gsutil finished successfully"
   exit_code=0
   for sra_file in $(ls -p "${sra_dir}"); do
-    # fasterq-dump is flakey, so trying the dump 3 times before giving up
-    if ! (execute_retry fasterq-dump "${sra_dir}/${sra_file}" -f -e 4  -O "${fastq_dir}" -t "${tmp_dir}"); then
+    if ! (execute fasterq-dump "${sra_dir}/${sra_file}" -f -e 4  -O "${fastq_dir}" -t "${tmp_dir}"); then
       exit_code=4  # TODO: check if return code 3 is also acceptable as success
     fi
     rm -rf "${tmp_dir}/*"
@@ -104,7 +88,7 @@ if (( sra_bucket > 0 )); then  # Get data from GCS
 else  # Get data via HTTP (machine must have external ip or internet access via NAT)
     source="${sra_id}"
     vdb-config --report-cloud-identity no  # otherwise NCBI will try to use the cloud and fail
-    if ! (execute_retry fasterq-dump "${source}" -f -e 4  -O "${fastq_dir}" -t "${tmp_dir}"); then
+    if ! (execute fasterq-dump "${source}" -f -e 4  -O "${fastq_dir}" -t "${tmp_dir}"); then
       rm -rf "${tmp_dir}/*"
       echo_err "[$sra_id] Download failed while running fasterq-dump"
       exit_with 4
