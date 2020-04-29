@@ -110,7 +110,7 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
                 continue;
 
             float sim = inner_prod(cols[i], cols[j]);
-            similarities[(j - 1) * j / 2 + i] = std::make_tuple(i, j, sim);
+            similarities[(uint64_t)(j - 1) * j / 2 + i] = std::make_tuple(i, j, sim);
             ++progress_bar;
         }
     }
