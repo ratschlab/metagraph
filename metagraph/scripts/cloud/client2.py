@@ -510,6 +510,7 @@ def check_status():
             if available_ram_gb > required_ram_gb:
                 logging.info(
                     f'[{sra_id}] Estimated {required_ram_gb}GB needed for cleaning, available {available_ram_gb} GB')
+                kmer_count_unique = sra_info[sra_id][2]
                 kmer_coverage = sra_info[sra_id][3]
                 kmer_count_singletons = sra_info[sra_id][4]
                 fallback = 5 if kmer_coverage > 5 else 2 if kmer_coverage > 2 or kmer_count_unique > 1e6 else 1
