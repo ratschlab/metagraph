@@ -344,7 +344,7 @@ def check_status():
                 logging.warning(f'[{sra_id}] Download timed out after {time.time()-start_time} seconds.')
                 return_code = 254
             else:
-                logging.error(f'[{sra_id}]Download process did not provide a return code. Assuming error')
+                logging.error(f'[{sra_id}] Download process did not provide a return code. Assuming error')
                 return_code = 255
             completed_downloads.add(sra_id)
             log_file_name = os.path.join(download_dir(sra_id), 'download.log')
@@ -396,7 +396,6 @@ def check_status():
                 waiting_builds[sra_id] = (time.time())
             else:
                 logging.warning(f'[{sra_id}] Download failed. Removing {download_path}')
-                exit(3)
                 subprocess.run(['rm', '-rf', download_path])
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': sra_size_mb,
                           'download_size_mb': download_size_mb, 'kmc_size_mb': kmc_size_mb, 'exit_code': return_code}
