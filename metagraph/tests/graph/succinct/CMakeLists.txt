@@ -12,7 +12,7 @@ add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/representation/base metagraph_g
 add_subdirectory(${PROJECT_PARENT_DIR}/src/graph/representation/succinct succinct)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/kmer kmer)
 add_subdirectory(${PROJECT_PARENT_DIR}/src/common metagraph_common)
-add_subdirectory(${PROJECT_PARENT_DIR}/src/test_utils test_utils)
+add_subdirectory(${PROJECT_PARENT_DIR}/tests/utils test_utils)
 
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
@@ -32,6 +32,7 @@ add_executable(tests ${test_files})
 target_compile_definitions(tests PUBLIC TEST_DATA_DIR="${PROJECT_PARENT_DIR}/tests/data")
 target_include_directories(tests
   PRIVATE
+    ${PROJECT_PARENT_DIR}/
     ${EXTERNAL_LIB_DIR}/googletest/googletest/include}
 )
 target_link_libraries(tests
