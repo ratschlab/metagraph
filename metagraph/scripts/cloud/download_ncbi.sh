@@ -77,11 +77,15 @@ if (( sra_bucket > 0 )); then  # Get data from GCS
   exit_code=0
   for sra_file in $(ls -p "${sra_dir}"); do
     if ! (execute fasterq-dump "${sra_dir}/${sra_file}" -f -e 4  -O "${fastq_dir}" -t "${tmp_dir}"); then
-      exit_code=4  # TODO: check if return code 3 is also acceptable as success
+      echo_err "[$sra_id] fasterq-dump failed, trying fastq-dump. Go get a coffeee."
+      if ! (execute fastq-dump "${sra_dir}/${sra_file}" --fasta default  -O "${fastq_dir}" --skip-technical); then
+        echo_err "[$sra_id] fastq-dump also failed, this SRA cannot be processed."
+        exit_code=4  # TODO: check if return code 3 is also acceptable as success
+      fi
     fi
     rm -rf "${tmp_dir}/*"
     if (( exit_code != 0 )); then
-      echo_err "[$sra_id] Download failed while running fasterq-dump"
+      echo_err "[$sra_id] Download failed while running fast(er)q-dump"
       exit_with $exit_code
     fi
   done
