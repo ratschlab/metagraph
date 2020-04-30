@@ -82,7 +82,7 @@ def start_download(download_resp):
         download_processes[sra_id] = subprocess.Popen(['./download_ena.sh', sra_id, download_dir_base()])
     else:
         download_processes[sra_id] = subprocess.Popen(
-            ['./download_ncbi.sh', download_resp['bucket'], sra_id, download_dir_base()])
+            ['./download.sh', download_resp['bucket'], sra_id, download_dir_base()])
 
 
 def internal_ip():
