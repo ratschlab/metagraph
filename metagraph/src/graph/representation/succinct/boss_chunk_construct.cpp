@@ -228,7 +228,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                      ChunkedWaitQueue<T> *kmers,
                                      ThreadPool &async_worker) {
     constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
-    constexpr uint8_t ALPHABET_LEN = 2 << (KmerExtractorBOSS::bits_per_char - 1);
+    constexpr uint8_t ALPHABET_LEN = 1 << (KmerExtractorBOSS::bits_per_char - 1);
 
     const std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
@@ -277,6 +277,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         dummy_l1_chunks[curW].add(kmer.data());
     }
     original_kmers.finish();
+    std::for_each(dummy_l1_chunks.begin(), dummy_l1_chunks.end(),
+                  [](auto &v) { v.finish(); });
 
     // stores the sorted original kmers and dummy k-mers of prefix length 1
     std::string original_and_dummy_l1_name = tmp_dir/"original_and_dummy_l1";
