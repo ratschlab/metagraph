@@ -132,8 +132,8 @@ else
   download_ena
 fi
 
-# set_size  TODO: Enable this
-echo "0" > "${output_dir}/size"  # and remove this
+set_size
+# echo "0" > "${output_dir}/size"  # and remove this
 
 
 
