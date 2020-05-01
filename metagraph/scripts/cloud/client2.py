@@ -152,7 +152,7 @@ def start_download(download_resp):
     util.make_dir_if_needed(download_dir(sra_id))
     log_file_name = os.path.join(download_dir(sra_id), 'download.log')
     log_file = util.TeeLogger(log_file_name, 'Stage')
-    bucket = 0
+    bucket = '0'
     if args.source == 'ncbi':
         if 'bucket' not in download_resp:
             logging.info(f'[{sra_id}] Specified NCBI as download source, but server response has no "bucket" field. '
