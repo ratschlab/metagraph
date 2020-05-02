@@ -156,7 +156,7 @@ using RecentKmers = common::CircularBuffer<KmerBuffered<T>>;
  * redundant dummy source k-mers
  */
 template <typename T, typename T_INT>
-static void push_and_remove_redundant_dummy_source(const T_INT &el,
+static void push_and_remove_redundant_dummy_source(int k, const T_INT &el,
                                                    RecentKmers<T> *buffer) {
     buffer->push_back({ el, false });
 
@@ -172,6 +172,7 @@ static void push_and_remove_redundant_dummy_source(const T_INT &el,
         KMER &prev_kmer = get_first((*it).data);
         assert((curW || prev_kmer[1]) && "Main dummy source k-mer must be unique");
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
+            std::cout << prev_kmer.to_string(k+1, "$ACGT") << "----" << kmer.to_string(k+1, "$ACGT") << std::endl;
             (*it).is_removed = true;
             break;
         }
@@ -228,7 +229,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                      ChunkedWaitQueue<T> *kmers,
                                      ThreadPool &async_worker) {
     constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
-    constexpr uint8_t ALPHABET_LEN = 1 << (KmerExtractorBOSS::bits_per_char - 1);
+    constexpr uint8_t ALPHABET_LEN = 1 << KmerExtractorBOSS::bits_per_char;
 
     const std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
@@ -272,7 +273,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
             original_kmers.add(v.data());
         }
         KMER kmer = get_first(v);
+        std::cout << "kmer is: "  << kmer.to_string(k+1, "$ACGT") << std::endl;
         kmer.to_prev(k + 1, BOSS::kSentinelCode);
+        std::cout << "dummy kmer is: "  << kmer.to_string(k+1, "$ACGT") << std::endl;
         TAlphabet curW = kmer[0];
         dummy_l1_chunks[curW].add(kmer.data());
     }
@@ -280,17 +283,17 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     std::for_each(dummy_l1_chunks.begin(), dummy_l1_chunks.end(),
                   [](auto &v) { v.finish(); });
 
-    // stores the sorted original kmers and dummy k-mers of prefix length 1
+    // stores the sorted original kmers and dummy-1 k-mers
     std::string original_and_dummy_l1_name = tmp_dir/"original_and_dummy_l1";
     common::EliasFanoEncoderBuffered<T_INT> original_and_l1(original_and_dummy_l1_name,
                                                    ENCODER_BUFFER_SIZE);
 
-    // merge the original kmers with the dummy kmers of prefix length 1, while also
-    // removing the redundant dummy kmers
+    // merge the original kmers with the dummy-1 kmers, while also removing the redundant
+    // dummy-1 kmers
     const std::function<void(const T_INT &)> &on_new_item
             = [&num_dummy_l1_kmers, k, &recent_buffer, &original_and_l1,
                &dummy_l2_chunks](const T_INT &v) {
-                  push_and_remove_redundant_dummy_source(reinterpret_cast<const T &>(v),
+                  push_and_remove_redundant_dummy_source(k, reinterpret_cast<const T &>(v),
                                                          &recent_buffer);
                   if (recent_buffer.full()) {
                       num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(),
@@ -304,6 +307,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                          &dummy_l2_chunks);
     }
     original_and_l1.finish();
+    std::for_each(dummy_l2_chunks.begin(), dummy_l2_chunks.end(),
+                  [](auto &v) { v.finish(); });
 
     logger->trace("Total number of k-mers: {}", num_parent_kmers);
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
@@ -322,7 +327,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         dummy_next_names.resize(0);
         dummy_next_chunks.reserve(ALPHABET_LEN);
         for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
-            dummy_next_names.push_back(tmp_dir/("dummy_source_" + std::to_string(k+1) +"_"+std::to_string(i)));
+            std::string name = tmp_dir/("dummy_source_"
+                    + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
+            dummy_next_names.push_back(name);
             dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         }
         size_t num_kmers = 0;
@@ -338,6 +345,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         common::merge_files(dummy_names, write_dummy);
 
         encoder.finish();
+        std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
+                      [](auto &v) { v.finish(); });
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                       dummy_pref_len, num_kmers);
     }
