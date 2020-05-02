@@ -66,7 +66,7 @@ Download done: %s
 def get_work():
     global downloads_done
     if downloads_done or len(download_processes) >= MAX_DOWNLOAD_PROCESSES or len(
-            waiting_builds) >= 2 * MAX_BUILD_PROCESSES:
+            waiting_builds) + len(download_processes) >= 2 * MAX_BUILD_PROCESSES:
         return None
     url = f'http://{args.server}/jobs'
     for i in range(10):
