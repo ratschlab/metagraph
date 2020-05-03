@@ -182,7 +182,7 @@ build_graph_batch<DBGBitmap>(uint64_t k,
                              const std::vector<std::string> &sequences,
                              bool canonical) {
     DBGBitmapConstructor constructor(k, canonical);
-    constructor.add_sequences(sequences);
+    constructor.add_sequences(std::vector<std::string>(sequences));
     return std::shared_ptr<DeBruijnGraph>(new DBGBitmap(&constructor));
 }
 
@@ -193,7 +193,7 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
                                bool canonical) {
     BOSSConstructor constructor(k - 1, canonical);
     EXPECT_EQ(k - 1, constructor.get_k());
-    constructor.add_sequences(sequences);
+    constructor.add_sequences(std::vector<std::string>(sequences));
     std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor), canonical) };
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
     EXPECT_EQ(k, graph->get_k());

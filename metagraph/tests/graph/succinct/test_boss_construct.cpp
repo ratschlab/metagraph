@@ -150,7 +150,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
             };
             BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20000, container);
-            constructor.add_sequences(input_data);
+            constructor.add_sequences(std::vector<std::string>(input_data));
             BOSS constructed(&constructor);
 
             BOSS appended(k);
@@ -176,7 +176,7 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
 
             BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20000, container);
-            constructor.add_sequences(input_data);
+            constructor.add_sequences(std::vector<std::string>(input_data));
 
             BOSS constructed;
             sdsl::int_vector<> weights;
@@ -256,7 +256,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
             };
             BOSSConstructor constructor(k, true, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20'000, container);
-            constructor.add_sequences(input_data);
+            constructor.add_sequences(std::vector<std::string>(input_data));
             BOSS constructed(&constructor);
 
             BOSS appended(k);

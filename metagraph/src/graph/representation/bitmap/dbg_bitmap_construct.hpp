@@ -45,10 +45,13 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
         constructor_->add_sequence(sequence, count);
     }
 
-    void add_sequences(const std::vector<std::string> &sequences) {
-        constructor_->add_sequences([&sequences](const CallString &callback) {
-            std::for_each(sequences.begin(), sequences.end(), callback);
-        });
+    void add_sequences(std::vector<std::string>&& sequences) {
+        auto seqs = std::make_shared<std::vector<std::string>>(std::move(sequences));
+        constructor_->add_sequences(
+            [seqs](const CallString &callback) {
+                std::for_each(seqs->begin(), seqs->end(), callback);
+            }
+        );
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {
