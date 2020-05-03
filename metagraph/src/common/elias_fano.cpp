@@ -469,7 +469,7 @@ EliasFanoDecoder<std::pair<T, C>>::EliasFanoDecoder(const std::string &source,
       remove_source_(remove_source) {
     source_second_ = std::ifstream(source_second_name_, std::ios::binary);
     if (!source_second_.good()) {
-        logger->error("Unable to write to {}", source_second_name_);
+        logger->error("Unable to read from {}", source_second_name_);
         std::exit(EXIT_FAILURE);
     }
 }

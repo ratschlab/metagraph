@@ -203,14 +203,15 @@ uint64_t merge_dummy(const std::string &source,
 
     const std::function<void(const T &)> merge_dummy
             = [&data_item, &on_new_item, &num_elements_read, &decoder](const T &v) {
-              num_elements_read++;
-              if (!data_item.has_value() || data_item.value().first > v) {
+                  num_elements_read++;
+                  while (data_item.has_value() && data_item.value().first < v) {
+                      num_elements_read++;
+                      on_new_item(data_item.value());
+                      data_item = decoder.next();
+                  }
+                  assert(!data_item.has_value() || data_item.value().first != v);
                   on_new_item({ v, 0 });
-              } else {
-                  on_new_item(data_item.value());
-                  data_item = decoder.next();
-              }
-            };
+              };
     merge_files(source_dummy, merge_dummy);
 
     // add the leftover contents from #source

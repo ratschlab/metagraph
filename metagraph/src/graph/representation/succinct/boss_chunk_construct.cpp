@@ -283,7 +283,6 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     std::for_each(dummy_l1_chunks.begin(), dummy_l1_chunks.end(),
                   [](auto &v) { v.finish(); });
 
-    // stores the sorted original kmers and dummy-1 k-mers
     std::string original_and_dummy_l1_name = tmp_dir/"original_and_dummy_l1";
     common::EliasFanoEncoderBuffered<T_INT> original_and_l1(original_and_dummy_l1_name,
                                                    ENCODER_BUFFER_SIZE);
@@ -314,7 +313,9 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   num_dummy_l1_kmers);
 
+    // stores the sorted original kmers and dummy-1 k-mers
     std::vector<std::string> files_to_merge;
+
     // generate dummy k-mers of prefix length 2..k
     for (size_t dummy_pref_len = 2; dummy_pref_len <= k; ++dummy_pref_len) {
         // this will compress all sorted dummy k-mers of given prefix length
@@ -350,15 +351,16 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                       dummy_pref_len, num_kmers);
     }
+    const std::function<void(const INT &)> &empty = [](const INT&){};
+    common::merge_files(dummy_next_names, empty);
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix
     // length x in /tmp_dir/dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([kmers, original_and_dummy_l1_name, files_to_merge]() {
-        common::merge_dummy<T_INT>(original_and_dummy_l1_name, files_to_merge,
-            [kmers](const T_INT &v) {
-                kmers->push(reinterpret_cast<const T &>(v));
-            }
-        );
+        std::function<void(const T_INT&)> on_new_item = [kmers](const T_INT &v) {
+          kmers->push(reinterpret_cast<const T &>(v));
+        };
+        common::merge_dummy(original_and_dummy_l1_name, files_to_merge, on_new_item);
         kmers->shutdown();
     });
 }
