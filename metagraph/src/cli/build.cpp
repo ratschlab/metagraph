@@ -116,11 +116,14 @@ int build_graph(Config *config) {
                 config->disk_cap_bytes
             );
 
-            parse_sequences(files, *config, timer,
-                [&](std::string_view seq) { constructor->add_sequence(seq); },
-                [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); },
-                [&](const auto &loop) { constructor->add_sequences(loop); }
-            );
+            for (const auto &file : files) {
+                parse_sequences(file, *config,
+                    [&](std::string_view seq) { constructor->add_sequence(seq); },
+                    [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); }
+                );
+                logger->trace("Extracted all sequences from file '{}' in {} sec",
+                              file, timer.elapsed());
+            }
 
             BOSS::Chunk *next_chunk = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
@@ -187,11 +190,14 @@ int build_graph(Config *config) {
                 )
             );
 
-            parse_sequences(files, *config, timer,
-                [&](std::string_view seq) { constructor->add_sequence(seq); },
-                [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); },
-                [&](const auto &loop) { constructor->add_sequences(loop); }
-            );
+            for (const auto &file : files) {
+                parse_sequences(file, *config,
+                    [&](std::string_view seq) { constructor->add_sequence(seq); },
+                    [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); }
+                );
+                logger->trace("Extracted all sequences from file '{}' in {} sec",
+                              file, timer.elapsed());
+            }
 
             if (!suffix.size()) {
                 assert(suffixes.size() == 1);
@@ -269,17 +275,14 @@ int build_graph(Config *config) {
         }
         assert(graph);
 
-        parse_sequences(files, *config, timer,
-            [&graph](std::string_view seq) {
-                graph->add_sequence(seq);
-            },
-            [&graph](std::string_view seq, uint32_t /*count*/) {
-                graph->add_sequence(seq);
-            },
-            [&graph](const auto &loop) {
-                loop([&graph](const char *seq) { graph->add_sequence(seq); });
-            }
-        );
+        for (const auto &file : files) {
+            parse_sequences(file, *config,
+                [&graph](std::string_view seq) { graph->add_sequence(seq); },
+                [&graph](std::string_view seq, uint32_t) { graph->add_sequence(seq); }
+            );
+            logger->trace("Extracted all sequences from file '{}' in {} sec",
+                          file, timer.elapsed());
+        }
 
         if (config->count_kmers) {
             graph->add_extension(std::make_shared<NodeWeights>(graph->max_index() + 1,
@@ -290,26 +293,22 @@ int build_graph(Config *config) {
             if (graph->is_canonical_mode())
                 config->forward_and_reverse = true;
 
-            parse_sequences(files, *config, timer,
-                [&graph,&node_weights](std::string_view seq) {
-                    graph->map_to_nodes_sequentially(seq,
-                        [&](auto node) { node_weights->add_weight(node, 1); }
-                    );
-                },
-                [&graph,&node_weights](std::string_view seq, uint32_t count) {
-                    graph->map_to_nodes_sequentially(seq,
-                        [&](auto node) { node_weights->add_weight(node, count); }
-                    );
-                },
-                [&graph,&node_weights](const auto &loop) {
-                    loop([&graph,&node_weights](const char *seq) {
-                        std::string seq_str(seq);
-                        graph->map_to_nodes_sequentially(seq_str,
+            for (const auto &file : files) {
+                parse_sequences(file, *config,
+                    [&graph,&node_weights](std::string_view seq) {
+                        graph->map_to_nodes_sequentially(seq,
                             [&](auto node) { node_weights->add_weight(node, 1); }
                         );
-                    });
-                }
-            );
+                    },
+                    [&graph,&node_weights](std::string_view seq, uint32_t count) {
+                        graph->map_to_nodes_sequentially(seq,
+                            [&](auto node) { node_weights->add_weight(node, count); }
+                        );
+                    }
+                );
+                logger->trace("Extracted all sequences from file '{}' in {} sec",
+                              file, timer.elapsed());
+            }
         }
     }
 
