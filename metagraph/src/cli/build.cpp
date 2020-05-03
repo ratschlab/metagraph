@@ -36,6 +36,39 @@ void signal_handler(int sig) {
     std::exit(sig);
 }
 
+template <class GraphConstructor>
+void push_sequences(const std::vector<std::string> &files,
+                    const Config &config,
+                    const Timer &timer,
+                    GraphConstructor *constructor) {
+    using Buffer = std::vector<std::pair<std::string, uint64_t>>;
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 1)
+    for (size_t i = 0; i < files.size(); ++i) {
+        BatchAccumulator<std::pair<std::string, uint64_t>> batcher(
+            [constructor](Buffer&& sequences) {
+                auto seqs = std::make_shared<Buffer>(std::move(sequences));
+                constructor->add_sequences([seqs](CallStringCount callback) {
+                    for (const auto &[seq, count] : *seqs) {
+                        callback(seq, count);
+                    }
+                });
+            },
+            1'000'000 / sizeof(std::pair<std::string, uint64_t>),
+            1'000'000
+        );
+        parse_sequences(files[i], config,
+            [&](std::string_view seq) {
+                batcher.push_and_pay(seq.size(), seq, 1);
+            },
+            [&](std::string_view seq, uint32_t count) {
+                batcher.push_and_pay(seq.size(), seq, count);
+            }
+        );
+        logger->trace("Extracted all sequences from file '{}' in {} sec",
+                      files[i], timer.elapsed());
+    }
+}
+
 int build_graph(Config *config) {
     assert(config);
 
@@ -116,14 +149,7 @@ int build_graph(Config *config) {
                 config->disk_cap_bytes
             );
 
-            for (const auto &file : files) {
-                parse_sequences(file, *config,
-                    [&](std::string_view seq) { constructor->add_sequence(seq); },
-                    [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); }
-                );
-                logger->trace("Extracted all sequences from file '{}' in {} sec",
-                              file, timer.elapsed());
-            }
+            push_sequences(files, *config, timer, constructor.get());
 
             BOSS::Chunk *next_chunk = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
@@ -190,14 +216,7 @@ int build_graph(Config *config) {
                 )
             );
 
-            for (const auto &file : files) {
-                parse_sequences(file, *config,
-                    [&](std::string_view seq) { constructor->add_sequence(seq); },
-                    [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); }
-                );
-                logger->trace("Extracted all sequences from file '{}' in {} sec",
-                              file, timer.elapsed());
-            }
+            push_sequences(files, *config, timer, constructor.get());
 
             if (!suffix.size()) {
                 assert(suffixes.size() == 1);

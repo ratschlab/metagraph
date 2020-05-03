@@ -16,7 +16,11 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
         constructor_->add_sequence(sequence, count);
     }
 
-    void add_sequences(std::function<void(CallString)> generate_sequences) {
+    void add_sequences(const std::function<void(CallString)> &generate_sequences) {
+        constructor_->add_sequences(generate_sequences);
+    }
+
+    void add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
         constructor_->add_sequences(generate_sequences);
     }
 
