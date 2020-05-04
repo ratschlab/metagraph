@@ -273,11 +273,11 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
             original_kmers.add(v.data());
         }
         KMER kmer = get_first(v);
-        std::cout << "kmer is: "  << kmer.to_string(k+1, "$ACGT") << std::endl;
         kmer.to_prev(k + 1, BOSS::kSentinelCode);
-        std::cout << "dummy kmer is: "  << kmer.to_string(k+1, "$ACGT") << std::endl;
-        TAlphabet curW = kmer[0];
-        dummy_l1_chunks[curW].add(kmer.data());
+        if (kmer.data() != 0) {
+            TAlphabet curW = kmer[0];
+            dummy_l1_chunks[curW].add(kmer.data());
+        }
     }
     original_kmers.finish();
     std::for_each(dummy_l1_chunks.begin(), dummy_l1_chunks.end(),
@@ -339,9 +339,11 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
                       encoder.add(v);
                       KMER kmer(v);
                       kmer.to_prev(k + 1, BOSS::kSentinelCode);
-                      const TAlphabet W = kmer[0];
-                      dummy_next_chunks[W].add(kmer.data());
-                      num_kmers++;
+                      if (kmer.data() != 0) { // sentinel k-mer was already added
+                          const TAlphabet W = kmer[0];
+                          dummy_next_chunks[W].add(kmer.data());
+                          num_kmers++;
+                      }
                   };
         common::merge_files(dummy_names, write_dummy);
 
@@ -357,7 +359,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // length x in /tmp_dir/dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([kmers, original_and_dummy_l1_name, files_to_merge]() {
-        std::function<void(const T_INT&)> on_new_item = [kmers](const T_INT &v) {
+        std::function<void(const T_INT&)> on_new_item = [kmers, files_to_merge](const T_INT &v) { // TODO: remove files_to_merge
           kmers->push(reinterpret_cast<const T &>(v));
         };
         common::merge_dummy(original_and_dummy_l1_name, files_to_merge, on_new_item);
