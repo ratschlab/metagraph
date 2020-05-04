@@ -757,7 +757,7 @@ TEST(FastaFromString, read_fasta_from_string) {
     std::string fasta_str = "";
 
     int nr_seqs = 20'000;
-    for(int i = 0; i<nr_seqs; i++) {
+    for (int i = 0; i < nr_seqs; i++) {
         fasta_str.append(">hello\nAAA\n");
     }
 

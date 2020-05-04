@@ -429,7 +429,8 @@ inline std::string query_sequence(size_t id,
 }
 
 void QueryExecutor::query_fasta(const string &file,
-                                const std::function<void(const std::string &)> &callback) {
+                                const std::function<void(const std::string &)> &callback,
+                                bool exact_matching) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     FastaParser fasta_parser(file, config_.forward_and_reverse);
@@ -447,7 +448,7 @@ void QueryExecutor::query_fasta(const string &file,
     for (const auto &kseq : fasta_parser) {
         thread_pool_.enqueue(
             [&](size_t id, const std::string &name, std::string &seq) {
-                if (!aligner_) {
+                if (!aligner_ || exact_matching) {
                     callback(query_sequence(id, name, seq, anno_graph_, config_));
                     return;
                 }
