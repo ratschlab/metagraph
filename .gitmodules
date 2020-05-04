@@ -64,3 +64,6 @@
 [submodule "metagraph/external-libraries/zlib"]
 	path = metagraph/external-libraries/zlib
 	url = https://github.com/cloudflare/zlib
+[submodule "metagraph/external-libraries/Simple-Web-Server"]
+	path = metagraph/external-libraries/Simple-Web-Server
+	url = https://gitlab.com/eidheim/Simple-Web-Server.git
