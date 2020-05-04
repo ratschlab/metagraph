@@ -44,14 +44,14 @@ std::string convert_query_response_to_json(const std::string &ret_str) {
     query_results.reserve(query_results.size());
 
     for (auto qit = queries.begin(); qit != queries.end(); ++qit) {
-        std::vector<std::string> parts = utils::split_string(*qit, "\t");
+        std::vector<std::string> parts = utils::split_string(*qit, "\t", false);
 
         if (parts.size() <= 2)
             continue; // no sequences found
 
         Json::Value res_obj;
         std::vector<std::string> query_desc_parts = utils::split_string(parts[1], ":");
-        res_obj[SEQ_DESCRIPTION_JSON_FIELD] = query_desc_parts[0].substr(1);
+        res_obj[SEQ_DESCRIPTION_JSON_FIELD] = query_desc_parts[0];
 
         if (query_desc_parts.size() > 1) {
             // we aligned first, so extracting aligned sequence and score:

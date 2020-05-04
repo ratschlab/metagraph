@@ -421,7 +421,7 @@ inline std::string query_sequence(size_t id,
                                   const AnnotatedDBG &anno_graph,
                                   const Config &config) {
     // adding "_" as name might be empty
-    return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + "_" + name, seq,
+    return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
                                         config.discovery_fraction, config.anno_labels_delimiter,
