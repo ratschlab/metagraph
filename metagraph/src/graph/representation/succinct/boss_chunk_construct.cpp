@@ -156,8 +156,7 @@ using RecentKmers = common::CircularBuffer<KmerBuffered<T>>;
  * redundant dummy source k-mers
  */
 template <typename T, typename T_INT>
-static void push_and_remove_redundant_dummy_source(int k, const T_INT &el,
-                                                   RecentKmers<T> *buffer) {
+static void push_and_remove_redundant_dummy_source(const T_INT &el, RecentKmers<T> *buffer) {
     buffer->push_back({ el, false });
 
     using KMER = get_first_type_t<T>;
@@ -172,7 +171,6 @@ static void push_and_remove_redundant_dummy_source(int k, const T_INT &el,
         KMER &prev_kmer = get_first((*it).data);
         assert((curW || prev_kmer[1]) && "Main dummy source k-mer must be unique");
         if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
-            std::cout << prev_kmer.to_string(k+1, "$ACGT") << "----" << kmer.to_string(k+1, "$ACGT") << std::endl;
             (*it).is_removed = true;
             break;
         }
@@ -275,7 +273,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         }
         KMER kmer = get_first(v);
         kmer.to_prev(k + 1, BOSS::kSentinelCode);
-        if (kmer == all_dummy) {
+        if (kmer != all_dummy) {
             TAlphabet curW = kmer[0];
             dummy_l1_chunks[curW].add(kmer.data());
         }
@@ -293,7 +291,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     const std::function<void(const T_INT &)> &on_new_item
             = [&num_dummy_l1_kmers, k, &recent_buffer, &original_and_l1,
                &dummy_l2_chunks](const T_INT &v) {
-                  push_and_remove_redundant_dummy_source(k, reinterpret_cast<const T &>(v),
+                  push_and_remove_redundant_dummy_source( reinterpret_cast<const T &>(v),
                                                          &recent_buffer);
                   if (recent_buffer.full()) {
                       num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(),
