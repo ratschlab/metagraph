@@ -538,7 +538,7 @@ edge_index BOSS::bwd(edge_index i) const {
 }
 
 /**
- * This functions gets a position i reflecting the r-th occurrence of the corresponding
+ * This function gets a position i reflecting the r-th occurrence of the corresponding
  * character c in W and returns the position of the r-th occurrence of c in last.
  */
 edge_index BOSS::fwd(edge_index i, TAlphabet c) const {

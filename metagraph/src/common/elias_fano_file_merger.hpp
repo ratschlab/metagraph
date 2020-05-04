@@ -209,7 +209,7 @@ uint64_t merge_dummy(const std::string &source,
                       on_new_item(data_item.value());
                       data_item = decoder.next();
                   }
-                  assert(!data_item.has_value() || data_item.value().first != v);
+                  assert(!data_item.has_value() || data_item.value().first != v || v==0);
                   on_new_item({ v, 0 });
               };
     merge_files(source_dummy, merge_dummy);
