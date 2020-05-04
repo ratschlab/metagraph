@@ -264,6 +264,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         dummy_l2_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
     }
 
+    const KMER all_dummy = std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         const T& v = *it;
@@ -274,7 +275,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         }
         KMER kmer = get_first(v);
         kmer.to_prev(k + 1, BOSS::kSentinelCode);
-        if (kmer.data() != 0) {
+        if (kmer == all_dummy) {
             TAlphabet curW = kmer[0];
             dummy_l1_chunks[curW].add(kmer.data());
         }
@@ -335,11 +336,11 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         }
         size_t num_kmers = 0;
         const std::function<void(const INT &)> &write_dummy
-                = [k, &num_kmers, &dummy_next_chunks, &encoder](const INT &v) {
+                = [k, &num_kmers, &dummy_next_chunks, &encoder, &all_dummy](const INT &v) {
                       encoder.add(v);
                       KMER kmer(v);
                       kmer.to_prev(k + 1, BOSS::kSentinelCode);
-                      if (kmer.data() != 0) { // sentinel k-mer was already added
+                      if (kmer != all_dummy) {
                           const TAlphabet W = kmer[0];
                           dummy_next_chunks[W].add(kmer.data());
                           num_kmers++;
