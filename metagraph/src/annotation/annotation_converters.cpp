@@ -358,6 +358,7 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
     auto matrix = std::make_unique<BRWT>(
         BRWTBottomUpBuilder::build(get_column, linkage, tmp_dir,
                                    num_parallel_nodes, num_threads));
+    std::filesystem::remove(tmp_dir);
 
     std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
     column_names.erase(std::unique(column_names.begin(), column_names.end()),
