@@ -34,8 +34,7 @@ class QueryExecutor {
         thread_pool_(thread_pool) {}
 
     void query_fasta(const std::string &file_path,
-                     const std::function<void(const std::string &)> &callback,
-                     bool exact_matching = false);
+                     const std::function<void(const std::string &)> &callback);
 
     static std::string execute_query(const std::string &seq_name,
                                      const std::string &sequence,
