@@ -46,7 +46,7 @@ int transform_annotation(Config *config) {
 
     const auto &files = config->fnames;
 
-    assert(files.size() == 1);
+    // assert(files.size() == 1);
 
     Timer timer;
 
@@ -229,7 +229,7 @@ int transform_annotation(Config *config) {
         return 0;
     }
 
-    if (input_anno_type == Config::ColumnCompressed && files.size() > 1) {
+    if (input_anno_type != Config::ColumnCompressed && files.size() > 1) {
         logger->error("Conversion of multiple annotators only "
                       "supported for ColumnCompressed");
         exit(1);
@@ -281,15 +281,18 @@ int transform_annotation(Config *config) {
     } else if (input_anno_type == Config::ColumnCompressed) {
         auto annotation = initialize_annotation(files.at(0), *config);
 
-        logger->trace("Loading annotation...");
-
-        // Load annotation from disk
-        if (!annotation->merge_load(files)) {
-            logger->error("Cannot load annotations");
+        if (config->tmp_dir.empty()) {
+            logger->trace("Loading annotation from disk...");
+            if (!annotation->merge_load(files)) {
+                logger->error("Cannot load annotations");
+                exit(1);
+            }
+            logger->trace("Annotation loaded in {} sec", timer.elapsed());
+        } else if (config->anno_type != Config::BRWT) {
+            logger->error("Streaming source annotation is only"
+                          " implemented for conversion to Multi-BRWT");
             exit(1);
         }
-
-        logger->trace("Annotation loaded in {} sec", timer.elapsed());
 
         std::unique_ptr<ColumnCompressed<>> annotator {
             dynamic_cast<ColumnCompressed<> *>(annotation.release())
@@ -326,17 +329,25 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::BRWT: {
-                auto brwt_annotator = config->greedy_brwt
-                    ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
-                        std::move(*annotator),
+                auto brwt_annotator = config->infbase.size()
+                    ? convert_to_BRWT<MultiBRWTAnnotator>(
+                        files, config->infbase,
                         config->parallel_nodes,
                         get_num_threads(),
-                        config->num_rows_subsampled)
-                    : convert_to_simple_BRWT<MultiBRWTAnnotator>(
-                        std::move(*annotator),
-                        config->arity_brwt,
-                        config->parallel_nodes,
-                        get_num_threads());
+                        config->tmp_dir.empty()
+                            ? std::filesystem::path(config->outfbase).remove_filename()
+                            : config->tmp_dir)
+                    : (config->greedy_brwt
+                        ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
+                            std::move(*annotator),
+                            config->parallel_nodes,
+                            get_num_threads(),
+                            config->num_rows_subsampled)
+                        : convert_to_simple_BRWT<MultiBRWTAnnotator>(
+                            std::move(*annotator),
+                            config->arity_brwt,
+                            config->parallel_nodes,
+                            get_num_threads()));
 
                 annotator.reset();
                 logger->trace("Annotation converted in {} sec", timer.elapsed());

@@ -4,6 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <filesystem>
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/threads/threading.hpp"
@@ -21,6 +22,12 @@ class BRWTBottomUpBuilder {
     // Build the Multi-BRWT compressed representation of a binary matrix
     static BRWT build(std::vector<std::unique_ptr<bit_vector>>&& columns,
                       Partitioner partitioner = get_basic_partitioner(),
+                      size_t num_nodes_parallel = 1,
+                      size_t num_threads = 1);
+
+    static BRWT build(const std::function<std::unique_ptr<bit_vector>(uint64_t)> &get_column,
+                      const std::vector<std::vector<uint64_t>> &linkage,
+                      std::filesystem::path tmp_dir,
                       size_t num_nodes_parallel = 1,
                       size_t num_threads = 1);
 

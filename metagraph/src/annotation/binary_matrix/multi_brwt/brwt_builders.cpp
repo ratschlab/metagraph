@@ -120,6 +120,123 @@ BRWT BRWTBottomUpBuilder::build(std::vector<std::unique_ptr<bit_vector>>&& colum
     return merge(std::move(nodes), partitioner, num_nodes_parallel, num_threads);
 }
 
+BRWT BRWTBottomUpBuilder::build(
+        const std::function<std::unique_ptr<bit_vector>(uint64_t)> &get_column,
+        const std::vector<std::vector<uint64_t>> &linkage,
+        std::filesystem::path tmp_dir,
+        size_t num_nodes_parallel,
+        size_t num_threads) {
+
+    if (!linkage.size())
+        return BRWT();
+
+    std::vector<bool> done(linkage.size(), false);
+    std::mutex done_mu;
+    std::condition_variable done_cond;
+
+    num_nodes_parallel = std::min(num_nodes_parallel, done.size());
+    // initialize buffers for merging columns
+    // these may be huge, so we keep only a few of them
+    std::vector<sdsl::bit_vector> buffers;
+    for (size_t i = 0; i < std::max(num_nodes_parallel, size_t(1)); ++i) {
+        buffers.emplace_back(get_column(0)->size());
+    }
+
+    num_threads = std::max(num_nodes_parallel, num_threads);
+
+    ThreadPool thread_pool(num_threads, 100'000 * num_threads);
+
+    ProgressBar progress_bar(linkage.size(), "Building BRWT",
+                             std::cerr, !utils::get_verbose());
+
+    std::vector<std::vector<uint64_t>> stored_columns(linkage.size());
+
+    #pragma omp parallel for num_threads(num_nodes_parallel) schedule(dynamic)
+    for (size_t i = 0; i < linkage.size(); ++i) {
+        BRWT node;
+
+        if (linkage[i].empty()) {
+            // this is a leaf
+            node.assignments_ = RangePartition(Partition(1, { 0 }));
+            node.nonzero_rows_ = get_column(i);
+
+        } else {
+            // compute column assignments for the parent
+            for (size_t j : linkage[i]) {
+                if (!stored_columns[j].size()) {
+                    // the child j is a leaf
+                    stored_columns[i].push_back(j);
+                } else {
+                    // the child j is an internal node
+                    for (size_t c : stored_columns[j]) {
+                        stored_columns[i].push_back(c);
+                    }
+                }
+            }
+
+            std::vector<BRWT> children(linkage[i].size());
+            for (size_t r = 0; r < children.size(); ++r) {
+                size_t j = linkage[i][r];
+                std::ifstream in;
+                {
+                    std::unique_lock<std::mutex> lock(done_mu);
+                    done_cond.wait(lock, [&]() { return done[j]; });
+                    in.open(tmp_dir/std::to_string(j), std::ios::binary);
+                }
+                if (!children[r].load(in)) {
+                    std::cerr << "ERROR: Can't load internal node "
+                                            << tmp_dir/std::to_string(j);
+                    exit(1);
+                }
+                std::filesystem::remove(tmp_dir/std::to_string(j));
+            }
+
+            // merge submatrices
+            node = concatenate(std::move(children),
+                               &buffers.at(omp_get_thread_num()),
+                               thread_pool);
+        }
+
+        std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
+        node.serialize(out);
+
+        {
+            std::unique_lock<std::mutex> lock(done_mu);
+            done[i] = true;
+        }
+        done_cond.notify_all();
+
+        ++progress_bar;
+    }
+
+    // All submatrices must be merged into one
+    // assert(nodes.size() == 1u);
+    // assert(current_partition.size() == 1u);
+
+    // get the root node in Multi-BRWT
+    BRWT root;
+    std::ifstream in(tmp_dir/std::to_string(linkage.size() - 1), std::ios::binary);
+    if (!root.load(in)) {
+        std::cerr << "ERROR: Can't load the root";
+        exit(1);
+    }
+    std::filesystem::remove(tmp_dir/std::to_string(linkage.size() - 1));
+    // compress the index vector
+    root.nonzero_rows_ = std::make_unique<bit_vector_smallrank>(
+        root.nonzero_rows_->convert_to<bit_vector_smallrank>()
+    );
+    // update the column arrangement to be consistent with the initial
+    // order 1,2,...,m
+    const auto &column_arrangement = stored_columns.back();
+    std::vector<size_t> submatrix_sizes;
+    for (size_t g = 0; g < root.assignments_.num_groups(); ++g) {
+        submatrix_sizes.push_back(root.assignments_.group_size(g));
+    }
+    root.assignments_ = RangePartition(column_arrangement, submatrix_sizes);
+
+    return root;
+}
+
 BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
                                 Partitioner partitioner,
                                 size_t num_nodes_parallel,

@@ -1,11 +1,13 @@
 #include "annotation_converters.hpp"
 
 #include <cassert>
+#include <csignal>
 #include <vector>
 #include <functional>
 #include <filesystem>
 #include <progress_bar.hpp>
 
+#include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
@@ -17,8 +19,9 @@
 #include "representation/column_compressed/annotate_column_compressed.hpp"
 #include "representation/row_compressed/annotate_row_compressed.hpp"
 
-
 namespace annotate {
+
+using mg::common::logger;
 
 size_t kNumRowsInBlock = 50'000;
 
@@ -260,6 +263,114 @@ convert_to_simple_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
         num_parallel_nodes,
         num_threads
     );
+}
+
+std::filesystem::path tmp_dir;
+
+void signal_handler(int sig) {
+    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", tmp_dir);
+    if (!tmp_dir.empty())
+        std::filesystem::remove_all(tmp_dir);
+
+    std::exit(sig);
+}
+
+template <>
+std::unique_ptr<MultiBRWTAnnotator>
+convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_files,
+                                    const std::string &linkage_matrix_file,
+                                    size_t num_parallel_nodes,
+                                    size_t num_threads,
+                                    std::filesystem::path tmp_dir_root) {
+    if (tmp_dir_root.empty())
+        tmp_dir_root = "./";
+    std::string tmp_dir_str(tmp_dir_root/"temp_brwt_XXXXXX");
+    if (!mkdtemp(tmp_dir_str.data())) {
+        logger->error("Failed to create a temporary directory in {}", tmp_dir_root);
+        exit(1);
+    }
+    tmp_dir = tmp_dir_str;
+    logger->trace("Setting temporary directory to {}", tmp_dir);
+
+    if (std::signal(SIGINT, signal_handler) == SIG_ERR)
+        logger->error("Couldn't reset the singal handler for SIGINT");
+    if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
+        logger->error("Couldn't reset the singal handler for SIGTERM");
+
+    std::vector<std::pair<uint64_t, std::string>> column_names;
+
+    auto get_column = [&](uint64_t i) {
+        ColumnCompressed<> column(0, 1);
+        if (!column.load(annotation_files[i])) {
+            logger->error("Cannot load {}", annotation_files[i]);
+            exit(1);
+        }
+        if (column.num_labels() != 1) {
+            logger->error("{} contains {} != 1 columns",
+                          annotation_files[i], column.num_labels());
+            exit(1);
+        }
+        column_names.emplace_back(i, column.get_label_encoder().decode(0));
+        return const_cast<std::unique_ptr<bit_vector>&&>(
+            column.get_matrix().data()[0]
+        );
+    };
+
+    std::ifstream in(linkage_matrix_file);
+
+    std::vector<std::vector<uint64_t>> linkage;
+    std::string line;
+    while (std::getline(in, line)) {
+        auto parts = utils::split_string(line, " ");
+        if (!parts.size())
+            continue;
+
+        try {
+            if (parts.size() != 4)
+                throw std::runtime_error("Invalid format");
+
+            uint64_t first = std::stoi(parts.at(0));
+            uint64_t second = std::stoi(parts.at(1));
+            uint64_t merged = std::stoi(parts.at(3));
+
+            if (first == second || first >= merged || second >= merged) {
+                logger->error("Invalid format of the linkage matrix."
+                              " Indexes of parent clusters must be larger than"
+                              " indexes of the objects/clusters the include");
+                exit(1);
+            }
+
+            while (linkage.size() <= merged) {
+                linkage.push_back({});
+            }
+
+            linkage[merged].push_back(first);
+            linkage[merged].push_back(second);
+
+        } catch (...) {
+            logger->error("Invalid format of the linkage matrix."
+                          " Each line must contsin exactly 4 values:"
+                          " <cluster 1> <cluster 2> <dist> <cluster 3>");
+            exit(1);
+        }
+    }
+
+    auto matrix = std::make_unique<BRWT>(
+        BRWTBottomUpBuilder::build(get_column, linkage, tmp_dir,
+                                   num_parallel_nodes, num_threads));
+
+    std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
+    column_names.erase(std::unique(column_names.begin(), column_names.end()),
+                       column_names.end());
+
+    assert(matrix->num_columns() == column_names.size());
+
+    LEncoder label_encoder;
+    for (const auto &[i, label] : column_names) {
+        label_encoder.insert_and_encode(label);
+    }
+
+    return std::make_unique<MultiBRWTAnnotator>(std::move(matrix), label_encoder);
 }
 
 template <>

@@ -39,11 +39,6 @@ void signal_handler(int sig) {
 int build_graph(Config *config) {
     assert(config);
 
-    if (std::signal(SIGINT, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the singal handler for SIGINT");
-    if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the singal handler for SIGTERM");
-
     const auto &files = config->fnames;
 
     std::unique_ptr<DeBruijnGraph> graph;
@@ -93,6 +88,11 @@ int build_graph(Config *config) {
             }
             tmp_dir = tmp_dir_str;
             logger->trace("Setting temporary directory to {}", tmp_dir);
+
+            if (std::signal(SIGINT, signal_handler) == SIG_ERR)
+                logger->error("Couldn't reset the singal handler for SIGINT");
+            if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
+                logger->error("Couldn't reset the singal handler for SIGTERM");
         }
 
         //one pass per suffix
