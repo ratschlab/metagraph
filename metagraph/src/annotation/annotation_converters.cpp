@@ -298,6 +298,7 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
         logger->error("Couldn't reset the singal handler for SIGTERM");
 
     std::vector<std::pair<uint64_t, std::string>> column_names;
+    std::mutex mu;
 
     auto get_column = [&](uint64_t i) {
         ColumnCompressed<> column(0, 1);
@@ -310,7 +311,10 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
                           annotation_files[i], column.num_labels());
             exit(1);
         }
+
+        std::lock_guard<std::mutex> lock(mu);
         column_names.emplace_back(i, column.get_label_encoder().decode(0));
+
         return const_cast<std::unique_ptr<bit_vector>&&>(
             column.get_matrix().data()[0]
         );

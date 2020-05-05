@@ -200,10 +200,8 @@ BRWT BRWTBottomUpBuilder::build(
         std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
         node.serialize(out);
 
-        {
-            std::unique_lock<std::mutex> lock(done_mu);
-            done[i] = true;
-        }
+        std::unique_lock<std::mutex> lock(done_mu);
+        done[i] = true;
         done_cond.notify_all();
 
         ++progress_bar;
