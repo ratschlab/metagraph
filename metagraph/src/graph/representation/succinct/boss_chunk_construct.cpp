@@ -66,6 +66,71 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
     }
 }
 
+/**
+ * Push a k-mer into the buffer, then iterate backwards and check if there is a dummy
+ * incoming edge (a dummy edge with identical suffix and label as the current one)
+ * into the same node.
+ * If such an edge is found, mark it for removal (because it's redundant).
+ * @param kmer check for redundancy against this k-mer
+ * @param buffer queue that stores the last  |Alphabet|^2 k-mers used for identifying
+ * redundant dummy source k-mers
+ */
+template <typename T, typename T_INT>
+static void push_and_remove_redundant_dummy_source(const T_INT &el, RecentKmers<T> *buffer) {
+    buffer->push_back({ el, false });
+
+    using KMER = get_first_type_t<T>;
+    const KMER &kmer = get_first(el);
+
+    TAlphabet curW = kmer[0];
+    if (buffer->size() < 2 || curW == 0) {
+        return;
+    }
+    for (auto it = ++buffer->rbegin();
+         KMER::compare_suffix(kmer, get_first((*it).data), 1); ++it) {
+        KMER &prev_kmer = get_first((*it).data);
+        assert((curW || prev_kmer[1]) && "Main dummy source k-mer must be unique");
+        if (prev_kmer[0] == curW && !prev_kmer[1]) { // redundant dummy source k-mer
+            (*it).is_removed = true;
+            break;
+        }
+        if (it.at_begin())
+            break;
+    }
+}
+
+/**
+ * Writes the front of #buffer to a file if it's not a redundant dummy kmer. If the k-mer
+ * at the front is a (not-redundant) dummy k-mer it also writes its corresponding dummy
+ * k-mer of prefix length 2 into #sorted_dummy_kmers.
+ */
+template <typename T, typename T_INT, typename INT>
+uint8_t write_kmer(size_t k,
+                   KmerBuffered<T> to_write,
+                   common::EliasFanoEncoderBuffered<T_INT> *encoder,
+                   std::vector<common::EliasFanoEncoderBuffered<INT>> *dummy_kmer_chunks) {
+    static_assert(std::is_same_v<T_INT, get_int_t<T>>);
+
+    if (to_write.is_removed) { // redundant dummy k-mer
+        return 0;
+    }
+    if constexpr(utils::is_pair_v<T>) {
+        encoder->add({ to_write.data.first.data(), to_write.data.second });
+    } else {
+        encoder->add(to_write.data.data());
+    }
+    auto &kmer_to_write = get_first(to_write.data);
+    const TAlphabet node_last_char = kmer_to_write[1];
+    const TAlphabet edge_label = kmer_to_write[0];
+    if (node_last_char || !edge_label) { // not a dummy source kmer
+        return 0;
+    }
+
+    kmer_to_write.to_prev(k + 1, BOSS::kSentinelCode);
+    (*dummy_kmer_chunks)[kmer_to_write[0]].add(kmer_to_write.data());
+    return 1;
+}
+
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 // k is node length
@@ -87,7 +152,6 @@ void recover_source_dummy_nodes(size_t k,
     using KMER = get_first_type_t<T>;
 
     size_t dummy_begin = kmers->size();
-    size_t num_dummy_parent_kmers = 0;
 
     for (size_t i = 0; i < dummy_begin; ++i) {
         const KMER &kmer = get_first((*kmers)[i]);
@@ -96,25 +160,22 @@ void recover_source_dummy_nodes(size_t k,
 
         TAlphabet node_last_char = kmer[1];
         TAlphabet edge_label = kmer[0];
-        // skip if it's not a source dummy kmer
-        if (node_last_char || !edge_label)
+        // skip if it's the sentinel or a dummy sink k-mer
+        if (!node_last_char || !edge_label)
             continue;
-
-        num_dummy_parent_kmers++;
 
         if (kmers->size() + 1 > kmers->capacity())
             shrink_kmers(kmers, num_threads, dummy_begin);
 
         push_back(*kmers, kmer).to_prev(k + 1, BOSS::kSentinelCode);
     }
-    logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
-                  num_dummy_parent_kmers);
+
     sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
-    logger->trace("Number of dummy k-mers with dummy prefix of length 2: {}",
+    logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   kmers->size() - dummy_begin);
 
-    for (size_t c = 3; c < k + 1; ++c) {
+    for (size_t c = 2; c < k + 1; ++c) {
         size_t succ_dummy_begin = dummy_begin;
         dummy_begin = kmers->size();
 
