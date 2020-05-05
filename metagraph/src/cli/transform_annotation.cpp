@@ -281,17 +281,13 @@ int transform_annotation(Config *config) {
     } else if (input_anno_type == Config::ColumnCompressed) {
         auto annotation = initialize_annotation(files.at(0), *config);
 
-        if (config->tmp_dir.empty()) {
+        if (config->anno_type != Config::BRWT || !config->infbase.size()) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
                 logger->error("Cannot load annotations");
                 exit(1);
             }
             logger->trace("Annotation loaded in {} sec", timer.elapsed());
-        } else if (config->anno_type != Config::BRWT) {
-            logger->error("Streaming source annotation is only"
-                          " implemented for conversion to Multi-BRWT");
-            exit(1);
         }
 
         std::unique_ptr<ColumnCompressed<>> annotator {
