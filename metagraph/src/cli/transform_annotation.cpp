@@ -193,7 +193,7 @@ int transform_annotation(Config *config) {
                     subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
                     subvector = subcolumn_ptrs.back().get();
                     column_ids.push_back(i);
-                    logger->trace("Loaded column {}: {}", i, label);
+                    logger->trace("Column {}: {}", i, label);
                 }
 
                 *subvector = sdsl::bit_vector(row_indexes.size(), false);
