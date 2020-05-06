@@ -110,29 +110,32 @@ void recover_source_dummy_nodes(size_t k,
         KMER to_search = KMER(zeros, k+1);
         first_char_it[i] = std::lower_bound(kmers->begin(), kmers->end(), to_search,
                                  [](const T &a, const  KMER&b) -> bool {
-                                     return utils::get_first(a) < b;
+                                     return get_first(a) < b;
                                  })
                 - kmers->begin();
         if (first_char_it[i] < kmers->size()) {
             std::cout << "\nTo search: " << to_search << "\t" << first_char_it[i] << "\t"
-                      << utils::get_first((*kmers)[first_char_it[i]]) << std::endl;
+                      << get_first((*kmers)[first_char_it[i]]).to_string(k+1,"$ACGT") << std::endl;
         }
         max_it[i-1] = first_char_it[i];
     }
     max_it[ALPHABET_LEN-1] = kmers->size();
 
     size_t dummy_begin = kmers->size();
-
+uint32_t not_redundant = 0;
     for (size_t i = 0; i < dummy_begin; ++i) {
         const KMER &kmer = get_first((*kmers)[i]);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 
-        TAlphabet node_last_char = kmer[1];
         TAlphabet edge_label = kmer[0];
-        // skip if it's the sentinel or a dummy sink k-mer
-        if (!node_last_char || !edge_label)
+        // skip if it's a dummy sink k-mer
+        if (!edge_label)
             continue;
+
+        if (i + 1 < dummy_begin && KMER::compare_suffix(kmer, get_first((*kmers)[i + 1]))) {
+            continue; // i and i+1 will generate identical dummy k-mers, skip
+        }
 
         KMER prev_kmer = kmer;
         prev_kmer.to_prev(k+1, BOSS::kSentinelCode);
@@ -141,7 +144,7 @@ void recover_source_dummy_nodes(size_t k,
         TAlphabet dummy_first_char = prev_kmer[k];
         TAlphabet dummy_edge_label = prev_kmer[0];
         while (first_char_it[dummy_first_char] < max_it[dummy_first_char]
-               && KMER::less(utils::get_first((*kmers)[first_char_it[dummy_first_char]]), prev_kmer,1)) {
+               && KMER::less(get_first((*kmers)[first_char_it[dummy_first_char]]), prev_kmer,1)) {
             first_char_it[dummy_first_char]++;
         }
         if (first_char_it[dummy_first_char] == max_it[dummy_first_char]) {
@@ -149,11 +152,11 @@ void recover_source_dummy_nodes(size_t k,
         }
 
         size_t cur_pos = first_char_it[dummy_first_char];
-        std::cout << "Comparing with: " << utils::get_first(((*kmers)[cur_pos])).to_string(k+1, "$ACGT") << std::endl;
+        std::cout << "Comparing with: " << get_first(((*kmers)[cur_pos])).to_string(k+1, "$ACGT") << std::endl;
         bool is_redundant = false;
         while (cur_pos < max_it[dummy_first_char]
-               && KMER::compare_suffix(utils::get_first((*kmers)[cur_pos]), prev_kmer, 1)) {
-            const KMER &current_kmer = utils::get_first((*kmers)[cur_pos]);
+               && KMER::compare_suffix(get_first((*kmers)[cur_pos]), prev_kmer, 1)) {
+            const KMER &current_kmer = get_first((*kmers)[cur_pos]);
             if (dummy_edge_label == current_kmer[0]) {
                 is_redundant = true;
                 break;
@@ -163,12 +166,14 @@ void recover_source_dummy_nodes(size_t k,
         if (is_redundant) {
             continue;
         }
+        not_redundant++;
 
         if (kmers->size() + 1 > kmers->capacity())
             shrink_kmers(kmers, num_threads, dummy_begin);
 
         push_back(*kmers, prev_kmer);
     }
+    std::cout << "Not redunant kmers: " << not_redundant << std::endl;
 
     sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 

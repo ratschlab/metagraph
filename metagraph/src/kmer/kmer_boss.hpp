@@ -58,6 +58,10 @@ class KMerBOSS {
     bool operator==(const KMerBOSS &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMerBOSS &other) const { return seq_ != other.seq_; }
 
+    /**
+     * Returns the character at position i. For the k-mer ACGT, which is laid out in
+     * memory as GCAT, kmer[0]=T, kmer[1]=C, kmer[2]=A, kmer[3]=G.
+     */
     inline CharType operator[](size_t i) const;
 
     /**
