@@ -76,17 +76,6 @@ for list in x*; do
 done
 cd ..
 
-PREF=ERR
-bsub -J "merge_columns" \
-     -oo ~/metagenome/data/BIGSI/logs/merge_columns_${PREF}.lsf \
-     -W 24:00 \
-     -n 10 -R "rusage[mem=150000] span[hosts=1]" \
-    "find ~/metagenome/data/BIGSI/annotation/columns/ -name \"*.column.annodbg\" | grep $PREF | sort \
-        | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph merge_anno -v \
-            -o ~/metagenome/data/BIGSI/annotation/annotation_$PREF \
-            --parallel 20 \
-            2>&1";
-
 bsub -J "cluster" \
      -oo ~/metagenome/data/BIGSI/logs/cluster_columns.lsf \
      -W 120:00 \
