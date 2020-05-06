@@ -37,7 +37,6 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 
     logger->trace("Serializing annotation to '{}'...", config.outfbase);
     target_annotator->serialize(config.outfbase);
-    logger->trace("Serialization done in {} sec", timer.elapsed());
 }
 
 
@@ -46,7 +45,14 @@ int transform_annotation(Config *config) {
 
     const auto &files = config->fnames;
 
-    // assert(files.size() == 1);
+    const Config::AnnotationType input_anno_type
+        = parse_annotation_type(files.at(0));
+
+    if (input_anno_type != Config::ColumnCompressed && files.size() > 1) {
+        logger->error("Conversion of multiple annotators is only "
+                      "supported for ColumnCompressed");
+        exit(1);
+    }
 
     Timer timer;
 
@@ -55,9 +61,6 @@ int transform_annotation(Config *config) {
     /********************************************************/
 
     if (config->dump_text_anno) {
-        const Config::AnnotationType input_anno_type
-            = parse_annotation_type(files.at(0));
-
         auto annotation = initialize_annotation(files.at(0), *config);
 
         logger->trace("Loading annotation...");
@@ -158,9 +161,6 @@ int transform_annotation(Config *config) {
     /****************** convert annotation ******************/
     /********************************************************/
 
-    const Config::AnnotationType input_anno_type
-        = parse_annotation_type(files.at(0));
-
     if (config->cluster_linkage) {
         if (input_anno_type != Config::ColumnCompressed) {
             logger->error("Column clustering is only supported for ColumnCompressed");
@@ -229,12 +229,6 @@ int transform_annotation(Config *config) {
         return 0;
     }
 
-    if (input_anno_type != Config::ColumnCompressed && files.size() > 1) {
-        logger->error("Conversion of multiple annotators only "
-                      "supported for ColumnCompressed");
-        exit(1);
-    }
-
     logger->trace("Converting to {} annotator...",
                   Config::annotype_to_string(config->anno_type));
 
@@ -278,6 +272,7 @@ int transform_annotation(Config *config) {
         target_annotator->serialize(config->outfbase);
 
         logger->trace("Serialization done in {} sec", timer.elapsed());
+
     } else if (input_anno_type == Config::ColumnCompressed) {
         auto annotation = initialize_annotation(files.at(0), *config);
 
@@ -352,7 +347,6 @@ int transform_annotation(Config *config) {
 
                 brwt_annotator->serialize(config->outfbase);
 
-                logger->trace("Serialization done in {} sec", timer.elapsed());
                 break;
             }
             case Config::BinRelWT_sdsl: {
@@ -379,6 +373,8 @@ int transform_annotation(Config *config) {
                       Config::annotype_to_string(input_anno_type));
         exit(1);
     }
+
+    logger->trace("Done");
 
     return 0;
 }
