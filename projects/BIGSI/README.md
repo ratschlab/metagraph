@@ -87,6 +87,18 @@ bsub -J "cluster" \
             -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI.csv \
             --parallel 96 \
             2>&1";
+
+bsub -J "cluster" \
+     -oo ~/metagenome/data/BIGSI/logs/cluster_columns_1M.lsf \
+     -W 120:00 \
+     -n 48 -R "rusage[mem=37500] span[hosts=1]" \
+    "find ~/metagenome/data/BIGSI/annotation/columns/ -name \"*.column.annodbg\" \
+        | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph transform_anno -v \
+            --linkage \
+            --subsample 1000000 \
+            -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_1M.csv \
+            --parallel 96 \
+            2>&1";
 ```
 
 ## Generate subsets
