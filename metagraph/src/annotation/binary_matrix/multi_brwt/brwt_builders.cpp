@@ -138,9 +138,7 @@ BRWT BRWTBottomUpBuilder::build(
     ProgressBar progress_bar(linkage.size(), "Building BRWT",
                              std::cerr, !utils::get_verbose());
 
-    std::vector<std::vector<uint64_t>> stored_columns(linkage.size());
-    uint64_t num_leaves;
-
+    uint64_t num_leaves = 0;
     uint64_t num_rows = 0;
 
     // prepare leaves
@@ -190,12 +188,39 @@ BRWT BRWTBottomUpBuilder::build(
 
     ThreadPool thread_pool(num_threads, 100'000 * num_threads);
 
+    std::vector<std::vector<uint64_t>> stored_columns(linkage.size());
+
     #pragma omp parallel for num_threads(num_nodes_parallel) schedule(dynamic)
     for (size_t i = num_leaves; i < linkage.size(); ++i) {
         if (!linkage[i].size()) {
             logger->error("Invalid linkage: no rule for node {}", i);
             exit(1);
         }
+
+        std::vector<BRWT> children(linkage[i].size());
+        for (size_t r = 0; r < children.size(); ++r) {
+            size_t j = linkage[i][r];
+            std::ifstream in;
+            {
+                std::unique_lock<std::mutex> lock(done_mu);
+                done_cond.wait(lock, [&]() { return done[j]; });
+                in.open(tmp_dir/std::to_string(j), std::ios::binary);
+            }
+            if (!children[r].load(in)) {
+                logger->error("Can't load internal node {}",
+                              tmp_dir/std::to_string(j));
+                exit(1);
+            }
+            std::filesystem::remove(tmp_dir/std::to_string(j));
+        }
+
+        // merge submatrices
+        BRWT node = concatenate(std::move(children),
+                                &buffers.at(omp_get_thread_num()),
+                                thread_pool);
+
+        std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
+        node.serialize(out);
 
         // compute column assignments for the parent
         for (size_t j : linkage[i]) {
@@ -210,32 +235,12 @@ BRWT BRWTBottomUpBuilder::build(
             }
         }
 
-        std::vector<BRWT> children(linkage[i].size());
-        for (size_t r = 0; r < children.size(); ++r) {
-            size_t j = linkage[i][r];
-            std::ifstream in;
-            {
-                std::unique_lock<std::mutex> lock(done_mu);
-                done_cond.wait(lock, [&]() { return done[j]; });
-                in.open(tmp_dir/std::to_string(j), std::ios::binary);
-            }
-            if (!children[r].load(in)) {
-                std::cerr << "ERROR: Can't load internal node "
-                                        << tmp_dir/std::to_string(j);
-                exit(1);
-            }
-            std::filesystem::remove(tmp_dir/std::to_string(j));
+        std::unique_lock<std::mutex> lock(done_mu);
+        if (done[i]) {
+            logger->error("Invalid linkage: multiple rules for node {}", i);
+            exit(1);
         }
 
-        // merge submatrices
-        BRWT node = concatenate(std::move(children),
-                                &buffers.at(omp_get_thread_num()),
-                                thread_pool);
-
-        std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
-        node.serialize(out);
-
-        std::unique_lock<std::mutex> lock(done_mu);
         done[i] = true;
         done_cond.notify_all();
 
@@ -243,14 +248,15 @@ BRWT BRWTBottomUpBuilder::build(
     }
 
     // All submatrices must be merged into one
-    // assert(nodes.size() == 1u);
-    // assert(current_partition.size() == 1u);
+    if (stored_columns.back().size() != num_leaves) {
+        logger->error("Invalid linkage: all must merge into a single root");
+    }
 
     // get the root node in Multi-BRWT
     BRWT root;
     std::ifstream in(tmp_dir/std::to_string(linkage.size() - 1), std::ios::binary);
     if (!root.load(in)) {
-        std::cerr << "ERROR: Can't load the root";
+        logger->error("Can't load the root");
         exit(1);
     }
     std::filesystem::remove(tmp_dir/std::to_string(linkage.size() - 1));

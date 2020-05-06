@@ -167,7 +167,8 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
-        logger->trace("Loading annotation...");
+        logger->trace("Loading annotation and sampling subcolumns of size {}",
+                      config->num_rows_subsampled);
 
         std::vector<uint64_t> row_indexes;
         std::vector<std::unique_ptr<sdsl::bit_vector>> subcolumn_ptrs;
