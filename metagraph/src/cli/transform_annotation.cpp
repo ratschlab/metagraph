@@ -174,33 +174,39 @@ int transform_annotation(Config *config) {
         std::vector<std::unique_ptr<sdsl::bit_vector>> subcolumn_ptrs;
         std::vector<uint64_t> column_ids;
         uint64_t num_rows = 0;
+        std::mutex mu;
+
+        ThreadPool subsampling_pool(get_num_threads(), 1);
 
         // Load columns from disk
         bool success = ColumnCompressed<>::merge_load(files,
-            [&](uint64_t i, const std::string &label, auto&& column_ptr) {
-                sdsl::bit_vector *subvector;
-                #pragma omp critical
-                {
-                    if (row_indexes.empty()) {
-                        num_rows = column_ptr->size();
-                        row_indexes = sample_row_indexes(num_rows,
-                                                         config->num_rows_subsampled);
-                    } else if (column_ptr->size() != num_rows) {
-                        logger->error("Size of column {} is {} != {}",
-                                      label, column_ptr->size(), num_rows);
-                        exit(1);
+            [&](uint64_t i, const std::string &label, auto&& column) {
+                subsampling_pool.enqueue([&,i,label,column{std::move(column)}]() {
+                    sdsl::bit_vector *subvector;
+                    {
+                        std::lock_guard<std::mutex> lock(mu);
+                        if (row_indexes.empty()) {
+                            num_rows = column->size();
+                            row_indexes
+                                = sample_row_indexes(num_rows,
+                                                     config->num_rows_subsampled);
+                        } else if (column->size() != num_rows) {
+                            logger->error("Size of column {} is {} != {}",
+                                          label, column->size(), num_rows);
+                            exit(1);
+                        }
+                        subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
+                        subvector = subcolumn_ptrs.back().get();
+                        column_ids.push_back(i);
+                        logger->trace("Column {}: {}", i, label);
                     }
-                    subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
-                    subvector = subcolumn_ptrs.back().get();
-                    column_ids.push_back(i);
-                    logger->trace("Column {}: {}", i, label);
-                }
 
-                *subvector = sdsl::bit_vector(row_indexes.size(), false);
-                for (size_t j = 0; j < row_indexes.size(); ++j) {
-                    if ((*column_ptr)[row_indexes[j]])
-                        (*subvector)[j] = true;
-                }
+                    *subvector = sdsl::bit_vector(row_indexes.size(), false);
+                    for (size_t j = 0; j < row_indexes.size(); ++j) {
+                        if ((*column)[row_indexes[j]])
+                            (*subvector)[j] = true;
+                    }
+                });
             },
             get_num_threads()
         );
@@ -209,6 +215,8 @@ int transform_annotation(Config *config) {
             logger->error("Cannot load annotations");
             exit(1);
         }
+
+        subsampling_pool.join();
 
         // arrange the columns in their original order
         std::vector<std::unique_ptr<sdsl::bit_vector>> permuted(subcolumn_ptrs.size());
