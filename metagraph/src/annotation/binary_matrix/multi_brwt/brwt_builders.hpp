@@ -25,7 +25,10 @@ class BRWTBottomUpBuilder {
                       size_t num_nodes_parallel = 1,
                       size_t num_threads = 1);
 
-    static BRWT build(const std::function<std::unique_ptr<bit_vector>(uint64_t)> &get_column,
+    using CallColumn
+        = std::function<void(uint64_t, std::unique_ptr<bit_vector>&&)>;
+
+    static BRWT build(const std::function<void(const CallColumn &)> &get_columns,
                       const std::vector<std::vector<uint64_t>> &linkage,
                       std::filesystem::path tmp_dir,
                       size_t num_nodes_parallel = 1,

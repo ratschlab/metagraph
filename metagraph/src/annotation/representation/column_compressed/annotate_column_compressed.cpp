@@ -1,6 +1,7 @@
 #include "annotate_column_compressed.hpp"
 
 #include <string>
+#include <numeric>
 #include <algorithm>
 #include <stdexcept>
 
@@ -118,7 +119,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     bool no_errors = true;
 
     bool merge_successful = merge_load(filenames,
-        [&](const Label &label, std::unique_ptr<bit_vector>&& column) {
+        [&](uint64_t, const Label &label, std::unique_ptr<bit_vector>&& column) {
             #pragma omp critical
             {
                 uint64_t num_set_bits = column->num_set_bits();
@@ -163,6 +164,34 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                                          size_t num_threads) {
     std::atomic<bool> error_occurred = false;
 
+    std::vector<uint64_t> offsets(filenames.size(), 0);
+
+    // load labels
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    for (size_t i = 1; i < filenames.size(); ++i) {
+        if (error_occurred)
+            continue;
+
+        const std::string &filename = filenames[i - 1];
+        std::ifstream instream(filename, std::ios::binary);
+        if (!instream.good()) {
+            logger->error("Can't read from {}", filename);
+            error_occurred = true;
+        }
+        std::ignore = load_number(instream);
+
+        LabelEncoder<Label> label_encoder;
+        if (!label_encoder.load(instream)) {
+            logger->error("Can't load label encoder from {}", filename);
+            error_occurred = true;
+        }
+
+        offsets[i] = label_encoder.size();
+    }
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
@@ -204,7 +233,8 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 if (new_column->size() != num_rows)
                     throw std::ifstream::failure("inconsistent column size");
 
-                callback(label_encoder_load.decode(c),
+                callback(offsets[i] + c,
+                         label_encoder_load.decode(c),
                          std::move(new_column));
             }
         } catch (...) {
@@ -297,10 +327,9 @@ void ColumnCompressed<Label>
         try {
             index_to_label[label_encoder_.encode(pair.first)] = pair.second;
         } catch (const std::out_of_range &) {
-            std::cerr << "Warning: label '" << pair.first << "' not"
-                      << " found in annotation. Skipping instruction"
-                      << " '" << pair.first << " -> " << pair.second << "'."
-                      << std::endl;
+            logger->warn("Label '{}' not found in annotation."
+                         " Skipping instruction '{} -> {}'.",
+                         pair.first, pair.first, pair.second);
         }
     }
 
@@ -529,7 +558,7 @@ bool ColumnCompressed<Label>
         );
 
         if (!outstream.good()) {
-            std::cerr << "ERROR: dumping column " << j << " failed" << std::endl;
+            logger->error("Dumping column {} failed", j);
             success = false;
             continue;
         }

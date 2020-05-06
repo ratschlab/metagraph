@@ -22,11 +22,19 @@
 namespace annotate {
 
 using mg::common::logger;
+typedef LabelEncoder<std::string> LEncoder;
 
 size_t kNumRowsInBlock = 50'000;
 
+std::filesystem::path TMP_DIR;
 
-typedef LabelEncoder<std::string> LEncoder;
+void signal_handler(int sig) {
+    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", TMP_DIR);
+    if (!TMP_DIR.empty())
+        std::filesystem::remove_all(TMP_DIR);
+
+    std::exit(sig);
+}
 
 template <class RowCallback>
 void call_rows(const BinaryMatrix &row_major_matrix,
@@ -265,62 +273,9 @@ convert_to_simple_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
     );
 }
 
-std::filesystem::path tmp_dir;
-
-void signal_handler(int sig) {
-    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", tmp_dir);
-    if (!tmp_dir.empty())
-        std::filesystem::remove_all(tmp_dir);
-
-    std::exit(sig);
-}
-
-template <>
-std::unique_ptr<MultiBRWTAnnotator>
-convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_files,
-                                    const std::string &linkage_matrix_file,
-                                    size_t num_parallel_nodes,
-                                    size_t num_threads,
-                                    std::filesystem::path tmp_dir_root) {
-    if (tmp_dir_root.empty())
-        tmp_dir_root = "./";
-    std::string tmp_dir_str(tmp_dir_root/"temp_brwt_XXXXXX");
-    if (!mkdtemp(tmp_dir_str.data())) {
-        logger->error("Failed to create a temporary directory in {}", tmp_dir_root);
-        exit(1);
-    }
-    tmp_dir = tmp_dir_str;
-    logger->trace("Setting temporary directory to {}", tmp_dir);
-
-    if (std::signal(SIGINT, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the singal handler for SIGINT");
-    if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the singal handler for SIGTERM");
-
-    std::vector<std::pair<uint64_t, std::string>> column_names;
-    std::mutex mu;
-
-    auto get_column = [&](uint64_t i) {
-        ColumnCompressed<> column(0, 1);
-        if (!column.load(annotation_files[i])) {
-            logger->error("Cannot load {}", annotation_files[i]);
-            exit(1);
-        }
-        if (column.num_labels() != 1) {
-            logger->error("{} contains {} != 1 columns",
-                          annotation_files[i], column.num_labels());
-            exit(1);
-        }
-
-        std::lock_guard<std::mutex> lock(mu);
-        column_names.emplace_back(i, column.get_label_encoder().decode(0));
-
-        return const_cast<std::unique_ptr<bit_vector>&&>(
-            column.get_matrix().data()[0]
-        );
-    };
-
-    std::ifstream in(linkage_matrix_file);
+std::vector<std::vector<uint64_t>>
+parse_linkage_matrix(const std::string &filename) {
+    std::ifstream in(filename);
 
     std::vector<std::vector<uint64_t>> linkage;
     std::string line;
@@ -359,10 +314,58 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
         }
     }
 
+    return linkage;
+}
+
+template <>
+std::unique_ptr<MultiBRWTAnnotator>
+convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_files,
+                                    const std::string &linkage_matrix_file,
+                                    size_t num_parallel_nodes,
+                                    size_t num_threads,
+                                    std::filesystem::path tmp_dir) {
+    if (tmp_dir.empty())
+        tmp_dir = "./";
+
+    std::string tmp_dir_str(tmp_dir/"temp_brwt_XXXXXX");
+    if (!mkdtemp(tmp_dir_str.data())) {
+        logger->error("Failed to create a temporary directory in {}", tmp_dir);
+        exit(1);
+    }
+    logger->trace("Setting temporary directory to {}", tmp_dir_str);
+    TMP_DIR = tmp_dir_str;
+    if (std::signal(SIGINT, signal_handler) == SIG_ERR)
+        logger->error("Couldn't reset the singal handler for SIGINT");
+    if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
+        logger->error("Couldn't reset the singal handler for SIGTERM");
+
+    std::vector<std::pair<uint64_t, std::string>> column_names;
+    std::mutex mu;
+
+    auto get_columns = [&](const BRWTBottomUpBuilder::CallColumn &call_column) {
+        bool success = ColumnCompressed<>::merge_load(
+            annotation_files,
+            [&](uint64_t column_index,
+                    const std::string &label,
+                    std::unique_ptr<bit_vector>&& column) {
+                call_column(column_index, std::move(column));
+                std::lock_guard<std::mutex> lock(mu);
+                column_names.emplace_back(column_index, label);
+            },
+            num_threads
+        );
+        if (!success) {
+            logger->error("Can't load annotation columns");
+            exit(1);
+        }
+    };
+
+    auto linkage = parse_linkage_matrix(linkage_matrix_file);
+
     auto matrix = std::make_unique<BRWT>(
-        BRWTBottomUpBuilder::build(get_column, linkage, tmp_dir,
+        BRWTBottomUpBuilder::build(get_columns, linkage, TMP_DIR,
                                    num_parallel_nodes, num_threads));
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove(TMP_DIR);
 
     std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
     column_names.erase(std::unique(column_names.begin(), column_names.end()),

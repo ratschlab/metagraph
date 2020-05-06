@@ -727,7 +727,7 @@ int main(int argc, char *argv[]) {
             auto files = files_arg.getValue();
             for (const auto &file : files) {
                 if (compressor == MatrixType::COLUMN) {
-                    annotate::ColumnCompressed<> annotator(0, 1);
+                    annotate::ColumnCompressed<> annotator;
                     annotator.merge_load({ file });
                     const auto &source_columns = annotator.get_matrix().data();
                     assert(annotator.num_labels() == source_columns.size());

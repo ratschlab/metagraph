@@ -171,11 +171,12 @@ int transform_annotation(Config *config) {
 
         std::vector<uint64_t> row_indexes;
         std::vector<std::unique_ptr<sdsl::bit_vector>> subcolumn_ptrs;
+        std::vector<uint64_t> column_ids;
         uint64_t num_rows = 0;
 
         // Load columns from disk
         bool success = ColumnCompressed<>::merge_load(files,
-            [&](const std::string &label, auto&& column_ptr) {
+            [&](uint64_t i, const std::string &label, auto&& column_ptr) {
                 sdsl::bit_vector *subvector;
                 #pragma omp critical
                 {
@@ -189,8 +190,9 @@ int transform_annotation(Config *config) {
                         exit(1);
                     }
                     subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
-                    subvector = &(*subcolumn_ptrs.back());
-                    fmt::print("{}: {}\n", subcolumn_ptrs.size(), label);
+                    subvector = subcolumn_ptrs.back().get();
+                    column_ids.push_back(i);
+                    logger->trace("Loaded column {}: {}", i, label);
                 }
 
                 *subvector = sdsl::bit_vector(row_indexes.size(), false);
@@ -205,6 +207,13 @@ int transform_annotation(Config *config) {
         if (!success) {
             logger->error("Cannot load annotations");
             exit(1);
+        }
+
+        // arrange the columns in their original order
+        std::vector<std::unique_ptr<sdsl::bit_vector>> permuted(subcolumn_ptrs.size());
+        permuted.swap(subcolumn_ptrs);
+        for (size_t i = 0; i < column_ids.size(); ++i) {
+            subcolumn_ptrs[column_ids[i]] = std::move(permuted[i]);
         }
 
         std::vector<sdsl::bit_vector> subcolumns;

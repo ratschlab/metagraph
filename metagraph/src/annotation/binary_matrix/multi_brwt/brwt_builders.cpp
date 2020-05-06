@@ -7,6 +7,8 @@
 #include "common/logger.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
+using mg::common::logger;
+
 
 BRWTBottomUpBuilder::Partitioner
 BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
@@ -121,7 +123,7 @@ BRWT BRWTBottomUpBuilder::build(std::vector<std::unique_ptr<bit_vector>>&& colum
 }
 
 BRWT BRWTBottomUpBuilder::build(
-        const std::function<std::unique_ptr<bit_vector>(uint64_t)> &get_column,
+        const std::function<void(const CallColumn &)> &get_columns,
         const std::vector<std::vector<uint64_t>> &linkage,
         std::filesystem::path tmp_dir,
         size_t num_nodes_parallel,
@@ -132,6 +134,48 @@ BRWT BRWTBottomUpBuilder::build(
 
     std::vector<bool> done(linkage.size(), false);
     std::mutex done_mu;
+
+    ProgressBar progress_bar(linkage.size(), "Building BRWT",
+                             std::cerr, !utils::get_verbose());
+
+    std::vector<std::vector<uint64_t>> stored_columns(linkage.size());
+    uint64_t num_leaves;
+
+    uint64_t num_rows = 0;
+
+    // prepare leaves
+    get_columns([&](uint64_t i, std::unique_ptr<bit_vector>&& column) {
+        uint64_t size = column->size();
+
+        BRWT node;
+        node.assignments_ = RangePartition(Partition(1, { 0 }));
+        node.nonzero_rows_ = std::move(column);
+
+        std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
+        node.serialize(out);
+
+        std::unique_lock<std::mutex> lock(done_mu);
+        done[i] = true;
+
+        if (!num_rows)
+            num_rows = size;
+
+        if (size != num_rows) {
+            logger->error("Can't merge columns of different size");
+            exit(1);
+        }
+
+        ++progress_bar;
+        num_leaves++;
+    });
+
+    for (size_t i = 0; i < num_leaves; ++i) {
+        if (linkage[i].size()) {
+            logger->error("Parsed more columns than expected");
+            exit(1);
+        }
+    }
+
     std::condition_variable done_cond;
 
     num_nodes_parallel = std::min(num_nodes_parallel, done.size());
@@ -139,63 +183,54 @@ BRWT BRWTBottomUpBuilder::build(
     // these may be huge, so we keep only a few of them
     std::vector<sdsl::bit_vector> buffers;
     for (size_t i = 0; i < std::max(num_nodes_parallel, size_t(1)); ++i) {
-        buffers.emplace_back(get_column(0)->size());
+        buffers.emplace_back(num_rows);
     }
 
     num_threads = std::max(num_nodes_parallel, num_threads);
 
     ThreadPool thread_pool(num_threads, 100'000 * num_threads);
 
-    ProgressBar progress_bar(linkage.size(), "Building BRWT",
-                             std::cerr, !utils::get_verbose());
-
-    std::vector<std::vector<uint64_t>> stored_columns(linkage.size());
-
     #pragma omp parallel for num_threads(num_nodes_parallel) schedule(dynamic)
-    for (size_t i = 0; i < linkage.size(); ++i) {
-        BRWT node;
-
-        if (linkage[i].empty()) {
-            // this is a leaf
-            node.assignments_ = RangePartition(Partition(1, { 0 }));
-            node.nonzero_rows_ = get_column(i);
-
-        } else {
-            // compute column assignments for the parent
-            for (size_t j : linkage[i]) {
-                if (!stored_columns[j].size()) {
-                    // the child j is a leaf
-                    stored_columns[i].push_back(j);
-                } else {
-                    // the child j is an internal node
-                    for (size_t c : stored_columns[j]) {
-                        stored_columns[i].push_back(c);
-                    }
-                }
-            }
-
-            std::vector<BRWT> children(linkage[i].size());
-            for (size_t r = 0; r < children.size(); ++r) {
-                size_t j = linkage[i][r];
-                std::ifstream in;
-                {
-                    std::unique_lock<std::mutex> lock(done_mu);
-                    done_cond.wait(lock, [&]() { return done[j]; });
-                    in.open(tmp_dir/std::to_string(j), std::ios::binary);
-                }
-                if (!children[r].load(in)) {
-                    std::cerr << "ERROR: Can't load internal node "
-                                            << tmp_dir/std::to_string(j);
-                    exit(1);
-                }
-                std::filesystem::remove(tmp_dir/std::to_string(j));
-            }
-
-            // merge submatrices
-            node = concatenate(std::move(children),
-                               &buffers.at(omp_get_thread_num()),
-                               thread_pool);
+    for (size_t i = num_leaves; i < linkage.size(); ++i) {
+        if (!linkage[i].size()) {
+            logger->error("Invalid linkage: no rule for node {}", i);
+            exit(1);
         }
+
+        // compute column assignments for the parent
+        for (size_t j : linkage[i]) {
+            if (!stored_columns[j].size()) {
+                // the child j is a leaf
+                stored_columns[i].push_back(j);
+            } else {
+                // the child j is an internal node
+                for (size_t c : stored_columns[j]) {
+                    stored_columns[i].push_back(c);
+                }
+            }
+        }
+
+        std::vector<BRWT> children(linkage[i].size());
+        for (size_t r = 0; r < children.size(); ++r) {
+            size_t j = linkage[i][r];
+            std::ifstream in;
+            {
+                std::unique_lock<std::mutex> lock(done_mu);
+                done_cond.wait(lock, [&]() { return done[j]; });
+                in.open(tmp_dir/std::to_string(j), std::ios::binary);
+            }
+            if (!children[r].load(in)) {
+                std::cerr << "ERROR: Can't load internal node "
+                                        << tmp_dir/std::to_string(j);
+                exit(1);
+            }
+            std::filesystem::remove(tmp_dir/std::to_string(j));
+        }
+
+        // merge submatrices
+        BRWT node = concatenate(std::move(children),
+                                &buffers.at(omp_get_thread_num()),
+                                thread_pool);
 
         std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
         node.serialize(out);
@@ -263,7 +298,7 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
     }
 
     for (size_t level = 1; nodes.size() > 1; ++level) {
-        mg::common::logger->trace("BRWT construction: level {}", level);
+        logger->trace("BRWT construction: level {}", level);
 
         VectorPtrs columns(nodes.size());
         for (size_t i = 0; i < nodes.size(); ++i) {
