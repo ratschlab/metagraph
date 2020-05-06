@@ -19,7 +19,7 @@ namespace kmer {
 
 using namespace mg;
 
-const size_t kLargeBufferSize = 30'000'000;
+const size_t kLargeBufferSize = 1'000'000;
 const size_t kBufferSize = 100'000;
 
 
@@ -198,8 +198,7 @@ KmerCollector<KMER, KmerExtractor, Container>
                 size_t __attribute__((unused)) max_disk_space)
       : k_(k),
         num_threads_(num_threads),
-        thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
-                     std::max(static_cast<size_t>(1), num_threads_)),
+        thread_pool_(std::max(static_cast<size_t>(1), num_threads_), 1),
         batcher_([this](auto&& sequences) { add_batch(std::move(sequences)); },
                  kLargeBufferSize / sizeof(typename decltype(batcher_)::value_type),
                  kLargeBufferSize),
