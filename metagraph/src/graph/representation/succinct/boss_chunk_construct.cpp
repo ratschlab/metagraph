@@ -120,9 +120,6 @@ void recover_source_dummy_nodes(size_t k,
 
         KMER prev_kmer = kmer;
         prev_kmer.to_prev(k+1, BOSS::kSentinelCode);
-        // first char in the original kmer, i.e. the most significant character in sorting
-        TAlphabet first_char = kmer[k];
-        std::cout << "Dummy kmer is: " << prev_kmer.to_string(k+1, "$ACGT") << "\t First char: " << "$ACGT"[first_char] <<  std::endl;
         while (dummy_it < dummy_begin
                && KMER::less(get_first(kmers[dummy_it]), prev_kmer,1)) {
             dummy_it++;
@@ -133,9 +130,7 @@ void recover_source_dummy_nodes(size_t k,
         while (cur_pos < dummy_begin
                && KMER::compare_suffix(get_first(kmers[cur_pos]), prev_kmer, 1)) {
             const KMER &current_kmer = get_first(kmers[cur_pos]);
-            std::cout << "Comparing with " << get_first(current_kmer).to_string(k+1, "$ACGT") << std::endl;
             if (prev_kmer[0] == current_kmer[0]) {  // edge labels match
-                std::cout << "Redundant!\n";
                 is_redundant = true;
                 break;
             }
@@ -144,7 +139,6 @@ void recover_source_dummy_nodes(size_t k,
         if (is_redundant) {
             continue;
         }
-        std::cout << "==Not redundant!\n";
 
         if (kmers.size() + 1 > kmers.capacity())
             shrink_kmers(&kmers, num_threads, dummy_begin);
