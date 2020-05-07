@@ -43,50 +43,54 @@ TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 void test_mask_indices(double density_cutoff) {
-    const std::vector<std::string> ingroup { "B", "C" };
-    const std::vector<std::string> outgroup { "A" };
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        set_num_threads(num_threads);
+        const std::vector<std::string> ingroup { "B", "C" };
+        const std::vector<std::string> outgroup { "A" };
 
-    for (size_t k = 3; k < 15; ++k) {
-        const std::vector<std::string> sequences {
-            std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "A",
-            std::string("T") + std::string(k - 1, 'A') + "G"
-        };
-        const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
+        for (size_t k = 3; k < 15; ++k) {
+            const std::vector<std::string> sequences {
+                std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
+                std::string("T") + std::string(k - 1, 'A') + "C",
+                std::string("T") + std::string(k - 1, 'A') + "C",
+                std::string("T") + std::string(k - 1, 'A') + "A",
+                std::string("T") + std::string(k - 1, 'A') + "G"
+            };
+            const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
 
-        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+            auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
 
-        std::unordered_set<std::string> obs_labels, obs_kmers;
-        const std::unordered_set<std::string> ref_kmers {
-            std::string(k - 1, 'A') + "C"
-        };
-        const std::unordered_set<std::string> ref_labels {
-            "B", "C"
-        };
+            std::unordered_set<std::string> obs_labels, obs_kmers;
+            const std::unordered_set<std::string> ref_kmers {
+                std::string(k - 1, 'A') + "C"
+            };
+            const std::unordered_set<std::string> ref_labels {
+                "B", "C"
+            };
 
-        auto masked_dbg = build_masked_graph(*anno_graph,
-                                             ingroup,
-                                             outgroup,
-                                             1.0,
-                                             0.0,
-                                             0.0,
-                                             density_cutoff);
+            auto masked_dbg = build_masked_graph(*anno_graph,
+                                                 ingroup,
+                                                 outgroup,
+                                                 1.0,
+                                                 0.0,
+                                                 0.0,
+                                                 density_cutoff);
 
-        // FYI: num_nodes() throws exception for masked graph with lazy node mask
-        // EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
-        ASSERT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
+            // FYI: num_nodes() throws exception for masked graph with lazy node mask
+            // EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+            ASSERT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 
-        masked_dbg.call_kmers([&](auto i, const auto &kmer) {
-            auto cur_labels = anno_graph->get_labels(i);
-            obs_labels.insert(cur_labels.begin(), cur_labels.end());
-            obs_kmers.insert(kmer);
-        });
+            masked_dbg.call_kmers([&](auto i, const auto &kmer) {
+                auto cur_labels = anno_graph->get_labels(i);
+                obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                obs_kmers.insert(kmer);
+            });
 
-        EXPECT_EQ(ref_labels, obs_labels) << k << " " << density_cutoff;
-        EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << density_cutoff;
+            EXPECT_EQ(ref_labels, obs_labels) << k << " " << density_cutoff;
+            EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << density_cutoff;
+        }
     }
+    set_num_threads(1);
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
@@ -103,52 +107,56 @@ test_mask_unitigs(double inlabel_fraction,
                   double outlabel_fraction,
                   double other_label_fraction,
                   const std::unordered_set<std::string> &ref_kmers) {
-    const std::vector<std::string> ingroup { "B", "C" };
-    const std::vector<std::string> outgroup { "A" };
-    size_t k = 3;
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        set_num_threads(num_threads);
+        const std::vector<std::string> ingroup { "B", "C" };
+        const std::vector<std::string> outgroup { "A" };
+        size_t k = 3;
 
-    {
-        /*
-           CGA                 GCC-CCT
-              \               /
-               GAA-AAT-ATG-TGC
-              /               \
-           GGA                 GCA-CAC
-        */
-        const std::vector<std::string> sequences {
-            "TGCCT",
-            "CGAATGCCT",
-            "GGAATGCAC",
-            "TTTTTTTTTTTTTT"
-        };
-        const std::vector<std::string> labels { "A", "B", "C", "D" };
+        {
+            /*
+               CGA                 GCC-CCT
+                  \               /
+                   GAA-AAT-ATG-TGC
+                  /               \
+               GGA                 GCA-CAC
+            */
+            const std::vector<std::string> sequences {
+                "TGCCT",
+                "CGAATGCCT",
+                "GGAATGCAC",
+                "TTTTTTTTTTTTTT"
+            };
+            const std::vector<std::string> labels { "A", "B", "C", "D" };
 
-        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+            auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
 
-        std::unordered_set<std::string> obs_kmers;
+            std::unordered_set<std::string> obs_kmers;
 
-        MaskedDeBruijnGraph masked_dbg(
-            std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph->get_graph_ptr()),
-            mask_nodes_by_unitig_labels(
-                *anno_graph,
-                ingroup,
-                outgroup,
-                inlabel_fraction,
-                outlabel_fraction,
-                other_label_fraction
-            )
-        );
+            MaskedDeBruijnGraph masked_dbg(
+                std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph->get_graph_ptr()),
+                mask_nodes_by_unitig_labels(
+                    *anno_graph,
+                    ingroup,
+                    outgroup,
+                    inlabel_fraction,
+                    outlabel_fraction,
+                    other_label_fraction
+                )
+            );
 
-        EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
+            EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 
-        masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
 
-        EXPECT_EQ(ref_kmers, obs_kmers)
-            << k << " "
-            << inlabel_fraction << " "
-            << outlabel_fraction << " "
-            << other_label_fraction;
+            EXPECT_EQ(ref_kmers, obs_kmers)
+                << k << " "
+                << inlabel_fraction << " "
+                << outlabel_fraction << " "
+                << other_label_fraction;
+        }
     }
+    set_num_threads(1);
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {

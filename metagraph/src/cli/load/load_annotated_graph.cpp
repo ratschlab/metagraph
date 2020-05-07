@@ -93,7 +93,9 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                 config->label_mask_in_fraction,
                 config->label_mask_out_fraction,
                 config->label_other_fraction
-            )
+            ),
+            false,
+            graph->is_canonical_mode()
         );
     }
 
