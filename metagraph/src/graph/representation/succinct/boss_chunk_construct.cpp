@@ -105,16 +105,17 @@ void recover_source_dummy_nodes(size_t k,
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 
+        if (i > 0 && kmer[k] != get_first(kmers[i - 1])[k]) {
+            // the last (most significant) character changed, need to start search from beginning
+            dummy_it = 0;
+        }
+
         TAlphabet edge_label = kmer[0];
         if (!edge_label)
             continue; // dummy sink k-mer, skip
 
         if (i + 1 < dummy_begin && KMER::compare_suffix(kmer, get_first(kmers[i + 1]))) {
             continue; // i and i+1 will generate identical dummy k-mers, skip
-        }
-        if (i > 0 && kmer[k] != get_first(kmers[i - 1])[k]) {
-            // the last (most significant) character changed, need to start search from beginning
-            dummy_it = 0;
         }
 
         KMER prev_kmer = kmer;
