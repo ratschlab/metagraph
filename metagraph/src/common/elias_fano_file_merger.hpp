@@ -181,6 +181,10 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     return num_elements_read;
 }
 
+/**
+ * Merges the Ts in source with the Ts in source_dummy. This is no different than
+ * calling merge() for all files.
+ */
 template <typename T>
 uint64_t merge_dummy(const std::string &source,
                      const std::vector<std::string> &source_dummy,
@@ -191,6 +195,10 @@ uint64_t merge_dummy(const std::string &source,
     return merge_files(sources, on_new_item, remove_sources);
 }
 
+/**
+ * Merges the <T, C> pairs in source with the Ts in source_dummy. The INTs in
+ * source_dummy will be assigned a count of 1.
+ */
 template <typename T, typename C>
 uint64_t merge_dummy(const std::string &source,
                      const std::vector<std::string> &source_dummy,

@@ -285,15 +285,13 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_l1_chunks;
     std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_l2_chunks;
-    std::vector<std::string> dummy_names;
-    std::vector<std::string> dummy_next_names;
-    dummy_names.reserve(ALPHABET_LEN);
-    dummy_next_names.reserve(ALPHABET_LEN);
+    std::vector<std::string> dummy_names(ALPHABET_LEN);
+    std::vector<std::string> dummy_next_names(ALPHABET_LEN);
     dummy_l1_chunks.reserve(ALPHABET_LEN);
     dummy_l2_chunks.reserve(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
-        dummy_names.push_back(tmp_dir/("dummy_source_1_"+std::to_string(i)));
-        dummy_next_names.push_back(tmp_dir/("dummy_source_2_"+std::to_string(i)));
+        dummy_names[i] = tmp_dir/("dummy_source_1_"+std::to_string(i));
+        dummy_next_names[i]= tmp_dir/("dummy_source_2_"+std::to_string(i));
         dummy_l1_chunks.emplace_back(dummy_names[i], ENCODER_BUFFER_SIZE);
         dummy_l2_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
     }
@@ -394,7 +392,7 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // length x in /tmp_dir/dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([kmers, original_and_dummy_l1_name, files_to_merge]() {
-        std::function<void(const T_INT&)> on_new_item = [kmers, files_to_merge](const T_INT &v) { // TODO: remove files_to_merge
+        std::function<void(const T_INT&)> on_new_item = [kmers](const T_INT &v) {
           kmers->push(reinterpret_cast<const T &>(v));
         };
         common::merge_dummy(original_and_dummy_l1_name, files_to_merge, on_new_item);
