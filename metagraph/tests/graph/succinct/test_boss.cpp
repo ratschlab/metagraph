@@ -370,6 +370,7 @@ TEST(BOSS, MarkDummySourceEdgesTwoPathsParallel) {
 }
 
 TEST(BOSS, RemoveDummyEdgesForClearGraph) {
+    mg::common::logger->set_level(spdlog::level::trace);
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> first_ptr;
         std::unique_ptr<BOSS> second_ptr;
