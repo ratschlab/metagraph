@@ -336,7 +336,7 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
     logger->trace("Setting temporary directory to {}", tmp_dir_str);
     TMP_DIR = tmp_dir_str;
     if (std::signal(SIGINT, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the singal handler for SIGINT");
+        logger->error("Couldn't reset the signal handler for SIGINT");
     if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
         logger->error("Couldn't reset the singal handler for SIGTERM");
 
