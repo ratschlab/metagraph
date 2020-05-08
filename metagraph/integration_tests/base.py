@@ -34,7 +34,7 @@ class TestingBase(unittest.TestCase):
 
     def _build_graph(self, input, output, k, repr):
         construct_command = '{exe} build \
-                --graph {repr} -k {k} --count-kmers -o {outfile} {input}'.format(
+                --graph {repr} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             k=k,
             repr=repr,
