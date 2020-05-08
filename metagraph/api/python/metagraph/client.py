@@ -28,9 +28,13 @@ class GraphClientJson:
         self.label = label
 
     def search(self, sequence: Union[str, Iterable[str]],
-               top_labels=DEFAULT_TOP_LABELS,
+               top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False) -> Tuple[JsonDict, str]:
+        if discovery_threshold < 0.0 or discovery_threshold > 1.0:
+            raise ValueError(
+                f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
+
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
