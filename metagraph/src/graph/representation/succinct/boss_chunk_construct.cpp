@@ -119,9 +119,9 @@ void recover_source_dummy_nodes(size_t k,
         }
 
         KMER prev_kmer = kmer;
-        prev_kmer.to_prev(k+1, BOSS::kSentinelCode);
+        prev_kmer.to_prev(k + 1, BOSS::kSentinelCode);
         while (dummy_it < dummy_begin
-               && KMER::less(get_first(kmers[dummy_it]), prev_kmer,1)) {
+               && KMER::less(get_first(kmers[dummy_it]), prev_kmer, 1)) {
             dummy_it++;
         }
 
@@ -392,9 +392,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // length x in /tmp_dir/dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
     async_worker.enqueue([kmers, original_and_dummy_l1_name, files_to_merge]() {
-        std::function<void(const T_INT&)> on_new_item = [kmers](const T_INT &v) {
-          kmers->push(reinterpret_cast<const T &>(v));
-        };
+        std::function<void(const T_INT &)> on_new_item
+                = [kmers](const T_INT &v) { kmers->push(reinterpret_cast<const T &>(v)); };
         common::merge_dummy(original_and_dummy_l1_name, files_to_merge, on_new_item);
         kmers->shutdown();
     });

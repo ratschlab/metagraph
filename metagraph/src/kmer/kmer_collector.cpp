@@ -168,7 +168,6 @@ void cleanup_boss_kmers(Vector<get_int_t<T>> *kmers_int) {
             // skip if redundant
             if (node_last_char && KMER::compare_suffix(kmer, utils::get_first(kmers->at(last)), 0))
                 continue;
-
         }
 
         // the k-mer is either not dummy, or not redundant -> keep the k-mer

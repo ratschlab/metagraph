@@ -73,8 +73,7 @@ class KMerBOSS {
     static inline bool compare_suffix(const KMerBOSS &k1,
                                       const KMerBOSS &k2, size_t minus = 0);
 
-    static inline bool less(const KMerBOSS &k1,
-                                      const KMerBOSS &k2, size_t minus = 0);
+    static inline bool less(const KMerBOSS &k1, const KMerBOSS &k2, size_t minus = 0);
 
     std::string to_string(size_t k, const std::string &alphabet) const;
 
