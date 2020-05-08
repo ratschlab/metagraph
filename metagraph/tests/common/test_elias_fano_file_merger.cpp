@@ -141,14 +141,14 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeIdentical) {
         file_names.push_back(files[i].name());
         std::vector<T> values;
         for (uint32_t j = 0; j < 10; j = j + 1) {
-            values.push_back(T(j));
+            values.push_back(T(2*j));
         }
         do_encode(values, file_names.back());
     }
     utils::TempFile file;
     std::vector<TypeParam> values;
     for (uint32_t j = 0; j < 10; j = j + 1) {
-        push_back(values, static_cast<utils::get_first_type_t<TypeParam>>(j));
+        push_back(values, static_cast<utils::get_first_type_t<TypeParam>>(2*j+1));
     }
     do_encode(values, file.name());
     std::function<void(const TypeParam &v)> on_new_item = [](const TypeParam &v) {
