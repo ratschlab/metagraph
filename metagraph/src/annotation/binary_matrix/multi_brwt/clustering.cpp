@@ -49,10 +49,7 @@ get_submatrix(const VectorPtrs &columns,
 // returns shrunk columns
 std::vector<uint64_t>
 sample_row_indexes(uint64_t num_rows, uint64_t num_samples, int seed) {
-    std::mt19937 gen;
-
-    if (seed)
-        gen.seed(seed);
+    std::mt19937 gen(seed);
 
     num_samples = std::min(num_samples, num_rows);
 
