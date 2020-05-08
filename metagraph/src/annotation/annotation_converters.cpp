@@ -338,7 +338,7 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
     if (std::signal(SIGINT, signal_handler) == SIG_ERR)
         logger->error("Couldn't reset the signal handler for SIGINT");
     if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the singal handler for SIGTERM");
+        logger->error("Couldn't reset the signal handler for SIGTERM");
 
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
