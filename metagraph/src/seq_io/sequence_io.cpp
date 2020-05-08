@@ -508,7 +508,6 @@ void read_fasta_from_string(const std::string &fasta_flat,
     read_fasta_file_critical(input_p, callback, with_reverse);
 
     writer.join();
-    close(p[1]);
 
     gzclose(input_p);
     close(p[0]);
