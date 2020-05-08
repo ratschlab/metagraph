@@ -145,7 +145,7 @@ void cleanup_boss_kmers(Vector<get_int_t<T>> *kmers_int) {
     if (kmers->size() < 2)
         return;
 
-    // last k-mer is never redundant. Start with the next one.
+    // The last k-mer is never redundant. Start with the next one.
     uint64_t last = kmers->size() - 1;
 
     typename KMER::CharType edge_label, node_last_char;
@@ -158,9 +158,6 @@ void cleanup_boss_kmers(Vector<get_int_t<T>> *kmers_int) {
         const KMER &kmer = utils::get_first(kmers->at(i));
         node_last_char = kmer[1];
         edge_label = kmer[0];
-
-        // assert((edge_label || node_last_char)
-        //             && "dummy k-mer cannot be both source and sink dummy");
 
         if (!edge_label) {
             // sink dummy k-mer
@@ -201,10 +198,8 @@ KmerCollector<KMER, KmerExtractor, Container>
     assert(num_threads_ > 0);
 
     std::function<void(Vector<Value> *)> cleanup = [](Vector<Value> *) {};
-    if constexpr(std::is_same_v<Extractor, KmerExtractorBOSS>) {
-        if (filter_suffix_encoded_.empty())
-            cleanup = cleanup_boss_kmers<get_kmer_t<KMER, Value>>;
-    }
+    if constexpr(std::is_same_v<Extractor, KmerExtractorBOSS>)
+        cleanup = cleanup_boss_kmers<get_kmer_t<KMER, Value>>;
 
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
