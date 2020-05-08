@@ -280,7 +280,7 @@ parse_linkage_matrix(const std::string &filename) {
     std::vector<std::vector<uint64_t>> linkage;
     std::string line;
     while (std::getline(in, line)) {
-        auto parts = utils::split_string(line, " ");
+        std::vector<std::string> parts = utils::split_string(line, " ");
         if (!parts.size())
             continue;
 
@@ -306,10 +306,11 @@ parse_linkage_matrix(const std::string &filename) {
             linkage[merged].push_back(first);
             linkage[merged].push_back(second);
 
-        } catch (...) {
-            logger->error("Invalid format of the linkage matrix."
+        } catch (const std::exception &e) {
+            logger->error("Possibly invalid format of the linkage matrix."
                           " Each line must contsin exactly 4 values:"
-                          " <cluster 1> <cluster 2> <dist> <cluster 3>");
+                          " <cluster 1> <cluster 2> <dist> <cluster 3>"
+                          "\nException: {}", e.what());
             exit(1);
         }
     }

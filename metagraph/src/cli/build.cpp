@@ -29,9 +29,11 @@ std::filesystem::path tmp_dir;
 
 
 void signal_handler(int sig) {
-    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", tmp_dir);
-    if (!tmp_dir.empty())
+    if (!tmp_dir.empty()) {
+        logger->trace("Got signal {}, cleaning up temporary directory {}",
+                      sig, tmp_dir);
         std::filesystem::remove_all(tmp_dir);
+    }
 
     std::exit(sig);
 }

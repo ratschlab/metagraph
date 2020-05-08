@@ -255,6 +255,7 @@ BRWT BRWTBottomUpBuilder::build(
     // All submatrices must be merged into one
     if (stored_columns.back().size() != num_leaves) {
         logger->error("Invalid linkage: all must merge into a single root");
+        exit(1);
     }
 
     // get the root node in Multi-BRWT
