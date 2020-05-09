@@ -318,20 +318,18 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     std::string original_and_dummy_l1_name = tmp_dir/"original_and_dummy_l1";
     common::EliasFanoEncoderBuffered<T_INT> original_and_l1(original_and_dummy_l1_name,
-                                                   ENCODER_BUFFER_SIZE);
+                                                            ENCODER_BUFFER_SIZE);
 
     // merge the original kmers with the dummy-1 kmers, while also removing the redundant
     // dummy-1 kmers
-    const std::function<void(const T_INT &)> &on_new_item
-            = [&num_dummy_l1_kmers, k, &recent_buffer, &original_and_l1,
-               &dummy_l2_chunks](const T_INT &v) {
-                  push_and_remove_redundant_dummy_source( reinterpret_cast<const T &>(v),
-                                                         &recent_buffer);
-                  if (recent_buffer.full()) {
-                      num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(),
-                                                       &original_and_l1, &dummy_l2_chunks);
-                  }
-              };
+    const std::function<void(const T_INT &)> &on_new_item = [&](const T_INT &v) {
+        push_and_remove_redundant_dummy_source(reinterpret_cast<const T &>(v),
+                                               &recent_buffer);
+        if (recent_buffer.full()) {
+            num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(),
+                                             &original_and_l1, &dummy_l2_chunks);
+        }
+    };
     common::merge_dummy(original_name, dummy_names, on_new_item);
 
     while (!recent_buffer.empty()) { // empty the buffer
@@ -386,8 +384,8 @@ void recover_source_dummy_nodes_disk(const KmerCollector &kmer_collector,
         logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
                       dummy_pref_len, num_kmers);
     }
-    const std::function<void(const INT &)> &empty = [](const INT&){};
-    common::merge_files(dummy_next_names, empty);
+    std::for_each(dummy_next_names.begin(), dummy_next_names.end(),
+                  [](const string &v) { std::filesystem::remove(v); });
     // at this point, we have the original k-mers plus the  dummy k-mers with prefix
     // length x in /tmp_dir/dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
