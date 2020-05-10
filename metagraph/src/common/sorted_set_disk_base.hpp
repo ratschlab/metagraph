@@ -194,17 +194,17 @@ class SortedSetDiskBase {
         } else if (total_chunk_size_bytes_ > max_disk_space_bytes_) {
             async_merge_l1_.remove_waiting_tasks();
             async_merge_l1_.join();
-            std::string all_merged_file = chunk_file_prefix_ + "_all.tmp";
-            chunk_count_++; // needs to be incremented, so that get_file_names()
-            // returns correct values
+            std::string all_merged_file = merged_all_name(chunk_file_prefix_, merged_all_count_);
+            // increment chunk_count, so that get_file_names() returns correct values
+            chunk_count_++;
             merge_all(all_merged_file, get_file_names());
-            merged_all_ = true;
+
             total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
             if (total_chunk_size_bytes_ > max_disk_space_bytes_ * 0.8) {
                 logger->critical("Disk space reduced by < 20%. Giving up.");
                 std::exit(EXIT_FAILURE);
             }
-            std::filesystem::rename(all_merged_file, merged_all_name(chunk_file_prefix_));
+            merged_all_count_++;
             chunk_count_ = 0;
             l1_chunk_count_ = 0;
             return;
@@ -322,7 +322,7 @@ class SortedSetDiskBase {
 
     std::atomic<size_t> total_chunk_size_bytes_ = 0;
 
-    bool merged_all_ = false;
+    uint32_t merged_all_count_ = 0;
 
   private:
     /** Number of chunks for "level 1" intermediary merging. */
@@ -332,8 +332,8 @@ class SortedSetDiskBase {
         return prefix + "m" + std::to_string(count);
     }
 
-    static inline std::string merged_all_name(const std::string &prefix) {
-        return prefix + "_all";
+    static inline std::string merged_all_name(const std::string &prefix, uint32_t count) {
+        return prefix + "all_" + std::to_string(count);
     }
 
     static void merge_l1(const std::string &chunk_file_prefix,
@@ -364,8 +364,6 @@ class SortedSetDiskBase {
 
     static void merge_all(const std::string &out_file,
                           const std::vector<std::string> &to_merge) {
-        std::ofstream merged_count_file(out_file + ".count",
-                                        std::ios::binary | std::ios::out);
         logger->trace(
                 "Max allocated disk capacity exceeded. Starting merging all {} chunks "
                 "into {}",
@@ -382,8 +380,8 @@ class SortedSetDiskBase {
     std::vector<std::string> get_file_names() {
         async_merge_l1_.join(); // make sure all L1 merges are done
         std::vector<std::string> file_names;
-        if (merged_all_) {
-            file_names.push_back(merged_all_name(chunk_file_prefix_));
+        if (merged_all_count_ > 0) {
+            file_names.push_back(merged_all_name(chunk_file_prefix_, merged_all_count_ - 1));
         }
 
         for (size_t i = 0; i < l1_chunk_count_; ++i) {

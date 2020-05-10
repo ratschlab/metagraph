@@ -7,9 +7,9 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
+#include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
-#include "parse_sequences.hpp"
 
 using mg::common::logger;
 

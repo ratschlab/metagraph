@@ -150,7 +150,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
             };
             BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20000, container);
-            constructor.add_sequences(input_data);
+            constructor.add_sequences(std::vector<std::string>(input_data));
             BOSS constructed(&constructor);
 
             BOSS appended(k);
@@ -176,7 +176,7 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
 
             BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20000, container);
-            constructor.add_sequences(input_data);
+            constructor.add_sequences(std::vector<std::string>(input_data));
 
             BOSS constructed;
             sdsl::int_vector<> weights;
@@ -256,7 +256,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
             };
             BOSSConstructor constructor(k, true, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20'000, container);
-            constructor.add_sequences(input_data);
+            constructor.add_sequences(std::vector<std::string>(input_data));
             BOSS constructed(&constructor);
 
             BOSS appended(k);
@@ -402,28 +402,28 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
         2, &result, {}, false, 100'000
     );
-    ASSERT_EQ(3u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
         2, &result, {}, false, 100'000
     );
-    ASSERT_EQ(3u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
         2, &result, {}, false, 100'000
     );
-    ASSERT_EQ(3u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, {}, false, 100'000
     );
 #if _DNA_GRAPH
-    ASSERT_EQ(3u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 #else
-    ASSERT_EQ(6u, result.data().size());
+    ASSERT_EQ(4u, result.data().size());
 #endif
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
@@ -431,9 +431,9 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
         2, &result, { 1, }, false, 100'000
     );
 #if _DNA_GRAPH
-    ASSERT_EQ(3u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 #else
-    ASSERT_EQ(6u, result.data().size());
+    ASSERT_EQ(4u, result.data().size());
 #endif
 }
 
@@ -453,7 +453,7 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
         2, &result, {}, false, 0
     );
-    ASSERT_EQ(3u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
@@ -464,9 +464,9 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
         2, &result, { 1, }, false, 0
     );
 #if _DNA_GRAPH
-    ASSERT_EQ(3u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 #else
-    ASSERT_EQ(6u, result.data().size());
+    ASSERT_EQ(4u, result.data().size());
 #endif
 }
 
@@ -477,16 +477,16 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {
         new std::vector<std::string>(5, std::string(500, 'A')),
         2, &result, {}, true, 100'000
     );
-    // $A, AA, A$
-    ASSERT_EQ(3u, result.data().size());
+    // AA, A$
+    ASSERT_EQ(2u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(500, 'A')),
         3, &result, {}, true, 100'000
     );
-    // $AA, AAA, AA$
-    ASSERT_EQ(3u, result.data().size());
+    // AAA, AA$
+    ASSERT_EQ(2u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper<TypeParam>(
@@ -505,8 +505,8 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {
         new std::vector<std::string>(5, std::string(500, 'A')),
         4, &result, {}, true, 100'000
     );
-    // $AAA, AAAA, AAA$
-    ASSERT_EQ(3u, result.data().size());
+    // AAAA, AAA$
+    ASSERT_EQ(2u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper<TypeParam>(
@@ -528,16 +528,16 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
         new std::vector<std::string>(5, std::string(500, 'A')),
         2, &result, {}, true, 0
     );
-    // $A, AA, A$
-    ASSERT_EQ(3u, result.data().size());
+    // AA, A$
+    ASSERT_EQ(2u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(500, 'A')),
         3, &result, {}, true, 0
     );
-    // $AA, AAA, AA$
-    ASSERT_EQ(3u, result.data().size());
+    // AAA, AA$
+    ASSERT_EQ(2u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper<TypeParam>(
@@ -556,8 +556,8 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
         new std::vector<std::string>(5, std::string(500, 'A')),
         4, &result, {}, true, 0
     );
-    // $AAA, AAAA, AAA$
-    ASSERT_EQ(3u, result.data().size());
+    // AAAA, AAA$
+    ASSERT_EQ(2u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper<TypeParam>(
@@ -619,32 +619,35 @@ void check_counts() {
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 5u, 5u, five_times });
+    assert_contents(result, { 5u, five_times }); // A$ - 5 times, AA - #five_times
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 10u, 10u, ten_times });
+    assert_contents(result, { 10u, ten_times }); // A$ - 10 times, AA - #ten_times
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 15u, 15u, fifteen_times });
+    assert_contents(result, { 15u, fifteen_times }); // A$ - 15 times, AA - #fifteen_times
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result, {});
-    assert_contents(result, { 15u, 5u, 15u, fifteen_times, 5u, five_times });
+    // A$ - 15, AA - fifteen_times, C$ - 5, CC - five_times
+    assert_contents(result, { 15u, fifteen_times, 5u, five_times });
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result, { 1 });
-    assert_contents(result, { 15u, 5u, 15u, fifteen_times, 5u, five_times });
+    // same as before, as no k-mers end with 'A'
+    assert_contents(result, { 15u, fifteen_times, 5u, five_times });
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result, { 0 });
-    assert_contents(result, { 15u, 10u, 15u, fifteen_times, 5u, five_times });
+    // $C - 5 (matches the given suffix), A$ - 15, AA - fifteen_times, C$ - 5, CC - five_times
+    assert_contents(result, { 5u, 15u, fifteen_times, 5u, five_times });
 }
 
 TYPED_TEST(CountKmers, CountKmers8bits) {
@@ -665,7 +668,7 @@ TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
 
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 5u, 5u, 255u });
+    assert_contents(result, { 5u, 255u });
 }
 
 TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
@@ -676,7 +679,7 @@ TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
 
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 5u, 5u, 5 * (sequence_size - 2 + 1) });
+    assert_contents(result, { 5u, 5 * (sequence_size - 2 + 1) });
 }
 
 TYPED_TEST(CountKmers, CountKmersAppendParallel) {
@@ -690,16 +693,17 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    ASSERT_EQ(3u, result.data().size());
+    // A$ and AA
+    ASSERT_EQ(2u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result, {});
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result, { 1 });
 #if _DNA_GRAPH
-    ASSERT_EQ(3u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 #else
-    ASSERT_EQ(6u, result.data().size());
+    ASSERT_EQ(4u, result.data().size());
 #endif
 }
 

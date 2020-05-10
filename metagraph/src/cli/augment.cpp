@@ -78,19 +78,18 @@ int augment_graph(Config *config) {
     if (inserted_nodes)
         on_node_insert = [&](uint64_t new_node) { inserted_nodes->insert_bit(new_node, 1); };
 
-    parse_sequences(files, *config, timer,
-        [&](std::string_view seq) {
-            graph->add_sequence(seq, on_node_insert);
-        },
-        [&](std::string_view seq, uint32_t /*count*/) {
-            graph->add_sequence(seq, on_node_insert);
-        },
-        [&](const auto &loop) {
-            loop([&](const char *seq) {
+    for (const auto &file : files) {
+        parse_sequences(file, *config,
+            [&](std::string_view seq) {
                 graph->add_sequence(seq, on_node_insert);
-            });
-        }
-    );
+            },
+            [&](std::string_view seq, uint32_t /*count*/) {
+                graph->add_sequence(seq, on_node_insert);
+            }
+        );
+        logger->trace("Extracted all sequences from file '{}' in {} sec",
+                      file, timer.elapsed());
+    }
     assert(!inserted_nodes || inserted_nodes->size() == graph->max_index() + 1);
 
     logger->trace("Graph augmentation done in {} sec", timer.elapsed());
@@ -104,26 +103,22 @@ int augment_graph(Config *config) {
         if (graph->is_canonical_mode())
             config->forward_and_reverse = true;
 
-        parse_sequences(files, *config, timer,
-            [&graph,&node_weights](std::string_view seq) {
-                graph->map_to_nodes_sequentially(seq,
-                    [&](auto node) { node_weights->add_weight(node, 1); }
-                );
-            },
-            [&graph,&node_weights](std::string_view seq, uint32_t count) {
-                graph->map_to_nodes_sequentially(seq,
-                    [&](auto node) { node_weights->add_weight(node, count); }
-                );
-            },
-            [&graph,&node_weights](const auto &loop) {
-                loop([&graph,&node_weights](const char *seq) {
-                    std::string seq_str(seq);
-                    graph->map_to_nodes_sequentially(seq_str,
+        for (const auto &file : files) {
+            parse_sequences(file, *config,
+                [&graph,&node_weights](std::string_view seq) {
+                    graph->map_to_nodes_sequentially(seq,
                         [&](auto node) { node_weights->add_weight(node, 1); }
                     );
-                });
-            }
-        );
+                },
+                [&graph,&node_weights](std::string_view seq, uint32_t count) {
+                    graph->map_to_nodes_sequentially(seq,
+                        [&](auto node) { node_weights->add_weight(node, count); }
+                    );
+                }
+            );
+            logger->trace("Extracted all sequences from file '{}' in {} sec",
+                          file, timer.elapsed());
+        }
     }
 
     logger->trace("Node weights updated in {} sec", timer.elapsed());

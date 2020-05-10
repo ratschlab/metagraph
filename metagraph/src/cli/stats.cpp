@@ -14,7 +14,6 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotation.hpp"
-#include "parse_sequences.hpp"
 
 using mg::common::logger;
 using utils::get_verbose;

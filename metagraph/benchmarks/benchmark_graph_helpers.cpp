@@ -26,7 +26,7 @@ std::shared_ptr<DeBruijnGraph> bm::build_graph(const std::string &filename) {
     size_t k = 12;
 
     BOSSConstructor constructor(k - 1);
-    constructor.add_sequences(sequences);
+    constructor.add_sequences(std::move(sequences));
     auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor));
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
 
@@ -49,7 +49,7 @@ std::unique_ptr<AnnotatedDBG> bm::build_anno_graph(const std::string &filename) 
     size_t k = 12;
 
     BOSSConstructor constructor(k - 1);
-    constructor.add_sequences(sequences);
+    constructor.add_sequences(std::vector<std::string>(sequences));
     auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor));
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
 

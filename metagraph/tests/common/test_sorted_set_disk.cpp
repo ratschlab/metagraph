@@ -232,4 +232,25 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwardsFromEnd) {
     }
 }
 
+/**
+ * Test that exceeding the allocated disk space and then merging all data to reduce
+ * space works correctly.
+ */
+TYPED_TEST(SortedSetDiskTest, DiskExceeded) {
+    common::logger->set_level(spdlog::level::trace);
+    constexpr size_t thread_count = 1;
+    constexpr size_t reserved_num_elements = 100;
+    constexpr size_t max_disk_space = 100;
+    auto nocleanup = [](typename common::SortedSetDisk<TypeParam>::storage_type *) {};
+    auto underTest = common::SortedSetDisk<TypeParam>(nocleanup, thread_count,
+                                                      reserved_num_elements,
+                                                      "/tmp/test_chunk_", max_disk_space, 1);
+    std::vector<TypeParam> elements(100);
+    std::iota(elements.begin(), elements.end(), 0);
+    for(uint32_t i = 0; i<10;++i) {
+        underTest.insert(elements.begin(), elements.end());
+    }
+    expect_equals(underTest, elements);
+}
+
 } // namespace
