@@ -45,7 +45,7 @@ KmerExtractorBOSS::Kmer64 to_kmer(const KmerExtractorBOSS &encoder,
                                   const std::string &kmer) {
     Vector<KmerExtractorBOSS::Kmer64> kmers;
     encoder.sequence_to_kmers(kmer, kmer.size(), {}, &kmers);
-    return kmers.at(1);
+    return kmers.at(0);
 }
 
 TEST(ExtractKmers, encode_decode_kmer) {
@@ -87,8 +87,8 @@ TEST(ExtractKmers, encode_decode_string) {
 
 #if _DNA_GRAPH
         ASSERT_EQ(k <= last_part.size()
-                    ? sequence.size() - 2 * k + 1 + 4
-                    : (k <= first_part.size() ? first_part.size() - k + 1 + 2 : 0),
+                    ? sequence.size() - 2 * k + 1 + 2
+                    : (k <= first_part.size() ? first_part.size() - k + 2 : 0),
                   kmers.size()) << k;
 
         if (!kmers.size())
@@ -96,10 +96,10 @@ TEST(ExtractKmers, encode_decode_string) {
 
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
         uint64_t i;
-        for (i = 1; i <= first_part.size() - k + 2; ++i) {
+        for (i = 1; i <= first_part.size() - k + 1; ++i) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
         }
-        EXPECT_EQ('$' + first_part + '$', reconstructed);
+        EXPECT_EQ(first_part + '$', reconstructed);
 
         if (k > last_part.size())
             continue;
@@ -108,7 +108,7 @@ TEST(ExtractKmers, encode_decode_string) {
         while (++i < kmers.size()) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
         }
-        EXPECT_EQ('$' + last_part + '$', reconstructed);
+        EXPECT_EQ(last_part + '$', reconstructed);
 #else
         ASSERT_LT(2u, kmers.size());
         kmers.erase(kmers.begin());
@@ -233,7 +233,7 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithoutFiltering) {
             KmerExtractorBOSS::sequence_to_kmers(
                 std::string(length, 'A'), k, {}, &result
             );
-            ASSERT_EQ(length - k + 3, result.size()) << "k: " << k
+            ASSERT_EQ(length - k + 2, result.size()) << "k: " << k
                                                      << ", length: " << length;
         }
     }
@@ -352,14 +352,14 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
 TYPED_TEST(ExtractKmers, ExtractKmersFromStringAppend) {
     Vector<TypeParam> result;
 
-    // A...A -> $A...A$
     KmerExtractorBOSS::sequence_to_kmers(
         std::string(500, 'A'), 2, {}, &result
     );
-    ASSERT_EQ(501u, result.size());
+    // A...AA and A...A$
+    ASSERT_EQ(500u, result.size());
 
     KmerExtractorBOSS::sequence_to_kmers(
         std::string(500, 'A'), 2, {}, &result
     );
-    ASSERT_EQ(501u * 2, result.size());
+    ASSERT_EQ(500u * 2, result.size());
 }

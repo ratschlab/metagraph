@@ -324,7 +324,7 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
         return;
 
     // encode sequence
-    const size_t dummy_prefix_size = suffix.size() > 0 ? k - 1 : 1;
+    const size_t dummy_prefix_size = suffix.size() > 0 ? k - 1 : 0;
 
     std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1, 0);
 
