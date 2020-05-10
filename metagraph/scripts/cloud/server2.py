@@ -208,6 +208,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         if self.handle_ack('download', post_vars, [downloaded_sras, pending_builds], pending_downloads):
             global total_download_size_MB, sra_to_size
             size_MB = float(get_var(post_vars, 'size_mb'))
+            if size_MB == 0:
+                size_MB = float(get_var(post_vars, 'download_size_mb'))
             total_download_size_MB += size_MB
             sra_to_size[get_var(post_vars, 'id')] = size_MB
 
@@ -417,7 +419,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--port', default=8000, help='HTTP Port on which the server runs')
+    parser.add_argument('--port', default=8000, type=int, help='HTTP Port on which the server runs')
     parser.add_argument(
         '--data_dir',
         default=os.path.expanduser('~/Downloads/sra_test/'),
@@ -436,7 +438,7 @@ def parse_args():
     parser.add_argument('--checkpoint', default='transferred|!downloaded|!built|!cleaned',
                         help='Which checkpointed SRAs to eliminate from processing, '
                              'a combination of downloaded/built/cleaned/transferred optionally preceded by !')
-    parser.add_argument('--server_info', default='gs://mg36/server',
+    parser.add_argument('--server_info', default=None,
                         help='Where to publish the server host/port on gcs')
 
     global args
