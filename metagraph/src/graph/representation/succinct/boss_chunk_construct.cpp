@@ -127,13 +127,10 @@ void recover_source_dummy_nodes(size_t k,
     max_it[0] = kmers.size(); // only used when k==2 bc last char is $ for all dummy k-mers
 
     size_t dummy_begin = kmers.size();
-    for (size_t i = 0; i < dummy_begin; ++i) {
+    for (size_t i = 1; i < dummy_begin; ++i) { // starting at 1 to skip the $$...$$ k-mer
         const KMER &kmer = get_first(kmers[i]);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
-
-        if (kmer.data() == 0)
-            continue; // all-dummy k-mer, skip
 
         if (i > 0 && kmer[k] != get_first(kmers[i - 1])[k]) {
             // the last (most significant) character changed, need to start search from beginning
@@ -142,7 +139,7 @@ void recover_source_dummy_nodes(size_t k,
 
         KMER dummy_sink_kmer = kmer;
         dummy_sink_kmer.to_next(k + 1, BOSS::kSentinelCode);
-        size_t dummy_sink_it = first_char_it[kmer[0]];
+        size_t &dummy_sink_it = first_char_it[kmer[0]];
         while (dummy_sink_it < max_it[kmer[0]]
                 && KMER::less(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
             dummy_sink_it++;
