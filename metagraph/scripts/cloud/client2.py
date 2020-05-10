@@ -661,7 +661,7 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://mg36/',  # TODO make the default empty
+    parser.add_argument('--destination', default=None,  # TODO make the default empty
                         help='Host/directory where the cleaned BOSS graphs are copied to')
     parser.add_argument('--log_destination', default=None,
                         help='GS folder where client logs are collected')

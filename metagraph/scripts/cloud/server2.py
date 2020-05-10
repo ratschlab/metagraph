@@ -438,7 +438,7 @@ def parse_args():
     parser.add_argument('--checkpoint', default='transferred|!downloaded|!built|!cleaned',
                         help='Which checkpointed SRAs to eliminate from processing, '
                              'a combination of downloaded/built/cleaned/transferred optionally preceded by !')
-    parser.add_argument('--server_info', default='gs://mg36/server',
+    parser.add_argument('--server_info', default=None,
                         help='Where to publish the server host/port on gcs')
 
     global args
