@@ -132,6 +132,7 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
     }
 }
 
+<<<<<<< Updated upstream
 // removes redundant dummy BOSS k-mers from a sorted list
 template <class T>
 void cleanup_boss_kmers(Vector<get_int_t<T>> *kmers_int) {
@@ -196,17 +197,14 @@ KmerCollector<KMER, KmerExtractor, Container>
         tmp_dir_(tmp_dir) {
     assert(num_threads_ > 0);
 
-    std::function<void(Vector<Value> *)> cleanup = [](Vector<Value> *) {};
-    if constexpr(std::is_same_v<Extractor, KmerExtractorBOSS>)
-        cleanup = cleanup_boss_kmers<get_kmer_t<KMER, Value>>;
-
+    std::function<void(Vector<Value> *)> no_cleanup = [](Vector<Value> *) {};
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
     if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_,
+        kmers_ = std::make_unique<Container>(no_cleanup, num_threads, buffer_size_,
                                              tmp_dir, max_disk_space);
     } else {
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_);
+        kmers_ = std::make_unique<Container>(no_cleanup, num_threads, buffer_size_);
     }
     common::logger->trace(
             "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
