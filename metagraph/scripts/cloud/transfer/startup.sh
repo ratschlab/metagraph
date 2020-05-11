@@ -60,9 +60,10 @@ function start() {
   cd /tmp
   rm -rf /tmp/sync
   mkdir /tmp/sync
+  # copy  data from Google Storage to a local directory
   cat $INPUT_CHUNK_FILE | gsutil -m cp -r -I  /tmp/sync/
   # leomed:/cluster/work/grlab/projects/metagenome/data/cloudcompute
-  rsync -azm --info=name --stats --safe-links --ignore-existing --dry-run --human-readable /tmp/sync/ hex:/cluster/project/raetsch/lab/01/projects/metagraph > /tmp/transfer.log
+  rsync -avzm --stats --safe-links --ignore-existing --dry-run --human-readable /tmp/sync/ hex:/cluster/project/raetsch/lab/01/projects/metagraph > /tmp/transfer.log
   sed -i 1d /tmp/transfer.log
   head -n -17 /tmp/transfer.log > /tmp/transf.log
 
