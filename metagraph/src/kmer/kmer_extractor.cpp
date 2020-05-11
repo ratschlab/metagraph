@@ -335,7 +335,7 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
     TAlphabet *begin_segm = seq.data();
     TAlphabet *end_segm = seq.data() + dummy_prefix_size;
     TAlphabet *end = seq.data() + seq.size();
-    *(end-1) = alphabet.size()+1; //
+    *(end-1) = alphabet.size()+1; // mark the end with an invalid character
     while (begin_segm + dummy_prefix_size + k + 1 <= end) {
         assert(end >= end_segm);
         // DNA segments may be stored continuously separated by a character outside of
