@@ -125,7 +125,7 @@ BRWT BRWTBottomUpBuilder::build(std::vector<std::unique_ptr<bit_vector>>&& colum
 BRWT BRWTBottomUpBuilder::build(
         const std::function<void(const CallColumn &)> &get_columns,
         const std::vector<std::vector<uint64_t>> &linkage,
-        std::filesystem::path tmp_dir,
+        const std::filesystem::path &tmp_dir,
         size_t num_nodes_parallel,
         size_t num_threads) {
 

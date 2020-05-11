@@ -281,7 +281,7 @@ parse_linkage_matrix(const std::string &filename) {
     std::string line;
     while (std::getline(in, line)) {
         std::vector<std::string> parts = utils::split_string(line, " ");
-        if (!parts.size())
+        if (parts.empty())
             continue;
 
         try {
