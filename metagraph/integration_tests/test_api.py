@@ -24,7 +24,7 @@ class TestAPIBase(TestingBase):
 
         cls.host = '127.0.0.1'
         cls.port = 3456
-        os.environ['NO_PROXY'] = '127.0.0.1'
+        os.environ['NO_PROXY'] = cls.host
         cls.server_process = cls._start_server(cls, graph_path, annotation_path, cls.port)
 
         print("Waiting for the server to start up on " + str(cls.server_process.pid))

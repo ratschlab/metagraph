@@ -10,7 +10,7 @@ fi
 API_DIR="$1"
 VENV_DIR="$2"
 
-echo "Setting up virtual environment"
+echo "Setting up virtual environment in ${VENV_DIR}"
 python3 -m venv ${VENV_DIR}
 source ${VENV_DIR}/bin/activate
 
