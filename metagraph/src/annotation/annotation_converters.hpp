@@ -49,7 +49,7 @@ convert_to_BRWT(const std::vector<std::string> &annotation_files,
                 const std::string &linkage_matrix_file,
                 size_t num_parallel_nodes = 1,
                 size_t num_threads = 1,
-                std::filesystem::path tmp_dir = "");
+                const std::filesystem::path &tmp_dir = "");
 
 template <class StaticAnnotation>
 void relax_BRWT(StaticAnnotation *annotation,

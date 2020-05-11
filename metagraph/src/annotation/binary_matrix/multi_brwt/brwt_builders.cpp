@@ -5,6 +5,7 @@
 
 #include "common/algorithms.hpp"
 #include "common/logger.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
 using mg::common::logger;
@@ -125,12 +126,14 @@ BRWT BRWTBottomUpBuilder::build(std::vector<std::unique_ptr<bit_vector>>&& colum
 BRWT BRWTBottomUpBuilder::build(
         const std::function<void(const CallColumn &)> &get_columns,
         const std::vector<std::vector<uint64_t>> &linkage,
-        const std::filesystem::path &tmp_dir,
+        const std::filesystem::path &tmp_path,
         size_t num_nodes_parallel,
         size_t num_threads) {
 
     if (!linkage.size())
         return BRWT();
+
+    std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_path, "brwt");
 
     std::vector<bool> done(linkage.size(), false);
     std::mutex done_mu;

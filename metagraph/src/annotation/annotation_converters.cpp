@@ -1,10 +1,10 @@
 #include "annotation_converters.hpp"
 
 #include <cassert>
-#include <csignal>
 #include <vector>
 #include <functional>
 #include <filesystem>
+
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
@@ -26,15 +26,6 @@ typedef LabelEncoder<std::string> LEncoder;
 
 size_t kNumRowsInBlock = 50'000;
 
-std::filesystem::path TMP_DIR;
-
-void signal_handler(int sig) {
-    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", TMP_DIR);
-    if (!TMP_DIR.empty())
-        std::filesystem::remove_all(TMP_DIR);
-
-    std::exit(sig);
-}
 
 template <class RowCallback>
 void call_rows(const BinaryMatrix &row_major_matrix,
@@ -324,22 +315,7 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
                                     const std::string &linkage_matrix_file,
                                     size_t num_parallel_nodes,
                                     size_t num_threads,
-                                    std::filesystem::path tmp_dir) {
-    if (tmp_dir.empty())
-        tmp_dir = "./";
-
-    std::string tmp_dir_str(tmp_dir/"temp_brwt_XXXXXX");
-    if (!mkdtemp(tmp_dir_str.data())) {
-        logger->error("Failed to create a temporary directory in {}", tmp_dir);
-        exit(1);
-    }
-    logger->trace("Setting temporary directory to {}", tmp_dir_str);
-    TMP_DIR = tmp_dir_str;
-    if (std::signal(SIGINT, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the signal handler for SIGINT");
-    if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the signal handler for SIGTERM");
-
+                                    const std::filesystem::path &tmp_path) {
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
@@ -364,9 +340,8 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
     auto linkage = parse_linkage_matrix(linkage_matrix_file);
 
     auto matrix = std::make_unique<BRWT>(
-        BRWTBottomUpBuilder::build(get_columns, linkage, TMP_DIR,
+        BRWTBottomUpBuilder::build(get_columns, linkage, tmp_path,
                                    num_parallel_nodes, num_threads));
-    std::filesystem::remove(TMP_DIR);
 
     std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
     column_names.erase(std::unique(column_names.begin(), column_names.end()),
