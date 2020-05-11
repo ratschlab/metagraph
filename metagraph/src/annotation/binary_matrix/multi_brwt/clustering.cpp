@@ -217,7 +217,7 @@ Partition greedy_matching(const std::vector<sdsl::bit_vector> &columns,
 Eigen::MatrixXd
 agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
                              size_t num_threads) {
-    if (!columns.size())
+    if (columns.empty())
         return Eigen::MatrixXd(0, 4);
 
     Eigen::MatrixXd linkage_matrix(columns.size() - 1, 4);
