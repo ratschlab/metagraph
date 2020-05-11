@@ -2,16 +2,20 @@
 
 set -e
 
-BASEDIR=$(dirname "$0")
+if [ $# -ne 2 ]; then
+    echo -e "Usage:\n$0 <API_DIR> <VENV_DIR>" >&2
+    exit 1
+fi
 
-VENV_DIR=${BASEDIR}/integration_test_env
+API_DIR="$1"
+VENV_DIR="$2"
 
 echo "Setting up virtual environment"
 python3 -m venv ${VENV_DIR}
 source ${VENV_DIR}/bin/activate
 
 echo "Installing required packages"
-pip install -e ${BASEDIR}/../api/python
+pip install -e ${API_DIR}
 pip install parameterized==0.7.1
 
 # signalling, that the environment set up was successful
