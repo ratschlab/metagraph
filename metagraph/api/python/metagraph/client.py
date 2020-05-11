@@ -51,13 +51,12 @@ class GraphClientJson:
 
     def _json_seq_query(self, sequence: Union[str, Iterable[str]], param_dict,
                         endpoint: str) -> Tuple[JsonDict, str]:
-
         if isinstance(sequence, str):
             fasta_str = f">query\n{sequence}"
         else:
             seqs = list(sequence)
             fasta_str = '\n'.join(
-                [f">{i}\n{seqs[i]}" for i in range(0, len(seqs))])
+                [f">{i}\n{seq}" for (i, seq) in enumerate(seqs)])
 
         payload_dict = {"FASTA": fasta_str}
         payload_dict.update(param_dict)
