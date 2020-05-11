@@ -345,16 +345,16 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
             [&](auto c) { return c >= alphabet.size(); }
         );
         assert(*end_segm >= alphabet.size());
+        if (!suffix.empty()) {
+            *end_segm = 0;
+            ++end_segm; // make room for the dummy sink k-mer
+        }
 
         if (begin_segm + dummy_prefix_size + k + 1 <= end_segm) {
             // set the dummy prefix for the next segment
             // ****AAA*AAAA*
             // ********AAAA*
             std::fill(begin_segm, begin_segm + dummy_prefix_size, 0);
-            if (!suffix.empty()) {
-                *end_segm = 0;
-                ++end_segm; // make room for the dummy sink k-mer
-            }
 
             extractor::sequence_to_kmers<KMER>(begin_segm, end_segm, k, suffix,
                 [&kmers](auto kmer) { kmers->push_back(kmer); },
@@ -362,10 +362,11 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
                 []() { return false; }
             );
         }
-        begin_segm = end_segm - dummy_prefix_size;
-        if (!suffix.empty()) {
-            ++begin_segm; // skip the separator character
+        if (suffix.empty()) {
+            ++end_segm; // skip the separator character
         }
+
+        begin_segm = end_segm - dummy_prefix_size;
     }
 }
 
