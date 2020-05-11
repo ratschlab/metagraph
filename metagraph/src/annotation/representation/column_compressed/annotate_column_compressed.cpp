@@ -172,7 +172,8 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         if (error_occurred)
             continue;
 
-        const std::string &filename = filenames[i - 1];
+        auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
+
         std::ifstream instream(filename, std::ios::binary);
         if (!instream.good()) {
             logger->error("Can't read from {}", filename);
