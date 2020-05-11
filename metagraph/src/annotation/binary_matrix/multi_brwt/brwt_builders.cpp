@@ -229,7 +229,7 @@ BRWT BRWTBottomUpBuilder::build(
 
         // compute column assignments for the parent
         for (size_t j : linkage[i]) {
-            if (!stored_columns[j].size()) {
+            if (stored_columns[j].empty()) {
                 // the child j is a leaf
                 stored_columns[i].push_back(j);
             } else {
