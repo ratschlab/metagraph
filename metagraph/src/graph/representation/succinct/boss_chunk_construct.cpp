@@ -30,39 +30,132 @@ using utils::get_first_type_t;
 
 
 template <class Array>
-void sort_and_remove_duplicates(Array *array,
-                                size_t num_threads,
-                                size_t offset) {
+void sort(Array *array, size_t num_threads, size_t offset) {
     ips4o::parallel::sort(array->begin() + offset, array->end(),
                           utils::LessFirst(),
                           num_threads);
-    // remove duplicates
-    auto unique_end = std::unique(array->begin() + offset, array->end(),
-                                  utils::EqualFirst());
-    array->erase(unique_end, array->end());
-}
-
-template <typename Array>
-void shrink_kmers(Array *kmers,
-                  size_t num_threads,
-                  size_t offset) {
-    logger->trace("Allocated capacity exceeded, filter out non-unique k-mers...");
-
-    size_t prev_num_kmers = kmers->size();
-    sort_and_remove_duplicates(kmers, num_threads, offset);
-
-    logger->trace("...done. Number of kmers reduced from {} to {}, {}Mb", prev_num_kmers,
-                  kmers->size(), (kmers->size() * sizeof(typename Array::value_type) >> 20));
 }
 
 template <class Container, typename KMER>
-inline KMER& push_back(Container &kmers, const KMER &kmer) {
+void push_back(Container &kmers, const KMER &kmer) {
     if constexpr(utils::is_pair_v<typename Container::value_type>) {
         kmers.emplace_back(kmer, 0);
-        return kmers.back().first;
     } else {
         kmers.push_back(kmer);
-        return kmers.back();
+    }
+}
+
+template <typename T>
+void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
+    using KMER = get_first_type_t<T>;
+    // TODO: this is a bit of a waste as we usually have less than 2^bits characters
+    // Maybe define an ALPHABET_SIZE constant in KmerExtractorBOSS and KmerBOSS?
+    constexpr uint8_t ALPHABET_LEN = 1 << KmerExtractorBOSS::bits_per_char;
+    using INT = typename KMER::WordType;
+
+    Vector<T> &kmers = *kmers_p;
+
+    // points to the current k-mer with the given first character
+    std::array<size_t, ALPHABET_LEN> first_char_it;
+    std::array<size_t, ALPHABET_LEN> max_it;
+    first_char_it[0] = 0;
+    std::vector<INT> zeros(k + 1);
+    for (uint32_t i = 1; i < ALPHABET_LEN; ++i) {
+        zeros[k - 1] = i;
+        KMER to_search = KMER(zeros, k + 1); // the $...$X->$ k-mer
+        first_char_it[i] = std::lower_bound(kmers.begin(), kmers.end(), to_search,
+                                            [](const T &a, const KMER &b) -> bool {
+                                                return get_first(a) < b;
+                                            })
+                - kmers.begin();
+        if (first_char_it[i] < kmers.size()) {
+            std::cout << "\nTo search: " << first_char_it[i] << "\t"
+                      << get_first(kmers[first_char_it[i]]).to_string(k + 1, "$ACGT")
+                      << std::endl;
+        }
+        max_it[i - 1] = first_char_it[i];
+    }
+    max_it[ALPHABET_LEN - 1] = kmers.size();
+    max_it[0] = kmers.size(); // only used when k==2 bc last char is $ for all dummy k-mers
+
+    std::vector<KMER> last_dummy(ALPHABET_LEN, KMER(0));
+    size_t size = kmers.size();
+    for (size_t i = 1; i < size; ++i) { // starting at 1 to skip the $$...$$ k-mer
+        const KMER &kmer = get_first(kmers[i]);
+        // we never add reads shorter than k
+        assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
+
+        KMER dummy_sink_kmer = kmer;
+        dummy_sink_kmer.to_next(k + 1, BOSS::kSentinelCode);
+        std::cout << "Dummy sink k-mer is: " << dummy_sink_kmer.to_string(k + 1, "$ACGT")
+                  << std::endl;
+
+        TAlphabet last_char = kmer[0];
+        if (last_dummy[last_char] == dummy_sink_kmer) {
+            continue;  // avoid generating duplicate dummy sink kmers
+        }
+        last_dummy[last_char] = dummy_sink_kmer;
+        size_t &dummy_sink_it = first_char_it[last_char];
+
+        while (dummy_sink_it < max_it[last_char]
+               && KMER::less(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
+            dummy_sink_it++;
+        }
+        if (dummy_sink_it < max_it[last_char]
+            && !KMER::compare_suffix(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
+            std::cout << "Not redundant\n";
+            push_back(kmers, dummy_sink_kmer);
+        }
+        std::cout << "Redundant with "
+                  << get_first(kmers[dummy_sink_it]).to_string(k + 1, "$ACGT") << std::endl;
+    }
+}
+
+template <typename T>
+void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
+    using KMER = get_first_type_t<T>;
+
+    // points to the first k-mer that may be redundant with the current dummy source k-mer
+    size_t dummy_it = 0;
+
+    Vector<T> &kmers = *kmers_p;
+
+    for (size_t i = 1; i < end; ++i) { // starting at 1 to skip the $$...$$ k-mer
+        const KMER &kmer = get_first(kmers[i]);
+        // we never add reads shorter than k
+        assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
+
+        if (kmer[k] != get_first(kmers[i - 1])[k]) {
+            // the last (most significant) character changed, need to start search from beginning
+            dummy_it = 0;
+        }
+
+        if (KMER::compare_suffix(kmer, get_first(kmers[i -1 ]))) {
+            continue; // i would generate the same dummy-1 k-mer as i-1, skip
+        }
+
+        KMER prev_kmer = kmer;
+        prev_kmer.to_prev(k + 1, BOSS::kSentinelCode);
+
+        while (dummy_it < end && KMER::less(get_first(kmers[dummy_it]), prev_kmer, 1)) {
+            dummy_it++;
+        }
+        std::cout << "Checking  " << prev_kmer.to_string(k+1, "$ACGT") << " starting at " << get_first(kmers[dummy_it]).to_string(k+1, "$ACGT") << std::endl;
+        size_t cur_pos = dummy_it;
+        bool is_redundant = false;
+        while (cur_pos < end
+               && KMER::compare_suffix(get_first(kmers[cur_pos]), prev_kmer, 1)) {
+            const KMER &current_kmer = get_first(kmers[cur_pos]);
+            if (prev_kmer[0] == current_kmer[0]) {  // edge labels match
+                is_redundant = true;
+                break;
+            }
+            cur_pos++;
+        }
+        if (!is_redundant) {
+            push_back(kmers, prev_kmer);
+            std::cout << prev_kmer.to_string(k+1, "$ACGT") << " is not redundant!!!\n";
+        }
     }
 }
 
@@ -90,121 +183,43 @@ inline KMER& push_back(Container &kmers, const KMER &kmer) {
  * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
  */
 template <typename T>
-void recover_source_dummy_nodes(size_t k,
-                                size_t num_threads,
-                                Vector<T> *kmers_p) {
+void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
-    // TODO: this is a bit of a waste as we usually have less than 2^bits characters
-    // Maybe define an ALPHABET_SIZE constant in KmerExtractorBOSS and KmerBOSS?
-    constexpr uint8_t ALPHABET_LEN = 1 << KmerExtractorBOSS::bits_per_char;
-    using INT = typename KMER::WordType;
-
-    // points to the first k-mer that may be redundant with the current k-mer
-    size_t dummy_it = 0;
-
     Vector<T> &kmers = *kmers_p;
+    size_t original_end = kmers.size();
 
-    // points to the current k-mer with the given first character
-    std::array<size_t, ALPHABET_LEN> first_char_it;
-    std::array<size_t, ALPHABET_LEN> max_it;
-    first_char_it[0] = 0;
-    std::vector<INT> zeros(k+1);
-    for (uint32_t i = 1; i<ALPHABET_LEN; ++i) {
-        zeros[k-1] = i;
-        KMER to_search = KMER(zeros, k+1); // the $...$X->$ k-mer
-        first_char_it[i] = std::lower_bound(kmers.begin(), kmers.end(), to_search,
-                                 [](const T &a, const  KMER&b) -> bool {
-                                     return get_first(a) < b;
-                                 })
-                - kmers.begin();
-        if (first_char_it[i] < kmers.size()) {
-            std::cout << "\nTo search: " << first_char_it[i] << "\t"
-                      << get_first(kmers[first_char_it[i]]).to_string(k+1,"$ACGT") << std::endl;
-        }
-        max_it[i-1] = first_char_it[i];
-    }
-    max_it[ALPHABET_LEN-1] = kmers.size();
-    max_it[0] = kmers.size(); // only used when k==2 bc last char is $ for all dummy k-mers
-
+    add_dummy_sink_kmers(k, &kmers);
     size_t dummy_begin = kmers.size();
-    for (size_t i = 1; i < dummy_begin; ++i) { // starting at 1 to skip the $$...$$ k-mer
-        const KMER &kmer = get_first(kmers[i]);
-        // we never add reads shorter than k
-        assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 
-        if (i > 0 && kmer[k] != get_first(kmers[i - 1])[k]) {
-            // the last (most significant) character changed, need to start search from beginning
-            dummy_it = 0;
-        }
-
-        KMER dummy_sink_kmer = kmer;
-        dummy_sink_kmer.to_next(k + 1, BOSS::kSentinelCode);
-        size_t &dummy_sink_it = first_char_it[kmer[0]];
-        while (dummy_sink_it < max_it[kmer[0]]
-                && KMER::less(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
-            dummy_sink_it++;
-        }
-        if (dummy_sink_it < max_it[kmer[0]]
-                && !KMER::compare_suffix(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
-            if (kmers.size() + 1 > kmers.capacity())
-                shrink_kmers(&kmers, num_threads, dummy_begin);
-
-            push_back(kmers, dummy_sink_kmer);
-        }
-
-        if (i + 1 < dummy_begin && KMER::compare_suffix(kmer, get_first(kmers[i + 1]))) {
-            continue; // i and i+1 will generate identical dummy k-mers, skip
-        }
-
-        KMER prev_kmer = kmer;
-        prev_kmer.to_prev(k + 1, BOSS::kSentinelCode);
-        while (dummy_it < dummy_begin
-               && KMER::less(get_first(kmers[dummy_it]), prev_kmer, 1)) {
-            dummy_it++;
-        }
-
-        size_t cur_pos = dummy_it;
-        bool is_redundant = false;
-        while (cur_pos < dummy_begin
-               && KMER::compare_suffix(get_first(kmers[cur_pos]), prev_kmer, 1)) {
-            const KMER &current_kmer = get_first(kmers[cur_pos]);
-            if (prev_kmer[0] == current_kmer[0]) {  // edge labels match
-                is_redundant = true;
-                break;
-            }
-            cur_pos++;
-        }
-        if (is_redundant) {
-            continue;
-        }
-
-        if (kmers.size() + 1 > kmers.capacity())
-            shrink_kmers(&kmers, num_threads, dummy_begin);
-
-        push_back(kmers, prev_kmer);
-    }
-
-    sort_and_remove_duplicates(&kmers, num_threads, dummy_begin);
+    add_dummy_source_kmers(k, &kmers, original_end);
+    sort(&kmers, num_threads, dummy_begin);
 
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   kmers.size() - dummy_begin);
 
     for (size_t c = 2; c < k + 1; ++c) {
-        size_t succ_dummy_begin = dummy_begin;
-        dummy_begin = kmers.size();
+        size_t dummy_end = kmers.size();
 
-        for (size_t i = succ_dummy_begin; i < dummy_begin; ++i) {
-            if (kmers.size() + 1 > kmers.capacity())
-                shrink_kmers(&kmers, num_threads, dummy_begin);
+        for (size_t i = dummy_begin; i < dummy_end; ++i) {
+            KMER kmer = get_first(kmers[i]);
+            if (KMER::compare_suffix(kmer, get_first(kmers[i - 1]))) {
+                continue; // i would generate the same dummy source k-mer as i-1, skip
+            }
 
-            push_back(kmers, get_first(kmers[i])).to_prev(k + 1, BOSS::kSentinelCode);
+            kmer.to_prev(k + 1, BOSS::kSentinelCode);
+            push_back(kmers, kmer);
         }
-        sort_and_remove_duplicates(&kmers, num_threads, dummy_begin);
+        sort(&kmers, num_threads, dummy_end);
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}", c,
-                      kmers.size() - dummy_begin);
+                      kmers.size() - dummy_end);
+        dummy_begin = dummy_end;
     }
-    ips4o::parallel::sort(kmers.begin(), kmers.end(), utils::LessFirst(), num_threads);
+    sort(&kmers, num_threads, 0);
+    std::ofstream f("/tmp/kmers");
+    for (size_t i = 0; i < kmers.size(); ++i) { // starting at 1 to skip the $$...$$ k-mer
+        f << get_first(kmers[i]).to_string(k+1, "$ACGT") << std::endl;
+    }
 }
 
 /**
@@ -563,7 +578,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
             } else {
                 // kmer_collector stores (BOSS::k_ + 1)-mers
                 static_assert(std::is_same_v<typename KmerCollector::Data, Vector<T_INT>>);
-                recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
+                recover_dummy_nodes(kmer_collector_.get_k() - 1,
                                            kmer_collector_.num_threads(), &kmers);
             }
             logger->trace("Dummy source k-mers were reconstructed in {} sec",

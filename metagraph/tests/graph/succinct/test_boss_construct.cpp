@@ -140,8 +140,9 @@ TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
+    common::logger->set_level(spdlog::level::trace);
+    for (auto container : { kmer::ContainerType::VECTOR/*, kmer::ContainerType::VECTOR_DISK*/ }) {
+        for (size_t k = 11; k < 12; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
                 "ATATTATAAAAAATTTTAAAAAA",
@@ -165,7 +166,7 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
 
 TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
     ASSERT_TRUE(TypeParam::kWeighted);
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+    for (auto container : { kmer::ContainerType::VECTOR/*, kmer::ContainerType::VECTOR_DISK */}) {
         for (size_t k = 1; k < kMaxK; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -246,8 +247,8 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
+    for (auto container : { kmer::ContainerType::VECTOR/*, kmer::ContainerType::VECTOR_DISK */}) {
+        for (size_t k = 22; k < 23; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
                 "ATATTATAAAAAATTTTAAAAAA",
