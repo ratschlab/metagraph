@@ -45,6 +45,21 @@ void push_back(Container &kmers, const KMER &kmer) {
     }
 }
 
+/**
+ * Generates non-redundant dummy sink kmers (a1a2...ak->$) for the given #kmers_p.
+ *
+ * The method traverses #kmers_p and generates the corresponding dummy sink k-mer for each
+ * kmer in #kmers_p. The dummy sink k-mer is added if it's not redundant, i.e. if there is
+ * no kmer in #kmers_p with the same prefix. Since #kmers_p are ordered, the generated
+ * dummy sink k-mers for a given edge label will also be ordered. The method keeps an
+ * iterator for each edge label that points to the first k-mer with prefix greater or
+ * equal to the current dummy k-mer. The current dummy k-mer is marked as redundant if its
+ * corresponding iterator points to a kmer with identical prefix.
+ * @tparam T the type of kmers being processed, typically either a KMer64/128/256 or an
+ * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
+ * @param k node length (the actual k-mer has length k+1)
+ * @param kmers_p list of sorted, non-redundant kmers of length k+1
+ */
 template <typename T>
 void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
@@ -56,8 +71,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     Vector<T> &kmers = *kmers_p;
 
     // points to the current k-mer with the given first character
-    std::array<size_t, ALPHABET_LEN> first_char_it;
-    std::array<size_t, ALPHABET_LEN> max_it;
+    std::array<size_t, ALPHABET_LEN+1> first_char_it;
     first_char_it[0] = 0;
     std::vector<INT> zeros(k + 1);
     for (uint32_t i = 1; i < ALPHABET_LEN; ++i) {
@@ -68,27 +82,18 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
                                                 return get_first(a) < b;
                                             })
                 - kmers.begin();
-        if (first_char_it[i] < kmers.size()) {
-            std::cout << "\nTo search: " << first_char_it[i] << "\t"
-                      << get_first(kmers[first_char_it[i]]).to_string(k + 1, "$ACGT")
-                      << std::endl;
-        }
-        max_it[i - 1] = first_char_it[i];
     }
-    max_it[ALPHABET_LEN - 1] = kmers.size();
-    max_it[0] = kmers.size(); // only used when k==2 bc last char is $ for all dummy k-mers
+    first_char_it[ALPHABET_LEN] = kmers.size();
 
     std::vector<KMER> last_dummy(ALPHABET_LEN, KMER(0));
     size_t size = kmers.size();
     for (size_t i = 1; i < size; ++i) { // starting at 1 to skip the $$...$$ k-mer
         const KMER &kmer = get_first(kmers[i]);
-        // we never add reads shorter than k
-        assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
+        // none of the original k-mers is a dummy k-mer
+        assert(kmer[1] != 0 && kmer[0] != 0);
 
         KMER dummy_sink_kmer = kmer;
         dummy_sink_kmer.to_next(k + 1, BOSS::kSentinelCode);
-        std::cout << "Dummy sink k-mer is: " << dummy_sink_kmer.to_string(k + 1, "$ACGT")
-                  << std::endl;
 
         TAlphabet last_char = kmer[0];
         if (last_dummy[last_char] == dummy_sink_kmer) {
@@ -97,33 +102,49 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
         last_dummy[last_char] = dummy_sink_kmer;
         size_t &dummy_sink_it = first_char_it[last_char];
 
-        while (dummy_sink_it < max_it[last_char]
+        while (dummy_sink_it < first_char_it[last_char+1]
                && KMER::less(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
             dummy_sink_it++;
         }
-        if (dummy_sink_it < max_it[last_char]
-            && !KMER::compare_suffix(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
-            std::cout << "Not redundant\n";
+        if (dummy_sink_it == first_char_it[last_char+1]
+            || !KMER::compare_suffix(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
             push_back(kmers, dummy_sink_kmer);
         }
-        std::cout << "Redundant with "
-                  << get_first(kmers[dummy_sink_it]).to_string(k + 1, "$ACGT") << std::endl;
     }
 }
 
+/**
+ * Adds non-redundant dummy source nodes with prefix length 1 for the given kmers.
+
+ * For each kmer in #kmers_p, the method creates the corresponding dummy sources with
+ * sentinels of length 1 (aka dummy-1 sources). The method then checks if the dummy-1
+ * source node is redundant, i.e. if there is another non-dummy node that is identical
+ * except for the first character. For example, $ACGT is redundant with TACGT. To do this
+ * efficiently, the method uses an iterator called dummy_it that points to the first kmer
+ * with the suffix equal to or larger than the current kmer. Since #kmers_p are ordered,
+ * the generated dummy-1 kmers will also be ordered as long as the last character
+ * in the original k-mers stays the same. This means that dummy_it only needs to move
+ * forward and must be reset only when the last character in the original kmer changes.
+ *
+ * For example, the k-mer ACG->T, generates the dummy-kmer $AC->G, while the k-mer AGG->T
+ * generates the dummy k-mer $AG->T. Because ACG->T precedes AGG->T, so will their
+ * generated dummy-1 kmers. To check if $AC->G is redundant, dummy_it is advanced until we
+ * find or pass k-mers with the suffix AC. Then we check all kmers with the AC suffix, and
+ * if we find one with the same edge label, such as TAC->G, then $AC->G is redundant and
+ * will be skipped.
+ */
 template <typename T>
 void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
     using KMER = get_first_type_t<T>;
+    Vector<T> &kmers = *kmers_p;
 
     // points to the first k-mer that may be redundant with the current dummy source k-mer
     size_t dummy_it = 0;
 
-    Vector<T> &kmers = *kmers_p;
-
     for (size_t i = 1; i < end; ++i) { // starting at 1 to skip the $$...$$ k-mer
         const KMER &kmer = get_first(kmers[i]);
-        // we never add reads shorter than k
-        assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
+        // none of the original k-mers is a dummy k-mer
+        assert(kmer[1] != 0 && kmer[0] != 0);
 
         if (kmer[k] != get_first(kmers[i - 1])[k]) {
             // the last (most significant) character changed, need to start search from beginning
@@ -140,7 +161,6 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
         while (dummy_it < end && KMER::less(get_first(kmers[dummy_it]), prev_kmer, 1)) {
             dummy_it++;
         }
-        std::cout << "Checking  " << prev_kmer.to_string(k+1, "$ACGT") << " starting at " << get_first(kmers[dummy_it]).to_string(k+1, "$ACGT") << std::endl;
         size_t cur_pos = dummy_it;
         bool is_redundant = false;
         while (cur_pos < end
@@ -154,7 +174,6 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
         }
         if (!is_redundant) {
             push_back(kmers, prev_kmer);
-            std::cout << prev_kmer.to_string(k+1, "$ACGT") << " is not redundant!!!\n";
         }
     }
 }
@@ -163,23 +182,12 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
 // the experiments show it's already fast enough.
 // k is node length
 /**
- * Adds dummy source nodes for the given kmers.
- * The method first adds dummy sources with sentinels of length 1 (aka dummy-1 sources).
- * For each dummy-1 source node it checks if it's redundant, i.e. if there is another
- * non-dummy node that is identical except for the first character. For example, $ACGT is
- * redundant with TACGT. To do this efficiently, the method uses an iterator called
- * dummy_it that points to the first kmer with the suffix equal to or larger than the
- * current kmer. Since dummy-1 kmers for a given last character are actually ordered,
- * dummy_it only needs to move forward and must be reset when the last character changes.
- * For example, the k-mer ACG->T, generates the dummy-kmer $AC->G, while the k-mer AGG->T
- * generates the dummy k-mer $AG->T. Because ACG->T precedes AGG->T, so will their
- * generated dummy-1 kmers. To check if $AC->G is redundant, dummy_it is advanced until we
- * find or pass k-mers with the suffix AC. Then we check all kmers with the AC suffix, and
- * if we find one with the same edge label, such as TAC->G, then $AC->G is redundant and
- * will be skipped. The method will then gradually add dummy sources with sentinels of
- * length 2, 3, ... up to k-1.
+ * Adds dummy nodes for the given kmers.
+ * The method first adds dummy sink kmers, then dummy sources with sentinels of length 1
+ * (aka dummy-1 sources). The method will then gradually add dummy sources with sentinels
+ * of length 2, 3, ... up to k-1.
  *
- * @tparam the type of kmers being processed, typically either a KMer64/128/256 or an
+ * @tparam T the type of kmers being processed, typically either a KMer64/128/256 or an
  * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
  */
 template <typename T>
@@ -216,10 +224,6 @@ void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
         dummy_begin = dummy_end;
     }
     sort(&kmers, num_threads, 0);
-    std::ofstream f("/tmp/kmers");
-    for (size_t i = 0; i < kmers.size(); ++i) { // starting at 1 to skip the $$...$$ k-mer
-        f << get_first(kmers[i]).to_string(k+1, "$ACGT") << std::endl;
-    }
 }
 
 /**
