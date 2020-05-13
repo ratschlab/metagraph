@@ -22,13 +22,18 @@ static std::vector<std::string> TMP_DIRS;
 
 void cleanup_tmp_dir_on_signal(int sig) {
     logger->trace("Got signal {}. Exiting...", sig);
+    // call std::exit to invoke handlers registered in std::atexit
     std::exit(sig);
 }
 
 void cleanup_tmp_dir_on_exit() {
     for (const std::string &tmp_dir : TMP_DIRS) {
         logger->trace("Cleaning up temporary directory {}", tmp_dir);
-        std::filesystem::remove_all(tmp_dir);
+        try {
+            std::filesystem::remove_all(tmp_dir);
+        } catch (...) {
+            logger->error("Failed cleaning up temporary directory {}", tmp_dir);
+        }
     }
 }
 
