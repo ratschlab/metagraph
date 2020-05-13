@@ -230,7 +230,7 @@ int transform_annotation(Config *config) {
             subcolumns.push_back(std::move(*col_ptr));
         }
 
-        Eigen::MatrixXd linkage_matrix
+        LinkageMatrix linkage_matrix
                 = agglomerative_greedy_linkage(std::move(subcolumns),
                                                get_num_threads());
 

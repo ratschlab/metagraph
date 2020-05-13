@@ -7,6 +7,8 @@
 
 #include "common/vectors/bit_vector.hpp"
 
+typedef Eigen::Matrix<uint64_t, Eigen::Dynamic, 4> LinkageMatrix;
+
 // Clustering of columns for Multi-BRWT
 
 // input: columns
@@ -19,7 +21,7 @@ greedy_matching(const std::vector<sdsl::bit_vector> &columns,
 // result: (x - 1) by 4 matrix
 // Points result[i, 0] and result[i, 1] are merged into result[i, 3]
 // result[i, 2] = dist(result[i, 0], result[i, 1])
-Eigen::MatrixXd
+LinkageMatrix
 agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
                              size_t num_threads = 1);
 
