@@ -24,7 +24,8 @@ class FastaWriter {
     FastaWriter(const std::string &filebase,
                 const std::string &header = "",
                 bool enumerate_sequences = false,
-                bool async = false);
+                bool async = false,
+                bool append = false);
 
     ~FastaWriter();
 
@@ -63,7 +64,8 @@ class ExtendedFastaWriter {
                         uint32_t kmer_length,
                         const std::string &header = "",
                         bool enumerate_sequences = false,
-                        bool async = false);
+                        bool async = false,
+                        bool append = false);
 
     ~ExtendedFastaWriter();
 

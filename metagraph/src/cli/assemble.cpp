@@ -15,6 +15,20 @@ namespace cli {
 
 using mtg::common::logger;
 
+template <class Generator>
+void write_sequences(const Config &config,
+                     const std::string &header,
+                     const Generator &generate_paths,
+                     bool append = false) {
+    seq_io::FastaWriter writer(config.outfbase, header, config.enumerate_out_sequences,
+                               get_num_threads() > 1, /* async write */
+                               append);
+    std::mutex write_mutex;
+    generate_paths([&](const std::string &sequence, auto&&) {
+        std::lock_guard<std::mutex> lock(write_mutex);
+        writer.write(sequence);
+    });
+}
 
 int assemble(Config *config) {
     assert(config);
@@ -34,6 +48,32 @@ int assemble(Config *config) {
     std::unique_ptr<graph::AnnotatedDBG> anno_graph;
     if (config->infbase_annotators.size()) {
         anno_graph = initialize_annotated_dbg(graph, *config);
+
+        if (config->label_mask_file.size()) {
+            logger->trace("Generating masked graphs...");
+            {
+                // overwrite
+                std::ofstream out(config->outfbase);
+            }
+            call_masked_graphs(
+                *anno_graph, config,
+                [&](const MaskedDeBruijnGraph &graph, const std::string &header) {
+                    write_sequences(*config, header, [&](const auto &callback) {
+                        if (config->unitigs || config->min_tip_size > 1) {
+                            graph.call_unitigs(callback,
+                                               get_num_threads(),
+                                               config->min_tip_size,
+                                               config->kmers_in_single_form);
+                        } else {
+                            graph.call_sequences(callback,
+                                                 get_num_threads(),
+                                                 config->kmers_in_single_form);
+                        }
+                    }, true);
+                }
+            );
+            return 0;
+        }
 
         logger->trace("Masking graph...");
 
@@ -90,26 +130,19 @@ int assemble(Config *config) {
         );
     }
 
-    seq_io::FastaWriter writer(config->outfbase, config->header,
-                               config->enumerate_out_sequences,
-                               get_num_threads() > 1);
-    std::mutex write_mutex;
-
     if (config->unitigs || config->min_tip_size > 1) {
-        graph->call_unitigs([&](const auto &unitig, auto&&) {
-                                std::lock_guard<std::mutex> lock(write_mutex);
-                                writer.write(unitig);
-                            },
-                            get_num_threads(),
-                            config->min_tip_size,
-                            config->kmers_in_single_form);
+        write_sequences(*config, config->header, [&](const auto &callback) {
+            graph->call_unitigs(callback,
+                                get_num_threads(),
+                                config->min_tip_size,
+                                config->kmers_in_single_form);
+        });
     } else {
-        graph->call_sequences([&](const auto &contig, auto&&) {
-                                  std::lock_guard<std::mutex> lock(write_mutex);
-                                  writer.write(contig);
-                              },
-                              get_num_threads(),
-                              config->kmers_in_single_form);
+        write_sequences(*config, config->header, [&](const auto &callback) {
+            graph->call_sequences(callback,
+                                  get_num_threads(),
+                                  config->kmers_in_single_form);
+        });
     }
 
     logger->trace("Sequences extracted in {} sec", timer.elapsed());

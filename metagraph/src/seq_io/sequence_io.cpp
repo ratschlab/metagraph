@@ -22,13 +22,14 @@ const size_t kBufferSize = 1'000'000;
 FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
                          bool enumerate_sequences,
-                         bool async)
+                         bool async,
+                         bool append)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(async, kWorkerQueueSize) {
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
-    gz_out_ = gzopen(filename.c_str(), "w");
+    gz_out_ = gzopen(filename.c_str(), append ? "a" : "w");
     if (gz_out_ == Z_NULL) {
         std::cerr << "ERROR: Can't write to " << filename << std::endl;
         exit(1);
@@ -83,7 +84,8 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                                             uint32_t kmer_length,
                                             const std::string &header,
                                             bool enumerate_sequences,
-                                            bool async)
+                                            bool async,
+                                            bool append)
       : kmer_length_(kmer_length),
         header_(header),
         enumerate_sequences_(enumerate_sequences),
@@ -92,7 +94,7 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
-    fasta_gz_out_ = gzopen(filename.c_str(), "w");
+    fasta_gz_out_ = gzopen(filename.c_str(), append ? "a" : "w");
     if (fasta_gz_out_ == Z_NULL) {
         std::cerr << "ERROR: Can't write to " << filename << std::endl;
         exit(1);

@@ -2,6 +2,7 @@
 
 #include "graph/annotated_graph_algorithm.hpp"
 #include "common/logger.hpp"
+#include "common/utils/string_utils.hpp"
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 
@@ -43,17 +44,20 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
 }
 
+
 std::unique_ptr<MaskedDeBruijnGraph>
-mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
+mask_graph_from_labels(const AnnotatedDBG &anno_graph,
+                       std::vector<std::string> &label_mask_in,
+                       std::vector<std::string> &label_mask_out,
+                       Config *config) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");
 
     // Remove non-present labels
-    config->label_mask_in.erase(
-        std::remove_if(config->label_mask_in.begin(),
-                       config->label_mask_in.end(),
+    label_mask_in.erase(
+        std::remove_if(label_mask_in.begin(), label_mask_in.end(),
                        [&](const auto &label) {
                            bool exists = anno_graph.label_exists(label);
                            if (!exists)
@@ -61,12 +65,11 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
 
                            return !exists;
                        }),
-        config->label_mask_in.end()
+        label_mask_in.end()
     );
 
-    config->label_mask_out.erase(
-        std::remove_if(config->label_mask_out.begin(),
-                       config->label_mask_out.end(),
+    label_mask_out.erase(
+        std::remove_if(label_mask_out.begin(), label_mask_out.end(),
                        [&](const auto &label) {
                            bool exists = anno_graph.label_exists(label);
                            if (!exists)
@@ -74,19 +77,19 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
 
                            return !exists;
                        }),
-        config->label_mask_out.end()
+        label_mask_out.end()
     );
 
-    logger->trace("Masked in: {}", fmt::join(config->label_mask_in, " "));
-    logger->trace("Masked out: {}", fmt::join(config->label_mask_out, " "));
+    logger->trace("Masked in: {}", fmt::join(label_mask_in, " "));
+    logger->trace("Masked out: {}", fmt::join(label_mask_out, " "));
 
     if (!config->filter_by_kmer) {
         return std::make_unique<MaskedDeBruijnGraph>(
             graph,
             mask_nodes_by_unitig_labels(
                 anno_graph,
-                config->label_mask_in,
-                config->label_mask_out,
+                label_mask_in,
+                label_mask_out,
                 config->label_mask_in_fraction,
                 config->label_mask_out_fraction,
                 config->label_other_fraction
@@ -94,27 +97,28 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
         );
     }
 
+    size_t num_mask_in = label_mask_in.size();
+    size_t num_mask_out = label_mask_out.size();
+
     return std::make_unique<MaskedDeBruijnGraph>(
         graph,
         mask_nodes_by_node_label(
             anno_graph,
-            config->label_mask_in,
-            config->label_mask_out,
-            [config,&anno_graph](auto index,
-                                 auto get_num_in_labels,
-                                 auto get_num_out_labels) {
+            label_mask_in,
+            label_mask_out,
+            [config,num_mask_in,num_mask_out,&anno_graph](auto index,
+                                                          auto get_num_in_labels,
+                                                          auto get_num_out_labels) {
                 assert(index != DeBruijnGraph::npos);
 
                 size_t num_in_labels = get_num_in_labels();
 
-                if (num_in_labels < config->label_mask_in_fraction
-                                        * config->label_mask_in.size())
+                if (num_in_labels < config->label_mask_in_fraction * num_mask_in)
                     return false;
 
                 size_t num_out_labels = get_num_out_labels();
 
-                if (num_out_labels < config->label_mask_out_fraction
-                                        * config->label_mask_out.size())
+                if (num_out_labels < config->label_mask_out_fraction * num_mask_out)
                     return false;
 
                 size_t num_total_labels = anno_graph.get_labels(index).size();
@@ -124,6 +128,54 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
             }
         )
     );
+}
+
+void
+call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
+                   const std::function<void(const MaskedDeBruijnGraph&,
+                                            const std::string& /* header */)> &callback) {
+    if (config->label_mask_file.empty()) {
+        callback(*mask_graph_from_labels(anno_graph,
+                                         config->label_mask_in,
+                                         config->label_mask_out,
+                                         config), config->header);
+        return;
+    }
+
+    std::ifstream fin(config->label_mask_file);
+    if (!fin.good()) {
+        throw std::iostream::failure("Failed to read label mask file");
+        exit(1);
+    }
+
+    std::string line;
+    while (std::getline(fin, line)) {
+        auto line_split = utils::split_string(line, "\t");
+        if (line_split.size() <= 1)
+            continue;
+
+        if (line_split.size() > 3)
+            throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
+
+        auto foreground_labels = utils::split_string(line_split[1], ",");
+        auto background_labels = utils::split_string(
+            line_split.size() == 3 ? line_split[2] : "",
+            ","
+        );
+        callback(*mask_graph_from_labels(anno_graph,
+                                         foreground_labels,
+                                         background_labels,
+                                         config), line_split[0]);
+    }
+}
+
+std::unique_ptr<MaskedDeBruijnGraph>
+mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
+    assert(config->label_mask_file.empty());
+    return mask_graph_from_labels(anno_graph,
+                                  config->label_mask_in,
+                                  config->label_mask_out,
+                                  config);
 }
 
 } // namespace cli

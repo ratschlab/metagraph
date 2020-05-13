@@ -137,6 +137,7 @@ class Config {
     std::string annotation_label = "";
     std::string header = "";
     std::string host_address;
+    std::string label_mask_file;
 
     std::filesystem::path tmp_dir;
 
