@@ -4,6 +4,7 @@
 #include <cassert>
 #include <fstream>
 #include <future>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -11,6 +12,10 @@
 
 
 namespace utils {
+
+std::filesystem::path create_temp_dir(std::filesystem::path path,
+                                      const std::string &name = "");
+
 
 bool check_if_writable(const std::string &filename);
 

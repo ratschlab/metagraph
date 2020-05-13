@@ -3,7 +3,7 @@
 
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
-#include "annotation/binary_matrix/multi_brwt/partitionings.hpp"
+#include "annotation/binary_matrix/multi_brwt/clustering.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
@@ -113,7 +113,11 @@ generate_brwt_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
     if (greedy) {
         binary_matrix = std::make_unique<BRWT>(
             BRWTBottomUpBuilder::build(std::move(columns),
-                [](const auto &columns) { return greedy_matching(columns); }
+                [](const auto &columns) {
+                    std::vector<sdsl::bit_vector> subvectors
+                        = random_submatrix(columns, 1'000'000);
+                    return greedy_matching(subvectors);
+                }
             )
         );
     } else {
@@ -161,7 +165,11 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
         case MatrixType::BRWT_EXTRA: {
             binary_matrix.reset(new BRWT(
                 BRWTBottomUpBuilder::build(std::move(columns),
-                    [](const auto &columns) { return greedy_matching(columns); }
+                    [](const auto &columns) {
+                        std::vector<sdsl::bit_vector> subvectors
+                            = random_submatrix(columns, 1'000'000);
+                        return greedy_matching(subvectors);
+                    }
                 )
             ));
             break;

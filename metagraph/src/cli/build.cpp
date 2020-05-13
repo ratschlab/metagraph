@@ -1,10 +1,9 @@
 #include "build.hpp"
 
-#include <csignal>
-
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_string.hpp"
@@ -25,16 +24,6 @@ using namespace mg::succinct;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
-std::filesystem::path tmp_dir;
-
-
-void signal_handler(int sig) {
-    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", tmp_dir);
-    if (!tmp_dir.empty())
-        std::filesystem::remove_all(tmp_dir);
-
-    std::exit(sig);
-}
 
 template <class GraphConstructor>
 void push_sequences(const std::vector<std::string> &files,
@@ -113,20 +102,9 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        if (!config->tmp_dir.empty()) {
-            std::string tmp_dir_str(config->tmp_dir/"temp_dbg_XXXXXX");
-            if (!mkdtemp(tmp_dir_str.data())) {
-                logger->error("Failed to create a temporary directory in {}", config->tmp_dir);
-                exit(1);
-            }
-            tmp_dir = tmp_dir_str;
-            logger->trace("Setting temporary directory to {}", tmp_dir);
-
-            if (std::signal(SIGINT, signal_handler) == SIG_ERR)
-                logger->error("Couldn't reset the singal handler for SIGINT");
-            if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
-                logger->error("Couldn't reset the singal handler for SIGTERM");
-        }
+        std::filesystem::path tmp_dir;
+        if (!config->tmp_dir.empty())
+            tmp_dir = utils::create_temp_dir(config->tmp_dir, "dbg");
 
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
@@ -162,15 +140,12 @@ int build_graph(Config *config) {
                 logger->info("Serialization done in {} sec", timer.elapsed());
             }
 
-            if (config->suffix.size()) {
-                std::filesystem::remove_all(tmp_dir);
+            if (config->suffix.size())
                 return 0;
-            }
 
             graph_data.extend(*next_chunk);
             delete next_chunk;
         }
-        std::filesystem::remove_all(tmp_dir);
 
         if (config->count_kmers) {
             sdsl::int_vector<> kmer_counts;
