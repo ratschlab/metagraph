@@ -348,7 +348,7 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
         assert(*end_segm >= alphabet.size());
         if (!suffix.empty()) {
             *end_segm = 0;
-            ++end_segm; // make room for the dummy sink k-mer
+            ++end_segm; // make room for the dummy suffix
         }
 
         if (begin_segm + dummy_prefix_size + k + dummy_suffix_size <= end_segm) {

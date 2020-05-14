@@ -37,7 +37,7 @@ void sort(Array *array, size_t num_threads, size_t offset) {
 }
 
 template <class Container, typename KMER>
-void push_back(Container &kmers, const KMER &kmer) {
+inline void push_back(Container &kmers, const KMER &kmer) {
     if constexpr(utils::is_pair_v<typename Container::value_type>) {
         kmers.emplace_back(kmer, 0);
     } else {
@@ -76,12 +76,12 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     std::vector<INT> zeros(k + 1);
     for (uint32_t i = 1; i < ALPHABET_LEN; ++i) {
         zeros[k - 1] = i;
-        KMER to_search = KMER(zeros, k + 1); // the $...$X->$ k-mer
-        first_char_it[i] = std::lower_bound(kmers.begin(), kmers.end(), to_search,
-                                            [](const T &a, const KMER &b) -> bool {
-                                                return get_first(a) < b;
-                                            })
-                - kmers.begin();
+        KMER to_search = KMER(zeros, k + 1); // the $$...i->$ k-mer
+        auto pos = std::lower_bound(kmers.begin(), kmers.end(), to_search,
+                                      [](const T &a, const KMER &b) -> bool {
+                                          return get_first(a) < b;
+                                      });
+        first_char_it[i] = pos - kmers.begin();
     }
     first_char_it[ALPHABET_LEN] = kmers.size();
 
@@ -418,7 +418,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(),
                                              &original_and_l1, &dummy_l2_chunks);
         }
-        if (get_first(kmer)[0] != 0) {
+        if (get_first(kmer)[0] != 0) { // not a dummy sink k-mer
             push_and_remove_redundant_dummy_source(kmer, &recent_buffer);
             if (recent_buffer.full()) {
                 num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(),
