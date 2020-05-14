@@ -11,10 +11,6 @@
 
 using sdsl::uint128_t;
 
-const uint64_t kBlockSize = 1'000'000 & ~0x3Full;
-// Each block is a multiple of 64 bits for thread safety
-static_assert((kBlockSize % 64) == 0);
-
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
     sdsl::bit_vector result(vector.size(), 0);
@@ -223,8 +219,8 @@ void compute_or(const std::vector<const bit_vector *> &columns,
     assert(result);
     assert(result->size() == size);
 
-    const uint64_t block_size = std::max(kBlockSize, size / 100 / 64 * 64);
-
+    const uint64_t block_size
+        = std::max(size / 100, static_cast<uint64_t>(1'000'000)) & ~0x3Full;
     // Each block is a multiple of 64 bits for thread safety
     assert(!(block_size & 0x3F));
 
@@ -260,6 +256,36 @@ void compute_or(const std::vector<const bit_vector *> &columns,
     }
 
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
+}
+
+std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns) {
+    std::vector<uint64_t> result;
+    std::vector<uint64_t> pos;
+    for (size_t i = 0; i < columns.size(); ++i) {
+        assert(col_ptr);
+
+        pos.reserve(columns[i]->num_set_bits());
+        pos.resize(0);
+
+        columns[i]->call_ones([&](uint64_t k) { pos.push_back(k); });
+
+        if (!i) {
+            result.swap(pos);
+        } else {
+            //TODO: use multiway merge for more than two columns
+            std::vector<uint64_t> new_result(result.size() + pos.size());
+            std::merge(pos.begin(), pos.end(),
+                       result.begin(), result.end(), new_result.begin());
+            result.swap(new_result);
+        }
+    }
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+
+    return std::make_unique<bit_vector_smart>(
+        [&](const auto &callback) { std::for_each(result.begin(), result.end(), callback); },
+        columns.at(0)->size(),
+        result.size()
+    );
 }
 
 void compute_subindex(const bit_vector &column,
@@ -317,6 +343,26 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
     }
 
     std::for_each(futures.begin(), futures.end(), [](auto &f) { f.wait(); });
+
+    return subindex;
+}
+
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const bit_vector &reference) {
+    assert(column.size() == reference.size());
+
+    uint64_t reference_num_set_bits = reference.num_set_bits();
+
+    // no shrinkage if vectors are the same
+    if (column.num_set_bits() == reference_num_set_bits)
+        return sdsl::bit_vector(reference_num_set_bits, true);
+
+    sdsl::bit_vector subindex(reference_num_set_bits, false);
+
+    column.call_ones([&](uint64_t j) {
+        assert(reference[j]);
+        subindex[reference.rank1(j) - 1] = true;
+    });
 
     return subindex;
 }
