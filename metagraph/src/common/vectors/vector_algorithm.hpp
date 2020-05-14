@@ -118,7 +118,8 @@ void compute_or(const std::vector<const bit_vector *> &columns,
                 sdsl::bit_vector *result,
                 ThreadPool &thread_pool);
 
-std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns);
+std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
+                                       ThreadPool &thread_pool);
 
 // assumes that all bits that are set in |column| are set in |reference| too.
 sdsl::bit_vector generate_subindex(const bit_vector &column,
@@ -127,7 +128,8 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
                                    ThreadPool &thread_pool);
 
 sdsl::bit_vector generate_subindex(const bit_vector &column,
-                                   const bit_vector &reference);
+                                   const bit_vector &reference,
+                                   ThreadPool &thread_pool);
 
 // Apply the bitwise AND of vector with right-shifts of itself. Only works for
 // values of offset < 64

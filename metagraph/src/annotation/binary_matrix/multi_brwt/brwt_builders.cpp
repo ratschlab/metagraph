@@ -47,7 +47,7 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
     // build an aggregated parent index column
     if (sum_num_set_bits < buffer->size() / 128) {
         // work with bits
-        return concatenate_sparse(std::move(submatrices));
+        return concatenate_sparse(std::move(submatrices), thread_pool);
     }
     // work with uncompressed bitmap stored in buffer
 
@@ -101,7 +101,8 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
     return parent;
 }
 
-BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices) {
+BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices,
+                                             ThreadPool &thread_pool) {
     assert(submatrices.size());
 
     if (submatrices.size() == 1)
@@ -117,7 +118,7 @@ BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices) {
     // work with bits
 
     // build an aggregated parent index column
-    parent.nonzero_rows_ = compute_or(index_columns);
+    parent.nonzero_rows_ = compute_or(index_columns, thread_pool);
 
     // set column assignments
     uint64_t num_columns = 0;
@@ -137,7 +138,7 @@ BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices) {
         // generate an index column for the child node
         sdsl::bit_vector subindex
             = generate_subindex(*submatrices[i].nonzero_rows_,
-                                *parent.nonzero_rows_);
+                                *parent.nonzero_rows_, thread_pool);
 
         // the full index vector is not needed anymore, the subindex
         // will be used instead

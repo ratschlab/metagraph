@@ -1,6 +1,7 @@
 #include "vector_algorithm.hpp"
 
 #include <cmath>
+#include <mutex>
 
 #include <sdsl/uint128_t.hpp>
 
@@ -258,33 +259,59 @@ void compute_or(const std::vector<const bit_vector *> &columns,
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
 }
 
-std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns) {
-    std::vector<uint64_t> result;
-    std::vector<uint64_t> pos;
-    for (size_t i = 0; i < columns.size(); ++i) {
-        assert(col_ptr);
+std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
+                                       ThreadPool &thread_pool) {
+    uint64_t size = columns.at(0)->size();
 
-        pos.reserve(columns[i]->num_set_bits());
-        pos.resize(0);
+    const uint64_t block_size = std::max(size / 100, static_cast<uint64_t>(100'000));
 
-        columns[i]->call_ones([&](uint64_t k) { pos.push_back(k); });
+    std::vector<std::vector<uint64_t>> results((size + block_size - 1) / block_size);
+    std::vector<std::future<void>> futures;
+    std::atomic<uint64_t> num_set_bits = 0;
 
-        if (!i) {
-            result.swap(pos);
-        } else {
-            //TODO: use multiway merge for more than two columns
-            std::vector<uint64_t> new_result(result.size() + pos.size());
-            std::merge(pos.begin(), pos.end(),
-                       result.begin(), result.end(), new_result.begin());
-            result.swap(new_result);
-        }
+    for (uint64_t i = 0; i < size; i += block_size) {
+        futures.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
+            auto &result = results[begin / block_size];
+
+            for (size_t j = 0; j < columns.size(); ++j) {
+                std::vector<uint64_t> pos;
+                pos.reserve(columns[j]->rank1(end - 1)
+                                - (begin ? columns[j]->rank1(begin - 1) : 0));
+
+                columns[j]->call_ones_in_range(begin, end,
+                    [&](uint64_t k) { pos.push_back(k); }
+                );
+
+                if (result.empty()) {
+                    result.swap(pos);
+                } else {
+                    //TODO: use multiway merge for more than two columns
+                    std::vector<uint64_t> merged(result.size() + pos.size());
+                    std::merge(pos.begin(), pos.end(),
+                               result.begin(), result.end(), merged.begin());
+                    result = std::move(merged);
+                }
+            }
+
+            result.erase(std::unique(result.begin(), result.end()), result.end());
+
+            num_set_bits += result.size();
+
+        }, i, std::min(i + block_size, size)));
     }
-    result.erase(std::unique(result.begin(), result.end()), result.end());
+
+    std::for_each(futures.begin(), futures.end(), [](auto &f) { f.wait(); });
 
     return std::make_unique<bit_vector_smart>(
-        [&](const auto &callback) { std::for_each(result.begin(), result.end(), callback); },
+        [&](const auto &callback) {
+            for (const auto &result : results) {
+                for (uint64_t i : result) {
+                    callback(i);
+                }
+            }
+        },
         columns.at(0)->size(),
-        result.size()
+        num_set_bits
     );
 }
 
@@ -348,7 +375,8 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 }
 
 sdsl::bit_vector generate_subindex(const bit_vector &column,
-                                   const bit_vector &reference) {
+                                   const bit_vector &reference,
+                                   ThreadPool &thread_pool) {
     assert(column.size() == reference.size());
 
     uint64_t reference_num_set_bits = reference.num_set_bits();
@@ -359,10 +387,37 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 
     sdsl::bit_vector subindex(reference_num_set_bits, false);
 
-    column.call_ones([&](uint64_t j) {
-        assert(reference[j]);
-        subindex[reference.rank1(j) - 1] = true;
-    });
+    const uint64_t block_size
+      = std::max(reference_num_set_bits / 100,
+                 static_cast<uint64_t>(1'000)) & ~0x3Full;
+    // Each block is a multiple of 64 bits for thread safety
+    assert(!(block_size & 0x3F));
+
+    std::vector<std::future<void>> futures;
+
+    uint64_t end = 0;
+
+    for (uint64_t offset = 0; offset < reference_num_set_bits; offset += block_size) {
+        // ........... [1     1       1    1  1] ............. //
+        //              ^                     ^                //
+        //          (rank = 1 mod 64)     (rank = 0 mod 64)    //
+        //              |                     |                //
+        //              |_______ BLOCK _______|                //
+
+        uint64_t begin = end;
+        end = offset + block_size < reference_num_set_bits
+                ? reference.select1(offset + block_size + 1)
+                : reference.size();
+
+        futures.push_back(thread_pool.enqueue([&,begin,end]() {
+            column.call_ones_in_range(begin, end, [&](uint64_t j) {
+                assert(reference[j]);
+                subindex[reference.rank1(j) - 1] = true;
+            });
+        }));
+    }
+
+    std::for_each(futures.begin(), futures.end(), [](auto &f) { f.wait(); });
 
     return subindex;
 }
