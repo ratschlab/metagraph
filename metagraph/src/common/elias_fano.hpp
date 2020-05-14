@@ -5,6 +5,7 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <vector>
 
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
@@ -14,6 +15,9 @@
 
 namespace mg {
 namespace common {
+
+/** Concatenates files into result */
+void concat(const std::vector<std::string> &files,  const std::string& result);
 
 /**
  * Elias-Fano encoder that streams the encoded result into a file.

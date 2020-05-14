@@ -356,7 +356,8 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_l1_chunks;
     std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_l2_chunks;
     std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_sink_chunks;
-    std::vector<std::string> dummy_names(2*ALPHABET_LEN);
+    std::vector<std::string> dummy_names(ALPHABET_LEN);
+    std::vector<std::string> dummy_sink_names(ALPHABET_LEN);
     std::vector<std::string> dummy_next_names(ALPHABET_LEN);
     dummy_l1_chunks.reserve(ALPHABET_LEN);
     dummy_l2_chunks.reserve(ALPHABET_LEN);
@@ -364,10 +365,10 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
         dummy_names[i] = tmp_dir / ("dummy_source_1_" + std::to_string(i));
         dummy_next_names[i] = tmp_dir / ("dummy_source_2_" + std::to_string(i));
-        dummy_names[i + ALPHABET_LEN] = tmp_dir / ("dummy_sink_" + std::to_string(i));
+        dummy_sink_names[i] = tmp_dir / ("dummy_sink_" + std::to_string(i));
         dummy_l1_chunks.emplace_back(dummy_names[i], ENCODER_BUFFER_SIZE);
         dummy_l2_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
-        dummy_sink_chunks.emplace_back(dummy_names[i + ALPHABET_LEN], ENCODER_BUFFER_SIZE);
+        dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
     size_t k = kmer_collector.get_k() - 1;
@@ -400,6 +401,8 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
         dummy_l1_chunks[i].finish();
         dummy_sink_chunks[i].finish();
     }
+    common::concat(dummy_sink_names, tmp_dir/"dummy_sink");
+    dummy_names.push_back(tmp_dir/"dummy_sink");
 
     std::string original_and_dummy_l1 = tmp_dir / "original_and_dummy_l1";
     common::EliasFanoEncoderBuffered<T_INT> original_and_l1(original_and_dummy_l1,
