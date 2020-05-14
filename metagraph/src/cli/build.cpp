@@ -102,10 +102,6 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        std::filesystem::path tmp_dir;
-        if (!config->tmp_dir.empty())
-            tmp_dir = utils::create_temp_dir(config->tmp_dir, "dbg");
-
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
             timer.reset();
@@ -121,9 +117,9 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                tmp_dir.empty() ? mg::kmer::ContainerType::VECTOR
-                                : mg::kmer::ContainerType::VECTOR_DISK,
-                tmp_dir,
+                config->tmp_dir.empty() ? mg::kmer::ContainerType::VECTOR
+                                        : mg::kmer::ContainerType::VECTOR_DISK,
+                config->tmp_dir,
                 config->disk_cap_bytes
             );
 

@@ -153,7 +153,6 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         logger->trace("Annotation loading finished ({} columns)", bitmatrix_.size());
         return true;
     } else {
-        logger->error("Annotation loading failed");
         return false;
     }
 }
