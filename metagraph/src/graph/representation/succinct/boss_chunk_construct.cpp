@@ -379,6 +379,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     size_t num_parent_kmers = 0;
     // traverse the input kmers and generated dummy-1 source k-mers and dummy sink k-mers
+    KMER prev;
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         encode(*it, &original_kmers);
@@ -472,10 +473,8 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             encoder.add(v);
             KMER kmer(v);
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
-            if (kmer != KMER(0)) {
-                dummy_next_chunks[kmer[0]].add(kmer.data());
-                num_kmers++;
-            }
+            dummy_next_chunks[kmer[0]].add(kmer.data());
+            num_kmers++;
         };
         common::merge_files(dummy_names, write_dummy);
 

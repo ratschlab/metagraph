@@ -16,7 +16,11 @@
 namespace mg {
 namespace common {
 
-/** Concatenates files into result */
+/**
+ * Concatenates Elias-Fano files into result
+ * The files store data that is ordered and the values in a file are smaller than the
+ * values in the next file.
+ */
 void concat(const std::vector<std::string> &files,  const std::string& result);
 
 /**
