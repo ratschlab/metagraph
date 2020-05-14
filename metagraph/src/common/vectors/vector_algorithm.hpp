@@ -32,6 +32,104 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
                                uint8_t bits_per_number);
 
 
+/**
+ * Atomic bit fetching, setting, and unsetting on packed vectors.
+ * fetch_and_* return the old values. The default memorder __ATOMIC_SEQ_CST
+ * enforces the ordering of writes and reads across threads. See
+ * https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
+ * for other options.
+ */
+
+template <class t_int_vec>
+inline bool atomic_fetch_and_set_bit(t_int_vec &v,
+                                     size_t i,
+                                     bool atomic = false,
+                                     int memorder = __ATOMIC_SEQ_CST) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    if (atomic) {
+        return (__atomic_fetch_or(&v.data()[i >> 6],
+                                  1llu << (i & 0x3F),
+                                  memorder) >> (i & 0x3F)) & 1;
+    } else {
+        uint64_t *word = &v.data()[i >> 6];
+        if (!((*word >> (i & 0x3F)) & 1)) {
+            *word |= (1llu << (i & 0x3F));
+            return false;
+        } else {
+            return true;
+        }
+    }
+}
+
+template <class t_int_vec>
+inline bool atomic_fetch_and_unset_bit(t_int_vec &v,
+                                       size_t i,
+                                       bool atomic = false,
+                                       int memorder = __ATOMIC_SEQ_CST) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    if (atomic) {
+        return (__atomic_fetch_and(&v.data()[i >> 6],
+                                   ~(1llu << (i & 0x3F)),
+                                   memorder) >> (i & 0x3F)) & 1;
+    } else {
+        uint64_t *word = &v.data()[i >> 6];
+        if ((*word >> (i & 0x3F)) & 1) {
+            *word &= ~(1llu << (i & 0x3F));
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+template <class t_int_vec>
+inline bool atomic_fetch_bit(t_int_vec &v,
+                             size_t i,
+                             bool atomic = false,
+                             int memorder = __ATOMIC_SEQ_CST) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    return atomic
+        ? ((__atomic_load_n(&v.data()[i >> 6], memorder) >> (i & 0x3F)) & 1)
+        : ((v.data()[i >> 6] >> (i & 0x3F)) & 1);
+}
+
+template <class t_int_vec>
+inline void atomic_set_bit(t_int_vec &v,
+                           size_t i,
+                           bool atomic = false,
+                           int memorder = __ATOMIC_SEQ_CST) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    if (atomic) {
+        __atomic_or_fetch(&v.data()[i >> 6], 1llu << (i & 0x3F), memorder);
+    } else {
+        v.data()[i >> 6] |= (1llu << (i & 0x3F));
+    }
+}
+
+template <class t_int_vec>
+inline void atomic_unset_bit(t_int_vec &v,
+                             size_t i,
+                             bool atomic = false,
+                             int memorder = __ATOMIC_SEQ_CST) {
+    // these assume that the underlying vector contains packed 64-bit integers
+    static_assert(sizeof(*v.data()) == 8);
+
+    if (atomic) {
+        __atomic_and_fetch(&v.data()[i >> 6], ~(1llu << (i & 0x3F)), memorder);
+    } else {
+        v.data()[i >> 6] &= ~(1llu << (i & 0x3F));
+    }
+}
+
+
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector,
                uint64_t begin, uint64_t end,
@@ -74,7 +172,14 @@ void call_ones(const Bitmap &vector, Callback callback) {
 template <class Bitmap, class Callback>
 void call_zeros(const Bitmap &vector,
                 uint64_t begin, uint64_t end,
-                Callback callback) {
+                Callback callback,
+                bool atomic = false,
+                int memorder = __ATOMIC_SEQ_CST) {
+    if (atomic) {
+        std::ignore = memorder;
+        throw std::runtime_error("Atomic call_zeros not implemented");
+    }
+
     assert(begin <= end);
     assert(end <= vector.size());
 
@@ -105,9 +210,48 @@ void call_zeros(const Bitmap &vector,
     }
 }
 
+template <class Callback>
+void call_zeros(const sdsl::bit_vector &vector,
+                uint64_t begin, uint64_t end,
+                Callback callback,
+                bool atomic = false,
+                int memorder = __ATOMIC_SEQ_CST) {
+    assert(begin <= end);
+    assert(end <= vector.size());
+
+    uint64_t i = begin;
+    for (; i < end && i & 0x3F; ++i) {
+        if (!atomic_fetch_bit(vector, i, atomic, memorder))
+            callback(i);
+    }
+    uint64_t word;
+    for (uint64_t j = i + 64; j <= end; j += 64) {
+        word = atomic
+            ? ~__atomic_load_n(&vector.data()[i >> 6], memorder)
+            : ~vector.get_int(i, 64);
+        if (!word) {
+            i += 64;
+            continue;
+        }
+
+        i += sdsl::bits::lo(word);
+        callback(i++);
+
+        for (; i < j; ++i) {
+            if (!atomic_fetch_bit(vector, i, atomic, memorder))
+                callback(i);
+        }
+    }
+    for (; i < end; ++i) {
+        if (!atomic_fetch_bit(vector, i, atomic, memorder))
+            callback(i);
+    }
+}
+
 template <class Bitmap, class Callback>
-void call_zeros(const Bitmap &vector, Callback callback) {
-    call_zeros(vector, 0, vector.size(), callback);
+void call_zeros(const Bitmap &vector, Callback callback,
+                bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+    call_zeros(vector, 0, vector.size(), callback, atomic, memorder);
 }
 
 uint64_t count_ones(const sdsl::bit_vector &vector, uint64_t begin, uint64_t end);
@@ -301,102 +445,6 @@ prev_bit(const t_int_vec &v,
     return v.bit_size();
 }
 
-/**
- * Atomic bit fetching, setting, and unsetting on packed vectors.
- * fetch_and_* return the old values. The default memorder __ATOMIC_SEQ_CST
- * enforces the ordering of writes and reads across threads. See
- * https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
- * for other options.
- */
-
-template <class t_int_vec>
-inline bool atomic_fetch_and_set_bit(t_int_vec &v,
-                                     size_t i,
-                                     bool atomic = false,
-                                     int memorder = __ATOMIC_SEQ_CST) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
-    if (atomic) {
-        return (__atomic_fetch_or(&v.data()[i >> 6],
-                                  1llu << (i & 0x3F),
-                                  memorder) >> (i & 0x3F)) & 1;
-    } else {
-        uint64_t *word = &v.data()[i >> 6];
-        if (!((*word >> (i & 0x3F)) & 1)) {
-            *word |= (1llu << (i & 0x3F));
-            return false;
-        } else {
-            return true;
-        }
-    }
-}
-
-template <class t_int_vec>
-inline bool atomic_fetch_and_unset_bit(t_int_vec &v,
-                                       size_t i,
-                                       bool atomic = false,
-                                       int memorder = __ATOMIC_SEQ_CST) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
-    if (atomic) {
-        return (__atomic_fetch_and(&v.data()[i >> 6],
-                                   ~(1llu << (i & 0x3F)),
-                                   memorder) >> (i & 0x3F)) & 1;
-    } else {
-        uint64_t *word = &v.data()[i >> 6];
-        if ((*word >> (i & 0x3F)) & 1) {
-            *word &= ~(1llu << (i & 0x3F));
-            return true;
-        } else {
-            return false;
-        }
-    }
-}
-
-template <class t_int_vec>
-inline bool atomic_fetch_bit(t_int_vec &v,
-                             size_t i,
-                             bool atomic = false,
-                             int memorder = __ATOMIC_SEQ_CST) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
-    return atomic
-        ? ((__atomic_load_n(&v.data()[i >> 6], memorder) >> (i & 0x3F)) & 1)
-        : ((v.data()[i >> 6] >> (i & 0x3F)) & 1);
-}
-
-template <class t_int_vec>
-inline void atomic_set_bit(t_int_vec &v,
-                           size_t i,
-                           bool atomic = false,
-                           int memorder = __ATOMIC_SEQ_CST) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
-    if (atomic) {
-        __atomic_or_fetch(&v.data()[i >> 6], 1llu << (i & 0x3F), memorder);
-    } else {
-        v.data()[i >> 6] |= (1llu << (i & 0x3F));
-    }
-}
-
-template <class t_int_vec>
-inline void atomic_unset_bit(t_int_vec &v,
-                             size_t i,
-                             bool atomic = false,
-                             int memorder = __ATOMIC_SEQ_CST) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
-    if (atomic) {
-        __atomic_and_fetch(&v.data()[i >> 6], ~(1llu << (i & 0x3F)), memorder);
-    } else {
-        v.data()[i >> 6] &= ~(1llu << (i & 0x3F));
-    }
-}
 
 namespace sdsl {
 
