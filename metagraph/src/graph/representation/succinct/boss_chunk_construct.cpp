@@ -396,31 +396,23 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
     size_t num_parent_kmers = 0;
-    std::vector<KMER> last_sink(ALPHABET_LEN, KMER(0));
-    auto& it = kmers->begin();
-
-    encode(*it, &original_kmers);
-    KMER prev = get_first(*it);
-    ++it;
     // traverse the input kmers and generated dummy-1 source k-mers and dummy sink k-mers
-    for (; it != kmers->end(); ++it) {
+    for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
         encode(*it, &original_kmers);
 
         KMER dummy_source = get_first(*it);
-        if (!KMER::compare_suffix(dummy_source, prev)) {
-            dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
-            TAlphabet curW = dummy_source[0];
-            dummy_l1_chunks[curW].add(dummy_source.data());
+        if (dummy_source == KMER(0)) {
+            continue; // skip the all dummy kmer
         }
+        dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
+        TAlphabet curW = dummy_source[0];
+        dummy_l1_chunks[curW].add(dummy_source.data());
+
         KMER dummy_sink = get_first(*it);
-        TAlphabet curW = dummy_sink[0];
         dummy_sink.to_next(k + 1, BOSS::kSentinelCode);
-        if (dummy_sink != last_sink[curW]) {
-            dummy_sink_chunks[curW].add(dummy_sink.data());
-            last_sink[curW] = dummy_sink;
-        }
-        prev = get_first(*it);
+        TAlphabet first_char = dummy_sink[k];
+        dummy_sink_chunks[first_char].add(dummy_sink.data());
     }
     original_kmers.finish();
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
