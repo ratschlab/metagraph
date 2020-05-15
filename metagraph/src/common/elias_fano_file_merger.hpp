@@ -227,6 +227,7 @@ uint64_t merge_dummy(const std::string &source,
 
     // add the leftover contents from #source
     while (data_item.has_value()) {
+        num_elements_read++;
         on_new_item(data_item.value());
         data_item = decoder.next();
     }

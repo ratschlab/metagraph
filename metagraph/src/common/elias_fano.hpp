@@ -290,6 +290,8 @@ class EliasFanoEncoderBuffered {
 
     void add(const T &value);
 
+    inline const std::string &name() { return file_name_; }
+
     size_t finish();
 
   private:
@@ -315,6 +317,8 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
 
     void add(const std::pair<T, C> &value);
+
+    inline const std::string &name() { return file_name_; }
 
     size_t finish();
 
