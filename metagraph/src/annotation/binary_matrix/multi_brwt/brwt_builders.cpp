@@ -45,9 +45,9 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
     }
 
     // build an aggregated parent index column
-    if (sum_num_set_bits < buffer->size() / 128) {
+    if (sum_num_set_bits * 64 * 3 < buffer->size()) {
         // work with bits
-        return concatenate_sparse(std::move(submatrices), thread_pool);
+        return concatenate_sparse(std::move(submatrices), buffer, thread_pool);
     }
     // work with uncompressed bitmap stored in buffer
 
@@ -102,6 +102,7 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
 }
 
 BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices,
+                                             sdsl::bit_vector *buffer,
                                              ThreadPool &thread_pool) {
     assert(submatrices.size());
 
@@ -118,7 +119,7 @@ BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices,
     // work with bits
 
     // build an aggregated parent index column
-    parent.nonzero_rows_ = compute_or(index_columns, thread_pool);
+    parent.nonzero_rows_ = compute_or(index_columns, buffer->data(), thread_pool);
 
     // set column assignments
     uint64_t num_columns = 0;

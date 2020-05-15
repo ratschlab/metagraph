@@ -118,7 +118,10 @@ void compute_or(const std::vector<const bit_vector *> &columns,
                 sdsl::bit_vector *result,
                 ThreadPool &thread_pool);
 
+// The buffer must have capacity to store 3 x (number of set bits in all columns)
+// 64-bit integers
 std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
+                                       uint64_t *buffer,
                                        ThreadPool &thread_pool);
 
 // assumes that all bits that are set in |column| are set in |reference| too.

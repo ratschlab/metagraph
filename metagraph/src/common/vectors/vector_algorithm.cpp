@@ -260,42 +260,65 @@ void compute_or(const std::vector<const bit_vector *> &columns,
 }
 
 std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
+                                       uint64_t *buffer,
                                        ThreadPool &thread_pool) {
     uint64_t size = columns.at(0)->size();
 
     const uint64_t block_size = std::max(size / 100, static_cast<uint64_t>(100'000));
 
-    std::vector<std::vector<uint64_t>> results((size + block_size - 1) / block_size);
+    std::vector<std::pair<uint64_t *, uint64_t *>> results((size + block_size - 1) / block_size);
+    std::mutex mu;
+
     std::vector<std::future<void>> futures;
     std::atomic<uint64_t> num_set_bits = 0;
 
     for (uint64_t i = 0; i < size; i += block_size) {
         futures.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
-            auto &result = results[begin / block_size];
+            std::pair<uint64_t *, uint64_t *> &result = results[begin / block_size];
+            std::pair<uint64_t *, uint64_t *> buffer_pos;
+            std::pair<uint64_t *, uint64_t *> buffer_merge;
 
+            uint64_t size = 0;
             for (size_t j = 0; j < columns.size(); ++j) {
-                std::vector<uint64_t> pos;
-                pos.reserve(columns[j]->rank1(end - 1)
-                                - (begin ? columns[j]->rank1(begin - 1) : 0));
-
-                columns[j]->call_ones_in_range(begin, end,
-                    [&](uint64_t k) { pos.push_back(k); }
-                );
-
-                if (result.empty()) {
-                    result.swap(pos);
-                } else {
-                    //TODO: use multiway merge for more than two columns
-                    std::vector<uint64_t> merged(result.size() + pos.size());
-                    std::merge(pos.begin(), pos.end(),
-                               result.begin(), result.end(), merged.begin());
-                    result = std::move(merged);
-                }
+                size += columns[j]->rank1(end - 1)
+                            - (begin ? columns[j]->rank1(begin - 1) : 0);
             }
 
-            result.erase(std::unique(result.begin(), result.end()), result.end());
+            {
+                std::lock_guard<std::mutex> lock(mu);
 
-            num_set_bits += result.size();
+                result.first = result.second = buffer;
+                buffer += size;
+
+                buffer_pos.first = buffer_pos.second = buffer;
+                buffer += size;
+
+                buffer_merge.first = buffer_merge.second = buffer;
+                buffer += size;
+            }
+
+            columns[0]->call_ones_in_range(begin, end,
+                [&](uint64_t k) { *(result.second++) = k; }
+            );
+
+            for (size_t j = 1; j < columns.size(); ++j) {
+                buffer_pos.second = buffer_pos.first;
+                columns[j]->call_ones_in_range(begin, end,
+                    [&](uint64_t k) { *(buffer_pos.second++) = k; }
+                );
+
+                //TODO: use multiway merge for more than two columns
+                std::merge(buffer_pos.first, buffer_pos.second,
+                           result.first, result.second, buffer_merge.first);
+                buffer_merge.second = buffer_merge.first
+                                        + (buffer_pos.second - buffer_pos.first)
+                                        + (result.second - result.first);
+                result.swap(buffer_merge);
+            }
+
+            result.second = std::unique(result.first, result.second);
+
+            num_set_bits += result.second - result.first;
 
         }, i, std::min(i + block_size, size)));
     }
@@ -305,8 +328,8 @@ std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &co
     return std::make_unique<bit_vector_smart>(
         [&](const auto &callback) {
             for (const auto &result : results) {
-                for (uint64_t i : result) {
-                    callback(i);
+                for (uint64_t *p = result.first; p < result.second; ++p) {
+                    callback(*p);
                 }
             }
         },
