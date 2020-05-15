@@ -71,19 +71,17 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     Vector<T> &kmers = *kmers_p;
 
     // points to the current k-mer with the given first character
-    std::array<size_t, ALPHABET_LEN+1> first_char_it;
-    first_char_it[0] = 0;
+    std::array<const T*, ALPHABET_LEN + 1> first_char_it;
     std::vector<INT> zeros(k + 1);
     for (uint32_t i = 1; i < ALPHABET_LEN; ++i) {
         zeros[k - 1] = i;
-        KMER to_search = KMER(zeros, k + 1); // the $$...i->$ k-mer
-        auto pos = std::lower_bound(kmers.begin(), kmers.end(), to_search,
-                                      [](const T &a, const KMER &b) -> bool {
-                                          return get_first(a) < b;
-                                      });
-        first_char_it[i] = pos - kmers.begin();
+        first_char_it[i] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
+                                            KMER(zeros, k + 1), // the $$...i->$ k-mer
+                                            [](const T &a, const KMER &b) -> bool {
+                                                return get_first(a) < b;
+                                            });
     }
-    first_char_it[ALPHABET_LEN] = kmers.size();
+    first_char_it[ALPHABET_LEN] = kmers.data() + kmers.size();
 
     std::vector<KMER> last_dummy(ALPHABET_LEN, KMER(0));
     size_t size = kmers.size();
@@ -97,17 +95,16 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
 
         TAlphabet last_char = kmer[0];
         if (last_dummy[last_char] == dummy_sink_kmer) {
-            continue;  // avoid generating duplicate dummy sink kmers
+            continue; // avoid generating duplicate dummy sink kmers
         }
         last_dummy[last_char] = dummy_sink_kmer;
-        size_t &dummy_sink_it = first_char_it[last_char];
 
-        while (dummy_sink_it < first_char_it[last_char+1]
-               && KMER::less(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
-            dummy_sink_it++;
+        while (first_char_it[last_char] < first_char_it[last_char + 1]
+                && KMER::less(get_first(*first_char_it[last_char]), dummy_sink_kmer)) {
+            first_char_it[last_char]++;
         }
-        if (dummy_sink_it == first_char_it[last_char+1]
-            || !KMER::compare_suffix(get_first(kmers[dummy_sink_it]), dummy_sink_kmer)) {
+        if (!KMER::compare_suffix(get_first(*first_char_it[last_char]), dummy_sink_kmer)
+                || first_char_it[last_char] == first_char_it[last_char + 1]) {
             push_back(kmers, dummy_sink_kmer);
         }
     }
@@ -115,7 +112,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
 
 /**
  * Adds non-redundant dummy source nodes with prefix length 1 for the given kmers.
-
+ *
  * For each kmer in #kmers_p, the method creates the corresponding dummy sources with
  * sentinels of length 1 (aka dummy-1 sources). The method then checks if the dummy-1
  * source node is redundant, i.e. if there is another non-dummy node that is identical
@@ -139,7 +136,7 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
     Vector<T> &kmers = *kmers_p;
 
     // points to the first k-mer that may be redundant with the current dummy source k-mer
-    size_t dummy_it = 0;
+    size_t real_it = 0;
 
     for (size_t i = 1; i < end; ++i) { // starting at 1 to skip the $$...$$ k-mer
         const KMER &kmer = get_first(kmers[i]);
@@ -147,30 +144,27 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
         assert(kmer[1] != 0 && kmer[0] != 0);
 
         if (kmer[k] != get_first(kmers[i - 1])[k]) {
-            // the last (most significant) character changed, need to start search from beginning
-            dummy_it = 0;
+            // the last (most significant) character changed -> reset the iterator
+            real_it = 0;
         }
 
-        if (KMER::compare_suffix(kmer, get_first(kmers[i -1 ]))) {
+        if (KMER::compare_suffix(kmer, get_first(kmers[i - 1])))
             continue; // i would generate the same dummy-1 k-mer as i-1, skip
-        }
 
         KMER prev_kmer = kmer;
         prev_kmer.to_prev(k + 1, BOSS::kSentinelCode);
 
-        while (dummy_it < end && KMER::less(get_first(kmers[dummy_it]), prev_kmer, 1)) {
-            dummy_it++;
+        while (real_it < end && KMER::less(get_first(kmers[real_it]), prev_kmer, 1)) {
+            real_it++;
         }
-        size_t cur_pos = dummy_it;
         bool is_redundant = false;
-        while (cur_pos < end
-               && KMER::compare_suffix(get_first(kmers[cur_pos]), prev_kmer, 1)) {
-            const KMER &current_kmer = get_first(kmers[cur_pos]);
-            if (prev_kmer[0] == current_kmer[0]) {  // edge labels match
+        while (real_it < end
+                && KMER::compare_suffix(get_first(kmers[real_it]), prev_kmer, 1)) {
+            if (get_first(kmers[real_it])[0] == prev_kmer[0]) {  // edge labels match
                 is_redundant = true;
                 break;
             }
-            cur_pos++;
+            real_it++;
         }
         if (!is_redundant) {
             push_back(kmers, prev_kmer);
@@ -210,18 +204,17 @@ void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
 
         for (size_t i = dummy_begin; i < dummy_end; ++i) {
             KMER kmer = get_first(kmers[i]);
-            if (KMER::compare_suffix(kmer, get_first(kmers[i - 1]))) {
+            if (KMER::compare_suffix(kmer, get_first(kmers[i - 1])))
                 continue; // i would generate the same dummy source k-mer as i-1, skip
-            }
 
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
             push_back(kmers, kmer);
         }
-        sort(&kmers, num_threads, dummy_end);
+        dummy_begin = dummy_end;
+        sort(&kmers, num_threads, dummy_begin);
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}", c,
-                      kmers.size() - dummy_end);
-        dummy_begin = dummy_end;
+                      kmers.size() - dummy_begin);
     }
     sort(&kmers, num_threads, 0);
 }
@@ -240,8 +233,8 @@ template <typename T>
 using RecentKmers = common::CircularBuffer<KmerBuffered<T>>;
 
 template <typename T, typename T_INT>
-void encode(const T &v, common::EliasFanoEncoderBuffered<T_INT> *encoder) {
-    if constexpr (utils::is_pair_v<T>) {
+inline void push(const T &v, common::EliasFanoEncoderBuffered<T_INT> *encoder) {
+    if constexpr(utils::is_pair_v<T>) {
         encoder->add({ v.first.data(), v.second });
     } else {
         encoder->add(v.data());
@@ -337,7 +330,7 @@ uint8_t write_kmer(size_t k,
     if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
     }
-    encode(to_write.data, encoder);
+    push(to_write.data, encoder);
     auto &kmer_to_write = get_first(to_write.data);
     const TAlphabet node_last_char = kmer_to_write[1];
     const TAlphabet edge_label = kmer_to_write[0];
@@ -372,11 +365,11 @@ size_t merge_original_and_dummy_l1(
     // while also removing the redundant dummy-1 kmers *and* generating dummy-2 kmers
     size_t num_dummy_l1_kmers = 0;
     const std::function<void(const T_INT &)> &on_new_item = [&](const T_INT &v) {
-      const T &kmer = reinterpret_cast<const T &>(v);
-      push_dummy_sink(k, kmer, &last_dummy_sink, &recent_buffer, &original_and_l1,
-                      dummy_l2_chunks, &num_dummy_l1_kmers);
-      push_and_remove_redundant_dummy_source(k, kmer, &recent_buffer, &original_and_l1,
-                                             dummy_l2_chunks, &num_dummy_l1_kmers);
+        const T &kmer = reinterpret_cast<const T &>(v);
+        push_dummy_sink(k, kmer, &last_dummy_sink, &recent_buffer, &original_and_l1,
+                        dummy_l2_chunks, &num_dummy_l1_kmers);
+        push_and_remove_redundant_dummy_source(k, kmer, &recent_buffer, &original_and_l1,
+                                               dummy_l2_chunks, &num_dummy_l1_kmers);
     };
     common::merge_dummy(original_name, dummy_names, on_new_item);
     if (last_dummy_sink.has_value()) { // add leftover dummy sink k-mer
@@ -394,15 +387,13 @@ size_t merge_original_and_dummy_l1(
 
 /**
  * Generates dummy-1 source k-mers and dummy sink kmers from #kmers and merges them into
- * #merged_l1_name. The dummy-2 source kmers for each first character are written into
- * #dummy_next_names.
+ * #merged_l1_name. The dummy-2 source kmers for each first character are returned.
  */
 template <typename T>
-void generate_dummy_1_kmers(size_t k,
-                            const std::filesystem::path &tmp_dir,
-                            ChunkedWaitQueue<T> *kmers,
-                            const std::string &merged_l1_name,
-                            std::vector<std::string> *dummy_next_names) {
+std::vector<std::string> generate_dummy_1_kmers(size_t k,
+                                                const std::filesystem::path &tmp_dir,
+                                                ChunkedWaitQueue<T> *kmers,
+                                                const std::string &merged_l1_name) {
     constexpr uint8_t ALPHABET_LEN = 1 << KmerExtractorBOSS::bits_per_char;
 
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
@@ -413,33 +404,30 @@ void generate_dummy_1_kmers(size_t k,
     std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_l2_chunks;
     std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_sink_chunks;
     std::vector<std::string> dummy_names(ALPHABET_LEN);
+    std::vector<std::string> dummy_next_names(ALPHABET_LEN);
     std::vector<std::string> dummy_sink_names(ALPHABET_LEN);
-    dummy_l1_chunks.reserve(ALPHABET_LEN);
-    dummy_l2_chunks.reserve(ALPHABET_LEN);
-    dummy_sink_chunks.reserve(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
         dummy_names[i] = tmp_dir / ("dummy_source_1_" + std::to_string(i));
-        (*dummy_next_names)[i] = tmp_dir / ("dummy_source_2_" + std::to_string(i));
+        dummy_next_names[i] = tmp_dir / ("dummy_source_2_" + std::to_string(i));
         dummy_sink_names[i] = tmp_dir / ("dummy_sink_" + std::to_string(i));
         dummy_l1_chunks.emplace_back(dummy_names[i], ENCODER_BUFFER_SIZE);
-        dummy_l2_chunks.emplace_back((*dummy_next_names)[i], ENCODER_BUFFER_SIZE);
+        dummy_l2_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
-    common::EliasFanoEncoderBuffered<T_INT> original_kmers(tmp_dir / "original_kmers",
+    common::EliasFanoEncoderBuffered<T_INT> original_kmers(tmp_dir/"original_kmers",
                                                            ENCODER_BUFFER_SIZE);
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
     size_t num_parent_kmers = 0;
+    // write the main dummy kmer
+    push(*kmers->begin(), &original_kmers);
     // traverse the input kmers and generated dummy-1 source k-mers and dummy sink k-mers
-    for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
+    for (auto &it = ++kmers->begin(); it != kmers->end(); ++it) {
         num_parent_kmers++;
-        encode(*it, &original_kmers);
+        push(*it, &original_kmers);
 
         KMER dummy_source = get_first(*it);
-        if (dummy_source == KMER(0)) {
-            continue; // skip the all dummy kmer
-        }
         dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
         TAlphabet curW = dummy_source[0];
         dummy_l1_chunks[curW].add(dummy_source.data());
@@ -455,17 +443,18 @@ void generate_dummy_1_kmers(size_t k,
         dummy_sink_chunks[i].finish();
     }
     logger->trace("...done. Starting to concatenate dummy sink...");
-    common::concat(dummy_sink_names, tmp_dir / "dummy_sink");
-    dummy_names.push_back(tmp_dir / "dummy_sink");
+    common::concat(dummy_sink_names, tmp_dir/"dummy_sink");
+    dummy_names.push_back(tmp_dir/"dummy_sink");
     logger->trace("...done. Starting merging dummy-1 source and dummy sink...");
 
     size_t dummy1_count
-            = merge_original_and_dummy_l1<T>(k, original_kmers.name(), merged_l1_name,
-                                             dummy_names, &dummy_l2_chunks);
+        = merge_original_and_dummy_l1<T>(k, original_kmers.name(), merged_l1_name,
+                                         dummy_names, &dummy_l2_chunks);
     logger->trace("Total number of k-mers: {}", num_parent_kmers);
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   dummy1_count);
 
+    return dummy_next_names;
 }
 
 /**
@@ -491,9 +480,9 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
 
-    std::vector<std::string> dummy_names(ALPHABET_LEN);
-    std::string merged_l1_name = tmp_dir / "original_and_dummy_l1";
-    generate_dummy_1_kmers(k, tmp_dir, kmers, merged_l1_name, &dummy_names);
+    std::string merged_l1_name = tmp_dir/"original_and_dummy_l1";
+    std::vector<std::string> dummy_names
+        = generate_dummy_1_kmers(k, tmp_dir, kmers, merged_l1_name);
 
     // stores the sorted original kmers and dummy-1 k-mers
     std::vector<std::string> files_to_merge;
@@ -506,11 +495,9 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
                                                       ENCODER_BUFFER_SIZE);
 
         std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_next_chunks;
-        dummy_next_chunks.reserve(ALPHABET_LEN);
         for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
-            std::string name = tmp_dir/("dummy_source_"
+            dummy_next_names[i] = tmp_dir/("dummy_source_"
                     + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
-            dummy_next_names[i] = std::move(name);
             dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         }
         size_t num_kmers = 0;
@@ -627,7 +614,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                 // kmer_collector stores (BOSS::k_ + 1)-mers
                 static_assert(std::is_same_v<typename KmerCollector::Data, Vector<T_INT>>);
                 recover_dummy_nodes(kmer_collector_.get_k() - 1,
-                                           kmer_collector_.num_threads(), &kmers);
+                                    kmer_collector_.num_threads(), &kmers);
             }
             logger->trace("Dummy source k-mers were reconstructed in {} sec",
                           timer.elapsed());
