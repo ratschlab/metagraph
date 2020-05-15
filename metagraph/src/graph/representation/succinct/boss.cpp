@@ -2061,6 +2061,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         if (thread_pool) {
             thread_pool->enqueue(start_cycle, edge);
+            thread_pool->join();
         } else {
             start_cycle(edge);
         }
