@@ -407,9 +407,9 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
     std::vector<std::string> dummy_next_names(ALPHABET_LEN);
     std::vector<std::string> dummy_sink_names(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
-        dummy_names[i] = tmp_dir / ("dummy_source_1_" + std::to_string(i));
-        dummy_next_names[i] = tmp_dir / ("dummy_source_2_" + std::to_string(i));
-        dummy_sink_names[i] = tmp_dir / ("dummy_sink_" + std::to_string(i));
+        dummy_names[i] = tmp_dir/("dummy_source_1_" + std::to_string(i));
+        dummy_next_names[i] = tmp_dir/("dummy_source_2_" + std::to_string(i));
+        dummy_sink_names[i] = tmp_dir/("dummy_sink_" + std::to_string(i));
         dummy_l1_chunks.emplace_back(dummy_names[i], ENCODER_BUFFER_SIZE);
         dummy_l2_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
