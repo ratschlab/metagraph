@@ -1985,13 +1985,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             if (!atomic_fetch_bit(discovered, i, async)) {
                 assert(!subgraph_mask || (*subgraph_mask)[i]);
                 enqueue_start(i);
-                call_paths_from_queue();
-                assert(atomic_fetch_bit(discovered, i, async));
             }
 
         } while (--i > 0 && !get_last(i));
 
-    });
+    }, async);
+
+    call_paths_from_queue();
 
 #ifndef NDEBUG
     call_zeros(discovered, [&](edge_index edge) {
@@ -2025,40 +2025,47 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     // TODO: handle source and sink dummy k-mers for rev comp
     call_zeros(discovered, [&](edge_index edge) {
-        edge_index start = edge;
-        std::vector<edge_index> path;
-        std::vector<TAlphabet> sequence = get_node_seq(edge);
-        do {
-            TAlphabet w = get_W(edge);
-            if (w == kSentinelCode) {
-                assert(path.empty());
-                break;
-            }
-            assert(w != kSentinelCode);
-            TAlphabet d = w % alph_size;
-            sequence.push_back(d);
-            path.push_back(edge);
-            if (d != w)
-                edge = pred_W(edge, d);
-            edge = fwd(edge, d);
-            masked_pick_single_outgoing(*this, &edge, subgraph_mask);
-        } while (edge != start && !atomic_fetch_bit(discovered, edge, async));
+        auto start_cycle = [&](edge_index edge) {
+            edge_index start = edge;
+            std::vector<edge_index> path;
+            std::vector<TAlphabet> sequence = get_node_seq(edge);
+            do {
+                TAlphabet w = get_W(edge);
+                assert(w != kSentinelCode);
+                TAlphabet d = w % alph_size;
+                sequence.push_back(d);
+                path.push_back(edge);
+                edge = fwd(edge, d);
+                masked_pick_single_outgoing(*this, &edge, subgraph_mask);
+            } while (edge != start && !atomic_fetch_bit(discovered, edge, async));
 
-        if (edge == start && path.size()) {
-            {
-                auto lock = conditional_unique_lock(vector_mutex, async);
-                for (edge_index edge : path) {
-                    if (atomic_fetch_and_set_bit(discovered, edge, async))
-                        return;
+            if (edge == start && path.size()) {
+                {
+                    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+                    auto lock = conditional_unique_lock(vector_mutex, async);
+                    for (edge_index edge : path) {
+                        if (atomic_fetch_bit(discovered, edge, async))
+                            return;
+                    }
+                    for (edge_index edge : path) {
+                        atomic_set_bit(discovered, edge, async);
+                    }
                 }
-            }
 
-            progress_bar += path.size();
-            call_path(*this, callback, path, sequence, split_to_unitigs,
-                      kmers_in_single_form, trim_sentinels, discovered, written,
-                      async, vector_mutex, progress_bar, subgraph_mask);
+                progress_bar += path.size();
+                call_path(*this, callback, path, sequence, split_to_unitigs,
+                          kmers_in_single_form, trim_sentinels, discovered, written,
+                          async, vector_mutex, progress_bar, subgraph_mask);
+            }
+        };
+
+        if (thread_pool) {
+            thread_pool->enqueue(start_cycle, edge);
+        } else {
+            start_cycle(edge);
         }
-    });
+
+    }, async);
 
     // call_zeros(discovered, [&](edge_index edge) {
     //     std::cout << get_node_str(edge) << decode(get_W(edge)) << "\n";
@@ -2326,17 +2333,14 @@ void call_path(const BOSS &boss,
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
 
-    if (front_trim) {
-        edge_index t = dual_path.back();
-        TAlphabet w = boss.get_W(t);
-        TAlphabet d = w % boss.alph_size;
-        if (w != d)
-            t = boss.pred_W(t, d);
-
-        t = boss.fwd(t, d);
-        assert(boss.get_W(t) == boss.kSentinelCode);
-        progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
-    }
+    // if (front_trim) {
+    //     edge_index t = dual_path.back();
+    //     TAlphabet w = boss.get_W(t);
+    //     TAlphabet d = w % boss.alph_size;
+    //     t = boss.fwd(t, d);
+    //     assert(boss.get_W(t) == boss.kSentinelCode);
+    //     progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
+    // }
 
     std::reverse(dual_path.begin(), dual_path.end());
 
@@ -2389,16 +2393,19 @@ void call_path(const BOSS &boss,
                 continue;
             }
 
-            // Check if the reverse-complement k-mer has not been traversed
-            // and thus, if the current edge path[i] is to be traversed first.
-            if (!atomic_fetch_and_set_bit(discovered, dual_path[i], async)) {
-                ++progress_bar;
-                atomic_set_bit(written, dual_path[i], async);
-                continue;
-            }
+            // // Check if the reverse-complement k-mer has not been traversed
+            // // and thus, if the current edge path[i] is to be traversed first.
+            // if (!atomic_fetch_and_set_bit(discovered, dual_path[i], async)) {
+            //     ++progress_bar;
+            //     atomic_set_bit(written, dual_path[i], async);
+            //     continue;
+            // }
+            std::ignore = progress_bar;
+            std::ignore = discovered;
 
             // check if another thread has written the reverse-complement k-mer
             if (!atomic_fetch_and_set_bit(written, dual_path[i], async)) {
+                // progress_bar += !atomic_fetch_and_set_bit(discovered, dual_path[i], async);
                 continue;
             }
 
