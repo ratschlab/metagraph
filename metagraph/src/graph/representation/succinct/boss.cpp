@@ -1834,6 +1834,21 @@ void call_paths_from_queue(const BOSS &boss,
                            ProgressBar &progress_bar,
                            const bitmap *subgraph_mask);
 
+void call_path(const BOSS &boss,
+               const BOSS::Call<std::vector<edge_index>&&,
+                                std::vector<TAlphabet>&&> &callback,
+               std::vector<edge_index> &path,
+               std::vector<TAlphabet> &sequence,
+               bool split_to_unitigs,
+               bool kmers_in_single_form,
+               bool trim_sentinels,
+               sdsl::bit_vector &discovered,
+               sdsl::bit_vector &written,
+               bool async,
+               std::mutex &vector_mutex,
+               ProgressBar &progress_bar,
+               const bitmap *subgraph_mask);
+
 /**
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
@@ -1855,7 +1870,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }
     discovered[0] = true;
 
-    sdsl::bit_vector written(discovered);
+    sdsl::bit_vector written = kmers_in_single_form ? discovered : sdsl::bit_vector();
 
     ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(discovered),
                              "Traverse BOSS",
@@ -1962,33 +1977,108 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     call_zeros(discovered, [&](edge_index i) {
-        if (!get_last(i))
-            return;
-
+        i = succ_last(i);
         if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
             return;
 
         do {
-            if (!discovered[i]) {
+            if (!atomic_fetch_bit(discovered, i, async)) {
+                assert(!subgraph_mask || (*subgraph_mask)[i]);
                 enqueue_start(i);
                 call_paths_from_queue();
+                assert(atomic_fetch_bit(discovered, i, async));
             }
 
         } while (--i > 0 && !get_last(i));
 
     });
 
-    // this past part can only be done in a single thread, so turn off async
-    thread_pool->join();
-    thread_pool.reset();
-    async = false;
-
-    // process all the remaining disconnected cycles that have not been traversed
-    // TODO: I don't see a way this part can be parallelized...
-    call_zeros(discovered, [&](edge_index i) {
-        enqueue_start(i);
-        call_paths_from_queue();
+#ifndef NDEBUG
+    call_zeros(discovered, [&](edge_index edge) {
+        edge_index t = succ_last(edge);
+        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask));
+        assert(t == edge);
     });
+    call_zeros(discovered, [&](edge_index edge) {
+        TAlphabet w = get_W(edge);
+        TAlphabet d = w % alph_size;
+        edge_index t = edge;
+        if (w != d)
+            t = pred_W(t, d);
+
+        assert(masked_pick_single_incoming(*this, &t, d, subgraph_mask));
+        assert(t == edge);
+    });
+    call_zeros(discovered, [&](edge_index edge) {
+        TAlphabet w = get_W(edge);
+        TAlphabet d = w % alph_size;
+        edge_index t = edge;
+        if (w != d)
+            t = pred_W(t, d);
+
+        assert(get_node_seq(bwd(t))[0] != kSentinelCode);
+    });
+    call_zeros(discovered, [&](edge_index edge) {
+        assert(get_W(edge) != kSentinelCode);
+    });
+#endif
+
+    // TODO: handle source and sink dummy k-mers for rev comp
+    call_zeros(discovered, [&](edge_index edge) {
+        edge_index start = edge;
+        std::vector<edge_index> path;
+        std::vector<TAlphabet> sequence = get_node_seq(edge);
+        do {
+            TAlphabet w = get_W(edge);
+            if (w == kSentinelCode) {
+                assert(path.empty());
+                break;
+            }
+            assert(w != kSentinelCode);
+            TAlphabet d = w % alph_size;
+            sequence.push_back(d);
+            path.push_back(edge);
+            if (d != w)
+                edge = pred_W(edge, d);
+            edge = fwd(edge, d);
+            masked_pick_single_outgoing(*this, &edge, subgraph_mask);
+        } while (edge != start && !atomic_fetch_bit(discovered, edge, async));
+
+        if (edge == start && path.size()) {
+            {
+                auto lock = conditional_unique_lock(vector_mutex, async);
+                for (edge_index edge : path) {
+                    if (atomic_fetch_and_set_bit(discovered, edge, async))
+                        return;
+                }
+            }
+
+            progress_bar += path.size();
+            call_path(*this, callback, path, sequence, split_to_unitigs,
+                      kmers_in_single_form, trim_sentinels, discovered, written,
+                      async, vector_mutex, progress_bar, subgraph_mask);
+        }
+    });
+
+    // call_zeros(discovered, [&](edge_index edge) {
+    //     std::cout << get_node_str(edge) << decode(get_W(edge)) << "\n";
+    // });
+
+    // if (kmers_in_single_form) {
+
+    // } else {
+    //     // this past part can only be done in a single thread, so turn off async
+    //     thread_pool->join();
+    //     thread_pool.reset();
+    //     async = false;
+
+    //     // process all the remaining disconnected cycles that have not been traversed
+    //     // TODO: I don't see a way this part can be parallelized...
+    //     call_zeros(discovered, [&](edge_index i) {
+    //         enqueue_start(i);
+    //         call_paths_from_queue();
+    //     });
+    // }
 }
 
 template <class EdgeStorage, class AsyncEdgeStorage>
@@ -2216,13 +2306,13 @@ void call_path(const BOSS &boss,
     auto first_valid_it
         = std::find_if(sequence.begin(), sequence.end(),
                        [&boss](auto c) { return c != boss.kSentinelCode; });
+    size_t front_trim = first_valid_it - sequence.begin();
 
     if (first_valid_it + boss.get_k() >= sequence.end())
         return;
 
     sequence.erase(sequence.begin(), first_valid_it);
-    path.erase(path.begin(),
-               path.begin() + (first_valid_it - sequence.begin()));
+    path.erase(path.begin(), path.begin() + front_trim);
 
     if (!kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
@@ -2230,10 +2320,24 @@ void call_path(const BOSS &boss,
     }
 
     // get dual path (mapping of the reverse complement sequence)
-    auto rev_comp_seq = sequence;
+    std::vector<TAlphabet> rev_comp_seq(sequence.size(), boss.kSentinelCode);
+    std::copy(sequence.begin(), sequence.end(), rev_comp_seq.begin());
     KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
+
+    if (front_trim) {
+        edge_index t = dual_path.back();
+        TAlphabet w = boss.get_W(t);
+        TAlphabet d = w % boss.alph_size;
+        if (w != d)
+            t = boss.pred_W(t, d);
+
+        t = boss.fwd(t, d);
+        assert(boss.get_W(t) == boss.kSentinelCode);
+        progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
+    }
+
     std::reverse(dual_path.begin(), dual_path.end());
 
     size_t begin = 0;
