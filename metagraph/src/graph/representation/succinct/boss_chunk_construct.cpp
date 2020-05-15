@@ -180,13 +180,13 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
 
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
-// k is node length
 /**
  * Adds dummy nodes for the given kmers.
  * The method first adds dummy sink kmers, then dummy sources with sentinels of length 1
  * (aka dummy-1 sources). The method will then gradually add dummy sources with sentinels
  * of length 2, 3, ... up to k-1.
  *
+ * @param k the node length in the BOOS graph (so k-mer length is k+1)
  * @tparam T the type of kmers being processed, typically either a KMer64/128/256 or an
  * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
  */
@@ -262,7 +262,7 @@ static void push_dummy_sink(size_t k,
     using KMER = get_first_type_t<T>;
     if (last_dummy_sink->has_value()) {
         const KMER& dummy_sink = get_first(last_dummy_sink->value());
-        if (dummy_sink == KMER(0) || !KMER::compare_suffix(dummy_sink, get_first(kmer))) {
+        if (!KMER::compare_suffix(dummy_sink, get_first(kmer)) || dummy_sink == KMER(0)) {
             buffer->push_back({ last_dummy_sink->value(), false });
             if (buffer->full()) {
                 *num_dummy_l1_kmers += write_kmer(k, buffer->pop_front(),
@@ -271,7 +271,7 @@ static void push_dummy_sink(size_t k,
         }
         last_dummy_sink->reset();
     }
-    if (get_first(kmer)[0] == 0) {
+    if (get_first(kmer)[0] == BOSS::kSentinelCode) {
         *last_dummy_sink = kmer;
     }
 }
@@ -293,7 +293,7 @@ static void push_and_remove_redundant_dummy_source(
         common::EliasFanoEncoderBuffered<T_INT> *encoder,
         std::vector<common::EliasFanoEncoderBuffered<INT>> *dummy_kmer_chunks,
         size_t *num_dummy_l1_kmers) {
-    if (get_first(el)[0] == 0) { // not dealing with dummy sink k-mers
+    if (get_first(el)[0] == BOSS::kSentinelCode) { // not dealing with dummy sink k-mers
         return;
     }
     buffer->push_back({ el, false });
