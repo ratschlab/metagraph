@@ -1559,6 +1559,7 @@ TEST(BOSS, CallUnitigsCheckDegree) {
     });
     BOSS graph(&constructor);
     ASSERT_EQ(8u, graph.get_k());
+    std::mutex seq_mutex;
 
     std::multiset<std::string> unitigs {
         "AGACAAATCGCTCCACCAA",
@@ -1582,6 +1583,7 @@ TEST(BOSS, CallUnitigsCheckDegree) {
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
                 EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_unitigs.insert(unitig);
             },
             2,
@@ -1590,7 +1592,7 @@ TEST(BOSS, CallUnitigsCheckDegree) {
             num_threads
         );
 
-        EXPECT_EQ(unitigs, obs_unitigs);
+        EXPECT_EQ(unitigs, obs_unitigs) << num_threads;
     }
 }
 
@@ -1608,6 +1610,7 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
     });
     BOSS graph(&constructor);
     ASSERT_EQ(8u, graph.get_k());
+    std::mutex seq_mutex;
 
     std::multiset<std::string> unitigs {
         "AGACAAATCGCTCCACCAA",
@@ -1631,6 +1634,7 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
                 EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_unitigs.insert(unitig);
             },
             2,
@@ -1652,6 +1656,7 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
     });
     BOSS graph(&constructor);
     ASSERT_EQ(30u, graph.get_k());
+    std::mutex seq_mutex;
 
     std::multiset<std::string> unitigs {
         "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
@@ -1664,6 +1669,7 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
                 EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_unitigs.insert(unitig);
             },
             2,
@@ -1685,6 +1691,7 @@ TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
     });
     BOSS graph(&constructor);
     ASSERT_EQ(30u, graph.get_k());
+    std::mutex seq_mutex;
 
     std::multiset<std::string> unitigs {
         "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
@@ -1697,6 +1704,7 @@ TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
                 EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_unitigs.insert(unitig);
             },
             2,
@@ -1718,6 +1726,7 @@ TEST(BOSS, CallUnitigsMasked) {
     BOSSConstructor constructor(k);
     constructor.add_sequences(std::vector<std::string>(sequences));
     BOSS graph(&constructor);
+    std::mutex seq_mutex;
 
     sdsl::bit_vector mask_bv(graph.num_edges() + 1, false);
     graph.map_to_edges(
@@ -1734,6 +1743,7 @@ TEST(BOSS, CallUnitigsMasked) {
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
                 EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
                 obs.insert(unitig);
             },
             0,
