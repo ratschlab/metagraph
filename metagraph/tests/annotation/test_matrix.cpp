@@ -7,6 +7,7 @@
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 
 
 namespace {
@@ -22,6 +23,7 @@ typedef ::testing::Types<BRWT,
                          BinRelWT,
                          BinRelWT_sdsl,
                          RowConcatenated<>,
+                         UniqueRowBinmat,
                          Rainbowfish> BinMatTypes;
 TYPED_TEST_SUITE(BinaryMatrixTest, BinMatTypes);
 
