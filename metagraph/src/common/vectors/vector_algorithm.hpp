@@ -133,7 +133,14 @@ inline void atomic_unset_bit(t_int_vec &v,
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector,
                uint64_t begin, uint64_t end,
-               Callback callback) {
+               Callback callback,
+               bool atomic = false,
+               int memorder = __ATOMIC_SEQ_CST) {
+    if (atomic) {
+        std::ignore = memorder;
+        throw std::runtime_error("Atomic call_zeros not implemented");
+    }
+
     assert(begin <= end);
     assert(end <= vector.size());
 
@@ -164,9 +171,48 @@ void call_ones(const Bitmap &vector,
     }
 }
 
+template <class Callback>
+void call_ones(const sdsl::bit_vector &vector,
+               uint64_t begin, uint64_t end,
+               Callback callback,
+               bool atomic = false,
+               int memorder = __ATOMIC_SEQ_CST) {
+    assert(begin <= end);
+    assert(end <= vector.size());
+
+    uint64_t i = begin;
+    for (; i < end && i & 0x3F; ++i) {
+        if (atomic_fetch_bit(vector, i, atomic, memorder))
+            callback(i);
+    }
+    uint64_t word;
+    for (uint64_t j = i + 64; j <= end; j += 64) {
+        word = atomic
+            ? __atomic_load_n(&vector.data()[i >> 6], memorder)
+            : vector.get_int(i, 64);
+        if (!word) {
+            i += 64;
+            continue;
+        }
+
+        i += sdsl::bits::lo(word);
+        callback(i++);
+
+        for (; i < j; ++i) {
+            if (atomic_fetch_bit(vector, i, atomic, memorder))
+                callback(i);
+        }
+    }
+    for (; i < end; ++i) {
+        if (atomic_fetch_bit(vector, i, atomic, memorder))
+            callback(i);
+    }
+}
+
 template <class Bitmap, class Callback>
-void call_ones(const Bitmap &vector, Callback callback) {
-    call_ones(vector, 0, vector.size(), callback);
+void call_ones(const Bitmap &vector, Callback callback,
+               bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+    call_ones(vector, 0, vector.size(), callback, atomic, memorder);
 }
 
 template <class Bitmap, class Callback>
