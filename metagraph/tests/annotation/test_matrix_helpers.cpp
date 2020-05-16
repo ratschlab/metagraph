@@ -10,6 +10,7 @@
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
 
@@ -74,6 +75,11 @@ RBFBufferCol(6)
 template <>
 RowConcatenated<> build_matrix_from_columns(BitVectorPtrArray&& columns, uint64_t num_rows) {
     return build_matrix_from_rows<RowConcatenated<>>(std::move(columns), num_rows);
+}
+
+template <>
+UniqueRowBinmat build_matrix_from_columns(BitVectorPtrArray&& columns, uint64_t num_rows) {
+    return build_matrix_from_rows<UniqueRowBinmat>(std::move(columns), num_rows);
 }
 
 template <>
@@ -161,6 +167,15 @@ build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_
     return Rainbowfish(generate_rows, num_columns);
 }
 
+template <>
+UniqueRowBinmat
+build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
+                       uint64_t num_columns,
+                       uint64_t,
+                       uint64_t) {
+    return UniqueRowBinmat(generate_rows, num_columns);
+}
+
 #define RBFBufferRow(n) \
 template <> \
 RainbowfishBuffer<n> \
@@ -234,6 +249,7 @@ template ColumnMajor build_matrix_from_rows<ColumnMajor>(BitVectorPtrArray&&, ui
 template BinRelWT build_matrix_from_rows<BinRelWT>(BitVectorPtrArray&&, uint64_t);
 template BinRelWT_sdsl build_matrix_from_rows<BinRelWT_sdsl>(BitVectorPtrArray&&, uint64_t);
 template RowConcatenated<> build_matrix_from_rows<RowConcatenated<>>(BitVectorPtrArray&&, uint64_t);
+template UniqueRowBinmat build_matrix_from_rows<UniqueRowBinmat>(BitVectorPtrArray&&, uint64_t);
 template Rainbowfish build_matrix_from_rows<Rainbowfish>(BitVectorPtrArray&&, uint64_t);
 template RainbowfishBuffer<1> build_matrix_from_rows<RainbowfishBuffer<1>>(BitVectorPtrArray&&, uint64_t);
 template RainbowfishBuffer<2> build_matrix_from_rows<RainbowfishBuffer<2>>(BitVectorPtrArray&&, uint64_t);
@@ -430,6 +446,7 @@ template void test_matrix<ColumnMajor>(const ColumnMajor&, const BitVectorPtrArr
 template void test_matrix<BinRelWT>(const BinRelWT&, const BitVectorPtrArray &);
 template void test_matrix<BinRelWT_sdsl>(const BinRelWT_sdsl&, const BitVectorPtrArray &);
 template void test_matrix<RowConcatenated<>>(const RowConcatenated<>&, const BitVectorPtrArray &);
+template void test_matrix<UniqueRowBinmat>(const UniqueRowBinmat&, const BitVectorPtrArray &);
 template void test_matrix<Rainbowfish>(const Rainbowfish&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<1>>(const RainbowfishBuffer<1>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<2>>(const RainbowfishBuffer<2>&, const BitVectorPtrArray &);

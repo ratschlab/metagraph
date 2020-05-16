@@ -2,13 +2,15 @@
 
 #include <ips4o.hpp>
 #include <fmt/format.h>
+#include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/hash/hash.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
-#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -315,7 +317,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // initialize fast query annotation
     // TODO: use SmallVector if it doesn't slow it down too much. Increase the batch size
-    std::vector<BinaryMatrix::SetBitPositions> annotation_rows(graph->max_index());
+    using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
+                                    utils::VectorHash,
+                                    std::equal_to<BinaryMatrix::SetBitPositions>,
+                                    std::allocator<BinaryMatrix::SetBitPositions>,
+                                    std::vector<BinaryMatrix::SetBitPositions>,
+                                    std::uint64_t>;
+    RowSet unique_rows { BinaryMatrix::SetBitPositions() };
+    std::vector<uint64_t> row_rank(graph->max_index(), 0);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t batch_begin = 0;
@@ -338,16 +347,25 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         assert(rows.size() == batch_end - batch_begin);
 
-        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-            annotation_rows[from_full_to_query[i].second]
-                = std::move(rows[i - batch_begin]);
+        #pragma omp critical
+        {
+            for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                auto it = unique_rows.insert(rows[i - batch_begin]).first;
+                row_rank[from_full_to_query[i].second] = it - unique_rows.begin();
+            }
         }
     }
 
+    auto annotation_rows = const_cast<std::vector<BinaryMatrix::SetBitPositions>&&>(
+        unique_rows.values_container()
+    );
+
     // copy annotations from the full graph to the query graph
-    auto annotation = std::make_unique<annotate::RowCompressed<>>(
-        std::move(annotation_rows),
-        full_annotation.get_label_encoder().get_labels()
+    auto annotation = std::make_unique<annotate::UniqueRowAnnotator>(
+        std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
+                                          std::move(row_rank),
+                                          full_annotation.num_labels()),
+        full_annotation.get_label_encoder()
     );
 
     logger->trace("[Query graph construction] Query annotation constructed in {} sec",
