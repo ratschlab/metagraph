@@ -1941,13 +1941,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 begin,
                 std::min(begin + kBlockSize, discovered.size()),
                 [&](edge_index i) {
-                    if (!get_last(i))
-                        return;
-
+                    i = succ_last(i);
                     edge_index j = bwd(i);
-                    masked_pick_single_incoming(*this, &j, get_node_last_value(i), subgraph_mask);
+                    bool check = masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
                     if (j)
                         return;
+
+                    std::ignore = check;
+                    assert(!check);
 
                     do {
                         if ((*subgraph_mask)[i])
