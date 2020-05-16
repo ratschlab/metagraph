@@ -62,6 +62,21 @@ UniqueRowBinmat::SetBitPositions UniqueRowBinmat::get_row(Row i) const {
     return unique_rows_[row_rank_[i]];
 }
 
+std::vector<BinaryMatrix::SetBitPositions>
+UniqueRowBinmat::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows;
+    std::vector<size_t> ranks;
+    rows.reserve(row_ids.size());
+    ranks.reserve(row_ids.size());
+    for (Row i : row_ids) {
+        ranks.push_back(row_rank_[i]);
+    }
+    for (size_t r : ranks) {
+        rows.emplace_back(unique_rows_[r].begin(), unique_rows_[r].end());
+    }
+    return rows;
+}
+
 std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {
     std::vector<Row> result;
 
