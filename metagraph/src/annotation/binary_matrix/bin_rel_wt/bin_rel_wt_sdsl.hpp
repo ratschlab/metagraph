@@ -15,12 +15,6 @@ class BinRelWT_sdsl : public BinaryMatrix {
                   uint64_t num_set_bits,
                   uint64_t num_columns);
 
-    explicit BinRelWT_sdsl(const BinRelWT_sdsl &other) = default;
-    BinRelWT_sdsl& operator=(const BinRelWT_sdsl &other) = default;
-
-    BinRelWT_sdsl(BinRelWT_sdsl&& other) = default;
-    BinRelWT_sdsl& operator=(BinRelWT_sdsl&& other) = default;
-
     uint64_t num_columns() const;
     uint64_t num_rows() const;
 

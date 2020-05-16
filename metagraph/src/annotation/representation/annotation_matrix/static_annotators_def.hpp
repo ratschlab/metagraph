@@ -6,6 +6,7 @@
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 
 
 namespace annotate {
@@ -20,6 +21,8 @@ typedef StaticBinRelAnnotator<BinRelWT_sdsl, std::string> BinRelWT_sdslAnnotator
 
 typedef StaticBinRelAnnotator<BinRelWT, std::string> BinRelWTAnnotator;
 
+typedef StaticBinRelAnnotator<UniqueRowBinmat, std::string> UniqueRowAnnotator;
+
 template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
 template <>
@@ -30,6 +33,8 @@ template <>
 inline const std::string BinRelWT_sdslAnnotator::kExtension = ".bin_rel_wt_sdsl.annodbg";
 template <>
 inline const std::string BinRelWTAnnotator::kExtension = ".bin_rel_wt.annodbg";
+template <>
+inline const std::string UniqueRowAnnotator::kExtension = ".unique_row.annodbg";
 
 } // namespace annotate
 
