@@ -1723,8 +1723,9 @@ inline bool masked_pick_single_outgoing(const BOSS &boss,
     assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
     // in boss, at least one outgoing edge always exists
-    if (!subgraph_mask)
+    if (!subgraph_mask) {
         return boss.is_single_outgoing(*i);
+    }
 
     edge_index j = *i;
 
@@ -1732,6 +1733,9 @@ inline bool masked_pick_single_outgoing(const BOSS &boss,
 
     while (--j > 0 && !boss.get_last(j)) {
         if ((*subgraph_mask)[j]) {
+            if (boss.get_W(j) == boss.kSentinelCode)
+                continue;
+
             // stop if there are multiple outgoing edges detected
             if (edge_detected)
                 return false;
@@ -1908,6 +1912,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                                 progress_bar, subgraph_mask);
     };
 
+
     // start traversal from the source dummy edges first
     //
     //  .____
@@ -1961,14 +1966,12 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         // then start traversals in parallel
         call_ones(sources, [&](edge_index i) {
-            if (!kmers_in_single_form) {
+            assert((*subgraph_mask)[i]);
+            // TODO: is there a better way to have an early cutoff if the
+            //       reverse-complement of i has already been traversed?
+            if (!kmers_in_single_form || !atomic_fetch_bit(discovered, i, async))
                 enqueue_start(i);
-            } else if (!atomic_fetch_bit(discovered, i, async)) {
-                // TODO: is there a better way to have an early cutoff if the
-                //       reverse-complement of i has already been traversed?
-                enqueue_start(i);
-            }
-        });
+        }, async);
     }
 
     call_paths_from_queue();
@@ -1979,27 +1982,46 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     call_zeros(discovered, [&](edge_index i) {
         i = succ_last(i);
-        if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
+        bool check = masked_pick_single_outgoing(*this, &i, subgraph_mask);
+
+        // no outgoing edges
+        if (!i || check)
             return;
 
-        do {
-            if (!atomic_fetch_bit(discovered, i, async)) {
-                assert(!subgraph_mask || (*subgraph_mask)[i]);
-                enqueue_start(i);
+        if (subgraph_mask) {
+            do {
+                if (!atomic_fetch_bit(discovered, i, async)) {
+                    assert((*subgraph_mask)[i]);
+                    enqueue_start(i);
+                }
+
+            } while (--i > 0 && !get_last(i));
+
+        } else {
+            assert(!get_last(i - 1));
+            edge_index begin = pred_last(i - 1) + 1;
+
+            // check if the fork involved a dummy edge
+            if (get_W(begin) == kSentinelCode) {
+                progress_bar += !atomic_fetch_and_set_bit(discovered, begin, async);
+                ++begin;
             }
 
-        } while (--i > 0 && !get_last(i));
+            if (begin == i)
+                return;
+
+            for (size_t j = begin; j <= i; ++j) {
+                if (!atomic_fetch_bit(discovered, j, async)) {
+                    enqueue_start(j);
+                }
+            }
+        }
 
     }, async);
 
     call_paths_from_queue();
 
 #ifndef NDEBUG
-    call_zeros(discovered, [&](edge_index edge) {
-        edge_index t = succ_last(edge);
-        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask));
-        assert(t == edge);
-    });
     call_zeros(discovered, [&](edge_index edge) {
         TAlphabet w = get_W(edge);
         TAlphabet d = w % alph_size;
@@ -2009,7 +2031,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         assert(masked_pick_single_incoming(*this, &t, d, subgraph_mask));
         assert(t == edge);
-    });
+    }, async);
     call_zeros(discovered, [&](edge_index edge) {
         TAlphabet w = get_W(edge);
         TAlphabet d = w % alph_size;
@@ -2018,10 +2040,21 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             t = pred_W(t, d);
 
         assert(get_node_seq(bwd(t))[0] != kSentinelCode);
-    });
+    }, async);
+
     call_zeros(discovered, [&](edge_index edge) {
-        assert(get_W(edge) != kSentinelCode);
-    });
+        edge_index t = succ_last(edge);
+        bool check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
+        assert(t == edge);
+        if (!check) {
+            assert(!subgraph_mask);
+            assert(!get_last(edge - 1));
+            assert(discovered[edge - 1]);
+            assert(get_W(edge - 1) == kSentinelCode);
+        } else {
+            assert(get_W(edge) != kSentinelCode);
+        }
+    }, async);
 #endif
 
     // TODO: handle source and sink dummy k-mers for rev comp
@@ -2042,8 +2075,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
             if (edge == start && path.size()) {
                 {
-                    __atomic_thread_fence(__ATOMIC_SEQ_CST);
-                    auto lock = conditional_unique_lock(vector_mutex, async);
+                    // __atomic_thread_fence(__ATOMIC_SEQ_CST);
+                    // auto lock = conditional_unique_lock(vector_mutex, async);
                     for (edge_index edge : path) {
                         if (atomic_fetch_bit(discovered, edge, async))
                             return;
@@ -2242,6 +2275,20 @@ void call_paths(const BOSS &boss,
         if (!edge)
             break;
 
+        if (!single_outgoing && !subgraph_mask) {
+            // check if the extra edge is a dummy
+            assert(boss.get_last(edge));
+            assert(!boss.get_last(edge - 1));
+            edge_index t = boss.pred_last(edge - 1) + 1;
+            if (boss.get_W(t) == boss.kSentinelCode) {
+                progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
+                ++t;
+            }
+
+            if (t == edge)
+                single_outgoing = true;
+        }
+
         // continue the non-branching traversal further if
         //      1. there is only one edge outgoing from the target
         // and at least one of the following conditions is met:
@@ -2321,6 +2368,7 @@ void call_path(const BOSS &boss,
         return;
 
     sequence.erase(sequence.begin(), first_valid_it);
+
     path.erase(path.begin(), path.begin() + front_trim);
 
     if (!kmers_in_single_form) {
@@ -2335,14 +2383,17 @@ void call_path(const BOSS &boss,
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
 
-    // if (front_trim) {
-    //     edge_index t = dual_path.back();
-    //     TAlphabet w = boss.get_W(t);
-    //     TAlphabet d = w % boss.alph_size;
-    //     t = boss.fwd(t, d);
-    //     assert(boss.get_W(t) == boss.kSentinelCode);
-    //     progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
-    // }
+    if (front_trim) {
+        edge_index t = dual_path.back();
+        TAlphabet w = boss.get_W(t);
+        TAlphabet d = w % boss.alph_size;
+        t = boss.fwd(t, d);
+        if (boss.get_W(t) != boss.kSentinelCode) {
+            // this should only happen if there are redundant dummy edges
+            t = boss.pred_W(t, boss.kSentinelCode);
+        }
+        progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
+    }
 
     std::reverse(dual_path.begin(), dual_path.end());
 
@@ -2356,26 +2407,27 @@ void call_path(const BOSS &boss,
         // then lock all threads
         auto lock = conditional_unique_lock(vector_mutex, async);
         bool safe_to_unlock = false;
+        std::ignore = split_to_unitigs;
 
-        if (async) {
-            // If extracting unitigs, only the start of the unitig needs to be
-            // checked while locked. Afterwards, it's safe to unlock the mutex
-            if (split_to_unitigs && std::all_of(
-                    dual_path.begin(), dual_path.end(),
-                    [&](edge_index edge) {
-                        return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
-                    })) {
-                // if this unitig or its dual path has been printed already,
-                // exit early
-                if (atomic_fetch_bit(written, path.front(), async)
-                        || (path.back() != dual_path.back()
-                            && atomic_fetch_bit(written, dual_path.back(), async))) {
-                    return;
-                }
+        // if (async) {
+        //     // If extracting unitigs, only the start of the unitig needs to be
+        //     // checked while locked. Afterwards, it's safe to unlock the mutex
+        //     if (split_to_unitigs && std::all_of(
+        //             dual_path.begin(), dual_path.end(),
+        //             [&](edge_index edge) {
+        //                 return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
+        //             })) {
+        //         // if this unitig or its dual path has been printed already,
+        //         // exit early
+        //         if (atomic_fetch_bit(written, path.front(), async)
+        //                 || (path.back() != dual_path.back()
+        //                     && atomic_fetch_bit(written, dual_path.back(), async))) {
+        //             return;
+        //         }
 
-                safe_to_unlock = true;
-            }
-        }
+        //         safe_to_unlock = true;
+        //     }
+        // }
 
         // traverse the path with its dual and discover them
         for (size_t i = 0; i < path.size(); ++i) {
@@ -2407,7 +2459,6 @@ void call_path(const BOSS &boss,
 
             // check if another thread has written the reverse-complement k-mer
             if (!atomic_fetch_and_set_bit(written, dual_path[i], async)) {
-                // progress_bar += !atomic_fetch_and_set_bit(discovered, dual_path[i], async);
                 continue;
             }
 
@@ -2499,7 +2550,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
 
         edge_index last_fwd = 0;
 
-        // if the last node has multiple outgoing edges,
+        // if the last node has multiple outgoing edges,pick_sing
         // it is clearly neither a sink tip nor a source tip.
         if (path.back() != kSentinelCode
                 && !masked_pick_single_outgoing(*this,
