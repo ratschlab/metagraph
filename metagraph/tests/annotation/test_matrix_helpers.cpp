@@ -136,6 +136,7 @@ void test_serialization(const TypeParam &matrix) {
 
     ASSERT_EQ(matrix.num_columns(), loaded.num_columns());
     ASSERT_EQ(matrix.num_rows(), loaded.num_rows());
+    ASSERT_EQ(matrix.num_relations(), loaded.num_relations());
     for (size_t j = 0; j < loaded.num_columns(); ++j) {
         EXPECT_EQ(matrix.get_column(j), loaded.get_column(j));
     }
