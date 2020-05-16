@@ -316,15 +316,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     // initialize fast query annotation
-    // TODO: use SmallVector if it doesn't slow it down too much. Increase the batch size
-    using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
+    using RowSet = tsl::ordered_set<SmallVector<uint32_t>,
                                     utils::VectorHash,
-                                    std::equal_to<BinaryMatrix::SetBitPositions>,
-                                    std::allocator<BinaryMatrix::SetBitPositions>,
-                                    std::vector<BinaryMatrix::SetBitPositions>,
-                                    std::uint64_t>;
-    RowSet unique_rows { BinaryMatrix::SetBitPositions() };
-    std::vector<uint64_t> row_rank(graph->max_index(), 0);
+                                    std::equal_to<SmallVector<uint32_t>>,
+                                    std::allocator<SmallVector<uint32_t>>,
+                                    std::vector<SmallVector<uint32_t>>,
+                                    uint32_t>;
+    RowSet unique_rows { SmallVector<uint32_t>() };
+    std::vector<uint32_t> row_rank(graph->max_index(), 0);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t batch_begin = 0;
@@ -339,8 +338,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         for (uint64_t i = batch_begin; i < batch_end; ++i) {
             assert(from_full_to_query[i].first < full_annotation.num_objects());
-
             row_indexes.push_back(from_full_to_query[i].first);
+            if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
+                throw std::runtime_error("There must be less than 2^32 unique rows."
+                                         " Reduce the query batch size.");
         }
 
         auto rows = full_annotation.get_matrix().get_rows(row_indexes);
@@ -350,13 +351,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         #pragma omp critical
         {
             for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                auto it = unique_rows.insert(rows[i - batch_begin]).first;
+                const auto &row = rows[i - batch_begin];
+                auto it = unique_rows.emplace(row.begin(), row.end()).first;
                 row_rank[from_full_to_query[i].second] = it - unique_rows.begin();
             }
         }
     }
 
-    auto annotation_rows = const_cast<std::vector<BinaryMatrix::SetBitPositions>&&>(
+    auto annotation_rows = const_cast<std::vector<SmallVector<uint32_t>>&&>(
         unique_rows.values_container()
     );
 
