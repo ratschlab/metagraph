@@ -2406,7 +2406,7 @@ void call_path(const BOSS &boss,
 
         // then lock all threads
         auto lock = conditional_unique_lock(vector_mutex, async);
-        bool safe_to_unlock = false;
+        // bool safe_to_unlock = false;
         std::ignore = split_to_unitigs;
 
         // if (async) {
@@ -2433,11 +2433,11 @@ void call_path(const BOSS &boss,
         for (size_t i = 0; i < path.size(); ++i) {
             assert(path[i]);
             atomic_set_bit(written, path[i], async);
-            if (safe_to_unlock) {
-                assert(async);
-                safe_to_unlock = false;
-                lock.unlock();
-            }
+            // if (safe_to_unlock) {
+            //     assert(async);
+            //     safe_to_unlock = false;
+            //     lock.unlock();
+            // }
 
             // Extend the path if the reverse-complement k-mer does not belong
             // to the graph (subgraph) or if it matches the current k-mer and
