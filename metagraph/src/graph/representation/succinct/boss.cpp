@@ -2021,13 +2021,33 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     call_paths_from_queue();
 
+    if (kmers_in_single_form) {
+        call_zeros(discovered, [&](edge_index edge) {
+            TAlphabet w = get_W(edge);
+            TAlphabet d = w % alph_size;
+            edge_index t = w == d ? edge : pred_W(edge, d);
+
+            if (masked_pick_single_incoming(*this, &t, d, subgraph_mask)) {
+                assert(t);
+                if (atomic_fetch_bit(discovered, bwd(t), async))
+                    enqueue_start(edge);
+
+            } else {
+                // all merges should have been handled already, so this edge was
+                // skipped because of an early cutoff
+                enqueue_start(edge);
+            }
+
+        }, async);
+
+        call_paths_from_queue();
+    }
+
 #ifndef NDEBUG
     call_zeros(discovered, [&](edge_index edge) {
         TAlphabet w = get_W(edge);
         TAlphabet d = w % alph_size;
-        edge_index t = edge;
-        if (w != d)
-            t = pred_W(t, d);
+        edge_index t = w == d ? edge : pred_W(edge, d);
 
         assert(masked_pick_single_incoming(*this, &t, d, subgraph_mask));
         assert(t == edge);
@@ -2035,9 +2055,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     call_zeros(discovered, [&](edge_index edge) {
         TAlphabet w = get_W(edge);
         TAlphabet d = w % alph_size;
-        edge_index t = edge;
-        if (w != d)
-            t = pred_W(t, d);
+        edge_index t = w == d ? edge : pred_W(edge, d);
 
         assert(get_node_seq(bwd(t))[0] != kSentinelCode);
     }, async);
@@ -2401,8 +2419,8 @@ void call_path(const BOSS &boss,
 
     {
         // sync all writes
-        if (async)
-            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        // if (async)
+            // __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
         // then lock all threads
         auto lock = conditional_unique_lock(vector_mutex, async);
@@ -2459,6 +2477,7 @@ void call_path(const BOSS &boss,
 
             // check if another thread has written the reverse-complement k-mer
             if (!atomic_fetch_and_set_bit(written, dual_path[i], async)) {
+                progress_bar += !atomic_fetch_and_set_bit(discovered, dual_path[i], async);
                 continue;
             }
 
