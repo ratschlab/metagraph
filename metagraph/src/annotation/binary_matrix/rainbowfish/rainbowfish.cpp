@@ -205,6 +205,37 @@ Rainbowfish::get_rows(const std::vector<Row> &rows) const {
     return result;
 }
 
+std::vector<Rainbowfish::SetBitPositions>
+Rainbowfish::get_rows(std::vector<Row> *rows) const {
+    assert(rows);
+
+    std::vector<std::pair<uint64_t, /* code */
+                          uint64_t /* row */>> row_codes(rows->size());
+
+    for (size_t i = 0; i < rows->size(); ++i) {
+        row_codes[i] = { get_code((*rows)[i]), i };
+    }
+
+    ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
+                          utils::LessFirst(), get_num_threads());
+
+    std::vector<SetBitPositions> unique_rows;
+
+    uint64_t last_code = std::numeric_limits<uint64_t>::max();
+
+    for (const auto &[code, i] : row_codes) {
+        if (code != last_code) {
+            unique_rows.push_back(
+                reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_)
+            );
+            last_code = code;
+        }
+        (*rows)[i] = unique_rows.size() - 1;
+    }
+
+    return unique_rows;
+}
+
 std::vector<Rainbowfish::Row> Rainbowfish::get_column(Column column) const {
     sdsl::bit_vector distinct_row_indices(num_distinct_rows(), false);
     uint64_t offset = 0;

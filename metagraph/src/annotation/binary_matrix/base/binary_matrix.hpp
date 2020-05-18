@@ -39,6 +39,18 @@ class BinaryMatrix {
 };
 
 
+class RainbowMatrix : public BinaryMatrix {
+  public:
+    virtual ~RainbowMatrix() {}
+
+    using BinaryMatrix::get_rows;
+
+    // Return unique rows and update the row indexes in |rows| to point to their
+    // respective rows in the vector returned.
+    virtual std::vector<SetBitPositions> get_rows(std::vector<Row> *rows) const = 0;
+};
+
+
 class BinaryMatrixRowDynamic : public BinaryMatrix {
   public:
     virtual ~BinaryMatrixRowDynamic() {}
@@ -50,6 +62,7 @@ class BinaryMatrixRowDynamic : public BinaryMatrix {
     virtual void clear_row(Row row) = 0;
     virtual void insert_rows(const std::vector<Row> &rows) = 0;
 };
+
 
 // Row streamer -- read rows from a serialized row major binary matrix
 template <typename RowType = BinaryMatrix::SetBitPositions>
