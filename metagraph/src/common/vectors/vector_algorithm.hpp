@@ -138,7 +138,7 @@ void call_ones(const Bitmap &vector,
                int memorder = __ATOMIC_SEQ_CST) {
     if (atomic) {
         std::ignore = memorder;
-        throw std::runtime_error("Atomic call_zeros not implemented");
+        throw std::runtime_error("Atomic call_ones not implemented");
     }
 
     assert(begin <= end);
