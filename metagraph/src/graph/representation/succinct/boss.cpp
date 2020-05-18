@@ -1832,7 +1832,7 @@ void call_paths_from_queue(const BOSS &boss,
                            bool kmers_in_single_form,
                            bool trim_sentinels,
                            sdsl::bit_vector &discovered,
-                           sdsl::bit_vector &writted,
+                           sdsl::bit_vector &written,
                            bool async,
                            std::mutex &vector_mutex,
                            ProgressBar &progress_bar,
@@ -2044,6 +2044,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }
 
 #ifndef NDEBUG
+    // make sure all remaining edges have a single incoming edge
     call_zeros(discovered, [&](edge_index edge) {
         TAlphabet w = get_W(edge);
         TAlphabet d = w % alph_size;
@@ -2052,6 +2053,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         assert(masked_pick_single_incoming(*this, &t, d, subgraph_mask));
         assert(t == edge);
     }, async);
+
+    // make sure all dummy source edges have been traversed
     call_zeros(discovered, [&](edge_index edge) {
         TAlphabet w = get_W(edge);
         TAlphabet d = w % alph_size;
@@ -2060,6 +2063,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         assert(get_node_seq(bwd(t))[0] != kSentinelCode);
     }, async);
 
+    // make sure that all edges have a single outgoing edge and that all sink
+    // dummy k-mers have been handled
     call_zeros(discovered, [&](edge_index edge) {
         edge_index t = succ_last(edge);
         bool check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
@@ -2075,8 +2080,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }, async);
 #endif
 
-    // TODO: handle source and sink dummy k-mers for rev comp
+    // handle remaining disconnected loops
     call_zeros(discovered, [&](edge_index edge) {
+        // traverse loops in parallel and only check for unique k-mers at the
+        // end of the traversal
         auto start_cycle = [&](edge_index edge) {
             edge_index start = edge;
             std::vector<edge_index> path;
@@ -2092,16 +2099,12 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             } while (edge != start && !atomic_fetch_bit(discovered, edge, async));
 
             if (edge == start && path.size()) {
-                {
-                    // __atomic_thread_fence(__ATOMIC_SEQ_CST);
-                    // auto lock = conditional_unique_lock(vector_mutex, async);
-                    for (edge_index edge : path) {
-                        if (atomic_fetch_bit(discovered, edge, async))
-                            return;
-                    }
-                    for (edge_index edge : path) {
-                        atomic_set_bit(discovered, edge, async);
-                    }
+                for (edge_index edge : path) {
+                    if (atomic_fetch_bit(discovered, edge, async))
+                        return;
+                }
+                for (edge_index edge : path) {
+                    atomic_set_bit(discovered, edge, async);
                 }
 
                 progress_bar += path.size();
@@ -2119,26 +2122,6 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
 
     }, async);
-
-    // call_zeros(discovered, [&](edge_index edge) {
-    //     std::cout << get_node_str(edge) << decode(get_W(edge)) << "\n";
-    // });
-
-    // if (kmers_in_single_form) {
-
-    // } else {
-    //     // this past part can only be done in a single thread, so turn off async
-    //     thread_pool->join();
-    //     thread_pool.reset();
-    //     async = false;
-
-    //     // process all the remaining disconnected cycles that have not been traversed
-    //     // TODO: I don't see a way this part can be parallelized...
-    //     call_zeros(discovered, [&](edge_index i) {
-    //         enqueue_start(i);
-    //         call_paths_from_queue();
-    //     });
-    // }
 }
 
 template <class EdgeStorage, class AsyncEdgeStorage>
@@ -2418,44 +2401,39 @@ void call_path(const BOSS &boss,
     size_t begin = 0;
 
     {
-        // sync all writes
-        // if (async)
-            // __atomic_thread_fence(__ATOMIC_SEQ_CST);
-
         // then lock all threads
         auto lock = conditional_unique_lock(vector_mutex, async);
-        // bool safe_to_unlock = false;
-        std::ignore = split_to_unitigs;
+        bool safe_to_unlock = false;
 
-        // if (async) {
-        //     // If extracting unitigs, only the start of the unitig needs to be
-        //     // checked while locked. Afterwards, it's safe to unlock the mutex
-        //     if (split_to_unitigs && std::all_of(
-        //             dual_path.begin(), dual_path.end(),
-        //             [&](edge_index edge) {
-        //                 return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
-        //             })) {
-        //         // if this unitig or its dual path has been printed already,
-        //         // exit early
-        //         if (atomic_fetch_bit(written, path.front(), async)
-        //                 || (path.back() != dual_path.back()
-        //                     && atomic_fetch_bit(written, dual_path.back(), async))) {
-        //             return;
-        //         }
+        if (async) {
+            // If extracting unitigs, only the start of the unitig needs to be
+            // checked while locked. Afterwards, it's safe to unlock the mutex
+            if (split_to_unitigs && std::all_of(
+                    dual_path.begin(), dual_path.end(),
+                    [&](edge_index edge) {
+                        return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
+                    })) {
+                // if this unitig or its dual path has been printed already,
+                // exit early
+                if (atomic_fetch_bit(written, path.front(), async)
+                        || (path.back() != dual_path.back()
+                            && atomic_fetch_bit(written, dual_path.back(), async))) {
+                    return;
+                }
 
-        //         safe_to_unlock = true;
-        //     }
-        // }
+                safe_to_unlock = true;
+            }
+        }
 
         // traverse the path with its dual and discover them
         for (size_t i = 0; i < path.size(); ++i) {
             assert(path[i]);
             atomic_set_bit(written, path[i], async);
-            // if (safe_to_unlock) {
-            //     assert(async);
-            //     safe_to_unlock = false;
-            //     lock.unlock();
-            // }
+            if (safe_to_unlock) {
+                assert(async);
+                safe_to_unlock = false;
+                lock.unlock();
+            }
 
             // Extend the path if the reverse-complement k-mer does not belong
             // to the graph (subgraph) or if it matches the current k-mer and
@@ -2464,16 +2442,6 @@ void call_path(const BOSS &boss,
                     || dual_path[i] == path[i]) {
                 continue;
             }
-
-            // // Check if the reverse-complement k-mer has not been traversed
-            // // and thus, if the current edge path[i] is to be traversed first.
-            // if (!atomic_fetch_and_set_bit(discovered, dual_path[i], async)) {
-            //     ++progress_bar;
-            //     atomic_set_bit(written, dual_path[i], async);
-            //     continue;
-            // }
-            std::ignore = progress_bar;
-            std::ignore = discovered;
 
             // check if another thread has written the reverse-complement k-mer
             if (!atomic_fetch_and_set_bit(written, dual_path[i], async)) {
