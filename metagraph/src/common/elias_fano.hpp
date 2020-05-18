@@ -279,6 +279,21 @@ class EliasFanoDecoder<std::pair<T, C>> {
     bool remove_source_;
 };
 
+/** Decoder specialization for a series of sorted files */
+template <typename T>
+class EliasFanoConcatDecoder {
+  public:
+    EliasFanoConcatDecoder(const std::vector<std::string> &source, bool remove_source = true);
+
+    std::optional<T> next();
+
+  private:
+    std::vector<std::string> sources_;
+    bool remove_source_;
+    EliasFanoDecoder<T> source_current_;
+    uint32_t idx_;
+};
+
 /**
  * Specialization of #EliasFanoEncoder that can encode sequences of unknown range. It uses
  * a buffer to accumulate data and then dumps it in chunks to an EliasFanoEncoder.
