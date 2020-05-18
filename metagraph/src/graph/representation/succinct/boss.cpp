@@ -1982,16 +1982,16 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     call_zeros(discovered, [&](edge_index i) {
         i = succ_last(i);
-        bool check = masked_pick_single_outgoing(*this, &i, subgraph_mask);
 
-        // no outgoing edges
-        if (!i || check)
+        // no outgoing edges or a unique outgoing edge
+        if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
             return;
 
         if (subgraph_mask) {
             do {
                 if (!atomic_fetch_bit(discovered, i, async)) {
                     assert((*subgraph_mask)[i]);
+                    assert(get_W(i) != kSentinelCode);
                     enqueue_start(i);
                 }
 
@@ -2022,19 +2022,16 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     call_paths_from_queue();
 
     if (kmers_in_single_form) {
+        // check for edges whose predecesors have already been traversed
+        // (this should only happen when outputting simplitigs)
         call_zeros(discovered, [&](edge_index edge) {
-            TAlphabet w = get_W(edge);
-            TAlphabet d = w % alph_size;
-            edge_index t = w == d ? edge : pred_W(edge, d);
-
-            if (masked_pick_single_incoming(*this, &t, d, subgraph_mask)) {
+            edge_index t = bwd(edge);
+            if (!masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask)
+                    || atomic_fetch_bit(discovered, t, async)) {
+                // there are either multiple incoming edges (which should not
+                // exist unless outputting simplitigs), or the predecessor edge
+                // was already traversed
                 assert(t);
-                if (atomic_fetch_bit(discovered, bwd(t), async))
-                    enqueue_start(edge);
-
-            } else {
-                // all merges should have been handled already, so this edge was
-                // skipped because of an early cutoff
                 enqueue_start(edge);
             }
 
@@ -2044,23 +2041,16 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }
 
 #ifndef NDEBUG
-    // make sure all remaining edges have a single incoming edge
-    call_zeros(discovered, [&](edge_index edge) {
-        TAlphabet w = get_W(edge);
-        TAlphabet d = w % alph_size;
-        edge_index t = w == d ? edge : pred_W(edge, d);
-
-        assert(masked_pick_single_incoming(*this, &t, d, subgraph_mask));
-        assert(t == edge);
-    }, async);
-
+    // make sure all remaining edges have a single incoming edge which has not
+    // been traversed
     // make sure all dummy source edges have been traversed
     call_zeros(discovered, [&](edge_index edge) {
-        TAlphabet w = get_W(edge);
-        TAlphabet d = w % alph_size;
-        edge_index t = w == d ? edge : pred_W(edge, d);
-
-        assert(get_node_seq(bwd(t))[0] != kSentinelCode);
+        edge_index t = bwd(edge);
+        TAlphabet d = get_W(t);
+        assert(masked_pick_single_incoming(*this, &t, d, subgraph_mask));
+        assert(t);
+        assert(get_node_seq(t)[0] != kSentinelCode);
+        assert(!atomic_fetch_bit(discovered, t, async));
     }, async);
 
     // make sure that all edges have a single outgoing edge and that all sink
@@ -2072,10 +2062,20 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         if (!check) {
             assert(!subgraph_mask);
             assert(!get_last(edge - 1));
-            assert(discovered[edge - 1]);
+            assert(atomic_fetch_bit(discovered, edge - 1));
             assert(get_W(edge - 1) == kSentinelCode);
         } else {
             assert(get_W(edge) != kSentinelCode);
+        }
+        t = fwd(t, get_W(t) % alph_size);
+        check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
+        assert(t);
+        assert(!atomic_fetch_bit(discovered, t, async));
+        if (!check) {
+            assert(!subgraph_mask);
+            assert(!get_last(t - 1));
+            assert(atomic_fetch_bit(discovered, t - 1));
+            assert(get_W(t - 1) == kSentinelCode);
         }
     }, async);
 #endif
@@ -2095,7 +2095,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 sequence.push_back(d);
                 path.push_back(edge);
                 edge = fwd(edge, d);
-                masked_pick_single_outgoing(*this, &edge, subgraph_mask);
+                bool check = masked_pick_single_outgoing(*this, &edge, subgraph_mask);
+                assert(edge);
+                std::ignore = check;
+                assert(check);
             } while (edge != start && !atomic_fetch_bit(discovered, edge, async));
 
             if (edge == start && path.size()) {
@@ -2116,12 +2119,28 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         if (thread_pool) {
             thread_pool->enqueue(start_cycle, edge);
-            thread_pool->join();
         } else {
             start_cycle(edge);
         }
 
+        if (thread_pool)
+            thread_pool->join();
+
     }, async);
+
+#ifndef NDEBUG
+    bool leftover = false;
+    call_zeros(discovered, [&](edge_index edge) {
+        leftover = true;
+        TAlphabet d = get_W(edge) % alph_size;
+        std::cout << edge << "\t" << get_node_str(edge) << " " << decode(d) << "\t";
+        edge = fwd(edge, d);
+        d = get_W(edge) % alph_size;
+        std::cout << edge << "\t" << get_node_str(edge) << " " << decode(d) << "\n";
+    }, async);
+    std::cout << std::flush;
+    assert(!leftover);
+#endif
 }
 
 template <class EdgeStorage, class AsyncEdgeStorage>
