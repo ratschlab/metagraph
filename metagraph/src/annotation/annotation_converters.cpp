@@ -5,9 +5,12 @@
 #include <functional>
 #include <filesystem>
 
+#include <ips4o.hpp>
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
+#include "common/algorithms.hpp"
+#include "common/hash/hash.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
@@ -383,6 +386,134 @@ void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,
                              num_threads);
 }
 
+std::vector<uint32_t> get_row_classes(const std::vector<std::unique_ptr<bit_vector>> &columns) {
+    tsl::hopscotch_map<SmallVector<uint32_t>, uint64_t, utils::VectorHash> dict;
+    std::vector<uint32_t> row_classes;
+
+    ProgressBar progress_bar(columns.at(0)->size(), "Rows iterated",
+                             std::cerr, !common::get_verbose());
+
+    utils::RowsFromColumnsTransformer(columns).call_rows<SmallVector<uint32_t>>(
+        [&](const SmallVector<uint32_t> &row) {
+            auto [it, _] = dict.try_emplace(row, dict.size());
+            row_classes.push_back(it->second);
+            ++progress_bar;
+        }
+    );
+
+    return row_classes;
+}
+
+template <>
+std::unique_ptr<RbBRWTAnnotator>
+convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
+    std::vector<std::unique_ptr<bit_vector>> columns(annotator.num_labels());
+    columns.swap(const_cast<std::vector<std::unique_ptr<bit_vector>>&>(
+        annotator.get_matrix().data()
+    ));
+
+    uint64_t num_ones = 0;
+    for (const auto &col_ptr : columns) {
+        num_ones += col_ptr->num_set_bits();
+    }
+
+    logger->trace("Identifying unique rows");
+    std::vector<uint32_t> row_classes = get_row_classes(columns);
+
+    tsl::hopscotch_map<uint32_t /* class */, uint64_t /* count */> row_counter;
+    for (uint32_t row_class : row_classes) {
+        row_counter[row_class]++;
+    }
+
+    logger->trace("Number of unique rows: {}", row_counter.size());
+
+    std::vector<std::pair<uint32_t, uint64_t>> pairs;
+    pairs.reserve(row_counter.size());
+    for (const auto &pair : row_counter) {
+        pairs.push_back(pair);
+    }
+    row_counter.clear();
+
+    ips4o::parallel::sort(pairs.begin(), pairs.end(), utils::GreaterSecond(),
+                          get_num_threads());
+
+    tsl::hopscotch_map<uint32_t, uint32_t> class_to_code;
+    std::stringstream mult_log_message;
+    for (uint32_t i = 0; i < pairs.size(); ++i) {
+        class_to_code.emplace(pairs[i].first, i);
+        mult_log_message << i << ": " << pairs[i].second << ", ";
+    }
+    logger->trace("Row multiplicities: {}", mult_log_message.str());
+
+    // maps unique row ids to the respective rows of the original matrix
+    std::vector<uint64_t> row_pointers(class_to_code.size());
+
+    uint64_t total_code_length = 0;
+    for (size_t i = 0; i < row_classes.size(); ++i) {
+        uint32_t row_code = class_to_code[row_classes[i]];
+        row_classes[i] = row_code;
+        row_pointers[row_code] = i;
+        total_code_length += sdsl::bits::hi(row_code) + 1;
+    }
+    class_to_code.clear();
+
+    logger->trace("Started matrix reduction");
+
+    ProgressBar progress_bar(columns.size(), "Columns reduced",
+                             std::cerr, !common::get_verbose());
+
+    #pragma omp parallel for num_threads(get_num_threads())
+    for (size_t j = 0; j < columns.size(); ++j) {
+        sdsl::bit_vector reduced_column(row_pointers.size(), false);
+        for (size_t r = 0; r < row_pointers.size(); ++r) {
+            reduced_column[r] = (*columns[j])[row_pointers[r]];
+        }
+        columns[j] = std::make_unique<bit_vector_smart>(std::move(reduced_column));
+        ++progress_bar;
+    }
+
+    logger->trace("Compressing assignment vector");
+
+    sdsl::bit_vector code_bv(total_code_length);
+    sdsl::bit_vector boundary_bv(total_code_length, false);
+
+    uint64_t pos = 0;
+    for (uint32_t code : row_classes) {
+        uint8_t code_length = sdsl::bits::hi(code) + 1;
+        code_bv.set_int(pos, code, code_length);
+        boundary_bv[pos + code_length - 1] = true;
+        pos += code_length;
+    }
+    assert(pos == code_bv.size());
+
+    bit_vector_rrr<> row_codes(std::move(code_bv));
+    bit_vector_rrr<> row_code_delimiters(std::move(boundary_bv));
+
+    logger->trace("Building Multi-BRWT");
+
+    size_t num_threads = get_num_threads();
+    size_t num_rows_subsampled = 1'000'000;
+    size_t num_parallel_nodes = num_threads;
+
+    auto partitioning = [num_threads,num_rows_subsampled](const auto &columns) {
+        std::vector<sdsl::bit_vector> subvectors
+            = random_submatrix(columns, num_rows_subsampled, num_threads);
+        return greedy_matching(subvectors, num_threads);
+    };
+
+    BRWT reduced_matrix = BRWTBottomUpBuilder::build(std::move(columns),
+                                                     partitioning,
+                                                     num_parallel_nodes,
+                                                     num_threads);
+
+    return std::make_unique<RbBRWTAnnotator>(
+        std::make_unique<Rainbow<BRWT>>(std::move(reduced_matrix),
+                                        std::move(row_codes),
+                                        std::move(row_code_delimiters),
+                                        num_ones),
+        annotator.get_label_encoder()
+    );
+}
 
 template <>
 std::unique_ptr<BinRelWT_sdslAnnotator>

@@ -180,6 +180,7 @@ class Config {
         BinRelWT,
         RowFlat,
         RBFish,
+        RbBRWT,
     };
 
     enum GraphType {

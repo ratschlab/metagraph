@@ -37,6 +37,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annotate::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
+    } else if (utils::ends_with(filename, annotate::RbBRWTAnnotator::kExtension)) {
+        return Config::AnnotationType::RbBRWT;
+
     } else {
         logger->error("Unknown annotation format in '{}'", filename);
         exit(1);
@@ -79,6 +82,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RBFish: {
             annotation.reset(new annotate::RainbowfishAnnotator());
+            break;
+        }
+        case Config::RbBRWT: {
+            annotation.reset(new annotate::RbBRWTAnnotator());
             break;
         }
     }

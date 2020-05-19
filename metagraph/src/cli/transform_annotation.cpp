@@ -386,6 +386,10 @@ int transform_annotation(Config *config) {
                 convert<RainbowfishAnnotator>(std::move(annotator), *config, timer);
                 break;
             }
+            case Config::RbBRWT: {
+                convert<RbBRWTAnnotator>(std::move(annotator), *config, timer);
+                break;
+            }
         }
 
     } else {

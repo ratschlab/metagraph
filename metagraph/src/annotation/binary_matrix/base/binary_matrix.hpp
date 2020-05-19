@@ -48,6 +48,8 @@ class RainbowMatrix : public BinaryMatrix {
     // Return unique rows and update the row indexes in |rows| to point to their
     // respective rows in the vector returned.
     virtual std::vector<SetBitPositions> get_rows(std::vector<Row> *rows) const = 0;
+
+    virtual uint64_t num_distinct_rows() const = 0;
 };
 
 
