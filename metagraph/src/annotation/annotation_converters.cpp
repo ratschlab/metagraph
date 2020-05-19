@@ -387,19 +387,37 @@ void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,
 }
 
 std::vector<uint32_t> get_row_classes(const std::vector<std::unique_ptr<bit_vector>> &columns) {
-    tsl::hopscotch_map<SmallVector<uint32_t>, uint64_t, utils::VectorHash> dict;
-    std::vector<uint32_t> row_classes;
+    uint64_t num_rows = columns.at(0)->size();
 
-    ProgressBar progress_bar(columns.at(0)->size(), "Rows iterated",
+    std::vector<uint32_t> row_classes(num_rows, 0);
+    uint64_t max_class = 0;
+
+    ProgressBar progress_bar(columns.size(), "Columns iterated",
                              std::cerr, !common::get_verbose());
 
-    utils::RowsFromColumnsTransformer(columns).call_rows<SmallVector<uint32_t>>(
-        [&](const SmallVector<uint32_t> &row) {
-            auto [it, _] = dict.try_emplace(row, dict.size());
-            row_classes.push_back(it->second);
-            ++progress_bar;
-        }
-    );
+    tsl::hopscotch_map<uint32_t, uint32_t> new_class;
+
+    for (const auto &col_ptr : columns) {
+        new_class.clear();
+
+        col_ptr->call_ones([&](uint64_t i) {
+            uint32_t &row_class = row_classes[i];
+
+            auto [it, inserted] = new_class.try_emplace(row_class, max_class + 1);
+            if (inserted) {
+                ++max_class;
+
+                if (max_class == std::numeric_limits<uint32_t>::max()) {
+                    logger->error("Too many distinct rows");
+                    exit(1);
+                }
+            }
+
+            row_class = it->second;
+        });
+
+        ++progress_bar;
+    }
 
     return row_classes;
 }
