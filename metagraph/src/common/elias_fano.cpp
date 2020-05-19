@@ -16,20 +16,20 @@ namespace common {
 
 void concat(const std::vector<std::string> &files,  const std::string& result) {
     std::string concat_command = "cat ";
-    std::string concat_command1 = "cat ";
+    //std::string concat_command1 = "cat ";
     for (uint32_t i = 1; i < files.size(); ++i) {
         concat_command += files[i] + " ";
-        concat_command1 += files[i] + ".up ";
+      //  concat_command1 += files[i] + ".up ";
     }
     concat_command += " >> " + files[0];
-    concat_command1 += " >> " + files[0] + ".up";
+    //concat_command1 += " >> " + files[0] + ".up";
     system(concat_command.c_str());
-    system(concat_command1.c_str());
+    //system(concat_command1.c_str());
     std::filesystem::rename(files[0], result);
-    std::filesystem::rename(files[0] + ".up", result + ".up");
+   // std::filesystem::rename(files[0] + ".up", result + ".up");
     for(const auto &f: files) {
         std::filesystem::remove(f);
-        std::filesystem::remove(f + ".up");
+      //  std::filesystem::remove(f + ".up");
     }
 }
 

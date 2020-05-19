@@ -232,14 +232,69 @@ struct KmerBuffered {
 template <typename T>
 using RecentKmers = common::CircularBuffer<KmerBuffered<T>>;
 
-template <typename T, typename T_INT>
-inline void push(const T &v, common::EliasFanoEncoderBuffered<T_INT> *encoder) {
-    if constexpr(utils::is_pair_v<T>) {
-        encoder->add({ v.first.data(), v.second });
-    } else {
-        encoder->add(v.data());
+template <typename T>
+class Decoder {
+  public:
+    Decoder(const std::string& name) : name_(name), source_(name, ios::binary) {
+
     }
-}
+    std::optional<T> next() {
+        T result;
+        if (source_.read(reinterpret_cast<char *>(&result), sizeof(T))) {
+            return result;
+        }
+        return std::nullopt;
+    }
+  private:
+    std::string name_;
+    std::ifstream source_;
+};
+
+template <typename T>
+class ConcatDecoder {
+  public:
+    ConcatDecoder(const std::vector<std::string>& names) : names_(names), source_(names[0]) {
+
+    }
+    std::optional<T> next() {
+        std::optional<T> next = source_.next();
+        if (next.has_value()) {
+            return next;
+        } else {
+            while (++idx_ < names_.size()) {
+                source_ = Decoder<T>(names_[idx_]);
+                next = source_.next();
+                if (next.has_value()) {
+                    return next;
+                }
+            }
+            return std::nullopt;
+        }
+    }
+  private:
+    uint32_t idx_ = 0;
+    std::vector<std::string> names_;
+    Decoder<T> source_;
+};
+
+template <typename T>
+class Encoder {
+  public:
+    Encoder(const std::string &file_name)
+        : file_name_(file_name), sink_(file_name, ios::binary) {};
+
+    void add(const T &value) {
+        sink_.write(reinterpret_cast<const char *>(&value), sizeof(T));
+    }
+
+    inline const std::string &name() { return file_name_; }
+
+    void finish() { sink_.close(); }
+
+  private:
+    std::string file_name_;
+    std::ofstream sink_;
+};
 
 /**
  * Push a k-mer into the buffer, then iterate backwards and check if there is a dummy
@@ -250,13 +305,13 @@ inline void push(const T &v, common::EliasFanoEncoderBuffered<T_INT> *encoder) {
  * @param buffer queue that stores the last  |Alphabet|^2 k-mers used for identifying
  * redundant dummy source k-mers
  */
-template <typename T, typename T_INT, typename INT>
+template <typename T, typename INT>
 static void push_and_remove_redundant_dummy_source(
         size_t k,
         const T &el,
         RecentKmers<T> *buffer,
-        common::EliasFanoEncoderBuffered<T_INT> *encoder,
-        std::vector<common::EliasFanoEncoderBuffered<INT>> *dummy_kmer_chunks,
+        Encoder<INT> *encoder,
+        std::vector<Encoder<INT>> *dummy_kmer_chunks,
         size_t *num_dummy_l1_kmers) {
     assert(get_first(el)[0] != BOSS::kSentinelCode);
 
@@ -292,73 +347,27 @@ static void push_and_remove_redundant_dummy_source(
  * at the front is a (not-redundant) dummy k-mer it also writes its corresponding dummy
  * k-mer of prefix length 2 into #sorted_dummy_kmers.
  */
-template <typename T, typename T_INT, typename INT>
+template <typename T, typename INT>
 uint8_t write_kmer(size_t k,
                    const KmerBuffered<T> &to_write,
-                   common::EliasFanoEncoderBuffered<T_INT> *encoder,
-                   std::vector<common::EliasFanoEncoderBuffered<INT>> *dummy_kmer_chunks) {
-    static_assert(std::is_same_v<T_INT, get_int_t<T>>);
-
+                   Encoder<INT> *dummy_l1,
+                   std::vector<Encoder<INT>> *dummy_kmer_chunks) {
     if (to_write.is_removed) { // redundant dummy k-mer
         return 0;
     }
-    push(to_write.data, encoder);
     auto kmer_to_write = get_first(to_write.data);
+    assert(kmer_to_write[0] != BOSS::kSentinelCode) ;
     const TAlphabet node_last_char = kmer_to_write[1];
-    const TAlphabet edge_label = kmer_to_write[0];
-    if (node_last_char || !edge_label) { // not a dummy source kmer
+
+    if (node_last_char != BOSS::kSentinelCode) { // not a dummy source kmer
         return 0;
     }
+    dummy_l1->add(kmer_to_write.data());
 
     kmer_to_write.to_prev(k + 1, BOSS::kSentinelCode);
     (*dummy_kmer_chunks)[kmer_to_write[0]].add(kmer_to_write.data());
     return 1;
 }
-
-template <typename T>
-class Decoder {
-  public:
-    Decoder(const std::string& name) : name_(name), source_(name, ios::binary) {
-
-    }
-    std::optional<T> next() {
-        T result;
-        if (source_.read(reinterpret_cast<char *>(&result), sizeof(T))) {
-            return result;
-        }
-        return {};
-    }
-  private:
-    std::string name_;
-    std::ifstream source_;
-};
-
-template <typename T>
-class ConcatDecoder {
-  public:
-    ConcatDecoder(const std::vector<std::string>& names) : names_(names), source_(names[0]) {
-
-    }
-    std::optional<T> next() {
-        std::optional<T> next = source_.next();
-        if (next.has_value()) {
-            return next;
-        } else {
-            while (++idx_ < names_.size()) {
-                source_ = Decoder<T>(names_[idx_]);
-                next = source_.next();
-                if (next.has_value()) {
-                    return next;
-                }
-            }
-            return std::nullopt;
-        }
-    }
-  private:
-    uint32_t idx_ = 0;
-    std::vector<std::string> names_;
-    Decoder<T> source_;
-};
 
 template <typename KMER, typename T_INT, typename INT>
 std::optional<INT> next_dummy_source(size_t k, std::vector<Decoder<T_INT>> *dummy_source_it,
@@ -435,19 +444,20 @@ void push(const INT &v, RecentKmers<T> *buffer) {
  * #merged_l1_name. The dummy-2 source kmers for each first character are returned.
  */
 template <typename T>
-std::vector<std::string> generate_dummy_1_kmers(size_t k,
-                                                const std::filesystem::path &tmp_dir,
-                                                ChunkedWaitQueue<T> *kmers,
-                                                const std::string &merged_l1_name,
-                                                const std::string &dummy_sink_name) {
+std::pair<std::vector<std::string>, std::vector<std::string>>
+generate_dummy_1_kmers(size_t k,
+                       const std::filesystem::path &tmp_dir,
+                       ChunkedWaitQueue<T> *kmers,
+                       const std::string &dummy_l1_name,
+                       const std::string &dummy_sink_name) {
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
     using T_INT = get_int_t<T>; // either KMER::WordType or <KMER::WordType, count>
     using INT = typename KMER::WordType; // 64/128/256-bit integer
 
     std::vector<std::string> original_chunk_names = split_by_first(k, tmp_dir, *kmers);
 
-    std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_l2_chunks;
-    std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_sink_chunks;
+    std::vector<Encoder<INT>> dummy_l2_chunks;
+    std::vector<Encoder<INT>> dummy_sink_chunks;
     std::vector<std::string> dummy_l2_names(ALPHABET_LEN);
     std::vector<std::string> dummy_sink_names(ALPHABET_LEN);
     std::vector<Decoder<T_INT>> dummy_source_it;
@@ -458,8 +468,8 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
         original_chunk_names[i] = tmp_dir/("original_chunk_" + std::to_string(i));
         dummy_l2_names[i] = tmp_dir/("dummy_source_2_" + std::to_string(i));
         dummy_sink_names[i] = tmp_dir/("dummy_sink_" + std::to_string(i));
-        dummy_l2_chunks.emplace_back(dummy_l2_names[i], ENCODER_BUFFER_SIZE);
-        dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
+        dummy_l2_chunks.emplace_back(dummy_l2_names[i]);
+        dummy_sink_chunks.emplace_back(dummy_sink_names[i]);
         dummy_sink_it.emplace_back(original_chunk_names[i]);
         dummy_sink_it_v[i] = dummy_sink_it[i].next();
         dummy_source_it.emplace_back(original_chunk_names[i]);
@@ -476,7 +486,7 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
 
     std::vector<KMER> last_dummy(ALPHABET_LEN, KMER(0));
     RecentKmers<T> recent_buffer(1llu << 2 * KMER::kBitsPerChar);
-    common::EliasFanoEncoderBuffered<T_INT> merged_l1(merged_l1_name, ENCODER_BUFFER_SIZE);
+    Encoder<INT> dummy_l1(dummy_l1_name);
     std::optional<INT> dummy_source = next_dummy_source<KMER, T_INT, INT>(k, &dummy_source_it, &dummy_source_it_v);
     size_t num_dummy_l1_kmers = 0;
 
@@ -487,7 +497,7 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
                 push(dummy_source.value(), &recent_buffer);
                 if (recent_buffer.full()) {
                     num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(),
-                                                     &merged_l1, &dummy_l2_chunks);
+                                                     &dummy_l1, &dummy_l2_chunks);
                 }
                 prev_dummy_source = dummy_source;
             }
@@ -497,8 +507,8 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
     };
 
     ConcatDecoder<T_INT> it(original_chunk_names);
-    // write the main dummy kmer
-    merged_l1.add(it.next().value());
+    // skip the main dummy kmer
+    it.next();
     for(auto v = it.next(); v.has_value(); v = it.next())
     {
         T kmer_with_count = reinterpret_cast<const T&>(v.value());
@@ -519,18 +529,19 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
                                                  get_first(dummy_sink_it_v[first_char].value())),
                                          dummy_sink)) {
                 dummy_sink_chunks[first_char].add(dummy_sink.data());
+                std::cout << dummy_sink.to_string(k+1, "$ACGT") << " not redundant " << std::endl;
             }
         }
         push_dummy_source(kmer.data());
-        push_and_remove_redundant_dummy_source(k, kmer_with_count, &recent_buffer, &merged_l1,
+        push_and_remove_redundant_dummy_source(k, kmer_with_count, &recent_buffer, &dummy_l1,
                                                &dummy_l2_chunks, &num_dummy_l1_kmers);
     }
     push_dummy_source(INT(-1)); // leftover dummy sources
     while (!recent_buffer.empty()) { // add leftover elements from buffer
-        num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(), &merged_l1,
+        num_dummy_l1_kmers += write_kmer(k, recent_buffer.pop_front(), &dummy_l1,
                                          &dummy_l2_chunks);
     }
-    merged_l1.finish();
+    dummy_l1.finish();
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
         dummy_sink_chunks[i].finish();
         dummy_l2_chunks[i].finish();
@@ -540,7 +551,7 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   num_dummy_l1_kmers);
 
-    return dummy_l2_names;
+    return {original_chunk_names, dummy_l2_names};
 }
 
 /**
@@ -565,28 +576,30 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
 
-    std::string merged_l1_name = tmp_dir/"original_and_dummy_l1";
+    std::string dummy_l1_name = tmp_dir/"dummy_l1"; //TODO: all params or all return type
     std::string dummy_sink_name = tmp_dir/"dummy_sink";
-    std::vector<std::string> dummy_names
-        = generate_dummy_1_kmers(k, tmp_dir, kmers, merged_l1_name, dummy_sink_name);
+    std::vector<std::string> original_names;
+    std::vector<std::string> dummy_names;
+    std::tie(original_names, dummy_names)
+            = generate_dummy_1_kmers(k, tmp_dir, kmers, dummy_l1_name, dummy_sink_name);
 
     // stores the sorted original kmers and dummy-1 k-mers
     std::vector<std::string> files_to_merge;
     files_to_merge.push_back(dummy_sink_name);
+    files_to_merge.push_back(dummy_l1_name);
     std::vector<std::string> dummy_next_names(ALPHABET_LEN);
     // generate dummy k-mers of prefix length 2..k
     logger->trace("Starting generating dummy-k source k-mers...");
     for (size_t dummy_pref_len = 2; dummy_pref_len <= k; ++dummy_pref_len) {
         // this will compress all sorted dummy k-mers of given prefix length
         files_to_merge.push_back(tmp_dir/("dummy_l" + std::to_string(dummy_pref_len)));
-        common::EliasFanoEncoderBuffered<INT> encoder(files_to_merge.back(),
-                                                      ENCODER_BUFFER_SIZE);
+        Encoder<INT> encoder(files_to_merge.back());
 
-        std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_next_chunks;
+        std::vector<Encoder<INT>> dummy_next_chunks;
         for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
             dummy_next_names[i] = tmp_dir/("dummy_source_"
                     + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
-            dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
+            dummy_next_chunks.emplace_back(dummy_next_names[i]);
         }
         size_t num_kmers = 0;
         const std::function<void(const INT &)> &write_dummy = [&](const INT &v) {
@@ -596,7 +609,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             dummy_next_chunks[kmer[0]].add(kmer.data());
             num_kmers++;
         };
-        common::merge_files(dummy_names, write_dummy);
+        common::merge_files2(dummy_names, write_dummy);
 
         encoder.finish();
         std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
@@ -610,10 +623,12 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // at this point, we have the original k-mers and dummy-1 k-mers in original_and_dummy_l1,
     // the dummy-x k-mers in dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
-    async_worker.enqueue([kmers, merged_l1_name, files_to_merge]() {
+    async_worker.enqueue([kmers, original_names, files_to_merge, k]() { //TODO: remove k
         std::function<void(const T_INT &)> on_new_item
-                = [kmers](const T_INT &v) { kmers->push(reinterpret_cast<const T &>(v)); };
-        common::merge_dummy(merged_l1_name, files_to_merge, on_new_item);
+                = [kmers, k](const T_INT &v) {
+std::cout << get_first(reinterpret_cast<const T &>(v)).to_string(k+1, "$ACGT") << std::endl;
+                      kmers->push(reinterpret_cast<const T &>(v)); };
+        common::merge_dummy2(original_names, files_to_merge, on_new_item);
         kmers->shutdown();
     });
 }

@@ -141,7 +141,7 @@ TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
+        for (size_t k = 4; k < 5; ++k) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
                 "ATATTATAAAAAATTTTAAAAAA",
