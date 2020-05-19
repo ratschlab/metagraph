@@ -341,7 +341,7 @@ class ConcatDecoder {
     }
     std::optional<T> next() {
         std::optional<T> next = source_.next();
-        if (source_.has_value()) {
+        if (next.has_value()) {
             return next;
         } else {
             while (++idx_ < names_.size()) {
