@@ -350,8 +350,6 @@ template <typename T>
 std::vector<std::string> split_by_first(size_t k,
                                         const std::filesystem::path &tmp_dir,
                                         const ChunkedWaitQueue<T> &kmers) {
-    using T_INT = get_int_t<T>;
-
     std::vector<std::ofstream> original_chunks;
     std::vector<std::string> original_chunk_names(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
