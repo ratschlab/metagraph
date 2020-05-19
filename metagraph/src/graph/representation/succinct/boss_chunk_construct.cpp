@@ -315,8 +315,26 @@ uint8_t write_kmer(size_t k,
     return 1;
 }
 
-template <typename KMER, typename INT>
-std::optional<INT> next_dummy_source(size_t k, std::vector<common::EliasFanoDecoder<INT>> *dummy_source_it,
+template <typename T>
+class Decoder {
+  public:
+    Decoder(const std::string& name) : name_(name), source_(name, ios::binary) {
+
+    }
+    std::optional<T> next() {
+        T result;
+        if (source_.read(reinterpret_cast<char *>(&result), sizeof(T))) {
+            return result;
+        }
+        return {};
+    }
+  private:
+    std::string name_;
+    std::ifstream source_;
+};
+
+template <typename KMER, typename T_INT, typename INT>
+std::optional<INT> next_dummy_source(size_t k, std::vector<Decoder<T_INT>> *dummy_source_it,
                                      std::vector<INT> *dummy_source_it_v) {
     if (dummy_source_it->empty()) {
         return {};
@@ -329,10 +347,11 @@ std::optional<INT> next_dummy_source(size_t k, std::vector<common::EliasFanoDeco
             idx = i;
         }
     }
-    std::optional<INT> next = (*dummy_source_it)[idx].next();
+    std::optional<T_INT> next = (*dummy_source_it)[idx].next();
     if (next.has_value()) {
-        reinterpret_cast<KMER &>(next.value()).to_prev(k + 1, BOSS::kSentinelCode);
-        (*dummy_source_it_v)[idx] = next.value();
+        INT to_push = get_first(next.value());
+        reinterpret_cast<KMER &>(to_push).to_prev(k + 1, BOSS::kSentinelCode);
+        (*dummy_source_it_v)[idx] = to_push;
     } else {
         dummy_source_it->erase(dummy_source_it->begin() + idx);
         dummy_source_it_v->erase(dummy_source_it_v->begin() + idx);
@@ -406,23 +425,23 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
     std::vector<common::EliasFanoEncoderBuffered<INT>> dummy_sink_chunks;
     std::vector<std::string> dummy_l2_names(ALPHABET_LEN);
     std::vector<std::string> dummy_sink_names(ALPHABET_LEN);
-    std::vector<common::EliasFanoDecoder<INT>> dummy_source_it;
-    std::vector<common::EliasFanoDecoder<INT>> dummy_sink_it;
+    std::vector<Decoder<T_INT>> dummy_source_it;
+    std::vector<Decoder<T_INT>> dummy_sink_it;
     std::vector<INT> dummy_source_it_v;
-    std::vector<std::optional<INT>> dummy_sink_it_v(ALPHABET_LEN);
+    std::vector<std::optional<T_INT>> dummy_sink_it_v(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
         original_chunk_names[i] = tmp_dir/("original_chunk_" + std::to_string(i));
         dummy_l2_names[i] = tmp_dir/("dummy_source_2_" + std::to_string(i));
         dummy_sink_names[i] = tmp_dir/("dummy_sink_" + std::to_string(i));
         dummy_l2_chunks.emplace_back(dummy_l2_names[i], ENCODER_BUFFER_SIZE);
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
-        dummy_sink_it.emplace_back(original_chunk_names[i], false);
+        dummy_sink_it.emplace_back(original_chunk_names[i]);
         dummy_sink_it_v[i] = dummy_sink_it[i].next();
-        dummy_source_it.emplace_back(original_chunk_names[i], false);
-        std::optional<INT> first = dummy_source_it.back().next();
-        if (first.has_value() && first.value() != INT(0)) {
+        dummy_source_it.emplace_back(original_chunk_names[i]);
+        std::optional<T_INT> first = dummy_source_it.back().next();
+        if (first.has_value() && get_first(first.value()) != INT(0)) {
             reinterpret_cast<KMER &>(first.value()).to_prev(k + 1, BOSS::kSentinelCode);
-            dummy_source_it_v.push_back(first.value());
+            dummy_source_it_v.push_back(get_first(first.value()));
         } else {
             dummy_source_it.pop_back();
         }
@@ -433,7 +452,7 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
     std::vector<KMER> last_dummy(ALPHABET_LEN, KMER(0));
     RecentKmers<T> recent_buffer(1llu << 2 * KMER::kBitsPerChar);
     common::EliasFanoEncoderBuffered<T_INT> merged_l1(merged_l1_name, ENCODER_BUFFER_SIZE);
-    std::optional<INT> dummy_source = next_dummy_source<KMER, INT>(k, &dummy_source_it, &dummy_source_it_v);
+    std::optional<INT> dummy_source = next_dummy_source<KMER, T_INT, INT>(k, &dummy_source_it, &dummy_source_it_v);
     size_t num_dummy_l1_kmers = 0;
 
     auto push_dummy_source = [&](const INT &max) {
@@ -448,7 +467,7 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
                 prev_dummy_source = dummy_source;
             }
             dummy_source
-                    = next_dummy_source<KMER, INT>(k, &dummy_source_it, &dummy_source_it_v);
+                    = next_dummy_source<KMER, T_INT, INT>(k, &dummy_source_it, &dummy_source_it_v);
         }
     };
 
@@ -467,12 +486,12 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
             last_dummy[first_char] = dummy_sink;
 
             while (dummy_sink_it_v[first_char].has_value()
-                   && dummy_sink_it_v[first_char].value() < dummy_sink.data()) {
+                   && get_first(dummy_sink_it_v[first_char].value()) < dummy_sink.data()) {
                 dummy_sink_it_v[first_char] = dummy_sink_it[first_char].next();
             }
             if (!dummy_sink_it_v[first_char].has_value()
                 || !KMER::compare_suffix(reinterpret_cast<const KMER &>(
-                                                 dummy_sink_it_v[first_char].value()),
+                                                 get_first(dummy_sink_it_v[first_char].value())),
                                          dummy_sink)) {
                 dummy_sink_chunks[first_char].add(dummy_sink.data());
             }
