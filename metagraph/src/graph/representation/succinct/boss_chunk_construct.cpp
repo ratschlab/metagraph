@@ -333,6 +333,33 @@ class Decoder {
     std::ifstream source_;
 };
 
+template <typename T>
+class ConcatDecoder {
+  public:
+    ConcatDecoder(const std::vector<std::string>& names) : names_(names), source_(names[0]) {
+
+    }
+    std::optional<T> next() {
+        std::optional<T> next = source_.next();
+        if (source_.has_value()) {
+            return next;
+        } else {
+            while (++idx_ < names_.size()) {
+                source_ = Decoder<T>(names_[idx_]);
+                next = source_.next();
+                if (next.has_value()) {
+                    return next;
+                }
+            }
+            return std::nullopt;
+        }
+    }
+  private:
+    uint32_t idx_ = 0;
+    std::vector<std::string> names_;
+    Decoder<T> source_;
+};
+
 template <typename KMER, typename T_INT, typename INT>
 std::optional<INT> next_dummy_source(size_t k, std::vector<Decoder<T_INT>> *dummy_source_it,
                                      std::vector<INT> *dummy_source_it_v) {
@@ -369,8 +396,6 @@ template <typename T>
 std::vector<std::string> split_by_first(size_t k,
                                         const std::filesystem::path &tmp_dir,
                                         const ChunkedWaitQueue<T> &kmers) {
-    using T_INT = get_int_t<T>;
-
     std::vector<std::ofstream> original_chunks;
     std::vector<std::string> original_chunk_names(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
@@ -471,7 +496,7 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
         }
     };
 
-    common::EliasFanoConcatDecoder<T_INT> it(original_chunk_names, false);
+    ConcatDecoder<T_INT> it(original_chunk_names);
     // write the main dummy kmer
     merged_l1.add(it.next().value());
     for(auto v = it.next(); v.has_value(); v = it.next())
