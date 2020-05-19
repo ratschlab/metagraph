@@ -352,11 +352,11 @@ std::vector<std::string> split_by_first(size_t k,
                                         const ChunkedWaitQueue<T> &kmers) {
     using T_INT = get_int_t<T>;
 
-    std::vector<common::EliasFanoEncoderBuffered<T_INT>> original_chunks;
+    std::vector<std::ofstream> original_chunks;
     std::vector<std::string> original_chunk_names(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
         original_chunk_names[i] = tmp_dir / ("original_chunk_" + std::to_string(i));
-        original_chunks.emplace_back(original_chunk_names[i], ENCODER_BUFFER_SIZE);
+        original_chunks.emplace_back(original_chunk_names[i], ios::binary);
     }
 
     logger->trace("Splitting k-mers into {} chunks...", ALPHABET_LEN);
@@ -364,10 +364,12 @@ std::vector<std::string> split_by_first(size_t k,
     for (auto &it = kmers.begin(); it != kmers.end(); ++it) {
         num_parent_kmers++;
         const T &kmer = *it;
-        push(kmer, &original_chunks[get_first(kmer)[k]]);
+        //push(kmer, &original_chunks[get_first(kmer)[k]]);
+        original_chunks[get_first(kmer)[k]].write(reinterpret_cast<const char *>(&kmer),
+                                                  sizeof(T));
     }
     std::for_each(original_chunks.begin(), original_chunks.end(),
-                  [](common::EliasFanoEncoderBuffered<T_INT> &e) { e.finish(); });
+                  [](std::ofstream &e) { e.close(); });
     logger->trace("Total number of k-mers: {}", num_parent_kmers);
     return original_chunk_names;
 }
@@ -418,7 +420,7 @@ std::vector<std::string> generate_dummy_1_kmers(size_t k,
         dummy_sink_it_v[i] = dummy_sink_it[i].next();
         dummy_source_it.emplace_back(original_chunk_names[i], false);
         std::optional<INT> first = dummy_source_it.back().next();
-        if (first.has_value() && first.value() != 0) {
+        if (first.has_value() && first.value() != INT(0)) {
             reinterpret_cast<KMER &>(first.value()).to_prev(k + 1, BOSS::kSentinelCode);
             dummy_source_it_v.push_back(first.value());
         } else {
