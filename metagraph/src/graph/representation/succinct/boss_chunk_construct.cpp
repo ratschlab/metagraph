@@ -478,7 +478,8 @@ void handle_dummy_source(size_t k,
                          INT *last_dummy_sink) {
     // Push all non-dummy kmers smaller than dummy source
     while (dummy_source_it.top().has_value() && get_first(dummy_source_it.top().value()) < dummy_source) {
-        const T &v = reinterpret_cast<const T &>(dummy_source_it.next().value());
+        T_INT int_v = dummy_source_it.next().value();
+        const T &v = reinterpret_cast<const T &>(int_v);
         push_to_recent(v, recent_buffer, dummy_l1);
         remove_redundant_dummy_source(v, recent_buffer);
         // push the dummy sink k-mer corresponding to v
