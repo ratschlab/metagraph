@@ -262,52 +262,48 @@ void compute_or(const std::vector<const bit_vector *> &columns,
 std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
                                        uint64_t *buffer,
                                        ThreadPool &thread_pool) {
-    uint64_t size = columns.at(0)->size();
+    const uint64_t vector_size = columns.at(0)->size();
+    const uint64_t block_size = std::max(vector_size / 100,
+                                         static_cast<uint64_t>(100'000));
 
-    const uint64_t block_size = std::max(size / 100, static_cast<uint64_t>(100'000));
-
-    std::vector<std::pair<uint64_t *, uint64_t *>> results((size + block_size - 1) / block_size);
-    std::mutex mu;
+    std::vector<std::pair<uint64_t *, uint64_t *>>
+            results((vector_size + block_size - 1) / block_size);
 
     std::vector<std::future<void>> futures;
     std::atomic<uint64_t> num_set_bits = 0;
 
-    for (uint64_t i = 0; i < size; i += block_size) {
+    for (uint64_t i = 0; i < vector_size; i += block_size) {
         futures.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
+            // estimate the maximum number of set bits in the result
+            uint64_t buffer_size = 0;
+            for (size_t j = 0; j < columns.size(); ++j) {
+                buffer_size += columns[j]->rank1(end - 1)
+                                - (begin ? columns[j]->rank1(begin - 1) : 0);
+            }
+            // reserve space for 3 buffers of size |buffer_size| each
+            uint64_t *buff = __atomic_fetch_add(&buffer, buffer_size * 3,
+                                                __ATOMIC_RELAXED);
+
             std::pair<uint64_t *, uint64_t *> &result = results[begin / block_size];
             std::pair<uint64_t *, uint64_t *> buffer_pos;
             std::pair<uint64_t *, uint64_t *> buffer_merge;
+            result.first = result.second = buff;
+            buffer_pos.first = buffer_pos.second = buff + buffer_size;
+            buffer_merge.first = buffer_merge.second = buff + 2 * buffer_size;
 
-            uint64_t size = 0;
-            for (size_t j = 0; j < columns.size(); ++j) {
-                size += columns[j]->rank1(end - 1)
-                            - (begin ? columns[j]->rank1(begin - 1) : 0);
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(mu);
-
-                result.first = result.second = buffer;
-                buffer += size;
-
-                buffer_pos.first = buffer_pos.second = buffer;
-                buffer += size;
-
-                buffer_merge.first = buffer_merge.second = buffer;
-                buffer += size;
-            }
-
+            // write the positions of ones in the first vector to |result|
             columns[0]->call_ones_in_range(begin, end,
                 [&](uint64_t k) { *(result.second++) = k; }
             );
 
+            // iterate through all other columns and merge them sequentially
+            //TODO: use multiway merge if there are more than two columns?
             for (size_t j = 1; j < columns.size(); ++j) {
                 buffer_pos.second = buffer_pos.first;
                 columns[j]->call_ones_in_range(begin, end,
                     [&](uint64_t k) { *(buffer_pos.second++) = k; }
                 );
 
-                //TODO: use multiway merge for more than two columns
                 std::merge(buffer_pos.first, buffer_pos.second,
                            result.first, result.second, buffer_merge.first);
                 buffer_merge.second = buffer_merge.first
@@ -320,7 +316,7 @@ std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &co
 
             num_set_bits += result.second - result.first;
 
-        }, i, std::min(i + block_size, size)));
+        }, i, std::min(i + block_size, vector_size)));
     }
 
     std::for_each(futures.begin(), futures.end(), [](auto &f) { f.wait(); });
@@ -333,7 +329,7 @@ std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &co
                 }
             }
         },
-        columns.at(0)->size(),
+        vector_size,
         num_set_bits
     );
 }
