@@ -315,7 +315,7 @@ void handle_dummy_sink(size_t k,
 template <typename T, typename INT>
 void write_dummy_l1(const T &to_write, common::Encoder<INT> *dummy_l1) {
     auto kmer = get_first(to_write);
-    if (kmer.data() == 0) {
+    if (kmer.data() == 0U) {
         return;
     }
     assert(kmer[0] != BOSS::kSentinelCode);
