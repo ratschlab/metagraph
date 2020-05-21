@@ -364,6 +364,7 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 
     uint64_t block_end = 0;
 
+    // Each block has |block_size| many bits in |reference| set to `1`
     for (uint64_t offset = 0; offset < reference_num_set_bits; offset += block_size) {
         // ........... [1     1       1    1  1] ............. //
         //              ^                     ^                //
@@ -416,6 +417,7 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 
     uint64_t end = 0;
 
+    // Each block has |block_size| many bits in |reference| set to `1`
     for (uint64_t offset = 0; offset < reference_num_set_bits; offset += block_size) {
         // ........... [1     1       1    1  1] ............. //
         //              ^                     ^                //
