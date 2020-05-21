@@ -314,10 +314,10 @@ void handle_dummy_sink(size_t k,
 template <typename T, typename INT>
 void write_dummy_l1(const T &to_write, common::Encoder<INT> *dummy_l1) {
     auto kmer = get_first(to_write);
-    assert(kmer[0] != BOSS::kSentinelCode);
     if (kmer.data() == 0U) { // redundant dummy source k-mer
         return;
     }
+    assert(kmer[0] != BOSS::kSentinelCode);
 
     const TAlphabet node_last_char = kmer[1];
     if (node_last_char == BOSS::kSentinelCode) { // only write dummy-1 source k-mers
@@ -510,7 +510,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             dummy_next_chunks[kmer[0]].add(kmer.data());
             num_kmers++;
         };
-        common::merge_files2(dummy_names, write_dummy);
+        common::merge_files_uncompressed(dummy_names, write_dummy);
 
         encoder.finish();
         std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),

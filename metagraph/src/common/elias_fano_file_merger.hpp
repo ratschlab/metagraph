@@ -98,22 +98,20 @@ class MergeDecoder {
     common::MergeHeap<T> heap_;
 };
 
-
+namespace internal {
 /**
- * Given a list of n source files, containing ordered elements of type T, merge the n
- * sources into a single (ordered) list of type T and delete the original files.
+ * Given a list of n Decoders, containing ordered elements of type T, merge the n
+ * sources into a single (ordered) list of type T and invoke #on_new_item for each element
  * @tparam T the type of the  elements to be merged (typically a 64/128 or 256-bit k-mer)
- * @param sources the files containing sorted lists of type T
+ * @param decoders sources containing sorted lists of type T
  * @param on_new_item callback to invoke when a new element was merged
- * @param remove_sources if true, remove source files after merging
  * @return the total number of elements read from all files
  *
  * Note: this method blocks until all the data was successfully merged.
  */
-template <typename T>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     const std::function<void(const T &)> &on_new_item,
-                     bool remove_sources = true) {
+template <typename T, typename Decoder>
+uint64_t merge_files(std::vector<Decoder> &decoders,
+                     const std::function<void(const T &)> &on_new_item) {
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
     uint64_t num_elements_read = 0;
@@ -121,10 +119,8 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     MergeHeap<T> merge_heap;
     std::optional<T> data_item;
 
-    std::vector<EliasFanoDecoder<T>> decoders;
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.emplace_back(sources[i], remove_sources);
-        data_item = decoders.back().next();
+    for (uint32_t i = 0; i < decoders.size(); ++i) {
+        data_item = decoders[i].next();
         if (data_item.has_value()) {
             merge_heap.emplace(data_item.value(), i);
             num_elements_read++;
@@ -154,47 +150,49 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 
     return num_elements_read;
 }
+} // internal
 
+/**
+ * Merges Elias-Fano sorted compressed files into a single stream.
+ */
 template <typename T>
-uint64_t merge_files2(const std::vector<std::string> &sources,
+uint64_t merge_files(const std::vector<std::string> &sources,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
-    // start merging disk chunks by using a heap to store the current element
-    // from each chunk
-    uint64_t num_elements_read = 0;
-
-    MergeHeap<T> merge_heap;
-    T data_item;
-
-    std::vector<std::ifstream> decoders;
+    std::vector<EliasFanoDecoder<T>> decoders;
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.push_back(std::ifstream(sources[i], std::ios::binary));
-        if (decoders.back().read(reinterpret_cast<char *>(&data_item), sizeof(data_item))) {
-            merge_heap.emplace(data_item, i);
-            num_elements_read++;
-        }
+        decoders.emplace_back(sources[i], remove_sources);
     }
 
-    if (merge_heap.empty()) {
-        return 0;
+    return internal::merge_files(decoders, on_new_item);
+}
+
+template <typename T>
+class Decoder {
+  public:
+    Decoder(const std::string &name) : source_(name, std::ios::binary) {}
+    std::optional<T> next() {
+        T result;
+        if (source_.read(reinterpret_cast<char *>(&result), sizeof(T))) {
+            return result;
+        }
+        return std::nullopt;
     }
 
-    T last_written = merge_heap.top().first;
-    on_new_item(last_written);
+  private:
+    std::ifstream source_;
+};
 
-    while (!merge_heap.empty()) {
-        auto [smallest, chunk_index] = merge_heap.pop();
-
-        if (smallest != last_written) {
-            on_new_item(smallest);
-            last_written = smallest;
-        }
-
-        if (decoders[chunk_index].read(reinterpret_cast<char *>(&data_item), sizeof(data_item))) {
-            merge_heap.emplace(data_item, chunk_index);
-            num_elements_read++;
-        }
+/** Merges binary files into a single stream */
+template <typename T>
+uint64_t merge_files_uncompressed(const std::vector<std::string> &sources,
+                     const std::function<void(const T &)> &on_new_item,
+                     bool remove_sources = true) {
+    std::vector<Decoder<T>> decoders;
+    for (uint32_t i = 0; i < sources.size(); ++i) {
+        decoders.push_back(Decoder<T>(sources[i]));
     }
+    size_t num_elements_read = internal::merge_files(decoders, on_new_item);
 
     if (remove_sources) {
         std::for_each(sources.begin(), sources.end(),
@@ -294,7 +292,7 @@ uint64_t merge_dummy(const std::vector<std::string> &source,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
     source_no_count.insert(source_no_count.end(), source.begin(), source.end());
-    return merge_files2(source_no_count, on_new_item, remove_sources);
+    return merge_files_uncompressed(source_no_count, on_new_item, remove_sources);
 }
 
 /**
