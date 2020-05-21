@@ -425,6 +425,13 @@ std::vector<uint32_t> get_row_classes(const std::vector<std::unique_ptr<bit_vect
 template <>
 std::unique_ptr<RbBRWTAnnotator>
 convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
+    if (!annotator.num_labels()) {
+        return std::make_unique<RbBRWTAnnotator>(
+            std::make_unique<Rainbow<BRWT>>(),
+            annotator.get_label_encoder()
+        );
+    }
+
     std::vector<std::unique_ptr<bit_vector>> columns(annotator.num_labels());
     columns.swap(const_cast<std::vector<std::unique_ptr<bit_vector>>&>(
         annotator.get_matrix().data()
