@@ -409,7 +409,7 @@ generate_dummy_1_kmers(size_t k,
     }
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
-    #pragma omp parallel for num_threads(4)
+    #pragma omp parallel for num_threads(4) schedule(static, 1)
     for (uint32_t first_ch = 1; first_ch < ALPHABET_LEN; ++first_ch) {  // skip $$..$
         RecentKmers<KMER> recent_buffer(1llu << 2 * KMER::kBitsPerChar);
         INT last_dummy_sink = 0;
