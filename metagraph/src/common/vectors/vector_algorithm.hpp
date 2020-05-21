@@ -118,8 +118,9 @@ void compute_or(const std::vector<const bit_vector *> &columns,
                 sdsl::bit_vector *result,
                 ThreadPool &thread_pool);
 
+// Call this version only for sparse vectors (with the density about 1% or less).
 // The buffer must have capacity to store 3 x (number of set bits in all columns)
-// 64-bit integers
+// 64-bit integers.
 std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
                                        uint64_t *buffer,
                                        ThreadPool &thread_pool);
