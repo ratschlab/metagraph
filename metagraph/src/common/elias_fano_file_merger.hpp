@@ -57,6 +57,47 @@ class MergeHeap {
     Compare compare_ = Compare();
 };
 
+/**
+ * Decoder that reads data from several sorted files and merges it into a single sorted
+ * stream.
+ * @tparam T the type of data being stored
+ */
+template <typename T>
+class MergeDecoder {
+  public:
+    MergeDecoder(const std::vector<std::string> &source_names) {
+        T data_item;
+        sources_.resize(source_names.size());
+        for (uint32_t i = 0; i < sources_.size(); ++i) {
+            sources_[i] = std::ifstream(source_names[i], std::ios::binary);
+            if (sources_[i].read(reinterpret_cast<char *>(&data_item), sizeof(data_item))) {
+                heap_.emplace(data_item, i);
+            }
+        }
+    }
+    std::optional<T> top() {
+        if (heap_.empty()) {
+            return std::nullopt;
+        }
+        return heap_.top().first;
+    }
+    std::optional<T> next() {
+        if (heap_.empty()) {
+            return std::nullopt;
+        }
+        auto [result, chunk_index] = heap_.pop();
+        T data_item;
+        if (sources_[chunk_index].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
+            heap_.emplace(data_item, chunk_index);
+        }
+        return result;
+    }
+
+  private:
+    std::vector<std::ifstream> sources_;
+    common::MergeHeap<T> heap_;
+};
+
 
 /**
  * Given a list of n source files, containing ordered elements of type T, merge the n

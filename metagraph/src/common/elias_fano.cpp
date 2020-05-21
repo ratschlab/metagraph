@@ -456,34 +456,6 @@ T EliasFanoDecoder<T>::clear_high_bits(T value, uint8_t index) {
     return value & ((T(1) << index) - 1UL);
 }
 
-// -------------------------- EliasFanoConcatDecoder<T> -------------------------------
-template <typename T>
-EliasFanoConcatDecoder<T>::EliasFanoConcatDecoder(const std::vector<std::string> &sources,
-                                                  bool remove_source)
-    : sources_(sources),
-      remove_source_(remove_source),
-      source_current_(sources[0], remove_source),
-      idx_(0U) {
-    assert(!sources.empty());
-};
-
-template <typename T>
-std::optional<T> EliasFanoConcatDecoder<T>::next() {
-    std::optional<T> next = source_current_.next();
-    if (next.has_value()) {
-        return next;
-    } else {
-        while (++idx_ < sources_.size()) {
-            source_current_ = EliasFanoDecoder<T>(sources_[idx_], remove_source_);
-            next = source_current_.next();
-            if (next.has_value()) {
-                return next;
-            }
-        }
-        return {};
-    }
-}
-
 // -------------------------- EliasFanoEncoder<std::pair> -------------------------------
 template <typename T, typename C>
 EliasFanoEncoder<std::pair<T, C>>::EliasFanoEncoder(size_t size,
@@ -629,24 +601,6 @@ template class EliasFanoDecoder<std::pair<sdsl::uint128_t, uint32_t>>;
 template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint8_t>>;
 template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint16_t>>;
 template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint32_t>>;
-
-template class EliasFanoConcatDecoder<uint32_t>;
-template class EliasFanoConcatDecoder<uint64_t>;
-template class EliasFanoConcatDecoder<sdsl::uint128_t>;
-template class EliasFanoConcatDecoder<sdsl::uint256_t>;
-
-template class EliasFanoConcatDecoder<std::pair<uint32_t, uint8_t>>;
-template class EliasFanoConcatDecoder<std::pair<uint32_t, uint16_t>>;
-template class EliasFanoConcatDecoder<std::pair<uint32_t, uint32_t>>;
-template class EliasFanoConcatDecoder<std::pair<uint64_t, uint8_t>>;
-template class EliasFanoConcatDecoder<std::pair<uint64_t, uint16_t>>;
-template class EliasFanoConcatDecoder<std::pair<uint64_t, uint32_t>>;
-template class EliasFanoConcatDecoder<std::pair<sdsl::uint128_t, uint8_t>>;
-template class EliasFanoConcatDecoder<std::pair<sdsl::uint128_t, uint16_t>>;
-template class EliasFanoConcatDecoder<std::pair<sdsl::uint128_t, uint32_t>>;
-template class EliasFanoConcatDecoder<std::pair<sdsl::uint256_t, uint8_t>>;
-template class EliasFanoConcatDecoder<std::pair<sdsl::uint256_t, uint16_t>>;
-template class EliasFanoConcatDecoder<std::pair<sdsl::uint256_t, uint32_t>>;
 
 template class EliasFanoEncoderBuffered<uint32_t>;
 template class EliasFanoEncoderBuffered<uint64_t>;
