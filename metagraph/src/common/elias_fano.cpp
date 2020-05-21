@@ -215,7 +215,7 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
 }
 
 template <typename T>
-EliasFanoEncoder<T>::EliasFanoEncoder(const Vector<T> &data,
+EliasFanoEncoder<T>::EliasFanoEncoder(const std::vector<T> &data,
                                       std::ofstream *sink,
                                       std::ofstream *sink_upper)
     : declared_size_(data.size()), sink_(sink), sink_upper_(sink_upper) {
@@ -240,15 +240,16 @@ void EliasFanoEncoder<T>::add(T value) {
     // We are adding the size_-th element, so we have a 1 followed by upper_bits
     // zeros, plus the 1s for the previous size_ elements; this is not trivial to
     // understand, so spend some time thinking about why this is correct
-    const T pos = upper_bits + size_;
+    assert(upper_bits + size_ < std::numeric_limits<uint64_t>::max());
+    const uint64_t pos = upper_bits + size_;
     // using ">> 3" for /8 and "&7" for %8 because sdsl::uint256_t doesn't define / and %
-    upper_[(uint64_t)(pos >> 3)] |= 1U << (uint64_t)(pos & 7);
+    upper_[pos >> 3] |= 1U << (pos & 7);
 
     // Append the #num_lower_bits_ bits of #value to #lower_
     if (num_lower_bits_ != 0) {
         const T lower_bits = value & lower_bits_mask_;
         size_t pos_bits = size_ * num_lower_bits_;
-        const size_t max_buf_size = sizeof(lower_) - sizeof(T);
+        constexpr size_t max_buf_size = sizeof(lower_) - sizeof(T);
         if (pos_bits - cur_pos_lbits_ >= 8 * max_buf_size) {
             // first sizeof(T)*8 bits were written
             cur_pos_lbits_ += 8 * max_buf_size;
@@ -398,8 +399,8 @@ T EliasFanoDecoder<T>::next_lower() {
 
     const uint8_t *ptr
             = reinterpret_cast<uint8_t *>(&lower_[lower_idx_]) + (adjusted_pos / 8);
-    const T ptrv = load_unaligned<T>(ptr);
-    return T(clear_high_bits(ptrv >> (adjusted_pos % 8), num_lower_bits_));
+
+    return clear_high_bits(load_unaligned<T>(ptr) >> (adjusted_pos % 8), num_lower_bits_);
 }
 
 template <typename T>
@@ -547,14 +548,6 @@ EliasFanoEncoderBuffered<T>::EliasFanoEncoderBuffered(const std::string &file_na
 }
 
 template <typename T>
-void EliasFanoEncoderBuffered<T>::add(const T &value) {
-    buffer_.push_back(value);
-    if (buffer_.size() == buffer_.capacity()) {
-        encode_chunk();
-    }
-}
-
-template <typename T>
 size_t EliasFanoEncoderBuffered<T>::finish() {
     encode_chunk();
     sink_.close();
@@ -564,7 +557,7 @@ size_t EliasFanoEncoderBuffered<T>::finish() {
 
 template <typename T>
 void EliasFanoEncoderBuffered<T>::encode_chunk() {
-    EliasFanoEncoder<T> encoder_ = EliasFanoEncoder<T>(buffer_, &sink_, &sink_upper_);
+    EliasFanoEncoder<T> encoder_(buffer_, &sink_, &sink_upper_);
     total_size_ += encoder_.finish();
     buffer_.resize(0);
 }
@@ -579,15 +572,6 @@ EliasFanoEncoderBuffered<std::pair<T, C>>::EliasFanoEncoderBuffered(const std::s
     sink_second_ = std::ofstream(file_name + ".count", std::ios::binary | std::ios::out);
     buffer_.reserve(buffer_size);
     buffer_second_.reserve(buffer_size);
-}
-
-template <typename T, typename C>
-void EliasFanoEncoderBuffered<std::pair<T, C>>::add(const std::pair<T, C> &value) {
-    buffer_.push_back(value.first);
-    buffer_second_.push_back(value.second);
-    if (buffer_.size() == buffer_.capacity()) {
-        encode_chunk();
-    }
 }
 
 template <typename T, typename C>
