@@ -261,9 +261,8 @@ constexpr uint8_t ALPHABET_LEN = 1 << KmerExtractorBOSS::bits_per_char;
  * Splits #kmers by the first and last character into ALPHABET_LEN^2 blocks.
  */
 template <typename T>
-std::vector<std::string> split_by_first(size_t k,
-                                        const std::filesystem::path &tmp_dir,
-                                        const ChunkedWaitQueue<T> &kmers) {
+std::vector<std::string>
+split(size_t k, const std::filesystem::path &tmp_dir, const ChunkedWaitQueue<T> &kmers) {
     logger->trace("Splitting k-mers into {} chunks...", ALPHABET_LEN);
     std::vector<std::ofstream> sinks(std::pow(ALPHABET_LEN, 2));
     std::vector<std::string> names(std::pow(ALPHABET_LEN, 2));
@@ -294,7 +293,7 @@ void handle_dummy_sink(size_t k,
                        common::Encoder<INT> *dummy_sink_enc,
                        INT *last_dummy_sink) {
     kmer.to_next(k + 1, BOSS::kSentinelCode);
-    if (*last_dummy_sink == kmer.data()) { // distinct dummy sink k-mer
+    if (*last_dummy_sink == kmer.data()) { // generate only distinct dummy sink k-mers
         return;
     }
     *last_dummy_sink = kmer.data();
@@ -310,29 +309,19 @@ void handle_dummy_sink(size_t k,
 }
 
 /**
- * Writes #to_write to #dummy_l1 if it's a dummy kmer and it wasn't marked as redundant.
+ * Writes #to_write to #dummy_l1 if it's a dummy-1 kmer and it wasn't marked as redundant.
  */
 template <typename T, typename INT>
 void write_dummy_l1(const T &to_write, common::Encoder<INT> *dummy_l1) {
     auto kmer = get_first(to_write);
-    if (kmer.data() == 0U) {
+    assert(kmer[0] != BOSS::kSentinelCode);
+    if (kmer.data() == 0U) { // redundant dummy source k-mer
         return;
     }
-    assert(kmer[0] != BOSS::kSentinelCode);
-    const TAlphabet node_last_char = kmer[1];
 
+    const TAlphabet node_last_char = kmer[1];
     if (node_last_char == BOSS::kSentinelCode) { // only write dummy-1 source k-mers
         dummy_l1->add(kmer.data());
-    }
-}
-
-template <typename T, typename KMER, typename INT>
-void push_to_recent(const KMER &v, RecentKmers<KMER> *buffer, common::Encoder<INT> *dummy_l1) {
-    assert(get_first(v)[1] == BOSS::kSentinelCode); // must be dummy source k-mer
-    if constexpr (utils::is_pair_v<T>) {
-        push_to_recent({ v, 0 }, buffer, dummy_l1);
-    } else {
-        push_to_recent(v, buffer, dummy_l1);
     }
 }
 
@@ -395,7 +384,7 @@ generate_dummy_1_kmers(size_t k,
     using INT = typename KMER::WordType; // 64/128/256-bit integer
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
-    std::vector<std::string> original_names = split_by_first(k, tmp_dir, *kmers);
+    std::vector<std::string> original_names = split(k, tmp_dir, *kmers);
 
     std::vector<common::Encoder<INT>> dummy_l1_chunks;
     std::vector<common::Encoder<INT>> dummy_sink_chunks;
@@ -426,7 +415,7 @@ generate_dummy_1_kmers(size_t k,
         common::MergeDecoder<T_INT> dummy_source_it(last_ch_names);
         INT prev_dummy_source(0);
         for (auto v = it.next(); v.has_value(); v = it.next()) {
-            KMER dummy_source = get_first(reinterpret_cast<const T &>(v.value()));
+            KMER dummy_source(get_first(v.value()));
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
             if (dummy_source.data() != prev_dummy_source) {
                 handle_dummy_source(k, dummy_source.data(), dummy_source_it, dummy_sink_it,
@@ -449,8 +438,8 @@ generate_dummy_1_kmers(size_t k,
         dummy_l1_chunks[i].finish();
     }
 
-    // dummy sink k-mers are partitioned into blocks by kmer[1], simply concatenating the
-    // blocks will result in an ordered block
+    // dummy sink k-mers are partitioned into blocks by kmer[1], so simply concatenating
+    // the blocks will result in a single ordered block
     std::string dummy_sink_name = tmp_dir/"dummy_sink";
     common::concat(dummy_sink_names, dummy_sink_name);
 
@@ -538,7 +527,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     async_worker.enqueue([kmers, original_names, files_to_merge]() {
         std::function<void(const T_INT &)> on_new_item
                 = [kmers](const T_INT &v) { kmers->push(reinterpret_cast<const T &>(v)); };
-        common::merge_dummy2(original_names, files_to_merge, on_new_item);
+        common::merge_dummy(original_names, files_to_merge, on_new_item);
         kmers->shutdown();
     });
 }

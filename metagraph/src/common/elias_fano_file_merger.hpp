@@ -272,82 +272,37 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 }
 
 /**
- * Merges the Ts in #source with the Ts in #source_zero_count. This is no different than
+ * Merges the Ts in #source with the Ts in #source_no_count. This is no different than
  * calling merge() for all files.
  * @param source name of a source file containing Elias-Fano encoded INTs
- * @param source_zero_count name of a soruce file containing Elias-Fano encoded INTs corresponding to dummy k-mers
+ * @param source_no_count name of a soruce file containing Elias-Fano encoded INTs corresponding to dummy k-mers
  * @param on_new_item callback to invoke for each merged item
- * @param remove_sources if true, the #source and #source_zero_count files will be removed
+ * @param remove_sources if true, the #source and #source_no_count files will be removed
  */
-template <typename T>
-uint64_t merge_dummy(const std::string &source,
-                     std::vector<std::string> source_zero_count,
-                     const std::function<void(const T &)> &on_new_item,
-                     bool remove_sources = true) {
-    source_zero_count.push_back(source);
-    return merge_files(source_zero_count, on_new_item, remove_sources);
-}
 
 /**
- * Merges the <T, C> pairs in #source with the Ts in #source_zero_count. The INTs in
- * source_zero_count will be assigned a count of 0.
- */
-template <typename T, typename C>
-uint64_t merge_dummy(const std::string &source,
-                     const std::vector<std::string> &source_zero_count,
-                     const std::function<void(const std::pair<T, C> &)> &on_new_item,
-                     bool remove_sources = true) {
-    uint64_t num_elements_read = 0;
-
-    EliasFanoDecoder<std::pair<T,C>> decoder(source, remove_sources);
-    std::optional<std::pair<T, C>> data_item = decoder.next();
-
-    const std::function<void(const T &)> merge_dummy
-            = [&data_item, &on_new_item, &num_elements_read, &decoder](const T &v) {
-                  num_elements_read++;
-                  while (data_item.has_value() && data_item.value().first < v) {
-                      num_elements_read++;
-                      on_new_item(data_item.value());
-                      data_item = decoder.next();
-                  }
-                  assert(!data_item.has_value() || data_item.value().first != v);
-                  on_new_item({ v, 0 });
-              };
-    merge_files(source_zero_count, merge_dummy);
-
-    // add the leftover contents from #source
-    while (data_item.has_value()) {
-        num_elements_read++;
-        on_new_item(data_item.value());
-        data_item = decoder.next();
-    }
-
-    return num_elements_read;
-}
-
-/**
- * Merges the Ts in #source with the Ts in #source_zero_count. This is no different than
+ * Merges the Ts in #source with the Ts in #source_no_count. This is no different than
  * calling merge() for all files.
  * @param source name of a source file containing Elias-Fano encoded INTs
- * @param source_zero_count name of a soruce file containing Elias-Fano encoded INTs corresponding to dummy k-mers
+ * @param source_no_count name of a soruce file containing Elias-Fano encoded INTs corresponding to dummy k-mers
  * @param on_new_item callback to invoke for each merged item
- * @param remove_sources if true, the #source and #source_zero_count files will be removed
+ * @param remove_sources if true, the #source and #source_no_count files will be removed
  */
 template <typename T>
-uint64_t merge_dummy2(const std::vector<std::string> &source,
-                     std::vector<std::string> source_zero_count,
+uint64_t merge_dummy(const std::vector<std::string> &source,
+                     std::vector<std::string> source_no_count,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
-    source_zero_count.insert(source_zero_count.end(), source.begin(), source.end());
-    return merge_files2(source_zero_count, on_new_item, remove_sources);
+    source_no_count.insert(source_no_count.end(), source.begin(), source.end());
+    return merge_files2(source_no_count, on_new_item, remove_sources);
 }
 
 /**
- * Merges the <T, C> pairs in #source with the Ts in #source_zero_count. The INTs in
- * source_zero_count will be assigned a count of 0.
+ * Merges the <T, C> pairs in #sources with the Ts in #source_no_count. The INTs in
+ * source_no_count will be assigned a count of 0.
  */
 template <typename T, typename C>
-uint64_t merge_dummy2(const std::vector<std::string> &sources,
+uint64_t merge_dummy(const std::vector<std::string> &sources,
                      const std::vector<std::string> &sources_no_count,
                      const std::function<void(const std::pair<T, C> &)> &on_new_item,
                      bool remove_sources = true) {
