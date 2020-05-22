@@ -41,7 +41,7 @@ const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
 
-const size_t TRAVERSAL_START_BATCH_SIZE = 1000;
+const size_t TRAVERSAL_START_BATCH_SIZE = 20;
 
 
 BOSS::BOSS(size_t k)
