@@ -41,6 +41,8 @@ const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
 
+const size_t TRAVERSAL_START_BATCH_SIZE = 1000;
+
 
 BOSS::BOSS(size_t k)
       : alph_size(kmer_extractor_.alphabet.size()),
@@ -1900,7 +1902,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         if (async) {
             edges_async.emplace_back(thread_pool->enqueue([&](edge_index start) {
                 std::vector<Edge> edges;
-                edges.reserve(alph_size);
+                edges.reserve(TRAVERSAL_START_BATCH_SIZE);
                 ::call_paths(*this, Edge(start, get_node_seq(start)), edges, callback,
                              split_to_unitigs, kmers_in_single_form,
                              trim_sentinels, &discovered, &written,
@@ -2169,7 +2171,7 @@ void call_paths_from_queue(const BOSS &boss,
 
                 edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
                     std::vector<Edge> edges;
-                    edges.reserve(boss.alph_size);
+                    edges.reserve(TRAVERSAL_START_BATCH_SIZE);
                     ::call_paths(boss, std::move(next_edge), edges, callback,
                                  split_to_unitigs, kmers_in_single_form,
                                  trim_sentinels, &discovered, &written,
@@ -2234,110 +2236,124 @@ void call_paths(const BOSS &boss,
     path.reserve(100);
     sequence.reserve(100 + boss.get_k());
 
-    // traverse simple path until we reach its tail or
-    // the first edge that has already been discovered
-    while (!atomic_fetch_and_set_bit(discovered, edge, async)) {
-        assert(edge > 0);
-        assert(!subgraph_mask || (*subgraph_mask)[edge]);
-        ++progress_bar;
+    do {
+        // traverse simple path until we reach its tail or
+        // the first edge that has already been discovered
+        while (!atomic_fetch_and_set_bit(discovered, edge, async)) {
+            assert(edge > 0);
+            assert(!subgraph_mask || (*subgraph_mask)[edge]);
+            ++progress_bar;
 
-        // discover the edge
-        TAlphabet w = boss.get_W(edge);
-        TAlphabet d = w % boss.alph_size;
-        sequence.push_back(d);
-        path.push_back(edge);
+            // discover the edge
+            TAlphabet w = boss.get_W(edge);
+            TAlphabet d = w % boss.alph_size;
+            sequence.push_back(d);
+            path.push_back(edge);
 
-        // stop the traversal if the next node is a dummy sink
-        if (!d)
-            break;
+            // stop the traversal if the next node is a dummy sink
+            if (!d)
+                break;
 
-        bool stop_even_if_single_outgoing;
+            bool stop_even_if_single_outgoing;
 
-        if (!split_to_unitigs) {
-            // we always continue traversal of a contig if there is
-            // only a single outgoing edge
-            stop_even_if_single_outgoing = false;
+            if (!split_to_unitigs) {
+                // we always continue traversal of a contig if there is
+                // only a single outgoing edge
+                stop_even_if_single_outgoing = false;
 
-        } else if (!subgraph_mask && w != d) {
-            // For unitigs, we must terminate the traversal if there
-            // are more than one edges incoming to the target node.
-            // If the entire graph is selected and the edge is marked
-            // with '-', we know for sure this is not the only edge
-            // incoming into its target node.
-            stop_even_if_single_outgoing = true;
-        } else {
-            // Otherwise, we must check all edges by iteration.
-            // shift to the first incoming edge
-            if (w != d)
-                edge = boss.pred_W(edge, d);
-            // check if there are multiple incoming edges
-            stop_even_if_single_outgoing
-                = !masked_pick_single_incoming(boss, &edge, d, subgraph_mask);
-            assert(edge);
-        }
-
-        // make one traversal step
-        edge = boss.fwd(edge, d);
-
-        auto single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
-        // stop the traversal if there are no edges outgoing from the target
-        if (!edge)
-            break;
-
-        if (!single_outgoing && !subgraph_mask) {
-            // check if the extra edge is a dummy
-            assert(boss.get_last(edge));
-            assert(!boss.get_last(edge - 1));
-            edge_index t = boss.pred_last(edge - 1) + 1;
-            if (boss.get_W(t) == boss.kSentinelCode) {
-                progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
-                ++t;
+            } else if (!subgraph_mask && w != d) {
+                // For unitigs, we must terminate the traversal if there
+                // are more than one edges incoming to the target node.
+                // If the entire graph is selected and the edge is marked
+                // with '-', we know for sure this is not the only edge
+                // incoming into its target node.
+                stop_even_if_single_outgoing = true;
+            } else {
+                // Otherwise, we must check all edges by iteration.
+                // shift to the first incoming edge
+                if (w != d)
+                    edge = boss.pred_W(edge, d);
+                // check if there are multiple incoming edges
+                stop_even_if_single_outgoing
+                    = !masked_pick_single_incoming(boss, &edge, d, subgraph_mask);
+                assert(edge);
             }
 
-            if (t == edge)
-                single_outgoing = true;
-        }
+            // make one traversal step
+            edge = boss.fwd(edge, d);
 
-        // continue the non-branching traversal further if
-        //      1. there is only one edge outgoing from the target
-        // and at least one of the following conditions is met:
-        //      2. there is only one edge incoming to the target node
-        //      3. we call contigs (the unitigs may be concatenated)
-        if (single_outgoing && !stop_even_if_single_outgoing)
-            continue;
+            auto single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
+            // stop the traversal if there are no edges outgoing from the target
+            if (!edge)
+                break;
 
-        kmer.assign(sequence.end() - boss.get_k(), sequence.end());
-        edge_index next_edge = 0;
-
-        // loop over the outgoing edges
-        do {
-            assert((!subgraph_mask || (*subgraph_mask)[edge]
-                || atomic_fetch_bit(discovered, edge, async))
-                    && "k-mers not from subgraph are marked as discovered");
-
-            if (!atomic_fetch_bit(discovered, edge, async)) {
-                if (!next_edge && !split_to_unitigs) {
-                    // save the edge for discovery if we extract contigs
-                    next_edge = edge;
-                } else {
-                    // discover other edges
-                    edges.emplace_back(edge, kmer);
+            if (!single_outgoing && !subgraph_mask) {
+                // check if the extra edge is a dummy
+                assert(boss.get_last(edge));
+                assert(!boss.get_last(edge - 1));
+                edge_index t = boss.pred_last(edge - 1) + 1;
+                if (boss.get_W(t) == boss.kSentinelCode) {
+                    progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
+                    ++t;
                 }
+
+                if (t == edge)
+                    single_outgoing = true;
             }
-        } while (--edge > 0 && !boss.get_last(edge));
 
-        // stop traversing this sequence if the next edge was not selected
-        if (!next_edge)
+            // continue the non-branching traversal further if
+            //      1. there is only one edge outgoing from the target
+            // and at least one of the following conditions is met:
+            //      2. there is only one edge incoming to the target node
+            //      3. we call contigs (the unitigs may be concatenated)
+            if (single_outgoing && !stop_even_if_single_outgoing)
+                continue;
+
+            kmer.assign(sequence.end() - boss.get_k(), sequence.end());
+            edge_index next_edge = 0;
+
+            // loop over the outgoing edges
+            do {
+                assert((!subgraph_mask || (*subgraph_mask)[edge]
+                    || atomic_fetch_bit(discovered, edge, async))
+                        && "k-mers not from subgraph are marked as discovered");
+
+                if (!atomic_fetch_bit(discovered, edge, async)) {
+                    if (!next_edge && !split_to_unitigs) {
+                        // save the edge for discovery if we extract contigs
+                        next_edge = edge;
+                    } else {
+                        // discover other edges
+                        edges.emplace_back(edge, kmer);
+                    }
+                }
+            } while (--edge > 0 && !boss.get_last(edge));
+
+            // stop traversing this sequence if the next edge was not selected
+            if (!next_edge)
+                break;
+
+            // pick the last outgoing but not yet discovered
+            // edge and continue traversing the graph
+            edge = next_edge;
+        }
+
+        call_path(boss, callback, path, sequence, split_to_unitigs,
+                  kmers_in_single_form, trim_sentinels, discovered, *written_ptr,
+                  async, vector_mutex, progress_bar, subgraph_mask);
+
+        if (edges.empty())
+            return;
+
+        if (edges.size() < TRAVERSAL_START_BATCH_SIZE) {
+            std::tie(edge, sequence) = std::move(edges.back());
+            edges.pop_back();
+            kmer.clear();
+            path.clear();
+        } else {
             break;
-
-        // pick the last outgoing but not yet discovered
-        // edge and continue traversing the graph
-        edge = next_edge;
-    }
-
-    call_path(boss, callback, path, sequence, split_to_unitigs,
-              kmers_in_single_form, trim_sentinels, discovered, *written_ptr,
-              async, vector_mutex, progress_bar, subgraph_mask);
+        }
+    } while (true);
 }
 
 // Call the path or all primary paths extracted from it.
