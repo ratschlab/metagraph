@@ -1889,6 +1889,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     if (async)
         thread_pool = std::make_unique<ThreadPool>(num_threads);
 
+    auto call_paths_from_queue = [&]() {
+        ::call_paths_from_queue(*this, edges, edges_async, callback, thread_pool.get(),
+                                split_to_unitigs, kmers_in_single_form, trim_sentinels,
+                                discovered, written, async, vector_mutex,
+                                progress_bar, subgraph_mask);
+    };
+
     auto enqueue_start = [&](edge_index start) {
         if (async) {
             edges_async.emplace_back(thread_pool->enqueue([&](edge_index start) {
@@ -1902,14 +1909,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             }, start));
         } else {
             edges.emplace_back(start, get_node_seq(start));
+            call_paths_from_queue();
         }
-    };
-
-    auto call_paths_from_queue = [&]() {
-        ::call_paths_from_queue(*this, edges, edges_async, callback, thread_pool.get(),
-                                split_to_unitigs, kmers_in_single_form, trim_sentinels,
-                                discovered, written, async, vector_mutex,
-                                progress_bar, subgraph_mask);
     };
 
 
