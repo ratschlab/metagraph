@@ -574,11 +574,11 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                     size_t j = 0;
                     graph.map_to_nodes(sequences[i], [&](auto node) {
                         if (node) {
-                            EXPECT_TRUE(sequences[0].find(sequences[i].substr(j, k)) == -1
-                                && rev.find(sequences[i].substr(j, k)) == -1);
+                            EXPECT_TRUE(sequences[0].find(sequences[i].substr(j, k)) == std::string::npos
+                                && rev.find(sequences[i].substr(j, k)) == std::string::npos);
                         } else {
-                            EXPECT_TRUE(sequences[0].find(sequences[i].substr(j, k)) != -1
-                                || rev.find(sequences[i].substr(j, k)) != -1);
+                            EXPECT_TRUE(sequences[0].find(sequences[i].substr(j, k)) != std::string::npos
+                                || rev.find(sequences[i].substr(j, k)) != std::string::npos);
                         }
                         ++j;
                     });
