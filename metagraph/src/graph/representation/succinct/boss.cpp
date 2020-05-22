@@ -1919,21 +1919,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     if (!subgraph_mask) {
         // used to indicate if an edge from a source node has been taken
-        std::vector<bool> starts(alph_size * kmers_in_single_form);
-
         for (edge_index i = succ_last(1); i >= 1; --i) {
-            if (!kmers_in_single_form) {
-                assert(!atomic_fetch_bit(discovered, i, async));
+            if (!atomic_fetch_bit(discovered, i, async))
                 enqueue_start(i);
-            } else {
-                TAlphabet d = get_W(i) % alph_size;
-                if (!starts[d]) {
-                    assert(!atomic_fetch_bit(discovered, i, async));
-                    enqueue_start(i);
-                    starts[d] = true;
-                    starts[KmerExtractorBOSS::complement(d)] = true;
-                }
-            }
         }
 
     } else {
