@@ -142,7 +142,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     uint64_t num_elements_read = 1;
     std::pair<T, C> current = decoder.next().value();
     while (decoder.top().has_value()) {
-        std::pair<T,C> last = decoder.top().value();
+        std::pair<T,C> last = decoder.next().value();
         if (current != last) {
             on_new_item(current);
             num_elements_read++;
