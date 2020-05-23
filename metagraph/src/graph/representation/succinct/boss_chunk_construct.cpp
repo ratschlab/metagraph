@@ -382,6 +382,7 @@ void handle_dummy_source(size_t k,
 template <typename T>
 std::tuple<std::vector<std::string>, std::vector<std::string>, std::string>
 generate_dummy_1_kmers(size_t k,
+                       size_t num_threads,
                        const std::filesystem::path &tmp_dir,
                        ChunkedWaitQueue<T> *kmers) {
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
@@ -403,7 +404,7 @@ generate_dummy_1_kmers(size_t k,
     }
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
-    #pragma omp parallel for num_threads(4) schedule(static, 1)
+    #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
     for (uint32_t first_ch = 1; first_ch < ALPHABET_LEN; ++first_ch) {  // skip $$..$
         RecentKmers<KMER> recent_buffer(1llu << 2 * KMER::kBitsPerChar);
         INT last_dummy_sink = 0;
@@ -488,7 +489,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     std::vector<std::string> original_names;
     std::vector<std::string> dummy_names;
     std::tie(original_names, dummy_names, dummy_sink_name)
-            = generate_dummy_1_kmers(k, tmp_dir, kmers);
+            = generate_dummy_1_kmers(k, kmer_collector.num_threads(), tmp_dir, kmers);
 
     // stores the sorted original kmers and dummy-1 k-mers
     std::vector<std::string> files_to_merge;
