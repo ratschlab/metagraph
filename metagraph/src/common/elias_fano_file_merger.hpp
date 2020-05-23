@@ -63,38 +63,40 @@ class MergeHeap {
  * @tparam T the type of data being stored
  */
 template <typename T>
-class MergeDecoder {
+class MergeDecoderEF {
   public:
-    MergeDecoder(const std::vector<std::string> &source_names) {
-        T data_item;
-        sources_.resize(source_names.size());
-        for (uint32_t i = 0; i < sources_.size(); ++i) {
-            sources_[i] = std::ifstream(source_names[i], std::ios::binary);
-            if (sources_[i].read(reinterpret_cast<char *>(&data_item), sizeof(data_item))) {
-                heap_.emplace(data_item, i);
+    MergeDecoderEF(const std::vector<std::string> &source_names) {
+        sources_.reserve(source_names.size());
+        for (uint32_t i = 0; i < source_names.size(); ++i) {
+            sources_.emplace_back(source_names[i], false);
+            std::optional<T> data_item = sources_.back().next();
+            if (data_item.has_value()) {
+                heap_.emplace(data_item.value(), i);
             }
         }
     }
+
     std::optional<T> top() {
         if (heap_.empty()) {
             return std::nullopt;
         }
         return heap_.top().first;
     }
+
     std::optional<T> next() {
         if (heap_.empty()) {
             return std::nullopt;
         }
         auto [result, chunk_index] = heap_.pop();
-        T data_item;
-        if (sources_[chunk_index].read(reinterpret_cast<char *>(&data_item), sizeof(T))) {
-            heap_.emplace(data_item, chunk_index);
+        std::optional<T> data_item = sources_[chunk_index].next();
+        if (data_item.has_value()) {
+            heap_.emplace(data_item.value(), chunk_index);
         }
         return result;
     }
 
   private:
-    std::vector<std::ifstream> sources_;
+    std::vector<EliasFanoDecoder<T>> sources_;
     common::MergeHeap<T> heap_;
 };
 
@@ -167,41 +169,6 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     return internal::merge_files(decoders, on_new_item);
 }
 
-template <typename T>
-class Decoder {
-  public:
-    Decoder(const std::string &name) : source_(name, std::ios::binary) {}
-    std::optional<T> next() {
-        T result;
-        if (source_.read(reinterpret_cast<char *>(&result), sizeof(T))) {
-            return result;
-        }
-        return std::nullopt;
-    }
-
-  private:
-    std::ifstream source_;
-};
-
-/** Merges binary files into a single stream */
-template <typename T>
-uint64_t merge_files_uncompressed(const std::vector<std::string> &sources,
-                     const std::function<void(const T &)> &on_new_item,
-                     bool remove_sources = true) {
-    std::vector<Decoder<T>> decoders;
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.push_back(Decoder<T>(sources[i]));
-    }
-    size_t num_elements_read = internal::merge_files(decoders, on_new_item);
-
-    if (remove_sources) {
-        std::for_each(sources.begin(), sources.end(),
-                      [](const std::string &name) { std::filesystem::remove(name); });
-    }
-
-    return num_elements_read;
-}
-
 // TODO: these two `merge_files` are almost identical. Merge them into one.
 //       Implement the merging mechanism  (remove duplicates, increment
 //       counters) in the caller?
@@ -270,29 +237,16 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 }
 
 /**
- * Merges the Ts in #source with the Ts in #source_no_count. This is no different than
- * calling merge() for all files.
- * @param source name of a source file containing Elias-Fano encoded INTs
- * @param source_no_count name of a soruce file containing Elias-Fano encoded INTs corresponding to dummy k-mers
- * @param on_new_item callback to invoke for each merged item
- * @param remove_sources if true, the #source and #source_no_count files will be removed
- */
-
-/**
- * Merges the Ts in #source with the Ts in #source_no_count. This is no different than
- * calling merge() for all files.
- * @param source name of a source file containing Elias-Fano encoded INTs
- * @param source_no_count name of a soruce file containing Elias-Fano encoded INTs corresponding to dummy k-mers
- * @param on_new_item callback to invoke for each merged item
- * @param remove_sources if true, the #source and #source_no_count files will be removed
+ * Merges the <T, C> pairs in #sources with the Ts in #source_no_count. The INTs in
+ * source_no_count will be assigned a count of 0.
  */
 template <typename T>
-uint64_t merge_dummy(const std::vector<std::string> &source,
+uint64_t merge_dummy_ef(const std::vector<std::string> &source,
                      std::vector<std::string> source_no_count,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
     source_no_count.insert(source_no_count.end(), source.begin(), source.end());
-    return merge_files_uncompressed(source_no_count, on_new_item, remove_sources);
+    return merge_files(source_no_count, on_new_item, remove_sources);
 }
 
 /**
@@ -300,7 +254,7 @@ uint64_t merge_dummy(const std::vector<std::string> &source,
  * source_no_count will be assigned a count of 0.
  */
 template <typename T, typename C>
-uint64_t merge_dummy(const std::vector<std::string> &sources,
+uint64_t merge_dummy_ef(const std::vector<std::string> &sources,
                      const std::vector<std::string> &sources_no_count,
                      const std::function<void(const std::pair<T, C> &)> &on_new_item,
                      bool remove_sources = true) {
@@ -309,20 +263,23 @@ uint64_t merge_dummy(const std::vector<std::string> &sources,
     uint64_t num_elements_read = 0;
 
     MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
-    std::pair<T,C> data_item;
-    std::vector<std::ifstream> decoders;
+    std::optional<std::pair<T, C>> data_item;
+    std::vector<EliasFanoDecoder<std::pair<T, C>>> decoders;
     for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.push_back(std::ifstream(sources[i], std::ios::binary));
-        if (decoders.back().read(reinterpret_cast<char *>(&data_item), sizeof(data_item))) {
-            merge_heap.emplace(data_item, i);
+        decoders.emplace_back(sources[i], remove_sources);
+        data_item = decoders.back().next();
+        if (data_item.has_value()) {
+            merge_heap.emplace(data_item.value(), i);
             num_elements_read++;
         }
     }
-    T data_item2;
+    std::vector<EliasFanoDecoder<T>> decoders2;
+    std::optional<T> data_item2;
     for (uint32_t i = 0; i < sources_no_count.size(); ++i) {
-        decoders.push_back(std::ifstream(sources_no_count[i], std::ios::binary));
-        if (decoders.back().read(reinterpret_cast<char *>(&data_item2), sizeof(data_item2))) {
-            merge_heap.emplace({data_item2, 0}, i + sources.size());
+        decoders2.emplace_back(sources_no_count[i], remove_sources);
+        data_item2 = decoders2.back().next();
+        if (data_item2.has_value()) {
+            merge_heap.emplace({data_item2.value(), 0}, i + sources.size());
             num_elements_read++;
         }
     }
@@ -348,29 +305,22 @@ uint64_t merge_dummy(const std::vector<std::string> &sources,
             }
         }
         if (chunk_index < sources.size()) {
-            if (decoders[chunk_index].read(reinterpret_cast<char *>(&data_item), sizeof(data_item))) {
-                merge_heap.emplace(data_item, chunk_index);
+            data_item = decoders[chunk_index].next();
+            if (data_item.has_value()) {
+                merge_heap.emplace(data_item.value(), chunk_index);
                 num_elements_read++;
             }
         } else {
-            if (decoders[chunk_index].read(reinterpret_cast<char *>(&data_item2), sizeof(data_item2))) {
-                merge_heap.emplace({ data_item2, 0 }, chunk_index);
+            data_item2 = decoders2[chunk_index - sources.size()].next();
+            if (data_item2.has_value()) {
+                merge_heap.emplace({ data_item2.value(), 0 }, chunk_index);
                 num_elements_read++;
             }
         }
     }
     on_new_item(current);
-
-    if (remove_sources) {
-        std::for_each(sources.begin(), sources.end(),
-                      [](const std::string &name) { std::filesystem::remove(name); });
-        std::for_each(sources_no_count.begin(), sources_no_count.end(),
-                      [](const std::string &name) { std::filesystem::remove(name); });
-    }
-
     return num_elements_read;
 }
-
 
 } // namespace common
 } // namespace mg
