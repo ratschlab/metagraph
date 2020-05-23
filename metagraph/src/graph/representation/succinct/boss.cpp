@@ -71,7 +71,6 @@ BOSS::BOSS(BOSSConstructor *builder) : BOSS::BOSS() {
     assert(builder);
 
     builder->build_graph(this);
-
     assert(is_valid());
 }
 
@@ -1060,7 +1059,7 @@ void BOSS::print_internal_representation(std::ostream &os) const {
 }
 
 void BOSS::print(std::ostream &os) const {
-    //assert(is_valid());
+    assert(is_valid());
 
     std::string vertex_header = "Vertex";
     vertex_header.resize(k_, ' ');

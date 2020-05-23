@@ -494,8 +494,8 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     std::vector<std::string> files_to_merge;
     files_to_merge.push_back(dummy_sink_name);
     std::vector<std::string> dummy_next_names(ALPHABET_LEN);
-    // generate dummy k-mers of prefix length 2..k
-    logger->trace("Starting generating dummy-k source k-mers...");
+    // generate dummy k-mers of prefix length 1..k
+    logger->trace("Starting generating dummy-1..k source k-mers...");
     for (size_t dummy_pref_len = 1; dummy_pref_len <= k; ++dummy_pref_len) {
         // this will compress all sorted dummy k-mers of given prefix length
         files_to_merge.push_back(tmp_dir/("dummy_l" + std::to_string(dummy_pref_len)));
@@ -507,11 +507,15 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
                     + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
             dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         }
+        KMER prev_kmer(0);
         const std::function<void(const INT &)> &write_dummy = [&](const INT &v) {
             encoder.add(v);
             KMER kmer(v);
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
-            dummy_next_chunks[kmer[0]].add(kmer.data());
+            if (prev_kmer != kmer) {
+                dummy_next_chunks[kmer[0]].add(kmer.data());
+                prev_kmer = std::move(kmer);
+            }
         };
         size_t num_kmers = common::merge_files(dummy_names, write_dummy);
 
@@ -519,7 +523,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
         std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
                       [](auto &v) { v.finish(); });
         std::swap(dummy_names, dummy_next_names);
-        logger->trace("Number of dummy k-mers with dummy prefix of length {} : {}",
+        logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}",
                       dummy_pref_len, num_kmers);
     }
     const std::function<void(const INT &)> on_merge = [](const INT& ) {};

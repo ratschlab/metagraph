@@ -339,27 +339,5 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
     size_t total_size_ = 0;
 };
 
-/**
- * Encoder that simply writes the data as is to a stream.
- */
-template <typename T>
-class Encoder {
-  public:
-    Encoder(const std::string &file_name)
-            : file_name_(file_name), sink_(file_name, std::ios::binary) {};
-
-    void add(const T &value) {
-        sink_.write(reinterpret_cast<const char *>(&value), sizeof(T));
-    }
-
-    inline const std::string &name() { return file_name_; }
-
-    void finish() { sink_.close(); }
-
-  private:
-    std::string file_name_;
-    std::ofstream sink_;
-};
-
 } // namespace common
 } // namespace mg

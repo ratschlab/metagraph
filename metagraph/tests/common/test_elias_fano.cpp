@@ -451,30 +451,4 @@ TEST(EliasFanoTest256, ReadWriteRandomLarge) {
     }
 }
 
-TYPED_TEST(EliasFanoTest, MultipleFiles) {
-    std::vector<utils::TempFile> files(5);
-    std::vector<std::string> names;
-    std::vector<common::EliasFanoEncoderBuffered<TypeParam>> under_test;
-    for (const auto& f : files) {
-        under_test.emplace_back(f.name(), 3);
-        names.push_back(f.name());
-    }
-    uint32_t j = 0;
-    for (auto& encoder : under_test) {
-        for (uint32_t i = 0; i < 3; ++i) {
-            encoder.add(j+ 2 * i);
-        }
-        j+=6;
-        encoder.finish();
-    }
-
-    common::EliasFanoConcatDecoder<TypeParam> decoder(names);
-    for (uint32_t i = 0; i < 3 * names.size(); ++i) {
-        std::optional<TypeParam> decoded = decoder.next();
-        ASSERT_TRUE(decoded.has_value());
-        EXPECT_EQ(2 * i, decoded.value());
-    }
-    EXPECT_FALSE(decoder.next().has_value());
-}
-
 } // namespace
