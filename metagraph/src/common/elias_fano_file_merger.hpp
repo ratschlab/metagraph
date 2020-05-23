@@ -63,12 +63,12 @@ class MergeHeap {
  * @tparam T the type of data being stored
  */
 template <typename T>
-class MergeDecoderEF {
+class MergeDecoder {
   public:
-    MergeDecoderEF(const std::vector<std::string> &source_names) {
+    MergeDecoder(const std::vector<std::string> &source_names, bool remove_sources) {
         sources_.reserve(source_names.size());
         for (uint32_t i = 0; i < source_names.size(); ++i) {
-            sources_.emplace_back(source_names[i], false);
+            sources_.emplace_back(source_names[i], remove_sources);
             std::optional<T> data_item = sources_.back().next();
             if (data_item.has_value()) {
                 heap_.emplace(data_item.value(), i);
@@ -100,60 +100,6 @@ class MergeDecoderEF {
     common::MergeHeap<T> heap_;
 };
 
-namespace internal {
-/**
- * Given a list of n Decoders, containing ordered elements of type T, merge the n
- * sources into a single (ordered) list of type T and invoke #on_new_item for each element
- * @tparam T the type of the  elements to be merged (typically a 64/128 or 256-bit k-mer)
- * @param decoders sources containing sorted lists of type T
- * @param on_new_item callback to invoke when a new element was merged
- * @return the total number of elements read from all files
- *
- * Note: this method blocks until all the data was successfully merged.
- */
-template <typename T, typename Decoder>
-uint64_t merge_files(std::vector<Decoder> &decoders,
-                     const std::function<void(const T &)> &on_new_item) {
-    // start merging disk chunks by using a heap to store the current element
-    // from each chunk
-    uint64_t num_elements_read = 0;
-
-    MergeHeap<T> merge_heap;
-    std::optional<T> data_item;
-
-    for (uint32_t i = 0; i < decoders.size(); ++i) {
-        data_item = decoders[i].next();
-        if (data_item.has_value()) {
-            merge_heap.emplace(data_item.value(), i);
-            num_elements_read++;
-        }
-    }
-
-    if (merge_heap.empty()) {
-        return num_elements_read;
-    }
-
-    T last_written = merge_heap.top().first;
-    on_new_item(last_written);
-
-    while (!merge_heap.empty()) {
-        auto [smallest, chunk_index] = merge_heap.pop();
-
-        if (smallest != last_written) {
-            on_new_item(smallest);
-            last_written = smallest;
-        }
-
-        if ((data_item = decoders[chunk_index].next()).has_value()) {
-            merge_heap.emplace(data_item.value(), chunk_index);
-            num_elements_read++;
-        }
-    }
-
-    return num_elements_read;
-}
-} // internal
-
 /**
  * Merges Elias-Fano sorted compressed files into a single stream.
  */
@@ -161,27 +107,24 @@ template <typename T>
 uint64_t merge_files(const std::vector<std::string> &sources,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
-    std::vector<EliasFanoDecoder<T>> decoders;
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.emplace_back(sources[i], remove_sources);
+    MergeDecoder<T> decoder = MergeDecoder<T>(sources, remove_sources);
+    size_t num_elements_read = 0;
+    while (decoder.top().has_value()) {
+        on_new_item(decoder.next().value());
+        num_elements_read++;
     }
-
-    return internal::merge_files(decoders, on_new_item);
+    return num_elements_read;
 }
 
-// TODO: these two `merge_files` are almost identical. Merge them into one.
-//       Implement the merging mechanism  (remove duplicates, increment
-//       counters) in the caller?
 /**
  * Given a list of n source files, containing ordered pairs of  <element, count>,
- * merge the n sources (and the corresponding counts) into a single list, ordered by el
- * and delete the original files.
+ * merge the n sources (and the corresponding counts) into a single list, ordered by el.
  * If two pairs have the same first element, the counts are added together.
  * @param sources the files containing sorted lists of pairs of type <T, C>
  * @param on_new_item callback to invoke when a new element was merged
  * @param remove_sources if true, remove source files after merging
  *
- * @return the total number of elements read from all files
+ * @return the total number of (merged) elements read from all files
  *
  * Note: this method blocks until all the data was successfully merged.
  */
@@ -189,46 +132,27 @@ template <typename T, typename C>
 uint64_t merge_files(const std::vector<std::string> &sources,
                      const std::function<void(const std::pair<T, C> &)> &on_new_item,
                      bool remove_sources = true) {
+    MergeDecoder<std::pair<T, C>> decoder
+            = MergeDecoder<std::pair<T, C>>(sources, remove_sources);
+    if (!decoder.top().has_value()) {
+        return 0;
+    }
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
-    uint64_t num_elements_read = 0;
-
-    MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
-    std::optional<std::pair<T, C>> data_item;
-    std::vector<EliasFanoDecoder<std::pair<T, C>>> decoders;
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.emplace_back(sources[i], remove_sources);
-        data_item = decoders.back().next();
-        if (data_item.has_value()) {
-            merge_heap.emplace(data_item.value(), i);
-            num_elements_read++;
-        }
-    }
-
-    if (merge_heap.empty()) {
-        return num_elements_read;
-    }
-
-    // initialize the smallest element
-    std::pair<T, C> current = { merge_heap.top().first.first, 0 };
-
-    while (!merge_heap.empty()) {
-        auto [smallest, chunk_index] = merge_heap.pop();
-
-        if (smallest.first != current.first) {
+    uint64_t num_elements_read = 1;
+    std::pair<T, C> current = decoder.next().value();
+    while (decoder.top().has_value()) {
+        std::pair<T,C> last = decoder.top().value();
+        if (current != last) {
             on_new_item(current);
-            current = smallest;
+            num_elements_read++;
+            current = last;
         } else {
-            if (current.second < std::numeric_limits<C>::max() - smallest.second) {
-                current.second += smallest.second;
+            if (current.second < std::numeric_limits<C>::max() - last.second) {
+                current.second += last.second;
             } else {
                 current.second = std::numeric_limits<C>::max();
             }
-        }
-
-        if ((data_item = decoders[chunk_index].next()).has_value()) {
-            merge_heap.emplace(data_item.value(), chunk_index);
-            num_elements_read++;
         }
     }
     on_new_item(current);
@@ -241,7 +165,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
  * source_no_count will be assigned a count of 0.
  */
 template <typename T>
-uint64_t merge_dummy_ef(const std::vector<std::string> &source,
+uint64_t merge_dummy(const std::vector<std::string> &source,
                      std::vector<std::string> source_no_count,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
@@ -254,71 +178,28 @@ uint64_t merge_dummy_ef(const std::vector<std::string> &source,
  * source_no_count will be assigned a count of 0.
  */
 template <typename T, typename C>
-uint64_t merge_dummy_ef(const std::vector<std::string> &sources,
+uint64_t merge_dummy(const std::vector<std::string> &sources,
                      const std::vector<std::string> &sources_no_count,
                      const std::function<void(const std::pair<T, C> &)> &on_new_item,
                      bool remove_sources = true) {
-    // start merging disk chunks by using a heap to store the current element
-    // from each chunk
     uint64_t num_elements_read = 0;
-
-    MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
-    std::optional<std::pair<T, C>> data_item;
-    std::vector<EliasFanoDecoder<std::pair<T, C>>> decoders;
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.emplace_back(sources[i], remove_sources);
-        data_item = decoders.back().next();
-        if (data_item.has_value()) {
-            merge_heap.emplace(data_item.value(), i);
+    MergeDecoder<std::pair<T, C>> decoder
+            = MergeDecoder<std::pair<T, C>>(sources, remove_sources);
+    MergeDecoder<T> decoder_no_count = MergeDecoder<T>(sources_no_count, remove_sources);
+    while (decoder.top().has_value()) {
+        std::pair<T,C> next = decoder.next().value();
+        while (decoder_no_count.top().has_value() && decoder_no_count.top().value() < next.first) {
+            on_new_item({decoder_no_count.next().value(), 0U});
             num_elements_read++;
         }
+        on_new_item(next);
+        num_elements_read++;
     }
-    std::vector<EliasFanoDecoder<T>> decoders2;
-    std::optional<T> data_item2;
-    for (uint32_t i = 0; i < sources_no_count.size(); ++i) {
-        decoders2.emplace_back(sources_no_count[i], remove_sources);
-        data_item2 = decoders2.back().next();
-        if (data_item2.has_value()) {
-            merge_heap.emplace({data_item2.value(), 0}, i + sources.size());
-            num_elements_read++;
-        }
+    while (decoder_no_count.top().has_value()) {
+        on_new_item({ decoder_no_count.next().value(), 0U });
+        num_elements_read++;
     }
 
-    if (merge_heap.empty()) {
-        return 0;
-    }
-
-    // initialize the smallest element
-    std::pair<T, C> current = { merge_heap.top().first.first, 0 };
-
-    while (!merge_heap.empty()) {
-        auto [smallest, chunk_index] = merge_heap.pop();
-
-        if (smallest.first != current.first) {
-            on_new_item(current);
-            current = smallest;
-        } else {
-            if (current.second < std::numeric_limits<C>::max() - smallest.second) {
-                current.second += smallest.second;
-            } else {
-                current.second = std::numeric_limits<C>::max();
-            }
-        }
-        if (chunk_index < sources.size()) {
-            data_item = decoders[chunk_index].next();
-            if (data_item.has_value()) {
-                merge_heap.emplace(data_item.value(), chunk_index);
-                num_elements_read++;
-            }
-        } else {
-            data_item2 = decoders2[chunk_index - sources.size()].next();
-            if (data_item2.has_value()) {
-                merge_heap.emplace({ data_item2.value(), 0 }, chunk_index);
-                num_elements_read++;
-            }
-        }
-    }
-    on_new_item(current);
     return num_elements_read;
 }
 

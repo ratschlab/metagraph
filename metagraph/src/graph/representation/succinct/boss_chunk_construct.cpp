@@ -294,7 +294,7 @@ split(size_t k, const std::filesystem::path &tmp_dir, const ChunkedWaitQueue<T> 
 template <typename T_INT, typename KMER, typename INT>
 void handle_dummy_sink(size_t k,
                        KMER kmer,
-                       common::MergeDecoderEF<T_INT> &decoder,
+                       common::MergeDecoder<T_INT> &decoder,
                        Encoder<INT> *dummy_sink_enc,
                        INT *last_dummy_sink) {
     kmer.to_next(k + 1, BOSS::kSentinelCode);
@@ -357,8 +357,8 @@ void push_to_recent(const KMER &v, RecentKmers<KMER> *buffer, Encoder<INT> *dumm
 template <typename T_INT, typename KMER, typename INT>
 void handle_dummy_source(size_t k,
                          const INT &dummy_source,
-                         common::MergeDecoderEF<T_INT> &dummy_source_it,
-                         common::MergeDecoderEF<T_INT> &dummy_sink_it,
+                         common::MergeDecoder<T_INT> &dummy_source_it,
+                         common::MergeDecoder<T_INT> &dummy_sink_it,
                          RecentKmers<KMER> *recent_buffer,
                          Encoder<INT> *dummy_l1,
                          Encoder<INT> *dummy_sink_chunk,
@@ -415,9 +415,9 @@ generate_dummy_1_kmers(size_t k,
             last_ch_names[i] = original_names[i*ALPHABET_LEN + first_ch];
         }
 
-        common::MergeDecoderEF<T_INT> it(first_ch_names);
-        common::MergeDecoderEF<T_INT> dummy_sink_it(first_ch_names);
-        common::MergeDecoderEF<T_INT> dummy_source_it(last_ch_names);
+        common::MergeDecoder<T_INT> it(first_ch_names, false);
+        common::MergeDecoder<T_INT> dummy_sink_it(first_ch_names, false);
+        common::MergeDecoder<T_INT> dummy_source_it(last_ch_names, false);
         INT prev_dummy_source(0);
         for (auto v = it.next(); v.has_value(); v = it.next()) {
             KMER dummy_source(get_first(v.value()));
@@ -507,15 +507,13 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
                     + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
             dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         }
-        size_t num_kmers = 0;
         const std::function<void(const INT &)> &write_dummy = [&](const INT &v) {
             encoder.add(v);
             KMER kmer(v);
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
             dummy_next_chunks[kmer[0]].add(kmer.data());
-            num_kmers++;
         };
-        common::merge_files(dummy_names, write_dummy);
+        size_t num_kmers = common::merge_files(dummy_names, write_dummy);
 
         encoder.finish();
         std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
@@ -532,7 +530,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     async_worker.enqueue([kmers, original_names, files_to_merge]() {
         std::function<void(const T_INT &)> on_new_item
                 = [kmers](const T_INT &v) { kmers->push(reinterpret_cast<const T &>(v)); };
-        common::merge_dummy_ef(original_names, files_to_merge, on_new_item);
+        common::merge_dummy(original_names, files_to_merge, on_new_item);
         kmers->shutdown();
     });
 }
