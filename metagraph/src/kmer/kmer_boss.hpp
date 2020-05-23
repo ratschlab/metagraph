@@ -59,8 +59,8 @@ class KMerBOSS {
     bool operator!=(const KMerBOSS &other) const { return seq_ != other.seq_; }
 
     /**
-     * Returns the character at position i. For the k-mer a_1a_2...a_k, which is laid out
-     * in memory as a_(k-1)a_(k-2)..a_1a_k, kmer[0]=ak, kmer[1]=a1, ..., kmer[k-1]=a_(k-1)
+     * Returns the character at position i. For the k-mer a_1|a_2|...|a_(k-1)|a_k, which is laid out
+     * in memory as a_(k-1)|a_(k-2)|...|a_1|a_k, kmer[0]=a_k, kmer[1]=a_1, ..., kmer[k-1]=a_(k-1)
      */
     inline CharType operator[](size_t i) const;
 
