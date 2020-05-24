@@ -394,7 +394,6 @@ generate_dummy_1_kmers(size_t k,
     }
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
-    //TODO: iterate (W,F) in parallel, not just W
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {  // skip $$..$
         RecentKmers<KMER> recent_buffer(std::pow(ALPHABET_LEN, 2));
