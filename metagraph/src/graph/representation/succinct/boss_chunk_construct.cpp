@@ -316,7 +316,7 @@ void push_to_recent(const KMER &v, RecentKmers<KMER> *buffer, Encoder<INT> *dumm
 }
 
 /**
- * Generates the next dummy source k-mer.
+ * Generates the next dummy sink k-mer.
  * First, all non-dummy k-mers smaller than #dummy_source are written to #recent_buffer,
  * while also checking if any of the pushed k-mers is redundant with a previous dummy
  * source k-mer. For each of these k-mers, also generate the corresponding dummy sink k-mer
@@ -326,31 +326,30 @@ void push_to_recent(const KMER &v, RecentKmers<KMER> *buffer, Encoder<INT> *dumm
  * @param dummy_source_it traverses all k-mers with the same last char as #dummy_source
  * @param dummy_sink_it traverses all k-mers with the same *first* char as #dummy_source's last char
  * @param recent_buffer stores the recently seen non-dummy and dummy-1 k-mers (in order to check for redundancy)
- * @param dummy_l1 sink where the non-dummy1 source kmers are written
  * @param dummy_sink_chunk sink where the non-dummy sink k-mers are written
  * @param last_dummy_sink the last written dummy sink k-mer (to avoid writing duplicates)
  */
 template <typename T_INT, typename KMER, typename INT>
 void handle_dummy_source(size_t k,
-                         const INT &dummy_source,
+                         const INT &source_kmer_bound,
                          common::MergeDecoder<T_INT> &real_it,
                          common::MergeDecoder<T_INT> &dummy_sink_it,
                          RecentKmers<KMER> *recent_buffer,
-                         Encoder<INT> *dummy_l1,
                          Encoder<INT> *dummy_sink_chunk,
                          INT *last_dummy_sink) {
     // Push all non-dummy kmers smaller than dummy source
     std::optional<T_INT> curr;
     std::optional<T_INT> sink_it;
     while ((curr = real_it.next()).has_value()
-           && get_first(curr.value()) < dummy_source) {
+           && get_first(curr.value()) < source_kmer_bound) {
+        // remove redundant dummy source nodes smaller than |source_kmer_bound|
         KMER kmer(get_first(curr.value()));
-        push_to_recent(kmer, recent_buffer, dummy_l1);
         remove_redundant_dummy_source(kmer, recent_buffer);
+
         // generate the next dummy sink k-mer
         kmer.to_next(k + 1, BOSS::kSentinelCode);
         if (kmer.data() == *last_dummy_sink)
-            return; // generate only distinct dummy sink k-mers
+            continue; // generate only distinct dummy sink k-mers
 
         *last_dummy_sink = kmer.data();
 
@@ -395,6 +394,7 @@ generate_dummy_1_kmers(size_t k,
     }
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
+    //TODO: iterate (W,F) in parallel, not just W
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {  // skip $$..$
         RecentKmers<KMER> recent_buffer(std::pow(ALPHABET_LEN, 2));
@@ -408,28 +408,30 @@ generate_dummy_1_kmers(size_t k,
             F_chunk_names.push_back(original_names[F * ALPHABET_LEN + W]);
         }
 
+        // TODO: remove merging
         common::MergeDecoder<T_INT> it(W_chunk_names, false);
         common::MergeDecoder<T_INT> dummy_sink_it(W_chunk_names, false);
         common::MergeDecoder<T_INT> dummy_source_it(F_chunk_names, false);
 
-        INT last_dummy_source(0);
+        KMER last_dummy_source(0);
         INT last_dummy_sink(0);
 
         for (auto v = it.next(); v.has_value(); v = it.next()) {
             KMER dummy_source(get_first(v.value()));
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
-            if (dummy_source.data() != last_dummy_source) {
+            if (dummy_source != last_dummy_source) {
+                // Generate sink dummy k-mers for all real k-mers from |dummy_source_it|
+                // smaller than |dummy_source| and filter the redundant source k-mers in
+                // |recent_buffer|.
                 handle_dummy_source(k, dummy_source.data(), dummy_source_it, dummy_sink_it,
-                                    &recent_buffer, &dummy_l1_chunks[W],
-                                    &dummy_sink_chunks[W], &last_dummy_sink);
+                                    &recent_buffer, &dummy_sink_chunks[W], &last_dummy_sink);
                 push_to_recent(dummy_source, &recent_buffer, &dummy_l1_chunks[W]);
-                last_dummy_source = dummy_source.data();
+                last_dummy_source = dummy_source;
             }
         }
         // push leftover dummy_source_it
         handle_dummy_source(k, INT(-1), dummy_source_it, dummy_sink_it,
-                            &recent_buffer, &dummy_l1_chunks[W],
-                            &dummy_sink_chunks[W], &last_dummy_sink);
+                            &recent_buffer, &dummy_sink_chunks[W], &last_dummy_sink);
         while (!recent_buffer.empty()) { // add leftover elements from buffer
             write_dummy_l1(recent_buffer.pop_front(), &dummy_l1_chunks[W]);
         }
@@ -444,6 +446,8 @@ generate_dummy_1_kmers(size_t k,
     // concatenating the blocks will result in a single ordered block
     std::string dummy_sink_name = dir/"dummy_sink";
     common::concat(dummy_sink_names, dummy_sink_name);
+
+    // TODO: try removing this concat and see if that makes the merge faster.
 
     // similarly, the 16 blocks of the original k-mers can be concatenated in groups of
     // 4 without destroying the order
