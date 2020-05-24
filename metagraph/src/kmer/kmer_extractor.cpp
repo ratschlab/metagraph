@@ -324,8 +324,8 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
         return;
 
     // encode sequence
-    const size_t dummy_prefix_size = suffix.size() > 0 ? k - 1 : 0;
-    const size_t dummy_suffix_size = suffix.size() > 0 ? 1 : 0;
+    const size_t dummy_prefix_size = suffix.size() ? k - 1 : 0;
+    const size_t dummy_suffix_size = suffix.size() ? 1 : 0;
 
     std::vector<TAlphabet> seq(dummy_prefix_size
                                     + sequence.size() + 1, alphabet.size());
@@ -334,14 +334,13 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
         [](char c) { return encode(c); }
     );
 
-    TAlphabet *begin_segm = seq.data();
     TAlphabet *end_segm = seq.data() + dummy_prefix_size;
     TAlphabet *end = seq.data() + seq.size();
 
     do {
         assert(end >= end_segm);
 
-        begin_segm = end_segm - dummy_prefix_size;
+        TAlphabet *begin_segm = end_segm - dummy_prefix_size;
 
         // DNA segments may be stored continuously separated by a character outside of
         // the valid alphabet (usually 'N'). Each segment is treated as a distinct DNA
@@ -360,7 +359,7 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
                 //     ---^
                 *end_segm = 0;
 
-                assert(dummy_suffix_size);
+                assert(dummy_prefix_size);
                 // set the dummy prefix for the next segment
                 // ***NAAANAAAA* ->
                 // ****AAA*AAAA*
