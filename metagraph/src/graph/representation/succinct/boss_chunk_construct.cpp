@@ -219,44 +219,10 @@ void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
     sort(&kmers, num_threads, 0);
 }
 
-/**
- * Contains recently added kmers and dummy-1 source kmers to facilitate checking for
- * redundancy. A dummy-1 source k-mer that is redundant is set to 0 and will be ignred.
- * */
-template <typename KMER>
-using RecentKmers = common::CircularBuffer<KMER>;
 template <typename T>
 using Encoder = common::EliasFanoEncoderBuffered<T>;
 template <typename T>
 using Decoder = common::EliasFanoDecoder<T>;
-
-/**
- * Push a k-mer into the buffer, then iterate backwards and check if there is a dummy
- * incoming edge (a dummy edge with identical suffix and label as the current one)
- * into the same node.
- * If such an edge is found, mark it for removal (because it's redundant).
- * @param kmer check for redundancy against this k-mer
- * @param buffer queue that stores the last  |Alphabet|^2 k-mers used for identifying
- * redundant dummy source k-mers
- */
-template <typename KMER>
-static void remove_redundant_dummy_source(const KMER &kmer, RecentKmers<KMER> *buffer) {
-    // kmer should not be a dummy k-mer
-    assert(kmer[0] != BOSS::kSentinelCode && kmer[1] != BOSS::kSentinelCode);
-
-    if (buffer->size() < 2) {
-        return;
-    }
-    for (auto it = ++buffer->rbegin(); KMER::compare_suffix(kmer, *it, 1); ++it) {
-        KMER &prev_kmer = *it;
-        if (prev_kmer[1] == BOSS::kSentinelCode) { // redundant dummy source k-mer
-            prev_kmer = KMER(0);
-            break;
-        }
-        if (it.at_begin())
-            break;
-    }
-}
 
 constexpr uint8_t ALPHABET_LEN = 1 << KmerExtractorBOSS::bits_per_char;
 constexpr uint32_t ENCODER_BUFFER_SIZE = 100'000;
@@ -267,10 +233,11 @@ constexpr uint32_t ENCODER_BUFFER_SIZE = 100'000;
 template <typename T>
 std::vector<std::string>
 split(size_t k, const std::filesystem::path &tmp_dir, const ChunkedWaitQueue<T> &kmers) {
-    logger->trace("Splitting k-mers into {} chunks...", ALPHABET_LEN);
+    uint32_t chunk_count = std::pow(ALPHABET_LEN, 2);
+    logger->trace("Splitting k-mers into {} chunks...", chunk_count);
     using T_INT = get_int_t<T>;
     std::vector<Encoder<T_INT>> sinks;
-    std::vector<std::string> names(std::pow(ALPHABET_LEN, 2));
+    std::vector<std::string> names(chunk_count);
     for (uint32_t i = 0; i < names.size(); ++i) {
         names[i] = tmp_dir/("original_split_by01_" + std::to_string(i));
         sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
@@ -286,7 +253,8 @@ split(size_t k, const std::filesystem::path &tmp_dir, const ChunkedWaitQueue<T> 
         sinks[idx].add(reinterpret_cast<const T_INT&>(kmer));
     }
     std::for_each(sinks.begin(), sinks.end(), [](auto &f) { f.finish(); });
-    logger->trace("Total number of k-mers: {}", num_parent_kmers);
+    // subtract the $$$...$ k-mer that was added at the beginning
+    logger->trace("Total number of non-dummy k-mers: {}", num_parent_kmers - 1);
     return names;
 }
 
@@ -314,64 +282,44 @@ void handle_dummy_sink(size_t k,
 }
 
 /**
- * Writes #to_write to #dummy_l1 if it's a dummy-1 kmer and it wasn't marked as redundant.
- */
-template <typename T, typename INT>
-void write_dummy_l1(const T &to_write, Encoder<INT> *dummy_l1) {
-    auto kmer = get_first(to_write);
-    if (kmer.data() == 0U) { // redundant dummy source k-mer
-        return;
-    }
-    assert(kmer[0] != BOSS::kSentinelCode);
-
-    const TAlphabet node_last_char = kmer[1];
-    if (node_last_char == BOSS::kSentinelCode) { // only write dummy-1 source k-mers
-        dummy_l1->add(kmer.data());
-    }
-}
-
-template <typename KMER, typename INT>
-void push_to_recent(const KMER &v, RecentKmers<KMER> *buffer, Encoder<INT> *dummy_l1) {
-    assert(v[0] != BOSS::kSentinelCode); // no dummy sink k-mers allowed
-    buffer->push_back(v);
-    if (buffer->full()) {
-        write_dummy_l1(buffer->pop_front(), dummy_l1);
-    }
-}
-
-/**
  * Handles the next dummy source k-mer.
- * First, all non-dummy k-mers smaller than #dummy_source are written to #recent_buffer,
- * while also checking if any of the pushed k-mers is redundant with a previous dummy
- * source k-mer. For each of these k-mers, also generate the corresponding dummy sink k-mer
- * and check if it's redundant against #dummy_sink_it.
- * Finally, the dummy source k-mer is written to #recent_buffer.
+ * First, all non-dummy k-mers smaller than #dummy_source are traversed and dummy sink
+ * k-mers are generated anc checked for redundancy against #dummy_sink_it.
+ * Finally, the dummy source k-mer is written to #dummy_l1 if it's not redundant.
+ * Note: since all kmers in #dummy_source_it end with the same character as #dummy_source,
+ * we know that if there is a kmer in #dummy_source_it that #dummy_source is redundant
+ * with, that k-mer is the first k-mer bigger than #dummy_source.
  * @param k node length (k-mer length is k+1)
+ * @param dummy_source the current dummy source node to check for redundancy or KMER(-1)
  * @param dummy_source_it traverses all k-mers with the same last char as #dummy_source
- * @param dummy_sink_it traverses all k-mers with the same *first* char as #dummy_source's last char
- * @param recent_buffer stores the recently seen non-dummy and dummy-1 k-mers (in order to check for redundancy)
+ * @param dummy_sink_it traverses all k-mers with the same *first* char as #dummy_source's
+ * last char
  * @param dummy_l1 sink where the non-dummy1 source kmers are written
  * @param dummy_sink_chunk sink where the non-dummy sink k-mers are written
  * @param last_dummy_sink the last written dummy sink k-mer (to avoid writing duplicates)
  */
 template <typename T_INT, typename KMER, typename INT>
 void handle_dummy_source(size_t k,
-                         const INT &dummy_source,
+                         const KMER &dummy_source,
                          common::MergeDecoder<T_INT> &dummy_source_it,
                          common::MergeDecoder<T_INT> &dummy_sink_it,
-                         RecentKmers<KMER> *recent_buffer,
                          Encoder<INT> *dummy_l1,
                          Encoder<INT> *dummy_sink_chunk,
                          INT *last_dummy_sink) {
     // Push all non-dummy kmers smaller than dummy source
     while (dummy_source_it.top().has_value()
-           && get_first(dummy_source_it.top().value()) < dummy_source) {
+           && get_first(dummy_source_it.top().value()) <= dummy_source.data()) {
         const KMER v(get_first(dummy_source_it.next().value()));
-        push_to_recent(v, recent_buffer, dummy_l1);
-        remove_redundant_dummy_source(v, recent_buffer);
         // push the dummy sink k-mer corresponding to v
-        handle_dummy_sink(k, get_first(v), dummy_sink_it, dummy_sink_chunk, last_dummy_sink);
+        handle_dummy_sink(k, v, dummy_sink_it, dummy_sink_chunk, last_dummy_sink);
     }
+    if (dummy_source_it.top().has_value()) {
+        const KMER v(get_first(dummy_source_it.top().value()));
+        if (KMER::compare_suffix(v, dummy_source, 1)) {
+            return;
+        }
+    }
+    dummy_l1->add(dummy_source.data());
 }
 
 /**
@@ -404,9 +352,8 @@ generate_dummy_1_kmers(size_t k,
     }
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
-    #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (uint32_t first_ch = 1; first_ch < ALPHABET_LEN; ++first_ch) {  // skip $$..$
-        RecentKmers<KMER> recent_buffer(1llu << 2 * KMER::kBitsPerChar);
         INT last_dummy_sink = 0;
         std::vector<std::string> first_ch_names(
                 original_names.begin() + first_ch * ALPHABET_LEN,
@@ -424,19 +371,16 @@ generate_dummy_1_kmers(size_t k,
             KMER dummy_source(get_first(v.value()));
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
             if (dummy_source.data() != prev_dummy_source) {
-                handle_dummy_source(k, dummy_source.data(), dummy_source_it, dummy_sink_it,
-                                    &recent_buffer, &dummy_l1_chunks[first_ch],
+                handle_dummy_source(k, dummy_source, dummy_source_it, dummy_sink_it,
+                                    &dummy_l1_chunks[first_ch],
                                     &dummy_sink_chunks[first_ch], &last_dummy_sink);
-                push_to_recent(dummy_source, &recent_buffer, &dummy_l1_chunks[first_ch]);
                 prev_dummy_source = dummy_source.data();
             }
         }
-        // push leftover dummy_source_it
-        handle_dummy_source(k, INT(-1), dummy_source_it, dummy_sink_it,
-                            &recent_buffer, &dummy_l1_chunks[first_ch],
-                            &dummy_sink_chunks[first_ch], &last_dummy_sink);
-        while (!recent_buffer.empty()) { // add leftover elements from buffer
-            write_dummy_l1(recent_buffer.pop_front(), &dummy_l1_chunks[first_ch]);
+        // handle leftover dummy_source_it
+        while (dummy_source_it.top().has_value()) {
+            handle_dummy_sink(k, KMER(get_first(dummy_source_it.next().value())),
+                              dummy_sink_it, &dummy_sink_chunks[first_ch], &last_dummy_sink);
         }
     }
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
