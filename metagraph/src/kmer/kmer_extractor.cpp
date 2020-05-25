@@ -324,51 +324,57 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
         return;
 
     // encode sequence
-    const size_t dummy_prefix_size = suffix.size() > 0 ? k - 1 : 0;
-    const size_t dummy_suffix_size = suffix.size() > 0 ? 1 : 0;
+    const size_t dummy_prefix_size = suffix.empty() ? 0 : k - 1;
+    const size_t dummy_suffix_size = suffix.empty() ? 0 : 1;
 
-    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1, 0);
+    std::vector<TAlphabet> seq(dummy_prefix_size
+                                    + sequence.size() + 1, alphabet.size());
 
     std::transform(sequence.begin(), sequence.end(), &seq[dummy_prefix_size],
         [](char c) { return encode(c); }
     );
 
-    TAlphabet *begin_segm = seq.data();
     TAlphabet *end_segm = seq.data() + dummy_prefix_size;
     TAlphabet *end = seq.data() + seq.size();
-    seq.back() = alphabet.size()+1; // mark the end with an invalid character
-    while (begin_segm + dummy_prefix_size + k + 1 <= end) {
+
+    do {
         assert(end >= end_segm);
+
+        TAlphabet *begin_segm = end_segm - dummy_prefix_size;
+
         // DNA segments may be stored continuously separated by a character outside of
         // the valid alphabet (usually 'N'). Each segment is treated as a distinct DNA
         // read and will be prepended with a dummy prefix if #suffix is not empty
-        end_segm = std::find_if(end_segm, end,
-            [&](auto c) { return c >= alphabet.size(); }
-        );
-        assert(*end_segm >= alphabet.size());
-        if (!suffix.empty()) {
-            *end_segm = 0;
-            ++end_segm; // make room for the dummy suffix
+        while (*end_segm < alphabet.size()) {
+            end_segm++;
         }
+        assert(end_segm < end);
 
         if (begin_segm + dummy_prefix_size + k + dummy_suffix_size <= end_segm) {
-            // set the dummy prefix for the next segment
-            // ****AAA*AAAA*
-            // ********AAAA*
-            std::fill(begin_segm, begin_segm + dummy_prefix_size, 0);
+            if (dummy_suffix_size) {
+                assert(*end_segm >= alphabet.size());
+                // set the dummy suffix
+                // ***NAAANAAAA* ->
+                // ***NAAA*AAAA*
+                //     ---^
+                *end_segm = 0;
 
-            extractor::sequence_to_kmers<KMER>(begin_segm, end_segm, k, suffix,
+                assert(dummy_prefix_size);
+                // set the dummy prefix for the next segment
+                // ***NAAANAAAA* ->
+                // ****AAA*AAAA*
+                //   ^^---^
+                std::fill(begin_segm, begin_segm + dummy_prefix_size, 0);
+            }
+
+            extractor::sequence_to_kmers<KMER>(begin_segm, end_segm + dummy_suffix_size, k, suffix,
                 [&kmers](auto kmer) { kmers->push_back(kmer); },
                 canonical_mode ? kComplementCode : std::vector<uint8_t>(),
                 []() { return false; }
             );
         }
-        if (suffix.empty()) {
-            ++end_segm; // skip the separator character
-        }
 
-        begin_segm = end_segm - dummy_prefix_size;
-    }
+    } while (++end_segm + k + dummy_suffix_size <= end);
 }
 
 template

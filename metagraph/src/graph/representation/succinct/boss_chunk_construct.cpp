@@ -28,13 +28,9 @@ using TAlphabet = KmerExtractorBOSS::TAlphabet;
 using utils::get_first;
 using utils::get_first_type_t;
 
+const uint8_t ALPHABET_LEN = KmerExtractorBOSS::alphabet.size();
+constexpr uint32_t ENCODER_BUFFER_SIZE = 100'000;
 
-template <class Array>
-void sort(Array *array, size_t num_threads, size_t offset) {
-    ips4o::parallel::sort(array->begin() + offset, array->end(),
-                          utils::LessFirst(),
-                          num_threads);
-}
 
 template <class Container, typename KMER>
 inline void push_back(Container &kmers, const KMER &kmer) {
@@ -65,23 +61,22 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
     // TODO: this is a bit of a waste as we usually have less than 2^bits characters
     // Maybe define an ALPHABET_SIZE constant in KmerExtractorBOSS and KmerBOSS?
-    constexpr uint8_t ALPHABET_LEN = 1 << KmerExtractorBOSS::bits_per_char;
     using INT = typename KMER::WordType;
 
     Vector<T> &kmers = *kmers_p;
 
     // points to the current k-mer with the given first character
-    std::array<const T*, ALPHABET_LEN + 1> first_char_it;
-    std::vector<INT> zeros(k + 1);
-    for (uint32_t i = 1; i < ALPHABET_LEN; ++i) {
-        zeros[k - 1] = i;
-        first_char_it[i] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
-                                            KMER(zeros, k + 1), // the $$...i->$ k-mer
-                                            [](const T &a, const KMER &b) -> bool {
-                                                return get_first(a) < b;
-                                            });
+    std::vector<const T*> it(ALPHABET_LEN + 1);
+    for (TAlphabet c = 1; c < ALPHABET_LEN; ++c) {
+        std::vector<INT> zeros(k + 1, 0);
+        zeros[k - 1] = c;
+        it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
+                                 KMER(zeros, k + 1), // the $$...i->$ k-mer
+                                 [](const T &a, const KMER &b) -> bool {
+                                     return get_first(a) < b;
+                                 });
     }
-    first_char_it[ALPHABET_LEN] = kmers.data() + kmers.size();
+    it[ALPHABET_LEN] = kmers.data() + kmers.size();
 
     std::vector<KMER> last_dummy(ALPHABET_LEN, KMER(0));
     size_t size = kmers.size();
@@ -90,22 +85,23 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
         // none of the original k-mers is a dummy k-mer
         assert(kmer[1] != 0 && kmer[0] != 0);
 
-        KMER dummy_sink_kmer = kmer;
-        dummy_sink_kmer.to_next(k + 1, BOSS::kSentinelCode);
+        KMER dummy_sink = kmer;
+        dummy_sink.to_next(k + 1, BOSS::kSentinelCode);
 
         TAlphabet last_char = kmer[0];
-        if (last_dummy[last_char] == dummy_sink_kmer) {
-            continue; // avoid generating duplicate dummy sink kmers
-        }
-        last_dummy[last_char] = dummy_sink_kmer;
 
-        while (first_char_it[last_char] < first_char_it[last_char + 1]
-                && KMER::less(get_first(*first_char_it[last_char]), dummy_sink_kmer)) {
-            first_char_it[last_char]++;
+        if (last_dummy[last_char] == dummy_sink)
+            continue; // avoid generating duplicate dummy sink kmers
+
+        last_dummy[last_char] = dummy_sink;
+
+        while (it[last_char] < it[last_char + 1]
+                && KMER::less(get_first(*it[last_char]), dummy_sink)) {
+            it[last_char]++;
         }
-        if (!KMER::compare_suffix(get_first(*first_char_it[last_char]), dummy_sink_kmer)
-                || first_char_it[last_char] == first_char_it[last_char + 1]) {
-            push_back(kmers, dummy_sink_kmer);
+        if (!KMER::compare_suffix(get_first(*it[last_char]), dummy_sink)
+                || it[last_char] == it[last_char + 1]) {
+            push_back(kmers, dummy_sink);
         }
     }
 }
@@ -194,7 +190,9 @@ void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
     size_t dummy_begin = kmers.size();
 
     add_dummy_source_kmers(k, &kmers, original_end);
-    sort(&kmers, num_threads, dummy_begin);
+
+    ips4o::parallel::sort(kmers.begin() + dummy_begin, kmers.end(),
+                          utils::LessFirst(), num_threads);
 
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
                   kmers.size() - dummy_begin);
@@ -211,12 +209,15 @@ void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
             push_back(kmers, kmer);
         }
         dummy_begin = dummy_end;
-        sort(&kmers, num_threads, dummy_begin);
+        ips4o::parallel::sort(kmers.begin() + dummy_begin, kmers.end(),
+                              utils::LessFirst(), num_threads);
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}", c,
                       kmers.size() - dummy_begin);
     }
-    sort(&kmers, num_threads, 0);
+
+    ips4o::parallel::sort(kmers.begin(), kmers.end(),
+                          utils::LessFirst(), num_threads);
 }
 
 template <typename T>
@@ -224,22 +225,19 @@ using Encoder = common::EliasFanoEncoderBuffered<T>;
 template <typename T>
 using Decoder = common::EliasFanoDecoder<T>;
 
-constexpr uint8_t ALPHABET_LEN = 1 << KmerExtractorBOSS::bits_per_char;
-constexpr uint32_t ENCODER_BUFFER_SIZE = 100'000;
-
 /**
- * Splits #kmers by the first and last character into ALPHABET_LEN^2 blocks.
+ * Splits #kmers by W (kmer[0]) and F (kmer[k]) into ALPHABET_LEN^2 chunks.
  */
 template <typename T>
 std::vector<std::string>
-split(size_t k, const std::filesystem::path &tmp_dir, const ChunkedWaitQueue<T> &kmers) {
+split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kmers) {
     uint32_t chunk_count = std::pow(ALPHABET_LEN, 2);
     logger->trace("Splitting k-mers into {} chunks...", chunk_count);
     using T_INT = get_int_t<T>;
     std::vector<Encoder<T_INT>> sinks;
     std::vector<std::string> names(chunk_count);
     for (uint32_t i = 0; i < names.size(); ++i) {
-        names[i] = tmp_dir/("original_split_by01_" + std::to_string(i));
+        names[i] = dir/("original_split_by01_" + std::to_string(i));
         sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
 
@@ -247,9 +245,9 @@ split(size_t k, const std::filesystem::path &tmp_dir, const ChunkedWaitQueue<T> 
     for (auto &it = kmers.begin(); it != kmers.end(); ++it) {
         num_parent_kmers++;
         const T &kmer = *it;
-        TAlphabet first_char = get_first(kmer)[k];
-        TAlphabet last_char = get_first(kmer)[0];
-        uint32_t idx = first_char * ALPHABET_LEN + last_char;
+        TAlphabet F = get_first(kmer)[k];
+        TAlphabet W = get_first(kmer)[0];
+        uint32_t idx = F * ALPHABET_LEN + W;
         sinks[idx].add(reinterpret_cast<const T_INT&>(kmer));
     }
     std::for_each(sinks.begin(), sinks.end(), [](auto &f) { f.finish(); });
@@ -331,73 +329,76 @@ template <typename T>
 std::tuple<std::vector<std::string>, std::vector<std::string>, std::string>
 generate_dummy_1_kmers(size_t k,
                        size_t num_threads,
-                       const std::filesystem::path &tmp_dir,
+                       const std::filesystem::path &dir,
                        ChunkedWaitQueue<T> *kmers) {
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
     using T_INT = get_int_t<T>; // either KMER::WordType or <KMER::WordType, count>
     using INT = typename KMER::WordType; // 64/128/256-bit integer
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
-    std::vector<std::string> original_names = split(k, tmp_dir, *kmers);
+    std::vector<std::string> original_names = split(k, dir, *kmers);
 
     std::vector<Encoder<INT>> dummy_l1_chunks;
     std::vector<Encoder<INT>> dummy_sink_chunks;
     std::vector<std::string> dummy_l1_names(ALPHABET_LEN);
     std::vector<std::string> dummy_sink_names(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
-        dummy_l1_names[i] = tmp_dir/("dummy_source_1_" + std::to_string(i));
-        dummy_sink_names[i] = tmp_dir/("dummy_sink_" + std::to_string(i));
+        dummy_l1_names[i] = dir/("dummy_source_1_" + std::to_string(i));
+        dummy_sink_names[i] = dir/("dummy_sink_" + std::to_string(i));
         dummy_l1_chunks.emplace_back(dummy_l1_names[i], ENCODER_BUFFER_SIZE);
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
-    for (uint32_t first_ch = 1; first_ch < ALPHABET_LEN; ++first_ch) {  // skip $$..$
+    for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {  // skip $$..$
         INT last_dummy_sink = 0;
-        std::vector<std::string> first_ch_names(
-                original_names.begin() + first_ch * ALPHABET_LEN,
-                original_names.begin() + (first_ch + 1) * ALPHABET_LEN);
-        std::vector<std::string> last_ch_names(ALPHABET_LEN);
-        for(uint32_t i = 0; i<ALPHABET_LEN; ++i){
-            last_ch_names[i] = original_names[i*ALPHABET_LEN + first_ch];
+        std::vector<std::string> W_chunk_names(
+                original_names.begin() + W * ALPHABET_LEN,
+                original_names.begin() + (W + 1) * ALPHABET_LEN);
+
+        std::vector<std::string> F_chunk_names;
+        for (TAlphabet F = 1; F < ALPHABET_LEN; ++F) {
+            F_chunk_names.push_back(original_names[F * ALPHABET_LEN + W]);
         }
 
-        common::MergeDecoder<T_INT> it(first_ch_names, false);
-        common::MergeDecoder<T_INT> dummy_sink_it(first_ch_names, false);
-        common::MergeDecoder<T_INT> dummy_source_it(last_ch_names, false);
-        INT prev_dummy_source(0);
+        common::MergeDecoder<T_INT> it(W_chunk_names, false);
+        common::MergeDecoder<T_INT> dummy_sink_it(W_chunk_names, false);
+        // TODO: use concatenation instead of merging for F_chunk_names
+        common::MergeDecoder<T_INT> dummy_source_it(F_chunk_names, false);
+        INT last_dummy_source(0);
         for (auto v = it.next(); v.has_value(); v = it.next()) {
             KMER dummy_source(get_first(v.value()));
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
-            if (dummy_source.data() != prev_dummy_source) {
+            if (dummy_source.data() != last_dummy_source) {
                 handle_dummy_source(k, dummy_source, dummy_source_it, dummy_sink_it,
-                                    &dummy_l1_chunks[first_ch],
-                                    &dummy_sink_chunks[first_ch], &last_dummy_sink);
-                prev_dummy_source = dummy_source.data();
+                                    &dummy_l1_chunks[W], &dummy_sink_chunks[W],
+                                    &last_dummy_sink);
+                last_dummy_source = dummy_source.data();
             }
         }
         // handle leftover dummy_source_it
         while (dummy_source_it.top().has_value()) {
             handle_dummy_sink(k, KMER(get_first(dummy_source_it.next().value())),
-                              dummy_sink_it, &dummy_sink_chunks[first_ch], &last_dummy_sink);
+                              dummy_sink_it, &dummy_sink_chunks[W], &last_dummy_sink);
         }
     }
+
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
         dummy_sink_chunks[i].finish();
         dummy_l1_chunks[i].finish();
     }
 
-    // dummy sink k-mers are partitioned into blocks by kmer[1], so simply concatenating
-    // the blocks will result in a single ordered block
-    std::string dummy_sink_name = tmp_dir/"dummy_sink";
+    // dummy sink k-mers are partitioned into blocks by F (kmer[1]), so simply
+    // concatenating the blocks will result in a single ordered block
+    std::string dummy_sink_name = dir/"dummy_sink";
     common::concat(dummy_sink_names, dummy_sink_name);
 
     // similarly, the 16 blocks of the original k-mers can be concatenated in groups of
     // 4 without destroying the order
     std::vector<std::string> original_merged_names(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
-        original_merged_names[i] = tmp_dir/("original_split1_" + std::to_string(i));
+        original_merged_names[i] = dir/("original_split1_" + std::to_string(i));
         std::vector<std::string> source(ALPHABET_LEN);
         for (uint32_t j = 0; j < ALPHABET_LEN; ++j) {
             source[j] = original_names[j * ALPHABET_LEN + i];
@@ -576,20 +577,12 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
         BOSS::Chunk *result;
 
-        if constexpr(utils::is_pair_v<typename KmerCollector::Value>) {
-            // kmer_collector stores (BOSS::k_ + 1)-mers
-            result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
-                                     kmer_collector_.get_k() - 1,
-                                     kmer_collector_.is_both_strands_mode(),
-                                     kmers,
-                                     bits_per_count_);
-        } else {
-            // kmer_collector stores (BOSS::k_ + 1)-mers
-            result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
-                                     kmer_collector_.get_k() - 1,
-                                     kmer_collector_.is_both_strands_mode(),
-                                     kmers);
-        }
+        // kmer_collector stores (BOSS::k_ + 1)-mers
+        result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
+                                 kmer_collector_.get_k() - 1,
+                                 kmer_collector_.is_both_strands_mode(),
+                                 kmers,
+                                 bits_per_count_);
 
         kmer_collector_.clear();
 

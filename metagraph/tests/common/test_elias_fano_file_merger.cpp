@@ -109,7 +109,7 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeEmpty) {
     }
     std::function<void(const TypeParam &v)> on_new_item
             = [](const TypeParam &) { FAIL() << "Should not be called."; };
-    common::merge_dummy(file_names[0], file_names, on_new_item, false);
+    common::merge_dummy({ file_names[0] }, file_names, on_new_item, false);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, MergeIdentical) {
@@ -157,7 +157,7 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeIdentical) {
         i++;
     };
 
-    common::merge_dummy(file.name(), file_names, on_new_item);
+    common::merge_dummy({ file.name() }, file_names, on_new_item);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, DummyMergeDistinct) {
@@ -186,7 +186,7 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeDistinct) {
         i++;
     };
 
-    common::merge_dummy(file.name(), file_names, on_new_item);
+    common::merge_dummy({ file.name() }, file_names, on_new_item);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, MergeRandom) {
@@ -269,7 +269,7 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeRandom) {
         ASSERT_EQ(expected[i], v);
         i++;
     };
-    common::merge_dummy(file.name(), file_names, on_new_item);
+    common::merge_dummy({ file.name() }, file_names, on_new_item);
 }
 
 } // namespace
