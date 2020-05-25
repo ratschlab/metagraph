@@ -256,8 +256,8 @@ split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kme
     return names;
 }
 
-template <typename T_INT, typename KMER>
-void skip_same_suffix(const KMER &el, common::MergeDecoder<T_INT> &decoder, size_t suf) {
+template <typename Decoder, typename KMER>
+void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
     while (!decoder.empty()) {
         KMER kmer = reinterpret_cast<const KMER &>(get_first(decoder.top()));
         if (!KMER::compare_suffix(kmer, el, suf)) {
@@ -303,7 +303,7 @@ void handle_dummy_sink(size_t k,
 template <typename T_INT, typename KMER, typename INT>
 void handle_dummy_source(size_t k,
                          const KMER &dummy_source,
-                         common::MergeDecoder<T_INT> &dummy_source_it,
+                         common::ConcatDecoder<T_INT> &dummy_source_it,
                          common::MergeDecoder<T_INT> &dummy_sink_it,
                          Encoder<INT> *dummy_l1,
                          Encoder<INT> *dummy_sink_chunk) {
@@ -357,19 +357,18 @@ generate_dummy_1_kmers(size_t k,
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 1; F < ALPHABET_LEN; ++F) {  // skip $$..$
-        std::vector<std::string> W_chunk_names(
+        std::vector<std::string> first_F_names(  // chunks whose first char is F
                 original_names.begin() + F * ALPHABET_LEN,
                 original_names.begin() + (F + 1) * ALPHABET_LEN);
 
-        std::vector<std::string> F_chunk_names;
+        std::vector<std::string> last_F_names; // chunks ending with F
         for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {
-            F_chunk_names.push_back(original_names[W * ALPHABET_LEN + F]);
+            last_F_names.push_back(original_names[W * ALPHABET_LEN + F]);
         }
 
-        common::MergeDecoder<T_INT> it(W_chunk_names, false);
-        common::MergeDecoder<T_INT> dummy_sink_it(W_chunk_names, false);
-        // TODO: use concatenation instead of merging for F_chunk_names
-        common::MergeDecoder<T_INT> dummy_source_it(F_chunk_names, false);
+        common::MergeDecoder<T_INT> it(first_F_names, false);
+        common::MergeDecoder<T_INT> dummy_sink_it(first_F_names, false);
+        common::ConcatDecoder<T_INT> dummy_source_it(last_F_names);
         while (!it.empty()) {
             KMER dummy_source(get_first(it.pop()));
             // skip k-mers that would generate identical dummy k-mers

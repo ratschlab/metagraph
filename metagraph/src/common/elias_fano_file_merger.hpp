@@ -57,6 +57,53 @@ class MergeHeap {
     Compare compare_ = Compare();
 };
 
+template <typename T>
+class ConcatDecoder {
+  public:
+    ConcatDecoder(const std::vector<std::string> &names)
+        : names_(names), source_(names[0]) {
+        get_next();
+    }
+
+    bool empty() {
+        return !next_.has_value();
+    }
+
+    T top() {
+        return next_.value();
+    }
+
+    T pop() {
+#ifndef NDEBUG
+        if (!next_.has_value()) {
+            throw std::runtime_error("Attempt to pop an empty ConcatDecoder");
+        }
+#endif
+        T result = next_.value();
+        get_next();
+        return result;
+    }
+  private:
+    std::optional<T> next_;
+    uint32_t idx_ = 0;
+    std::vector<std::string> names_;
+    EliasFanoDecoder<T> source_;
+
+    void get_next() {
+        next_ = source_.next();
+        if (next_.has_value()) {
+            return;
+        }
+        while (++idx_ < names_.size()) {
+            source_ = EliasFanoDecoder<T>(names_[idx_]);
+            next_ = source_.next();
+            if (next_.has_value()) {
+                return;
+            }
+        }
+    }
+};
+
 /**
  * Decoder that reads data from several sorted files and merges it into a single sorted
  * stream.
