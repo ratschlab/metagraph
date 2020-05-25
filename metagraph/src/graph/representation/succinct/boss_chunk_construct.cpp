@@ -256,21 +256,26 @@ split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kme
     return names;
 }
 
+template <typename T_INT, typename KMER>
+void skip_same_suffix(const KMER &el, common::MergeDecoder<T_INT> &decoder) {
+    while (!decoder.empty()) {
+        KMER kmer = reinterpret_cast<const KMER &>(get_first(decoder.top()));
+        if (!KMER::compare_suffix(kmer, el, 1)) {
+            break;
+        }
+        decoder.pop();
+    }
+}
 
 template <typename T_INT, typename KMER, typename INT>
 void handle_dummy_sink(size_t k,
                        KMER kmer,
-                       common::MergeDecoder<T_INT> &decoder,
-                       Encoder<INT> *dummy_sink_enc,
-                       INT *last_dummy_sink) {
+                       common::MergeDecoder<T_INT> &dummy_sink_it,
+                       Encoder<INT> *dummy_sink_enc) {
     kmer.to_next(k + 1, BOSS::kSentinelCode);
-    if (*last_dummy_sink == kmer.data()) { // generate only distinct dummy sink k-mers
-        return;
-    }
-    *last_dummy_sink = kmer.data();
     INT v = 0;
-    while (!decoder.empty() && (v = get_first(decoder.top())) < kmer.data()) {
-        decoder.pop();
+    while (!dummy_sink_it.empty() && (v = get_first(dummy_sink_it.top())) < kmer.data()) {
+        dummy_sink_it.pop();
     }
     if (!KMER::compare_suffix(reinterpret_cast<const KMER &>(v), kmer)) {
         dummy_sink_enc->add(kmer.data());
@@ -288,9 +293,10 @@ void handle_dummy_sink(size_t k,
  * @param k node length (k-mer length is k+1)
  * @param dummy_source the current dummy source node to check for redundancy or KMER(-1)
  * @param dummy_source_it traverses all k-mers with the same last char as #dummy_source
+ * (in order to check for redundancy)
  * @param dummy_sink_it traverses all k-mers with the same *first* char as #dummy_source's
  * last char
- * @param dummy_l1 sink where the non-dummy1 source kmers are written
+ * @param dummy_l1 sink where the non-redundant dummy1 source kmers are written
  * @param dummy_sink_chunk sink where the non-dummy sink k-mers are written
  * @param last_dummy_sink the last written dummy sink k-mer (to avoid writing duplicates)
  */
@@ -300,15 +306,16 @@ void handle_dummy_source(size_t k,
                          common::MergeDecoder<T_INT> &dummy_source_it,
                          common::MergeDecoder<T_INT> &dummy_sink_it,
                          Encoder<INT> *dummy_l1,
-                         Encoder<INT> *dummy_sink_chunk,
-                         INT *last_dummy_sink) {
+                         Encoder<INT> *dummy_sink_chunk) {
     // Push all non-dummy kmers smaller than dummy source
     KMER v(0);
     while (!dummy_source_it.empty()
            && get_first(dummy_source_it.top()) <= dummy_source.data()) {
         v = KMER(get_first(dummy_source_it.pop()));
-        // push the dummy sink k-mer corresponding to v
-        handle_dummy_sink(k, v, dummy_sink_it, dummy_sink_chunk, last_dummy_sink);
+        // check the dummy sink k-mer corresponding to v for redundancy
+        handle_dummy_sink(k, v, dummy_sink_it, dummy_sink_chunk);
+        // skip k-mers with the same suffix as v, as they generate identical dummy sinks
+        skip_same_suffix(v, dummy_source_it);
     }
     if (!KMER::compare_suffix(v, dummy_source, 1)) {
         dummy_l1->add(dummy_source.data());
@@ -347,7 +354,6 @@ generate_dummy_1_kmers(size_t k,
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {  // skip $$..$
-        INT last_dummy_sink = 0;
         std::vector<std::string> W_chunk_names(
                 original_names.begin() + W * ALPHABET_LEN,
                 original_names.begin() + (W + 1) * ALPHABET_LEN);
@@ -361,21 +367,17 @@ generate_dummy_1_kmers(size_t k,
         common::MergeDecoder<T_INT> dummy_sink_it(W_chunk_names, false);
         // TODO: use concatenation instead of merging for F_chunk_names
         common::MergeDecoder<T_INT> dummy_source_it(F_chunk_names, false);
-        INT last_dummy_source(0);
         while (!it.empty()) {
             KMER dummy_source(get_first(it.pop()));
+            skip_same_suffix(dummy_source, it);
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
-            if (dummy_source.data() != last_dummy_source) {
-                handle_dummy_source(k, dummy_source, dummy_source_it, dummy_sink_it,
-                                    &dummy_l1_chunks[W], &dummy_sink_chunks[W],
-                                    &last_dummy_sink);
-                last_dummy_source = dummy_source.data();
-            }
+            handle_dummy_source(k, dummy_source, dummy_source_it, dummy_sink_it,
+                                &dummy_l1_chunks[W], &dummy_sink_chunks[W]);
         }
         // handle leftover dummy_source_it
         while (!dummy_source_it.empty()) {
             handle_dummy_sink(k, KMER(get_first(dummy_source_it.pop())),
-                              dummy_sink_it, &dummy_sink_chunks[W], &last_dummy_sink);
+                              dummy_sink_it, &dummy_sink_chunks[W]);
         }
     }
 
