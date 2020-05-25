@@ -324,9 +324,7 @@ std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &co
     return std::make_unique<bit_vector_smart>(
         [&](const auto &callback) {
             for (const auto &result : results) {
-                for (uint64_t *p = result.first; p < result.second; ++p) {
-                    callback(*p);
-                }
+                std::for_each(result.first, result.second, callback);
             }
         },
         vector_size,
