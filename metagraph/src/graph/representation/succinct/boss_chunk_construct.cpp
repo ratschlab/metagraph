@@ -257,10 +257,10 @@ split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kme
 }
 
 template <typename T_INT, typename KMER>
-void skip_same_suffix(const KMER &el, common::MergeDecoder<T_INT> &decoder) {
+void skip_same_suffix(const KMER &el, common::MergeDecoder<T_INT> &decoder, size_t suf) {
     while (!decoder.empty()) {
         KMER kmer = reinterpret_cast<const KMER &>(get_first(decoder.top()));
-        if (!KMER::compare_suffix(kmer, el, 1)) {
+        if (!KMER::compare_suffix(kmer, el, suf)) {
             break;
         }
         decoder.pop();
@@ -315,7 +315,7 @@ void handle_dummy_source(size_t k,
         // check the dummy sink k-mer corresponding to v for redundancy
         handle_dummy_sink(k, v, dummy_sink_it, dummy_sink_chunk);
         // skip k-mers with the same suffix as v, as they generate identical dummy sinks
-        skip_same_suffix(v, dummy_source_it);
+        skip_same_suffix(v, dummy_source_it, 1);
     }
     if (!KMER::compare_suffix(v, dummy_source, 1)) {
         dummy_l1->add(dummy_source.data());
@@ -353,14 +353,14 @@ generate_dummy_1_kmers(size_t k,
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
-    for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {  // skip $$..$
+    for (TAlphabet F = 1; F < ALPHABET_LEN; ++F) {  // skip $$..$
         std::vector<std::string> W_chunk_names(
-                original_names.begin() + W * ALPHABET_LEN,
-                original_names.begin() + (W + 1) * ALPHABET_LEN);
+                original_names.begin() + F * ALPHABET_LEN,
+                original_names.begin() + (F + 1) * ALPHABET_LEN);
 
         std::vector<std::string> F_chunk_names;
-        for (TAlphabet F = 1; F < ALPHABET_LEN; ++F) {
-            F_chunk_names.push_back(original_names[F * ALPHABET_LEN + W]);
+        for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {
+            F_chunk_names.push_back(original_names[W * ALPHABET_LEN + F]);
         }
 
         common::MergeDecoder<T_INT> it(W_chunk_names, false);
@@ -369,15 +369,16 @@ generate_dummy_1_kmers(size_t k,
         common::MergeDecoder<T_INT> dummy_source_it(F_chunk_names, false);
         while (!it.empty()) {
             KMER dummy_source(get_first(it.pop()));
-            skip_same_suffix(dummy_source, it);
+            // skip k-mers that would generate identical dummy k-mers
+            skip_same_suffix(dummy_source, it, 0);
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
             handle_dummy_source(k, dummy_source, dummy_source_it, dummy_sink_it,
-                                &dummy_l1_chunks[W], &dummy_sink_chunks[W]);
+                                &dummy_l1_chunks[F], &dummy_sink_chunks[F]);
         }
         // handle leftover dummy_source_it
         while (!dummy_source_it.empty()) {
             handle_dummy_sink(k, KMER(get_first(dummy_source_it.pop())),
-                              dummy_sink_it, &dummy_sink_chunks[W]);
+                              dummy_sink_it, &dummy_sink_chunks[F]);
         }
     }
 
