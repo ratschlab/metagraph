@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include "tests/utils/gtest_patch.hpp"
+
 #include <array>
 #include <filesystem>
 
@@ -12,7 +14,7 @@ using namespace mg;
 template <typename T>
 class SortedMultisetDiskTest : public ::testing::Test {};
 
-typedef ::testing::Types<uint64_t, uint32_t> SortedDiskElementTypes;
+typedef ::testing::Types<uint64_t, sdsl::uint128_t> SortedDiskElementTypes;
 
 TYPED_TEST_SUITE(SortedMultisetDiskTest, SortedDiskElementTypes);
 

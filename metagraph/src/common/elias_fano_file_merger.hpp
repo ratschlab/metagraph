@@ -205,7 +205,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     std::pair<T, C> current = decoder.pop();
     while (!decoder.empty()) {
         const std::pair<T, C> next = decoder.pop();
-        if (current != next) {
+        if (current.first != next.first) {
             on_new_item(current);
             num_elements_merged++;
             current = next;
@@ -225,19 +225,24 @@ uint64_t merge_files(const std::vector<std::string> &sources,
 /**
  * Merges the <T, C> pairs in #sources with the Ts in #source_no_count. The INTs in
  * source_no_count will be assigned a count of 0.
+ * Identical elements are not de-duped.
  */
 template <typename T>
-uint64_t merge_dummy(const std::vector<std::string> &source,
+void merge_dummy(const std::vector<std::string> &source,
                      std::vector<std::string> source_no_count,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
     source_no_count.insert(source_no_count.end(), source.begin(), source.end());
-    return merge_files(source_no_count, on_new_item, remove_sources);
+    MergeDecoder<T> decoder(source_no_count, remove_sources);
+    while (!decoder.empty()) {
+        on_new_item(decoder.pop());
+    }
 }
 
 /**
  * Merges the <T, C> pairs in #sources with the Ts in #source_no_count. The INTs in
  * source_no_count will be assigned a count of 0.
+ * Identical elements are not de-duped.
  */
 template <typename T, typename C>
 void merge_dummy(const std::vector<std::string> &sources,

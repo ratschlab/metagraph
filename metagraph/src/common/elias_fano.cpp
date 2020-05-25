@@ -570,16 +570,12 @@ void EliasFanoEncoderBuffered<std::pair<T, C>>::encode_chunk() {
 }
 
 // instantiate used templates
-template class EliasFanoEncoder<uint32_t>;
 template class EliasFanoEncoder<uint64_t>;
 template class EliasFanoEncoder<sdsl::uint128_t>;
 template class EliasFanoEncoder<sdsl::uint256_t>;
 template class EliasFanoEncoder<std::pair<uint64_t, uint8_t>>;
 template class EliasFanoEncoder<std::pair<uint64_t, uint16_t>>;
 template class EliasFanoEncoder<std::pair<uint64_t, uint32_t>>;
-template class EliasFanoEncoder<std::pair<uint32_t, uint8_t>>;
-template class EliasFanoEncoder<std::pair<uint32_t, uint16_t>>;
-template class EliasFanoEncoder<std::pair<uint32_t, uint32_t>>;
 template class EliasFanoEncoder<std::pair<sdsl::uint128_t, uint8_t>>;
 template class EliasFanoEncoder<std::pair<sdsl::uint128_t, uint16_t>>;
 template class EliasFanoEncoder<std::pair<sdsl::uint128_t, uint32_t>>;
@@ -587,14 +583,10 @@ template class EliasFanoEncoder<std::pair<sdsl::uint256_t, uint8_t>>;
 template class EliasFanoEncoder<std::pair<sdsl::uint256_t, uint16_t>>;
 template class EliasFanoEncoder<std::pair<sdsl::uint256_t, uint32_t>>;
 
-template class EliasFanoDecoder<uint32_t>;
 template class EliasFanoDecoder<uint64_t>;
 template class EliasFanoDecoder<sdsl::uint128_t>;
 template class EliasFanoDecoder<sdsl::uint256_t>;
 
-template class EliasFanoDecoder<std::pair<uint32_t, uint8_t>>;
-template class EliasFanoDecoder<std::pair<uint32_t, uint16_t>>;
-template class EliasFanoDecoder<std::pair<uint32_t, uint32_t>>;
 template class EliasFanoDecoder<std::pair<uint64_t, uint8_t>>;
 template class EliasFanoDecoder<std::pair<uint64_t, uint16_t>>;
 template class EliasFanoDecoder<std::pair<uint64_t, uint32_t>>;
@@ -605,13 +597,9 @@ template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint8_t>>;
 template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint16_t>>;
 template class EliasFanoDecoder<std::pair<sdsl::uint256_t, uint32_t>>;
 
-template class EliasFanoEncoderBuffered<uint32_t>;
 template class EliasFanoEncoderBuffered<uint64_t>;
 template class EliasFanoEncoderBuffered<sdsl::uint128_t>;
 template class EliasFanoEncoderBuffered<sdsl::uint256_t>;
-template class EliasFanoEncoderBuffered<std::pair<uint32_t, uint8_t>>;
-template class EliasFanoEncoderBuffered<std::pair<uint32_t, uint16_t>>;
-template class EliasFanoEncoderBuffered<std::pair<uint32_t, uint32_t>>;
 template class EliasFanoEncoderBuffered<std::pair<uint64_t, uint8_t>>;
 template class EliasFanoEncoderBuffered<std::pair<uint64_t, uint16_t>>;
 template class EliasFanoEncoderBuffered<std::pair<uint64_t, uint32_t>>;

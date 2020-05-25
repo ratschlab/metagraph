@@ -19,7 +19,7 @@ using namespace mg;
 template <typename T>
 class EliasFanoTestPair : public ::testing::Test {};
 
-typedef ::testing::Types<uint32_t, uint64_t, sdsl::uint128_t, sdsl::uint256_t> ValueTypes;
+typedef ::testing::Types<uint64_t, sdsl::uint128_t, sdsl::uint256_t> ValueTypes;
 
 TYPED_TEST_SUITE(EliasFanoTestPair, ValueTypes);
 
