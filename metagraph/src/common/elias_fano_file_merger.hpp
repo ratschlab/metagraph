@@ -198,7 +198,6 @@ void merge_dummy(const std::vector<std::string> &sources,
                  const std::function<void(const std::pair<T, C> &)> &on_new_item,
                  bool remove_sources = true) {
     MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
-    std::optional<std::pair<T, C>> next;
     // TODO: convert each MergeDecoder<T> to MergeDecoder<std::pair<T, C>>
     // and merge everything together?
     // TODO: Or merge the chunks separately for sources and sources_no_count in the

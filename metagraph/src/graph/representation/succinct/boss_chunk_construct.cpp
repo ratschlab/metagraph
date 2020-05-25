@@ -308,18 +308,21 @@ void handle_dummy_source(size_t k,
                          Encoder<INT> *dummy_l1,
                          Encoder<INT> *dummy_sink_chunk) {
     // Push all non-dummy kmers smaller than dummy source
-    KMER v(0);
     while (!dummy_source_it.empty()
            && get_first(dummy_source_it.top()) <= dummy_source.data()) {
-        v = KMER(get_first(dummy_source_it.pop()));
+        KMER v(get_first(dummy_source_it.pop()));
         // check the dummy sink k-mer corresponding to v for redundancy
         handle_dummy_sink(k, v, dummy_sink_it, dummy_sink_chunk);
         // skip k-mers with the same suffix as v, as they generate identical dummy sinks
         skip_same_suffix(v, dummy_source_it, 1);
     }
-    if (!KMER::compare_suffix(v, dummy_source, 1)) {
-        dummy_l1->add(dummy_source.data());
+    if (!dummy_source_it.empty()) {
+        KMER top = reinterpret_cast<const KMER &>(get_first(dummy_source_it.top()));
+        if (KMER::compare_suffix(top, dummy_source, 1)) {
+            return;
+        }
     }
+    dummy_l1->add(dummy_source.data());
 }
 
 /**
