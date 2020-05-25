@@ -76,21 +76,27 @@ class MergeDecoder {
         }
     }
 
-    std::optional<T> top() {
+    bool empty() { return heap_.empty(); }
+
+    T top() {
+#ifndef NDEBUG
         if (heap_.empty()) {
-            return std::nullopt;
+            throw std::runtime_error("Popping an empty MergeDecoder");
         }
+#endif
         return heap_.top().first;
     }
 
-    std::optional<T> next() {
+    T pop() {
+#ifndef NDEBUG
         if (heap_.empty()) {
-            return std::nullopt;
+            throw std::runtime_error("Popping an empty MergeDecoder");
         }
-        auto [result, chunk_index] = heap_.pop();
-        std::optional<T> data_item = sources_[chunk_index].next();
+#endif
+        auto [result, source_index] = heap_.pop();
+        std::optional<T> data_item = sources_[source_index].next();
         if (data_item.has_value()) {
-            heap_.emplace(data_item.value(), chunk_index);
+            heap_.emplace(data_item.value(), source_index);
         }
         return result;
     }
@@ -108,11 +114,21 @@ uint64_t merge_files(const std::vector<std::string> &sources,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
     MergeDecoder<T> decoder = MergeDecoder<T>(sources, remove_sources);
-    size_t num_elements_read = 0;
-    while (decoder.top().has_value()) {
-        on_new_item(decoder.next().value());
-        num_elements_read++;
+    if (decoder.empty()) {
+        return 0;
     }
+    T last = decoder.pop();
+    size_t num_elements_read = 0;
+    while (!decoder.empty()) {
+        T curr = decoder.pop();
+        if (curr != last) {
+            on_new_item(last);
+            last = curr;
+            num_elements_read++;
+        }
+    }
+    on_new_item(last);
+
     return num_elements_read;
 }
 
@@ -132,24 +148,23 @@ template <typename T, typename C>
 uint64_t merge_files(const std::vector<std::string> &sources,
                      const std::function<void(const std::pair<T, C> &)> &on_new_item,
                      bool remove_sources = true) {
-    MergeDecoder<std::pair<T, C>> decoder
-            = MergeDecoder<std::pair<T, C>>(sources, remove_sources);
-    if (!decoder.top().has_value()) {
+    MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
+    if (decoder.empty()) {
         return 0;
     }
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
-    uint64_t num_elements_read = 1;
-    std::pair<T, C> current = decoder.next().value();
-    while (decoder.top().has_value()) {
-        std::pair<T,C> last = decoder.next().value();
-        if (current != last) {
+    uint64_t num_elements_merged = 1;
+    std::pair<T, C> current = decoder.pop();
+    while (!decoder.empty()) {
+        const std::pair<T, C> next = decoder.pop();
+        if (current != next) {
             on_new_item(current);
-            num_elements_read++;
-            current = last;
+            num_elements_merged++;
+            current = next;
         } else {
-            if (current.second < std::numeric_limits<C>::max() - last.second) {
-                current.second += last.second;
+            if (current.second < std::numeric_limits<C>::max() - next.second) {
+                current.second += next.second;
             } else {
                 current.second = std::numeric_limits<C>::max();
             }
@@ -157,7 +172,7 @@ uint64_t merge_files(const std::vector<std::string> &sources,
     }
     on_new_item(current);
 
-    return num_elements_read;
+    return num_elements_merged;
 }
 
 /**
@@ -178,29 +193,27 @@ uint64_t merge_dummy(const std::vector<std::string> &source,
  * source_no_count will be assigned a count of 0.
  */
 template <typename T, typename C>
-uint64_t merge_dummy(const std::vector<std::string> &sources,
-                     const std::vector<std::string> &sources_no_count,
-                     const std::function<void(const std::pair<T, C> &)> &on_new_item,
-                     bool remove_sources = true) {
-    uint64_t num_elements_read = 0;
-    MergeDecoder<std::pair<T, C>> decoder
-            = MergeDecoder<std::pair<T, C>>(sources, remove_sources);
-    MergeDecoder<T> decoder_no_count = MergeDecoder<T>(sources_no_count, remove_sources);
-    while (decoder.top().has_value()) {
-        std::pair<T,C> next = decoder.next().value();
-        while (decoder_no_count.top().has_value() && decoder_no_count.top().value() < next.first) {
-            on_new_item({decoder_no_count.next().value(), 0U});
-            num_elements_read++;
+void merge_dummy(const std::vector<std::string> &sources,
+                 const std::vector<std::string> &sources_no_count,
+                 const std::function<void(const std::pair<T, C> &)> &on_new_item,
+                 bool remove_sources = true) {
+    MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
+    std::optional<std::pair<T, C>> next;
+    // TODO: convert each MergeDecoder<T> to MergeDecoder<std::pair<T, C>>
+    // and merge everything together?
+    // TODO: Or merge the chunks separately for sources and sources_no_count in the
+    // function above, as here.
+    MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
+    while (!decoder.empty()) {
+        std::pair<T,C> next = decoder.pop();
+        while (!decoder_no_count.empty() && decoder_no_count.top() < next.first) {
+            on_new_item({ decoder_no_count.pop(), 0U});
         }
         on_new_item(next);
-        num_elements_read++;
     }
-    while (decoder_no_count.top().has_value()) {
-        on_new_item({ decoder_no_count.next().value(), 0U });
-        num_elements_read++;
+    while (!decoder_no_count.empty()) {
+        on_new_item({ decoder_no_count.pop(), 0U });
     }
-
-    return num_elements_read;
 }
 
 } // namespace common

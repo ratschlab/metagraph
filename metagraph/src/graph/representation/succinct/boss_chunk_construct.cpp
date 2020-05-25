@@ -268,13 +268,11 @@ void handle_dummy_sink(size_t k,
         return;
     }
     *last_dummy_sink = kmer.data();
-
-    while (decoder.top().has_value() && get_first(decoder.top().value()) < kmer.data()) {
-        decoder.next();
+    INT v = 0;
+    while (!decoder.empty() && (v = get_first(decoder.top())) < kmer.data()) {
+        decoder.pop();
     }
-    if (!decoder.top().has_value()
-        || !KMER::compare_suffix(
-                reinterpret_cast<const KMER &>(get_first(decoder.top().value())), kmer)) {
+    if (!KMER::compare_suffix(reinterpret_cast<const KMER &>(v), kmer)) {
         dummy_sink_enc->add(kmer.data());
     }
 }
@@ -305,19 +303,16 @@ void handle_dummy_source(size_t k,
                          Encoder<INT> *dummy_sink_chunk,
                          INT *last_dummy_sink) {
     // Push all non-dummy kmers smaller than dummy source
-    while (dummy_source_it.top().has_value()
-           && get_first(dummy_source_it.top().value()) <= dummy_source.data()) {
-        const KMER v(get_first(dummy_source_it.next().value()));
+    KMER v(0);
+    while (!dummy_source_it.empty()
+           && get_first(dummy_source_it.top()) <= dummy_source.data()) {
+        v = KMER(get_first(dummy_source_it.pop()));
         // push the dummy sink k-mer corresponding to v
         handle_dummy_sink(k, v, dummy_sink_it, dummy_sink_chunk, last_dummy_sink);
     }
-    if (dummy_source_it.top().has_value()) {
-        const KMER v(get_first(dummy_source_it.top().value()));
-        if (KMER::compare_suffix(v, dummy_source, 1)) {
-            return;
-        }
+    if (!KMER::compare_suffix(v, dummy_source, 1)) {
+        dummy_l1->add(dummy_source.data());
     }
-    dummy_l1->add(dummy_source.data());
 }
 
 /**
@@ -367,8 +362,8 @@ generate_dummy_1_kmers(size_t k,
         // TODO: use concatenation instead of merging for F_chunk_names
         common::MergeDecoder<T_INT> dummy_source_it(F_chunk_names, false);
         INT last_dummy_source(0);
-        for (auto v = it.next(); v.has_value(); v = it.next()) {
-            KMER dummy_source(get_first(v.value()));
+        while (!it.empty()) {
+            KMER dummy_source(get_first(it.pop()));
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
             if (dummy_source.data() != last_dummy_source) {
                 handle_dummy_source(k, dummy_source, dummy_source_it, dummy_sink_it,
@@ -378,8 +373,8 @@ generate_dummy_1_kmers(size_t k,
             }
         }
         // handle leftover dummy_source_it
-        while (dummy_source_it.top().has_value()) {
-            handle_dummy_sink(k, KMER(get_first(dummy_source_it.next().value())),
+        while (!dummy_source_it.empty()) {
+            handle_dummy_sink(k, KMER(get_first(dummy_source_it.pop())),
                               dummy_sink_it, &dummy_sink_chunks[W], &last_dummy_sink);
         }
     }
