@@ -331,7 +331,7 @@ void handle_dummy_source(size_t k,
  * k-mer blocks and the dummy sink k-mers
  */
 template <typename T>
-std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::string>>
+std::tuple<std::vector<std::string>, std::vector<std::string>, std::string>
 generate_dummy_1_kmers(size_t k,
                        size_t num_threads,
                        const std::filesystem::path &dir,
@@ -391,21 +391,21 @@ generate_dummy_1_kmers(size_t k,
 
     // dummy sink k-mers are partitioned into blocks by F (kmer[1]), so simply
     // concatenating the blocks will result in a single ordered block
-    //std::string dummy_sink_name = dir/"dummy_sink";
-    //common::concat(dummy_sink_names, dummy_sink_name);
+    std::string dummy_sink_name = dir/"dummy_sink";
+    common::concat(dummy_sink_names, dummy_sink_name);
 
     // similarly, the 16 blocks of the original k-mers can be concatenated in groups of
     // 4 without destroying the order
-//    std::vector<std::string> original_merged_names(ALPHABET_LEN);
-//    for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
-//        original_merged_names[i] = dir/("original_split1_" + std::to_string(i));
-//        std::vector<std::string> source(ALPHABET_LEN);
-//        for (uint32_t j = 0; j < ALPHABET_LEN; ++j) {
-//            source[j] = original_names[j * ALPHABET_LEN + i];
-//        }
-//        common::concat(source, original_merged_names[i]);
-//    }
-    return { original_names, dummy_l1_names, dummy_sink_names };
+    std::vector<std::string> original_merged_names(ALPHABET_LEN);
+    for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
+        original_merged_names[i] = dir/("original_split1_" + std::to_string(i));
+        std::vector<std::string> source(ALPHABET_LEN);
+        for (uint32_t j = 0; j < ALPHABET_LEN; ++j) {
+            source[j] = original_names[j * ALPHABET_LEN + i];
+        }
+        common::concat(source, original_merged_names[i]);
+    }
+    return { original_merged_names, dummy_l1_names, dummy_sink_name };
 }
 
 /**
@@ -430,14 +430,15 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path tmp_dir = kmer_collector.tmp_dir();
 
-    std::vector<std::string> dummy_sink_names;
+    std::string dummy_sink_name;
     std::vector<std::string> original_names;
     std::vector<std::string> dummy_names;
-    std::tie(original_names, dummy_names, dummy_sink_names)
+    std::tie(original_names, dummy_names, dummy_sink_name)
             = generate_dummy_1_kmers(k, kmer_collector.num_threads(), tmp_dir, kmers);
 
     // stores the sorted original kmers and dummy-1 k-mers
-    std::vector<std::string> files_to_merge(dummy_sink_names);
+    std::vector<std::string> files_to_merge;
+    files_to_merge.push_back(dummy_sink_name);
     std::vector<std::string> dummy_next_names(ALPHABET_LEN);
     // generate dummy k-mers of prefix length 1..k
     logger->trace("Starting generating dummy-1..k source k-mers...");
