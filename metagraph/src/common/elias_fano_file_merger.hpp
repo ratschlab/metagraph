@@ -61,7 +61,7 @@ template <typename T>
 class ConcatDecoder {
   public:
     ConcatDecoder(const std::vector<std::string> &names)
-        : names_(names), source_(names[0]) {
+        : names_(names), source_(names[0], false) {
         get_next();
     }
 
@@ -95,7 +95,7 @@ class ConcatDecoder {
             return;
         }
         while (++idx_ < names_.size()) {
-            source_ = EliasFanoDecoder<T>(names_[idx_]);
+            source_ = EliasFanoDecoder<T>(names_[idx_], false);
             next_ = source_.next();
             if (next_.has_value()) {
                 return;
