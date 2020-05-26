@@ -350,7 +350,7 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
         }
         assert(end_segm < end);
 
-        if (begin_segm + dummy_prefix_size + k + dummy_suffix_size <= end_segm) {
+        if (begin_segm + dummy_prefix_size + k + dummy_suffix_size <= end_segm + 1) {
             if (dummy_suffix_size) {
                 assert(*end_segm >= alphabet.size());
                 // set the dummy suffix
