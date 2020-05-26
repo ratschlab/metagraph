@@ -49,7 +49,7 @@ class MergeHeap {
         return result;
     }
 
-    bool empty() { return els.empty(); }
+    bool empty() const { return els.empty(); }
 
   private:
     // elements stored in decreasing order of the first tuple member
@@ -65,19 +65,14 @@ class ConcatDecoder {
         get_next();
     }
 
-    bool empty() {
-        return !next_.has_value();
-    }
+    bool empty() const { return !next_.has_value(); }
 
-    T top() {
-        return next_.value();
-    }
+    T top() const { return next_.value(); }
 
     T pop() {
 #ifndef NDEBUG
-        if (!next_.has_value()) {
+        if (!next_.has_value())
             throw std::runtime_error("Attempt to pop an empty ConcatDecoder");
-        }
 #endif
         T result = next_.value();
         get_next();
@@ -91,15 +86,12 @@ class ConcatDecoder {
 
     void get_next() {
         next_ = source_.next();
-        if (next_.has_value()) {
+        if (next_.has_value())
             return;
-        }
-        while (++idx_ < names_.size()) {
+
+        while (!next_.has_value() && ++idx_ < names_.size()) {
             source_ = EliasFanoDecoder<T>(names_[idx_], false);
             next_ = source_.next();
-            if (next_.has_value()) {
-                return;
-            }
         }
     }
 };
@@ -123,22 +115,20 @@ class MergeDecoder {
         }
     }
 
-    bool empty() { return heap_.empty(); }
+    bool empty() const { return heap_.empty(); }
 
-    T top() {
+    T top() const {
 #ifndef NDEBUG
-        if (heap_.empty()) {
+        if (heap_.empty())
             throw std::runtime_error("Popping an empty MergeDecoder");
-        }
 #endif
         return heap_.top().first;
     }
 
     T pop() {
 #ifndef NDEBUG
-        if (heap_.empty()) {
+        if (heap_.empty())
             throw std::runtime_error("Popping an empty MergeDecoder");
-        }
 #endif
         auto [result, source_index] = heap_.pop();
         std::optional<T> data_item = sources_[source_index].next();
@@ -157,26 +147,22 @@ class MergeDecoder {
  * Merges Elias-Fano sorted compressed files into a single stream.
  */
 template <typename T>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     const std::function<void(const T &)> &on_new_item,
-                     bool remove_sources = true) {
+void merge_files(const std::vector<std::string> &sources,
+                 const std::function<void(const T &)> &on_new_item,
+                 bool remove_sources = true) {
     MergeDecoder<T> decoder(sources, remove_sources);
-    if (decoder.empty()) {
-        return 0;
-    }
+    if (decoder.empty())
+        return;
+
     T last = decoder.pop();
-    size_t num_elements_read = 0;
     while (!decoder.empty()) {
         T curr = decoder.pop();
         if (curr != last) {
             on_new_item(last);
             last = curr;
-            num_elements_read++;
         }
     }
     on_new_item(last);
-
-    return num_elements_read;
 }
 
 /**
@@ -187,27 +173,23 @@ uint64_t merge_files(const std::vector<std::string> &sources,
  * @param on_new_item callback to invoke when a new element was merged
  * @param remove_sources if true, remove source files after merging
  *
- * @return the total number of (merged) elements read from all files
- *
  * Note: this method blocks until all the data was successfully merged.
  */
 template <typename T, typename C>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     const std::function<void(const std::pair<T, C> &)> &on_new_item,
-                     bool remove_sources = true) {
+void merge_files(const std::vector<std::string> &sources,
+                 const std::function<void(const std::pair<T, C> &)> &on_new_item,
+                 bool remove_sources = true) {
     MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
-    if (decoder.empty()) {
-        return 0;
-    }
+    if (decoder.empty())
+        return;
+
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
-    uint64_t num_elements_merged = 1;
     std::pair<T, C> current = decoder.pop();
     while (!decoder.empty()) {
         const std::pair<T, C> next = decoder.pop();
         if (current.first != next.first) {
             on_new_item(current);
-            num_elements_merged++;
             current = next;
         } else {
             if (current.second < std::numeric_limits<C>::max() - next.second) {
@@ -218,8 +200,6 @@ uint64_t merge_files(const std::vector<std::string> &sources,
         }
     }
     on_new_item(current);
-
-    return num_elements_merged;
 }
 
 /**
@@ -258,7 +238,7 @@ void merge_dummy(const std::vector<std::string> &sources,
     while (!decoder.empty()) {
         std::pair<T,C> next = decoder.pop();
         while (!decoder_no_count.empty() && decoder_no_count.top() < next.first) {
-            on_new_item({ decoder_no_count.pop(), 0U});
+            on_new_item({ decoder_no_count.pop(), 0U });
         }
         on_new_item(next);
     }
