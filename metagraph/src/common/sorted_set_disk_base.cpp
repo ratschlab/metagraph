@@ -107,7 +107,7 @@ void SortedSetDiskBase<T>::shrink_data() {
     size_t old_size = data_.size();
     sort_and_remove_duplicates(&data_, num_threads_);
 
-    logger->trace("...done. Size reduced from {} to {}, {}MiB", old_size,
+    logger->trace("...done. Size reduced from {} to {}, {} MiB", old_size,
                   data_.size(), (data_.size() * sizeof(T) >> 20));
 }
 
