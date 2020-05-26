@@ -1999,9 +1999,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 return;
 
             for (size_t j = begin; j <= i; ++j) {
-                if (!atomic_fetch_bit(discovered, j, async)) {
+                if (!atomic_fetch_bit(discovered, j, async))
                     enqueue_start(j);
-                }
             }
         }
 
@@ -2069,52 +2068,70 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 #endif
 
     // handle remaining disconnected loops
-    call_zeros(discovered, [&](edge_index edge) {
-        // traverse loops in parallel and only check for unique k-mers at the
-        // end of the traversal
-        auto start_cycle = [&](edge_index edge) {
-            edge_index start = edge;
-            std::vector<edge_index> path;
-            std::vector<TAlphabet> sequence = get_node_seq(edge);
-            do {
-                TAlphabet w = get_W(edge);
-                assert(w != kSentinelCode);
-                TAlphabet d = w % alph_size;
-                sequence.push_back(d);
-                path.push_back(edge);
-                edge = fwd(edge, d);
-                bool check = masked_pick_single_outgoing(*this, &edge, subgraph_mask);
-                assert(edge);
-                std::ignore = check;
-                assert(check);
-            } while (edge != start && !atomic_fetch_bit(discovered, edge, async));
+    std::vector<edge_index> index_buffer;
+    index_buffer.reserve(TRAVERSAL_START_BATCH_SIZE);
 
-            if (edge == start && path.size()) {
-                for (edge_index edge : path) {
-                    if (atomic_fetch_bit(discovered, edge, async))
-                        return;
-                }
-                for (edge_index edge : path) {
-                    atomic_set_bit(discovered, edge, async);
-                }
+    auto start_cycle = [&](edge_index edge) {
+        edge_index start = edge;
+        std::vector<edge_index> path;
+        std::vector<TAlphabet> sequence = get_node_seq(edge);
+        do {
+            TAlphabet w = get_W(edge);
+            assert(w != kSentinelCode);
+            TAlphabet d = w % alph_size;
+            sequence.push_back(d);
+            path.push_back(edge);
+            edge = fwd(edge, d);
+            bool check = masked_pick_single_outgoing(*this, &edge, subgraph_mask);
+            assert(edge);
+            std::ignore = check;
+            assert(check);
+        } while (edge != start && !atomic_fetch_bit(discovered, edge, async));
 
-                progress_bar += path.size();
-                call_path(*this, callback, path, sequence, split_to_unitigs,
-                          kmers_in_single_form, trim_sentinels, discovered, written,
-                          async, vector_mutex, progress_bar, subgraph_mask);
+        if (edge == start && path.size()) {
+            for (edge_index edge : path) {
+                if (atomic_fetch_bit(discovered, edge, async))
+                    return;
             }
-        };
+            for (edge_index edge : path) {
+                atomic_set_bit(discovered, edge, async);
+            }
 
-        if (thread_pool) {
-            thread_pool->enqueue(start_cycle, edge);
-        } else {
-            start_cycle(edge);
+            progress_bar += path.size();
+            call_path(*this, callback, path, sequence, split_to_unitigs,
+                      kmers_in_single_form, trim_sentinels, discovered, written,
+                      async, vector_mutex, progress_bar, subgraph_mask);
+        }
+    };
+
+    if (!thread_pool) {
+        call_zeros(discovered, start_cycle, async);
+
+    } else {
+        call_zeros(discovered, [&](edge_index edge) {
+            // traverse loops in parallel and only check for unique k-mers at the
+            // end of the traversal
+            if (index_buffer.size() < TRAVERSAL_START_BATCH_SIZE) {
+                index_buffer.push_back(edge);
+                return;
+            }
+
+            thread_pool->enqueue([&](std::vector<edge_index> indices) {
+                std::for_each(indices.begin(), indices.end(), start_cycle);
+            }, index_buffer);
+
+            index_buffer.clear();
+
+        }, async);
+
+        if (index_buffer.size()) {
+            thread_pool->enqueue([&](std::vector<edge_index> indices) {
+                std::for_each(indices.begin(), indices.end(), start_cycle);
+            }, index_buffer);
         }
 
-        if (thread_pool)
-            thread_pool->join();
-
-    }, async);
+        thread_pool->join();
+    }
 
 #ifndef NDEBUG
     bool leftover = false;
@@ -2177,6 +2194,9 @@ void call_paths_from_queue(const BOSS &boss,
                 }, std::move(next_edge)));
             }
         }
+
+        thread_pool->join();
+
     } else {
         while (edges.size()) {
             auto next_edge = std::move(edges.back());
