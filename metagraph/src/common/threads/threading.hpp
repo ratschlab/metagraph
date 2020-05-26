@@ -38,24 +38,12 @@ class ThreadPool {
 
     template <class F, typename... Args>
     auto enqueue(F&& f, Args&&... args) {
-        using return_type = decltype(f(args...));
-        auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-        );
+        return maybe_enqueue(false, std::forward<F>(f), std::forward<Args>(args)...);
+    }
 
-        if (!workers.size()) {
-            (*task)();
-            return task->get_future();
-        } else {
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            full_condition.wait(lock, [this]() {
-                return this->tasks.size() < this->max_num_tasks_;
-            });
-            tasks.emplace([task](){ (*task)(); });
-        }
-        empty_condition.notify_one();
-
-        return task->get_future();
+    template <class F, typename... Args>
+    auto force_enqueue(F&& f, Args&&... args) {
+        return maybe_enqueue(true, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     void join();
@@ -77,6 +65,30 @@ class ThreadPool {
 
     bool joining_;
     bool stop_;
+
+    template <class F, typename... Args>
+    auto maybe_enqueue(bool force, F&& f, Args&&... args) {
+        using return_type = decltype(f(args...));
+        auto task = std::make_shared<std::packaged_task<return_type()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+        );
+
+        if (!workers.size()) {
+            (*task)();
+            return task->get_future();
+        } else {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            if (!force) {
+                full_condition.wait(lock, [this]() {
+                    return this->tasks.size() < this->max_num_tasks_;
+                });
+            }
+            tasks.emplace([task](){ (*task)(); });
+        }
+        empty_condition.notify_one();
+
+        return task->get_future();
+    }
 };
 
 
