@@ -1898,9 +1898,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                                 progress_bar, subgraph_mask);
     };
 
-    auto enqueue_start = [&](edge_index start) {
+    auto enqueue_start = [&](edge_index start, bool force = false) {
         if (async) {
-            edges_async.emplace_back(thread_pool->enqueue([&](edge_index start) {
+            auto start_path = [&,start]() {
                 std::vector<Edge> edges;
                 edges.reserve(TRAVERSAL_START_BATCH_SIZE);
                 ::call_paths(*this, Edge(start, get_node_seq(start)), edges, callback,
@@ -1908,7 +1908,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              trim_sentinels, &discovered, &written,
                              async, vector_mutex, progress_bar, subgraph_mask);
                 return edges;
-            }, start));
+            };
+            edges_async.emplace_back(force ? thread_pool->force_enqueue(start_path)
+                                           : thread_pool->enqueue(start_path));
         } else {
             edges.emplace_back(start, get_node_seq(start));
             call_paths_from_queue();
@@ -1928,41 +1930,36 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
 
     } else {
-        sdsl::bit_vector sources(discovered.size());
+        auto enqueue_starts_in_range = [&](size_t begin, size_t end) {
+            call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
+                edge_index j = bwd(i);
+                bool check = masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
+                if (j)
+                    return;
 
-        // mark all source edges in parallel
-        #pragma omp parallel for num_threads(num_threads)
+                std::ignore = check;
+                assert(!check);
+
+                i = succ_last(i);
+
+                do {
+                    if ((*subgraph_mask)[i] && (!kmers_in_single_form
+                            || !atomic_fetch_bit(discovered, i, async))) {
+                        enqueue_start(i, thread_pool.get());
+                    }
+
+                } while (--i > 0 && !get_last(i));
+            });
+        };
+
         for (size_t begin = 0; begin < discovered.size(); begin += kBlockSize) {
-            call_ones(*subgraph_mask,
-                begin,
-                std::min(begin + kBlockSize, discovered.size()),
-                [&](edge_index i) {
-                    i = succ_last(i);
-                    edge_index j = bwd(i);
-                    bool check = masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
-                    if (j)
-                        return;
-
-                    std::ignore = check;
-                    assert(!check);
-
-                    do {
-                        if ((*subgraph_mask)[i])
-                            atomic_set_bit(sources, i, true);
-
-                    } while (--i > 0 && !get_last(i));
-                }
-            );
+            size_t end = std::min(begin + kBlockSize, discovered.size());
+            if (thread_pool) {
+                thread_pool->enqueue(enqueue_starts_in_range, begin, end);
+            } else {
+                enqueue_starts_in_range(begin, end);
+            }
         }
-
-        // then start traversals in parallel
-        call_ones(sources, [&](edge_index i) {
-            assert((*subgraph_mask)[i]);
-            // TODO: is there a better way to have an early cutoff if the
-            //       reverse-complement of i has already been traversed?
-            if (!kmers_in_single_form || !atomic_fetch_bit(discovered, i, async))
-                enqueue_start(i);
-        }, async);
     }
 
     call_paths_from_queue();
