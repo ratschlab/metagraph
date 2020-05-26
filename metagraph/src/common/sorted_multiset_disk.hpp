@@ -1,12 +1,7 @@
 #pragma once
 
-#include <cassert>
-#include <functional>
-#include <shared_mutex>
-
-#include <ips4o.hpp>
-
 #include "common/sorted_set_disk_base.hpp"
+
 
 namespace mg {
 namespace common {
@@ -89,36 +84,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
 
   private:
     virtual void sort_and_remove_duplicates(storage_type *vector,
-                                            size_t num_threads) const override {
-        assert(vector);
-        ips4o::parallel::sort(
-                vector->begin(), vector->end(),
-                [](const value_type &first, const value_type &second) {
-                    return first.first < second.first;
-                },
-                num_threads);
-
-        auto first = vector->begin();
-        auto last = vector->end();
-
-        auto dest = first;
-
-        while (++first != last) {
-            if (first->first == dest->first) {
-                if (first->second < max_count() - dest->second) {
-                    dest->second += first->second;
-                } else {
-                    dest->second = max_count();
-                }
-            } else {
-                *++dest = std::move(*first);
-            }
-        }
-
-        vector->erase(++dest, this->data_.end());
-
-        this->cleanup_(vector);
-    }
+                                            size_t num_threads) const override;
 };
 
 } // namespace common
