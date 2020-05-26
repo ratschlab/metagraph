@@ -147,26 +147,22 @@ class MergeDecoder {
  * Merges Elias-Fano sorted compressed files into a single stream.
  */
 template <typename T>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     const std::function<void(const T &)> &on_new_item,
-                     bool remove_sources = true) {
+void merge_files(const std::vector<std::string> &sources,
+                 const std::function<void(const T &)> &on_new_item,
+                 bool remove_sources = true) {
     MergeDecoder<T> decoder = MergeDecoder<T>(sources, remove_sources);
     if (decoder.empty())
-        return 0;
+        return;
 
     T last = decoder.pop();
-    size_t num_elements_read = 0;
     while (!decoder.empty()) {
         T curr = decoder.pop();
         if (curr != last) {
             on_new_item(last);
             last = curr;
-            num_elements_read++;
         }
     }
     on_new_item(last);
-
-    return num_elements_read;
 }
 
 /**
@@ -177,27 +173,23 @@ uint64_t merge_files(const std::vector<std::string> &sources,
  * @param on_new_item callback to invoke when a new element was merged
  * @param remove_sources if true, remove source files after merging
  *
- * @return the total number of (merged) elements read from all files
- *
  * Note: this method blocks until all the data was successfully merged.
  */
 template <typename T, typename C>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     const std::function<void(const std::pair<T, C> &)> &on_new_item,
-                     bool remove_sources = true) {
+void merge_files(const std::vector<std::string> &sources,
+                 const std::function<void(const std::pair<T, C> &)> &on_new_item,
+                 bool remove_sources = true) {
     MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
     if (decoder.empty())
-        return 0;
+        return;
 
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
-    uint64_t num_elements_merged = 1;
     std::pair<T, C> current = decoder.pop();
     while (!decoder.empty()) {
         const std::pair<T, C> next = decoder.pop();
         if (current.first != next.first) {
             on_new_item(current);
-            num_elements_merged++;
             current = next;
         } else {
             if (current.second < std::numeric_limits<C>::max() - next.second) {
@@ -208,8 +200,6 @@ uint64_t merge_files(const std::vector<std::string> &sources,
         }
     }
     on_new_item(current);
-
-    return num_elements_merged;
 }
 
 /**

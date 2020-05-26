@@ -110,7 +110,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
  *
  * For each kmer in #kmers_p, the method creates the corresponding dummy sources with
  * sentinels of length 1 (aka dummy-1 sources). The method then checks if the dummy-1
- * source node is redundant, i.e. if there is another non-dummy node that is identical
+ * source node is redundant, i.e. if there is another k-mer that is identical
  * except for the first character. For example, $ACGT is redundant with TACGT. To do this
  * efficiently, the method uses an iterator called dummy_it that points to the first kmer
  * with the suffix equal to or larger than the current kmer. Since #kmers_p are ordered,
@@ -225,47 +225,52 @@ template <typename T>
 using Decoder = common::EliasFanoDecoder<T>;
 
 /**
- * Splits #kmers by W (kmer[0]) and F (kmer[k]) into ALPHABET_LEN^2 chunks.
+ * Splits #kmers by W (kmer[0]) and F (kmer[k]) into |ALPHABET\{$}|^2 chunks.
  */
 template <typename T>
 std::vector<std::string>
 split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kmers) {
     using T_INT = get_int_t<T>;
 
-    uint32_t chunk_count = std::pow(ALPHABET_LEN, 2);
+    uint32_t chunk_count = std::pow(ALPHABET_LEN - 1, 2);
 
     logger->trace("Splitting k-mers into {} chunks...", chunk_count);
 
     std::vector<Encoder<T_INT>> sinks;
     std::vector<std::string> names(chunk_count);
     for (uint32_t i = 0; i < names.size(); ++i) {
-        names[i] = dir/("original_split_by01_" + std::to_string(i));
+        names[i] = dir/("original_split_by_F_W_" + std::to_string(i));
         sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
 
     size_t num_parent_kmers = 0;
     for (auto &it = kmers.begin(); it != kmers.end(); ++it) {
-        num_parent_kmers++;
         const T &kmer = *it;
         TAlphabet F = get_first(kmer)[k];
         TAlphabet W = get_first(kmer)[0];
-        uint32_t idx = F * ALPHABET_LEN + W;
+
+        if (W == 0) {
+            // erase the $$$...$ k-mer that was added at the beginning
+            // it will be added as a source dummy k-mer later
+            assert(F == 0);
+            continue;
+        }
+        assert(F != 0);
+
+        num_parent_kmers++;
+        // subtract 1 -- the sentinel with code 0
+        uint32_t idx = (F - 1) * (ALPHABET_LEN - 1) + (W - 1);
         sinks[idx].add(reinterpret_cast<const T_INT&>(kmer));
     }
     std::for_each(sinks.begin(), sinks.end(), [](auto &f) { f.finish(); });
-    // subtract the $$$...$ k-mer that was added at the beginning
-    assert(num_parent_kmers);
-    logger->trace("Total number of non-dummy k-mers: {}", num_parent_kmers - 1);
+    logger->trace("Total number of real k-mers: {}", num_parent_kmers);
     return names;
 }
 
 template <typename Decoder, typename KMER>
 void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
-    while (!decoder.empty()) {
-        KMER kmer = reinterpret_cast<const KMER &>(get_first(decoder.top()));
-        if (!KMER::compare_suffix(kmer, el, suf))
-            break;
-
+    while (!decoder.empty()
+            && KMER::compare_suffix(KMER(get_first(decoder.top())), el, suf)) {
         decoder.pop();
     }
 }
@@ -287,7 +292,7 @@ void handle_dummy_sink(size_t k,
 
 /**
  * Handles the next dummy source k-mer.
- * First, all non-dummy k-mers smaller than #dummy_source are traversed and dummy sink
+ * First, all real k-mers smaller than #dummy_source are traversed and dummy sink
  * k-mers are generated anc checked for redundancy against #dummy_sink_it.
  * Finally, the dummy source k-mer is written to #dummy_l1 if it's not redundant.
  * Note: since all kmers in #dummy_source_it end with the same character as #dummy_source,
@@ -300,7 +305,7 @@ void handle_dummy_sink(size_t k,
  * @param dummy_sink_it traverses all k-mers with the same *first* char as #dummy_source's
  * last char
  * @param dummy_l1 sink where the non-redundant dummy1 source kmers are written
- * @param dummy_sink_chunk sink where the non-dummy sink k-mers are written
+ * @param dummy_sink_chunk sink where the dummy sink k-mers are written
  * @param last_dummy_sink the last written dummy sink k-mer (to avoid writing duplicates)
  */
 template <typename T_INT, typename KMER, typename INT>
@@ -360,18 +365,18 @@ generate_dummy_1_kmers(size_t k,
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 1; F < ALPHABET_LEN; ++F) {  // skip $$..$
-        std::vector<std::string> first_F_names(  // chunks whose first char is F
-                original_names.begin() + F * ALPHABET_LEN,
-                original_names.begin() + (F + 1) * ALPHABET_LEN);
+        std::vector<std::string> F_chunks(  // cuhnks with k-mers ***F*
+                original_names.begin() + (F - 1) * (ALPHABET_LEN - 1),
+                original_names.begin() + F * (ALPHABET_LEN - 1));
+        common::MergeDecoder<T_INT> it(F_chunks, false);
+        common::MergeDecoder<T_INT> dummy_sink_it(F_chunks, false);
 
-        std::vector<std::string> last_F_names; // chunks ending with F
-        for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {
-            last_F_names.push_back(original_names[W * ALPHABET_LEN + F]);
+        std::vector<std::string> W_chunks;  // cuhnks with k-mers ****F
+        for (TAlphabet c = 1; c < ALPHABET_LEN; ++c) {
+            W_chunks.push_back(original_names[(c - 1) * (ALPHABET_LEN - 1) + (F - 1)]);
         }
+        common::ConcatDecoder<T_INT> dummy_source_it(W_chunks);
 
-        common::MergeDecoder<T_INT> it(first_F_names, false);
-        common::MergeDecoder<T_INT> dummy_sink_it(first_F_names, false);
-        common::ConcatDecoder<T_INT> dummy_source_it(last_F_names);
         while (!it.empty()) {
             KMER dummy_source(get_first(it.pop()));
             // skip k-mers that would generate identical dummy k-mers
@@ -399,16 +404,16 @@ generate_dummy_1_kmers(size_t k,
 
     // similarly, the 16 blocks of the original k-mers can be concatenated in groups of
     // 4 without destroying the order
-    std::vector<std::string> original_merged_names(ALPHABET_LEN);
-    for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
-        original_merged_names[i] = dir/("original_split1_" + std::to_string(i));
-        std::vector<std::string> source(ALPHABET_LEN);
-        for (uint32_t j = 0; j < ALPHABET_LEN; ++j) {
-            source[j] = original_names[j * ALPHABET_LEN + i];
+    std::vector<std::string> real_split_by_W;
+    for (TAlphabet W = 1; W < ALPHABET_LEN; ++W) {
+        std::vector<std::string> blocks;
+        for (TAlphabet F = 1; F < ALPHABET_LEN; ++F) {
+            blocks.push_back(original_names[(F - 1) * (ALPHABET_LEN - 1) + W - 1]);
         }
-        common::concat(source, original_merged_names[i]);
+        real_split_by_W.push_back(dir/("real_split_by_W_" + std::to_string(W)));
+        common::concat(blocks, real_split_by_W.back());
     }
-    return { original_merged_names, dummy_l1_names, dummy_sink_name };
+    return { real_split_by_W, dummy_l1_names, dummy_sink_name };
 }
 
 /**
@@ -450,6 +455,11 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
         files_to_merge.push_back(tmp_dir/("dummy_l" + std::to_string(dummy_pref_len)));
         Encoder<INT> encoder(files_to_merge.back(), ENCODER_BUFFER_SIZE);
 
+        if (dummy_pref_len == 1) {
+            // add the main dummy source k-mer
+            encoder.add(0);
+        }
+
         std::vector<Encoder<INT>> dummy_next_chunks;
         for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
             dummy_next_names[i] = tmp_dir/("dummy_source_"
@@ -457,6 +467,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         }
         KMER prev_kmer(0);
+        uint64_t num_kmers = 0;
         const std::function<void(const INT &)> &write_dummy = [&](const INT &v) {
             encoder.add(v);
             KMER kmer(v);
@@ -465,8 +476,9 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
                 dummy_next_chunks[kmer[0]].add(kmer.data());
                 prev_kmer = std::move(kmer);
             }
+            num_kmers++;
         };
-        size_t num_kmers = common::merge_files(dummy_names, write_dummy);
+        common::merge_files(dummy_names, write_dummy);
 
         encoder.finish();
         std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
@@ -475,8 +487,9 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}",
                       dummy_pref_len, num_kmers);
     }
-    const std::function<void(const INT &)> on_merge = [](const INT& ) {};
-    common::merge_files(dummy_names, on_merge);
+    std::for_each(dummy_names.begin(), dummy_names.end(),
+                  [&](const std::string &f) { std::filesystem::remove(f); });
+
     // at this point, we have the original k-mers and dummy-1 k-mers in original_and_dummy_l1,
     // the dummy-x k-mers in dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
