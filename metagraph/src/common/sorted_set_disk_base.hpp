@@ -62,7 +62,6 @@ class SortedSetDiskBase {
           merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
                        num_last_elements_cached),
           cleanup_(cleanup) {
-        std::filesystem::create_directory(tmp_dir);
         if (reserved_num_elements == 0) {
             logger->error("SortedSetDisk buffer cannot have size 0");
             std::exit(EXIT_FAILURE);

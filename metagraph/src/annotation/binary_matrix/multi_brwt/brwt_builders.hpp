@@ -45,6 +45,10 @@ class BRWTBottomUpBuilder {
     static BRWT concatenate(std::vector<BRWT>&& submatrices,
                             sdsl::bit_vector *buffer,
                             ThreadPool &thread_pool);
+    // Concatenate multiple Multi-BRWT submatrices
+    static BRWT concatenate_sparse(std::vector<BRWT>&& submatrices,
+                                   sdsl::bit_vector *buffer,
+                                   ThreadPool &thread_pool);
 };
 
 

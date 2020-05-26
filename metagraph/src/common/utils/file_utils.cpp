@@ -18,7 +18,7 @@ namespace utils {
 
 using mg::common::logger;
 
-static std::vector<std::string> TMP_DIRS;
+std::vector<std::string> TMP_DIRS;
 
 void cleanup_tmp_dir_on_signal(int sig) {
     logger->trace("Got signal {}. Exiting...", sig);
@@ -48,18 +48,21 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
         exit(1);
     }
 
+    if (TMP_DIRS.empty()) {
+        logger->trace("Registered temporary directory {}", tmp_dir_str);
+
+        if (std::signal(SIGINT, cleanup_tmp_dir_on_signal) == SIG_ERR)
+            logger->error("Couldn't reset the signal handler for SIGINT");
+        if (std::signal(SIGTERM, cleanup_tmp_dir_on_signal) == SIG_ERR)
+            logger->error("Couldn't reset the signal handler for SIGTERM");
+        if (std::atexit(cleanup_tmp_dir_on_exit))
+            logger->error("Couldn't reset the atexit handler");
+    }
+
     static std::mutex mu;
     std::lock_guard<std::mutex> lock(mu);
 
     TMP_DIRS.push_back(tmp_dir_str);
-    logger->trace("Registered temporary directory {}", tmp_dir_str);
-
-    if (std::signal(SIGINT, cleanup_tmp_dir_on_signal) == SIG_ERR)
-        logger->error("Couldn't reset the signal handler for SIGINT");
-    if (std::signal(SIGTERM, cleanup_tmp_dir_on_signal) == SIG_ERR)
-        logger->error("Couldn't reset the signal handler for SIGTERM");
-    if (std::atexit(cleanup_tmp_dir_on_exit))
-        logger->error("Couldn't reset the atexit handler");
 
     return tmp_dir_str;
 }

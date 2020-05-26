@@ -2,6 +2,7 @@
 
 #include <type_traits>
 
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -148,14 +149,14 @@ KmerCollector<KMER, KmerExtractor, Container>
                  kLargeBufferSize / sizeof(typename decltype(batcher_)::value_type),
                  kLargeBufferSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
-        both_strands_mode_(both_strands_mode),
-        tmp_dir_(tmp_dir) {
+        both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
 
     std::function<void(Vector<Value> *)> no_cleanup = [](Vector<Value> *) {};
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
     if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
+        tmp_dir_ = utils::create_temp_dir(tmp_dir, "kmers");
         kmers_ = std::make_unique<Container>(no_cleanup, num_threads, buffer_size_,
                                              tmp_dir, max_disk_space);
     } else {
@@ -165,6 +166,13 @@ KmerCollector<KMER, KmerExtractor, Container>
             "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
             kmers_->buffer_size() * sizeof(typename Container::value_type) >> 20,
             kmers_->buffer_size());
+}
+
+template <typename KMER, class KmerExtractor, class Container>
+KmerCollector<KMER, KmerExtractor, Container>
+::~KmerCollector() {
+    if (!tmp_dir_.empty())
+        std::filesystem::remove_all(tmp_dir_);
 }
 
 template <typename KMER, class KmerExtractor, class Container>

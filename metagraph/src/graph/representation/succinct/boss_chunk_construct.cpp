@@ -519,13 +519,13 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
   private:
     BOSSChunkConstructor(size_t k,
-                         bool canonical_mode = false,
-                         uint8_t bits_per_count = 0,
-                         const std::string &filter_suffix = "",
-                         size_t num_threads = 1,
-                         double memory_preallocated = 0,
-                         const std::filesystem::path &tmp_dir = "/tmp",
-                         size_t max_disk_space = 1e9)
+                         bool canonical_mode,
+                         uint8_t bits_per_count,
+                         const std::string &filter_suffix,
+                         size_t num_threads,
+                         double memory_preallocated,
+                         const std::filesystem::path &tmp_dir,
+                         size_t max_disk_space)
         : kmer_collector_(k + 1,
                           canonical_mode,
                           encode_filter_suffix_boss(filter_suffix),
