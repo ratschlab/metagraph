@@ -6,6 +6,7 @@
 #include "tests/utils/gtest_patch.hpp"
 
 #include <array>
+#include <numeric>
 #include <filesystem>
 
 #include <sdsl/uint128_t.hpp>
