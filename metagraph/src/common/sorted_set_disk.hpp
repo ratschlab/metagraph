@@ -3,9 +3,7 @@
 
 #include <cassert>
 #include <functional>
-#include <optional>
 #include <shared_mutex>
-#include <string>
 
 #include <ips4o.hpp>
 
