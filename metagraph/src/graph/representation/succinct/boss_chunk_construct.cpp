@@ -432,14 +432,15 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             = generate_dummy_1_kmers(k, kmer_collector.num_threads(), dir, kmers);
 
     // stores the sorted original kmers and dummy-1 k-mers
-    std::vector<std::string> files_to_merge = { dummy_sink_name };
+    std::vector<std::string> dummy_chunks = { dummy_sink_name };
     std::vector<std::string> dummy_next_names(ALPHABET_LEN);
     // generate dummy k-mers of prefix length 1..k
     logger->trace("Starting generating dummy-1..k source k-mers...");
     for (size_t dummy_pref_len = 1; dummy_pref_len <= k; ++dummy_pref_len) {
         // this will compress all sorted dummy k-mers of given prefix length
-        files_to_merge.push_back(dir/("dummy_l" + std::to_string(dummy_pref_len)));
-        Encoder<INT> encoder(files_to_merge.back(), ENCODER_BUFFER_SIZE);
+        for (const std::string &dummy_chunk : dummy_names) {
+            dummy_chunks.push_back(dummy_chunk);
+        }
 
         std::vector<Encoder<INT>> dummy_next_chunks;
         for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
@@ -447,10 +448,10 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
                     + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
             dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         }
+
         KMER prev_kmer(0);
         uint64_t num_kmers = 0;
         const std::function<void(const INT &)> &write_dummy = [&](const INT &v) {
-            encoder.add(v);
             KMER kmer(v);
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
             if (prev_kmer != kmer) {
@@ -459,9 +460,8 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             }
             num_kmers++;
         };
-        common::merge_files(dummy_names, write_dummy);
+        common::merge_files(dummy_names, write_dummy, false);
 
-        encoder.finish();
         std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
                       [](auto &v) { v.finish(); });
         std::swap(dummy_names, dummy_next_names);
@@ -478,10 +478,10 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // add the main dummy source k-mer
     kmers->push(T());
     // push all other dummy and non-dummy k-mers to |kmers|
-    async_worker.enqueue([kmers, real_split_by_W, files_to_merge]() {
+    async_worker.enqueue([kmers, real_split_by_W, dummy_chunks]() {
         std::function<void(const T_INT &)> on_new_item
                 = [kmers](const T_INT &v) { kmers->push(reinterpret_cast<const T &>(v)); };
-        common::merge_dummy(real_split_by_W, files_to_merge, on_new_item);
+        common::merge_dummy(real_split_by_W, dummy_chunks, on_new_item);
         kmers->shutdown();
     });
 }
