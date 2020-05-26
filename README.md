@@ -203,6 +203,28 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
                            ~/fasta_zurich/refs_chimpanzee_primates.fa
 ```
 
+### Convert annotation to Multi-BRWT
+1) Cluster columns
+```bash
+./metagraph transform_anno -v --linkage \
+                           -o linkage.txt \
+                           --subsample R \
+                           -p NCORES \
+                           primates.column.annodbg
+```
+Requires `N*R/8 + 6*N^2` bytes of RAM, where `N` is the number of columns and `R` is the number of rows subsampled.
+
+2) Construct Multi-BRWT
+```bash
+./metagraph transform_anno -v -p NCORES --anno-type brwt \
+                           -i linkage.txt \
+                           -o primates \
+                           --parallel-nodes V \
+                           -p NCORES \
+                           primates.column.annodbg
+```
+Requires `M*V/8 + Size(BRWT)` bytes of RAM, where `M` is the number of rows in the annotation and `V` is the number of nodes merged concurrently.
+
 ### Query graph
 ```bash
 ./metagraph query -v -i <GRAPH_DIR>/graph.dbg \

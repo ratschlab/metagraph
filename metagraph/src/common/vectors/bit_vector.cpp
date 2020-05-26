@@ -25,17 +25,27 @@ Vector bit_vector::convert_to() {
         // to the same type, no conversion
         return dynamic_cast<Vector&&>(*this);
 
-    } else if (dynamic_cast<bit_vector_stat*>(this)) {
-        // stat -> anything else
-        return Vector(std::move(dynamic_cast<bit_vector_stat*>(this)->vector_));
-
     } else if (dynamic_cast<bit_vector_adaptive*>(this)) {
         // adaptive(x) -> anything
         return dynamic_cast<bit_vector_adaptive*>(this)->vector_->convert_to<Vector>();
 
     } else {
-        // anything -> anything (slower: with full reconstruction)
-        return Vector(to_vector());
+        uint64_t n_set_bits = num_set_bits();
+        sdsl::bit_vector bv;
+        if (auto *bv_stat = dynamic_cast<bit_vector_stat*>(this)) {
+            // stat -> anything else
+            bv = std::move(bv_stat->vector_);
+        } else {
+            // anything -> anything (slower: with full reconstruction)
+            bv = to_vector();
+        }
+
+        if constexpr(std::is_same_v<Vector, bit_vector_sd>) {
+            return Vector(std::move(bv), n_set_bits);
+        } else {
+            std::ignore = n_set_bits;
+            return Vector(std::move(bv));
+        }
     }
 }
 template bit_vector_dyn bit_vector::convert_to<bit_vector_dyn>();
@@ -72,18 +82,25 @@ Vector bit_vector::copy_to() const {
         // copy to the same type, no conversion
         return Vector(dynamic_cast<const Vector&>(*this));
 
-    } else if (dynamic_cast<const bit_vector_stat*>(this)) {
-        // copy stat -> anything else
-        auto bv = dynamic_cast<const bit_vector_stat*>(this)->vector_;
-        return Vector(std::move(bv));
-
     } else if (dynamic_cast<const bit_vector_adaptive*>(this)) {
         // copy adaptive(x) -> anything
         return dynamic_cast<const bit_vector_adaptive*>(this)->vector_->copy_to<Vector>();
 
     } else {
-        // anything -> anything (slower: with full reconstruction)
-        return Vector(to_vector());
+        sdsl::bit_vector bv;
+        if (auto *bv_stat = dynamic_cast<const bit_vector_stat*>(this)) {
+            // copy stat -> anything else
+            bv = bv_stat->vector_;
+        } else {
+            // anything -> anything (slower: with full reconstruction)
+            bv = to_vector();
+        }
+
+        if constexpr(std::is_same_v<Vector, bit_vector_sd>) {
+            return Vector(std::move(bv), num_set_bits());
+        } else {
+            return Vector(std::move(bv));
+        }
     }
 }
 template bit_vector_dyn bit_vector::copy_to<bit_vector_dyn>() const;

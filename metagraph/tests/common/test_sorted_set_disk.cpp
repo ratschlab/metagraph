@@ -3,8 +3,14 @@
 
 #include <gtest/gtest.h>
 
+#include "tests/utils/gtest_patch.hpp"
+
 #include <array>
 #include <filesystem>
+
+#include <sdsl/uint128_t.hpp>
+#include <sdsl/uint256_t.hpp>
+
 
 namespace {
 using namespace mg;
@@ -12,7 +18,9 @@ using namespace mg;
 template <typename T>
 class SortedSetDiskTest : public ::testing::Test {};
 
-typedef ::testing::Types<uint64_t, uint32_t> SortedDiskElementTypes;
+typedef ::testing::Types<uint64_t,
+                         sdsl::uint128_t,
+                         sdsl::uint256_t> SortedDiskElementTypes;
 
 TYPED_TEST_SUITE(SortedSetDiskTest, SortedDiskElementTypes);
 
@@ -34,9 +42,11 @@ common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8,
                                                 size_t num_elements_cached = 2) {
     constexpr size_t thread_count = 1;
     constexpr size_t max_disk_space = 1e6;
+    std::filesystem::create_directory("./test_chunk_");
+    std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     auto nocleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
     return common::SortedSetDisk<T>(nocleanup, thread_count, container_size,
-                                    "/tmp/test_chunk_", max_disk_space,
+                                    "./test_chunk_", max_disk_space,
                                     num_elements_cached);
 }
 
@@ -230,6 +240,28 @@ TYPED_TEST(SortedSetDiskTest, IterateBackwardsFromEnd) {
         ++iterator;
         EXPECT_EQ(merge_queue.end(), iterator);
     }
+}
+
+/**
+ * Test that exceeding the allocated disk space and then merging all data to reduce
+ * space works correctly.
+ */
+TYPED_TEST(SortedSetDiskTest, DiskExceeded) {
+    constexpr size_t thread_count = 1;
+    constexpr size_t reserved_num_elements = 100;
+    constexpr size_t max_disk_space = 100;
+    auto nocleanup = [](typename common::SortedSetDisk<TypeParam>::storage_type *) {};
+    std::filesystem::create_directory("./test_chunk_");
+    std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
+    auto underTest = common::SortedSetDisk<TypeParam>(nocleanup, thread_count,
+                                                      reserved_num_elements,
+                                                      "./test_chunk_", max_disk_space, 1);
+    std::vector<TypeParam> elements(100);
+    std::iota(elements.begin(), elements.end(), 0);
+    for(uint32_t i = 0; i<10;++i) {
+        underTest.insert(elements.begin(), elements.end());
+    }
+    expect_equals(underTest, elements);
 }
 
 } // namespace

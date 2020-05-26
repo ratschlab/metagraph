@@ -2,6 +2,7 @@
 
 #include <type_traits>
 
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -19,7 +20,7 @@ namespace kmer {
 
 using namespace mg;
 
-const size_t kLargeBufferSize = 30'000'000;
+const size_t kLargeBufferSize = 1'000'000;
 const size_t kBufferSize = 100'000;
 
 
@@ -132,61 +133,6 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
     }
 }
 
-// removes redundant dummy BOSS k-mers from a sorted list
-template <class T>
-void cleanup_boss_kmers(Vector<get_int_t<T>> *kmers_int) {
-    static_assert(sizeof(T) == sizeof(get_int_t<T>));
-    using KMER = utils::get_first_type_t<T>;
-    Vector<T> *kmers = reinterpret_cast<Vector<T> *> (kmers_int);
-
-    assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst()));
-    assert(std::unique(kmers->begin(), kmers->end(), utils::EqualFirst()) == kmers->end());
-
-    if (kmers->size() < 2)
-        return;
-
-    // last k-mer is never redundant. Start with the next one.
-    uint64_t last = kmers->size() - 1;
-
-    typename KMER::CharType edge_label, node_last_char;
-
-    std::vector<uint64_t> last_kmer(1llu << KMER::kBitsPerChar, kmers->size());
-
-    last_kmer[utils::get_first(kmers->at(last))[0]] = last;
-
-    for (int64_t i = last - 1; i >= 0; --i) {
-        const KMER &kmer = utils::get_first(kmers->at(i));
-        node_last_char = kmer[1];
-        edge_label = kmer[0];
-
-        // assert((edge_label || node_last_char)
-        //             && "dummy k-mer cannot be both source and sink dummy");
-
-        if (!edge_label) {
-            // sink dummy k-mer
-
-            // skip if redundant
-            if (node_last_char && KMER::compare_suffix(kmer, utils::get_first(kmers->at(last)), 0))
-                continue;
-
-        } else if (!node_last_char) {
-            // source dummy k-mer
-
-            // skip if redundant
-            if (last_kmer[edge_label] < kmers->size()
-                    && KMER::compare_suffix(kmer, utils::get_first(kmers->at(last_kmer[edge_label])), 1))
-                continue;
-        }
-
-        // the k-mer is either not dummy, or not redundant -> keep the k-mer
-        kmers->at(--last) = kmers->at(i);
-        last_kmer[edge_label] = last;
-    }
-
-    kmers->erase(kmers->begin(), kmers->begin() + last);
-}
-
-
 template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::KmerCollector(size_t k,
@@ -198,34 +144,35 @@ KmerCollector<KMER, KmerExtractor, Container>
                 size_t __attribute__((unused)) max_disk_space)
       : k_(k),
         num_threads_(num_threads),
-        thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
-                     std::max(static_cast<size_t>(1), num_threads_)),
+        thread_pool_(std::max(static_cast<size_t>(1), num_threads_), 1),
         batcher_([this](auto&& sequences) { add_batch(std::move(sequences)); },
                  kLargeBufferSize / sizeof(typename decltype(batcher_)::value_type),
                  kLargeBufferSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
-        both_strands_mode_(both_strands_mode),
-        tmp_dir_(tmp_dir) {
+        both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
 
-    std::function<void(Vector<Value> *)> cleanup = [](Vector<Value> *) {};
-    if constexpr(std::is_same_v<Extractor, KmerExtractorBOSS>) {
-        if (filter_suffix_encoded_.empty())
-            cleanup = cleanup_boss_kmers<get_kmer_t<KMER, Value>>;
-    }
-
+    std::function<void(Vector<Value> *)> no_cleanup = [](Vector<Value> *) {};
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
     if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_,
-                                             tmp_dir, max_disk_space);
+        tmp_dir_ = utils::create_temp_dir(tmp_dir, "kmers");
+        kmers_ = std::make_unique<Container>(no_cleanup, num_threads, buffer_size_,
+                                             tmp_dir_, max_disk_space);
     } else {
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_);
+        kmers_ = std::make_unique<Container>(no_cleanup, num_threads, buffer_size_);
     }
     common::logger->trace(
             "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
             kmers_->buffer_size() * sizeof(typename Container::value_type) >> 20,
             kmers_->buffer_size());
+}
+
+template <typename KMER, class KmerExtractor, class Container>
+KmerCollector<KMER, KmerExtractor, Container>
+::~KmerCollector() {
+    if (!tmp_dir_.empty())
+        std::filesystem::remove_all(tmp_dir_);
 }
 
 template <typename KMER, class KmerExtractor, class Container>

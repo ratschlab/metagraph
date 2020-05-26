@@ -58,6 +58,10 @@ class KMerBOSS {
     bool operator==(const KMerBOSS &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMerBOSS &other) const { return seq_ != other.seq_; }
 
+    /**
+     * Returns the character at position i. For the k-mer a_1|a_2|...|a_(k-1)|a_k, which is laid out
+     * in memory as a_(k-1)|a_(k-2)|...|a_1|a_k, kmer[0]=a_k, kmer[1]=a_1, ..., kmer[k-1]=a_(k-1)
+     */
     inline CharType operator[](size_t i) const;
 
     /**
@@ -68,6 +72,8 @@ class KMerBOSS {
      */
     static inline bool compare_suffix(const KMerBOSS &k1,
                                       const KMerBOSS &k2, size_t minus = 0);
+
+    static inline bool less(const KMerBOSS &k1, const KMerBOSS &k2, size_t minus = 0);
 
     std::string to_string(size_t k, const std::string &alphabet) const;
 
@@ -193,6 +199,12 @@ template <typename G, int L>
 bool KMerBOSS<G, L>::compare_suffix(const KMerBOSS &k1, const KMerBOSS &k2, size_t minus) {
     return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
              == k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
+}
+
+template <typename G, int L>
+bool KMerBOSS<G, L>::less(const KMerBOSS &k1, const KMerBOSS &k2, size_t minus) {
+    return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
+            < k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
 }
 
 

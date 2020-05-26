@@ -7,13 +7,14 @@ import http.server
 import json
 import logging
 import math
+import multiprocessing
 import os
 import psutil
 import signal
-import socket
 import subprocess
 import threading
 import time
+import util
 import urllib.parse
 import urllib.request
 
@@ -21,7 +22,7 @@ args = None
 
 sra_info = {}  # global information about a processed SRA (for now, time only)
 
-pending_processes = []
+pending_processes = []  # TODO: probably not needed
 download_processes = {}
 build_processes = {}
 clean_processes = {}
@@ -30,7 +31,7 @@ transfer_processes = {}
 waiting_builds = collections.OrderedDict()
 waiting_cleans = collections.OrderedDict()
 
-CORES = 4
+CORES = multiprocessing.cpu_count()
 MAX_DOWNLOAD_PROCESSES = CORES / 4
 MAX_BUILD_PROCESSES = CORES / 4
 MAX_CLEAN_PROCESSES = CORES
@@ -65,7 +66,7 @@ Download done: %s
 def get_work():
     global downloads_done
     if downloads_done or len(download_processes) >= MAX_DOWNLOAD_PROCESSES or len(
-            waiting_builds) >= 2 * MAX_BUILD_PROCESSES:
+            waiting_builds) + len(download_processes) >= 2 * MAX_BUILD_PROCESSES:
         return None
     url = f'http://{args.server}/jobs'
     for i in range(10):
@@ -124,19 +125,19 @@ def clean_dir(sra_id):
     return os.path.join(clean_dir_base(), sra_id)
 
 
-def destination_dir(sra_id):
+def destination_dir(sra_id, subdir):
     result = ''
     if len(sra_id) > 6:
         result = f'{sra_id[0:6]}/{result}'
     if len(sra_id) > 3:
         result = f'{sra_id[0:3]}/{result}'
-    return os.path.join(args.destination, result)
+    return os.path.join(args.destination, f'{subdir}/{result}')
 
 
 def dump_pending(sra_ids):
     ids = ','.join(sra_ids)
     url = f'http://{args.server}/jobs/preempt'
-    data = f'client_id={internal_ip()}&ids={ids}'
+    data = f'client_id={util.internal_ip()}&ids={ids}'
     with open('/tmp/shutdown.sh', 'w') as f:
         f.write(f'curl --data "{data}&reason=shutdown" "{url}"')
 
@@ -148,64 +149,67 @@ def start_download(download_resp):
     sra_id = download_resp['id']
     pending_processes.append(sra_id)
     dump_pending(pending_processes)
-    if args.source == 'ena':
-        download_processes[sra_id] = (subprocess.Popen(['./download_ena.sh', sra_id, download_dir_base()]), time.time())
-    else:
-        if not download_resp['bucket']:
-            logging.fatal(f'[{sra_id}] Specified NCBI as download source, but server response has no "bucket" field')
-        make_dir_if_needed(download_dir(sra_id))
-        log_file_name = os.path.join(download_dir(sra_id), 'download.log')
-        bucket = download_resp['bucket']
-        download_processes[sra_id] = (subprocess.Popen(
-            f'./download_ncbi.sh {bucket} {sra_id} {download_dir_base()}  2>&1 | '
-            f'grep -v "Stage" >{log_file_name}', shell=True),
-                                      time.time())
+    util.make_dir_if_needed(download_dir(sra_id))
+    log_file_name = os.path.join(download_dir(sra_id), 'download.log')
+    log_file = util.TeeLogger(log_file_name, 'Stage')
+    bucket = '0'
+    if args.source == 'ncbi':
+        if 'bucket' not in download_resp:
+            logging.info(f'[{sra_id}] Specified NCBI as download source, but server response has no "bucket" field. '
+                         f'Will download via HTTP instead of GCS')
+        else:
+            bucket = download_resp['bucket']
+    download_processes[sra_id] = (
+        subprocess.Popen(['./download.sh', args.source, sra_id, download_dir_base(), bucket], stdout=log_file,
+                         stderr=log_file), time.time())
     sra_info[sra_id] = (time.time(),)
 
 
-def internal_ip():
-    try:
-        return socket.gethostbyname(socket.gethostname())
-    except socket.gaierror:
-        return '127.0.0.1'  # this usually happens on dev laptops; cloud machines work fine
+def write_log_header(log_file_name, operation, sra_id, required_ram_gb, available_ram_gb):
+    with open(log_file_name, 'w') as f:
+        free_ram_gb = psutil.virtual_memory().available / 1e9
+        f.write(
+            f'[{sra_id}] Starting {operation} on {util.internal_ip()}, required RAM {round(required_ram_gb, 2)}, free RAM '
+            f'{round(free_ram_gb, 2)}GB, available for {operation} (not reserved) RAM {round(available_ram_gb, 2)}GB')
+        f.write(f'[{sra_id}] Full machine log: "gsutil cat {args.destination}logs/{util.internal_ip()}/client.log"')
 
 
-def start_build(sra_id, wait_time, buffer_size_gb, container_type):
+def start_build(sra_id, wait_time, buffer_size_gb, container_type, required_ram_gb, available_ram_gb):
     input_dir = download_dir(sra_id)
     output_dir = build_dir(sra_id)
-    logging.info(f'[{sra_id}] Starting build from {input_dir} to {output_dir}, ram={round(buffer_size_gb, 2)}')
-    make_dir_if_needed(build_dir(sra_id))
+    logging.info(f'[{sra_id}] Starting build from {input_dir} to {output_dir}, buffer={round(buffer_size_gb, 2)}GB')
+
+    util.make_dir_if_needed(build_dir(sra_id))
     log_file_name = os.path.join(build_dir(sra_id), 'build.log')
+    write_log_header(log_file_name, 'build', sra_id, required_ram_gb, available_ram_gb)
+    log_file = util.TeeLogger(log_file_name)
     build_processes[sra_id] = (subprocess.Popen(
-        f'./build.sh {sra_id} {input_dir} {output_dir} {buffer_size_gb} {container_type} 2>&1 > {log_file_name}',
-        shell=True), time.time(), wait_time)
+        ['./build.sh', sra_id, input_dir, output_dir, str(buffer_size_gb), container_type], stdout=log_file,
+        stderr=log_file), time.time(), wait_time, required_ram_gb)
     return True
 
 
-def make_dir_if_needed(path):
-    try:
-        os.makedirs(path, exist_ok=True)
-    except FileExistsError:
-        pass
-
-
-def start_clean(sra_id, wait_time, kmer_count_singletons, fallback):
+def start_clean(sra_id, wait_time, kmer_count_singletons, fallback, required_ram_gb, available_ram_gb):
     input_file = build_file(sra_id)
-    make_dir_if_needed(clean_dir(sra_id))
     output_file = os.path.join(clean_dir(sra_id), sra_id)
-    logging.info(f'[{sra_id}] Starting clean with {input_file} {output_file}')
-    clean_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
+    logging.info(f'[{sra_id}] Starting clean from {input_file} to {output_file}')
+    log_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
+    write_log_header(log_file_name, 'clean', sra_id, required_ram_gb, available_ram_gb)
+    log_file = util.TeeLogger(log_file_name, '%,')  # %, eliminates the progress bar spam
     clean_processes[sra_id] = (
         subprocess.Popen(
-            f'./clean.sh {sra_id} {input_file} {output_file} {kmer_count_singletons} {fallback} 2>&1 | grep -v "%," > {clean_file_name}',
-            shell=True),
-        time.time(), wait_time)
+            ['./clean.sh', sra_id, input_file, output_file, str(kmer_count_singletons), str(fallback)], stdout=log_file,
+            stderr=log_file),
+        time.time(), wait_time, required_ram_gb)
     return True
 
 
-def start_transfer(sra_id, cleaned_graph_location):
-    transfer_processes[sra_id] = (subprocess.Popen(
-        f'gsutil -q -u metagraph cp -r {cleaned_graph_location} {destination_dir(sra_id)}', shell=True), time.time())
+def start_transfer(sra_id, source, top_folder):
+    destination = destination_dir(sra_id, top_folder)
+    transfer_process = subprocess.Popen(
+        f'gsutil -q -u metagraph cp -r {source} {destination}', shell=True), time.time()
+    if top_folder == 'clean':
+        transfer_processes[sra_id] = transfer_process
     if sra_id in pending_processes:
         pending_processes.remove(sra_id)
         dump_pending(pending_processes)
@@ -215,7 +219,7 @@ def start_transfer(sra_id, cleaned_graph_location):
 
 def ack(operation, params):
     url = f'http://{args.server}/jobs/ack/{operation}'
-    data = f'client_id={internal_ip()}&' + urllib.parse.urlencode(params)
+    data = f'client_id={util.internal_ip()}&' + urllib.parse.urlencode(params)
     while True:
         try:
             request = urllib.request.Request(url, data=data.encode('UTF-8'),
@@ -240,7 +244,10 @@ def ack(operation, params):
 
 def nack(operation, params):
     url = f'http://{args.server}/jobs/nack/{operation}'
-    data = f'client_id={internal_ip()}&' + urllib.parse.urlencode(params)
+    data = f'client_id={util.internal_ip()}&' + urllib.parse.urlencode(params)
+    sra_id = params['id']
+    cleaned_dir = clean_dir(sra_id)
+    start_transfer(sra_id, cleaned_dir, 'not_' + operation)
     while True:
         try:
             request = urllib.request.Request(url, data=data.encode('UTF-8'),
@@ -263,18 +270,6 @@ def nack(operation, params):
             time.sleep(5)  # wait a bit and try again
 
 
-def dir_size(dir_path):
-    total_size = 0
-    for dir_path, dir_names, file_names in os.walk(dir_path):
-        for f in file_names:
-            fp = os.path.join(dir_path, f)
-            # skip if it is symbolic link
-            if not os.path.islink(fp):
-                total_size += os.path.getsize(fp)
-
-    return round(total_size / 1000000, 2)
-
-
 # Simple sanity check for graph built: unique kmer count from KMC * 2 is equal to edges - dummy_source - dummy_sink
 def check_sanity(sra_id):
     stat_file = open(os.path.join(build_dir(sra_id), f'{sra_id}.stats')).readlines()
@@ -290,10 +285,6 @@ def check_sanity(sra_id):
     return sanity
 
 
-def tab(string_list):
-    return '\t' + '\t'.join(string_list)
-
-
 def check_status():
     global must_quit
     if must_quit:
@@ -301,26 +292,39 @@ def check_status():
     completed_downloads = set()
     for sra_id, (download_process, start_time) in download_processes.items():
         return_code = download_process.poll()
-        is_timed_out = (time.time() - start_time) > 15 * 60
+        is_timed_out = (time.time() - start_time) > 120 * 60
         if return_code is not None or is_timed_out:
+            if os.path.exists(os.path.join(download_dir(sra_id), 'code')):
+                return_code = int(open(os.path.join(download_dir(sra_id), 'code')).read())
+            elif is_timed_out:
+                logging.warning(f'[{sra_id}] Download timed out after {time.time() - start_time} seconds.')
+                return_code = 254
+            else:
+                logging.error(f'[{sra_id}] Download process did not provide a return code. Assuming error')
+                return_code = 255
             completed_downloads.add(sra_id)
             log_file_name = os.path.join(download_dir(sra_id), 'download.log')
-            logging.info(f'[{sra_id}] Download finished with output\n {tab(open(log_file_name).readlines())}\n\n\n')
+            logging.info(f'[{sra_id}] Download finished with output\n {util.tab(open(log_file_name).readlines())}\n\n\n')
             log_new_file_name = os.path.join(clean_dir(sra_id), 'download.log')
-            make_dir_if_needed(clean_dir(sra_id))
+            util.make_dir_if_needed(clean_dir(sra_id))
             os.rename(log_file_name, log_new_file_name)
+
             download_path = download_dir(sra_id)
             sra_dir = os.path.join(download_path, 'sra')
-            download_size_mb = dir_size(sra_dir)
+            download_size_mb = util.dir_size_MB(sra_dir)
+            size_file = os.path.join(download_dir(sra_id), 'size')
+            if os.path.exists(size_file):
+                sra_size_mb = round(int(open(size_file).read()) / 1e6, 2)
+                logging.info(f'Downloaded sra files have {sra_size_mb}MB')
+            else:
+                logging.warning('Could not find size file. Reporting size -1')
+                sra_size_mb = -1
             subprocess.run(['rm', '-rf', sra_dir])
             kmc_dir = os.path.join(download_path, 'kmc')
-            kmc_size_mb = dir_size(kmc_dir)
+            kmc_size_mb = util.dir_size_MB(kmc_dir)
             success = True
-            if return_code == 0 or return_code == 3:
-                if return_code == 0:
-                    logging.info(f'[{sra_id}] Download completed successfully.')
-                else:
-                    logging.info(f'[{sra_id}] Download completed with some errors.')
+            if return_code == 0:
+                logging.info(f'[{sra_id}] Download completed successfully.')
                 stats_file = os.path.join(download_path, 'stats')
                 try:
                     with open(stats_file) as stats:
@@ -338,30 +342,32 @@ def check_status():
             else:
                 success = False
             if success:
-                params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
-                          'kmc_size_mb': kmc_size_mb, 'kmer_count_unique': kmer_count_unique,
-                          'kmer_coverage': kmer_coverage, 'kmer_count_singletons': kmer_count_singletons}
+                params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': sra_size_mb,
+                          'download_size_mb': download_size_mb, 'kmc_size_mb': kmc_size_mb,
+                          'kmer_count_unique': kmer_count_unique, 'kmer_coverage': kmer_coverage,
+                          'kmer_count_singletons': kmer_count_singletons}
                 sra_info[sra_id] = (
-                    *sra_info[sra_id], download_size_mb, kmer_count_unique, kmer_coverage, kmer_count_singletons)
+                    *sra_info[sra_id], sra_size_mb, kmer_count_unique, kmer_coverage, kmer_count_singletons)
                 ack('download', params)
                 waiting_builds[sra_id] = (time.time())
             else:
                 logging.warning(f'[{sra_id}] Download failed. Removing {download_path}')
                 subprocess.run(['rm', '-rf', download_path])
-                params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': download_size_mb,
-                          'kmc_size_mb': kmc_size_mb}
+                params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': sra_size_mb,
+                          'download_size_mb': download_size_mb, 'kmc_size_mb': kmc_size_mb, 'exit_code': return_code}
                 nack('download', params)
     for d in completed_downloads:
         del download_processes[d]
 
     completed_builds = set()
-    for sra_id, (build_process, start_time, wait_time) in build_processes.items():
+    total_reserved_ram_gb = 0  # how much memory all active processes need
+    for sra_id, (build_process, start_time, wait_time, reserved_ram_gb) in build_processes.items():
         return_code = build_process.poll()
 
         if return_code is not None:
             completed_builds.add(sra_id)
             log_file_name = os.path.join(build_dir(sra_id), 'build.log')
-            logging.info(f'[{sra_id}] Build finished with output\n {tab(open(log_file_name).readlines())}\n\n\n')
+            logging.info(f'[{sra_id}] Build finished with output\n {util.tab(open(log_file_name).readlines())}\n\n\n')
             log_new_file_name = os.path.join(clean_dir(sra_id), 'build.log')
             os.rename(log_file_name, log_new_file_name)
 
@@ -371,30 +377,32 @@ def check_status():
             subprocess.run(['rm', '-rf', download_path])
 
             build_path = build_dir(sra_id)
-            build_size = dir_size(build_path)
+            build_size_mb = util.dir_size_MB(build_path)
             if return_code == 0:
                 logging.info(f'[{sra_id}] Building graph completed successfully.')
                 sanity = check_sanity(sra_id)
                 params = {'id': sra_id, 'time': int(time.time() - start_time),
-                          'wait_time': int(wait_time), 'size_mb': build_size, 'sanity': sanity}
+                          'wait_time': int(wait_time), 'size_mb': build_size_mb, 'sanity': sanity}
                 ack('build', params)
                 waiting_cleans[sra_id] = (time.time())
             else:
                 logging.warning(f'[{sra_id}] Building graph failed. Removing {build_path}.')
                 subprocess.run(['rm', '-rf', build_path])
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
-                          'size_mb': build_size, 'return_code': return_code}
+                          'size_mb': build_size_mb, 'return_code': return_code}
                 nack('build', params)
+        else:
+            total_reserved_ram_gb += reserved_ram_gb
     for d in completed_builds:
         del build_processes[d]
 
     completed_cleans = set()
-    for sra_id, (clean_process, start_time, wait_time) in clean_processes.items():
+    for sra_id, (clean_process, start_time, wait_time, reserved_ram_gb) in clean_processes.items():
         return_code = clean_process.poll()
         if return_code is not None:
             completed_cleans.add(sra_id)
             log_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
-            logging.info(f'[{sra_id}] Clean finished with output\n {tab(open(log_file_name).readlines())}\n\n\n')
+            logging.info(f'[{sra_id}] Clean finished with output\n {util.tab(open(log_file_name).readlines())}\n\n\n')
 
             # clean up the original graph; if adding retries, do this only on success
             build_path = build_dir(sra_id)
@@ -402,20 +410,22 @@ def check_status():
             subprocess.run(['rm', '-rf', build_path])
 
             cleaned_dir = clean_dir(sra_id)
-            cleaned_size = dir_size(cleaned_dir)
+            cleaned_size_mb = util.dir_size_MB(cleaned_dir)
             if return_code == 0:
                 logging.info(f'[{sra_id}] Cleaning graph completed successfully.')
 
                 params = {'id': sra_id, 'time': int(time.time() - start_time),
-                          'size_mb': cleaned_size}
+                          'size_mb': cleaned_size_mb}
                 ack('clean', params)
-                start_transfer(sra_id, cleaned_dir)
+                start_transfer(sra_id, cleaned_dir, 'clean')
             else:
                 logging.warning(f'[{sra_id}] Cleaning graph failed. Removing {cleaned_dir}')
                 subprocess.run(['rm', '-rf', cleaned_dir])
                 params = {'id': sra_id, 'time': int(time.time() - start_time),
-                          'size_mb': cleaned_size, 'return_code': return_code}
+                          'size_mb': cleaned_size_mb, 'return_code': return_code}
                 nack('clean', params)
+        else:
+            total_reserved_ram_gb += reserved_ram_gb
     for d in completed_cleans:
         del clean_processes[d]
 
@@ -426,7 +436,7 @@ def check_status():
             completed_transfers.add(sra_id)
             # clean up the cleaned graph; if adding retries, do this only on success
             clean_path = clean_dir(sra_id)
-            cleaned_size = dir_size(clean_path)
+            cleaned_size_mb = util.dir_size_MB(clean_path)
             logging.info(f'[{sra_id}] Cleaning up {clean_path}')
             subprocess.run(['rm', '-rf', clean_path])
 
@@ -434,61 +444,77 @@ def check_status():
                 logging.info(f'[{sra_id}] Transferring graph completed successfully.')
                 params = {'id': sra_id, 'time': int(time.time() - start_time),
                           'total_time': int(time.time() - sra_info[sra_id][0]), 'size_init_mb': sra_info[sra_id][1],
-                          'size_final_mb': cleaned_size}
+                          'size_final_mb': cleaned_size_mb}
                 ack('transfer', params)
             else:
                 logging.warning(f'[{sra_id}] Transferring cleaned graph failed.')
                 params = {'id': sra_id, 'time': int(time.time() - start_time),
-                          'size_mb': cleaned_size}
+                          'size_mb': cleaned_size_mb}
                 nack('transfer', params)
 
     # for cleaning we allow using all the available RAM
-    available_ram_gb = psutil.virtual_memory().available / 1e9 - 1
+    total_ram_gb = psutil.virtual_memory().total / 1e9
+    available_ram_gb = total_ram_gb - total_reserved_ram_gb
     if 3 * len(build_processes) + len(clean_processes) + 1 <= CORES and waiting_cleans:
+        logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_cleans.items():
             # remove the old clean waiting and append the new one after
             build_path = build_dir(sra_id)
-            build_size_gb = dir_size(build_path) / 1e9
+            build_size_gb = util.dir_size_MB(build_path) / 1e3
             required_ram_gb = max(build_size_gb * 1.1, build_size_gb + 1)
-
-            if available_ram_gb - required_ram_gb > 0:
+            if available_ram_gb > required_ram_gb:
+                logging.info(
+                    f'[{sra_id}] Estimated {required_ram_gb}GB needed for cleaning, available {available_ram_gb} GB')
+                kmer_count_unique = sra_info[sra_id][2]
                 kmer_coverage = sra_info[sra_id][3]
                 kmer_count_singletons = sra_info[sra_id][4]
-                fallback = 5 if kmer_coverage > 5 else 2 if kmer_coverage > 2 else 1
+                fallback = 5 if kmer_coverage > 5 else 2 if kmer_coverage > 2 or kmer_count_unique > 1e6 else 1
+
                 # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
-                start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, fallback)
+                start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, fallback, required_ram_gb,
+                            available_ram_gb)
+                available_ram_gb -= required_ram_gb
                 del waiting_cleans[sra_id]
                 break
             logging.info(f'[{sra_id}] Not enough RAM for cleaning. '
                          f'Have {round(available_ram_gb, 2)}GB need {round(build_size_gb + 0.5, 2)}GB')
 
     if 3 * (len(build_processes) + 1) + len(clean_processes) <= CORES and waiting_builds:
-        sra_id, (start_time) = waiting_builds.popitem()
-        num_kmers = sra_info[sra_id][2]
-        # estimated RAM needed for loading graph in memory; 0.6 bytes/kmer (for --small representation),
-        # 2 byte/kmer-count; the 3.5 comes from 2x canonical+non-canonical + ~1.5 for dummy kmers
-        required_ram_gb = round((num_kmers * 3.5 * (2 + 0.6)) / 1e9 + 0.5, 2)
-        logging.info(f'[{sra_id}] Estimated {required_ram_gb}GB needed for building')
-        total_ram_gb = psutil.virtual_memory().total / 1e9
-        if required_ram_gb > total_ram_gb - 3:
-            build_path = build_dir(sra_id)
-            logging.warning(
-                f'[{sra_id}] Building graph needs too much RAM: {required_ram_gb}GB). Removing {build_path}.')
-            subprocess.run(['rm', '-rf', build_path])
-            params = {'id': sra_id, 'time': int(time.time() - start_time), 'required_ram_gb': required_ram_gb}
-            nack('build', params)
-        elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
-            # how much memory does it take to load all unique kmers into RAM
-            required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9;  # also account for dummy kmers
-            if (required_ram_all_mem_gb < 2):
-                start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector')
+        logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
+        for sra_id, (start_time) in waiting_builds.items():
+            num_kmers = sra_info[sra_id][2]
+            # estimated RAM needed for loading graph in memory; 1.3 bytes/kmer (for --small representation),
+            # 2 byte/kmer-count; the 3.5 comes from 2x canonical+non-canonical + ~1.5 for dummy kmers
+            # then multiply all by 2 to leave space for reallocation, except that I multiply by 1.5
+            required_ram_gb = round(1.5 * (num_kmers * 3.5 * (2 + 1.3)) / 1e9 + 0.5, 2)
+            if required_ram_gb > total_ram_gb - 2:
+                download_path = download_dir(sra_id)
+                logging.warning(
+                    f'[{sra_id}] Building graph needs too much RAM: {required_ram_gb}GB). Removing {download_path}.')
+                subprocess.run(['rm', '-rf', download_path])
+                params = {'id': sra_id, 'time': int(time.time() - start_time), 'required_ram_gb': required_ram_gb}
+                nack('build', params)
+                del waiting_builds[sra_id]
+                break
+            elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
+                logging.info(
+                    f'[{sra_id}] Estimated {required_ram_gb}GB needed for building, available {available_ram_gb} GB')
+                # how much memory does it take to load all unique kmers into RAM
+                required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9;  # also account for dummy kmers
+                if required_ram_all_mem_gb < 2:
+                    start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector',
+                                required_ram_gb, available_ram_gb)
+                else:
+                    buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
+                    start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk', required_ram_gb,
+                                available_ram_gb)
+                del waiting_builds[sra_id]
+                available_ram_gb -= required_ram_gb  # not that it matters
+                break
             else:
-                buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
-                start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk')
-        else:
-            logging.info(
-                f'[{sra_id}] Not enough RAM for building. Have {round(available_ram_gb, 2)}GB need {required_ram_gb}GB')
-            waiting_builds[sra_id] = (start_time)
+                logging.info(
+                    f'[{sra_id}] Not enough RAM for building. Have {round(total_ram_gb - total_reserved_ram_gb, 2)}GB '
+                    f'need {required_ram_gb}GB')
 
     for d in completed_transfers:
         del transfer_processes[d]
@@ -510,7 +536,7 @@ def do_work():
         else:
             logging.error(f'[{sra_id}] Server response invalid. Expected a \'download\' tag: {work_response}')
         subprocess.Popen(
-            [f'gsutil rsync -x \'(?!^client.log$)\' {args.output_dir} {args.log_destination}/{internal_ip()}/'],
+            [f'gsutil rsync -x \'(?!^client.log$)\' {args.output_dir} {args.log_destination}/{util.internal_ip()}/'],
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
@@ -518,7 +544,7 @@ def do_work():
         i = i + 1
         time.sleep(5)
     subprocess.Popen(
-        [f'gsutil rsync -x \'(?!^client.log$)\' {args.output_dir} {args.log_destination}/{internal_ip()}/'],
+        [f'gsutil rsync -x \'(?!^client.log$)\' {args.output_dir} {args.log_destination}/{util.internal_ip()}/'],
         shell=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
@@ -528,9 +554,9 @@ def check_env():
     """ Make sure all the necessary software is in place to successfully run the client and create working
     directories """
 
-    make_dir_if_needed(download_dir_base())
-    make_dir_if_needed(build_dir_base())
-    make_dir_if_needed(clean_dir_base())
+    util.make_dir_if_needed(download_dir_base())
+    util.make_dir_if_needed(build_dir_base())
+    util.make_dir_if_needed(clean_dir_base())
 
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
     file_handler = logging.FileHandler(f'{args.output_dir}/client.log')
@@ -549,27 +575,21 @@ def handle_quit():
         list(download_processes) + list(build_processes) + list(clean_processes) + list(transfer_processes) + list(
             waiting_builds) + list(waiting_cleans))
     url = f'http://{args.server}/jobs/preempt'
-    data = f'client_id={internal_ip()}&ids={ids}'
-    while True:
-        try:
-            request = urllib.request.Request(url, data=data.encode('UTF-8'),
-                                             headers={'Content-type': 'application/x-www-form-urlencoded'},
-                                             method='POST')
-            response = urllib.request.urlopen(request, timeout=10)
-            if response.getcode() == 200:
-                break
-            else:
-                logging.warning(f'Server returned response code {response.getcode()} for {url}')
-                time.sleep(5)  # avoid overwhelming the server
-        except urllib.error.URLError as e:
-            logging.error(f'Failed to open URL {url} Reason: {e.reason}')
-            time.sleep(5)  # wait a bit and try again
-        except http.client.RemoteDisconnected as e:
-            logging.error(f'Failed to open URL {url} Reason: remote disconnected.')
-            time.sleep(5)  # wait a bit and try again
-        except:
-            logging.error(f'Failed to open URL {url} Reason: unknown.')
-            time.sleep(5)  # wait a bit and try again
+    data = f'client_id={util.internal_ip()}&ids={ids}'
+    try:
+        request = urllib.request.Request(url, data=data.encode('UTF-8'),
+                                         headers={'Content-type': 'application/x-www-form-urlencoded'},
+                                         method='POST')
+        response = urllib.request.urlopen(request, timeout=10)
+        if response.getcode() != 200:
+            logging.warning(f'Server returned response code {response.getcode()} for {url}')
+            time.sleep(5)  # avoid overwhelming the server
+    except urllib.error.URLError as e:
+        logging.error(f'Failed to open URL {url} Reason: {e.reason}')
+    except http.client.RemoteDisconnected as e:
+        logging.error(f'Failed to open URL {url} Reason: remote disconnected.')
+    except:
+        logging.error(f'Failed to open URL {url} Reason: unknown.')
     global pending_processes
     pending_processes = []
     dump_pending(pending_processes)
@@ -641,19 +661,26 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default='gs://metagraph-test/clean/',
+    parser.add_argument('--destination', default=None,  # TODO make the default empty
                         help='Host/directory where the cleaned BOSS graphs are copied to')
-    parser.add_argument('--log_destination', default='gs://metagraph-test/logs',
+    parser.add_argument('--log_destination', default=None,
                         help='GS folder where client logs are collected')
     parser.add_argument('--port', default=8001, help='HTTP Port on which the status/kill server runs')
-    parser.add_argument('--server_info', default='gs://metagraph-test/server',
-                        help='Where to publish the server host/port on gcs')
+    parser.add_argument('--server_info', default=None,
+                        help='Where to obtain the server host/port on gcs')
     args = parser.parse_args()
+
+    args.log_destination = args.log_destination or os.path.join(args.destination, 'logs')
+    args.server_info = args.server_info or os.path.join(args.destination, 'server')
+
     if not os.path.isabs(args.output_dir):
         logging.error(f'output_dir must be an absolute path, not {args.output_dir}')
         exit(1)
 
     check_env()
+
+    logging.info(f'Machine has {CORES} cores. Max simultaneous downloads: {MAX_DOWNLOAD_PROCESSES}. Max builds: '
+                 f'{MAX_BUILD_PROCESSES}. Max cleans: {MAX_CLEAN_PROCESSES}')
 
     if not args.server:
         logging.info('Trying to find server address...')
@@ -668,6 +695,9 @@ if __name__ == '__main__':
 
     # gracefully handle termination
     signal.signal(signal.SIGTERM, signal_handler)
+    # signal.signal(signal.SIGKILL, signal_handler)
+    signal.signal(signal.SIGSEGV, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
     httpd = http.server.HTTPServer(('', args.port), SimpleHTTPRequestHandler)
     logging.info(f'Starting client status server on port {args.port}')

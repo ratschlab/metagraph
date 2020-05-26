@@ -1450,7 +1450,8 @@ TEST(BOSS, CallUnitigsWithPruning) {
 }
 
 TEST(BOSS, CallUnitigsCheckDegree) {
-    std::vector<std::string> sequences {
+    BOSSConstructor constructor(8);
+    constructor.add_sequences({
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
         "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATAACTGGAAAA",
@@ -1459,10 +1460,7 @@ TEST(BOSS, CallUnitigsCheckDegree) {
         "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGC",
         "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAATTGGCTGAAAAGC",
         "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
-    };
-
-    BOSSConstructor constructor(8);
-    constructor.add_sequences(sequences);
+    });
     BOSS graph(&constructor);
     ASSERT_EQ(8u, graph.get_k());
 
@@ -1496,7 +1494,8 @@ TEST(BOSS, CallUnitigsCheckDegree) {
 }
 
 TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
-    std::vector<std::string> sequences {
+    BOSSConstructor constructor(8);
+    constructor.add_sequences({
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
         "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATAACTGGAAAA",
@@ -1505,10 +1504,7 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
         "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGC",
         "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAATTGGCTGAAAAGC",
         "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
-    };
-
-    BOSSConstructor constructor(8);
-    constructor.add_sequences(sequences);
+    });
     BOSS graph(&constructor);
     ASSERT_EQ(8u, graph.get_k());
 
@@ -1542,14 +1538,12 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
 }
 
 TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
-    std::vector<std::string> sequences {
+    BOSSConstructor constructor(30);
+    constructor.add_sequences({
         "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
         "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
         "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
-    };
-
-    BOSSConstructor constructor(30);
-    constructor.add_sequences(sequences);
+    });
     BOSS graph(&constructor);
     ASSERT_EQ(30u, graph.get_k());
 
@@ -1572,14 +1566,12 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
 }
 
 TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
-    std::vector<std::string> sequences {
+    BOSSConstructor constructor(30);
+    constructor.add_sequences({
         "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
         "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
         "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
-    };
-
-    BOSSConstructor constructor(30);
-    constructor.add_sequences(sequences);
+    });
     BOSS graph(&constructor);
     ASSERT_EQ(30u, graph.get_k());
 
@@ -1608,7 +1600,7 @@ TEST(BOSS, CallUnitigsMasked) {
     // ATGC      GCAGTGGTC
     std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
     BOSSConstructor constructor(k);
-    constructor.add_sequences(sequences);
+    constructor.add_sequences(std::vector<std::string>(sequences));
     BOSS graph(&constructor);
 
     sdsl::bit_vector mask_bv(graph.num_edges() + 1, false);

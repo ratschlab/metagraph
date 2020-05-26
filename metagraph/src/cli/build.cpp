@@ -1,10 +1,9 @@
 #include "build.hpp"
 
-#include <csignal>
-
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_string.hpp"
@@ -25,24 +24,42 @@ using namespace mg::succinct;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
-std::filesystem::path tmp_dir;
 
-
-void signal_handler(int sig) {
-    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", tmp_dir);
-    if (!tmp_dir.empty())
-        std::filesystem::remove_all(tmp_dir);
-
-    std::exit(sig);
+template <class GraphConstructor>
+void push_sequences(const std::vector<std::string> &files,
+                    const Config &config,
+                    const Timer &timer,
+                    GraphConstructor *constructor) {
+    using Buffer = std::vector<std::pair<std::string, uint64_t>>;
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 1)
+    for (size_t i = 0; i < files.size(); ++i) {
+        BatchAccumulator<std::pair<std::string, uint64_t>> batcher(
+            [constructor](Buffer&& sequences) {
+                auto seqs = std::make_shared<Buffer>(std::move(sequences));
+                constructor->add_sequences([seqs](CallStringCount callback) {
+                    for (const auto &[seq, count] : *seqs) {
+                        callback(seq, count);
+                    }
+                });
+            },
+            1'000'000 / sizeof(std::pair<std::string, uint64_t>),
+            1'000'000
+        );
+        parse_sequences(files[i], config,
+            [&](std::string_view seq) {
+                batcher.push_and_pay(seq.size(), seq, 1);
+            },
+            [&](std::string_view seq, uint32_t count) {
+                batcher.push_and_pay(seq.size(), seq, count);
+            }
+        );
+        logger->trace("Extracted all sequences from file '{}' in {} sec",
+                      files[i], timer.elapsed());
+    }
 }
 
 int build_graph(Config *config) {
     assert(config);
-
-    if (std::signal(SIGINT, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the singal handler for SIGINT");
-    if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
-        logger->error("Couldn't reset the singal handler for SIGTERM");
 
     const auto &files = config->fnames;
 
@@ -85,16 +102,6 @@ int build_graph(Config *config) {
                                boss_graph->get_k(),
                                config->canonical);
 
-        if (!config->tmp_dir.empty()) {
-            std::string tmp_dir_str(config->tmp_dir/"temp_dbg_XXXXXX");
-            if (!mkdtemp(tmp_dir_str.data())) {
-                logger->error("Failed to create a temporary directory in {}", config->tmp_dir);
-                exit(1);
-            }
-            tmp_dir = tmp_dir_str;
-            logger->trace("Setting temporary directory to {}", tmp_dir);
-        }
-
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
             timer.reset();
@@ -110,17 +117,13 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                tmp_dir.empty() ? mg::kmer::ContainerType::VECTOR
-                                : mg::kmer::ContainerType::VECTOR_DISK,
-                tmp_dir,
+                config->tmp_dir.empty() ? mg::kmer::ContainerType::VECTOR
+                                        : mg::kmer::ContainerType::VECTOR_DISK,
+                config->tmp_dir,
                 config->disk_cap_bytes
             );
 
-            parse_sequences(files, *config, timer,
-                [&](std::string_view seq) { constructor->add_sequence(seq); },
-                [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); },
-                [&](const auto &loop) { constructor->add_sequences(loop); }
-            );
+            push_sequences(files, *config, timer, constructor.get());
 
             BOSS::Chunk *next_chunk = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
@@ -133,15 +136,12 @@ int build_graph(Config *config) {
                 logger->info("Serialization done in {} sec", timer.elapsed());
             }
 
-            if (config->suffix.size()) {
-                std::filesystem::remove_all(tmp_dir);
+            if (config->suffix.size())
                 return 0;
-            }
 
             graph_data.extend(*next_chunk);
             delete next_chunk;
         }
-        std::filesystem::remove_all(tmp_dir);
 
         if (config->count_kmers) {
             sdsl::int_vector<> kmer_counts;
@@ -187,11 +187,7 @@ int build_graph(Config *config) {
                 )
             );
 
-            parse_sequences(files, *config, timer,
-                [&](std::string_view seq) { constructor->add_sequence(seq); },
-                [&](std::string_view seq, uint32_t count) { constructor->add_sequence(seq, count); },
-                [&](const auto &loop) { constructor->add_sequences(loop); }
-            );
+            push_sequences(files, *config, timer, constructor.get());
 
             if (!suffix.size()) {
                 assert(suffixes.size() == 1);
@@ -269,17 +265,14 @@ int build_graph(Config *config) {
         }
         assert(graph);
 
-        parse_sequences(files, *config, timer,
-            [&graph](std::string_view seq) {
-                graph->add_sequence(seq);
-            },
-            [&graph](std::string_view seq, uint32_t /*count*/) {
-                graph->add_sequence(seq);
-            },
-            [&graph](const auto &loop) {
-                loop([&graph](const char *seq) { graph->add_sequence(seq); });
-            }
-        );
+        for (const auto &file : files) {
+            parse_sequences(file, *config,
+                [&graph](std::string_view seq) { graph->add_sequence(seq); },
+                [&graph](std::string_view seq, uint32_t) { graph->add_sequence(seq); }
+            );
+            logger->trace("Extracted all sequences from file '{}' in {} sec",
+                          file, timer.elapsed());
+        }
 
         if (config->count_kmers) {
             graph->add_extension(std::make_shared<NodeWeights>(graph->max_index() + 1,
@@ -290,26 +283,22 @@ int build_graph(Config *config) {
             if (graph->is_canonical_mode())
                 config->forward_and_reverse = true;
 
-            parse_sequences(files, *config, timer,
-                [&graph,&node_weights](std::string_view seq) {
-                    graph->map_to_nodes_sequentially(seq,
-                        [&](auto node) { node_weights->add_weight(node, 1); }
-                    );
-                },
-                [&graph,&node_weights](std::string_view seq, uint32_t count) {
-                    graph->map_to_nodes_sequentially(seq,
-                        [&](auto node) { node_weights->add_weight(node, count); }
-                    );
-                },
-                [&graph,&node_weights](const auto &loop) {
-                    loop([&graph,&node_weights](const char *seq) {
-                        std::string seq_str(seq);
-                        graph->map_to_nodes_sequentially(seq_str,
+            for (const auto &file : files) {
+                parse_sequences(file, *config,
+                    [&graph,&node_weights](std::string_view seq) {
+                        graph->map_to_nodes_sequentially(seq,
                             [&](auto node) { node_weights->add_weight(node, 1); }
                         );
-                    });
-                }
-            );
+                    },
+                    [&graph,&node_weights](std::string_view seq, uint32_t count) {
+                        graph->map_to_nodes_sequentially(seq,
+                            [&](auto node) { node_weights->add_weight(node, count); }
+                        );
+                    }
+                );
+                logger->trace("Extracted all sequences from file '{}' in {} sec",
+                              file, timer.elapsed());
+            }
         }
     }
 

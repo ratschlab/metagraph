@@ -99,7 +99,7 @@ TEST(DBGBitmapConstruct, ConstructionEQAppending) {
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
         DBGBitmapConstructor constructor(k);
-        constructor.add_sequences(input_data);
+        constructor.add_sequences(std::vector<std::string>(input_data));
         DBGBitmap constructed(&constructor);
 
         Vector<KmerExtractor2Bit::Kmer64> kmers;
@@ -124,7 +124,7 @@ TEST(DBGBitmapConstruct, ConstructionEQAppendingCanonical) {
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
         DBGBitmapConstructor constructor(k, true);
-        constructor.add_sequences(input_data);
+        constructor.add_sequences(std::vector<std::string>(input_data));
         DBGBitmap constructed(&constructor);
 
         Vector<KmerExtractor2Bit::Kmer64> kmers;
@@ -156,7 +156,7 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
                 std::string(100, 'C')
             };
             auto constructor = std::make_unique<DBGBitmapConstructor>(k, canonical);
-            constructor->add_sequences(input_data);
+            constructor->add_sequences(std::vector<std::string>(input_data));
             DBGBitmap reference(constructor.get());
 
             for (size_t suffix_len = 0; suffix_len <= k && suffix_len <= 4u; ++suffix_len) {

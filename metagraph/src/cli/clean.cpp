@@ -3,15 +3,16 @@
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "graph/graph_cleaning.hpp"
+#include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
-#include "parse_sequences.hpp"
 
 using mg::common::logger;
 

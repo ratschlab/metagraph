@@ -49,7 +49,7 @@ class MergeHeap {
         return result;
     }
 
-    bool empty() { return els.empty(); }
+    bool empty() const { return els.empty(); }
 
   private:
     // elements stored in decreasing order of the first tuple member
@@ -57,129 +57,189 @@ class MergeHeap {
     Compare compare_ = Compare();
 };
 
+template <typename T>
+class ConcatDecoder {
+  public:
+    ConcatDecoder(const std::vector<std::string> &names)
+        : names_(names), source_(names[0], false) {
+        get_next();
+    }
+
+    bool empty() const { return !next_.has_value(); }
+
+    T top() const { return next_.value(); }
+
+    T pop() {
+#ifndef NDEBUG
+        if (!next_.has_value())
+            throw std::runtime_error("Attempt to pop an empty ConcatDecoder");
+#endif
+        T result = next_.value();
+        get_next();
+        return result;
+    }
+  private:
+    std::optional<T> next_;
+    uint32_t idx_ = 0;
+    std::vector<std::string> names_;
+    EliasFanoDecoder<T> source_;
+
+    void get_next() {
+        next_ = source_.next();
+        if (next_.has_value())
+            return;
+
+        while (!next_.has_value() && ++idx_ < names_.size()) {
+            source_ = EliasFanoDecoder<T>(names_[idx_], false);
+            next_ = source_.next();
+        }
+    }
+};
 
 /**
- * Given a list of n source files, containing ordered elements of type T, merge the n
- * sources into a single (ordered) list of type T and delete the original files.
- * @tparam T the type of the  elements to be merged (typically a 64/128 or 256-bit k-mer)
- * @param sources the files containing sorted lists of type T
- * @param on_new_item callback to invoke when a new element was merged
- * @param remove_sources if true, remove source files after merging
- * @return the total number of elements read from all files
- *
- * Note: this method blocks until all the data was successfully merged.
+ * Decoder that reads data from several sorted files and merges it into a single sorted
+ * stream.
+ * @tparam T the type of data being stored
  */
 template <typename T>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     const std::function<void(const T &)> &on_new_item,
-                     bool remove_sources = true) {
-    // start merging disk chunks by using a heap to store the current element
-    // from each chunk
-    uint64_t num_elements_read = 0;
+class MergeDecoder {
+  public:
+    MergeDecoder(const std::vector<std::string> &source_names, bool remove_sources) {
+        sources_.reserve(source_names.size());
+        for (uint32_t i = 0; i < source_names.size(); ++i) {
+            sources_.emplace_back(source_names[i], remove_sources);
+            std::optional<T> data_item = sources_.back().next();
+            if (data_item.has_value()) {
+                heap_.emplace(data_item.value(), i);
+            }
+        }
+    }
 
-    MergeHeap<T> merge_heap;
-    std::optional<T> data_item;
+    bool empty() const { return heap_.empty(); }
 
-    std::vector<EliasFanoDecoder<T>> decoders;
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.emplace_back(sources[i], remove_sources);
-        data_item = decoders.back().next();
+    T top() const {
+#ifndef NDEBUG
+        if (heap_.empty())
+            throw std::runtime_error("Popping an empty MergeDecoder");
+#endif
+        return heap_.top().first;
+    }
+
+    T pop() {
+#ifndef NDEBUG
+        if (heap_.empty())
+            throw std::runtime_error("Popping an empty MergeDecoder");
+#endif
+        auto [result, source_index] = heap_.pop();
+        std::optional<T> data_item = sources_[source_index].next();
         if (data_item.has_value()) {
-            merge_heap.emplace(data_item.value(), i);
-            num_elements_read++;
+            heap_.emplace(data_item.value(), source_index);
         }
+        return result;
     }
 
-    if (merge_heap.empty()) {
-        return num_elements_read;
-    }
+  private:
+    std::vector<EliasFanoDecoder<T>> sources_;
+    common::MergeHeap<T> heap_;
+};
 
-    T last_written = merge_heap.top().first;
-    on_new_item(last_written);
+/**
+ * Merges Elias-Fano sorted compressed files into a single stream.
+ */
+template <typename T>
+void merge_files(const std::vector<std::string> &sources,
+                 const std::function<void(const T &)> &on_new_item,
+                 bool remove_sources = true) {
+    MergeDecoder<T> decoder(sources, remove_sources);
+    if (decoder.empty())
+        return;
 
-    while (!merge_heap.empty()) {
-        auto [smallest, chunk_index] = merge_heap.pop();
-
-        if (smallest != last_written) {
-            on_new_item(smallest);
-            last_written = smallest;
+    T last = decoder.pop();
+    while (!decoder.empty()) {
+        T curr = decoder.pop();
+        if (curr != last) {
+            on_new_item(last);
+            last = curr;
         }
-
-        if ((data_item = decoders[chunk_index].next()).has_value()) {
-            merge_heap.emplace(data_item.value(), chunk_index);
-            num_elements_read++;
-        }
     }
-
-    return num_elements_read;
+    on_new_item(last);
 }
 
-
-// TODO: these two `merge_files` are almost identical. Merge them into one.
-//       Implement the merging mechanism  (remove duplicates, increment
-//       counters) in the caller?
 /**
  * Given a list of n source files, containing ordered pairs of  <element, count>,
- * merge the n sources (and the corresponding counts) into a single list, ordered by el
- * and delete the original files.
+ * merge the n sources (and the corresponding counts) into a single list, ordered by el.
  * If two pairs have the same first element, the counts are added together.
  * @param sources the files containing sorted lists of pairs of type <T, C>
  * @param on_new_item callback to invoke when a new element was merged
  * @param remove_sources if true, remove source files after merging
  *
- * @return the total number of elements read from all files
- *
  * Note: this method blocks until all the data was successfully merged.
  */
 template <typename T, typename C>
-uint64_t merge_files(const std::vector<std::string> &sources,
-                     const std::function<void(const std::pair<T, C> &)> &on_new_item,
-                     bool remove_sources = true) {
+void merge_files(const std::vector<std::string> &sources,
+                 const std::function<void(const std::pair<T, C> &)> &on_new_item,
+                 bool remove_sources = true) {
+    MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
+    if (decoder.empty())
+        return;
+
     // start merging disk chunks by using a heap to store the current element
     // from each chunk
-    uint64_t num_elements_read = 0;
-
-    MergeHeap<std::pair<T, C>, utils::GreaterFirst> merge_heap;
-    std::optional<std::pair<T, C>> data_item;
-    std::vector<EliasFanoDecoder<std::pair<T, C>>> decoders;
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-        decoders.emplace_back(sources[i], remove_sources);
-        data_item = decoders.back().next();
-        if (data_item.has_value()) {
-            merge_heap.emplace(data_item.value(), i);
-            num_elements_read++;
-        }
-    }
-
-    if (merge_heap.empty()) {
-        return num_elements_read;
-    }
-
-    // initialize the smallest element
-    std::pair<T, C> current = { merge_heap.top().first.first, 0 };
-
-    while (!merge_heap.empty()) {
-        auto [smallest, chunk_index] = merge_heap.pop();
-
-        if (smallest.first != current.first) {
+    std::pair<T, C> current = decoder.pop();
+    while (!decoder.empty()) {
+        const std::pair<T, C> next = decoder.pop();
+        if (current.first != next.first) {
             on_new_item(current);
-            current = smallest;
+            current = next;
         } else {
-            if (current.second < std::numeric_limits<C>::max() - smallest.second) {
-                current.second += smallest.second;
+            if (current.second < std::numeric_limits<C>::max() - next.second) {
+                current.second += next.second;
             } else {
                 current.second = std::numeric_limits<C>::max();
             }
         }
-
-        if ((data_item = decoders[chunk_index].next()).has_value()) {
-            merge_heap.emplace(data_item.value(), chunk_index);
-            num_elements_read++;
-        }
     }
     on_new_item(current);
+}
 
-    return num_elements_read;
+/**
+ * Merges the Ts in #sources with the Ts in #source_no_count.
+ * Identical elements are not de-duped.
+ */
+template <typename T>
+void merge_dummy(const std::vector<std::string> &sources,
+                 std::vector<std::string> sources_no_count,
+                 const std::function<void(const T &)> &on_new_item,
+                 bool remove_sources = true) {
+    sources_no_count.insert(sources_no_count.end(), sources.begin(), sources.end());
+    MergeDecoder<T> decoder(sources_no_count, remove_sources);
+    while (!decoder.empty()) {
+        on_new_item(decoder.pop());
+    }
+}
+
+/**
+ * Merges the <T, C> pairs in #sources with the Ts in #source_no_count. The INTs in
+ * source_no_count will be assigned a count of 0.
+ * Identical elements are not de-duped.
+ */
+template <typename T, typename C>
+void merge_dummy(const std::vector<std::string> &sources,
+                 const std::vector<std::string> &sources_no_count,
+                 const std::function<void(const std::pair<T, C> &)> &on_new_item,
+                 bool remove_sources = true) {
+    MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
+    MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
+    while (!decoder.empty()) {
+        std::pair<T,C> next = decoder.pop();
+        while (!decoder_no_count.empty() && decoder_no_count.top() < next.first) {
+            on_new_item({ decoder_no_count.pop(), 0U });
+        }
+        on_new_item(next);
+    }
+    while (!decoder_no_count.empty()) {
+        on_new_item({ decoder_no_count.pop(), 0U });
+    }
 }
 
 } // namespace common

@@ -4,11 +4,11 @@ chmod a+rx $0
 
 echo "Executing script as: $(whoami)"
 # set up SSD disk
-sudo mkfs.ext4 -F /dev/nvme0n1
+sudo mdadm --create /dev/md0 --level=0 --raid-devices=4 /dev/nvme0n1 /dev/nvme0n2 /dev/nvme0n3 /dev/nvme0n4
+sudo mkfs.ext4 -F /dev/md0
 sudo mkdir -p /mnt/disks/ssd
-sudo mount /dev/nvme0n1 /mnt/disks/ssd
+sudo mount /dev/md0 /mnt/disks/ssd
 sudo chmod a+w /mnt/disks/ssd
-echo UUID=`sudo blkid -s UUID -o value /dev/md0` /mnt/disks/ssd ext4 discard,defaults,nofail 0 2 | sudo tee -a /etc/fstab
 
 # starts the cloud metagraph client
 function start_client() {

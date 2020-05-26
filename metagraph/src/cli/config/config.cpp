@@ -234,7 +234,9 @@ Config::Config(int argc, char *argv[]) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
             port = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--suffix")) {
+        } else if (!strcmp(argv[i], "--address")) {
+            host_address = get_value(i++);
+        }else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
         } else if (!strcmp(argv[i], "--initialize-bloom")) {
             initialize_bloom = true;
@@ -300,6 +302,8 @@ Config::Config(int argc, char *argv[]) {
         //    debug = true;
         } else if (!strcmp(argv[i], "--greedy")) {
             greedy_brwt = true;
+        } else if (!strcmp(argv[i], "--linkage")) {
+            cluster_linkage = true;
         } else if (!strcmp(argv[i], "--subsample")) {
             num_rows_subsampled = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--arity")) {
@@ -958,10 +962,16 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
             fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
+            fprintf(stderr, "\t   --linkage \t\tcluster columns and construct linkage matrix [off]\n");
+            fprintf(stderr, "\t-i --infile-base [STR] \tlinkage matrix specifying brwt tree structure []\n");
+            fprintf(stderr, "\t                       \texample: '0 1 <dist> 4\n");
+            fprintf(stderr, "\t                       \t          2 3 <dist> 5\n");
+            fprintf(stderr, "\t                       \t          4 5 <dist> 6'\n");
             fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
             fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
+            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
@@ -1022,6 +1032,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for server_query:\n");
             fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
+            fprintf(stderr, "\t   --address \t\tinterface for incoming connections (default: all)\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");

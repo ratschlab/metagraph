@@ -45,6 +45,7 @@ class Config {
     bool count_dummy = false;
     bool canonical_mode = false;
     bool greedy_brwt = false;
+    bool cluster_linkage = false;
     bool separately = false;
     bool files_sequentially = false;
     bool call_bubbles = false;
@@ -135,6 +136,7 @@ class Config {
     std::string annotation_label = "";
     std::string header = "";
     std::string accession2taxid;
+    std::string host_address;
 
     std::filesystem::path tmp_dir;
 

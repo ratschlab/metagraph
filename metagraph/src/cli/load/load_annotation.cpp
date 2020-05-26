@@ -47,9 +47,7 @@ initialize_annotation(Config::AnnotationType anno_type,
     switch (anno_type) {
         case Config::ColumnCompressed: {
             annotation.reset(
-                new annotate::ColumnCompressed<>(
-                    num_rows, config.num_columns_cached, utils::get_verbose()
-                )
+                new annotate::ColumnCompressed<>(num_rows, config.num_columns_cached)
             );
             break;
         }

@@ -5,15 +5,21 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <vector>
 
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
-#include "common/vector.hpp"
-
 
 namespace mg {
 namespace common {
+
+/**
+ * Concatenates Elias-Fano files into result.
+ * The files store data that is ordered and the values in a file are smaller than the
+ * values in the next file.
+ */
+void concat(const std::vector<std::string> &files,  const std::string& result);
 
 /**
  * Elias-Fano encoder that streams the encoded result into a file.
@@ -24,7 +30,6 @@ template <typename T>
 class EliasFanoEncoder {
   public:
     static constexpr uint32_t WRITE_BUF_SIZE = 1024;
-    EliasFanoEncoder() {}
 
     EliasFanoEncoder(EliasFanoEncoder&&) = delete;
     EliasFanoEncoder& operator=(EliasFanoEncoder&&) = delete;
@@ -39,7 +44,7 @@ class EliasFanoEncoder {
                      const std::string &out_filename);
 
     /** Constructs an encoder that encodes the #data array */
-    EliasFanoEncoder(const Vector<T> &data, std::ofstream *sink, std::ofstream *sink_upper);
+    EliasFanoEncoder(const std::vector<T> &data, std::ofstream *sink, std::ofstream *sink_upper);
 
     /** Encodes the next number */
     void add(T value);
@@ -76,7 +81,7 @@ class EliasFanoEncoder {
      * encoded as 1000, the 2 as 100, the 0 as 1 and the 4 as 10000,  resulting in
      * 1000011001000 in base 2.
      */
-    Vector<char> upper_;
+    std::vector<char> upper_;
 
     /** Current number of elements added for encoding */
     size_t size_ = 0;
@@ -193,7 +198,7 @@ class EliasFanoDecoder {
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
      * encoding, with a 1 followed by as many zeros as the value to encode.
      */
-    Vector<char> upper_;
+    std::vector<char> upper_;
 
     /** Total number of elements encoded. */
     size_t size_ = 0;
@@ -238,8 +243,6 @@ class EliasFanoDecoder {
 template <typename T, typename C>
 class EliasFanoEncoder<std::pair<T, C>> {
   public:
-    EliasFanoEncoder() {}
-
     EliasFanoEncoder(size_t size,
                      const T &first_value,
                      const T &last_value,
@@ -261,7 +264,6 @@ class EliasFanoDecoder<std::pair<T, C>> {
   public:
     EliasFanoDecoder(const std::string &source, bool remove_source = true);
 
-
     std::optional<std::pair<T, C>> next();
 
   private:
@@ -280,14 +282,21 @@ class EliasFanoEncoderBuffered {
   public:
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
 
-    void add(const T &value);
+    inline void add(const T &value) {
+        buffer_.push_back(value);
+        if (buffer_.size() == buffer_.capacity()) {
+            encode_chunk();
+        }
+    }
+
+    const std::string& name() { return file_name_; }
 
     size_t finish();
 
   private:
     void encode_chunk();
   private:
-    Vector<T> buffer_;
+    std::vector<T> buffer_;
     std::ofstream sink_;
     std::ofstream sink_upper_;
     std::string file_name_;
@@ -306,16 +315,23 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
   public:
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
 
-    void add(const std::pair<T, C> &value);
+    inline void add(const std::pair<T, C> &value) {
+        buffer_.push_back(value.first);
+        buffer_second_.push_back(value.second);
+        if (buffer_.size() == buffer_.capacity()) {
+            encode_chunk();
+        }
+    }
+
+    const std::string& name() { return file_name_; }
 
     size_t finish();
 
   private:
     void encode_chunk();
-
   private:
-    Vector<T> buffer_;
-    Vector<C> buffer_second_;
+    std::vector<T> buffer_;
+    std::vector<C> buffer_second_;
     std::ofstream sink_;
     std::ofstream sink_upper_;
     std::ofstream sink_second_;

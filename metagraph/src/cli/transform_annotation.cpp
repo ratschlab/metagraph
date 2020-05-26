@@ -1,5 +1,7 @@
 #include "transform_annotation.hpp"
 
+#include <fmt/format.h>
+
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
@@ -7,6 +9,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/binary_matrix/multi_brwt/clustering.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
@@ -16,6 +19,9 @@ using utils::get_verbose;
 using namespace annotate;
 
 typedef MultiLabelEncoded<std::string> Annotator;
+
+static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
+                                       Eigen::DontAlignCols, " ", "\n");
 
 
 template <class AnnotatorTo, class AnnotatorFrom>
@@ -31,7 +37,6 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 
     logger->trace("Serializing annotation to '{}'...", config.outfbase);
     target_annotator->serialize(config.outfbase);
-    logger->trace("Serialization done in {} sec", timer.elapsed());
 }
 
 
@@ -40,7 +45,14 @@ int transform_annotation(Config *config) {
 
     const auto &files = config->fnames;
 
-    assert(files.size() == 1);
+    const Config::AnnotationType input_anno_type
+        = parse_annotation_type(files.at(0));
+
+    if (input_anno_type != Config::ColumnCompressed && files.size() > 1) {
+        logger->error("Conversion of multiple annotators is only "
+                      "supported for ColumnCompressed");
+        exit(1);
+    }
 
     Timer timer;
 
@@ -49,9 +61,6 @@ int transform_annotation(Config *config) {
     /********************************************************/
 
     if (config->dump_text_anno) {
-        const Config::AnnotationType input_anno_type
-            = parse_annotation_type(files.at(0));
-
         auto annotation = initialize_annotation(files.at(0), *config);
 
         logger->trace("Loading annotation...");
@@ -152,19 +161,90 @@ int transform_annotation(Config *config) {
     /****************** convert annotation ******************/
     /********************************************************/
 
-    const Config::AnnotationType input_anno_type
-        = parse_annotation_type(files.at(0));
+    if (config->cluster_linkage) {
+        if (input_anno_type != Config::ColumnCompressed) {
+            logger->error("Column clustering is only supported for ColumnCompressed");
+            exit(1);
+        }
+
+        logger->trace("Loading annotation and sampling subcolumns of size {}",
+                      config->num_rows_subsampled);
+
+        std::vector<uint64_t> row_indexes;
+        std::vector<std::unique_ptr<sdsl::bit_vector>> subcolumn_ptrs;
+        std::vector<uint64_t> column_ids;
+        uint64_t num_rows = 0;
+        std::mutex mu;
+
+        ThreadPool subsampling_pool(get_num_threads(), 1);
+
+        // Load columns from disk
+        bool success = ColumnCompressed<>::merge_load(files,
+            [&](uint64_t i, const std::string &label, auto&& column) {
+                subsampling_pool.enqueue([&,i,label,column{std::move(column)}]() {
+                    sdsl::bit_vector *subvector;
+                    {
+                        std::lock_guard<std::mutex> lock(mu);
+                        if (row_indexes.empty()) {
+                            num_rows = column->size();
+                            row_indexes
+                                = sample_row_indexes(num_rows,
+                                                     config->num_rows_subsampled);
+                        } else if (column->size() != num_rows) {
+                            logger->error("Size of column {} is {} != {}",
+                                          label, column->size(), num_rows);
+                            exit(1);
+                        }
+                        subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
+                        subvector = subcolumn_ptrs.back().get();
+                        column_ids.push_back(i);
+                        logger->trace("Column {}: {}", i, label);
+                    }
+
+                    *subvector = sdsl::bit_vector(row_indexes.size(), false);
+                    for (size_t j = 0; j < row_indexes.size(); ++j) {
+                        if ((*column)[row_indexes[j]])
+                            (*subvector)[j] = true;
+                    }
+                });
+            },
+            get_num_threads()
+        );
+
+        if (!success) {
+            logger->error("Cannot load annotations");
+            exit(1);
+        }
+
+        subsampling_pool.join();
+
+        // arrange the columns in their original order
+        std::vector<std::unique_ptr<sdsl::bit_vector>> permuted(subcolumn_ptrs.size());
+        permuted.swap(subcolumn_ptrs);
+        for (size_t i = 0; i < column_ids.size(); ++i) {
+            subcolumn_ptrs[column_ids[i]] = std::move(permuted[i]);
+        }
+
+        std::vector<sdsl::bit_vector> subcolumns;
+        for (auto &col_ptr : subcolumn_ptrs) {
+            subcolumns.push_back(std::move(*col_ptr));
+        }
+
+        LinkageMatrix linkage_matrix
+                = agglomerative_greedy_linkage(std::move(subcolumns),
+                                               get_num_threads());
+
+        std::ofstream out(config->outfbase);
+        out << linkage_matrix.format(CSVFormat) << std::endl;
+
+        logger->trace("Linkage matrix is written to {}", config->outfbase);
+        return 0;
+    }
 
     if (config->anno_type == input_anno_type) {
         logger->info("Skipping conversion: same input and target type: {}",
                       Config::annotype_to_string(config->anno_type));
         return 0;
-    }
-
-    if (input_anno_type == Config::ColumnCompressed && files.size() > 1) {
-        logger->error("Conversion of multiple annotators only "
-                      "supported for ColumnCompressed");
-        exit(1);
     }
 
     logger->trace("Converting to {} annotator...",
@@ -210,18 +290,18 @@ int transform_annotation(Config *config) {
         target_annotator->serialize(config->outfbase);
 
         logger->trace("Serialization done in {} sec", timer.elapsed());
+
     } else if (input_anno_type == Config::ColumnCompressed) {
         auto annotation = initialize_annotation(files.at(0), *config);
 
-        logger->trace("Loading annotation...");
-
-        // Load annotation from disk
-        if (!annotation->merge_load(files)) {
-            logger->error("Cannot load annotations");
-            exit(1);
+        if (config->anno_type != Config::BRWT || !config->infbase.size()) {
+            logger->trace("Loading annotation from disk...");
+            if (!annotation->merge_load(files)) {
+                logger->error("Cannot load annotations");
+                exit(1);
+            }
+            logger->trace("Annotation loaded in {} sec", timer.elapsed());
         }
-
-        logger->trace("Annotation loaded in {} sec", timer.elapsed());
 
         std::unique_ptr<ColumnCompressed<>> annotator {
             dynamic_cast<ColumnCompressed<> *>(annotation.release())
@@ -258,17 +338,25 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::BRWT: {
-                auto brwt_annotator = config->greedy_brwt
-                    ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
-                        std::move(*annotator),
+                auto brwt_annotator = config->infbase.size()
+                    ? convert_to_BRWT<MultiBRWTAnnotator>(
+                        files, config->infbase,
                         config->parallel_nodes,
                         get_num_threads(),
-                        config->num_rows_subsampled)
-                    : convert_to_simple_BRWT<MultiBRWTAnnotator>(
-                        std::move(*annotator),
-                        config->arity_brwt,
-                        config->parallel_nodes,
-                        get_num_threads());
+                        config->tmp_dir.empty()
+                            ? std::filesystem::path(config->outfbase).remove_filename()
+                            : config->tmp_dir)
+                    : (config->greedy_brwt
+                        ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
+                            std::move(*annotator),
+                            config->parallel_nodes,
+                            get_num_threads(),
+                            config->num_rows_subsampled)
+                        : convert_to_simple_BRWT<MultiBRWTAnnotator>(
+                            std::move(*annotator),
+                            config->arity_brwt,
+                            config->parallel_nodes,
+                            get_num_threads()));
 
                 annotator.reset();
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
@@ -277,7 +365,6 @@ int transform_annotation(Config *config) {
 
                 brwt_annotator->serialize(config->outfbase);
 
-                logger->trace("Serialization done in {} sec", timer.elapsed());
                 break;
             }
             case Config::BinRelWT_sdsl: {
@@ -305,6 +392,8 @@ int transform_annotation(Config *config) {
         exit(1);
     }
 
+    logger->trace("Done");
+
     return 0;
 }
 
@@ -314,7 +403,7 @@ int merge_annotation(Config *config) {
     const auto &files = config->fnames;
 
     if (config->anno_type == Config::ColumnCompressed) {
-        ColumnCompressed<> annotation(0, config->num_columns_cached, get_verbose());
+        ColumnCompressed<> annotation(0, config->num_columns_cached);
         if (!annotation.merge_load(files)) {
             logger->error("Cannot load annotations");
             exit(1);
