@@ -2203,8 +2203,6 @@ void call_paths_from_queue(const BOSS &boss,
             }
         }
 
-        thread_pool->join();
-
     } else {
         while (edges.size()) {
             auto next_edge = std::move(edges.back());
