@@ -186,20 +186,20 @@ void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
     size_t original_end = kmers.size();
 
     add_dummy_sink_kmers(k, &kmers);
-    size_t dummy_begin = kmers.size();
 
+    size_t dummy_source_begin = kmers.size();
     add_dummy_source_kmers(k, &kmers, original_end);
 
-    ips4o::parallel::sort(kmers.begin() + dummy_begin, kmers.end(),
+    ips4o::parallel::sort(kmers.begin() + dummy_source_begin, kmers.end(),
                           utils::LessFirst(), num_threads);
 
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
-                  kmers.size() - dummy_begin);
+                  kmers.size() - dummy_source_begin);
 
     for (size_t c = 2; c < k + 1; ++c) {
         size_t dummy_end = kmers.size();
 
-        for (size_t i = dummy_begin; i < dummy_end; ++i) {
+        for (size_t i = dummy_source_begin; i < dummy_end; ++i) {
             KMER kmer = get_first(kmers[i]);
             if (KMER::compare_suffix(kmer, get_first(kmers[i - 1])))
                 continue; // i would generate the same dummy source k-mer as i-1, skip
@@ -207,12 +207,12 @@ void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
             push_back(kmers, kmer);
         }
-        dummy_begin = dummy_end;
-        ips4o::parallel::sort(kmers.begin() + dummy_begin, kmers.end(),
+        dummy_source_begin = dummy_end;
+        ips4o::parallel::sort(kmers.begin() + dummy_source_begin, kmers.end(),
                               utils::LessFirst(), num_threads);
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}", c,
-                      kmers.size() - dummy_begin);
+                      kmers.size() - dummy_source_begin);
     }
 
     ips4o::parallel::sort(kmers.begin(), kmers.end(),
@@ -230,9 +230,12 @@ using Decoder = common::EliasFanoDecoder<T>;
 template <typename T>
 std::vector<std::string>
 split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kmers) {
-    uint32_t chunk_count = std::pow(ALPHABET_LEN, 2);
-    logger->trace("Splitting k-mers into {} chunks...", chunk_count);
     using T_INT = get_int_t<T>;
+
+    uint32_t chunk_count = std::pow(ALPHABET_LEN, 2);
+
+    logger->trace("Splitting k-mers into {} chunks...", chunk_count);
+
     std::vector<Encoder<T_INT>> sinks;
     std::vector<std::string> names(chunk_count);
     for (uint32_t i = 0; i < names.size(); ++i) {
@@ -251,6 +254,7 @@ split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kme
     }
     std::for_each(sinks.begin(), sinks.end(), [](auto &f) { f.finish(); });
     // subtract the $$$...$ k-mer that was added at the beginning
+    assert(num_parent_kmers);
     logger->trace("Total number of non-dummy k-mers: {}", num_parent_kmers - 1);
     return names;
 }
@@ -259,9 +263,9 @@ template <typename Decoder, typename KMER>
 void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
     while (!decoder.empty()) {
         KMER kmer = reinterpret_cast<const KMER &>(get_first(decoder.top()));
-        if (!KMER::compare_suffix(kmer, el, suf)) {
+        if (!KMER::compare_suffix(kmer, el, suf))
             break;
-        }
+
         decoder.pop();
     }
 }
