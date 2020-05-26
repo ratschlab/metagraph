@@ -46,6 +46,8 @@ class EliasFanoEncoder {
     /** Constructs an encoder that encodes the #data array */
     EliasFanoEncoder(const std::vector<T> &data, std::ofstream *sink, std::ofstream *sink_upper);
 
+    ~EliasFanoEncoder();
+
     /** Encodes the next number */
     void add(T value);
 
@@ -282,6 +284,10 @@ class EliasFanoEncoderBuffered {
   public:
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
 
+    EliasFanoEncoderBuffered(EliasFanoEncoderBuffered &&) = default;
+
+    ~EliasFanoEncoderBuffered();
+
     inline void add(const T &value) {
         buffer_.push_back(value);
         if (buffer_.size() == buffer_.capacity()) {
@@ -314,6 +320,10 @@ template <typename T, typename C>
 class EliasFanoEncoderBuffered<std::pair<T, C>> {
   public:
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
+
+    EliasFanoEncoderBuffered(EliasFanoEncoderBuffered &&) = default;
+
+    ~EliasFanoEncoderBuffered();
 
     inline void add(const std::pair<T, C> &value) {
         buffer_.push_back(value.first);
