@@ -1909,6 +1909,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              async, vector_mutex, progress_bar, subgraph_mask);
                 return edges;
             };
+
+            // If enqueue_start is being called by another task in the thread
+            // pool, force needs to be true to force a job to be queued when
+            // the the maximum number of tasks is reached. Otherwise, it will
+            // deadlock at that point.
             edges_async.emplace_back(force ? thread_pool->force_enqueue(start_path)
                                            : thread_pool->enqueue(start_path));
         } else {
@@ -1930,6 +1935,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
 
     } else {
+        // find all edges in a block with no incoming edge and enqueue a traversal
+        // task from each one
         auto enqueue_starts_in_range = [&](size_t begin, size_t end) {
             call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
                 edge_index j = bwd(i);
@@ -1952,6 +1959,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             });
         };
 
+        // check each block in a separate thread
         for (size_t begin = 0; begin < discovered.size(); begin += kBlockSize) {
             size_t end = std::min(begin + kBlockSize, discovered.size());
             if (thread_pool) {
