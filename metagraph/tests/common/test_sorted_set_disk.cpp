@@ -8,13 +8,19 @@
 #include <array>
 #include <filesystem>
 
+#include <sdsl/uint128_t.hpp>
+#include <sdsl/uint256_t.hpp>
+
+
 namespace {
 using namespace mg;
 
 template <typename T>
 class SortedSetDiskTest : public ::testing::Test {};
 
-typedef ::testing::Types<uint64_t, sdsl::uint128_t> SortedDiskElementTypes;
+typedef ::testing::Types<uint64_t,
+                         sdsl::uint128_t,
+                         sdsl::uint256_t> SortedDiskElementTypes;
 
 TYPED_TEST_SUITE(SortedSetDiskTest, SortedDiskElementTypes);
 

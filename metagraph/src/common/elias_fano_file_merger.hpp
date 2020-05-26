@@ -203,17 +203,16 @@ void merge_files(const std::vector<std::string> &sources,
 }
 
 /**
- * Merges the <T, C> pairs in #sources with the Ts in #source_no_count. The INTs in
- * source_no_count will be assigned a count of 0.
+ * Merges the Ts in #sources with the Ts in #source_no_count.
  * Identical elements are not de-duped.
  */
 template <typename T>
-void merge_dummy(const std::vector<std::string> &source,
-                     std::vector<std::string> source_no_count,
-                     const std::function<void(const T &)> &on_new_item,
-                     bool remove_sources = true) {
-    source_no_count.insert(source_no_count.end(), source.begin(), source.end());
-    MergeDecoder<T> decoder(source_no_count, remove_sources);
+void merge_dummy(const std::vector<std::string> &sources,
+                 std::vector<std::string> sources_no_count,
+                 const std::function<void(const T &)> &on_new_item,
+                 bool remove_sources = true) {
+    sources_no_count.insert(sources_no_count.end(), sources.begin(), sources.end());
+    MergeDecoder<T> decoder(sources_no_count, remove_sources);
     while (!decoder.empty()) {
         on_new_item(decoder.pop());
     }
@@ -230,10 +229,6 @@ void merge_dummy(const std::vector<std::string> &sources,
                  const std::function<void(const std::pair<T, C> &)> &on_new_item,
                  bool remove_sources = true) {
     MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
-    // TODO: convert each MergeDecoder<T> to MergeDecoder<std::pair<T, C>>
-    // and merge everything together?
-    // TODO: Or merge the chunks separately for sources and sources_no_count in the
-    // function above, as here.
     MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
     while (!decoder.empty()) {
         std::pair<T,C> next = decoder.pop();

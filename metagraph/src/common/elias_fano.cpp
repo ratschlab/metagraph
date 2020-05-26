@@ -14,7 +14,7 @@
 namespace mg {
 namespace common {
 
-void concat(const std::vector<std::string> &files,  const std::string& result) {
+void concat(const std::vector<std::string> &files, const std::string &result) {
     if (files.empty())
         return;
 
@@ -30,7 +30,7 @@ void concat(const std::vector<std::string> &files,  const std::string& result) {
         concat_command += " >> " + files[0] + suffix;
 
         if (std::system(concat_command.c_str()))
-            throw std::runtime_error("Error while cat-ing files");
+            throw std::runtime_error("Error while cat-ing files: " + concat_command);
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
         for (const std::string &f : files) {
@@ -579,7 +579,7 @@ size_t EliasFanoEncoderBuffered<std::pair<T, C>>::finish() {
 
 template <typename T, typename C>
 void EliasFanoEncoderBuffered<std::pair<T, C>>::encode_chunk() {
-    EliasFanoEncoder<T> encoder_ = EliasFanoEncoder<T>(buffer_, &sink_, &sink_upper_);
+    EliasFanoEncoder<T> encoder_(buffer_, &sink_, &sink_upper_);
 
     sink_second_.write(reinterpret_cast<char *>(buffer_second_.data()),
                        buffer_second_.size() * sizeof(C));
@@ -605,7 +605,6 @@ template class EliasFanoEncoder<std::pair<sdsl::uint256_t, uint32_t>>;
 template class EliasFanoDecoder<uint64_t>;
 template class EliasFanoDecoder<sdsl::uint128_t>;
 template class EliasFanoDecoder<sdsl::uint256_t>;
-
 template class EliasFanoDecoder<std::pair<uint64_t, uint8_t>>;
 template class EliasFanoDecoder<std::pair<uint64_t, uint16_t>>;
 template class EliasFanoDecoder<std::pair<uint64_t, uint32_t>>;
