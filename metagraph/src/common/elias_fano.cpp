@@ -28,7 +28,9 @@ void concat(const std::vector<std::string> &files,  const std::string& result) {
             concat_command += files[i] + suffix + " ";
         }
         concat_command += " >> " + files[0] + suffix;
-        system(concat_command.c_str());
+        if (std::system(concat_command.c_str())) {
+            throw std::runtime_error("Error while cat-ing files");
+        }
         std::filesystem::rename(files[0] + suffix, result + suffix);
         for (const auto &f : files) {
             std::filesystem::remove(f + suffix);
