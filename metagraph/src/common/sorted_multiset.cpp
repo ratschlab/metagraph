@@ -100,15 +100,15 @@ void SortedMultiset<T, C, Container>::try_reserve(size_t size, size_t min_size) 
     data_.reserve(min_size);
 }
 
-template class SortedMultiset<std::pair<uint64_t, uint8_t>>;
-template class SortedMultiset<std::pair<sdsl::uint128_t, uint8_t>>;
-template class SortedMultiset<std::pair<sdsl::uint256_t, uint8_t>>;
-template class SortedMultiset<std::pair<uint64_t, uint16_t>>;
-template class SortedMultiset<std::pair<sdsl::uint128_t, uint16_t>>;
-template class SortedMultiset<std::pair<sdsl::uint256_t, uint16_t>>;
-template class SortedMultiset<std::pair<uint64_t, uint32_t>>;
-template class SortedMultiset<std::pair<sdsl::uint128_t, uint32_t>>;
-template class SortedMultiset<std::pair<sdsl::uint256_t, uint32_t>>;
+template class SortedMultiset<uint64_t, uint8_t>;
+template class SortedMultiset<sdsl::uint128_t, uint8_t>;
+template class SortedMultiset<sdsl::uint256_t, uint8_t>;
+template class SortedMultiset<uint64_t, uint16_t>;
+template class SortedMultiset<sdsl::uint128_t, uint16_t>;
+template class SortedMultiset<sdsl::uint256_t, uint16_t>;
+template class SortedMultiset<uint64_t, uint32_t>;
+template class SortedMultiset<sdsl::uint128_t, uint32_t>;
+template class SortedMultiset<sdsl::uint256_t, uint32_t>;
 
 } // namespace common
 } // namespace mg
