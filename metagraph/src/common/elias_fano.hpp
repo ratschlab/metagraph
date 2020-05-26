@@ -284,7 +284,8 @@ class EliasFanoEncoderBuffered {
   public:
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
 
-    EliasFanoEncoderBuffered(EliasFanoEncoderBuffered &&) = default;
+    EliasFanoEncoderBuffered(EliasFanoEncoderBuffered&&) = default;
+    EliasFanoEncoderBuffered& operator=(EliasFanoEncoderBuffered&&) = default;
 
     ~EliasFanoEncoderBuffered();
 
@@ -321,7 +322,8 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
   public:
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
 
-    EliasFanoEncoderBuffered(EliasFanoEncoderBuffered &&) = default;
+    EliasFanoEncoderBuffered(EliasFanoEncoderBuffered&&) = default;
+    EliasFanoEncoderBuffered& operator=(EliasFanoEncoderBuffered&&) = default;
 
     ~EliasFanoEncoderBuffered();
 
