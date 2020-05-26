@@ -160,7 +160,7 @@ template <typename T>
 uint64_t merge_files(const std::vector<std::string> &sources,
                      const std::function<void(const T &)> &on_new_item,
                      bool remove_sources = true) {
-    MergeDecoder<T> decoder = MergeDecoder<T>(sources, remove_sources);
+    MergeDecoder<T> decoder(sources, remove_sources);
     if (decoder.empty()) {
         return 0;
     }
