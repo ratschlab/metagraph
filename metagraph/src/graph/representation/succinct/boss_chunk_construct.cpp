@@ -2,7 +2,6 @@
 
 #include <ips4o.hpp>
 
-#include "common/circular_buffer.hpp"
 #include "common/elias_fano_file_merger.hpp"
 #include "common/logger.hpp"
 #include "common/sorted_multiset.hpp"
