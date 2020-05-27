@@ -373,8 +373,7 @@ generate_dummy_1_kmers(size_t k,
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
             KMER v(get_first(sink_gen_it.pop()));
-            handle_dummy_sink(k, KMER(get_first(sink_gen_it.pop())),
-                              dummy_sink_it, &dummy_sink_chunks[F]);
+            handle_dummy_sink(k, v, dummy_sink_it, &dummy_sink_chunks[F]);
             skip_same_suffix(v, sink_gen_it, 1);
         }
     }
