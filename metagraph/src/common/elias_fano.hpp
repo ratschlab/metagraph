@@ -19,7 +19,7 @@ namespace common {
  * The files store data that is ordered and the values in a file are smaller than the
  * values in the next file.
  */
-void concat(const std::vector<std::string> &files,  const std::string& result);
+void concat(const std::vector<std::string> &files, const std::string &result);
 
 /**
  * Elias-Fano encoder that streams the encoded result into a file.
@@ -45,6 +45,8 @@ class EliasFanoEncoder {
 
     /** Constructs an encoder that encodes the #data array */
     EliasFanoEncoder(const std::vector<T> &data, std::ofstream *sink, std::ofstream *sink_upper);
+
+    ~EliasFanoEncoder();
 
     /** Encodes the next number */
     void add(T value);
@@ -282,6 +284,11 @@ class EliasFanoEncoderBuffered {
   public:
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
 
+    EliasFanoEncoderBuffered(EliasFanoEncoderBuffered&&) = default;
+    EliasFanoEncoderBuffered& operator=(EliasFanoEncoderBuffered&&) = default;
+
+    ~EliasFanoEncoderBuffered();
+
     inline void add(const T &value) {
         buffer_.push_back(value);
         if (buffer_.size() == buffer_.capacity()) {
@@ -314,6 +321,11 @@ template <typename T, typename C>
 class EliasFanoEncoderBuffered<std::pair<T, C>> {
   public:
     EliasFanoEncoderBuffered(const std::string &file_name, size_t buffer_size);
+
+    EliasFanoEncoderBuffered(EliasFanoEncoderBuffered&&) = default;
+    EliasFanoEncoderBuffered& operator=(EliasFanoEncoderBuffered&&) = default;
+
+    ~EliasFanoEncoderBuffered();
 
     inline void add(const std::pair<T, C> &value) {
         buffer_.push_back(value.first);

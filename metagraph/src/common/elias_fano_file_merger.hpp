@@ -21,7 +21,7 @@ namespace common {
  * only for a small (<1000) number of elements.
  * @tparam T the actual heap element type; this is the type tested for equality
  */
-// Note: profiling shows that using a sorted vector instead of a std::priority queue is
+// Note: profiling shows that using a sorted vector instead of a std::priority_queue is
 // faster up to ~1000 elements.  Using an unsorted vector (faster insert,
 // slower pop()) is ~40% slower. Preventing duplicates in the heap so that we don't
 // need to test for dupes at pop time is ~60% slower.
@@ -33,7 +33,7 @@ class MergeHeap {
     using value_type = std::pair<T, uint32_t>;
 
   public:
-    void emplace(T el, uint32_t idx) {
+    inline void emplace(T el, uint32_t idx) {
         auto it = std::lower_bound(els.begin(), els.end(), el,
                                    [this](const value_type &p, const T &v) {
                                        return compare_(p.first, v);
@@ -41,15 +41,15 @@ class MergeHeap {
         els.emplace(it, el, idx);
     }
 
-    const value_type& top() const { return els.back(); }
+    inline const value_type& top() const { return els.back(); }
 
-    value_type pop() {
+    inline value_type pop() {
         value_type result = els.back();
         els.pop_back();
         return result;
     }
 
-    bool empty() const { return els.empty(); }
+    inline bool empty() const { return els.empty(); }
 
   private:
     // elements stored in decreasing order of the first tuple member
@@ -65,11 +65,11 @@ class ConcatDecoder {
         get_next();
     }
 
-    bool empty() const { return !next_.has_value(); }
+    inline bool empty() const { return !next_.has_value(); }
 
-    T top() const { return next_.value(); }
+    inline const T& top() const { return next_.value(); }
 
-    T pop() {
+    inline T pop() {
 #ifndef NDEBUG
         if (!next_.has_value())
             throw std::runtime_error("Attempt to pop an empty ConcatDecoder");
@@ -115,9 +115,9 @@ class MergeDecoder {
         }
     }
 
-    bool empty() const { return heap_.empty(); }
+    inline bool empty() const { return heap_.empty(); }
 
-    T top() const {
+    inline const T& top() const {
 #ifndef NDEBUG
         if (heap_.empty())
             throw std::runtime_error("Popping an empty MergeDecoder");
@@ -125,7 +125,7 @@ class MergeDecoder {
         return heap_.top().first;
     }
 
-    T pop() {
+    inline T pop() {
 #ifndef NDEBUG
         if (heap_.empty())
             throw std::runtime_error("Popping an empty MergeDecoder");
@@ -211,10 +211,20 @@ void merge_dummy(const std::vector<std::string> &sources,
                  std::vector<std::string> sources_no_count,
                  const std::function<void(const T &)> &on_new_item,
                  bool remove_sources = true) {
-    sources_no_count.insert(sources_no_count.end(), sources.begin(), sources.end());
-    MergeDecoder<T> decoder(sources_no_count, remove_sources);
+    MergeDecoder<T> decoder(sources, remove_sources);
+    MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
+    while (!decoder.empty() && !decoder_no_count.empty()) {
+        if (decoder.top() < decoder_no_count.top()) {
+            on_new_item(decoder.pop());
+        } else {
+            on_new_item(decoder_no_count.pop());
+        }
+    }
     while (!decoder.empty()) {
         on_new_item(decoder.pop());
+    }
+    while (!decoder_no_count.empty()) {
+        on_new_item(decoder_no_count.pop());
     }
 }
 
@@ -230,12 +240,15 @@ void merge_dummy(const std::vector<std::string> &sources,
                  bool remove_sources = true) {
     MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
     MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
-    while (!decoder.empty()) {
-        std::pair<T,C> next = decoder.pop();
-        while (!decoder_no_count.empty() && decoder_no_count.top() < next.first) {
+    while (!decoder.empty() && !decoder_no_count.empty()) {
+        if (decoder.top().first < decoder_no_count.top()) {
+            on_new_item(decoder.pop());
+        } else {
             on_new_item({ decoder_no_count.pop(), 0U });
         }
-        on_new_item(next);
+    }
+    while (!decoder.empty()) {
+        on_new_item(decoder.pop());
     }
     while (!decoder_no_count.empty()) {
         on_new_item({ decoder_no_count.pop(), 0U });

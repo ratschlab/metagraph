@@ -236,6 +236,11 @@ EliasFanoEncoder<T>::EliasFanoEncoder(const std::vector<T> &data,
 }
 
 template <typename T>
+EliasFanoEncoder<T>::~EliasFanoEncoder() {
+    assert(!sink_internal_.is_open());
+}
+
+template <typename T>
 void EliasFanoEncoder<T>::add(T value) {
 #ifndef NDEBUG
     assert(value >= last_value_);
@@ -526,6 +531,12 @@ EliasFanoEncoderBuffered<T>::EliasFanoEncoderBuffered(const std::string &file_na
 }
 
 template <typename T>
+EliasFanoEncoderBuffered<T>::~EliasFanoEncoderBuffered() {
+    assert(!sink_.is_open());
+}
+
+
+template <typename T>
 size_t EliasFanoEncoderBuffered<T>::finish() {
     encode_chunk();
     sink_.close();
@@ -550,6 +561,11 @@ EliasFanoEncoderBuffered<std::pair<T, C>>::EliasFanoEncoderBuffered(const std::s
     sink_second_ = std::ofstream(file_name + ".count", std::ios::binary | std::ios::out);
     buffer_.reserve(buffer_size);
     buffer_second_.reserve(buffer_size);
+}
+
+template <typename T, typename C>
+EliasFanoEncoderBuffered<std::pair<T, C>>::~EliasFanoEncoderBuffered() {
+    assert(!sink_.is_open());
 }
 
 template <typename T, typename C>

@@ -15,14 +15,12 @@ SortedSetDiskBase<T>::SortedSetDiskBase(std::function<void(storage_type *)> clea
                                         size_t num_threads,
                                         size_t reserved_num_elements,
                                         const std::filesystem::path &tmp_dir,
-                                        size_t max_disk_space_bytes,
-                                        size_t num_last_elements_cached)
+                                        size_t max_disk_space_bytes)
     : num_threads_(num_threads),
       reserved_num_elements_(reserved_num_elements),
       max_disk_space_bytes_(max_disk_space_bytes),
       chunk_file_prefix_(tmp_dir/"chunk_"),
-      merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT),
-                   num_last_elements_cached),
+      merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT)),
       cleanup_(cleanup) {
     if (reserved_num_elements == 0) {
         logger->error("SortedSetDisk buffer cannot have size 0");
