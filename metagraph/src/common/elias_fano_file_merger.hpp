@@ -67,7 +67,7 @@ class ConcatDecoder {
 
     bool empty() const { return !next_.has_value(); }
 
-    T top() const { return next_.value(); }
+    const T& top() const { return next_.value(); }
 
     T pop() {
 #ifndef NDEBUG
@@ -117,7 +117,7 @@ class MergeDecoder {
 
     bool empty() const { return heap_.empty(); }
 
-    T top() const {
+    const T& top() const {
 #ifndef NDEBUG
         if (heap_.empty())
             throw std::runtime_error("Popping an empty MergeDecoder");
