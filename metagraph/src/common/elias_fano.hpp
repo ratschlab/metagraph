@@ -19,7 +19,7 @@ namespace common {
  * The files store data that is ordered and the values in a file are smaller than the
  * values in the next file.
  */
-void concat(const std::vector<std::string> &files,  const std::string& result);
+void concat(const std::vector<std::string> &files, const std::string &result);
 
 /**
  * Elias-Fano encoder that streams the encoded result into a file.
