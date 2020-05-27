@@ -21,7 +21,7 @@ namespace common {
  * only for a small (<1000) number of elements.
  * @tparam T the actual heap element type; this is the type tested for equality
  */
-// Note: profiling shows that using a sorted vector instead of a std::priority queue is
+// Note: profiling shows that using a sorted vector instead of a std::priority_queue is
 // faster up to ~1000 elements.  Using an unsorted vector (faster insert,
 // slower pop()) is ~40% slower. Preventing duplicates in the heap so that we don't
 // need to test for dupes at pop time is ~60% slower.

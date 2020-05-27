@@ -331,6 +331,17 @@ generate_dummy_1_kmers(size_t k,
         common::MergeDecoder<T_INT> it(F_chunks, false);
         common::MergeDecoder<T_INT> dummy_sink_it(F_chunks, false);
 
+       // TODO: think about this
+       //
+       //   ***F*
+       //  $***F
+       //
+       //  N***F
+       //   ***F$
+       //
+       //   ***FA
+       //
+
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 1; c < ALPHABET_LEN; ++c) {
             W_chunks.push_back(original_split_by_F_W[(c - 1) * (ALPHABET_LEN - 1) + (F - 1)]);
@@ -421,8 +432,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             = generate_dummy_1_kmers(k, kmer_collector.num_threads(), dir, kmers);
 
     // stores the sorted original kmers and dummy-1 k-mers
-    std::vector<std::string> files_to_merge;
-    files_to_merge.push_back(dummy_sink_name);
+    std::vector<std::string> files_to_merge = { dummy_sink_name };
     std::vector<std::string> dummy_next_names(ALPHABET_LEN);
     // generate dummy k-mers of prefix length 1..k
     logger->trace("Starting generating dummy-1..k source k-mers...");
@@ -430,11 +440,6 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
         // this will compress all sorted dummy k-mers of given prefix length
         files_to_merge.push_back(dir/("dummy_l" + std::to_string(dummy_pref_len)));
         Encoder<INT> encoder(files_to_merge.back(), ENCODER_BUFFER_SIZE);
-
-        if (dummy_pref_len == 1) {
-            // add the main dummy source k-mer
-            encoder.add(0);
-        }
 
         std::vector<Encoder<INT>> dummy_next_chunks;
         for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
@@ -470,6 +475,9 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // at this point, we have the original k-mers and dummy-1 k-mers in original_and_dummy_l1,
     // the dummy-x k-mers in dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
+    // add the main dummy source k-mer
+    kmers->push(T());
+    // push all other dummy and non-dummy k-mers to |kmers|
     async_worker.enqueue([kmers, real_split_by_W, files_to_merge]() {
         std::function<void(const T_INT &)> on_new_item
                 = [kmers](const T_INT &v) { kmers->push(reinterpret_cast<const T &>(v)); };
