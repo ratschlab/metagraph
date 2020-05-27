@@ -211,10 +211,20 @@ void merge_dummy(const std::vector<std::string> &sources,
                  std::vector<std::string> sources_no_count,
                  const std::function<void(const T &)> &on_new_item,
                  bool remove_sources = true) {
-    sources_no_count.insert(sources_no_count.end(), sources.begin(), sources.end());
-    MergeDecoder<T> decoder(sources_no_count, remove_sources);
+    MergeDecoder<T> decoder(sources, remove_sources);
+    MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
+    while (!decoder.empty() && !decoder_no_count.empty()) {
+        if (decoder.top() < decoder_no_count.top()) {
+            on_new_item(decoder.pop());
+        } else {
+            on_new_item(decoder_no_count.pop());
+        }
+    }
     while (!decoder.empty()) {
         on_new_item(decoder.pop());
+    }
+    while (!decoder_no_count.empty()) {
+        on_new_item(decoder_no_count.pop());
     }
 }
 
@@ -230,12 +240,15 @@ void merge_dummy(const std::vector<std::string> &sources,
                  bool remove_sources = true) {
     MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
     MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
-    while (!decoder.empty()) {
-        std::pair<T,C> next = decoder.pop();
-        while (!decoder_no_count.empty() && decoder_no_count.top() < next.first) {
+    while (!decoder.empty() && !decoder_no_count.empty()) {
+        if (decoder.top().first < decoder_no_count.top()) {
+            on_new_item(decoder.pop());
+        } else {
             on_new_item({ decoder_no_count.pop(), 0U });
         }
-        on_new_item(next);
+    }
+    while (!decoder.empty()) {
+        on_new_item(decoder.pop());
     }
     while (!decoder_no_count.empty()) {
         on_new_item({ decoder_no_count.pop(), 0U });
