@@ -335,33 +335,33 @@ generate_dummy_1_kmers(size_t k,
         for (TAlphabet c = 1; c < ALPHABET_LEN; ++c) {
             W_chunks.push_back(original_split_by_F_W[(c - 1) * (ALPHABET_LEN - 1) + (F - 1)]);
         }
-        common::ConcatDecoder<T_INT> dummy_source_it(W_chunks);
+        common::ConcatDecoder<T_INT> sink_gen_it(W_chunks);
 
         while (!it.empty()) {
             KMER dummy_source(get_first(it.pop()));
-            // skip k-mers that would generate identical dummy k-mers
+            // skip k-mers that would generate identical source dummy k-mers
             skip_same_suffix(dummy_source, it, 0);
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
-            // Push all non-dummy kmers smaller than dummy source
-            while (!dummy_source_it.empty()
-                    && get_first(dummy_source_it.top()) <= dummy_source.data()) {
-                KMER v(get_first(dummy_source_it.pop()));
+            // generate dummy sink k-mers from all non-dummy kmers smaller than |dummy_source|
+            while (!sink_gen_it.empty()
+                    && get_first(sink_gen_it.top()) <= dummy_source.data()) {
+                KMER v(get_first(sink_gen_it.pop()));
                 // check the dummy sink k-mer corresponding to v for redundancy
                 handle_dummy_sink(k, v, dummy_sink_it, &dummy_sink_chunks[F]);
                 // skip k-mers with the same suffix as v, as they generate identical dummy sinks
-                skip_same_suffix(v, dummy_source_it, 1);
+                skip_same_suffix(v, sink_gen_it, 1);
             }
-            if (!dummy_source_it.empty()) {
-                KMER top(get_first(dummy_source_it.top()));
+            if (!sink_gen_it.empty()) {
+                KMER top(get_first(sink_gen_it.top()));
                 if (KMER::compare_suffix(top, dummy_source, 1)) {
                     continue;
                 }
             }
             dummy_l1_chunks[F].add(dummy_source.data());
         }
-        // handle leftover dummy_source_it
-        while (!dummy_source_it.empty()) {
-            handle_dummy_sink(k, KMER(get_first(dummy_source_it.pop())),
+        // handle leftover sink_gen_it
+        while (!sink_gen_it.empty()) {
+            handle_dummy_sink(k, KMER(get_first(sink_gen_it.pop())),
                               dummy_sink_it, &dummy_sink_chunks[F]);
         }
     }
