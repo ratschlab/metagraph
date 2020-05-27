@@ -29,15 +29,16 @@ namespace common {
 // inserting duplicates and merging them when popping from the heap, as we do now
 template <typename T, class Compare = std::greater<T>>
 class MergeHeap {
-    /** The heap stores pairs <Element, SourceIndex> */
-    using value_type = std::pair<T, uint32_t>;
-
   public:
+    /** The heap stores pairs <Element, SourceIndex> */
+    typedef std::pair<T, uint32_t> value_type;
+
     inline void emplace(T el, uint32_t idx) {
-        auto it = std::lower_bound(els.begin(), els.end(), el,
-                                   [this](const value_type &p, const T &v) {
-                                       return compare_(p.first, v);
-                                   });
+        auto it = els.begin();
+        auto end = els.end();
+        while (it != end && compare_(it->first, el)) {
+            ++it;
+        }
         els.emplace(it, el, idx);
     }
 
@@ -54,7 +55,7 @@ class MergeHeap {
   private:
     // elements stored in decreasing order of the first tuple member
     std::vector<value_type> els;
-    Compare compare_ = Compare();
+    Compare compare_;
 };
 
 template <typename T>
