@@ -469,7 +469,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
                       dummy_pref_len, num_kmers);
     }
     // remove the last chunks with .up and .count
-    const std::function<void(const INT &)> on_merge = [](const INT& ) {};
+    const std::function<void(const INT &)> on_merge = [](const INT &) {};
     common::merge_files(dummy_names, on_merge);
 
     // at this point, we have the original k-mers and dummy-1 k-mers in original_and_dummy_l1,

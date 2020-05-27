@@ -33,7 +33,7 @@ class MergeHeap {
     using value_type = std::pair<T, uint32_t>;
 
   public:
-    void emplace(T el, uint32_t idx) {
+    inline void emplace(T el, uint32_t idx) {
         auto it = std::lower_bound(els.begin(), els.end(), el,
                                    [this](const value_type &p, const T &v) {
                                        return compare_(p.first, v);
@@ -41,15 +41,15 @@ class MergeHeap {
         els.emplace(it, el, idx);
     }
 
-    const value_type& top() const { return els.back(); }
+    inline const value_type& top() const { return els.back(); }
 
-    value_type pop() {
+    inline value_type pop() {
         value_type result = els.back();
         els.pop_back();
         return result;
     }
 
-    bool empty() const { return els.empty(); }
+    inline bool empty() const { return els.empty(); }
 
   private:
     // elements stored in decreasing order of the first tuple member
@@ -65,11 +65,11 @@ class ConcatDecoder {
         get_next();
     }
 
-    bool empty() const { return !next_.has_value(); }
+    inline bool empty() const { return !next_.has_value(); }
 
-    const T& top() const { return next_.value(); }
+    inline const T& top() const { return next_.value(); }
 
-    T pop() {
+    inline T pop() {
 #ifndef NDEBUG
         if (!next_.has_value())
             throw std::runtime_error("Attempt to pop an empty ConcatDecoder");
@@ -115,9 +115,9 @@ class MergeDecoder {
         }
     }
 
-    bool empty() const { return heap_.empty(); }
+    inline bool empty() const { return heap_.empty(); }
 
-    const T& top() const {
+    inline const T& top() const {
 #ifndef NDEBUG
         if (heap_.empty())
             throw std::runtime_error("Popping an empty MergeDecoder");
@@ -125,7 +125,7 @@ class MergeDecoder {
         return heap_.top().first;
     }
 
-    T pop() {
+    inline T pop() {
 #ifndef NDEBUG
         if (heap_.empty())
             throw std::runtime_error("Popping an empty MergeDecoder");
