@@ -16,7 +16,7 @@ using common::ChunkedWaitQueue;
 TEST(WaitQueue, PushPop) {
     constexpr size_t buffer_size = 4;
     constexpr size_t fence_size = 1;
-    ChunkedWaitQueue<int32_t> under_test(buffer_size, fence_size);
+    ChunkedWaitQueue<int32_t> under_test(buffer_size);
     under_test.push(1);
     under_test.push(2);
     under_test.push(3);
@@ -40,7 +40,7 @@ TEST(WaitQueue, PushPop) {
 }
 
 TEST(WaitQueue, Shutdown) {
-        ChunkedWaitQueue<std::string> under_test(20, 3);
+        ChunkedWaitQueue<std::string> under_test(20);
         under_test.shutdown();
         std::string v;
         EXPECT_TRUE(under_test.begin() == under_test.end());
@@ -48,7 +48,7 @@ TEST(WaitQueue, Shutdown) {
 
 void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
     for (uint32_t fence_size = 1; fence_size <= 11; fence_size += 5) {
-        ChunkedWaitQueue<int32_t> under_test(50, fence_size);
+        ChunkedWaitQueue<int32_t> under_test(50);
         struct Receiver {
             ChunkedWaitQueue<int32_t> *const under_test;
             uint32_t delay_read_ms;
@@ -62,13 +62,6 @@ void writeReadWaitQueue(uint32_t delay_read_ms, uint32_t delay_write_ms) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(delay_read_ms));
                     }
                     int32_t v = *it;
-                    uint32_t steps = std::min(std::min(10U, count), fence_size);
-                    for (uint32_t i = 0; i < steps; ++i) {
-                        --it;
-                    }
-                    for (uint32_t i = 0; i < steps; ++i) {
-                        ++it;
-                    }
                     EXPECT_EQ(v, *it);
                     pop_result.push_back(*it);
                 }

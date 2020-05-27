@@ -47,8 +47,7 @@ class SortedSetDiskBase {
                       size_t num_threads,
                       size_t reserved_num_elements,
                       const std::filesystem::path &tmp_dir,
-                      size_t max_disk_space_bytes,
-                      size_t num_last_elements_cached);
+                      size_t max_disk_space_bytes);
 
     virtual ~SortedSetDiskBase() {
         // remove the files that have not been requested to merge

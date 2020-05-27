@@ -46,14 +46,12 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
             const std::filesystem::path &tmp_dir = "/tmp/",
-            size_t max_disk_space_bytes = 1e9,
-            size_t num_last_elements_cached = 100)
+            size_t max_disk_space_bytes = 1e9)
         : SortedSetDiskBase<value_type>(cleanup,
                                         num_threads,
                                         reserved_num_elements,
                                         tmp_dir,
-                                        max_disk_space_bytes,
-                                        num_last_elements_cached) {}
+                                        max_disk_space_bytes) {}
 
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 

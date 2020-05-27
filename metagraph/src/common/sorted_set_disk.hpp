@@ -48,14 +48,12 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
             const std::filesystem::path &tmp_dir = "/tmp/",
-            size_t max_disk_space_bytes = 1e9,
-            size_t num_last_elements_cached = 100)
+            size_t max_disk_space_bytes = 1e9)
         : SortedSetDiskBase<T>(cleanup,
                                num_threads,
                                reserved_num_elements,
                                tmp_dir,
-                               max_disk_space_bytes,
-                               num_last_elements_cached) {}
+                               max_disk_space_bytes) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is
