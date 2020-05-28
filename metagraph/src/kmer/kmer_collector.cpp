@@ -133,50 +133,6 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
     }
 }
 
-// removes redundant dummy BOSS k-mers from a sorted list
-template <class T>
-void cleanup_boss_kmers(Vector<get_int_t<T>> *kmers_int) {
-    static_assert(sizeof(T) == sizeof(get_int_t<T>));
-    using KMER = utils::get_first_type_t<T>;
-    Vector<T> *kmers = reinterpret_cast<Vector<T> *> (kmers_int);
-
-    assert(std::is_sorted(kmers->begin(), kmers->end(), utils::LessFirst()));
-    assert(std::unique(kmers->begin(), kmers->end(), utils::EqualFirst()) == kmers->end());
-
-    if (kmers->size() < 2)
-        return;
-
-    // The last k-mer is never redundant. Start with the next one.
-    uint64_t last = kmers->size() - 1;
-
-    typename KMER::CharType edge_label, node_last_char;
-
-    std::vector<uint64_t> last_kmer(1llu << KMER::kBitsPerChar, kmers->size());
-
-    last_kmer[utils::get_first(kmers->at(last))[0]] = last;
-
-    for (int64_t i = last - 1; i >= 0; --i) {
-        const KMER &kmer = utils::get_first(kmers->at(i));
-        node_last_char = kmer[1];
-        edge_label = kmer[0];
-
-        if (!edge_label) {
-            // sink dummy k-mer
-
-            // skip if redundant
-            if (node_last_char && KMER::compare_suffix(kmer, utils::get_first(kmers->at(last)), 0))
-                continue;
-        }
-
-        // the k-mer is either not dummy, or not redundant -> keep the k-mer
-        kmers->at(--last) = kmers->at(i);
-        last_kmer[edge_label] = last;
-    }
-
-    kmers->erase(kmers->begin(), kmers->begin() + last);
-}
-
-
 template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::KmerCollector(size_t k,
@@ -196,18 +152,15 @@ KmerCollector<KMER, KmerExtractor, Container>
         both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
 
-    std::function<void(Vector<Value> *)> cleanup = [](Vector<Value> *) {};
-    if constexpr(std::is_same_v<Extractor, KmerExtractorBOSS>)
-        cleanup = cleanup_boss_kmers<get_kmer_t<KMER, Value>>;
-
+    std::function<void(Vector<Value> *)> no_cleanup = [](Vector<Value> *) {};
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
     if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
         tmp_dir_ = utils::create_temp_dir(tmp_dir, "kmers");
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_,
+        kmers_ = std::make_unique<Container>(no_cleanup, num_threads, buffer_size_,
                                              tmp_dir_, max_disk_space);
     } else {
-        kmers_ = std::make_unique<Container>(cleanup, num_threads, buffer_size_);
+        kmers_ = std::make_unique<Container>(no_cleanup, num_threads, buffer_size_);
     }
     common::logger->trace(
             "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",

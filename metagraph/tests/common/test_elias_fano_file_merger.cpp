@@ -18,11 +18,10 @@ using namespace mg;
 template <typename T>
 class EliasFanoFileMergerTest : public ::testing::Test {};
 
-typedef ::testing::Types<uint32_t,
-                         uint64_t,
+typedef ::testing::Types<uint64_t,
                          sdsl::uint128_t,
                          sdsl::uint256_t,
-                         std::pair<uint32_t, uint32_t>>
+                         std::pair<uint64_t, uint32_t>>
         ValueTypes;
 
 TYPED_TEST_SUITE(EliasFanoFileMergerTest, ValueTypes);
@@ -109,7 +108,7 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeEmpty) {
     }
     std::function<void(const TypeParam &v)> on_new_item
             = [](const TypeParam &) { FAIL() << "Should not be called."; };
-    common::merge_dummy(file_names[0], file_names, on_new_item, false);
+    common::merge_dummy({ file_names[0] }, file_names, on_new_item, false);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, MergeIdentical) {
@@ -137,11 +136,13 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeIdentical) {
     std::vector<utils::TempFile> files(FILE_COUNT);
     std::vector<std::string> file_names;
     using T = utils::get_first_type_t<TypeParam>;
+    std::vector<T> expected;
     for (uint32_t i = 0; i < FILE_COUNT; ++i) {
         file_names.push_back(files[i].name());
         std::vector<T> values;
         for (uint32_t j = 0; j < 10; j = j + 1) {
             values.push_back(T(2*j));
+            expected.push_back(values.back());
         }
         do_encode(values, file_names.back());
     }
@@ -149,15 +150,17 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeIdentical) {
     std::vector<TypeParam> values;
     for (uint32_t j = 0; j < 10; j = j + 1) {
         push_back(values, static_cast<utils::get_first_type_t<TypeParam>>(2*j+1));
+        expected.push_back(utils::get_first(values.back()));
     }
+    std::sort(expected.begin(), expected.end());
     do_encode(values, file.name());
-    std::function<void(const TypeParam &v)> on_new_item = [](const TypeParam &v) {
+    std::function<void(const TypeParam &v)> on_new_item = [&expected](const TypeParam &v) {
         static uint32_t i = 0;
-        EXPECT_EQ(i, utils::get_first(v));
+        EXPECT_EQ(expected[i], utils::get_first(v)) << i;
         i++;
     };
 
-    common::merge_dummy(file.name(), file_names, on_new_item);
+    common::merge_dummy({ file.name() }, file_names, on_new_item);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, DummyMergeDistinct) {
@@ -186,7 +189,7 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeDistinct) {
         i++;
     };
 
-    common::merge_dummy(file.name(), file_names, on_new_item);
+    common::merge_dummy({ file.name() }, file_names, on_new_item);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, MergeRandom) {
@@ -215,8 +218,8 @@ TYPED_TEST(EliasFanoFileMergerTest, MergeRandom) {
     }
     std::function<void(const TypeParam &v)> on_new_item = [expected](const TypeParam &v) {
         static uint32_t i = 0;
-        ASSERT_LT(i, expected.size());
-        ASSERT_EQ(expected[i], v);
+        EXPECT_LT(i, expected.size());
+        EXPECT_EQ(expected[i], v) << i;
         i++;
     };
     common::merge_files(file_names, on_new_item);
@@ -256,20 +259,13 @@ TYPED_TEST(EliasFanoFileMergerTest, DummyMergeRandom) {
     do_encode(values, file.name());
     expected.insert(expected.end(), values.begin(), values.end());
 
-
-    if constexpr (utils::is_pair_v<TypeParam>) {
-        remove_duplicates(&expected);
-    } else {
-        expected.erase(std::unique(expected.begin(), expected.end()), expected.end());
-    }
-
     std::function<void(const TypeParam &v)> on_new_item = [expected](const TypeParam &v) {
         static uint32_t i = 0;
         ASSERT_LT(i, expected.size());
         ASSERT_EQ(expected[i], v);
         i++;
     };
-    common::merge_dummy(file.name(), file_names, on_new_item);
+    common::merge_dummy({ file.name() }, file_names, on_new_item);
 }
 
 } // namespace
