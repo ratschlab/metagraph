@@ -9,6 +9,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 
 using mg::common::logger;
+using mg::common::get_verbose;
 
 
 BRWTBottomUpBuilder::Partitioner
@@ -202,7 +203,7 @@ BRWT BRWTBottomUpBuilder::build(
     std::mutex done_mu;
 
     ProgressBar progress_bar(linkage.size(), "Building BRWT",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !get_verbose());
 
     uint64_t num_leaves = 0;
     uint64_t num_rows = 0;
@@ -393,7 +394,7 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
         current_partition.assign(groups.size(), {});
 
         ProgressBar progress_bar(groups.size(), "Building BRWT level",
-                                 std::cerr, !utils::get_verbose());
+                                 std::cerr, !get_verbose());
 
         #pragma omp parallel for num_threads(num_nodes_parallel) schedule(dynamic)
         for (size_t g = 0; g < groups.size(); ++g) {
@@ -448,7 +449,7 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix, uint64_t max_arity, size_t num_thre
     });
 
     ProgressBar progress_bar(parents.size(), "Relax Multi-BRWT",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !get_verbose());
 
     for (BRWT *parent : parents) {
         assert(parent->child_nodes_.size());

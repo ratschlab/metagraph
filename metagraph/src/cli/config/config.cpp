@@ -5,7 +5,6 @@
 #include <unordered_set>
 #include <filesystem>
 
-#include "common/algorithms.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
@@ -97,7 +96,7 @@ Config::Config(int argc, char *argv[]) {
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
-            utils::set_verbose(true);
+            common::set_verbose(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--print-col-names")) {

@@ -3,7 +3,6 @@
 #include <fmt/format.h>
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
@@ -15,7 +14,7 @@
 #include "load/load_annotation.hpp"
 
 using mg::common::logger;
-using utils::get_verbose;
+using mg::common::get_verbose;
 using namespace annotate;
 
 typedef MultiLabelEncoded<std::string> Annotator;

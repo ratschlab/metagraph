@@ -2,7 +2,6 @@
 
 #include <progress_bar.hpp>
 
-#include "common/algorithms.hpp"
 #include "common/logger.hpp"
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
