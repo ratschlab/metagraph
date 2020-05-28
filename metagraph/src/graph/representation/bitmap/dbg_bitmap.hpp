@@ -7,7 +7,7 @@
 #include "kmer/kmer_extractor.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
-namespace mg {
+namespace mtg {
 namespace bitmap_graph {
 
 class DBGBitmapConstructor;
@@ -126,6 +126,6 @@ class DBGBitmap : public DeBruijnGraph {
 };
 
 } // namespace bitmap_graph
-} // namespace mg
+} // namespace mtg
 
 #endif // __DBG_BITMAP_HPP__

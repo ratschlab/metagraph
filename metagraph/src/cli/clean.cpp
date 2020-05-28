@@ -16,7 +16,8 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
+using mtg::seq_io::ExtendedFastaWriter;
 
 
 int clean_graph(Config *config) {
@@ -151,7 +152,7 @@ int clean_graph(Config *config) {
             });
 
         } else {
-            FastaWriter writer(outfbase, config->header,
+            mtg::seq_io::FastaWriter writer(outfbase, config->header,
                                config->enumerate_out_sequences,
                                get_num_threads() > 1);
 

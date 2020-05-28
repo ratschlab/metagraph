@@ -5,7 +5,7 @@
 #include "common/algorithms.hpp"
 #include "common/logger.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 
 
 template <typename NodeType>

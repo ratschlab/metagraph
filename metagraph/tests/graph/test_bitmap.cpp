@@ -9,10 +9,10 @@
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 
-namespace {
-using namespace mg::bitmap_graph;
 
-KSEQ_INIT(gzFile, gzread);
+namespace {
+
+using namespace mtg::bitmap_graph;
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";

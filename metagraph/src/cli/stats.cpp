@@ -15,7 +15,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotation.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 using utils::get_verbose;
 
 typedef annotate::MultiLabelEncoded<std::string> Annotator;

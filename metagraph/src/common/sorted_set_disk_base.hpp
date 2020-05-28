@@ -13,7 +13,7 @@
 #include "common/vector.hpp"
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 /**
@@ -205,6 +205,6 @@ class SortedSetDiskBase {
 };
 
 } // namespace common
-} // namespace mg
+} // namespace mtg
 
 #endif // __SORTED_SET_DISK_BASE_HPP__

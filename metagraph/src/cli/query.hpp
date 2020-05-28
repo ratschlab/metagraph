@@ -10,8 +10,12 @@ class AnnotatedDBG;
 class IDBGAligner;
 class Config;
 class ThreadPool;
-class FastaParser;
 
+namespace mtg {
+namespace seq_io {
+class FastaParser;
+} // namespace seq_io
+} // namespace mtg
 
 using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
@@ -52,7 +56,7 @@ class QueryExecutor {
     const IDBGAligner *aligner_;
     ThreadPool &thread_pool_;
 
-    void batched_query_fasta(FastaParser &fasta_parser,
+    void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
                              const std::function<void(const std::string &)> &callback);
 };
 

@@ -16,7 +16,7 @@
 #include "cli/transform_graph.hpp"
 #include "cli/transform_annotation.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 
 
 int main(int argc, char *argv[]) {

@@ -5,6 +5,10 @@
 #include <gtest/gtest.h>
 
 
+namespace {
+
+using namespace mtg;
+
 TEST(DBGSuccinct, get_degree_with_source_dummy) {
     for (size_t k = 2; k < 10; ++k) {
         auto graph = std::make_unique<DBGSuccinct>(k);
@@ -494,3 +498,5 @@ TEST(DBGSuccinct, CallNodesWithSuffixMultipleInOut) {
     EXPECT_EQ(ref_nodes, nodes) << *graph;
     EXPECT_EQ(ref_node_str, node_str) << *graph;
 }
+
+} // namespace

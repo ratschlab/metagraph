@@ -5,7 +5,7 @@
 #include "common/logger.hpp"
 #include "server_utils.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 
 /**
  * Compress a STL string using zlib with given compression level and return

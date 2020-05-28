@@ -964,7 +964,7 @@ int main(int argc, char *argv[]) {
 
                     std::vector<uint64_t> hist;
 
-                    kmc::read_kmers(file, [&](std::string_view, uint64_t count) {
+                    mtg::seq_io::read_kmers(file, [&](std::string_view, uint64_t count) {
                         min_count = std::min(min_count, count);
                         max_count = std::max(max_count, count);
                         sum_counts += count;

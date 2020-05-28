@@ -8,6 +8,10 @@
 #include "common/logger.hpp"
 
 
+namespace {
+
+using namespace mtg;
+
 #ifdef _NO_DEATH_TEST
 // Disable death tests
 
@@ -26,10 +30,10 @@
 #else
 // Define death tests without error messages in log
 #define ASSERT_DEATH_SILENT(...) \
-    mg::common::logger->set_level(spdlog::level::critical); \
+    mtg::common::logger->set_level(spdlog::level::critical); \
     ASSERT_DEATH(__VA_ARGS__)
 #define EXPECT_DEATH_SILENT(...) \
-    mg::common::logger->set_level(spdlog::level::critical); \
+    mtg::common::logger->set_level(spdlog::level::critical); \
     EXPECT_DEATH(__VA_ARGS__)
 
 #endif // _NO_DEATH_TEST
@@ -62,5 +66,7 @@ inline std::set<typename Container::value_type> convert_to_set(const Container &
 inline std::set<std::string> convert_to_set(const std::vector<std::string> &vector) {
     return std::set<std::string>(vector.begin(), vector.end());
 }
+
+} // namespace
 
 #endif // __TEST_HELPERS_HPP__

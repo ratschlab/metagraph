@@ -3,7 +3,7 @@
 #include "common/sorted_set_disk_base.hpp"
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 /**
@@ -80,4 +80,4 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
 };
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

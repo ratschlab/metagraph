@@ -7,7 +7,7 @@
 #include <sdsl/uint256_t.hpp>
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 template <typename T>
@@ -24,4 +24,4 @@ template class SortedSetDisk<sdsl::uint128_t>;
 template class SortedSetDisk<sdsl::uint256_t>;
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

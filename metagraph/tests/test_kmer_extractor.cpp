@@ -7,6 +7,8 @@
 #include "common/seq_tools/reverse_complement.hpp"
 
 
+namespace {
+
 template <typename Kmer>
 class ExtractKmers2Bit : public ::testing::Test { };
 
@@ -333,3 +335,5 @@ TYPED_TEST(ExtractKmers2Bit, ExtractKmersFromStringAppend) {
     );
     ASSERT_EQ(499u * 2, result.size());
 }
+
+} // namespace

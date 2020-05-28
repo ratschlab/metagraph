@@ -15,7 +15,7 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 
 using utils::remove_suffix;
-using mg::common::logger;
+using mtg::common::logger;
 
 typedef DBGSuccinct::node_index node_index;
 

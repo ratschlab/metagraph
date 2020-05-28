@@ -11,7 +11,7 @@
 #include "load/load_graph.hpp"
 #include "stats.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 using utils::get_verbose;
 
 

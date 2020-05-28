@@ -5,7 +5,8 @@
 #include <string>
 
 
-namespace kmc {
+namespace mtg {
+namespace seq_io {
 
 // Read k-mers from KMC database.
 // This retrieves only canonical k-mers from canonical
@@ -31,6 +32,7 @@ void read_kmers(const std::string &kmc_filename,
                 uint64_t min_count = 1,
                 uint64_t max_count = -1);
 
-} // namespace kmc
+} // namespace seq_io
+} // namespace mtg
 
 #endif // __KMC_KMERS__

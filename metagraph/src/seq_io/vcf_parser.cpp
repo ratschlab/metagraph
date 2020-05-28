@@ -5,6 +5,9 @@
 #include <filesystem>
 
 
+namespace mtg {
+namespace seq_io {
+
 static char passfilt[] = "PASS";
 
 
@@ -172,3 +175,6 @@ bool VCFParser::read_next_line() {
 
     return true;
 }
+
+} // namespace seq_io
+} // namespace mtg

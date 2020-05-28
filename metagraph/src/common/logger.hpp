@@ -2,8 +2,8 @@
 #include <spdlog/fmt/ostr.h> // for logging custom classes
 #include <spdlog/spdlog.h>
 
-namespace mg {
+namespace mtg {
 namespace common {
 extern std::shared_ptr<spdlog::logger> logger;
 } // namespace common
-} // namespace mg
+} // namespace mtg

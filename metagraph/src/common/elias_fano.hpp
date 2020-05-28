@@ -11,7 +11,7 @@
 #include <sdsl/uint256_t.hpp>
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 /**
@@ -352,4 +352,4 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
 };
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

@@ -15,10 +15,10 @@
 #include "kmer_extractor.hpp"
 #include "kmer_to_int_converter.hpp"
 
-namespace mg {
+namespace mtg {
 namespace kmer {
 
-using namespace mg;
+using namespace mtg;
 
 const size_t kLargeBufferSize = 1'000'000;
 const size_t kBufferSize = 100'000;
@@ -246,4 +246,4 @@ INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128)
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256)
 
 } // namespace kmer
-} // namespace mg
+} // namespace mtg

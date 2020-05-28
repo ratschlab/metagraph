@@ -5,6 +5,12 @@
 
 #include "seq_io/sequence_io.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::seq_io;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/transcripts_1000.fa";
 const std::string dump_filename = test_data_dir + "/dump.fasta.gz";
@@ -23,7 +29,7 @@ TEST(FastaFile, iterator_read) {
 
 TEST(FastaFile, full_iterator_read_empty) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
     }
 
     size_t num_records = 0;
@@ -40,7 +46,7 @@ TEST(FastaFile, full_iterator_read_empty) {
 
 TEST(FastaFile, full_iterator_read_1K) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 1'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -60,7 +66,7 @@ TEST(FastaFile, full_iterator_read_1K) {
 
 TEST(FastaFile, full_iterator_read_100K) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 100'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -80,7 +86,7 @@ TEST(FastaFile, full_iterator_read_100K) {
 
 TEST(FastaFile, full_iterator_read_100K_async) {
     {
-        FastaWriter writer(dump_filename, "seq", true, true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true, true);
         for (size_t i = 0; i < 100'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -100,7 +106,7 @@ TEST(FastaFile, full_iterator_read_100K_async) {
 
 TEST(FastaFile, full_iterator_read_100K_multithreaded) {
     {
-        FastaWriter writer(dump_filename, "seq", true, true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true, true);
         #pragma omp parallel for num_threads(2)
         for (size_t i = 0; i < 100'000; ++i) {
             std::string seq(i % 1'000, 'A');
@@ -125,7 +131,7 @@ TEST(FastaFile, full_iterator_read_100K_multithreaded) {
 // test that seek works fast so we can copy an iterator very quickly
 TEST(FastaFile, full_iterator_read_100K_fast_copy) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 100'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -151,7 +157,7 @@ TEST(FastaFile, full_iterator_read_100K_fast_copy) {
 
 TEST(FastaFile, twice_iterator_read_empty) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
     }
 
     FastaParser parser(dump_filename);
@@ -180,7 +186,7 @@ TEST(FastaFile, twice_iterator_read_empty) {
 
 TEST(FastaFile, twice_full_iterator_read_1K) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 1'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -213,7 +219,7 @@ TEST(FastaFile, twice_full_iterator_read_1K) {
 
 TEST(FastaFile, twice_iterator_read_empty_with_move) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
     }
 
     FastaParser parser(dump_filename);
@@ -242,7 +248,7 @@ TEST(FastaFile, twice_iterator_read_empty_with_move) {
 
 TEST(FastaFile, twice_full_iterator_read_1K_with_move) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 1'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -274,7 +280,7 @@ TEST(FastaFile, twice_full_iterator_read_1K_with_move) {
 
 TEST(FastaFile, iterator_compare) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 1'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -297,7 +303,7 @@ TEST(FastaFile, iterator_compare) {
 
 TEST(FastaFile, iterator_read_1M_multiple_copies) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         writer.write(std::string(1'000'000, 'A'));
         writer.write(std::string(2'000'000, 'C'));
         writer.write(std::string(3'000'000, 'G'));
@@ -417,7 +423,7 @@ TEST(FastaFileWithCanonical, iterator_read) {
 
 TEST(FastaFileWithCanonical, full_iterator_read_empty) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
     }
 
     size_t num_records = 0;
@@ -434,7 +440,7 @@ TEST(FastaFileWithCanonical, full_iterator_read_empty) {
 
 TEST(FastaFileWithCanonical, full_iterator_read_1K) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 1'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -454,7 +460,7 @@ TEST(FastaFileWithCanonical, full_iterator_read_1K) {
 
 TEST(FastaFileWithCanonical, full_iterator_read_100K) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 100'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -475,7 +481,7 @@ TEST(FastaFileWithCanonical, full_iterator_read_100K) {
 // test that seek works fast so we can copy an iterator very quickly
 TEST(FastaFileWithCanonical, full_iterator_read_100K_fast_copy) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 100'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -501,7 +507,7 @@ TEST(FastaFileWithCanonical, full_iterator_read_100K_fast_copy) {
 
 TEST(FastaFileWithCanonical, twice_iterator_read_empty) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
     }
 
     FastaParser parser(dump_filename, true);
@@ -530,7 +536,7 @@ TEST(FastaFileWithCanonical, twice_iterator_read_empty) {
 
 TEST(FastaFileWithCanonical, twice_full_iterator_read_1K) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 1'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -563,7 +569,7 @@ TEST(FastaFileWithCanonical, twice_full_iterator_read_1K) {
 
 TEST(FastaFileWithCanonical, twice_iterator_read_empty_with_move) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
     }
 
     FastaParser parser(dump_filename, true);
@@ -592,7 +598,7 @@ TEST(FastaFileWithCanonical, twice_iterator_read_empty_with_move) {
 
 TEST(FastaFileWithCanonical, twice_full_iterator_read_1K_with_move) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 1'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -624,7 +630,7 @@ TEST(FastaFileWithCanonical, twice_full_iterator_read_1K_with_move) {
 
 TEST(FastaFileWithCanonical, iterator_compare) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         for (size_t i = 0; i < 1'000; ++i) {
             writer.write(std::string(i % 1'000, 'A'));
         }
@@ -647,7 +653,7 @@ TEST(FastaFileWithCanonical, iterator_compare) {
 
 TEST(FastaFileWithCanonical, iterator_read_1M_multiple_copies) {
     {
-        FastaWriter writer(dump_filename, "seq", true);
+        mtg::seq_io::FastaWriter writer(dump_filename, "seq", true);
         writer.write(std::string(1'000'000, 'A'));
         writer.write(std::string(2'000'000, 'C'));
         writer.write(std::string(3'000'000, 'G'));
@@ -772,3 +778,5 @@ TEST(FastaFromString, read_fasta_from_string) {
 
     EXPECT_EQ(seqs_cnt, nr_seqs);
 }
+
+} // namespace

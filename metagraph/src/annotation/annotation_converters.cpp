@@ -21,7 +21,7 @@
 
 namespace annotate {
 
-using mg::common::logger;
+using mtg::common::logger;
 typedef LabelEncoder<std::string> LEncoder;
 
 size_t kNumRowsInBlock = 50'000;

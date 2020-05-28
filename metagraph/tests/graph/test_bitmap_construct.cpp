@@ -20,12 +20,11 @@
 #include "common/sorted_set.hpp"
 #include "kmer/kmer_collector.hpp"
 
+
 namespace {
-using namespace mg::bitmap_graph;
-using namespace mg;
 
-
-KSEQ_INIT(gzFile, gzread);
+using namespace mtg;
+using namespace mtg::bitmap_graph;
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
@@ -207,7 +206,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     kmers->try_reserve(reserved_capacity);
     using KMER_INT = typename KMER::WordType ;
     kmer::extract_kmers<KMER, KmerExtractor2Bit, common::SortedSet<KMER_INT>>(
-        [reads](mg::kmer::CallString callback) {
+        [reads](mtg::kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
         k, false, kmers, suffix

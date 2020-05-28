@@ -33,7 +33,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
         return Config::AnnotationType::RBFish;
 
     } else {
-        mg::common::logger->error("Unknown annotation format in '{}'", filename);
+        mtg::common::logger->error("Unknown annotation format in '{}'", filename);
         exit(1);
     }
 }

@@ -7,7 +7,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 
 
 int assemble(Config *config) {
@@ -62,7 +62,7 @@ int assemble(Config *config) {
         );
     }
 
-    FastaWriter writer(config->outfbase, config->header,
+    mtg::seq_io::FastaWriter writer(config->outfbase, config->header,
                        config->enumerate_out_sequences,
                        get_num_threads() > 1);
 

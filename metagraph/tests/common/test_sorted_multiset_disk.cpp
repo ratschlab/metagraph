@@ -14,7 +14,7 @@
 
 
 namespace {
-using namespace mg;
+using namespace mtg;
 
 template <typename T>
 class SortedMultisetDiskTest : public ::testing::Test {};

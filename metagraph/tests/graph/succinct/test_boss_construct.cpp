@@ -19,11 +19,11 @@
 #include "kmer/kmer_collector.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
-namespace {
-using namespace mg;
-using namespace mg::succinct;
 
-KSEQ_INIT(gzFile, gzread);
+namespace {
+
+using namespace mtg;
+using namespace mtg::succinct;
 
 const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";

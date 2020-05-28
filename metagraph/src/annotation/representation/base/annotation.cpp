@@ -61,7 +61,7 @@ void MultiLabelEncoded<LabelType>
         try {
             index_to_label[label_encoder_.encode(pair.first)] = pair.second;
         } catch (const std::out_of_range &) {
-            mg::common::logger->warn("Label '{}' not found"
+            mtg::common::logger->warn("Label '{}' not found"
                                      ", instruction '{} -> {}' skipped",
                                      pair.first, pair.first, pair.second);
         }
@@ -73,7 +73,7 @@ void MultiLabelEncoded<LabelType>
     for (const auto &label : index_to_label) {
         if (label_encoder_.label_exists(label)) {
             // no exception -> there already exists a column with this name
-            mg::common::logger->error("Detected multiple labels renamed to '{}'"
+            mtg::common::logger->error("Detected multiple labels renamed to '{}'"
                                       ". Annotation merge is not implemented"
                                       " for this annotation type.", label);
             exit(1);

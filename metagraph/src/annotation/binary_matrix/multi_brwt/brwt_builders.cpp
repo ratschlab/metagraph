@@ -8,7 +8,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 
 
 BRWTBottomUpBuilder::Partitioner

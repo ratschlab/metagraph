@@ -4,7 +4,7 @@
 #include "common/sorted_set_disk_base.hpp"
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 /**
@@ -72,6 +72,6 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
 };
 
 } // namespace common
-} // namespace mg
+} // namespace mtg
 
 #endif // __SORTED_SET_DISK_HPP__

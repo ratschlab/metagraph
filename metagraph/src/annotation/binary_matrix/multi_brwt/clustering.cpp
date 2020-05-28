@@ -231,7 +231,7 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
             = utils::arange<uint64_t>(0, columns.size());
 
     for (size_t level = 1; columns.size() > 1; ++level) {
-        mg::common::logger->trace("Clustering: level {}", level);
+        mtg::common::logger->trace("Clustering: level {}", level);
 
         Partition groups = greedy_matching(columns, num_threads);
 

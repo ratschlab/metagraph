@@ -14,7 +14,7 @@
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 using utils::get_verbose;
 using namespace annotate;
 

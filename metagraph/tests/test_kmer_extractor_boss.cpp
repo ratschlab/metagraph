@@ -11,6 +11,10 @@
 #include "common/seq_tools/reverse_complement.hpp"
 
 
+namespace {
+
+using namespace mtg;
+
 template <typename Kmer>
 class ExtractKmers : public ::testing::Test { };
 
@@ -363,3 +367,5 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringAppend) {
     );
     ASSERT_EQ(499u * 2, result.size());
 }
+
+} // namespace

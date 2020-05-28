@@ -10,11 +10,11 @@
 #include "kmer/kmer_collector.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 
-namespace mg {
+namespace mtg {
 namespace bitmap_graph {
 
-using namespace mg;
-using mg::common::logger;
+using namespace mtg;
+using mtg::common::logger;
 
 
 template <typename KmerCollector>
@@ -320,4 +320,4 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
 }
 
 } // namespace bitmap_graph
-} // namespace mg
+} // namespace mtg

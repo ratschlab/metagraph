@@ -11,9 +11,10 @@
 #include "common/utils/file_utils.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
+
 namespace {
 
-using namespace mg;
+using namespace mtg;
 
 template <typename T>
 class EliasFanoFileMergerTest : public ::testing::Test {};

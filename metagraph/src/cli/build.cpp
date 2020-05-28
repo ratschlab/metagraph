@@ -17,10 +17,10 @@
 #include "parse_sequences.hpp"
 #include "stats.hpp"
 
-using mg::common::logger;
+using namespace mtg::bitmap_graph;
+using namespace mtg::succinct;
+using mtg::common::logger;
 using utils::get_verbose;
-using namespace mg::bitmap_graph;
-using namespace mg::succinct;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
@@ -117,8 +117,8 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                config->tmp_dir.empty() ? mg::kmer::ContainerType::VECTOR
-                                        : mg::kmer::ContainerType::VECTOR_DISK,
+                config->tmp_dir.empty() ? mtg::kmer::ContainerType::VECTOR
+                                        : mtg::kmer::ContainerType::VECTOR_DISK,
                 config->tmp_dir,
                 config->disk_cap_bytes
             );

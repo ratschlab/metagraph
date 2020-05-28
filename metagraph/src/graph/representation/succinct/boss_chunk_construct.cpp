@@ -16,10 +16,10 @@
 #include "kmer/kmer_to_int_converter.hpp"
 #include "boss_chunk.hpp"
 
-namespace mg {
+namespace mtg {
 namespace succinct {
 
-using namespace mg;
+using namespace mtg;
 using common::logger;
 using common::ChunkedWaitQueue;
 using kmer::KmerCollector;
@@ -714,4 +714,4 @@ IBOSSChunkConstructor::initialize(size_t k,
 }
 
 } // namespace succinct
-} // namespace mg
+} // namespace mtg

@@ -17,7 +17,7 @@
 #include "config/config.hpp"
 #include "parse_sequences.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 using utils::get_verbose;
 
 
