@@ -15,7 +15,7 @@
 
 namespace {
 
-using namespace mtg;
+using namespace mtg::kmer;
 
 typedef uint8_t TAlphabet;
 

@@ -15,6 +15,7 @@
 #include "kmer_extractor.hpp"
 #include "kmer_to_int_converter.hpp"
 
+
 namespace mtg {
 namespace kmer {
 

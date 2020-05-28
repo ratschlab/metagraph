@@ -19,6 +19,7 @@
 
 using namespace mtg::bitmap_graph;
 using namespace mtg::succinct;
+using namespace mtg::kmer;
 using mtg::common::logger;
 using utils::get_verbose;
 
@@ -117,8 +118,8 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                config->tmp_dir.empty() ? mtg::kmer::ContainerType::VECTOR
-                                        : mtg::kmer::ContainerType::VECTOR_DISK,
+                config->tmp_dir.empty() ? ContainerType::VECTOR
+                                        : ContainerType::VECTOR_DISK,
                 config->tmp_dir,
                 config->disk_cap_bytes
             );

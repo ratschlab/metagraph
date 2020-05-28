@@ -2075,7 +2075,7 @@ void call_path(const BOSS &boss,
 
     // get dual path (mapping of the reverse complement sequence)
     auto rev_comp_seq = sequence;
-    KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
+    mtg::kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());

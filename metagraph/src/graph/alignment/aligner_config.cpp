@@ -76,11 +76,11 @@ void DBGAlignerConfig::set_scoring_matrix() {
     if (alignment_edit_distance) {
         // TODO: REPLACE THIS
         #if _PROTEIN_GRAPH
-            const auto *alphabet = alphabets::kAlphabetProtein;
-            const auto *alphabet_encoding = alphabets::kCharToProtein;
+            const auto *alphabet = mtg::kmer::alphabets::kAlphabetProtein;
+            const auto *alphabet_encoding = mtg::kmer::alphabets::kCharToProtein;
         #elif _DNA_GRAPH || _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-            const auto *alphabet = alphabets::kAlphabetDNA;
-            const auto *alphabet_encoding = alphabets::kCharToDNA;
+            const auto *alphabet = mtg::kmer::alphabets::kAlphabetDNA;
+            const auto *alphabet_encoding = mtg::kmer::alphabets::kCharToDNA;
         #else
             static_assert(false,
                 "Define an alphabet: either "

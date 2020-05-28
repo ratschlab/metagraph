@@ -16,13 +16,17 @@
 #include "kmer/kmer_to_int_converter.hpp"
 #include "boss_chunk.hpp"
 
+
 namespace mtg {
 namespace succinct {
 
 using namespace mtg;
 using common::logger;
 using common::ChunkedWaitQueue;
+using kmer::get_int_t;
+using kmer::get_kmer_t;
 using kmer::KmerCollector;
+using kmer::KmerExtractorBOSS;
 using TAlphabet = KmerExtractorBOSS::TAlphabet;
 using utils::get_first;
 using utils::get_first_type_t;

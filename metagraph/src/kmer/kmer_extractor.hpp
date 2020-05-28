@@ -15,6 +15,9 @@
 #include "alphabets.hpp"
 
 
+namespace mtg {
+namespace kmer {
+
 /**
  * Extracts k-mers to be placed in a BOSS table from sequences. Each sequence is
  * prepended with (k-1) $ characters (aka 'dummy prefix') and terminated with a $ to
@@ -155,5 +158,8 @@ class KmerExtractor2BitT {
 };
 
 typedef KmerExtractor2BitT<alphabets::kBitsPerCharDNA> KmerExtractor2Bit;
+
+} // namespace kmer
+} // namespace mtg
 
 #endif // __KMER_EXTRACTOR_HPP__

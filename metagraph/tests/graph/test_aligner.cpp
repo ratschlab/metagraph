@@ -16,6 +16,7 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::test;
+using namespace mtg::kmer;
 
 typedef DBGAligner<>::score_t score_t;
 

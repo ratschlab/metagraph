@@ -15,7 +15,7 @@
 
 namespace {
 
-using namespace mtg;
+using namespace mtg::kmer;
 
 template <typename T>
 T encode_c(char c, const T *char_map) {

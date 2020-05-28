@@ -1046,11 +1046,11 @@ int main(int argc, char *argv[]) {
             std::string align_regime = align_regime_arg.getValue();
             std::string cur_alphabet = alphabet_arg.getValue();
             const char *alphabet = cur_alphabet == "dna"
-                ? alphabets::kAlphabetDNA
-                : alphabets::kAlphabetProtein;
+                ? mtg::kmer::alphabets::kAlphabetDNA
+                : mtg::kmer::alphabets::kAlphabetProtein;
             const uint8_t *alphabet_encoding = cur_alphabet == "dna"
-                ? alphabets::kCharToDNA
-                : alphabets::kCharToProtein;
+                ? mtg::kmer::alphabets::kCharToDNA
+                : mtg::kmer::alphabets::kCharToProtein;
             std::string mode = mode_arg.getValue();
             std::string file = file_arg.getValue();
             cmd.reset();

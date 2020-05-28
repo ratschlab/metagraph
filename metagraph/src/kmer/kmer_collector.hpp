@@ -10,6 +10,7 @@
 #include "common/threads/threading.hpp"
 #include "common/batch_accumulator.hpp"
 
+
 namespace mtg {
 namespace kmer {
 

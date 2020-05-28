@@ -13,8 +13,8 @@
 namespace mtg {
 namespace bitmap_graph {
 
-using namespace mtg;
 using mtg::common::logger;
+using mtg::kmer::KmerExtractor2Bit;
 
 
 template <typename KmerCollector>
