@@ -23,7 +23,7 @@ SortedMultiset<T, C, Container>::data() {
     std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
     if (sorted_end_ != data_.size()) {
-        sort_and_merge_duplicates();
+        sort_and_merge_counts();
         sorted_end_ = data_.size();
     }
 
@@ -44,7 +44,7 @@ void SortedMultiset<T, C, Container>::shrink_data() {
     logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
     size_t old_size = data_.size();
-    sort_and_merge_duplicates();
+    sort_and_merge_counts();
     sorted_end_ = data_.size();
 
     logger->trace("...done. Size reduced from {} to {}, {} MiB", old_size,
@@ -52,7 +52,7 @@ void SortedMultiset<T, C, Container>::shrink_data() {
 }
 
 template <typename T, typename C, class Container>
-void SortedMultiset<T, C, Container>::sort_and_merge_duplicates() {
+void SortedMultiset<T, C, Container>::sort_and_merge_counts() {
     if (!data_.size())
         return;
 
@@ -81,8 +81,6 @@ void SortedMultiset<T, C, Container>::sort_and_merge_duplicates() {
     }
 
     data_.erase(++dest, data_.end());
-
-    cleanup_(&data_);
 }
 
 template <typename T, typename C, class Container>

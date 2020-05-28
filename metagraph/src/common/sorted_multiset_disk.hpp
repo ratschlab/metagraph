@@ -28,22 +28,17 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
     /**
      * Constructs a SortedMultisetDisk instance and initializes its buffers sizes to the
      * value specified in #reserved_num_elements.
-     * @param cleanup function to run each time a chunk is written to disk; typically
-     * performs cleanup operations, such as removing redundant dummy source k-mers
      * @param num_threads the number of threads to use by the sorting algorithm
      * @param tmp_dir the prefix of the temporary files where chunks are
      * written before being merged
      * @param container_size the size of the in-memory container that is written
      * to disk when full
      */
-    SortedMultisetDisk(
-            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-            size_t num_threads = 1,
-            size_t reserved_num_elements = 1e6,
-            const std::filesystem::path &tmp_dir = "/tmp/",
-            size_t max_disk_space_bytes = 1e9)
-        : SortedSetDiskBase<value_type>(cleanup,
-                                        num_threads,
+    SortedMultisetDisk(size_t num_threads = 1,
+                       size_t reserved_num_elements = 1e6,
+                       const std::filesystem::path &tmp_dir = "/tmp/",
+                       size_t max_disk_space_bytes = 1e9)
+        : SortedSetDiskBase<value_type>(num_threads,
                                         reserved_num_elements,
                                         tmp_dir,
                                         max_disk_space_bytes) {}
@@ -81,8 +76,7 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
     }
 
   private:
-    virtual void sort_and_remove_duplicates(storage_type *vector,
-                                            size_t num_threads) const override;
+    virtual void sort_and_dedupe() override;
 };
 
 } // namespace common

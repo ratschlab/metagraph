@@ -44,7 +44,7 @@ class bitmap_builder_set : public bitmap_builder {
      * @param[in]  reserved     number of elements in buffer (grows automatically)
      */
     bitmap_builder_set(uint64_t size, size_t num_threads = 0, uint64_t reserved = 0)
-          : size_(size), set_bit_positions_([](const auto &) {}, num_threads) {
+          : size_(size), set_bit_positions_(num_threads) {
         set_bit_positions_.reserve(reserved);
     }
 

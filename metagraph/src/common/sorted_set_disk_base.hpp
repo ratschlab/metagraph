@@ -21,7 +21,7 @@ namespace common {
  * underlying Container using external storage to limit the amount of required memory.
  * Data is pushed into the data structure in chunks using the #insert() method.
  * Once the internal buffer is full, the data is processed using
- * #sort_and_remove_duplicates and written to disk, each disk write into a different file.
+ * #sort_and_dedupe and written to disk, each disk write into a different file.
  * The #data() method returns the globally sorted data.
  *
  * @tparam T the type of the elements that are being stored and sorted,
@@ -43,8 +43,7 @@ class SortedSetDiskBase {
     static constexpr size_t QUEUE_EL_COUNT = 30'000;
 
   public:
-    SortedSetDiskBase(std::function<void(storage_type *)> cleanup,
-                      size_t num_threads,
+    SortedSetDiskBase(size_t num_threads,
                       size_t reserved_num_elements,
                       const std::filesystem::path &tmp_dir,
                       size_t max_disk_space_bytes);
@@ -77,24 +76,7 @@ class SortedSetDiskBase {
      */
     void clear(const std::filesystem::path &tmp_path = "/tmp/");
 
-  protected: // TODO: move most of these methods to private before submitting
-    virtual void sort_and_remove_duplicates(storage_type *vector,
-                                            size_t num_threads) const = 0;
-
-    void start_merging_async();
-
-    void shrink_data();
-
-    /**
-     * Dumps the given data to a file, synchronously. If the maximum allowed disk size
-     * is reached, all chunks will be merged into a single chunk in an effort to reduce
-     * disk space.
-     * @param is_done if this is the last chunk being dumped
-     */
-    void dump_to_file(bool is_done);
-
-    void try_reserve(size_t size, size_t min_size = 0);
-
+  protected:
     /** Advances #it by step or points to #end, whichever comes first. */
     template <typename Iterator>
     Iterator safe_advance(const Iterator &it, const Iterator &end, size_t step) {
@@ -128,6 +110,40 @@ class SortedSetDiskBase {
     }
 
     /**
+     * Hold the data filled in via #insert.
+     */
+    storage_type data_;
+
+    /**
+     * Ensures mutually exclusive access (and thus thread-safety) to #data.
+     */
+    mutable std::mutex mutex_;
+    /**
+     * Mutex that can be acquired by multiple threads that are appending to
+     * non-overlapping areas of #data_
+     */
+    mutable std::shared_timed_mutex multi_insert_mutex_;
+
+    size_t num_threads_;
+
+  private:
+    virtual void sort_and_dedupe() = 0;
+
+    void start_merging_async();
+
+    void shrink_data();
+
+    /**
+     * Dumps the given data to a file, synchronously. If the maximum allowed disk size
+     * is reached, all chunks will be merged into a single chunk in an effort to reduce
+     * disk space.
+     * @param is_done if this is the last chunk being dumped
+     */
+    void dump_to_file(bool is_done);
+
+    void try_reserve(size_t size, size_t min_size = 0);
+
+    /**
      * Current number of chunks written to disk. We expect this to be at most in
      * the order of thousands, so a 32 bit integer should suffice for storage.
      */
@@ -137,13 +153,6 @@ class SortedSetDiskBase {
      * The number of L1 merges that were successfully performed.
      */
     std::atomic<uint32_t> l1_chunk_count_ = 0;
-
-    /**
-     * Hold the data filled in via #insert.
-     */
-    storage_type data_;
-
-    size_t num_threads_;
 
     size_t reserved_num_elements_;
 
@@ -155,16 +164,6 @@ class SortedSetDiskBase {
      * True if the data merging thread was started, and data started flowing into the #merge_queue_.
      */
     bool is_merging_ = false;
-
-    /**
-     * Ensures mutually exclusive access (and thus thread-safety) to #data.
-     */
-    mutable std::mutex mutex_;
-    /**
-     * Mutex that can be acquired by multiple threads that are appending to
-     * non-overlapping areas of #data_
-     */
-    mutable std::shared_timed_mutex multi_insert_mutex_;
 
     /**
      * Thread for merging data from disk.
@@ -179,13 +178,10 @@ class SortedSetDiskBase {
      */
     ThreadPool async_merge_l1_ = ThreadPool(1, 100);
 
-    std::function<void(storage_type *)> cleanup_;
-
     std::atomic<size_t> total_chunk_size_bytes_ = 0;
 
     uint32_t merged_all_count_ = 0;
 
-  private:
     /** Number of chunks for "level 1" intermediary merging. */
     static constexpr uint32_t MERGE_L1_COUNT = 4;
 
