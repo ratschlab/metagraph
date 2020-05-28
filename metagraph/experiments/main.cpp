@@ -30,6 +30,15 @@
 #include "cli/config/config.hpp"
 #include "method_constructors.hpp"
 
+
+int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
+                                 double *alpha_est_ptr, double *beta_est_ptr,
+                                 double *false_pos_ptr, double *false_neg_ptr);
+
+
+namespace mtg {
+namespace experiments {
+
 using namespace std::chrono_literals;
 
 using TCLAP::ValueArg;
@@ -281,11 +290,6 @@ void dump_column_slice(const bit_vector &column,
                               [&](auto i) { out << i << "\n"; });
 }
 
-int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
-                                 double *alpha_est_ptr, double *beta_est_ptr,
-                                 double *false_pos_ptr, double *false_neg_ptr);
-
-
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annotate::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
@@ -358,6 +362,13 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename) {
               << filename << std::endl;
     exit(1);
 }
+
+} // namespace experiments
+} // namespace mtg
+
+
+using namespace mtg;
+using namespace experiments;
 
 
 int main(int argc, char *argv[]) {

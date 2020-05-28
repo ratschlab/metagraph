@@ -10,6 +10,9 @@
 #include "common/data_generation.hpp"
 
 
+namespace mtg {
+namespace experiments {
+
 template <typename T>
 using UniquePtrs = typename std::vector<std::unique_ptr<T>>;
 
@@ -312,5 +315,8 @@ subsample_rows(const std::vector<std::unique_ptr<BitVector>> &source_columns,
 
     return columns;
 }
+
+} // namespace experiments
+} // namespace mtg
 
 #endif // __METHOD_CONSTRUCTORS_HPP__
