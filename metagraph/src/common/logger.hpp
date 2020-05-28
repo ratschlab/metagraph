@@ -4,6 +4,11 @@
 
 namespace mg {
 namespace common {
+
+bool get_verbose();
+void set_verbose(bool verbose);
+
 extern std::shared_ptr<spdlog::logger> logger;
+
 } // namespace common
 } // namespace mg

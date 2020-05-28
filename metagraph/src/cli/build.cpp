@@ -1,7 +1,6 @@
 #include "build.hpp"
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
@@ -18,7 +17,7 @@
 #include "stats.hpp"
 
 using mg::common::logger;
-using utils::get_verbose;
+using mg::common::get_verbose;
 using namespace mg::bitmap_graph;
 using namespace mg::succinct;
 

@@ -1,7 +1,6 @@
 #include "align.hpp"
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -107,7 +106,7 @@ void map_sequences_in_file(const std::string &file,
     Timer data_reading_timer;
 
     read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-        if (utils::get_verbose())
+        if (mg::common::get_verbose())
             std::cout << "Sequence: " << read_stream->seq.s << "\n";
 
         if (config.query_presence

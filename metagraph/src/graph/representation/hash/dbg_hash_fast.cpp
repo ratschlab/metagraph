@@ -8,7 +8,6 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
-#include "common/algorithms.hpp"
 #include "common/hash/hash.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"

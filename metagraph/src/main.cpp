@@ -22,7 +22,9 @@ using mg::common::logger;
 int main(int argc, char *argv[]) {
     auto config = std::make_unique<Config>(argc, argv);
 
-    logger->set_level(utils::get_verbose() ? spdlog::level::trace : spdlog::level::info);
+    logger->set_level(mg::common::get_verbose()
+                            ? spdlog::level::trace
+                            : spdlog::level::info);
     //logger->set_pattern("%^date %x....%$  %v");
     //spdlog::set_pattern("[%H:%M:%S %z] [%n] [%^---%L---%$] [thread %t] %v");
     //console_sink->set_color(spdlog::level::trace, "\033[37m");

@@ -1,7 +1,6 @@
 #include "boss_chunk.hpp"
 
 #include "common/threads/chunked_wait_queue.hpp"
-#include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
